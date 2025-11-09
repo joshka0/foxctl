@@ -1,3 +1,4 @@
+// Package main implements manifest policy checking for skill.yaml files.
 package main
 
 import (

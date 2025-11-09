@@ -1,3 +1,4 @@
+// Package memory implements named memory storage for skill execution results and context data.
 package memory
 
 import (
@@ -156,7 +157,7 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 	if err != nil {
 		return nil, fmt.Errorf("memory: list: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []NamedEntry
 	for rows.Next() {
@@ -270,7 +271,7 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 	if err != nil {
 		return nil, fmt.Errorf("memory: search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanEntries(rows)
 }
 
@@ -308,7 +309,7 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	if err != nil {
 		return nil, fmt.Errorf("memory: relevant: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	entries, err := scanEntries(rows)
 	if err != nil {
 		return nil, err

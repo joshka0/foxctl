@@ -251,8 +251,12 @@ func TestCrashRecoveryMarksOrphanedJobs(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	// Explicitly call RecoverOrphanedJobs (simulating worker startup)
-	if err := store.RecoverOrphanedJobs(ctx); err != nil {
+	recoveredCount, err := store.RecoverOrphanedJobs(ctx)
+	if err != nil {
 		t.Fatalf("recover orphaned jobs: %v", err)
+	}
+	if recoveredCount != 1 {
+		t.Errorf("Expected 1 orphaned job to be recovered, got %d", recoveredCount)
 	}
 
 	// Job should now be in error state

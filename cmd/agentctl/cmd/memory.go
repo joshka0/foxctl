@@ -55,7 +55,7 @@ func newMemoryRecentCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			entries, err := store.Recent(cmd.Context(), ws, limit)
 			if err != nil {
@@ -102,7 +102,7 @@ func newMemoryCacheCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			entry, ok, err := store.Get(cmd.Context(), args[0])
 			if err != nil {
@@ -141,7 +141,7 @@ func newMemoryListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			entries, err := store.List(cmd.Context(), ws, limit)
 			if err != nil {
@@ -190,7 +190,7 @@ func newMemorySearchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			entries, err := store.Search(cmd.Context(), ws, query, limit)
 			if err != nil {
@@ -234,7 +234,7 @@ func newMemoryGetCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			entry, err := store.Get(cmd.Context(), args[0], ws)
 			if err != nil {
@@ -288,7 +288,7 @@ func newMemoryPutCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			entry, err := store.SaveFromResult(cmd.Context(), name, typ, ws, summary, payload)
 			if err != nil {
 				return err
@@ -345,7 +345,7 @@ func newMemorySaveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer mem.Close()
+			defer func() { _ = mem.Close() }()
 			entry, err := mem.SaveFromResult(cmd.Context(), name, typ, ws, summary, result)
 			if err != nil {
 				return err
@@ -388,7 +388,7 @@ func newMemoryUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			var summaryPtr *string
 			var typePtr *string
 			if summary != "" {
@@ -433,7 +433,7 @@ func newMemoryDeleteCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			if err := store.Delete(cmd.Context(), args[0], ws); err != nil {
 				return err
 			}
@@ -463,7 +463,7 @@ func newMemoryRelevantCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			entries, err := store.Relevant(cmd.Context(), ws, limit)
 			if err != nil {
 				return err
