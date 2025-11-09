@@ -1,3 +1,4 @@
+// Package cache implements content-addressable storage and automatic caching for skill execution results.
 package cache
 
 import (
@@ -26,8 +27,11 @@ import (
 type Mode string
 
 const (
+	// ModeAuto enables caching for skill execution results.
 	ModeAuto Mode = "auto"
-	ModeOff  Mode = "off"
+	// ModeOff disables all caching operations.
+	ModeOff Mode = "off"
+	// ModeOnly returns cached results only, never executing skills.
 	ModeOnly Mode = "only"
 )
 
@@ -198,7 +202,7 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 	if err != nil {
 		return nil, fmt.Errorf("cache: recent: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []Entry
 	for rows.Next() {
@@ -296,7 +300,7 @@ func (s *Store) evictExpired(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("cache: select expired: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type doomed struct {
 		key     string
 		digests []string
