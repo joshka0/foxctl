@@ -46,12 +46,6 @@ func Open(ctx context.Context, root string) (*Store, error) {
 	}
 	store := &Store{db: db, root: root}
 
-	// Crash recovery: mark orphaned running jobs as error
-	if err := store.recoverOrphanedJobs(ctx); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("jobs: crash recovery: %w", err)
-	}
-
 	return store, nil
 }
 
@@ -280,6 +274,16 @@ func hashArgs(command string, argsJSON []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// ComputeSkillArgsHash computes the args_hash for a skill without creating a job.
+func (s *Store) ComputeSkillArgsHash(name string, input []byte) string {
+	args := map[string]any{"skill": name}
+	if len(input) > 0 {
+		args["input_size_bytes"] = len(input)
+	}
+	argsBuf, _ := json.Marshal(args)
+	return hashArgs(name, argsBuf)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -339,8 +343,9 @@ func (s *Store) prepareSkillJob(ctx context.Context, name string, input []byte) 
 	return job, nil
 }
 
-// recoverOrphanedJobs marks any running jobs as error on startup (crash recovery).
-func (s *Store) recoverOrphanedJobs(ctx context.Context) error {
+// RecoverOrphanedJobs marks any running jobs as error (crash recovery).
+// This should be called explicitly during worker startup, NOT on every Open().
+func (s *Store) RecoverOrphanedJobs(ctx context.Context) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE jobs
 		SET state = ?, error = ?, updated_at = ?
@@ -380,17 +385,19 @@ func (s *Store) FindDuplicateJob(ctx context.Context, argsHash string) (Job, err
 }
 
 func (s *Store) executeSkill(ctx context.Context, jobID, binPath string, input []byte) ([]byte, error) {
-	if err := s.updateState(ctx, jobID, StateRunning, "", ""); err != nil {
-		return nil, err
-	}
 	jobDir := s.jobDir(jobID)
 
-	// Create progress writer
+	// Create progress writer before setting state to running
 	progressWriter, err := NewProgressWriter(jobDir)
 	if err != nil {
+		_ = s.updateState(ctx, jobID, StateError, fmt.Sprintf("failed to create progress writer: %v", err), "")
 		return nil, fmt.Errorf("jobs: progress writer: %w", err)
 	}
 	defer func() { _ = progressWriter.Close() }()
+
+	if err := s.updateState(ctx, jobID, StateRunning, "", ""); err != nil {
+		return nil, err
+	}
 
 	// Emit started event
 	_ = progressWriter.WriteMessage("Skill execution started")

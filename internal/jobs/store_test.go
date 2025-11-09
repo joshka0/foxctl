@@ -246,6 +246,11 @@ func TestCrashRecoveryMarksOrphanedJobs(t *testing.T) {
 	}
 	defer func() { _ = store.Close() }()
 
+	// Explicitly call RecoverOrphanedJobs (simulating worker startup)
+	if err := store.RecoverOrphanedJobs(ctx); err != nil {
+		t.Fatalf("recover orphaned jobs: %v", err)
+	}
+
 	// Job should now be in error state
 	recovered, err := store.Get(ctx, job.ID)
 	if err != nil {
@@ -256,6 +261,37 @@ func TestCrashRecoveryMarksOrphanedJobs(t *testing.T) {
 	}
 	if recovered.Error != "ERUNTIME_RESTART: process restarted" {
 		t.Fatalf("unexpected error message: %s", recovered.Error)
+	}
+}
+
+func TestComputeSkillArgsHash(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Compute hash before creating job
+	input := []byte(`{"input":"value"}`)
+	hash1 := store.ComputeSkillArgsHash("test", input)
+
+	// Create job with same parameters
+	job, err := store.prepareSkillJob(ctx, "test", input)
+	if err != nil {
+		t.Fatalf("prepare job: %v", err)
+	}
+
+	// Hashes should match
+	if hash1 != job.ArgsHash {
+		t.Fatalf("expected hash %s, got %s", hash1, job.ArgsHash)
+	}
+
+	// Different input should produce different hash
+	hash2 := store.ComputeSkillArgsHash("test", []byte(`{"input":"different"}`))
+	if hash1 == hash2 {
+		t.Fatalf("expected different hashes for different inputs")
 	}
 }
 

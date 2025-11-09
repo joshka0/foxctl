@@ -122,7 +122,7 @@ func (pr *ProgressReader) Close() error {
 }
 
 // TailProgress streams progress events from a job, following new writes.
-func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool) error {
+func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool) (retErr error) {
 	jobDir := s.jobDir(jobID)
 	progressPath := filepath.Join(jobDir, "progress.ndjson")
 
@@ -152,7 +152,15 @@ func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool) err
 			// Retry
 		}
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = fmt.Errorf("progress: close: %w", closeErr)
+			} else {
+				retErr = fmt.Errorf("%v; close error: %w", retErr, closeErr)
+			}
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	for {

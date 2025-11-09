@@ -41,11 +41,9 @@ func newRunCommand() *cobra.Command {
 
 			// Check for duplicate job if --dedupe is enabled
 			if dedupe {
-				job, err := store.PrepareSkillJob(cmd.Context(), skillName, data)
-				if err != nil {
-					return err
-				}
-				existing, dupErr := store.FindDuplicateJob(cmd.Context(), job.ArgsHash)
+				// Compute hash BEFORE creating a job to avoid false duplicates
+				argsHash := store.ComputeSkillArgsHash(skillName, data)
+				existing, dupErr := store.FindDuplicateJob(cmd.Context(), argsHash)
 				if dupErr == nil {
 					// Found duplicate, use existing job
 					fmt.Fprintf(cmd.ErrOrStderr(), "using existing job %s (deduplicated)\n", existing.ID)
@@ -72,34 +70,7 @@ func newRunCommand() *cobra.Command {
 					}
 					return writeEnvelope(cmd.OutOrStdout(), result)
 				}
-				// No duplicate found, continue with prepared job
-				if async {
-					worker := exec.CommandContext(cmd.Context(), os.Args[0], "jobs", "exec-skill", "--job-id", job.ID, "--bin", bin)
-					worker.Stdout = cmd.ErrOrStderr()
-					worker.Stderr = cmd.ErrOrStderr()
-					if err := worker.Start(); err != nil {
-						return err
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "job %s submitted\n", job.ID)
-					return nil
-				}
-				// For sync, execute the prepared job
-				result, execErr := store.ExecutePreparedSkill(cmd.Context(), job.ID, bin)
-				if execErr != nil {
-					return execErr
-				}
-				job, _ = store.Get(cmd.Context(), job.ID)
-				if err := handleArtifacts(cmd.Context(), cfg, job.ID, result); err != nil {
-					return err
-				}
-				if err := writeEnvelope(cmd.OutOrStdout(), result); err != nil {
-					return err
-				}
-				logger := cmd.ErrOrStderr()
-				if _, err := logger.Write([]byte("job " + job.ID + " state " + string(job.State) + "\n")); err != nil {
-					return err
-				}
-				return nil
+				// No duplicate found, create and execute new job
 			}
 
 			if async {
