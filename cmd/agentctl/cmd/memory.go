@@ -388,7 +388,7 @@ func newMemoryUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			var summaryPtr *string
 			var typePtr *string
 			if summary != "" {
@@ -433,7 +433,7 @@ func newMemoryDeleteCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			if err := store.Delete(cmd.Context(), args[0], ws); err != nil {
 				return err
 			}
@@ -463,7 +463,7 @@ func newMemoryRelevantCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			entries, err := store.Relevant(cmd.Context(), ws, limit)
 			if err != nil {
 				return err

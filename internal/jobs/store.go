@@ -621,6 +621,7 @@ func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.M
 		if err := pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"}); err != nil {
 			// Progress write failures are non-fatal
 			// TODO: add structured logging
+			_ = err // Explicitly ignore - best effort only
 		}
 	}
 	return stdout, nil
