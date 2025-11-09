@@ -71,9 +71,10 @@ type Parameter struct {
 
 // Capabilities describe network/fs policies.
 type Capabilities struct {
-	Network    string       `yaml:"network" json:"network"`
-	Filesystem []FileAccess `yaml:"filesystem" json:"filesystem"`
-	Pure       bool         `yaml:"pure" json:"pure"`
+	Network     string       `yaml:"network" json:"network"`
+	EgressAllow []string     `yaml:"egressAllow,omitempty" json:"egressAllow,omitempty"`
+	Filesystem  []FileAccess `yaml:"filesystem" json:"filesystem"`
+	Pure        bool         `yaml:"pure" json:"pure"`
 }
 
 // FileAccess grants access to specific filesystem roots.
