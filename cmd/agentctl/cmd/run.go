@@ -13,6 +13,7 @@ func newRunCommand() *cobra.Command {
 	var input string
 	var inputFile string
 	var async bool
+	var dedupe bool
 	cmd := &cobra.Command{
 		Use:   "run <skill-name>",
 		Short: "Run a skill and record the result as a job",
@@ -37,6 +38,41 @@ func newRunCommand() *cobra.Command {
 				return err
 			}
 			defer cleanup()
+
+			// Check for duplicate job if --dedupe is enabled
+			if dedupe {
+				// Compute hash BEFORE creating a job to avoid false duplicates
+				argsHash := store.ComputeSkillArgsHash(skillName, data)
+				existing, dupErr := store.FindDuplicateJob(cmd.Context(), argsHash)
+				if dupErr == nil {
+					// Found duplicate, use existing job
+					fmt.Fprintf(cmd.ErrOrStderr(), "using existing job %s (deduplicated)\n", existing.ID)
+					if async {
+						fmt.Fprintf(cmd.OutOrStdout(), "job %s (existing)\n", existing.ID)
+						return nil
+					}
+					// For sync mode, return existing result if available
+					if existing.ResultPath != "" {
+						result, err := store.Result(cmd.Context(), existing.ID)
+						if err != nil {
+							return err
+						}
+						return writeEnvelope(cmd.OutOrStdout(), result)
+					}
+					// Wait for existing job to complete
+					existing, err = store.WaitForCompletion(cmd.Context(), existing.ID, 0)
+					if err != nil {
+						return err
+					}
+					result, err := store.Result(cmd.Context(), existing.ID)
+					if err != nil {
+						return err
+					}
+					return writeEnvelope(cmd.OutOrStdout(), result)
+				}
+				// No duplicate found, create and execute new job
+			}
+
 			if async {
 				job, err := store.PrepareSkillJob(cmd.Context(), skillName, data)
 				if err != nil {
@@ -71,6 +107,7 @@ func newRunCommand() *cobra.Command {
 	cmd.Flags().StringVar(&input, "input", "", "Inline JSON input (default: {})")
 	cmd.Flags().StringVar(&inputFile, "input-file", "", "Path to JSON input file ('-' for stdin)")
 	cmd.Flags().BoolVar(&async, "async", false, "Submit job and return immediately")
+	cmd.Flags().BoolVar(&dedupe, "dedupe", false, "Reuse existing job with same args_hash")
 	return cmd
 }
 

@@ -44,7 +44,9 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, root: root}, nil
+	store := &Store{db: db, root: root}
+
+	return store, nil
 }
 
 // Close releases database resources.
@@ -272,6 +274,16 @@ func hashArgs(command string, argsJSON []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// ComputeSkillArgsHash computes the args_hash for a skill without creating a job.
+func (s *Store) ComputeSkillArgsHash(name string, input []byte) string {
+	args := map[string]any{"skill": name}
+	if len(input) > 0 {
+		args["input_size_bytes"] = len(input)
+	}
+	argsBuf, _ := json.Marshal(args)
+	return hashArgs(name, argsBuf)
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -331,11 +343,65 @@ func (s *Store) prepareSkillJob(ctx context.Context, name string, input []byte) 
 	return job, nil
 }
 
+// RecoverOrphanedJobs marks any running jobs as error (crash recovery).
+// This should be called explicitly during worker startup, NOT on every Open().
+func (s *Store) RecoverOrphanedJobs(ctx context.Context) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET state = ?, error = ?, updated_at = ?
+		WHERE state = ?`,
+		StateError, "ERUNTIME_RESTART: process restarted", time.Now().UTC().Format(time.RFC3339Nano), StateRunning)
+	if err != nil {
+		return fmt.Errorf("recover orphans: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		// Could log this if we had logging
+		_ = rows
+	}
+	return nil
+}
+
+// FindDuplicateJob searches for an existing job with the same args_hash.
+func (s *Store) FindDuplicateJob(ctx context.Context, argsHash string) (Job, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at
+		FROM jobs
+		WHERE args_hash = ?
+		ORDER BY created_at DESC
+		LIMIT 1`, argsHash)
+
+	var job Job
+	var created, updated string
+	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated); err != nil {
+		if errorsIsNoRows(err) {
+			return Job{}, ErrNotFound
+		}
+		return Job{}, fmt.Errorf("jobs: find duplicate: %w", err)
+	}
+	job.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
+	job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	return job, nil
+}
+
 func (s *Store) executeSkill(ctx context.Context, jobID, binPath string, input []byte) ([]byte, error) {
+	jobDir := s.jobDir(jobID)
+
+	// Create progress writer before setting state to running
+	progressWriter, err := NewProgressWriter(jobDir)
+	if err != nil {
+		_ = s.updateState(ctx, jobID, StateError, fmt.Sprintf("failed to create progress writer: %v", err), "")
+		return nil, fmt.Errorf("jobs: progress writer: %w", err)
+	}
+	defer func() { _ = progressWriter.Close() }()
+
 	if err := s.updateState(ctx, jobID, StateRunning, "", ""); err != nil {
 		return nil, err
 	}
-	jobDir := s.jobDir(jobID)
+
+	// Emit started event
+	_ = progressWriter.WriteMessage("Skill execution started")
+
 	stdout := &bytes.Buffer{}
 	stderrPath := filepath.Join(jobDir, "stderr.log")
 	stderrFile, err := os.Create(stderrPath)
@@ -344,21 +410,29 @@ func (s *Store) executeSkill(ctx context.Context, jobID, binPath string, input [
 	}
 	defer func() { _ = stderrFile.Close() }()
 
+	_ = progressWriter.WritePercent(0, "Executing skill binary")
+
 	cmd := exec.CommandContext(ctx, binPath)
 	cmd.Stdin = bytes.NewReader(input)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderrFile
 
 	if err := cmd.Run(); err != nil {
+		_ = progressWriter.WriteMessage(fmt.Sprintf("Skill execution failed: %s", err.Error()))
 		_ = s.updateState(ctx, jobID, StateError, err.Error(), "")
 		return stdout.Bytes(), fmt.Errorf("skill run failed: %w", err)
 	}
+
+	_ = progressWriter.WritePercent(90, "Writing result")
 
 	resultPath := filepath.Join(jobDir, "result.json")
 	if err := os.WriteFile(resultPath, stdout.Bytes(), 0o644); err != nil {
 		_ = s.updateState(ctx, jobID, StateError, err.Error(), "")
 		return nil, fmt.Errorf("jobs: write result: %w", err)
 	}
+
+	_ = progressWriter.WritePercent(100, "Skill execution completed")
+
 	if err := s.updateState(ctx, jobID, StateOK, "", resultPath); err != nil {
 		return nil, err
 	}
