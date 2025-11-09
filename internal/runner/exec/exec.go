@@ -125,8 +125,8 @@ func setResourceLimits(cmd *exec.Cmd, maxMemory, maxCPUSeconds uint64) error {
 	// - Implement wrapper using unix.ForkExec
 	// - External limit enforcement via systemd/cgroups
 
-	_ = maxMemory      // Not currently enforced
-	_ = maxCPUSeconds  // Not currently enforced
+	_ = maxMemory     // Not currently enforced
+	_ = maxCPUSeconds // Not currently enforced
 
 	return nil
 }

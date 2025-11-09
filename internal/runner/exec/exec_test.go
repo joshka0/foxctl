@@ -167,7 +167,7 @@ func main() {
 func TestRunnerNetworkPolicyRejection(t *testing.T) {
 	bin := buildHelper(t, `package main
 func main() {}`)
-	
+
 	runner := Runner{
 		Manifest: skill.Manifest{
 			Distribution: skill.Distribution{Type: "exec"},
