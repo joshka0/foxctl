@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -254,38 +255,52 @@ func (s *Store) updateState(ctx context.Context, id string, newState State, errM
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Get current state for validation
-	var currentState State
-	err := s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = ?`, id).Scan(&currentState)
-	if err != nil {
-		if errorsIsNoRows(err) {
-			return ErrNotFound
-		}
-		return fmt.Errorf("jobs: get current state: %w", err)
+	// Build atomic UPDATE with state constraint in WHERE clause to prevent TOCTOU races
+	allowedStates := validSourceStates(newState)
+	placeholders := make([]string, len(allowedStates))
+	stateArgs := make([]any, len(allowedStates))
+	for i, state := range allowedStates {
+		placeholders[i] = "?"
+		stateArgs[i] = state
 	}
+	stateConstraint := fmt.Sprintf("state IN (%s)", strings.Join(placeholders, ", "))
 
-	// Validate state transition
-	if !isValidStateTransition(currentState, newState) {
-		return fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidState, currentState, newState)
-	}
-
+	// Build UPDATE query with state validation in WHERE clause
 	var setResult string
 	if resultPath != "" {
 		setResult = ", result_path = ?"
 	}
-	query := fmt.Sprintf(`UPDATE jobs SET state = ?, error = ?, updated_at = ?%s WHERE id = ?`, setResult)
+	query := fmt.Sprintf(`UPDATE jobs SET state = ?, error = ?, updated_at = ?%s WHERE id = ? AND %s`,
+		setResult, stateConstraint)
+
+	// Build args: [newState, errMsg, timestamp, (optional resultPath), id, ...allowedStates]
 	args := []any{newState, errMsg, time.Now().UTC().Format(time.RFC3339Nano)}
 	if resultPath != "" {
 		args = append(args, resultPath)
 	}
 	args = append(args, id)
+	args = append(args, stateArgs...)
+
 	res, execErr := s.db.ExecContext(ctx, query, args...)
 	if execErr != nil {
 		return fmt.Errorf("jobs: update state: %w", execErr)
 	}
+
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		return ErrNotFound
+		// Distinguish between "job not found" and "invalid state transition"
+		var exists bool
+		checkErr := s.db.QueryRowContext(ctx, `SELECT 1 FROM jobs WHERE id = ?`, id).Scan(&exists)
+		if checkErr != nil {
+			if errorsIsNoRows(checkErr) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("jobs: check existence: %w", checkErr)
+		}
+		// Job exists but UPDATE didn't affect it, so state transition was invalid
+		var currentState State
+		_ = s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = ?`, id).Scan(&currentState)
+		return fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidState, currentState, newState)
 	}
 	return nil
 }
@@ -307,6 +322,30 @@ func isValidStateTransition(from, to State) bool {
 		return false
 	default:
 		return false
+	}
+}
+
+// validSourceStates returns the list of states that can validly transition to the target state.
+// Used by updateState to build atomic UPDATE queries with state constraints.
+func validSourceStates(target State) []State {
+	switch target {
+	case StateQueued:
+		// Only same-state transition allowed
+		return []State{StateQueued}
+	case StateRunning:
+		// Can transition from queued or stay running (idempotent)
+		return []State{StateQueued, StateRunning}
+	case StateOK:
+		// Can only reach OK from running
+		return []State{StateRunning, StateOK}
+	case StateError:
+		// Can error from queued or running
+		return []State{StateQueued, StateRunning, StateError}
+	case StateCanceled:
+		// Can cancel from queued or running
+		return []State{StateQueued, StateRunning, StateCanceled}
+	default:
+		return []State{}
 	}
 }
 
@@ -453,11 +492,8 @@ func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []
 	if err != nil {
 		return Job{}, false, fmt.Errorf("jobs: begin transaction: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	// Always attempt rollback; if transaction was committed, Rollback returns sql.ErrTxDone which we ignore
+	defer func() { _ = tx.Rollback() }()
 
 	// Check for existing job with same hash (inside transaction)
 	row := tx.QueryRowContext(ctx, `
