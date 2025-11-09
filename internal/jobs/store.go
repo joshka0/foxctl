@@ -124,8 +124,15 @@ func (s *Store) List(ctx context.Context, limit int) ([]Job, error) {
 		if err := rows.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated); err != nil {
 			return nil, fmt.Errorf("jobs: scan: %w", err)
 		}
-		job.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+		var err error
+		job.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, fmt.Errorf("jobs: parse created_at: %w", err)
+		}
+		job.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated)
+		if err != nil {
+			return nil, fmt.Errorf("jobs: parse updated_at: %w", err)
+		}
 		jobs = append(jobs, job)
 	}
 	return jobs, nil
@@ -144,8 +151,15 @@ func (s *Store) Get(ctx context.Context, id string) (Job, error) {
 		}
 		return Job{}, fmt.Errorf("jobs: get: %w", err)
 	}
-	job.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-	job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	var parseErr error
+	job.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
+	if parseErr != nil {
+		return Job{}, fmt.Errorf("jobs: parse created_at: %w", parseErr)
+	}
+	job.UpdatedAt, parseErr = time.Parse(time.RFC3339Nano, updated)
+	if parseErr != nil {
+		return Job{}, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
+	}
 	return job, nil
 }
 
@@ -229,29 +243,64 @@ func (s *Store) insertJob(ctx context.Context, job Job) error {
 	return nil
 }
 
-func (s *Store) updateState(ctx context.Context, id string, state State, errMsg string, resultPath string) error {
+func (s *Store) updateState(ctx context.Context, id string, newState State, errMsg string, resultPath string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Get current state for validation
+	var currentState State
+	err := s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = ?`, id).Scan(&currentState)
+	if err != nil {
+		if errorsIsNoRows(err) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("jobs: get current state: %w", err)
+	}
+
+	// Validate state transition
+	if !isValidStateTransition(currentState, newState) {
+		return fmt.Errorf("%w: cannot transition from %s to %s", ErrInvalidState, currentState, newState)
+	}
 
 	var setResult string
 	if resultPath != "" {
 		setResult = ", result_path = ?"
 	}
 	query := fmt.Sprintf(`UPDATE jobs SET state = ?, error = ?, updated_at = ?%s WHERE id = ?`, setResult)
-	args := []any{state, errMsg, time.Now().UTC().Format(time.RFC3339Nano)}
+	args := []any{newState, errMsg, time.Now().UTC().Format(time.RFC3339Nano)}
 	if resultPath != "" {
 		args = append(args, resultPath)
 	}
 	args = append(args, id)
-	res, err := s.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("jobs: update state: %w", err)
+	res, execErr := s.db.ExecContext(ctx, query, args...)
+	if execErr != nil {
+		return fmt.Errorf("jobs: update state: %w", execErr)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// isValidStateTransition checks if a state transition is allowed.
+func isValidStateTransition(from, to State) bool {
+	// Same state is always valid (idempotent updates)
+	if from == to {
+		return true
+	}
+
+	switch from {
+	case StateQueued:
+		return to == StateRunning || to == StateCanceled || to == StateError
+	case StateRunning:
+		return to == StateOK || to == StateError || to == StateCanceled
+	case StateOK, StateError, StateCanceled:
+		// Terminal states: no transitions allowed
+		return false
+	default:
+		return false
+	}
 }
 
 func writeResult(path string, env envelope.Envelope) error {
@@ -329,21 +378,21 @@ func (s *Store) prepareSkillJob(ctx context.Context, name string, input []byte) 
 
 // RecoverOrphanedJobs marks any running jobs as error (crash recovery).
 // This should be called explicitly during worker startup, NOT on every Open().
-func (s *Store) RecoverOrphanedJobs(ctx context.Context) error {
+// Returns the number of jobs recovered.
+func (s *Store) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE jobs
 		SET state = ?, error = ?, updated_at = ?
 		WHERE state = ?`,
 		StateError, "ERUNTIME_RESTART: process restarted", time.Now().UTC().Format(time.RFC3339Nano), StateRunning)
 	if err != nil {
-		return fmt.Errorf("recover orphans: %w", err)
+		return 0, fmt.Errorf("recover orphans: %w", err)
 	}
-	rows, _ := result.RowsAffected()
-	if rows > 0 {
-		// Could log this if we had logging
-		_ = rows
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("recover orphans: get rows affected: %w", err)
 	}
-	return nil
+	return rows, nil
 }
 
 // FindDuplicateJob searches for an existing job with the same args_hash.
@@ -363,9 +412,90 @@ func (s *Store) FindDuplicateJob(ctx context.Context, argsHash string) (Job, err
 		}
 		return Job{}, fmt.Errorf("jobs: find duplicate: %w", err)
 	}
-	job.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-	job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
+	var parseErr error
+	job.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
+	if parseErr != nil {
+		return Job{}, fmt.Errorf("jobs: parse created_at: %w", parseErr)
+	}
+	job.UpdatedAt, parseErr = time.Parse(time.RFC3339Nano, updated)
+	if parseErr != nil {
+		return Job{}, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
+	}
 	return job, nil
+}
+
+// FindOrPrepareSkillJob atomically finds a duplicate job or creates a new one.
+// This prevents the TOCTOU race in deduplication.
+func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []byte, dedupe bool) (Job, bool, error) {
+	if !dedupe {
+		// No dedup requested, just create new job
+		job, err := s.prepareSkillJob(ctx, name, input)
+		return job, false, err
+	}
+
+	// Lock to prevent race between checking for duplicates and creating job
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Compute hash
+	argsBuf := marshalSkillArgs(name, input)
+	argsHash := hashArgs(name, argsBuf)
+
+	// Check for existing job with same hash
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at
+		FROM jobs
+		WHERE args_hash = ?
+		ORDER BY created_at DESC
+		LIMIT 1`, argsHash)
+
+	var job Job
+	var created, updated string
+	err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated)
+
+	if err == nil {
+		// Found duplicate
+		var parseErr error
+		job.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
+		if parseErr != nil {
+			return Job{}, false, fmt.Errorf("jobs: parse created_at: %w", parseErr)
+		}
+		job.UpdatedAt, parseErr = time.Parse(time.RFC3339Nano, updated)
+		if parseErr != nil {
+			return Job{}, false, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
+		}
+		return job, true, nil // true = found duplicate
+	}
+
+	if !errorsIsNoRows(err) {
+		return Job{}, false, fmt.Errorf("jobs: find duplicate: %w", err)
+	}
+
+	// No duplicate found, create new job
+	jobID := ulid.Make().String()
+	jobDir := s.jobDir(jobID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		return Job{}, false, fmt.Errorf("jobs: job dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(jobDir, "input.json"), input, 0o644); err != nil {
+		return Job{}, false, fmt.Errorf("jobs: write input: %w", err)
+	}
+
+	job = Job{
+		ID:        jobID,
+		Command:   "skill:" + name,
+		ArgsJSON:  string(argsBuf),
+		ArgsHash:  argsHash,
+		State:     StateQueued,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+
+	if err := s.insertJob(ctx, job); err != nil {
+		return Job{}, false, err
+	}
+
+	return job, false, nil // false = new job created
 }
 
 func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
@@ -377,33 +507,80 @@ func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.M
 	if writer, err := NewProgressWriter(s.jobDir(jobID)); err == nil {
 		pw = writer
 		defer func() { _ = pw.Close() }()
-		_ = pw.WriteMessage("skill execution started")
+		if err := pw.WriteMessage("skill execution started"); err != nil {
+			// Progress write failures are non-fatal but we track them
+			// TODO: add structured logging
+		}
 	}
 
 	stdout, stderr, err := runner.Run(ctx, manifest, artifactPath, input)
 	stderrPath := filepath.Join(s.jobDir(jobID), "stderr.log")
-	_ = os.WriteFile(stderrPath, append(stderr, '\n'), 0o644)
+	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
+		// Stderr logging is best-effort; don't fail job if it can't be written
+		// TODO: add structured logging for writeErr
+	}
 	if err != nil {
 		if pw != nil {
-			_ = pw.WriteMessage(fmt.Sprintf("skill failed: %s", err))
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
+				// Progress write failed, but we're already in error path
+			}
 		}
-		_ = s.updateState(ctx, jobID, StateError, err.Error(), "")
+		if stateErr := s.updateState(ctx, jobID, StateError, err.Error(), ""); stateErr != nil {
+			// State update failed - return combined error
+			return stdout, fmt.Errorf("skill run failed: %w (state update also failed: %v)", err, stateErr)
+		}
 		return stdout, fmt.Errorf("skill run failed: %w", err)
+	}
+
+	// Validate the result envelope before persisting
+	var resultEnv envelope.Envelope
+	if err := json.Unmarshal(stdout, &resultEnv); err != nil {
+		validationErr := fmt.Errorf("invalid result envelope: %w", err)
+		if pw != nil {
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr)); pwErr != nil {
+				// Progress write failed, but we're already in error path
+			}
+		}
+		if stateErr := s.updateState(ctx, jobID, StateError, validationErr.Error(), ""); stateErr != nil {
+			return nil, fmt.Errorf("%w (state update also failed: %v)", validationErr, stateErr)
+		}
+		return nil, validationErr
+	}
+
+	if err := envelope.Validate(resultEnv); err != nil {
+		validationErr := fmt.Errorf("envelope validation failed: %w", err)
+		if pw != nil {
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr)); pwErr != nil {
+				// Progress write failed, but we're already in error path
+			}
+		}
+		if stateErr := s.updateState(ctx, jobID, StateError, validationErr.Error(), ""); stateErr != nil {
+			return nil, fmt.Errorf("%w (state update also failed: %v)", validationErr, stateErr)
+		}
+		return nil, validationErr
 	}
 
 	resultPath := filepath.Join(s.jobDir(jobID), "result.json")
 	if err := os.WriteFile(resultPath, stdout, 0o644); err != nil {
 		if pw != nil {
-			_ = pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err))
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err)); pwErr != nil {
+				// Progress write failed, but we're already in error path
+			}
 		}
-		_ = s.updateState(ctx, jobID, StateError, err.Error(), "")
+		if stateErr := s.updateState(ctx, jobID, StateError, err.Error(), ""); stateErr != nil {
+			// State update failed - return combined error
+			return nil, fmt.Errorf("jobs: write result: %w (state update also failed: %v)", err, stateErr)
+		}
 		return nil, fmt.Errorf("jobs: write result: %w", err)
 	}
 	if err := s.updateState(ctx, jobID, StateOK, "", resultPath); err != nil {
 		return nil, err
 	}
 	if pw != nil {
-		_ = pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"})
+		if err := pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"}); err != nil {
+			// Progress write failures are non-fatal
+			// TODO: add structured logging
+		}
 	}
 	return stdout, nil
 }

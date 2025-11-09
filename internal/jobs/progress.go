@@ -22,9 +22,10 @@ type ProgressEvent struct {
 
 // ProgressWriter writes progress events to a job's progress.ndjson file.
 type ProgressWriter struct {
-	file *os.File
-	enc  *json.Encoder
-	mu   sync.Mutex
+	file   *os.File
+	enc    *json.Encoder
+	mu     sync.Mutex
+	closed bool
 }
 
 // NewProgressWriter creates a progress writer for the given job directory.
@@ -44,6 +45,10 @@ func NewProgressWriter(jobDir string) (*ProgressWriter, error) {
 func (pw *ProgressWriter) Write(event ProgressEvent) error {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
+
+	if pw.closed {
+		return fmt.Errorf("progress: writer closed")
+	}
 
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
@@ -74,6 +79,12 @@ func (pw *ProgressWriter) WritePercent(percent float64, message string) error {
 func (pw *ProgressWriter) Close() error {
 	pw.mu.Lock()
 	defer pw.mu.Unlock()
+
+	if pw.closed {
+		return nil // Already closed, idempotent
+	}
+
+	pw.closed = true
 	return pw.file.Close()
 }
 
@@ -122,7 +133,11 @@ func (pr *ProgressReader) Close() error {
 }
 
 // TailProgress streams progress events from a job, following new writes.
-func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool) (retErr error) {
+// Output is written to the provided io.Writer (thread-safe).
+func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool, w io.Writer) (retErr error) {
+	if w == nil {
+		return fmt.Errorf("progress: writer cannot be nil")
+	}
 	jobDir := s.jobDir(jobID)
 	progressPath := filepath.Join(jobDir, "progress.ndjson")
 
@@ -166,7 +181,9 @@ func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool) (re
 	for {
 		// Read available lines
 		for scanner.Scan() {
-			fmt.Println(scanner.Text())
+			if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+				return fmt.Errorf("progress: write: %w", err)
+			}
 		}
 
 		if err := scanner.Err(); err != nil {
@@ -187,7 +204,9 @@ func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool) (re
 		if job.State == StateOK || job.State == StateError || job.State == StateCanceled {
 			// Job finished, read any remaining lines and exit
 			for scanner.Scan() {
-				fmt.Println(scanner.Text())
+				if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+					return fmt.Errorf("progress: write: %w", err)
+				}
 			}
 			return nil
 		}

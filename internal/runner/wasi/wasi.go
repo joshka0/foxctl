@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/tetratelabs/wazero"
@@ -24,6 +25,7 @@ type Runner struct {
 type Options struct {
 	WorkDir string
 	Env     []string
+	Timeout time.Duration // Execution timeout (0 = no timeout, default 5 minutes)
 }
 
 // Run executes the WASI module and captures stdout/stderr.
@@ -34,6 +36,15 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	if cap := strings.TrimSpace(r.Manifest.Capabilities.Network); cap != "" && cap != "none" {
 		return nil, nil, fmt.Errorf("wasi runner only supports network:\"none\" (got %q)", cap)
 	}
+
+	// Apply timeout (default 5 minutes if not specified)
+	timeout := r.Options.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	modulePath := r.ModulePath
 	if modulePath == "" && r.Manifest.Distribution.WASI != nil {

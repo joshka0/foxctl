@@ -93,47 +93,43 @@ func newRunCommand() *cobra.Command {
 			}
 			defer cleanup()
 
-			// Check for duplicate job if --dedupe is enabled
-			if dedupe {
-				// Compute hash BEFORE creating a job to avoid false duplicates
-				argsHash := store.ComputeSkillArgsHash(skillName, data)
-				existing, dupErr := store.FindDuplicateJob(cmd.Context(), argsHash)
-				if dupErr == nil {
-					// Found duplicate, use existing job
-					fmt.Fprintf(cmd.ErrOrStderr(), "using existing job %s (deduplicated)\n", existing.ID)
-					if async {
-						fmt.Fprintf(cmd.OutOrStdout(), "job %s (existing)\n", existing.ID)
-						return nil
-					}
-					// For sync mode, return existing result if available
-					if existing.ResultPath != "" {
-						result, err := store.Result(cmd.Context(), existing.ID)
-						if err != nil {
-							return err
-						}
-						result = annotateRunMeta(result, ws, skillVersion)
-						return writeEnvelope(cmd.OutOrStdout(), result)
-					}
-					// Wait for existing job to complete
-					existing, err = store.WaitForCompletion(cmd.Context(), existing.ID, 0)
-					if err != nil {
-						return err
-					}
-					result, err := store.Result(cmd.Context(), existing.ID)
+			// Use atomic dedup+prepare to prevent race conditions
+			job, isDuplicate, err := store.FindOrPrepareSkillJob(cmd.Context(), skillName, data, dedupe)
+			if err != nil {
+				return err
+			}
+
+			if isDuplicate {
+				// Found duplicate, use existing job
+				fmt.Fprintf(cmd.ErrOrStderr(), "using existing job %s (deduplicated)\n", job.ID)
+				if async {
+					fmt.Fprintf(cmd.OutOrStdout(), "job %s (existing)\n", job.ID)
+					return nil
+				}
+				// For sync mode, return existing result if available
+				if job.ResultPath != "" {
+					result, err := store.Result(cmd.Context(), job.ID)
 					if err != nil {
 						return err
 					}
 					result = annotateRunMeta(result, ws, skillVersion)
 					return writeEnvelope(cmd.OutOrStdout(), result)
 				}
-				// No duplicate found, create and execute new job
-			}
-
-			if async {
-				job, err := store.PrepareSkillJob(cmd.Context(), skillName, data)
+				// Wait for existing job to complete
+				job, err = store.WaitForCompletion(cmd.Context(), job.ID, 0)
 				if err != nil {
 					return err
 				}
+				result, err := store.Result(cmd.Context(), job.ID)
+				if err != nil {
+					return err
+				}
+				result = annotateRunMeta(result, ws, skillVersion)
+				return writeEnvelope(cmd.OutOrStdout(), result)
+			}
+
+			// New job created, proceed with execution
+			if async {
 				worker := exec.CommandContext(cmd.Context(), os.Args[0], "jobs", "exec-skill",
 					"--job-id", job.ID,
 					"--manifest", handle.ManifestPath,
@@ -147,7 +143,10 @@ func newRunCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "job %s submitted\n", job.ID)
 				return nil
 			}
-			job, result, runErr := store.RunSkill(cmd.Context(), handle.Manifest, handle.ArtifactPath, data)
+
+			// Execute the skill synchronously
+			result, runErr := store.ExecutePreparedSkill(cmd.Context(), job.ID, handle.Manifest, handle.ArtifactPath)
+			job, _ = store.Get(cmd.Context(), job.ID)
 			if runErr != nil {
 				return runErr
 			}

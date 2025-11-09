@@ -184,7 +184,7 @@ func newJobsTailCommand() *cobra.Command {
 			}
 			defer cleanup()
 
-			return store.TailProgress(cmd.Context(), args[0], follow)
+			return store.TailProgress(cmd.Context(), args[0], follow, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVarP(&follow, "follow", "f", true, "Follow progress updates in real-time")
