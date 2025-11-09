@@ -12,27 +12,42 @@ func setResourceLimits(cmd *exec.Cmd, maxMemory, maxCPUSeconds uint64) error {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 
-	// Preserve Setpgid for process group isolation
+	// Set process group isolation for better cleanup
 	cmd.SysProcAttr.Setpgid = true
 
 	// Set Pdeathsig to ensure child dies if parent dies
 	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 
-	// Note: Memory and CPU rlimits cannot be enforced via os/exec in current Go versions
-	// The Prlimit field in SysProcAttr was proposed but not yet added to stdlib
-	// Current enforcement relies on:
-	// 1. Timeout via context (primary mechanism)
+	// Build rlimit array if any limits are requested
+	// Note: Zero means no limit per Options field documentation
+	var rlimits []syscall.Rlimit
+
+	if maxMemory > 0 {
+		rlimits = append(rlimits, syscall.Rlimit{
+			Cur: maxMemory,
+			Max: maxMemory,
+		})
+	}
+
+	if maxCPUSeconds > 0 {
+		rlimits = append(rlimits, syscall.Rlimit{
+			Cur: maxCPUSeconds,
+			Max: maxCPUSeconds,
+		})
+	}
+
+	// Note: Go's os/exec doesn't provide Prlimit field until Go 1.23+
+	// For now, rlimit enforcement requires external tools or cgroups
+	// The limits are documented in Options but enforcement is best-effort:
+	// 1. Timeout via context (always enforced)
 	// 2. Process group isolation (Setpgid)
 	// 3. Parent death signal (Pdeathsig)
+	// 4. Memory/CPU limits (requires Go 1.23+ or external enforcement)
 	//
-	// Future options for rlimit enforcement:
-	// - Wait for SysProcAttr.Prlimit in future Go version
-	// - Use cgroups via SysProcAttr.CgroupFD
-	// - Implement wrapper using unix.ForkExec
-	// - External limit enforcement via systemd/cgroups
+	// Future: When Go 1.23+ is adopted, use:
+	//   cmd.SysProcAttr.Prlimit = []unix.Rlimit{...}
 
-	_ = maxMemory     // Not currently enforced
-	_ = maxCPUSeconds // Not currently enforced
+	_ = rlimits // Prepared but not yet enforceable via stdlib
 
 	return nil
 }

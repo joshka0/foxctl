@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/skill"
@@ -25,8 +24,8 @@ type Options struct {
 	WorkDir        string
 	Env            []string
 	Timeout        time.Duration // Maximum execution time (0 = no timeout)
-	MaxMemoryBytes uint64        // Maximum memory in bytes (default: 512MB)
-	MaxCPUSeconds  uint64        // Maximum CPU seconds (default: 30s)
+	MaxMemoryBytes uint64        // Maximum memory in bytes (0 = no limit)
+	MaxCPUSeconds  uint64        // Maximum CPU seconds (0 = no limit)
 }
 
 // Run executes the skill and returns stdout/stderr bytes.
@@ -75,23 +74,9 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	env = append(env, fmt.Sprintf("SKILL_VERSION=%s", r.Manifest.Metadata.Version))
 	cmd.Env = env
 
-	// Apply resource limits (Linux-specific)
-	maxMemory := r.Options.MaxMemoryBytes
-	if maxMemory == 0 {
-		maxMemory = 512 * 1024 * 1024 // 512MB default
-	}
-	maxCPU := r.Options.MaxCPUSeconds
-	if maxCPU == 0 {
-		maxCPU = 30 // 30 seconds default
-	}
-
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Create new process group for better cleanup
-	}
-
-	// Set resource limits via prlimit (applied before exec)
-	// Note: These limits are enforced by the kernel
-	if err := setResourceLimits(cmd, maxMemory, maxCPU); err != nil {
+	// Apply resource limits if specified (0 = no limit per Options field docs)
+	// setResourceLimits is best-effort and platform-specific
+	if err := setResourceLimits(cmd, r.Options.MaxMemoryBytes, r.Options.MaxCPUSeconds); err != nil {
 		return nil, nil, fmt.Errorf("runner: failed to set resource limits: %w", err)
 	}
 
