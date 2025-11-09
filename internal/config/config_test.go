@@ -29,6 +29,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.MaxCaptureKB != DefaultMaxCaptureKB {
 		t.Fatalf("expected max_capture_kb default %d got %d", DefaultMaxCaptureKB, cfg.MaxCaptureKB)
 	}
+	if cfg.Memory.AutoCacheTTL.Hours() != 24 {
+		t.Fatalf("expected auto cache ttl 24h got %s", cfg.Memory.AutoCacheTTL)
+	}
+	if cfg.Cache.DefaultMode != "auto" {
+		t.Fatalf("expected default cache mode auto got %s", cfg.Cache.DefaultMode)
+	}
 }
 
 func TestLoadWithConfigFile(t *testing.T) {

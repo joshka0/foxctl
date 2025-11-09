@@ -1,11 +1,16 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
+	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -14,6 +19,8 @@ func newRunCommand() *cobra.Command {
 	var inputFile string
 	var async bool
 	var dedupe bool
+	var cacheModeFlag string
+	var workspaceFlag string
 	cmd := &cobra.Command{
 		Use:   "run <skill-name>",
 		Short: "Run a skill and record the result as a job",
@@ -32,6 +39,53 @@ func newRunCommand() *cobra.Command {
 				return err
 			}
 			skillName := handle.Manifest.Metadata.Name
+			skillVersion := handle.Manifest.Metadata.Version
+
+			ws := workspace.Normalize(workspaceFlag)
+			if ws == "" && cfg.Memory.AutoLoadWorkspace {
+				ws = workspace.Detect("")
+			} else if ws == "" {
+				if cwd, err := os.Getwd(); err == nil {
+					ws = cwd
+				}
+			}
+
+			cacheMode, err := parseCacheMode(cacheModeFlag, cfg.Cache.DefaultMode)
+			if err != nil {
+				return err
+			}
+			if async && cacheMode == cache.ModeOnly {
+				return fmt.Errorf("--cache=only cannot be combined with --async")
+			}
+
+			var cacheStore *cache.Store
+			var cacheKey string
+			if !async && cacheMode != cache.ModeOff {
+				cacheStore, err = cache.Open(cmd.Context(), cfg.Paths.Cache, cache.Options{
+					AutoTTL: cfg.Memory.AutoCacheTTL,
+					CASPath: cfg.Paths.CAS,
+				})
+				if err != nil {
+					return err
+				}
+				defer cacheStore.Close()
+				cacheKey, err = cache.BuildKey(handle.Manifest, data, nil)
+				if err != nil {
+					return err
+				}
+				if entry, ok, err := cacheStore.Get(cmd.Context(), cacheKey); err != nil {
+					return err
+				} else if ok {
+					hit, err := cache.AnnotateHit(entry.Result, entry.CacheKey, ws, skillVersion)
+					if err != nil {
+						return err
+					}
+					fmt.Fprintf(cmd.ErrOrStderr(), "cache hit %s\n", entry.CacheKey)
+					return writeEnvelope(cmd.OutOrStdout(), hit)
+				} else if cacheMode == cache.ModeOnly {
+					return fmt.Errorf("cache miss for key %s", cacheKey)
+				}
+			}
 
 			store, cleanup, err := openJobStore(cmd.Context())
 			if err != nil {
@@ -57,6 +111,7 @@ func newRunCommand() *cobra.Command {
 						if err != nil {
 							return err
 						}
+						result = annotateRunMeta(result, ws, skillVersion)
 						return writeEnvelope(cmd.OutOrStdout(), result)
 					}
 					// Wait for existing job to complete
@@ -68,6 +123,7 @@ func newRunCommand() *cobra.Command {
 					if err != nil {
 						return err
 					}
+					result = annotateRunMeta(result, ws, skillVersion)
 					return writeEnvelope(cmd.OutOrStdout(), result)
 				}
 				// No duplicate found, create and execute new job
@@ -98,6 +154,20 @@ func newRunCommand() *cobra.Command {
 			if err := handleArtifacts(cmd.Context(), cfg, job.ID, result); err != nil {
 				return err
 			}
+			result = annotateRunMeta(result, ws, skillVersion)
+			if cacheMode == cache.ModeAuto && cacheStore != nil && cacheKey != "" {
+				entry := cache.Entry{
+					CacheKey:     cacheKey,
+					SkillName:    skillName,
+					SkillVersion: skillVersion,
+					Workspace:    ws,
+					Result:       result,
+					Digests:      cache.CollectDigests(result),
+				}
+				if err := cacheStore.Put(cmd.Context(), entry); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "cache put failed: %v\n", err)
+				}
+			}
 			if err := writeEnvelope(cmd.OutOrStdout(), result); err != nil {
 				return err
 			}
@@ -112,9 +182,47 @@ func newRunCommand() *cobra.Command {
 	cmd.Flags().StringVar(&inputFile, "input-file", "", "Path to JSON input file ('-' for stdin)")
 	cmd.Flags().BoolVar(&async, "async", false, "Submit job and return immediately")
 	cmd.Flags().BoolVar(&dedupe, "dedupe", false, "Reuse existing job with same args_hash")
+	cmd.Flags().StringVar(&cacheModeFlag, "cache", "", "Cache mode: auto|off|only (default from config)")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace override (default: auto-detect)")
 	return cmd
 }
 
 func init() {
 	rootCmd.AddCommand(newRunCommand())
+}
+
+func parseCacheMode(flagValue, defaultValue string) (cache.Mode, error) {
+	mode := strings.TrimSpace(flagValue)
+	if mode == "" {
+		mode = defaultValue
+	}
+	switch strings.ToLower(mode) {
+	case "", "auto":
+		return cache.ModeAuto, nil
+	case "off":
+		return cache.ModeOff, nil
+	case "only":
+		return cache.ModeOnly, nil
+	default:
+		return cache.ModeOff, fmt.Errorf("invalid cache mode %q (expected auto|off|only)", mode)
+	}
+}
+
+func annotateRunMeta(result []byte, workspacePath, skillVersion string) []byte {
+	var env envelope.Envelope
+	if err := json.Unmarshal(result, &env); err != nil {
+		return result
+	}
+	env.Meta.Source = "run"
+	if workspacePath != "" {
+		env.Meta.Workspace = workspacePath
+	}
+	if skillVersion != "" {
+		env.Meta.SkillVer = skillVersion
+	}
+	data, err := json.Marshal(env)
+	if err != nil {
+		return result
+	}
+	return data
 }

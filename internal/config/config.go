@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -21,10 +22,12 @@ const (
 
 // Config represents the fully materialized runtime configuration.
 type Config struct {
-	Home           string `mapstructure:"home" json:"home"`
-	InlineOutputKB int    `mapstructure:"inline_output_kb" json:"inline_output_kb"`
-	MaxCaptureKB   int    `mapstructure:"max_capture_kb" json:"max_capture_kb"`
-	Paths          Paths  `mapstructure:"paths" json:"paths"`
+	Home           string        `mapstructure:"home" json:"home"`
+	InlineOutputKB int           `mapstructure:"inline_output_kb" json:"inline_output_kb"`
+	MaxCaptureKB   int           `mapstructure:"max_capture_kb" json:"max_capture_kb"`
+	Paths          Paths         `mapstructure:"paths" json:"paths"`
+	Memory         MemorySettings `mapstructure:"memory" json:"memory"`
+	Cache          CacheSettings  `mapstructure:"cache" json:"cache"`
 }
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
@@ -33,6 +36,18 @@ type Paths struct {
 	Jobs   string `mapstructure:"jobs" json:"jobs"`
 	Cache  string `mapstructure:"cache" json:"cache"`
 	Skills string `mapstructure:"skills" json:"skills"`
+}
+
+// MemorySettings influence cache + named memory behavior.
+type MemorySettings struct {
+	AutoCacheTTL      time.Duration `mapstructure:"auto_cache_ttl" json:"auto_cache_ttl"`
+	DefaultNamedTTL   time.Duration `mapstructure:"default_named_ttl" json:"default_named_ttl"`
+	AutoLoadWorkspace bool          `mapstructure:"auto_load_workspace" json:"auto_load_workspace"`
+}
+
+// CacheSettings describe run-time caching defaults.
+type CacheSettings struct {
+	DefaultMode string `mapstructure:"default_mode" json:"default_mode"`
 }
 
 // Option customizes the loader.
@@ -75,6 +90,10 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	v.SetDefault("paths.jobs", filepath.Join(defaultHome, "jobs"))
 	v.SetDefault("paths.cache", filepath.Join(defaultHome, "cache"))
 	v.SetDefault("paths.skills", filepath.Join(defaultHome, "skills"))
+	v.SetDefault("memory.auto_cache_ttl", "24h")
+	v.SetDefault("memory.default_named_ttl", "720h") // 30d
+	v.SetDefault("memory.auto_load_workspace", true)
+	v.SetDefault("cache.default_mode", "auto")
 
 	if l.configFile != "" {
 		v.SetConfigFile(l.configFile)
@@ -106,6 +125,15 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	}
 	if cfg.MaxCaptureKB <= 0 {
 		cfg.MaxCaptureKB = DefaultMaxCaptureKB
+	}
+	if cfg.Memory.AutoCacheTTL <= 0 {
+		cfg.Memory.AutoCacheTTL = 24 * time.Hour
+	}
+	if cfg.Memory.DefaultNamedTTL <= 0 {
+		cfg.Memory.DefaultNamedTTL = 30 * 24 * time.Hour
+	}
+	if cfg.Cache.DefaultMode == "" {
+		cfg.Cache.DefaultMode = "auto"
 	}
 
 	return cfg, nil
