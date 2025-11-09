@@ -273,7 +273,7 @@ func rememberResult(ctx context.Context, cfg config.Config, name, typ, summary, 
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if summary == "" {
 		summary = summarizeResult(result)
 	}
