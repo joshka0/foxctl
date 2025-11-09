@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.22.x', 'stable']
+        go: ['1.22.x']
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
