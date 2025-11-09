@@ -30,6 +30,7 @@ func TestRunCommandEmitsCompleteMeta(t *testing.T) {
 
 	cmd := newRunCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
@@ -76,6 +77,7 @@ func TestSkillsRunProducesInlineEnvelope(t *testing.T) {
 
 	cmd := newSkillsRunCommand()
 	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
@@ -95,6 +97,40 @@ func TestSkillsRunProducesInlineEnvelope(t *testing.T) {
 	}
 	if env.Meta.CASDigest != "" {
 		t.Fatalf("expected no cas digest for inline results, got %q", env.Meta.CASDigest)
+	}
+}
+
+func TestRunCommandRememberSavesMemory(t *testing.T) {
+	cfg := installTextGrepSkill(t)
+	workdir := t.TempDir()
+	sample := filepath.Join(workdir, "file.txt")
+	if err := os.WriteFile(sample, []byte("needle here"), 0o644); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+	cmd := newRunCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	cmd.SetArgs([]string{
+		"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, workdir),
+		"--remember", "remembered",
+		"--workspace", workdir,
+		"text/grep",
+	})
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	stderr := &bytes.Buffer{}
+	cmd.SetErr(stderr)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run command: %v (stderr=%s)", err, stderr.String())
+	}
+	if stderr.Len() > 0 {
+		t.Logf("stderr: %s", stderr.String())
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode run envelope: %v", err)
+	}
+	if env.Meta.Workspace != workdir {
+		t.Fatalf("expected meta.workspace=%s got %s", workdir, env.Meta.Workspace)
 	}
 }
 

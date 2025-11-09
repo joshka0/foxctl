@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	memstore "github.com/jkatigb/agentctl/internal/memory"
 	"github.com/jkatigb/agentctl/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +23,9 @@ func newRunCommand() *cobra.Command {
 	var dedupe bool
 	var cacheModeFlag string
 	var workspaceFlag string
+	var rememberName string
+	var rememberType string
+	var rememberSummary string
 	cmd := &cobra.Command{
 		Use:   "run <skill-name>",
 		Short: "Run a skill and record the result as a job",
@@ -56,6 +61,9 @@ func newRunCommand() *cobra.Command {
 			}
 			if async && cacheMode == cache.ModeOnly {
 				return fmt.Errorf("--cache=only cannot be combined with --async")
+			}
+			if async && rememberName != "" {
+				return fmt.Errorf("--remember cannot be used with --async")
 			}
 
 			var cacheStore *cache.Store
@@ -109,10 +117,16 @@ func newRunCommand() *cobra.Command {
 				// For sync mode, return existing result if available
 				if job.ResultPath != "" {
 					result, err := store.Result(cmd.Context(), job.ID)
+
 					if err != nil {
 						return err
 					}
 					result = annotateRunMeta(result, ws, skillVersion)
+					if rememberName != "" {
+						if err := rememberResult(cmd.Context(), cfg, rememberName, rememberType, rememberSummary, ws, result); err != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "remember failed: %v\n", err)
+						}
+					}
 					return writeEnvelope(cmd.OutOrStdout(), result)
 				}
 				// Wait for existing job to complete
@@ -183,6 +197,9 @@ func newRunCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dedupe, "dedupe", false, "Reuse existing job with same args_hash")
 	cmd.Flags().StringVar(&cacheModeFlag, "cache", "", "Cache mode: auto|off|only (default from config)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace override (default: auto-detect)")
+	cmd.Flags().StringVar(&rememberName, "remember", "", "Save successful result as named memory")
+	cmd.Flags().StringVar(&rememberType, "remember-type", "result", "Memory type for --remember")
+	cmd.Flags().StringVar(&rememberSummary, "remember-summary", "", "Summary to record for remembered result")
 	return cmd
 }
 
@@ -224,4 +241,21 @@ func annotateRunMeta(result []byte, workspacePath, skillVersion string) []byte {
 		return result
 	}
 	return data
+}
+
+func rememberResult(ctx context.Context, cfg config.Config, name, typ, summary, workspacePath string, result []byte) error {
+	name = strings.TrimSpace(strings.TrimPrefix(name, "memory:"))
+	if name == "" {
+		return fmt.Errorf("memory name cannot be empty")
+	}
+	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	if summary == "" {
+		summary = summarizeResult(result)
+	}
+	_, err = store.SaveFromResult(ctx, name, typ, workspacePath, summary, result)
+	return err
 }
