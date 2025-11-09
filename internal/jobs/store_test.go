@@ -330,7 +330,6 @@ func TestWaitForCompletion(t *testing.T) {
 }
 
 func TestProgressReader(t *testing.T) {
-	ctx := context.Background()
 	root := t.TempDir()
 	jobDir := filepath.Join(root, "test-job")
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
