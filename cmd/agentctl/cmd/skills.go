@@ -355,8 +355,13 @@ func matchesQuery(m skill.Manifest, query string) bool {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		len(s) > len(substr) && anySubstring(s, substr))
+	if len(substr) == 0 {
+		return true
+	}
+	if len(s) < len(substr) {
+		return false
+	}
+	return anySubstring(s, substr)
 }
 
 func anySubstring(s, substr string) bool {

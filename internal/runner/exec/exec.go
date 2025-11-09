@@ -24,7 +24,7 @@ type Runner struct {
 type Options struct {
 	WorkDir        string
 	Env            []string
-	Timeout        time.Duration // Maximum execution time (default: 30s)
+	Timeout        time.Duration // Maximum execution time (0 = no timeout)
 	MaxMemoryBytes uint64        // Maximum memory in bytes (default: 512MB)
 	MaxCPUSeconds  uint64        // Maximum CPU seconds (default: 30s)
 }
@@ -38,13 +38,12 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("runner: network policy %s not supported", r.Manifest.Capabilities.Network)
 	}
 
-	// Apply timeout (default: 30 seconds)
-	timeout := r.Options.Timeout
-	if timeout == 0 {
-		timeout = 30 * time.Second
+	// Apply timeout only if explicitly set
+	if r.Options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.Options.Timeout)
+		defer cancel()
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	workDir := r.Options.WorkDir
 	var cleanup func()
@@ -107,18 +106,27 @@ func setResourceLimits(cmd *exec.Cmd, maxMemory, maxCPUSeconds uint64) error {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 
-	// Set limits via SysProcAttr prlimit hook
-	// These will be applied before the child process execs
+	// Preserve Setpgid for process group isolation
 	cmd.SysProcAttr.Setpgid = true
 
-	// On Linux, we can use the Prlimit field (Go 1.21+) or preexec hooks
-	// For compatibility, we'll document the limits but note they require kernel support
-	// The timeout via context provides the primary enforcement mechanism
+	// Set Pdeathsig to ensure child dies if parent dies
+	cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL
 
-	// Memory limit (RLIMIT_AS - address space)
-	// CPU time limit (RLIMIT_CPU - CPU seconds)
-	// These would be enforced via setrlimit() in the child process
-	// For maximum compatibility, we rely on context timeout as primary limit
+	// Note: Memory and CPU rlimits cannot be enforced via os/exec in current Go versions
+	// The Prlimit field in SysProcAttr was proposed but not yet added to stdlib
+	// Current enforcement relies on:
+	// 1. Timeout via context (primary mechanism)
+	// 2. Process group isolation (Setpgid)
+	// 3. Parent death signal (Pdeathsig)
+	//
+	// Future options for rlimit enforcement:
+	// - Wait for SysProcAttr.Prlimit in future Go version
+	// - Use cgroups via SysProcAttr.CgroupFD
+	// - Implement wrapper using unix.ForkExec
+	// - External limit enforcement via systemd/cgroups
+
+	_ = maxMemory      // Not currently enforced
+	_ = maxCPUSeconds  // Not currently enforced
 
 	return nil
 }

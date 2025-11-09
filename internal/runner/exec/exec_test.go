@@ -80,8 +80,8 @@ func main() {
 	}
 }
 
-func TestRunnerDefaultTimeout(t *testing.T) {
-	// Test that default timeout is applied
+func TestRunnerNoTimeout(t *testing.T) {
+	// Test that when no timeout is specified, runner runs without timeout
 	bin := buildHelper(t, `package main
 import (
 	"io"
@@ -93,11 +93,11 @@ func main() {
 	runner := Runner{
 		Manifest: skill.Manifest{
 			Distribution: skill.Distribution{Type: "exec"},
-			Metadata:     skill.Metadata{Name: "test/default-timeout", Version: "0.1.0"},
+			Metadata:     skill.Metadata{Name: "test/no-timeout", Version: "0.1.0"},
 			Capabilities: skill.Capabilities{Network: "none"},
 		},
 		Binary: bin,
-		// No timeout specified - should use default 30s
+		// No timeout specified - should run without timeout
 	}
 	stdout, _, err := runner.Run(context.Background(), []byte("test"))
 	if err != nil {
