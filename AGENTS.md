@@ -39,7 +39,7 @@ Project: agentctl (single-binary CLI)
 Language: Go (>= 1.22), modules on, CGO off by default
 CLI: Cobra + Viper
 I/O Contract: JSON envelopes (canonical, version: 1)
-Runners: WASI (wasmtime-go) preferred; exec runner fallback
+Runners: WASI (wazero, pure Go) preferred; exec runner fallback
 Storage: SQLite (modernc.org/sqlite) + filesystem CAS (~/.agentctl/cas)
 Hashing: SHA-256 digests (sha256:<hex>)
 Cache Keys: RFC 8785 canonical JSON + input blob digests
@@ -83,7 +83,7 @@ agentctl/
 │   ├── memory/                    # auto-cache + named memory
 │   ├── cache/                     # memoization, RFC 8785, file/dir digests
 │   ├── runner/
-│   │   ├── wasi/                  # WASI runner (wasmtime-go)
+│   │   ├── wasi/                  # WASI runner (wazero)
 │   │   └── exec/                  # exec runner, resource limits
 │   ├── skill/                     # skill discovery/manifest validation
 │   └── openapi/                   # http/openapi skill (core), built-in auth/paging
@@ -386,7 +386,7 @@ agentctl run http/openapi \
 
 * Go: Effective Go, Uber Go Style Guide
 * Zerolog docs
-* wasmtime-go (WASI)
+* wazero (pure Go WASI runtime)
 * modernc.org/sqlite (CGO-less SQLite)
 * RFC 8785 (JSON Canonicalization Scheme)
 

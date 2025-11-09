@@ -6,7 +6,8 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
 
 - ✅ Phases 0–2: bootstrap, envelope/config kernel, and CAS (with CLI + tests) are implemented.
 - ✅ Phase 3 foundation: SQLite-backed jobs subsystem, `agentctl run` wired to skills, async worker, CAS pin/unpin per job, and bash-style skills (`fs/ls`, `text/grep`, `http/openapi`) hooked into the CLI.
-- 🚧 Upcoming focus: Phase 4 runners/skill manifests (exec/WASI, install/list), Phase 5 cache & memory, plus the full OpenAPI skill + plugin SPI.
+- ✅ Phase 4 scaffolding: skill parser/installer, exec runner, wazero-based WASI runner, sample `wasi/echo` skill, and `agentctl skills install/list/run`.
+- 🚧 Upcoming focus: Phase 5 cache & memory, plus the full OpenAPI skill + plugin SPI.
 
 ---
 
@@ -100,7 +101,7 @@ Awesome—here’s a crisp, dependency-ordered implementation plan to ship **age
   * Process exec with resource limits; ephemeral `/work`; policy enforcement (egressAllow)
 * `internal/runner/wasi/`
 
-  * wasmtime-go; **Core rule:** `distribution: wasi` ⇒ `network:"none"` validated at install
+* wazero (pure Go); **Core rule:** `distribution: wasi` ⇒ `network:"none"` validated at install
 * CLI: `agentctl skills list|describe|install`, `agentctl run <skill> …` (sync)
 
 **Depends on:** Phases 1–3

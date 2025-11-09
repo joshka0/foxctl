@@ -1,0 +1,23 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: wasi/echo
+  version: 0.1.0
+  description: "Minimal WASI skill emitting a static envelope"
+  tags: ["wasi", "demo"]
+distribution:
+  type: wasi
+  wasi:
+    module: module.wasm
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: wasi/echo
+  parameters: []
+  returns: []
+capabilities:
+  network: "none"
+  filesystem: []
+memory:
+  recommend: false
