@@ -152,7 +152,7 @@ func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool) err
 			// Retry
 		}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for {
