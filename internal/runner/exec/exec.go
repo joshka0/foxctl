@@ -21,9 +21,11 @@ type Runner struct {
 
 // Options control execution behavior.
 type Options struct {
-	WorkDir string
-	Env     []string
-	Timeout time.Duration // Execution timeout (0 = no timeout, default 5 minutes)
+	WorkDir        string
+	Env            []string
+	Timeout        time.Duration // Maximum execution time (0 = no timeout)
+	MaxMemoryBytes uint64        // Maximum memory in bytes (0 = no limit)
+	MaxCPUSeconds  uint64        // Maximum CPU seconds (0 = no limit)
 }
 
 // Run executes the skill and returns stdout/stderr bytes.
@@ -35,14 +37,12 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("runner: network policy %s not supported", r.Manifest.Capabilities.Network)
 	}
 
-	// Apply timeout (default 5 minutes if not specified)
-	timeout := r.Options.Timeout
-	if timeout == 0 {
-		timeout = 5 * time.Minute
+	// Apply timeout only if explicitly set
+	if r.Options.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.Options.Timeout)
+		defer cancel()
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, timeout)
-	defer cancel()
 
 	workDir := r.Options.WorkDir
 	var cleanup func()
@@ -73,6 +73,12 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	env = append(env, fmt.Sprintf("SKILL_NAME=%s", r.Manifest.Metadata.Name))
 	env = append(env, fmt.Sprintf("SKILL_VERSION=%s", r.Manifest.Metadata.Version))
 	cmd.Env = env
+
+	// Apply resource limits if specified (0 = no limit per Options field docs)
+	// setResourceLimits is best-effort and platform-specific
+	if err := setResourceLimits(cmd, r.Options.MaxMemoryBytes, r.Options.MaxCPUSeconds); err != nil {
+		return nil, nil, fmt.Errorf("runner: failed to set resource limits: %w", err)
+	}
 
 	if err := cmd.Run(); err != nil {
 		return stdout.Bytes(), stderr.Bytes(), err
