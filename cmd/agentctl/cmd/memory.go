@@ -190,7 +190,7 @@ func newMemorySearchCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			entries, err := store.Search(cmd.Context(), ws, query, limit)
 			if err != nil {
@@ -234,7 +234,7 @@ func newMemoryGetCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			entry, err := store.Get(cmd.Context(), args[0], ws)
 			if err != nil {
@@ -288,7 +288,7 @@ func newMemoryPutCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 			entry, err := store.SaveFromResult(cmd.Context(), name, typ, ws, summary, payload)
 			if err != nil {
 				return err

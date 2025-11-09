@@ -577,6 +577,7 @@ func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.M
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr)); pwErr != nil {
 				// Progress write failed, but we're already in error path
+				_ = pwErr // Explicitly ignore - already in error state
 			}
 		}
 		if stateErr := s.updateState(ctx, jobID, StateError, validationErr.Error(), ""); stateErr != nil {
@@ -590,6 +591,7 @@ func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.M
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr)); pwErr != nil {
 				// Progress write failed, but we're already in error path
+				_ = pwErr // Explicitly ignore - already in error state
 			}
 		}
 		if stateErr := s.updateState(ctx, jobID, StateError, validationErr.Error(), ""); stateErr != nil {
@@ -603,6 +605,7 @@ func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.M
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err)); pwErr != nil {
 				// Progress write failed, but we're already in error path
+				_ = pwErr // Explicitly ignore - already in error state
 			}
 		}
 		if stateErr := s.updateState(ctx, jobID, StateError, err.Error(), ""); stateErr != nil {
