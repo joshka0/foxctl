@@ -22,10 +22,10 @@ const (
 
 // Config represents the fully materialized runtime configuration.
 type Config struct {
-	Home           string        `mapstructure:"home" json:"home"`
-	InlineOutputKB int           `mapstructure:"inline_output_kb" json:"inline_output_kb"`
-	MaxCaptureKB   int           `mapstructure:"max_capture_kb" json:"max_capture_kb"`
-	Paths          Paths         `mapstructure:"paths" json:"paths"`
+	Home           string         `mapstructure:"home" json:"home"`
+	InlineOutputKB int            `mapstructure:"inline_output_kb" json:"inline_output_kb"`
+	MaxCaptureKB   int            `mapstructure:"max_capture_kb" json:"max_capture_kb"`
+	Paths          Paths          `mapstructure:"paths" json:"paths"`
 	Memory         MemorySettings `mapstructure:"memory" json:"memory"`
 	Cache          CacheSettings  `mapstructure:"cache" json:"cache"`
 }
