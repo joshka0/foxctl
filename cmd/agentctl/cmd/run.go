@@ -26,10 +26,11 @@ func newRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			bin, err := resolveSkillBinary(args[0])
+			manifest, bin, err := findSkill(cfg, args[0])
 			if err != nil {
 				return err
 			}
+			skillName := manifest.Metadata.Name
 
 			store, cleanup, err := openJobStore(cmd.Context())
 			if err != nil {
@@ -37,7 +38,7 @@ func newRunCommand() *cobra.Command {
 			}
 			defer cleanup()
 			if async {
-				job, err := store.PrepareSkillJob(cmd.Context(), args[0], data)
+				job, err := store.PrepareSkillJob(cmd.Context(), skillName, data)
 				if err != nil {
 					return err
 				}
@@ -50,7 +51,7 @@ func newRunCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "job %s submitted\n", job.ID)
 				return nil
 			}
-			job, result, runErr := store.RunSkill(cmd.Context(), args[0], bin, data)
+			job, result, runErr := store.RunSkill(cmd.Context(), skillName, bin, data)
 			if runErr != nil {
 				return runErr
 			}

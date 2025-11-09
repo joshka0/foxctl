@@ -29,9 +29,10 @@ type Config struct {
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
 type Paths struct {
-	CAS   string `mapstructure:"cas" json:"cas"`
-	Jobs  string `mapstructure:"jobs" json:"jobs"`
-	Cache string `mapstructure:"cache" json:"cache"`
+	CAS    string `mapstructure:"cas" json:"cas"`
+	Jobs   string `mapstructure:"jobs" json:"jobs"`
+	Cache  string `mapstructure:"cache" json:"cache"`
+	Skills string `mapstructure:"skills" json:"skills"`
 }
 
 // Option customizes the loader.
@@ -73,6 +74,7 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	v.SetDefault("paths.cas", filepath.Join(defaultHome, "cas"))
 	v.SetDefault("paths.jobs", filepath.Join(defaultHome, "jobs"))
 	v.SetDefault("paths.cache", filepath.Join(defaultHome, "cache"))
+	v.SetDefault("paths.skills", filepath.Join(defaultHome, "skills"))
 
 	if l.configFile != "" {
 		v.SetConfigFile(l.configFile)
@@ -97,6 +99,7 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	cfg.Paths.CAS = resolvePath(cfg.Paths.CAS, cfg.Home, home)
 	cfg.Paths.Jobs = resolvePath(cfg.Paths.Jobs, cfg.Home, home)
 	cfg.Paths.Cache = resolvePath(cfg.Paths.Cache, cfg.Home, home)
+	cfg.Paths.Skills = resolvePath(cfg.Paths.Skills, cfg.Home, home)
 
 	if cfg.InlineOutputKB <= 0 {
 		cfg.InlineOutputKB = DefaultInlineOutputKB

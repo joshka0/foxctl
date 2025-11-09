@@ -1,0 +1,155 @@
+// Package skill parses and validates skill manifests.
+package skill
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Manifest mirrors skill.yaml structure.
+type Manifest struct {
+	APIVersion   string       `yaml:"apiVersion" json:"apiVersion"`
+	Kind         string       `yaml:"kind" json:"kind"`
+	Metadata     Metadata     `yaml:"metadata" json:"metadata"`
+	Distribution Distribution `yaml:"distribution" json:"distribution"`
+	IO           IOConfig     `yaml:"io" json:"io"`
+	Signature    Signature    `yaml:"signature" json:"signature"`
+	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
+	Memory       MemoryConfig `yaml:"memory" json:"memory"`
+}
+
+// Metadata describes the human-facing info for a skill.
+type Metadata struct {
+	Name        string   `yaml:"name" json:"name"`
+	Version     string   `yaml:"version" json:"version"`
+	Description string   `yaml:"description" json:"description"`
+	Tags        []string `yaml:"tags" json:"tags"`
+}
+
+// Distribution declares how the skill binary/module is shipped.
+type Distribution struct {
+	Type string            `yaml:"type" json:"type"`
+	Exec *ExecDistribution `yaml:"exec" json:"exec"`
+	WASI *WASIDistribution `yaml:"wasi" json:"wasi"`
+}
+
+// ExecDistribution points to a native binary entry.
+type ExecDistribution struct {
+	Entry string `yaml:"entry" json:"entry"`
+}
+
+// WASIDistribution references a wasm module.
+type WASIDistribution struct {
+	Module string `yaml:"module" json:"module"`
+}
+
+// IOConfig controls envelope I/O limits.
+type IOConfig struct {
+	Format         string `yaml:"format" json:"format"`
+	InlineOutputKB int    `yaml:"inline_output_kb" json:"inline_output_kb"`
+}
+
+// Signature declares command name and parameters.
+type Signature struct {
+	Command    string      `yaml:"command" json:"command"`
+	Parameters []Parameter `yaml:"parameters" json:"parameters"`
+	Returns    []Parameter `yaml:"returns" json:"returns"`
+}
+
+// Parameter defines a single input or output field.
+type Parameter struct {
+	Name        string      `yaml:"name" json:"name"`
+	Type        string      `yaml:"type" json:"type"`
+	Required    bool        `yaml:"required" json:"required"`
+	Description string      `yaml:"description" json:"description"`
+	Default     interface{} `yaml:"default" json:"default"`
+}
+
+// Capabilities describe network/fs policies.
+type Capabilities struct {
+	Network    string       `yaml:"network" json:"network"`
+	Filesystem []FileAccess `yaml:"filesystem" json:"filesystem"`
+	Pure       bool         `yaml:"pure" json:"pure"`
+}
+
+// FileAccess grants access to specific filesystem roots.
+type FileAccess struct {
+	Type string `yaml:"type" json:"type"`
+}
+
+// MemoryConfig hints how results integrate with memory/cache.
+type MemoryConfig struct {
+	Recommend  bool   `yaml:"recommend" json:"recommend"`
+	DefaultTTL string `yaml:"default_ttl" json:"default_ttl"`
+}
+
+// LoadManifest reads and validates a manifest.
+func LoadManifest(path string) (Manifest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	var m Manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return Manifest{}, err
+	}
+	if err := validateManifest(m); err != nil {
+		return Manifest{}, err
+	}
+	return m, nil
+}
+
+func validateManifest(m Manifest) error {
+	if m.APIVersion == "" || m.Kind != "Skill" {
+		return fmt.Errorf("invalid apiVersion/kind")
+	}
+	if !strings.Contains(m.Metadata.Name, "/") {
+		return fmt.Errorf("metadata.name must include namespace (e.g. text/grep)")
+	}
+	if m.Metadata.Version == "" {
+		return fmt.Errorf("version required")
+	}
+	switch m.Distribution.Type {
+	case "exec":
+		if m.Distribution.Exec == nil || m.Distribution.Exec.Entry == "" {
+			return fmt.Errorf("exec entry required")
+		}
+	case "wasi":
+		if m.Distribution.WASI == nil || m.Distribution.WASI.Module == "" {
+			return fmt.Errorf("wasi module required")
+		}
+	default:
+		return fmt.Errorf("unknown distribution type %q", m.Distribution.Type)
+	}
+	if m.Signature.Command == "" {
+		return fmt.Errorf("signature.command required")
+	}
+	return nil
+}
+
+// Discover finds manifests under root (skill.yaml files).
+func Discover(root string) ([]Manifest, error) {
+	var manifests []Manifest
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) != "skill.yaml" {
+			return nil
+		}
+		m, err := LoadManifest(path)
+		if err != nil {
+			return err
+		}
+		manifests = append(manifests, m)
+		return nil
+	})
+	return manifests, err
+}
