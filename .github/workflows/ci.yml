@@ -84,7 +84,7 @@ jobs:
       - name: Build skills pack
         run: make skills-build
 
-      - name: Policy check: skill manifests
+      - name: Check skill manifests (policy)
         run: go run ./scripts/checkmanifests
 
       - name: Upload build artifacts
