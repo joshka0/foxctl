@@ -1,0 +1,48 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: http/openapi
+  version: 0.1.0
+  description: "Simple OpenAPI dry-run planner"
+  tags: ["openapi", "http"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/http_openapi/http_openapi
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: http/openapi
+  parameters:
+    - name: base_url
+      type: string
+      required: true
+    - name: path
+      type: string
+      required: true
+    - name: method
+      type: string
+      required: false
+      default: GET
+    - name: query
+      type: object
+      required: false
+    - name: headers
+      type: object
+      required: false
+    - name: body
+      type: object
+      required: false
+    - name: dry_run
+      type: boolean
+      required: false
+      default: true
+returns:
+  - name: request_plan
+    type: object
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

@@ -1,0 +1,47 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: fs/ls
+  version: 0.1.0
+  description: "List directory entries"
+  tags: ["fs", "ls", "files"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/fs_ls/fs_ls
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: fs/ls
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "Directory to list (default .)"
+    - name: include
+      type: array
+      required: false
+      items:
+        type: string
+    - name: exclude
+      type: array
+      required: false
+      items:
+        type: string
+    - name: max_entries
+      type: integer
+      required: false
+      default: 200
+    - name: show_hidden
+      type: boolean
+      required: false
+      default: false
+returns:
+  - name: entries
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

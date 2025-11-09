@@ -1,0 +1,52 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: text/grep
+  version: 0.1.0
+  description: "Recursive regex search with include/exclude globs"
+  tags: ["text", "search", "regex"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/text_grep/text_grep
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: text/grep
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "Directory or file (default .)"
+    - name: pattern
+      type: string
+      required: true
+      description: "Go RE2 regex"
+    - name: ci
+      type: boolean
+      required: false
+      description: "Case insensitive"
+      default: false
+    - name: include
+      type: array
+      required: false
+      items:
+        type: string
+    - name: exclude
+      type: array
+      required: false
+      items:
+        type: string
+    - name: max_matches
+      type: integer
+      required: false
+      default: 100000
+returns:
+  - name: matches
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
