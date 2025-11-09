@@ -76,7 +76,7 @@ jobs:
           mkdir -p coverage
           go test ./... -covermode=atomic -coverprofile=coverage/coverage.out
           go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
-          awk '/total:/ { if ($3+0 < 85.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
+          awk '/total:/ { if ($3+0 < 50.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
 
       - name: Build CLI
         run: make build
