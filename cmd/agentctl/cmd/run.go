@@ -76,7 +76,7 @@ func newRunCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				defer cacheStore.Close()
+				defer func() { _ = cacheStore.Close() }()
 				cacheKey, err = cache.BuildKey(handle.Manifest, data, nil)
 				if err != nil {
 					return err

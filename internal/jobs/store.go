@@ -545,6 +545,7 @@ func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.M
 		if err := pw.WriteMessage("skill execution started"); err != nil {
 			// Progress write failures are non-fatal but we track them
 			// TODO: add structured logging
+			_ = err // Explicitly ignore - best effort only
 		}
 	}
 
@@ -553,11 +554,13 @@ func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.M
 	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
 		// Stderr logging is best-effort; don't fail job if it can't be written
 		// TODO: add structured logging for writeErr
+		_ = writeErr // Explicitly ignore - best effort only
 	}
 	if err != nil {
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
 				// Progress write failed, but we're already in error path
+				_ = pwErr // Explicitly ignore - already in error state
 			}
 		}
 		if stateErr := s.updateState(ctx, jobID, StateError, err.Error(), ""); stateErr != nil {

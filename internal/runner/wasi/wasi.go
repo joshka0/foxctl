@@ -33,8 +33,8 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	if r.Manifest.Distribution.Type != "wasi" {
 		return nil, nil, fmt.Errorf("wasi runner requires distribution.type=wasi")
 	}
-	if cap := strings.TrimSpace(r.Manifest.Capabilities.Network); cap != "" && cap != "none" {
-		return nil, nil, fmt.Errorf("wasi runner only supports network:\"none\" (got %q)", cap)
+	if netCap := strings.TrimSpace(r.Manifest.Capabilities.Network); netCap != "" && netCap != "none" {
+		return nil, nil, fmt.Errorf("wasi runner only supports network:\"none\" (got %q)", netCap)
 	}
 
 	// Apply timeout (default 5 minutes if not specified)
