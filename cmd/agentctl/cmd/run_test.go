@@ -1,0 +1,168 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+
+	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/envelope"
+)
+
+func TestRunCommandEmitsCompleteMeta(t *testing.T) {
+	cfg := installTextGrepSkill(t)
+	inputDir := t.TempDir()
+	sample := filepath.Join(inputDir, "sample.txt")
+	var buf bytes.Buffer
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(&buf, "needle line %d\n", i)
+	}
+	if err := os.WriteFile(sample, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	cmd := newRunCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{
+		"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, inputDir),
+		"text/grep",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("run command: %v\nstderr: %s", err, stderr.String())
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if _, err := time.Parse(time.RFC3339, env.Meta.TS); err != nil {
+		t.Fatalf("meta.ts not RFC3339: %v", err)
+	}
+	if env.Meta.Source != "run" {
+		t.Fatalf("expected meta.source=run got %q", env.Meta.Source)
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be a map got %T", env.Data)
+	}
+	artifact, _ := data["artifact"].(string)
+	if artifact == "" {
+		t.Fatalf("expected artifact in data")
+	}
+	if env.Meta.CASDigest != artifact {
+		t.Fatalf("meta.cas_digest %q does not match artifact %q", env.Meta.CASDigest, artifact)
+	}
+}
+
+func TestSkillsRunProducesInlineEnvelope(t *testing.T) {
+	cfg := installTextGrepSkill(t)
+	file := filepath.Join(t.TempDir(), "small.txt")
+	if err := os.WriteFile(file, []byte("only once\nsecond line\n"), 0o644); err != nil {
+		t.Fatalf("write small file: %v", err)
+	}
+
+	cmd := newSkillsRunCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{
+		"--input", fmt.Sprintf(`{"path":%q,"pattern":"only"}`, file),
+		"text/grep",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills run: %v\nstderr: %s", err, stderr.String())
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Meta.CASDigest != "" {
+		t.Fatalf("expected no cas digest for inline results, got %q", env.Meta.CASDigest)
+	}
+}
+
+func installTextGrepSkill(t *testing.T) config.Config {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	agentHome := filepath.Join(tmp, ".agentctl")
+	cfg := config.Config{
+		Home:           agentHome,
+		InlineOutputKB: config.DefaultInlineOutputKB,
+		MaxCaptureKB:   config.DefaultMaxCaptureKB,
+		Paths: config.Paths{
+			CAS:    filepath.Join(agentHome, "cas"),
+			Jobs:   filepath.Join(agentHome, "jobs"),
+			Cache:  filepath.Join(agentHome, "cache"),
+			Skills: filepath.Join(agentHome, "skills"),
+		},
+	}
+
+	for _, dir := range []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	dest := filepath.Join(cfg.Paths.Skills, "text_grep")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("skill dir: %v", err)
+	}
+	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "text_grep", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
+
+	binaryPath := filepath.Join(dest, "bin")
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+	buildSkillBinary(t, binaryPath)
+	return cfg
+}
+
+func buildSkillBinary(t *testing.T, dest string) {
+	t.Helper()
+	cmd := exec.Command("go", "build", "-o", dest, "./skills/text_grep")
+	cmd.Dir = repoRoot(t)
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build text_grep: %v\n%s", err, string(out))
+	}
+}
+
+func copySkillFile(t *testing.T, src, dst string) {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", dst, err)
+	}
+}
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("determine repo root: no caller info")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+}

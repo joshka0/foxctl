@@ -195,6 +195,21 @@ Start
 
 * Only after CI is green and a human **approves**.
 
+### ❌ Hard Fail Conditions (LLM must stop)
+- Proposing any change that alters the JSON envelope wire contract (fields/semantics) without spec + golden updates.
+- Enabling network access for WASI skills (Core v1 mandates `network:"none"`).
+- Storing secrets in code, testdata, CAS, or Git history.
+- Writing outside the workspace or auto-modifying files when the user has not opted in with `--apply`.
+- Adding dependencies that require CGO or platform-specific toolchains.
+- Emitting non-JSON stdout from CLI/skills (envelopes-only forever).
+
+### Spec ↔ Code Drift Watchlist
+| Topic | Spec (canonical) | Code (actual) | Action |
+|-------|------------------|---------------|--------|
+| inline_output_kb | `docs/spec/core_profile_v1.md` §2 → 32 KB default | `internal/config.DefaultInlineOutputKB = 32` (tested in `internal/config/config_test.go`) | Keep spec + constant in lockstep |
+| WASI network rule | `docs/spec/core_profile_v1.md` §10 → WASI = `network:"none"` | Manifest validation + `scripts/checkmanifests` enforce the restriction | Add regression tests whenever new WASI skill ships |
+| Envelope meta fields | `docs/spec/core_profile_v1.md` §2 enumerates `meta.*` | `internal/envelope.Envelope` + CLI smoke tests (`cmd/agentctl/cmd/run_test.go`) assert presence | Extend smoke tests when adding new meta fields |
+
 ---
 
 ## 🧑‍💻 Go Coding Conventions
@@ -248,7 +263,12 @@ func Ok(cmd string, data any, meta Meta) Envelope {
 * **OpenAPI**: dry‑run, bearer/apiKey/basic/oauth2‑cc, link/cursor/offset pagination, retries on 429/5xx, non‑UTF‑8 bodies rejected (`EPARSE`).
 * **Plugins**: auth and pagination example plugins invoked via subprocess (WASI and exec).
 
-**Live integration tests** (opt‑in): set `AGENTCTL_TEST_LIVE=1`; otherwise use go‑vcr cassettes. Never rely on network in default CI.
+**Live integration tests** (opt-in): set `AGENTCTL_TEST_LIVE=1`; otherwise use go-vcr cassettes. Never rely on network in default CI.
+
+### Golden Test Pact
+- Every skill ships `testdata/ok.json` (or `.wrapper.json` when CAS is required) for the happy-path envelope.
+- Every skill ships `testdata/error.json` capturing actionable `error.code` plus `data.hint`.
+- Freeze timestamps, redact host-specific data, and prefer shared helpers so goldens stay deterministic.
 
 ---
 

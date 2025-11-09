@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -49,6 +50,11 @@ func (rc *RunnerContext) Close() error {
 
 // Emit OK envelope with automatic CAS wrapping for large payloads.
 func (rc *RunnerContext) Emit(command string, data any, _ string, meta envelope.Meta) error {
+	if meta.CASDigest == "" {
+		if digest := artifactDigest(data); digest != "" {
+			meta.CASDigest = digest
+		}
+	}
 	env := envelope.OK(command, data, envelope.WithMeta(meta))
 	return envelope.Write(rc.Stdout, env)
 }
@@ -139,4 +145,40 @@ func depth(rel string) int {
 	}
 	rel = filepath.ToSlash(rel)
 	return strings.Count(rel, "/") + 1
+}
+
+func artifactDigest(data any) string {
+	if data == nil {
+		return ""
+	}
+	switch v := data.(type) {
+	case map[string]any:
+		return extractArtifact(v)
+	case map[string]interface{}:
+		return extractArtifact(v)
+	default:
+		val := reflect.ValueOf(data)
+		if val.Kind() == reflect.Map && val.Type().Key().Kind() == reflect.String {
+			iter := val.MapRange()
+			for iter.Next() {
+				if key := iter.Key().String(); key == "artifact" {
+					if s, ok := iter.Value().Interface().(string); ok && strings.HasPrefix(s, "sha256:") {
+						return s
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func extractArtifact(m map[string]any) string {
+	val, ok := m["artifact"]
+	if !ok {
+		return ""
+	}
+	if digest, ok := val.(string); ok && strings.HasPrefix(digest, "sha256:") {
+		return digest
+	}
+	return ""
 }

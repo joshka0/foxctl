@@ -1,0 +1,9 @@
+//go:build tools
+
+// Package tools pins developer tooling versions via go modules.
+package tools
+
+import (
+	_ "github.com/golangci/golangci-lint/cmd/golangci-lint"
+	_ "mvdan.cc/gofumpt"
+)

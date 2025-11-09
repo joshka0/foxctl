@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -25,39 +26,107 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           labels: ai-generated
 
-  go-build:
-    runs-on: ubuntu-latest
+  build-test:
+    name: Go ${{ matrix.go }} • ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.22.x', 'stable']
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Set up Go
-        uses: actions/setup-go@v5
+
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: ${{ matrix.go }}
+
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-go-
-      - name: Enforce formatting
+
+      - name: Format (gofumpt)
         run: |
           make fmt
-          git diff --exit-code || (echo 'Go formatting changed files. Run make fmt locally.' && exit 1)
-      - name: Lint
+          git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+
+      - name: Lint (golangci-lint)
         run: make lint
-      - name: Test
+
+      - name: Vet
+        run: make vet
+
+      - name: Unit tests (no race)
         run: make test
+
+      - name: Race tests (Linux only)
+        if: runner.os == 'Linux'
+        run: make test-race
+
+      - name: Coverage (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p coverage
+          go test ./... -covermode=atomic -coverprofile=coverage/coverage.out
+          go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
+          awk '/total:/ { if ($3+0 < 85.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
+
       - name: Build CLI
         run: make build
-      - name: Build skills
+
+      - name: Build skills pack
         run: make skills-build
 
+      - name: Policy check: skill manifests
+        run: go run ./scripts/checkmanifests
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentctl-${{ matrix.os }}-${{ matrix.go }}
+          path: |
+            bin/agentctl
+            dist/skills/**
+
+  docs-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Markdown link check
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          config-file: .github/mlc_config.json
+
   all-checks:
-    needs: go-build
+    needs: [build-test, docs-lint]
     runs-on: ubuntu-latest
     steps:
       - run: echo "✅ All checks passed"
+
+  release:
+    name: Release (tags only)
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

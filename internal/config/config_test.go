@@ -23,6 +23,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Paths.CAS != filepath.Join(expectedHome, "cas") {
 		t.Fatalf("unexpected cas path: %s", cfg.Paths.CAS)
 	}
+	if cfg.InlineOutputKB != DefaultInlineOutputKB {
+		t.Fatalf("expected inline_output_kb default %d got %d", DefaultInlineOutputKB, cfg.InlineOutputKB)
+	}
+	if cfg.MaxCaptureKB != DefaultMaxCaptureKB {
+		t.Fatalf("expected max_capture_kb default %d got %d", DefaultMaxCaptureKB, cfg.MaxCaptureKB)
+	}
 }
 
 func TestLoadWithConfigFile(t *testing.T) {
@@ -85,5 +91,28 @@ func TestContextHelpers(t *testing.T) {
 	}
 	if stored.Home != cfg.Home {
 		t.Fatalf("expected home %s got %s", cfg.Home, stored.Home)
+	}
+}
+
+func TestInvalidInlineOutputFallsBackToDefault(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	home := filepath.Join(tmp, ".agentctl")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	cfgFile := filepath.Join(home, "config.yaml")
+	if err := os.WriteFile(cfgFile, []byte("inline_output_kb: -64\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(context.Background(), WithConfigFile(cfgFile))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.InlineOutputKB != DefaultInlineOutputKB {
+		t.Fatalf("expected inline_output_kb default %d got %d", DefaultInlineOutputKB, cfg.InlineOutputKB)
 	}
 }

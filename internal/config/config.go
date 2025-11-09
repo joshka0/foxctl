@@ -14,7 +14,7 @@ import (
 
 const (
 	// DefaultInlineOutputKB is the fallback size threshold for inline envelopes.
-	DefaultInlineOutputKB = 256
+	DefaultInlineOutputKB = 32
 	// DefaultMaxCaptureKB limits captured stdout/stderr data per job.
 	DefaultMaxCaptureKB = 10240
 )
