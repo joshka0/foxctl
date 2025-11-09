@@ -27,11 +27,11 @@ func newRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			manifest, bin, err := findSkill(cfg, args[0])
+			handle, err := findSkill(cfg, args[0])
 			if err != nil {
 				return err
 			}
-			skillName := manifest.Metadata.Name
+			skillName := handle.Manifest.Metadata.Name
 
 			store, cleanup, err := openJobStore(cmd.Context())
 			if err != nil {
@@ -78,7 +78,11 @@ func newRunCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				worker := exec.CommandContext(cmd.Context(), os.Args[0], "jobs", "exec-skill", "--job-id", job.ID, "--bin", bin)
+				worker := exec.CommandContext(cmd.Context(), os.Args[0], "jobs", "exec-skill",
+					"--job-id", job.ID,
+					"--manifest", handle.ManifestPath,
+					"--artifact", handle.ArtifactPath,
+				)
 				worker.Stdout = cmd.ErrOrStderr()
 				worker.Stderr = cmd.ErrOrStderr()
 				if err := worker.Start(); err != nil {
@@ -87,7 +91,7 @@ func newRunCommand() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "job %s submitted\n", job.ID)
 				return nil
 			}
-			job, result, runErr := store.RunSkill(cmd.Context(), skillName, bin, data)
+			job, result, runErr := store.RunSkill(cmd.Context(), handle.Manifest, handle.ArtifactPath, data)
 			if runErr != nil {
 				return runErr
 			}

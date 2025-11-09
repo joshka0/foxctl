@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,7 +16,7 @@ func TestRunnerRunEcho(t *testing.T) {
 	t.Parallel()
 
 	manifest := loadManifest(t)
-	modulePath := filepathFor(t, "skills/wasi_echo/module.wasm")
+	modulePath := repoPath(t, "skills", "wasi_echo", "module.wasm")
 
 	r := Runner{
 		Manifest:   manifest,
@@ -53,7 +55,7 @@ func TestRunnerRejectsNetwork(t *testing.T) {
 
 	manifest := loadManifest(t)
 	manifest.Capabilities.Network = "egress"
-	modulePath := filepathFor(t, "skills/wasi_echo/module.wasm")
+	modulePath := repoPath(t, "skills", "wasi_echo", "module.wasm")
 
 	r := Runner{
 		Manifest:   manifest,
@@ -66,7 +68,7 @@ func TestRunnerRejectsNetwork(t *testing.T) {
 
 func loadManifest(t *testing.T) skill.Manifest {
 	t.Helper()
-	path := filepathFor(t, "skills/wasi_echo/skill.yaml")
+	path := repoPath(t, "skills", "wasi_echo", "skill.yaml")
 	manifest, err := skill.LoadManifest(path)
 	if err != nil {
 		t.Fatalf("load manifest: %v", err)
@@ -74,8 +76,14 @@ func loadManifest(t *testing.T) skill.Manifest {
 	return manifest
 }
 
-func filepathFor(t *testing.T, path string) string {
+func repoPath(t *testing.T, elems ...string) string {
 	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatalf("runtime.Caller failed")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+	path := filepath.Join(append([]string{root}, elems...)...)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("stat %s: %v", path, err)
 	}

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/skill"
 )
 
 func TestSubmitEchoCreatesResult(t *testing.T) {
@@ -151,7 +153,8 @@ func main() {
   fmt.Println("{\"version\":1,\"status\":\"ok\",\"command\":\"test\",\"data\":{\"message\":\"skill\"},\"meta\":{\"ts\":\"2025-01-01T00:00:00Z\"},\"error\":{}}")
 }`)
 	input := []byte(`{"foo":"bar"}`)
-	job, result, err := store.RunSkill(ctx, "test/skill", bin, input)
+	manifest := testExecManifest("test/skill")
+	job, result, err := store.RunSkill(ctx, manifest, bin, input)
 	if err != nil {
 		t.Fatalf("run skill: %v", err)
 	}
@@ -186,7 +189,8 @@ func main() {
   fmt.Println("{\"version\":1,\"status\":\"ok\",\"command\":\"test\",\"data\":{\"message\":\"skill\"},\"meta\":{\"ts\":\"2025-01-01T00:00:00Z\"},\"error\":{}}")
 }`)
 	input := []byte(`{"foo":"bar"}`)
-	job, _, err := store.RunSkill(ctx, "test/skill", bin, input)
+	manifest := testExecManifest("test/skill")
+	job, _, err := store.RunSkill(ctx, manifest, bin, input)
 	if err != nil {
 		t.Fatalf("run skill: %v", err)
 	}
@@ -426,4 +430,30 @@ func buildTestSkill(t *testing.T, src string) string {
 		t.Fatalf("build skill: %v\n%s", err, out)
 	}
 	return binPath
+}
+
+func testExecManifest(name string) skill.Manifest {
+	return skill.Manifest{
+		APIVersion: "agentctl/v1",
+		Kind:       "Skill",
+		Metadata: skill.Metadata{
+			Name:        name,
+			Version:     "0.0.1",
+			Description: "test manifest",
+		},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "skill"},
+		},
+		IO: skill.IOConfig{
+			Format:         "JSON",
+			InlineOutputKB: 32,
+		},
+		Signature: skill.Signature{
+			Command: name,
+		},
+		Capabilities: skill.Capabilities{
+			Network: "none",
+		},
+	}
 }

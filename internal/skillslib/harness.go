@@ -154,8 +154,6 @@ func artifactDigest(data any) string {
 	switch v := data.(type) {
 	case map[string]any:
 		return extractArtifact(v)
-	case map[string]interface{}:
-		return extractArtifact(v)
 	default:
 		val := reflect.ValueOf(data)
 		if val.Kind() == reflect.Map && val.Type().Key().Kind() == reflect.String {

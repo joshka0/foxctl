@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -9,12 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/runner"
+	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/oklog/ulid/v2"
 	_ "modernc.org/sqlite" // sqlite driver
 )
@@ -44,9 +44,7 @@ func Open(ctx context.Context, root string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	store := &Store{db: db, root: root}
-
-	return store, nil
+	return &Store{db: db, root: root}, nil
 }
 
 // Close releases database resources.
@@ -195,12 +193,12 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 }
 
 // RunSkill executes a skill binary, recording its output as a job.
-func (s *Store) RunSkill(ctx context.Context, name, binPath string, input []byte) (Job, []byte, error) {
-	job, err := s.prepareSkillJob(ctx, name, input)
+func (s *Store) RunSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) (Job, []byte, error) {
+	job, err := s.prepareSkillJob(ctx, manifest.Metadata.Name, input)
 	if err != nil {
 		return Job{}, nil, err
 	}
-	result, execErr := s.executeSkill(ctx, job.ID, binPath, input)
+	result, execErr := s.executeSkill(ctx, job.ID, manifest, artifactPath, input)
 	job, _ = s.Get(ctx, job.ID)
 	return job, result, execErr
 }
@@ -211,13 +209,13 @@ func (s *Store) PrepareSkillJob(ctx context.Context, name string, input []byte) 
 }
 
 // ExecutePreparedSkill runs a previously prepared job.
-func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID, binPath string) ([]byte, error) {
+func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string) ([]byte, error) {
 	inputPath := filepath.Join(s.jobDir(jobID), "input.json")
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("jobs: read input: %w", err)
 	}
-	return s.executeSkill(ctx, jobID, binPath, data)
+	return s.executeSkill(ctx, jobID, manifest, artifactPath, data)
 }
 
 func (s *Store) insertJob(ctx context.Context, job Job) error {
@@ -274,16 +272,6 @@ func hashArgs(command string, argsJSON []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// ComputeSkillArgsHash computes the args_hash for a skill without creating a job.
-func (s *Store) ComputeSkillArgsHash(name string, input []byte) string {
-	args := map[string]any{"skill": name}
-	if len(input) > 0 {
-		args["input_size_bytes"] = len(input)
-	}
-	argsBuf, _ := json.Marshal(args)
-	return hashArgs(name, argsBuf)
-}
-
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS jobs (
@@ -315,11 +303,7 @@ func (s *Store) jobDir(id string) string {
 }
 
 func (s *Store) prepareSkillJob(ctx context.Context, name string, input []byte) (Job, error) {
-	args := map[string]any{"skill": name}
-	if len(input) > 0 {
-		args["input_size_bytes"] = len(input)
-	}
-	argsBuf, _ := json.Marshal(args)
+	argsBuf := marshalSkillArgs(name, input)
 	jobID := ulid.Make().String()
 	jobDir := s.jobDir(jobID)
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
@@ -384,57 +368,60 @@ func (s *Store) FindDuplicateJob(ctx context.Context, argsHash string) (Job, err
 	return job, nil
 }
 
-func (s *Store) executeSkill(ctx context.Context, jobID, binPath string, input []byte) ([]byte, error) {
-	jobDir := s.jobDir(jobID)
-
-	// Create progress writer before setting state to running
-	progressWriter, err := NewProgressWriter(jobDir)
-	if err != nil {
-		_ = s.updateState(ctx, jobID, StateError, fmt.Sprintf("failed to create progress writer: %v", err), "")
-		return nil, fmt.Errorf("jobs: progress writer: %w", err)
-	}
-	defer func() { _ = progressWriter.Close() }()
-
+func (s *Store) executeSkill(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
 	if err := s.updateState(ctx, jobID, StateRunning, "", ""); err != nil {
 		return nil, err
 	}
 
-	// Emit started event
-	_ = progressWriter.WriteMessage("Skill execution started")
+	var pw *ProgressWriter
+	if writer, err := NewProgressWriter(s.jobDir(jobID)); err == nil {
+		pw = writer
+		defer func() { _ = pw.Close() }()
+		_ = pw.WriteMessage("skill execution started")
+	}
 
-	stdout := &bytes.Buffer{}
-	stderrPath := filepath.Join(jobDir, "stderr.log")
-	stderrFile, err := os.Create(stderrPath)
+	stdout, stderr, err := runner.Run(ctx, manifest, artifactPath, input)
+	stderrPath := filepath.Join(s.jobDir(jobID), "stderr.log")
+	_ = os.WriteFile(stderrPath, append(stderr, '\n'), 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("jobs: stderr file: %w", err)
-	}
-	defer func() { _ = stderrFile.Close() }()
-
-	_ = progressWriter.WritePercent(0, "Executing skill binary")
-
-	cmd := exec.CommandContext(ctx, binPath)
-	cmd.Stdin = bytes.NewReader(input)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderrFile
-
-	if err := cmd.Run(); err != nil {
-		_ = progressWriter.WriteMessage(fmt.Sprintf("Skill execution failed: %s", err.Error()))
+		if pw != nil {
+			_ = pw.WriteMessage(fmt.Sprintf("skill failed: %s", err))
+		}
 		_ = s.updateState(ctx, jobID, StateError, err.Error(), "")
-		return stdout.Bytes(), fmt.Errorf("skill run failed: %w", err)
+		return stdout, fmt.Errorf("skill run failed: %w", err)
 	}
 
-	_ = progressWriter.WritePercent(90, "Writing result")
-
-	resultPath := filepath.Join(jobDir, "result.json")
-	if err := os.WriteFile(resultPath, stdout.Bytes(), 0o644); err != nil {
+	resultPath := filepath.Join(s.jobDir(jobID), "result.json")
+	if err := os.WriteFile(resultPath, stdout, 0o644); err != nil {
+		if pw != nil {
+			_ = pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err))
+		}
 		_ = s.updateState(ctx, jobID, StateError, err.Error(), "")
 		return nil, fmt.Errorf("jobs: write result: %w", err)
 	}
-
-	_ = progressWriter.WritePercent(100, "Skill execution completed")
-
 	if err := s.updateState(ctx, jobID, StateOK, "", resultPath); err != nil {
 		return nil, err
 	}
-	return stdout.Bytes(), nil
+	if pw != nil {
+		_ = pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"})
+	}
+	return stdout, nil
+}
+
+// ComputeSkillArgsHash deterministically computes the hash for skill inputs.
+func (s *Store) ComputeSkillArgsHash(name string, input []byte) string {
+	argsBuf := marshalSkillArgs(name, input)
+	return hashArgs(name, argsBuf)
+}
+
+func marshalSkillArgs(name string, input []byte) []byte {
+	args := map[string]any{"skill": name}
+	if len(input) > 0 {
+		args["input_size_bytes"] = len(input)
+	}
+	buf, err := json.Marshal(args)
+	if err != nil {
+		return []byte("{}")
+	}
+	return buf
 }

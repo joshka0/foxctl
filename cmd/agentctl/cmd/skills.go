@@ -5,11 +5,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
-	execrunner "github.com/jkatigb/agentctl/internal/runner/exec"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/spf13/cobra"
 )
@@ -43,14 +41,13 @@ func newSkillsRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			manifest, bin, err := findSkill(cfg, args[0])
+			handle, err := findSkill(cfg, args[0])
 			if err != nil {
 				return err
 			}
-			runner := execrunner.Runner{Manifest: manifest, Binary: bin}
-			stdout, stderr, err := runner.Run(cmd.Context(), data)
+			stdout, stderr, err := executeSkill(cmd.Context(), handle.Manifest, handle.ArtifactPath, data)
 			if len(stderr) > 0 {
-				if _, werr := cmd.ErrOrStderr().Write(stderr); werr != nil {
+				if _, werr := cmd.ErrOrStderr().Write(append(stderr, '\n')); werr != nil {
 					return werr
 				}
 			}
@@ -72,6 +69,7 @@ func init() {
 func newSkillsInstallCommand() *cobra.Command {
 	var manifestPath string
 	var binaryPath string
+	var modulePath string
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install a skill manifest and binary",
@@ -91,8 +89,23 @@ func newSkillsInstallCommand() *cobra.Command {
 			if err := copyFile(manifestPath, filepath.Join(dest, "skill.yaml")); err != nil {
 				return err
 			}
-			if err := copyFile(binaryPath, filepath.Join(dest, "bin")); err != nil {
-				return err
+			switch manifest.Distribution.Type {
+			case "exec":
+				if binaryPath == "" {
+					return fmt.Errorf("--binary is required for exec skills")
+				}
+				if err := copyFile(binaryPath, filepath.Join(dest, "bin")); err != nil {
+					return err
+				}
+			case "wasi":
+				if modulePath == "" {
+					return fmt.Errorf("--module is required for wasi skills")
+				}
+				if err := copyFile(modulePath, filepath.Join(dest, "module.wasm")); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unsupported distribution: %s", manifest.Distribution.Type)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "installed %s\n", manifest.Metadata.Name)
 			return nil
@@ -100,8 +113,8 @@ func newSkillsInstallCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to skill.yaml")
 	cmd.Flags().StringVar(&binaryPath, "binary", "", "Path to skill binary")
+	cmd.Flags().StringVar(&modulePath, "module", "", "Path to WASM module (for wasi skills)")
 	_ = cmd.MarkFlagRequired("manifest")
-	_ = cmd.MarkFlagRequired("binary")
 	return cmd
 }
 
@@ -134,20 +147,6 @@ func summarizeSkills(manifests []skill.Manifest) []map[string]string {
 		})
 	}
 	return out
-}
-
-func findSkill(cfg config.Config, name string) (skill.Manifest, string, error) {
-	installPath := filepath.Join(cfg.Paths.Skills, name, "skill.yaml")
-	if manifest, err := skill.LoadManifest(installPath); err == nil {
-		return manifest, filepath.Join(cfg.Paths.Skills, name, "bin"), nil
-	}
-	short := strings.ReplaceAll(strings.ReplaceAll(name, "/", "_"), "-", "_")
-	devManifest := filepath.Join("skills", short, "skill.yaml")
-	if manifest, err := skill.LoadManifest(devManifest); err == nil {
-		bin := filepath.Join("dist", "skills", short, short)
-		return manifest, bin, nil
-	}
-	return skill.Manifest{}, "", fmt.Errorf("skill %s not found (run make skills-build and install)", name)
 }
 
 func copyFile(src, dst string) error {

@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/spf13/cobra"
 )
 
 func newJobsExecSkillCommand() *cobra.Command {
 	var jobID string
-	var binPath string
+	var manifestPath string
+	var artifactPath string
 	cmd := &cobra.Command{
 		Use:    "exec-skill",
 		Hidden: true,
@@ -21,7 +23,11 @@ func newJobsExecSkillCommand() *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			result, err := store.ExecutePreparedSkill(cmd.Context(), jobID, binPath)
+			manifest, err := skill.LoadManifest(manifestPath)
+			if err != nil {
+				return err
+			}
+			result, err := store.ExecutePreparedSkill(cmd.Context(), jobID, manifest, artifactPath)
 			if err != nil {
 				return err
 			}
@@ -29,8 +35,10 @@ func newJobsExecSkillCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&jobID, "job-id", "", "Job identifier")
-	cmd.Flags().StringVar(&binPath, "bin", "", "Skill binary path")
+	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to skill manifest")
+	cmd.Flags().StringVar(&artifactPath, "artifact", "", "Path to skill binary/module")
 	_ = cmd.MarkFlagRequired("job-id")
-	_ = cmd.MarkFlagRequired("bin")
+	_ = cmd.MarkFlagRequired("manifest")
+	_ = cmd.MarkFlagRequired("artifact")
 	return cmd
 }

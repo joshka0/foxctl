@@ -122,7 +122,7 @@ func installTextGrepSkill(t *testing.T) config.Config {
 		}
 	}
 
-	dest := filepath.Join(cfg.Paths.Skills, "text_grep")
+	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep"))
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatalf("skill dir: %v", err)
 	}
@@ -140,7 +140,9 @@ func buildSkillBinary(t *testing.T, dest string) {
 	t.Helper()
 	cmd := exec.Command("go", "build", "-o", dest, "./skills/text_grep")
 	cmd.Dir = repoRoot(t)
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	env := append([]string{}, os.Environ()...)
+	env = append(env, "CGO_ENABLED=0", "GOFLAGS=-modcacherw")
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go build text_grep: %v\n%s", err, string(out))
