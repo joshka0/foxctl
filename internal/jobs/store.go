@@ -305,26 +305,6 @@ func (s *Store) updateState(ctx context.Context, id string, newState State, errM
 	return nil
 }
 
-// isValidStateTransition checks if a state transition is allowed.
-func isValidStateTransition(from, to State) bool {
-	// Same state is always valid (idempotent updates)
-	if from == to {
-		return true
-	}
-
-	switch from {
-	case StateQueued:
-		return to == StateRunning || to == StateCanceled || to == StateError
-	case StateRunning:
-		return to == StateOK || to == StateError || to == StateCanceled
-	case StateOK, StateError, StateCanceled:
-		// Terminal states: no transitions allowed
-		return false
-	default:
-		return false
-	}
-}
-
 // validSourceStates returns the list of states that can validly transition to the target state.
 // Used by updateState to build atomic UPDATE queries with state constraints.
 func validSourceStates(target State) []State {
