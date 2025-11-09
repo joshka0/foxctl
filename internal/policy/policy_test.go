@@ -273,3 +273,174 @@ func TestMatchesCIDR(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateFilesystemAccess(t *testing.T) {
+	tests := []struct {
+		name          string
+		manifest      skill.Manifest
+		requestedPath string
+		workDir       string
+		expectError   bool
+	}{
+		{
+			name: "workdir capability allows access within workdir",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "workdir"}},
+				},
+			},
+			requestedPath: "/tmp/work/file.txt",
+			workDir:       "/tmp/work",
+			expectError:   false,
+		},
+		{
+			name: "workdir capability blocks access outside workdir",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "workdir"}},
+				},
+			},
+			requestedPath: "/etc/passwd",
+			workDir:       "/tmp/work",
+			expectError:   true,
+		},
+		{
+			name: "no filesystem capability blocks all access",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{},
+				},
+			},
+			requestedPath: "/tmp/work/file.txt",
+			workDir:       "/tmp/work",
+			expectError:   true,
+		},
+		{
+			name: "relative path within workdir allowed",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "workdir"}},
+				},
+			},
+			requestedPath: "subdir/file.txt",
+			workDir:       "/tmp/work",
+			expectError:   false,
+		},
+		{
+			name: "path traversal blocked",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "workdir"}},
+				},
+			},
+			requestedPath: "../../../etc/passwd",
+			workDir:       "/tmp/work",
+			expectError:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := NewValidator(tt.manifest)
+			err := v.ValidateFilesystemAccess(tt.requestedPath, tt.workDir)
+			if tt.expectError && err == nil {
+				t.Errorf("expected error but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateFilesystemCapabilities(t *testing.T) {
+	tests := []struct {
+		name        string
+		manifest    skill.Manifest
+		expectError bool
+	}{
+		{
+			name: "workdir capability is valid",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "workdir"}},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "home capability is valid (future)",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "home"}},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "tmp capability is valid (future)",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "tmp"}},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "unknown capability type is invalid",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{{Type: "invalid"}},
+				},
+			},
+			expectError: true,
+		},
+		{
+			name: "empty filesystem list is valid",
+			manifest: skill.Manifest{
+				Capabilities: skill.Capabilities{
+					Filesystem: []skill.FileAccess{},
+				},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateFilesystemCapabilities(tt.manifest)
+			if tt.expectError && err == nil {
+				t.Errorf("expected error but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestIsWithinWorkdir(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		workDir  string
+		expected bool
+	}{
+		{"file in workdir", "/tmp/work/file.txt", "/tmp/work", true},
+		{"subdir in workdir", "/tmp/work/sub/file.txt", "/tmp/work", true},
+		{"file outside workdir", "/etc/passwd", "/tmp/work", false},
+		{"path traversal attempt", "/tmp/work/../../../etc/passwd", "/tmp/work", false},
+		{"relative path within", "file.txt", "/tmp/work", true},
+		{"relative subdir", "sub/file.txt", "/tmp/work", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isWithinWorkdir(tt.path, tt.workDir)
+			if result != tt.expected {
+				t.Errorf("isWithinWorkdir(%q, %q) = %v, want %v",
+					tt.path, tt.workDir, result, tt.expected)
+			}
+		})
+	}
+}

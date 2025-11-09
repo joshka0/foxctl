@@ -4,6 +4,7 @@ package policy
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -121,4 +122,82 @@ func matchesCIDR(host, cidr string) bool {
 	}
 
 	return ipnet.Contains(ip)
+}
+
+// ValidateFilesystemAccess checks if filesystem access to the given path is allowed.
+// Note: For exec skills, enforcement is best-effort. The skill runs with the user's
+// permissions and can technically access any path. This validation serves as a
+// manifest compliance check.
+// For WASI skills, wazero provides true filesystem sandboxing.
+func (v *Validator) ValidateFilesystemAccess(requestedPath, workDir string) error {
+	// Check if filesystem access is declared
+	if len(v.manifest.Capabilities.Filesystem) == 0 {
+		return fmt.Errorf("filesystem access denied: no filesystem capabilities declared")
+	}
+
+	// Check each filesystem capability
+	for _, fs := range v.manifest.Capabilities.Filesystem {
+		switch fs.Type {
+		case "workdir":
+			// Skill should only access paths within workdir
+			if isWithinWorkdir(requestedPath, workDir) {
+				return nil
+			}
+		case "home":
+			// Future: allow access to user's home directory
+			// Not implemented yet
+		case "tmp":
+			// Future: allow access to system temp directory
+			// Not implemented yet
+		}
+	}
+
+	return fmt.Errorf("filesystem access denied: %q not allowed by manifest", requestedPath)
+}
+
+// ValidateFilesystemCapabilities checks that the manifest's filesystem capabilities are valid.
+func ValidateFilesystemCapabilities(m skill.Manifest) error {
+	for _, fs := range m.Capabilities.Filesystem {
+		switch fs.Type {
+		case "workdir":
+			// Valid
+		case "home", "tmp":
+			// Future capabilities - warn but don't error
+			// Could add warning logging here
+		default:
+			return fmt.Errorf("unknown filesystem capability type: %q", fs.Type)
+		}
+	}
+	return nil
+}
+
+// isWithinWorkdir checks if a path is within the workdir.
+// This is a best-effort check for manifest compliance.
+func isWithinWorkdir(path, workDir string) bool {
+	// Clean the workdir
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return false
+	}
+
+	// For relative paths, treat them as relative to workDir
+	var absPath string
+	if !filepath.IsAbs(path) {
+		absPath = filepath.Join(absWorkDir, path)
+	} else {
+		absPath = path
+	}
+
+	// Clean the path
+	absPath = filepath.Clean(absPath)
+	absWorkDir = filepath.Clean(absWorkDir)
+
+	// Check if path is within workdir
+	rel, err := filepath.Rel(absWorkDir, absPath)
+	if err != nil {
+		return false
+	}
+
+	// If path is within workdir, it shouldn't start with ".."
+	return !strings.HasPrefix(rel, "..")
 }

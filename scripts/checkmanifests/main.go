@@ -7,32 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/jkatigb/agentctl/internal/policy"
+	"github.com/jkatigb/agentctl/internal/skill"
 )
-
-type manifest struct {
-	APIVersion string `yaml:"apiVersion"`
-	Kind       string `yaml:"kind"`
-	Metadata   struct {
-		Name string `yaml:"name"`
-	} `yaml:"metadata"`
-	Distribution struct {
-		Type string `yaml:"type"`
-		WASI *struct {
-			Entry string `yaml:"entry"`
-		} `yaml:"wasi"`
-		Exec *struct {
-			Entry string `yaml:"entry"`
-		} `yaml:"exec"`
-	} `yaml:"distribution"`
-	IO struct {
-		Format         string `yaml:"format"`
-		InlineOutputKB int    `yaml:"inline_output_kb"`
-	} `yaml:"io"`
-	Capabilities struct {
-		Network string `yaml:"network"`
-	} `yaml:"capabilities"`
-}
 
 type violation struct {
 	Path string `json:"path"`
@@ -72,29 +49,33 @@ func main() {
 	fmt.Println(`{"status":"ok","command":"policy/checkmanifests"}`)
 }
 
-func loadManifest(path string) (manifest, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return manifest{}, fmt.Errorf("read manifest: %w", err)
-	}
-	var m manifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return manifest{}, fmt.Errorf("parse manifest: %w", err)
-	}
-	return m, nil
+func loadManifest(path string) (skill.Manifest, error) {
+	return skill.LoadManifest(path)
 }
 
-func validateManifest(path string, m manifest) []violation {
+func validateManifest(path string, m skill.Manifest) []violation {
 	var out []violation
+
+	// Validate I/O format
 	format := strings.ToUpper(m.IO.Format)
 	if format != "JSON" {
 		out = append(out, violation{Path: path, Msg: "io.format must be JSON"})
 	}
-	if strings.EqualFold(m.Distribution.Type, "wasi") && m.Capabilities.Network != "none" {
-		out = append(out, violation{Path: path, Msg: "WASI skills must set capabilities.network=none"})
+
+	// Validate WASI network policy using centralized validation
+	if err := policy.ValidateWASIPolicy(m); err != nil {
+		out = append(out, violation{Path: path, Msg: err.Error()})
 	}
+
+	// Validate filesystem capabilities
+	if err := policy.ValidateFilesystemCapabilities(m); err != nil {
+		out = append(out, violation{Path: path, Msg: err.Error()})
+	}
+
+	// Validate inline output size
 	if m.IO.InlineOutputKB > 256 {
 		out = append(out, violation{Path: path, Msg: fmt.Sprintf("inline_output_kb too large (%d)", m.IO.InlineOutputKB)})
 	}
+
 	return out
 }
