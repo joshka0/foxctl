@@ -336,6 +336,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_args_hash ON jobs(args_hash);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("jobs: migrate: %w", err)
@@ -425,7 +426,8 @@ func (s *Store) FindDuplicateJob(ctx context.Context, argsHash string) (Job, err
 }
 
 // FindOrPrepareSkillJob atomically finds a duplicate job or creates a new one.
-// This prevents the TOCTOU race in deduplication.
+// This prevents the TOCTOU race in deduplication, even across multiple processes.
+// Uses a database transaction to ensure atomicity.
 func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []byte, dedupe bool) (Job, bool, error) {
 	if !dedupe {
 		// No dedup requested, just create new job
@@ -433,16 +435,25 @@ func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []
 		return job, false, err
 	}
 
-	// Lock to prevent race between checking for duplicates and creating job
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Compute hash
+	// Compute hash outside transaction
 	argsBuf := marshalSkillArgs(name, input)
 	argsHash := hashArgs(name, argsBuf)
 
-	// Check for existing job with same hash
-	row := s.db.QueryRowContext(ctx, `
+	// Use a transaction with immediate locking to prevent cross-process races
+	// BEGIN IMMEDIATE acquires a write lock on the database, preventing other
+	// processes from writing between our duplicate check and insert
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return Job{}, false, fmt.Errorf("jobs: begin transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Check for existing job with same hash (inside transaction)
+	row := tx.QueryRowContext(ctx, `
 		SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at
 		FROM jobs
 		WHERE args_hash = ?
@@ -451,10 +462,10 @@ func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []
 
 	var job Job
 	var created, updated string
-	err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated)
+	scanErr := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated)
 
-	if err == nil {
-		// Found duplicate
+	if scanErr == nil {
+		// Found duplicate - parse timestamps and commit transaction
 		var parseErr error
 		job.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
 		if parseErr != nil {
@@ -464,16 +475,22 @@ func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []
 		if parseErr != nil {
 			return Job{}, false, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
 		}
+
+		if err := tx.Commit(); err != nil {
+			return Job{}, false, fmt.Errorf("jobs: commit transaction: %w", err)
+		}
 		return job, true, nil // true = found duplicate
 	}
 
-	if !errorsIsNoRows(err) {
-		return Job{}, false, fmt.Errorf("jobs: find duplicate: %w", err)
+	if !errorsIsNoRows(scanErr) {
+		return Job{}, false, fmt.Errorf("jobs: find duplicate: %w", scanErr)
 	}
 
-	// No duplicate found, create new job
+	// No duplicate found, create new job (still inside transaction)
 	jobID := ulid.Make().String()
 	jobDir := s.jobDir(jobID)
+
+	// Create job directory and input file
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		return Job{}, false, fmt.Errorf("jobs: job dir: %w", err)
 	}
@@ -491,8 +508,19 @@ func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []
 		UpdatedAt: time.Now().UTC(),
 	}
 
-	if err := s.insertJob(ctx, job); err != nil {
-		return Job{}, false, err
+	// Insert job (inside transaction)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,
+		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State,
+		job.CreatedAt.Format(time.RFC3339Nano), job.UpdatedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		return Job{}, false, fmt.Errorf("jobs: insert: %w", err)
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return Job{}, false, fmt.Errorf("jobs: commit transaction: %w", err)
 	}
 
 	return job, false, nil // false = new job created
