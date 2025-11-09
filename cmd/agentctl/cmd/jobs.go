@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -21,6 +22,9 @@ func newJobsCommand() *cobra.Command {
 		newJobsListCommand(),
 		newJobsStatusCommand(),
 		newJobsResultCommand(),
+		newJobsStderrCommand(),
+		newJobsTailCommand(),
+		newJobsWaitCommand(),
 		newJobsCancelCommand(),
 		newJobsRemoveCommand(),
 		newJobsExecSkillCommand(),
@@ -124,6 +128,106 @@ func newJobsResultCommand() *cobra.Command {
 			return nil
 		},
 	}
+	return cmd
+}
+
+func newJobsStderrCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "stderr <job-id>",
+		Short: "Print the stderr log from a job",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := commandConfig(cmd.Context())
+			if err != nil {
+				return err
+			}
+			store, cleanup, err := openJobStore(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			// Verify job exists
+			if _, err := store.Get(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+
+			stderrPath := filepath.Join(cfg.Paths.Jobs, args[0], "stderr.log")
+			data, err := os.ReadFile(stderrPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("stderr log not found for job %s", args[0])
+				}
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			if _, err := out.Write(data); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+func newJobsTailCommand() *cobra.Command {
+	var follow bool
+	cmd := &cobra.Command{
+		Use:   "tail <job-id>",
+		Short: "Stream progress from a job",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, cleanup, err := openJobStore(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			return store.TailProgress(cmd.Context(), args[0], follow)
+		},
+	}
+	cmd.Flags().BoolVarP(&follow, "follow", "f", true, "Follow progress updates in real-time")
+	return cmd
+}
+
+func newJobsWaitCommand() *cobra.Command {
+	var showResult bool
+	cmd := &cobra.Command{
+		Use:   "wait <job-id>",
+		Short: "Wait for a job to complete",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, cleanup, err := openJobStore(cmd.Context())
+			if err != nil {
+				return err
+			}
+			defer cleanup()
+
+			job, err := store.WaitForCompletion(cmd.Context(), args[0], 0)
+			if err != nil {
+				return err
+			}
+
+			if showResult && job.ResultPath != "" {
+				data, err := store.Result(cmd.Context(), args[0])
+				if err != nil {
+					return err
+				}
+				out := cmd.OutOrStdout()
+				if _, err := out.Write(bytes.TrimSpace(data)); err != nil {
+					return err
+				}
+				if _, err := out.Write([]byte("\n")); err != nil {
+					return err
+				}
+				return nil
+			}
+
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.jobs.wait", job))
+		},
+	}
+	cmd.Flags().BoolVar(&showResult, "result", false, "Show result after completion")
 	return cmd
 }
 

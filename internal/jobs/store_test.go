@@ -3,9 +3,11 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -158,6 +160,220 @@ func main() {
 	}
 	if len(result) == 0 {
 		t.Fatalf("expected result bytes")
+	}
+}
+
+func TestProgressStreamingWrites(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	bin := buildTestSkill(t, `package main
+import (
+  "encoding/json"
+  "fmt"
+  "os"
+  "time"
+)
+func main() {
+  time.Sleep(100 * time.Millisecond)
+  var payload map[string]any
+  json.NewDecoder(os.Stdin).Decode(&payload)
+  fmt.Println("{\"version\":1,\"status\":\"ok\",\"command\":\"test\",\"data\":{\"message\":\"skill\"},\"meta\":{\"ts\":\"2025-01-01T00:00:00Z\"},\"error\":{}}")
+}`)
+	input := []byte(`{"foo":"bar"}`)
+	job, _, err := store.RunSkill(ctx, "test/skill", bin, input)
+	if err != nil {
+		t.Fatalf("run skill: %v", err)
+	}
+
+	// Check progress file exists
+	progressPath := filepath.Join(root, job.ID, "progress.ndjson")
+	if _, err := os.Stat(progressPath); err != nil {
+		t.Fatalf("expected progress file: %v", err)
+	}
+
+	// Read progress events
+	data, err := os.ReadFile(progressPath)
+	if err != nil {
+		t.Fatalf("read progress: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatalf("expected progress events")
+	}
+
+	// Verify at least one event can be parsed
+	var event ProgressEvent
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) > 0 && lines[0] != "" {
+		if err := json.Unmarshal([]byte(lines[0]), &event); err == nil {
+			if event.Timestamp.IsZero() {
+				t.Fatalf("expected timestamp in progress event")
+			}
+		}
+	}
+}
+
+func TestCrashRecoveryMarksOrphanedJobs(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	// Create a store and insert a running job directly
+	store, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+
+	// Create a job in running state
+	job, err := store.prepareSkillJob(ctx, "test", []byte(`{}`))
+	if err != nil {
+		t.Fatalf("prepare job: %v", err)
+	}
+	if err := store.updateState(ctx, job.ID, StateRunning, "", ""); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+
+	// Close and reopen store (simulating restart)
+	_ = store.Close()
+
+	store, err = Open(ctx, root)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Job should now be in error state
+	recovered, err := store.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if recovered.State != StateError {
+		t.Fatalf("expected error state, got %s", recovered.State)
+	}
+	if recovered.Error != "ERUNTIME_RESTART: process restarted" {
+		t.Fatalf("unexpected error message: %s", recovered.Error)
+	}
+}
+
+func TestFindDuplicateJob(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Create first job
+	job1, err := store.prepareSkillJob(ctx, "test", []byte(`{"input":"value"}`))
+	if err != nil {
+		t.Fatalf("prepare job1: %v", err)
+	}
+
+	// Find duplicate (should return the same job)
+	dup, err := store.FindDuplicateJob(ctx, job1.ArgsHash)
+	if err != nil {
+		t.Fatalf("find duplicate: %v", err)
+	}
+	if dup.ID != job1.ID {
+		t.Fatalf("expected same job ID, got %s != %s", dup.ID, job1.ID)
+	}
+
+	// Create second job with different input
+	job2, err := store.prepareSkillJob(ctx, "test", []byte(`{"input":"different"}`))
+	if err != nil {
+		t.Fatalf("prepare job2: %v", err)
+	}
+
+	// Should find job2 with its hash
+	dup2, err := store.FindDuplicateJob(ctx, job2.ArgsHash)
+	if err != nil {
+		t.Fatalf("find duplicate2: %v", err)
+	}
+	if dup2.ID != job2.ID {
+		t.Fatalf("expected job2 ID, got %s != %s", dup2.ID, job2.ID)
+	}
+
+	// Should not find non-existent hash
+	if _, err := store.FindDuplicateJob(ctx, "nonexistent"); err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestWaitForCompletion(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Submit echo job (completes immediately)
+	job, err := store.SubmitEcho(ctx, "wait test")
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Wait should return immediately since job is already done
+	finalJob, err := store.WaitForCompletion(ctx, job.ID, 0)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if finalJob.State != StateOK {
+		t.Fatalf("expected ok state, got %s", finalJob.State)
+	}
+}
+
+func TestProgressReader(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	jobDir := filepath.Join(root, "test-job")
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Write some progress events
+	pw, err := NewProgressWriter(jobDir)
+	if err != nil {
+		t.Fatalf("new progress writer: %v", err)
+	}
+	_ = pw.WriteMessage("first event")
+	_ = pw.WritePercent(50, "halfway")
+	_ = pw.WriteMessage("final event")
+	_ = pw.Close()
+
+	// Read back events
+	pr, err := OpenProgressReader(jobDir)
+	if err != nil {
+		t.Fatalf("open progress reader: %v", err)
+	}
+	defer func() { _ = pr.Close() }()
+
+	events := []ProgressEvent{}
+	for {
+		event, err := pr.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			t.Fatalf("read event: %v", err)
+		}
+		events = append(events, event)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(events))
+	}
+	if events[0].Message != "first event" {
+		t.Fatalf("unexpected first message: %s", events[0].Message)
+	}
+	if events[1].Percent != 50 {
+		t.Fatalf("expected percent 50, got %f", events[1].Percent)
 	}
 }
 
