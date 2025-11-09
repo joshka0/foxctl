@@ -117,8 +117,11 @@ func newRunCommand() *cobra.Command {
 				// For sync mode, return existing result if available
 				if job.ResultPath != "" {
 					result, err := store.Result(cmd.Context(), job.ID)
-
 					if err != nil {
+						return err
+					}
+					// Stage artifacts for deduplicated jobs
+					if err := handleArtifacts(cmd.Context(), cfg, job.ID, result); err != nil {
 						return err
 					}
 					result = annotateRunMeta(result, ws, skillVersion)
@@ -138,7 +141,16 @@ func newRunCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				// Stage artifacts for waited jobs
+				if err := handleArtifacts(cmd.Context(), cfg, job.ID, result); err != nil {
+					return err
+				}
 				result = annotateRunMeta(result, ws, skillVersion)
+				if rememberName != "" {
+					if err := rememberResult(cmd.Context(), cfg, rememberName, rememberType, rememberSummary, ws, result); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "remember failed: %v\n", err)
+					}
+				}
 				return writeEnvelope(cmd.OutOrStdout(), result)
 			}
 
@@ -159,8 +171,17 @@ func newRunCommand() *cobra.Command {
 			}
 
 			// Execute the skill synchronously
-			result, runErr := store.ExecutePreparedSkill(cmd.Context(), job.ID, handle.Manifest, handle.ArtifactPath)
-			job, _ = store.Get(cmd.Context(), job.ID)
+			result, runErr := store.ExecutePreparedSkill(cmd.Context(), job.ID, handle.ManifestPath, handle.ArtifactPath)
+			job, getErr := store.Get(cmd.Context(), job.ID)
+			if getErr != nil {
+				// Log the error with job ID for debugging
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to fetch job %s after execution: %v\n", job.ID, getErr)
+				// If execution succeeded but we can't fetch final state, propagate the fetch error
+				if runErr == nil {
+					return fmt.Errorf("execution completed but failed to fetch final job state for %s: %w", job.ID, getErr)
+				}
+				// If execution already failed, preserve that error and just log the fetch failure
+			}
 			if runErr != nil {
 				return runErr
 			}

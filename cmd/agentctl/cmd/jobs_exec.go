@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/spf13/cobra"
 )
 
@@ -23,11 +22,7 @@ func newJobsExecSkillCommand() *cobra.Command {
 				return err
 			}
 			defer cleanup()
-			manifest, err := skill.LoadManifest(manifestPath)
-			if err != nil {
-				return err
-			}
-			result, err := store.ExecutePreparedSkill(cmd.Context(), jobID, manifest, artifactPath)
+			result, err := store.ExecutePreparedSkill(cmd.Context(), jobID, manifestPath, artifactPath)
 			if err != nil {
 				return err
 			}

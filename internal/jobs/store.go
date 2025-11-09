@@ -223,12 +223,19 @@ func (s *Store) PrepareSkillJob(ctx context.Context, name string, input []byte) 
 }
 
 // ExecutePreparedSkill runs a previously prepared job.
-func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string) ([]byte, error) {
+func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifestPath string, artifactPath string) ([]byte, error) {
 	inputPath := filepath.Join(s.jobDir(jobID), "input.json")
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("jobs: read input: %w", err)
 	}
+
+	// Load manifest from path
+	manifest, err := skill.LoadManifest(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: load manifest: %w", err)
+	}
+
 	return s.executeSkill(ctx, jobID, manifest, artifactPath, data)
 }
 
