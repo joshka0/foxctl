@@ -172,16 +172,34 @@ func installTextGrepSkill(t *testing.T) config.Config {
 	return cfg
 }
 
-func buildSkillBinary(t *testing.T, dest string) {
+func installHTTPOpenAPISkill(t *testing.T, cfg config.Config) {
 	t.Helper()
-	cmd := exec.Command("go", "build", "-o", dest, "./skills/text_grep")
+	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("http/openapi"))
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("skill dir: %v", err)
+	}
+	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "http_openapi", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
+	binaryPath := filepath.Join(dest, "bin")
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+	buildSkillBinaryFromSource(t, binaryPath, "./skills/http_openapi")
+}
+
+func buildSkillBinary(t *testing.T, dest string) {
+	buildSkillBinaryFromSource(t, dest, "./skills/text_grep")
+}
+
+func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
+	t.Helper()
+	cmd := exec.Command("go", "build", "-o", dest, pkg)
 	cmd.Dir = repoRoot(t)
 	env := append([]string{}, os.Environ()...)
 	env = append(env, "CGO_ENABLED=0", "GOFLAGS=-modcacherw")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go build text_grep: %v\n%s", err, string(out))
+		t.Fatalf("go build %s: %v\n%s", pkg, err, string(out))
 	}
 }
 
