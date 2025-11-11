@@ -73,7 +73,7 @@ func TestSearchAndUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Name != "alpha" {
+	if len(entries) != 1 || entries[0].Entry.Name != "alpha" {
 		t.Fatalf("expected alpha search result, got %#v", entries)
 	}
 	newSummary := "updated"

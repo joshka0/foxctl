@@ -12,6 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
 	memstore "github.com/jkatigb/agentctl/internal/memory"
+	"github.com/spf13/cobra"
 )
 
 func TestMemoryRecentAndCacheCommands(t *testing.T) {
@@ -81,28 +82,19 @@ func TestMemoryListAndGetCommands(t *testing.T) {
 		t.Fatalf("save memory: %v", err)
 	}
 
-	listCmd := newMemoryListCommand()
-	listOut := &bytes.Buffer{}
-	listCmd.SetOut(listOut)
-	listCmd.SetErr(&bytes.Buffer{})
-	listCmd.SetArgs([]string{"--workspace", cfg.Home})
-	if err := listCmd.Execute(); err != nil {
-		t.Fatalf("memory list: %v", err)
+	listEnv := runMemoryCommand(t, cfg, newMemoryListCommand(), "--workspace", cfg.Home)
+	data := listEnv.Data.(map[string]any)
+	entries := data["entries"].([]any)
+	if len(entries) == 0 {
+		t.Fatalf("expected entries in list")
+	}
+	first := entries[0].(map[string]any)
+	if _, ok := first["access_count"]; !ok {
+		t.Fatalf("expected access_count metadata")
 	}
 
-	getCmd := newMemoryGetCommand()
-	getOut := &bytes.Buffer{}
-	getCmd.SetOut(getOut)
-	getCmd.SetErr(&bytes.Buffer{})
-	getCmd.SetArgs([]string{"--workspace", cfg.Home, "alpha"})
-	if err := getCmd.Execute(); err != nil {
-		t.Fatalf("memory get: %v", err)
-	}
-	var env envelope.Envelope
-	if err := json.Unmarshal(getOut.Bytes(), &env); err != nil {
-		t.Fatalf("decode get envelope: %v", err)
-	}
-	if env.Meta.Memory == nil || env.Meta.Memory.Name != "alpha" {
+	getEnv := runMemoryCommand(t, cfg, newMemoryGetCommand(), "--workspace", cfg.Home, "alpha")
+	if getEnv.Meta.Memory == nil || getEnv.Meta.Memory.Name != "alpha" {
 		t.Fatalf("expected memory metadata for alpha")
 	}
 }
@@ -110,18 +102,11 @@ func TestMemoryListAndGetCommands(t *testing.T) {
 func TestMemoryPutCommand(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
 	payload := `{"version":1,"status":"ok","command":"test","data":{"value":1},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`
-	cmd := newMemoryPutCommand()
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(&bytes.Buffer{})
-	cmd.SetArgs([]string{
+	runMemoryCommand(t, cfg, newMemoryPutCommand(),
 		"--name", "stored",
 		"--workspace", cfg.Home,
 		"--data", payload,
-	})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("memory put: %v", err)
-	}
+	)
 	store, err := memstore.Open(context.Background(), cfg.Paths.Cache, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
@@ -133,6 +118,41 @@ func TestMemoryPutCommand(t *testing.T) {
 	}
 	if entry.Summary == "" {
 		t.Fatalf("expected summary set")
+	}
+}
+
+func TestMemorySearchAndRelevantCommands(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	ctx := context.Background()
+	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	defer store.Close()
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "alpha", "result", cfg.Home, "alpha summary", result); err != nil {
+		t.Fatalf("save alpha: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "beta", "result", cfg.Home, "beta summary", result); err != nil {
+		t.Fatalf("save beta: %v", err)
+	}
+
+	searchEnv := runMemoryCommand(t, cfg, newMemorySearchCommand(), "--workspace", cfg.Home, "--query", "alpha")
+	data := searchEnv.Data.(map[string]any)
+	entries := data["entries"].([]any)
+	if len(entries) == 0 {
+		t.Fatalf("expected search results")
+	}
+	first := entries[0].(map[string]any)
+	if _, ok := first["score"]; !ok {
+		t.Fatalf("expected score in search results")
+	}
+
+	relEnv := runMemoryCommand(t, cfg, newMemoryRelevantCommand(), "--workspace", cfg.Home)
+	relData := relEnv.Data.(map[string]any)
+	relEntries := relData["entries"].([]any)
+	if len(relEntries) == 0 {
+		t.Fatalf("expected relevant entries")
 	}
 }
 
@@ -152,4 +172,21 @@ func setupMemoryTestEnv(t *testing.T) config.Config {
 		}
 	}
 	return cfg
+}
+
+func runMemoryCommand(t *testing.T, cfg config.Config, cmd *cobra.Command, args ...string) envelope.Envelope {
+	t.Helper()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("memory command failed: %v", err)
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	return env
 }

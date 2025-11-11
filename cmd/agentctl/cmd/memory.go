@@ -150,13 +150,16 @@ func newMemoryListCommand() *cobra.Command {
 			var payload []map[string]any
 			for _, e := range entries {
 				payload = append(payload, map[string]any{
-					"name":         e.Name,
-					"type":         e.Type,
-					"workspace":    e.Workspace,
-					"summary":      e.Summary,
-					"created_at":   e.CreatedAt,
-					"updated_at":   e.UpdatedAt,
-					"access_count": e.AccessCount,
+					"name":          e.Name,
+					"type":          e.Type,
+					"workspace":     e.Workspace,
+					"summary":       e.Summary,
+					"created_at":    e.CreatedAt,
+					"updated_at":    e.UpdatedAt,
+					"last_accessed": e.LastAccess,
+					"access_count":  e.AccessCount,
+					"size_bytes":    len(e.Result),
+					"digests":       e.Digests,
 				})
 			}
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.list", map[string]any{
@@ -199,11 +202,14 @@ func newMemorySearchCommand() *cobra.Command {
 			var payload []map[string]any
 			for _, e := range entries {
 				payload = append(payload, map[string]any{
-					"name":       e.Name,
-					"type":       e.Type,
-					"workspace":  e.Workspace,
-					"summary":    e.Summary,
-					"updated_at": e.UpdatedAt,
+					"name":          e.Entry.Name,
+					"type":          e.Entry.Type,
+					"workspace":     e.Entry.Workspace,
+					"summary":       e.Entry.Summary,
+					"updated_at":    e.Entry.UpdatedAt,
+					"score":         e.Score,
+					"access_count":  e.Entry.AccessCount,
+					"last_accessed": e.Entry.LastAccess,
 				})
 			}
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.search", map[string]any{
@@ -478,6 +484,8 @@ func newMemoryRelevantCommand() *cobra.Command {
 					"score":         e.Score,
 					"access_count":  e.Entry.AccessCount,
 					"last_accessed": e.Entry.LastAccess,
+					"created_at":    e.Entry.CreatedAt,
+					"updated_at":    e.Entry.UpdatedAt,
 				})
 			}
 			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.relevant", map[string]any{

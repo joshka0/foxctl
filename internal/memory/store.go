@@ -257,7 +257,7 @@ func errorsIsNoRows(err error) bool {
 }
 
 // Search finds entries whose name or summary contain the query string.
-func (s *Store) Search(ctx context.Context, workspace, query string, limit int) ([]NamedEntry, error) {
+func (s *Store) Search(ctx context.Context, workspace, query string, limit int) ([]ScoredEntry, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -272,7 +272,27 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 		return nil, fmt.Errorf("memory: search: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	return scanEntries(rows)
+	entries, err := scanEntries(rows)
+	if err != nil {
+		return nil, err
+	}
+	var scored []ScoredEntry
+	for _, entry := range entries {
+		scored = append(scored, ScoredEntry{
+			Entry: entry,
+			Score: scoreEntry(entry),
+		})
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].Score == scored[j].Score {
+			return scored[i].Entry.UpdatedAt.After(scored[j].Entry.UpdatedAt)
+		}
+		return scored[i].Score > scored[j].Score
+	})
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+	return scored, nil
 }
 
 // Update mutates summary and/or type for a named entry.
