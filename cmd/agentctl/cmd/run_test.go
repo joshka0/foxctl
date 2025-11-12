@@ -186,6 +186,34 @@ func installHTTPOpenAPISkill(t *testing.T, cfg config.Config) {
 	buildSkillBinaryFromSource(t, binaryPath, "./skills/http_openapi")
 }
 
+func installFSLsSkill(t *testing.T, cfg config.Config) {
+	t.Helper()
+	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("fs/ls"))
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("fs/ls skill dir: %v", err)
+	}
+	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "fs_ls", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
+	binaryPath := filepath.Join(dest, "bin")
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+	buildSkillBinaryFromSource(t, binaryPath, "./skills/fs_ls")
+}
+
+func installFSReadSkill(t *testing.T, cfg config.Config) {
+	t.Helper()
+	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("fs/read"))
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("fs/read skill dir: %v", err)
+	}
+	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "fs_read", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
+	binaryPath := filepath.Join(dest, "bin")
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+	buildSkillBinaryFromSource(t, binaryPath, "./skills/fs_read")
+}
+
 func buildSkillBinary(t *testing.T, dest string) {
 	buildSkillBinaryFromSource(t, dest, "./skills/text_grep")
 }
@@ -201,6 +229,25 @@ func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
 	if err != nil {
 		t.Fatalf("go build %s: %v\n%s", pkg, err, string(out))
 	}
+}
+
+func buildAgentctlBinary(t *testing.T) string {
+	t.Helper()
+	destDir := t.TempDir()
+	bin := filepath.Join(destDir, "agentctl")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/agentctl")
+	cmd.Dir = repoRoot(t)
+	env := append([]string{}, os.Environ()...)
+	env = append(env, "CGO_ENABLED=0", "GOFLAGS=-modcacherw")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build agentctl: %v\n%s", err, string(out))
+	}
+	return bin
 }
 
 func copySkillFile(t *testing.T, src, dst string) {

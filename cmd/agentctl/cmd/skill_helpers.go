@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/policy"
 	"github.com/jkatigb/agentctl/internal/runner"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/spf13/cobra"
@@ -58,6 +60,13 @@ func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
 			return handle, nil
 		}
 	}
+	if installed, err := installEmbeddedSkill(cfg, requested); err == nil {
+		if installed {
+			return findSkill(cfg, requested)
+		}
+	} else if !errors.Is(err, errUnknownEmbeddedSkill) {
+		return SkillHandle{}, err
+	}
 	return SkillHandle{}, fmt.Errorf("skill %s not found; run make skills-build or agentctl skills install", requested)
 }
 
@@ -68,6 +77,9 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 	}
 	manifest, err := skill.LoadManifest(manifestPath)
 	if err != nil {
+		return SkillHandle{}, err
+	}
+	if err := policy.ValidateWASIPolicy(manifest); err != nil {
 		return SkillHandle{}, err
 	}
 	var artifact string

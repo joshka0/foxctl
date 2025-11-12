@@ -26,7 +26,9 @@ func TestMemoryRecentAndCacheCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open cache store: %v", err)
 	}
-	defer cacheStore.Close()
+	defer func() {
+		_ = cacheStore.Close()
+	}()
 
 	entry := cache.Entry{
 		CacheKey:     "sha256:test",
@@ -76,7 +78,9 @@ func TestMemoryListAndGetCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		_ = store.Close()
+	}()
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	if _, err := store.SaveFromResult(ctx, "alpha", "result", cfg.Home, "alpha summary", result); err != nil {
 		t.Fatalf("save memory: %v", err)
@@ -111,7 +115,9 @@ func TestMemoryPutCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		_ = store.Close()
+	}()
 	entry, err := store.Get(context.Background(), "stored", cfg.Home)
 	if err != nil {
 		t.Fatalf("memory get stored: %v", err)
@@ -128,7 +134,9 @@ func TestMemorySearchAndRelevantCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		_ = store.Close()
+	}()
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	if _, err := store.SaveFromResult(ctx, "alpha", "result", cfg.Home, "alpha summary", result); err != nil {
 		t.Fatalf("save alpha: %v", err)

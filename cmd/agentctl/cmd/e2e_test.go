@@ -34,7 +34,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	ctx := config.WithContext(context.Background(), cfg)
 
 	// Initial run to generate CAS artifact and remember entry
-	env1, stderr1 := runSkillCommand(t, ctx, []string{
+	env1, stderr1 := runSkillCommand(ctx, t, []string{
 		"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, sampleFile),
 		"--remember", "grep-first",
 		"--workspace", workdir,
@@ -79,7 +79,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	}
 
 	// Second run should hit cache
-	env2, _ := runSkillCommand(t, ctx, []string{
+	env2, _ := runSkillCommand(ctx, t, []string{
 		"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, sampleFile),
 		"--workspace", workdir,
 		"--cache", "auto",
@@ -91,7 +91,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 
 	// Run http/openapi skill (dry-run) and remember result
 	openapiInput := `{"base_url":"https://api.example.com","path":"/todos","method":"GET","dry_run":true,"query":{"limit":"5"}}`
-	env3, stderr3 := runSkillCommand(t, ctx, []string{
+	env3, stderr3 := runSkillCommand(ctx, t, []string{
 		"--input", openapiInput,
 		"--remember", "openapi-plan",
 		"--workspace", workdir,
@@ -142,7 +142,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	}
 }
 
-func runSkillCommand(t *testing.T, ctx context.Context, args []string) (envelope.Envelope, *bytes.Buffer) {
+func runSkillCommand(ctx context.Context, t *testing.T, args []string) (envelope.Envelope, *bytes.Buffer) {
 	t.Helper()
 	cmd := newRunCommand()
 	cmd.SetContext(ctx)

@@ -1,0 +1,33 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: todo/manage
+  version: 0.1.0
+  description: "Manage nested TODOs with dependencies and completion notes"
+  tags: ["todo", "planning", "tasks"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/todo/todo
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: todo/manage
+  parameters:
+    - name: operation
+      type: string
+      required: false
+      description: "add|complete|list (default list)"
+    - name: store_path
+      type: string
+      required: false
+      description: "Location of the todo store (default: ~/.agentctl/todo/tasks.json)"
+returns:
+  - name: tasks
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

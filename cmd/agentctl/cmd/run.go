@@ -202,6 +202,11 @@ func newRunCommand() *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(), "cache put failed: %v\n", err)
 				}
 			}
+			if rememberName != "" {
+				if err := rememberResult(cmd.Context(), cfg, rememberName, rememberType, rememberSummary, ws, result); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "remember failed: %v\n", err)
+				}
+			}
 			if err := writeEnvelope(cmd.OutOrStdout(), result); err != nil {
 				return err
 			}

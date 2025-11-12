@@ -1,0 +1,37 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: fs/read
+  version: 0.1.0
+  description: "Read file contents with CAS-backed previews"
+  tags: ["fs", "read", "cat"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/fs_read/fs_read
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: fs/read
+  parameters:
+    - name: path
+      type: string
+      required: true
+      description: "Path to the file to read"
+    - name: max_bytes
+      type: integer
+      required: false
+      description: "Override preview byte limit (capped by inline_output_kb)"
+returns:
+  - name: preview
+    type: string
+  - name: artifact
+    type: string
+  - name: binary
+    type: boolean
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
