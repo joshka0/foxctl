@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/cache"
@@ -43,8 +42,6 @@ func newRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			skillName := handle.Manifest.Metadata.Name
-			skillVersion := handle.Manifest.Metadata.Version
 
 			ws := workspace.Normalize(workspaceFlag)
 			if ws == "" && cfg.Memory.AutoLoadWorkspace {
@@ -66,155 +63,37 @@ func newRunCommand() *cobra.Command {
 				return fmt.Errorf("--remember cannot be used with --async")
 			}
 
-			var cacheStore *cache.Store
-			var cacheKey string
-			if !async && cacheMode != cache.ModeOff {
-				cacheStore, err = cache.Open(cmd.Context(), cfg.Paths.Cache, cache.Options{
-					AutoTTL: cfg.Memory.AutoCacheTTL,
-					CASPath: cfg.Paths.CAS,
-				})
-				if err != nil {
-					return err
-				}
-				defer func() { _ = cacheStore.Close() }()
-				cacheKey, err = cache.BuildKey(handle.Manifest, data, nil)
-				if err != nil {
-					return err
-				}
-				if entry, ok, err := cacheStore.Get(cmd.Context(), cacheKey); err != nil {
-					return err
-				} else if ok {
-					hit, err := cache.AnnotateHit(entry.Result, entry.CacheKey, ws, skillVersion)
-					if err != nil {
-						return err
-					}
-					fmt.Fprintf(cmd.ErrOrStderr(), "cache hit %s\n", entry.CacheKey)
-					return writeEnvelope(cmd.OutOrStdout(), hit)
-				} else if cacheMode == cache.ModeOnly {
-					return fmt.Errorf("cache miss for key %s", cacheKey)
-				}
-			}
+			executor := newRunExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOptions{
+				async:           async,
+				dedupe:          dedupe,
+				cacheMode:       cacheMode,
+				workspace:       ws,
+				rememberName:    rememberName,
+				rememberType:    rememberType,
+				rememberSummary: rememberSummary,
+			})
+			defer executor.Close()
 
-			store, cleanup, err := openJobStore(cmd.Context())
-			if err != nil {
+			if done, err := executor.tryServeCache(data); err != nil {
 				return err
-			}
-			defer cleanup()
-
-			// Use atomic dedup+prepare to prevent race conditions
-			job, isDuplicate, err := store.FindOrPrepareSkillJob(cmd.Context(), skillName, data, dedupe)
-			if err != nil {
-				return err
-			}
-
-			if isDuplicate {
-				// Found duplicate, use existing job
-				fmt.Fprintf(cmd.ErrOrStderr(), "using existing job %s (deduplicated)\n", job.ID)
-				if async {
-					fmt.Fprintf(cmd.OutOrStdout(), "job %s (existing)\n", job.ID)
-					return nil
-				}
-				// For sync mode, return existing result if available
-				if job.ResultPath != "" {
-					result, err := store.Result(cmd.Context(), job.ID)
-					if err != nil {
-						return err
-					}
-					// Stage artifacts for deduplicated jobs
-					if err := handleArtifacts(cmd.Context(), cfg, job.ID, result); err != nil {
-						return err
-					}
-					result = annotateRunMeta(result, ws, skillVersion)
-					if rememberName != "" {
-						if err := rememberResult(cmd.Context(), cfg, rememberName, rememberType, rememberSummary, ws, result); err != nil {
-							fmt.Fprintf(cmd.ErrOrStderr(), "remember failed: %v\n", err)
-						}
-					}
-					return writeEnvelope(cmd.OutOrStdout(), result)
-				}
-				// Wait for existing job to complete
-				job, err = store.WaitForCompletion(cmd.Context(), job.ID, 0)
-				if err != nil {
-					return err
-				}
-				result, err := store.Result(cmd.Context(), job.ID)
-				if err != nil {
-					return err
-				}
-				// Stage artifacts for waited jobs
-				if err := handleArtifacts(cmd.Context(), cfg, job.ID, result); err != nil {
-					return err
-				}
-				result = annotateRunMeta(result, ws, skillVersion)
-				if rememberName != "" {
-					if err := rememberResult(cmd.Context(), cfg, rememberName, rememberType, rememberSummary, ws, result); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "remember failed: %v\n", err)
-					}
-				}
-				return writeEnvelope(cmd.OutOrStdout(), result)
-			}
-
-			// New job created, proceed with execution
-			if async {
-				worker := exec.CommandContext(cmd.Context(), os.Args[0], "jobs", "exec-skill",
-					"--job-id", job.ID,
-					"--manifest", handle.ManifestPath,
-					"--artifact", handle.ArtifactPath,
-				)
-				worker.Stdout = cmd.ErrOrStderr()
-				worker.Stderr = cmd.ErrOrStderr()
-				if err := worker.Start(); err != nil {
-					return err
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "job %s submitted\n", job.ID)
+			} else if done {
 				return nil
 			}
 
-			// Execute the skill synchronously
-			result, runErr := store.ExecutePreparedSkill(cmd.Context(), job.ID, handle.ManifestPath, handle.ArtifactPath)
-			job, getErr := store.Get(cmd.Context(), job.ID)
-			if getErr != nil {
-				// Log the error with job ID for debugging
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to fetch job %s after execution: %v\n", job.ID, getErr)
-				// If execution succeeded but we can't fetch final state, propagate the fetch error
-				if runErr == nil {
-					return fmt.Errorf("execution completed but failed to fetch final job state for %s: %w", job.ID, getErr)
-				}
-				// If execution already failed, preserve that error and just log the fetch failure
-			}
-			if runErr != nil {
-				return runErr
-			}
-			if err := handleArtifacts(cmd.Context(), cfg, job.ID, result); err != nil {
+			job, isDuplicate, err := executor.prepareJob(data)
+			if err != nil {
 				return err
 			}
-			result = annotateRunMeta(result, ws, skillVersion)
-			if cacheMode == cache.ModeAuto && cacheStore != nil && cacheKey != "" {
-				entry := cache.Entry{
-					CacheKey:     cacheKey,
-					SkillName:    skillName,
-					SkillVersion: skillVersion,
-					Workspace:    ws,
-					Result:       result,
-					Digests:      cache.CollectDigests(result),
-				}
-				if err := cacheStore.Put(cmd.Context(), entry); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "cache put failed: %v\n", err)
-				}
-			}
-			if rememberName != "" {
-				if err := rememberResult(cmd.Context(), cfg, rememberName, rememberType, rememberSummary, ws, result); err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "remember failed: %v\n", err)
-				}
-			}
-			if err := writeEnvelope(cmd.OutOrStdout(), result); err != nil {
-				return err
-			}
-			logger := cmd.ErrOrStderr()
-			if _, err := logger.Write([]byte("job " + job.ID + " state " + string(job.State) + "\n")); err != nil {
-				return err
-			}
-			return nil
+
+		if isDuplicate {
+			return executor.handleDuplicate(job)
+		}
+
+		if async {
+			return executor.submitAsync(job)
+		}
+
+		return executor.executeSync(job)
 		},
 	}
 	cmd.Flags().StringVar(&input, "input", "", "Inline JSON input (default: {})")
