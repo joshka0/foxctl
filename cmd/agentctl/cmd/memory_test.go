@@ -26,9 +26,7 @@ func TestMemoryRecentAndCacheCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open cache store: %v", err)
 	}
-	defer func() {
-		_ = cacheStore.Close()
-	}()
+	defer requireClose(t, cacheStore, "cache store")
 
 	entry := cache.Entry{
 		CacheKey:     "sha256:test",
@@ -78,9 +76,7 @@ func TestMemoryListAndGetCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer func() {
-		_ = store.Close()
-	}()
+	defer requireClose(t, store, "memory store")
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	if _, err := store.SaveFromResult(ctx, "alpha", "result", cfg.Home, "alpha summary", result); err != nil {
 		t.Fatalf("save memory: %v", err)
@@ -115,9 +111,7 @@ func TestMemoryPutCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer func() {
-		_ = store.Close()
-	}()
+	defer requireClose(t, store, "memory store post-put")
 	entry, err := store.Get(context.Background(), "stored", cfg.Home)
 	if err != nil {
 		t.Fatalf("memory get stored: %v", err)
@@ -197,4 +191,11 @@ func runMemoryCommand(t *testing.T, cfg config.Config, cmd *cobra.Command, args 
 		t.Fatalf("decode envelope: %v", err)
 	}
 	return env
+}
+
+func requireClose(t *testing.T, closer interface{ Close() error }, name string) {
+	t.Helper()
+	if err := closer.Close(); err != nil {
+		t.Fatalf("close %s: %v", name, err)
+	}
 }
