@@ -85,15 +85,15 @@ func newRunCommand() *cobra.Command {
 				return err
 			}
 
-		if isDuplicate {
-			return executor.handleDuplicate(job)
-		}
+			if isDuplicate {
+				return executor.handleDuplicate(job)
+			}
 
-		if async {
-			return executor.submitAsync(job)
-		}
+			if async {
+				return executor.submitAsync(job)
+			}
 
-		return executor.executeSync(job)
+			return executor.executeSync(job)
 		},
 	}
 	cmd.Flags().StringVar(&input, "input", "", "Inline JSON input (default: {})")

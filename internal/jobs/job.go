@@ -1,43 +1,30 @@
-// Package jobs manages durable job metadata and persistence.
+// Package jobs exposes high-level job APIs that wrap the internal types layer.
 package jobs
 
-import (
-	"errors"
-	"time"
-)
+import "github.com/jkatigb/agentctl/internal/jobs/types"
 
-// State represents the lifecycle of a job.
-type State string
+// State re-exports the canonical job state enumeration for callers of package jobs.
+type State = types.State
 
 const (
-	// StateQueued represents a job waiting to be executed.
-	StateQueued State = "queued"
-	// StateRunning represents a job currently executing.
-	StateRunning State = "running"
-	// StateOK indicates the job finished successfully.
-	StateOK State = "ok"
-	// StateError indicates the job failed with an error.
-	StateError State = "error"
-	// StateCanceled indicates the job was canceled by the user.
-	StateCanceled State = "canceled"
+	// StateQueued indicates a job waiting to run.
+	StateQueued = types.StateQueued
+	// StateRunning indicates a job currently executing.
+	StateRunning = types.StateRunning
+	// StateOK indicates a job that completed successfully.
+	StateOK = types.StateOK
+	// StateError indicates a job that failed.
+	StateError = types.StateError
+	// StateCanceled indicates a job canceled by the user.
+	StateCanceled = types.StateCanceled
 )
 
-// Job captures the persisted metadata for a job.
-type Job struct {
-	ID         string    `json:"id"`
-	Command    string    `json:"command"`
-	ArgsJSON   string    `json:"args_json"`
-	ArgsHash   string    `json:"args_hash"`
-	State      State     `json:"state"`
-	ResultPath string    `json:"result_path,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-}
+// Job re-exports the job metadata type for compatibility with previous API.
+type Job = types.Job
 
 var (
-	// ErrNotFound indicates the requested job id does not exist.
-	ErrNotFound = errors.New("jobs: not found")
-	// ErrInvalidState is returned when a transition is not allowed.
-	ErrInvalidState = errors.New("jobs: invalid state transition")
+	// ErrNotFound surfaces when a requested job id does not exist.
+	ErrNotFound = types.ErrNotFound
+	// ErrInvalidState is returned when a transition is disallowed.
+	ErrInvalidState = types.ErrInvalidState
 )

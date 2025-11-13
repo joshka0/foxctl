@@ -1,17 +1,47 @@
 package jobs
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/jobs/executor"
+	"github.com/jkatigb/agentctl/internal/jobs/persist"
+	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/oklog/ulid/v2"
 )
+
+// Store composes persistence and execution primitives for job management.
+type Store struct {
+	root     string
+	persist  persist.Store
+	executor *executor.Executor
+}
+
+// Open initializes the job store rooted at the provided path.
+func Open(ctx context.Context, root string) (*Store, error) {
+	p, err := persist.Open(ctx, root)
+	if err != nil {
+		return nil, err
+	}
+	exec := executor.New(root, p)
+	return &Store{root: root, persist: p, executor: exec}, nil
+}
+
+// Close releases database resources.
+func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
+	return s.persist.Close()
+}
 
 // SubmitEcho creates a job that echoes the provided message.
 func (s *Store) SubmitEcho(ctx context.Context, message string) (Job, error) {
@@ -20,63 +50,252 @@ func (s *Store) SubmitEcho(ctx context.Context, message string) (Job, error) {
 	if err != nil {
 		return Job{}, fmt.Errorf("jobs: marshal args: %w", err)
 	}
-	argsHash := hashArgs("echo", argsJSON)
-	jobID := ulid.Make().String()
+
 	now := time.Now().UTC()
-
-	jobDir := filepath.Join(s.root, jobID)
-	if err := os.MkdirAll(jobDir, 0o755); err != nil {
-		return Job{}, fmt.Errorf("jobs: job dir: %w", err)
-	}
-
 	job := Job{
-		ID:        jobID,
+		ID:        newJobID(),
 		Command:   "echo",
 		ArgsJSON:  string(argsJSON),
-		ArgsHash:  argsHash,
+		ArgsHash:  types.HashArgs("echo", argsJSON),
 		State:     StateQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 
-	if err := s.insertJob(ctx, job); err != nil {
+	if err := s.persist.InsertJob(ctx, job); err != nil {
 		return Job{}, err
 	}
 
-	if err := s.updateState(ctx, jobID, StateRunning, "", ""); err != nil {
+	jobDir := s.jobDir(job.ID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		_ = s.persist.Delete(ctx, job.ID)
+		return Job{}, fmt.Errorf("jobs: job dir: %w", err)
+	}
+
+	if err := s.persist.UpdateState(ctx, job.ID, StateRunning, "", ""); err != nil {
+		_ = s.persist.Delete(ctx, job.ID)
 		return Job{}, err
 	}
 
 	env := envelope.OK("jobs.echo", map[string]string{"message": message})
 	resultPath := filepath.Join(jobDir, "result.json")
 	if err := writeResult(resultPath, env); err != nil {
-		_ = s.updateState(ctx, jobID, StateError, err.Error(), "")
+		_ = s.persist.UpdateState(ctx, job.ID, StateError, err.Error(), "")
 		return Job{}, err
 	}
 
-	if err := s.updateState(ctx, jobID, StateOK, "", resultPath); err != nil {
+	if err := s.persist.UpdateState(ctx, job.ID, StateOK, "", resultPath); err != nil {
 		return Job{}, err
 	}
 
-	return s.Get(ctx, jobID)
+	return s.persist.Get(ctx, job.ID)
+}
+
+// List returns all jobs ordered by creation time descending.
+func (s *Store) List(ctx context.Context, limit int) ([]Job, error) {
+	return s.persist.List(ctx, limit)
+}
+
+// Get returns a single job by id.
+func (s *Store) Get(ctx context.Context, id string) (Job, error) {
+	return s.persist.Get(ctx, id)
+}
+
+// Result loads the result envelope for a job.
+func (s *Store) Result(ctx context.Context, id string) ([]byte, error) {
+	job, err := s.persist.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if job.ResultPath == "" {
+		return nil, fmt.Errorf("jobs: result not available")
+	}
+	data, err := os.ReadFile(job.ResultPath)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: read result: %w", err)
+	}
+	return data, nil
+}
+
+// Cancel attempts to mark a job as canceled if it is still pending.
+func (s *Store) Cancel(ctx context.Context, id string) error {
+	job, err := s.persist.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	switch job.State {
+	case StateQueued, StateRunning:
+		return s.persist.UpdateState(ctx, id, StateCanceled, "", "")
+	default:
+		return fmt.Errorf("%w: job already %s", ErrInvalidState, job.State)
+	}
+}
+
+// Delete removes the job record from the database.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	return s.persist.Delete(ctx, id)
 }
 
 // RunSkill executes a skill binary, recording its output as a job.
 func (s *Store) RunSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) (Job, []byte, error) {
-	executor := NewExecutor(s)
-	return executor.RunSkill(ctx, manifest, artifactPath, input)
+	job, result, err := s.executor.RunSkill(ctx, manifest, artifactPath, input)
+	if err != nil {
+		return job, result, err
+	}
+	updated, getErr := s.persist.Get(ctx, job.ID)
+	if getErr != nil {
+		return job, result, getErr
+	}
+	return updated, result, nil
 }
 
 // PrepareSkillJob enqueues a job without executing the skill.
 func (s *Store) PrepareSkillJob(ctx context.Context, name string, input []byte) (Job, error) {
-	executor := NewExecutor(s)
-	return executor.PrepareSkillJob(ctx, name, input)
+	job, _, err := s.executor.FindOrPrepareSkillJob(ctx, name, input, false)
+	return job, err
 }
 
 // ExecutePreparedSkill runs a previously prepared job.
 func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifestPath string, artifactPath string) ([]byte, error) {
-	executor := NewExecutor(s)
-	return executor.ExecutePreparedSkill(ctx, jobID, manifestPath, artifactPath)
+	inputPath := filepath.Join(s.jobDir(jobID), "input.json")
+	data, err := os.ReadFile(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: read input: %w", err)
+	}
+	manifest, err := skill.LoadManifest(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("jobs: load manifest: %w", err)
+	}
+	return s.executor.ExecutePrepared(ctx, jobID, manifest, artifactPath, data)
+}
+
+// FindOrPrepareSkillJob atomically finds a duplicate job or creates a new one.
+func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []byte, dedupe bool) (Job, bool, error) {
+	job, isDup, err := s.executor.FindOrPrepareSkillJob(ctx, name, input, dedupe)
+	return job, isDup, err
+}
+
+// RecoverOrphanedJobs marks any running jobs as error (crash recovery).
+func (s *Store) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
+	return s.persist.RecoverOrphanedJobs(ctx)
+}
+
+// ComputeSkillArgsHash deterministically computes the hash for skill inputs.
+func (s *Store) ComputeSkillArgsHash(name string, input []byte) string {
+	return types.ComputeSkillArgsHash(name, input)
+}
+
+// TailProgress streams progress events from a job, following new writes.
+func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool, w io.Writer) (retErr error) {
+	if w == nil {
+		return fmt.Errorf("progress: writer cannot be nil")
+	}
+	jobDir := s.jobDir(jobID)
+	progressPath := filepath.Join(jobDir, "progress.ndjson")
+
+	if _, err := s.persist.Get(ctx, jobID); err != nil {
+		return err
+	}
+
+	var f *os.File
+	var err error
+	for {
+		f, err = os.Open(progressPath)
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("progress: open: %w", err)
+		}
+		if !follow {
+			return fmt.Errorf("progress: no progress file yet")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = fmt.Errorf("progress: close: %w", closeErr)
+			} else {
+				retErr = fmt.Errorf("%v; close error: %w", retErr, closeErr)
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(f)
+	for {
+		for scanner.Scan() {
+			if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+				return fmt.Errorf("progress: write: %w", err)
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("progress: scan: %w", err)
+		}
+
+		if !follow {
+			return nil
+		}
+
+		job, err := s.persist.Get(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		if job.State == StateOK || job.State == StateError || job.State == StateCanceled {
+			scanner = bufio.NewScanner(f)
+			for scanner.Scan() {
+				if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+					return fmt.Errorf("progress: write: %w", err)
+				}
+			}
+			return scanner.Err()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		scanner = bufio.NewScanner(f)
+	}
+}
+
+// WaitForCompletion blocks until the job reaches a terminal state.
+func (s *Store) WaitForCompletion(ctx context.Context, jobID string, pollInterval time.Duration) (Job, error) {
+	if pollInterval <= 0 {
+		pollInterval = 500 * time.Millisecond
+	}
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		job, err := s.persist.Get(ctx, jobID)
+		if err != nil {
+			return Job{}, err
+		}
+
+		switch job.State {
+		case StateOK, StateError, StateCanceled:
+			return job, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return Job{}, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *Store) jobDir(id string) string {
+	return filepath.Join(s.root, id)
 }
 
 func writeResult(path string, env envelope.Envelope) error {
@@ -88,4 +307,8 @@ func writeResult(path string, env envelope.Envelope) error {
 		return fmt.Errorf("jobs: write result: %w", err)
 	}
 	return nil
+}
+
+func newJobID() string {
+	return ulid.Make().String()
 }
