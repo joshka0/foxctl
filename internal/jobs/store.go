@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/jobs/executor"
 	"github.com/jkatigb/agentctl/internal/jobs/persist"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
+	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/oklog/ulid/v2"
 )
@@ -27,11 +28,15 @@ type Store struct {
 
 // Open initializes the job store rooted at the provided path.
 func Open(ctx context.Context, root string) (*Store, error) {
+	logger := logging.FromContext(ctx)
+	if logger == nil {
+		logger = logging.Default()
+	}
 	p, err := persist.Open(ctx, root)
 	if err != nil {
 		return nil, err
 	}
-	exec := executor.New(root, p)
+	exec := executor.New(root, p, executor.WithLogger(logger))
 	return &Store{root: root, persist: p, executor: exec}, nil
 }
 

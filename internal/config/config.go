@@ -22,12 +22,13 @@ const (
 
 // Config represents the fully materialized runtime configuration.
 type Config struct {
-	Home           string         `mapstructure:"home" json:"home"`
-	InlineOutputKB int            `mapstructure:"inline_output_kb" json:"inline_output_kb"`
-	MaxCaptureKB   int            `mapstructure:"max_capture_kb" json:"max_capture_kb"`
-	Paths          Paths          `mapstructure:"paths" json:"paths"`
-	Memory         MemorySettings `mapstructure:"memory" json:"memory"`
-	Cache          CacheSettings  `mapstructure:"cache" json:"cache"`
+	Home           string          `mapstructure:"home" json:"home"`
+	InlineOutputKB int             `mapstructure:"inline_output_kb" json:"inline_output_kb"`
+	MaxCaptureKB   int             `mapstructure:"max_capture_kb" json:"max_capture_kb"`
+	Paths          Paths           `mapstructure:"paths" json:"paths"`
+	Memory         MemorySettings  `mapstructure:"memory" json:"memory"`
+	Cache          CacheSettings   `mapstructure:"cache" json:"cache"`
+	Logging        LoggingSettings `mapstructure:"logging" json:"logging"`
 }
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
@@ -48,6 +49,12 @@ type MemorySettings struct {
 // CacheSettings describe run-time caching defaults.
 type CacheSettings struct {
 	DefaultMode string `mapstructure:"default_mode" json:"default_mode"`
+}
+
+// LoggingSettings configure CLI logging behavior.
+type LoggingSettings struct {
+	Level  string `mapstructure:"level" json:"level"`
+	Format string `mapstructure:"format" json:"format"`
 }
 
 // Option customizes the loader.
@@ -94,6 +101,8 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	v.SetDefault("memory.default_named_ttl", "720h") // 30d
 	v.SetDefault("memory.auto_load_workspace", true)
 	v.SetDefault("cache.default_mode", "auto")
+	v.SetDefault("logging.level", "info")
+	v.SetDefault("logging.format", "text")
 
 	if l.configFile != "" {
 		v.SetConfigFile(l.configFile)
@@ -134,6 +143,14 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	}
 	if cfg.Cache.DefaultMode == "" {
 		cfg.Cache.DefaultMode = "auto"
+	}
+	cfg.Logging.Level = strings.ToLower(strings.TrimSpace(cfg.Logging.Level))
+	if cfg.Logging.Level == "" {
+		cfg.Logging.Level = "info"
+	}
+	cfg.Logging.Format = strings.ToLower(strings.TrimSpace(cfg.Logging.Format))
+	if cfg.Logging.Format == "" {
+		cfg.Logging.Format = "text"
 	}
 
 	return cfg, nil

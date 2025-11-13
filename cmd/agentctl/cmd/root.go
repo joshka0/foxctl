@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -44,7 +45,13 @@ func init() {
 		if err != nil {
 			return err
 		}
-		cmd.SetContext(config.WithContext(cmd.Context(), cfg))
+		logger := logging.New(logging.Config{
+			Level:  logging.ParseLevel(cfg.Logging.Level),
+			Format: logging.ParseFormat(cfg.Logging.Format),
+		})
+		ctx := config.WithContext(cmd.Context(), cfg)
+		ctx = logging.WithContext(ctx, logger)
+		cmd.SetContext(ctx)
 		return nil
 	}
 }

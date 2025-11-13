@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
+	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/jkatigb/agentctl/internal/runner"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/oklog/ulid/v2"
@@ -30,9 +32,11 @@ type Persistence interface {
 
 // Executor coordinates skill execution with persistent job state.
 type Executor struct {
-	root    string
-	persist Persistence
-	run     RunnerFunc
+	root            string
+	persist         Persistence
+	run             RunnerFunc
+	logger          *slog.Logger
+	progressFactory func(jobDir string) (*progressWriter, error)
 }
 
 // Option configures an Executor instance.
@@ -45,15 +49,37 @@ func WithRunner(run RunnerFunc) Option {
 	}
 }
 
+// WithLogger injects a logger used for best-effort warnings.
+func WithLogger(logger *slog.Logger) Option {
+	return func(e *Executor) {
+		e.logger = logger
+	}
+}
+
+// withProgressWriterFactory swaps the progress writer constructor (test hook).
+func withProgressWriterFactory(factory func(string) (*progressWriter, error)) Option {
+	return func(e *Executor) {
+		e.progressFactory = factory
+	}
+}
+
 // New creates a new Executor instance.
 func New(root string, persist Persistence, opts ...Option) *Executor {
 	exec := &Executor{
-		root:    root,
-		persist: persist,
-		run:     runner.Run,
+		root:            root,
+		persist:         persist,
+		run:             runner.Run,
+		logger:          logging.Default(),
+		progressFactory: newProgressWriter,
 	}
 	for _, opt := range opts {
 		opt(exec)
+	}
+	if exec.logger == nil {
+		exec.logger = logging.Default()
+	}
+	if exec.progressFactory == nil {
+		exec.progressFactory = newProgressWriter
 	}
 	return exec
 }
@@ -136,22 +162,41 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	}
 
 	var pw *progressWriter
-	if writer, err := newProgressWriter(e.jobDir(jobID)); err == nil {
+	if writer, err := e.progressFactory(e.jobDir(jobID)); err == nil {
 		pw = writer
-		defer func() { _ = pw.Close() }()
-		_ = pw.WriteMessage("skill execution started")
+		defer func() {
+			if closeErr := pw.Close(); closeErr != nil {
+				e.logger.Warn("progress close failed",
+					"job_id", jobID,
+					"error", closeErr,
+				)
+			}
+		}()
+		if err := pw.WriteMessage("skill execution started"); err != nil {
+			e.warnProgress(jobID, "execution_start", err)
+		}
+	} else if err != nil {
+		e.logger.Warn("progress writer init failed",
+			"job_id", jobID,
+			"error", err,
+		)
 	}
 
 	stdout, stderr, err := e.run(ctx, manifest, artifactPath, input)
 	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
 	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
-		// best-effort logging
-		_ = writeErr
+		e.logger.Warn("stderr log write failed",
+			"job_id", jobID,
+			"path", stderrPath,
+			"error", writeErr,
+		)
 	}
 
 	if err != nil {
 		if pw != nil {
-			_ = pw.WriteMessage(fmt.Sprintf("skill failed: %s", err))
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
+				e.warnProgress(jobID, "execution_error", pwErr)
+			}
 		}
 		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
 			return stdout, fmt.Errorf("skill run failed: %w (state update also failed: %v)", err, stateErr)
@@ -163,7 +208,9 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	if unmarshalErr := json.Unmarshal(stdout, &resultEnv); unmarshalErr != nil {
 		validationErr := fmt.Errorf("invalid result envelope: %w", unmarshalErr)
 		if pw != nil {
-			_ = pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr))
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr)); pwErr != nil {
+				e.warnProgress(jobID, "decode_error", pwErr)
+			}
 		}
 		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, validationErr.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", validationErr, stateErr)
@@ -174,7 +221,9 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	if validationErr := envelope.Validate(resultEnv); validationErr != nil {
 		wrapped := fmt.Errorf("envelope validation failed: %w", validationErr)
 		if pw != nil {
-			_ = pw.WriteMessage(fmt.Sprintf("skill failed: %s", wrapped))
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", wrapped)); pwErr != nil {
+				e.warnProgress(jobID, "validation_error", pwErr)
+			}
 		}
 		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, wrapped.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", wrapped, stateErr)
@@ -185,7 +234,9 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	resultPath := filepath.Join(e.jobDir(jobID), "result.json")
 	if err := os.WriteFile(resultPath, stdout, 0o644); err != nil {
 		if pw != nil {
-			_ = pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err))
+			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err)); pwErr != nil {
+				e.warnProgress(jobID, "result_error", pwErr)
+			}
 		}
 		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("jobs: write result: %w (state update also failed: %v)", err, stateErr)
@@ -198,10 +249,23 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	}
 
 	if pw != nil {
-		_ = pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"})
+		if err := pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"}); err != nil {
+			e.warnProgress(jobID, "execution_complete", err)
+		}
 	}
 
 	return stdout, nil
+}
+
+func (e *Executor) warnProgress(jobID, phase string, err error) {
+	if err == nil {
+		return
+	}
+	e.logger.Warn("progress write failed",
+		"job_id", jobID,
+		"phase", phase,
+		"error", err,
+	)
 }
 
 func (e *Executor) jobDir(id string) string {

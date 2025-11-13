@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
+	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/jkatigb/agentctl/internal/skill"
 )
 
@@ -103,6 +105,40 @@ func TestExecutorFindOrPrepareSkillJobDedupes(t *testing.T) {
 	}
 	if len(persist.snapshot()) != 1 {
 		t.Fatalf("expected one job in persistence, got %d", len(persist.snapshot()))
+	}
+}
+
+func TestExecutorLogsProgressFailures(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+	var logBuf bytes.Buffer
+	logger := logging.New(logging.Config{
+		Level:  logging.LevelWarn,
+		Format: logging.FormatText,
+		Writer: &logBuf,
+	})
+	runner := func(_ context.Context, _ skill.Manifest, _ string, _ []byte) ([]byte, []byte, error) {
+		env := envelope.OK("test", map[string]string{"message": "ok"})
+		buf, _ := json.Marshal(env)
+		return buf, nil, nil
+	}
+	exec := New(root, persist,
+		WithRunner(runner),
+		WithLogger(logger),
+		withProgressWriterFactory(func(string) (*progressWriter, error) {
+			return &progressWriter{
+				writeOverride: func(ProgressEvent) error { return errors.New("boom") },
+				closeOverride: func() error { return nil },
+			}, nil
+		}),
+	)
+	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	if _, _, err := exec.RunSkill(ctx, manifest, "", []byte(`{"foo":"bar"}`)); err != nil {
+		t.Fatalf("run skill: %v", err)
+	}
+	if !bytes.Contains(logBuf.Bytes(), []byte("progress write failed")) {
+		t.Fatalf("expected progress warning, got %q", logBuf.String())
 	}
 }
 

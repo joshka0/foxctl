@@ -35,6 +35,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Cache.DefaultMode != "auto" {
 		t.Fatalf("expected default cache mode auto got %s", cfg.Cache.DefaultMode)
 	}
+	if cfg.Logging.Level != "info" {
+		t.Fatalf("expected default logging level info got %s", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "text" {
+		t.Fatalf("expected default logging format text got %s", cfg.Logging.Format)
+	}
 }
 
 func TestLoadWithConfigFile(t *testing.T) {
@@ -47,7 +53,7 @@ func TestLoadWithConfigFile(t *testing.T) {
 	}
 
 	cfgFile := filepath.Join(home, "config.yaml")
-	content := []byte("inline_output_kb: 1024\npaths:\n  cas: custom/cas\n")
+	content := []byte("inline_output_kb: 1024\nlogging:\n  level: warn\n  format: json\npaths:\n  cas: custom/cas\n")
 	if err := os.WriteFile(cfgFile, content, 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -64,6 +70,12 @@ func TestLoadWithConfigFile(t *testing.T) {
 	if cfg.Paths.CAS != expectedCAS {
 		t.Fatalf("expected cas path %s got %s", expectedCAS, cfg.Paths.CAS)
 	}
+	if cfg.Logging.Level != "warn" {
+		t.Fatalf("expected logging level warn got %s", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "json" {
+		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
+	}
 }
 
 func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
@@ -72,6 +84,8 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 
 	t.Setenv("AGENTCTL_INLINE_OUTPUT_KB", "512")
 	t.Setenv("AGENTCTL_PATHS_CAS", "~/custom/cas")
+	t.Setenv("AGENTCTL_LOGGING_LEVEL", "DEBUG")
+	t.Setenv("AGENTCTL_LOGGING_FORMAT", "JSON")
 
 	cfg, err := Load(context.Background())
 	if err != nil {
@@ -84,6 +98,12 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	expectedCAS := filepath.Join(tmp, "custom/cas")
 	if cfg.Paths.CAS != expectedCAS {
 		t.Fatalf("expected cas path %s got %s", expectedCAS, cfg.Paths.CAS)
+	}
+	if cfg.Logging.Level != "debug" {
+		t.Fatalf("expected logging level debug got %s", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "json" {
+		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
 	}
 }
 

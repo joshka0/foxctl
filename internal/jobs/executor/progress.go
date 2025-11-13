@@ -22,6 +22,9 @@ type progressWriter struct {
 	enc    *json.Encoder
 	mu     sync.Mutex
 	closed bool
+
+	writeOverride func(ProgressEvent) error
+	closeOverride func() error
 }
 
 func newProgressWriter(jobDir string) (*progressWriter, error) {
@@ -39,6 +42,9 @@ func (pw *progressWriter) Write(event ProgressEvent) error {
 
 	if pw.closed {
 		return fmt.Errorf("progress: writer closed")
+	}
+	if pw.writeOverride != nil {
+		return pw.writeOverride(event)
 	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
@@ -60,5 +66,8 @@ func (pw *progressWriter) Close() error {
 		return nil
 	}
 	pw.closed = true
+	if pw.closeOverride != nil {
+		return pw.closeOverride()
+	}
 	return pw.file.Close()
 }
