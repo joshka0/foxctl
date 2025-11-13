@@ -7,12 +7,19 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
+
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
 
 // Runner executes WASI modules that follow the agentctl contract.
 type Runner struct {
@@ -65,8 +72,12 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	}
 	defer cleanup()
 
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
+	stdout := bufferPool.Get().(*bytes.Buffer)
+	stderr := bufferPool.Get().(*bytes.Buffer)
+	stdout.Reset()
+	stderr.Reset()
+	defer bufferPool.Put(stdout)
+	defer bufferPool.Put(stderr)
 
 	rt := wazero.NewRuntime(ctx)
 	defer func() { _ = rt.Close(ctx) }()

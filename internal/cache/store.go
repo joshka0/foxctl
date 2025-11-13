@@ -18,8 +18,10 @@ import (
 	canonicaljson "github.com/gibson042/canonicaljson-go"
 	"github.com/jkatigb/agentctl/internal/artifacts"
 	"github.com/jkatigb/agentctl/internal/cas"
+	"github.com/jkatigb/agentctl/internal/dbutil"
 	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/timeutil"
 	_ "modernc.org/sqlite" // sqlite driver
 )
 
@@ -77,6 +79,13 @@ func Open(ctx context.Context, root string, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cache: open db: %w", err)
 	}
+
+	// Configure connection pool for optimal performance
+	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
+	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
+	db.SetConnMaxLifetime(time.Hour)        // Recycle connections after 1 hour
+	db.SetConnMaxIdleTime(15 * time.Minute) // Close idle connections after 15 min
+
 	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("cache: pragma: %w", err)
@@ -114,7 +123,7 @@ func (s *Store) Put(ctx context.Context, entry Entry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now().UTC()
+	now := timeutil.NowUTC()
 	if entry.CreatedAt.IsZero() {
 		entry.CreatedAt = now
 	}
@@ -156,22 +165,21 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 	var digests string
 	var created, expires, last string
 	if err := row.Scan(&entry.CacheKey, &entry.SkillName, &entry.SkillVersion, &entry.Workspace, &entry.Result, &digests, &created, &expires, &last, &entry.HitCount); err != nil {
-		if errorsIsNoRows(err) {
+		if dbutil.IsNoRows(err) {
 			return Entry{}, false, nil
 		}
 		return Entry{}, false, fmt.Errorf("cache: scan: %w", err)
 	}
-	_ = json.Unmarshal([]byte(digests), &entry.Digests)
-	entry.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-	entry.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expires)
-	entry.LastAccessed, _ = time.Parse(time.RFC3339Nano, last)
+	entry.Digests = dbutil.ScanJSONArray(digests)
+	times := dbutil.ScanTimestampsMust(created, expires, last)
+	entry.CreatedAt, entry.ExpiresAt, entry.LastAccessed = times[0], times[1], times[2]
 
 	// refresh access metadata
 	_, _ = s.db.ExecContext(ctx, `
 		UPDATE auto_cache
 		SET last_accessed = ?, hit_count = hit_count + 1
 		WHERE cache_key = ?`,
-		time.Now().UTC().Format(time.RFC3339Nano), key)
+		timeutil.FormatNowUTC(), key)
 	return entry, true, nil
 }
 
@@ -204,7 +212,7 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 	}
 	defer func() { _ = rows.Close() }()
 
-	var entries []Entry
+	entries := make([]Entry, 0, limit)
 	for rows.Next() {
 		var entry Entry
 		var digests string
@@ -212,10 +220,9 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 		if err := rows.Scan(&entry.CacheKey, &entry.SkillName, &entry.SkillVersion, &entry.Workspace, &entry.Result, &digests, &created, &expires, &last, &entry.HitCount); err != nil {
 			return nil, fmt.Errorf("cache: scan recent: %w", err)
 		}
-		_ = json.Unmarshal([]byte(digests), &entry.Digests)
-		entry.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		entry.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expires)
-		entry.LastAccessed, _ = time.Parse(time.RFC3339Nano, last)
+		entry.Digests = dbutil.ScanJSONArray(digests)
+		times := dbutil.ScanTimestampsMust(created, expires, last)
+		entry.CreatedAt, entry.ExpiresAt, entry.LastAccessed = times[0], times[1], times[2]
 		entries = append(entries, entry)
 	}
 	return entries, nil
@@ -295,7 +302,7 @@ func canonicalArgs(input []byte) ([]byte, error) {
 }
 
 func (s *Store) evictExpired(ctx context.Context) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := timeutil.FormatNowUTC()
 	rows, err := s.db.QueryContext(ctx, `SELECT cache_key, digests FROM auto_cache WHERE expires_at <= ?`, now)
 	if err != nil {
 		return fmt.Errorf("cache: select expired: %w", err)
@@ -316,6 +323,10 @@ func (s *Store) evictExpired(ctx context.Context) error {
 		expired = append(expired, d)
 	}
 	for _, d := range expired {
+		// Check for context cancellation
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = ?`, d.key); err != nil {
 			return fmt.Errorf("cache: delete expired: %w", err)
 		}
@@ -329,6 +340,10 @@ func (s *Store) pinDigests(ctx context.Context, digests []string) {
 		return
 	}
 	for _, d := range digests {
+		// Check for context cancellation
+		if ctx.Err() != nil {
+			return
+		}
 		_ = s.cas.Pin(ctx, d)
 	}
 }
@@ -338,6 +353,10 @@ func (s *Store) unpinDigests(ctx context.Context, digests []string) {
 		return
 	}
 	for _, d := range digests {
+		// Check for context cancellation
+		if ctx.Err() != nil {
+			return
+		}
 		_ = s.cas.Unpin(ctx, d)
 	}
 }
@@ -362,10 +381,6 @@ CREATE INDEX IF NOT EXISTS idx_auto_cache_workspace ON auto_cache(workspace);
 		return fmt.Errorf("cache: migrate: %w", err)
 	}
 	return nil
-}
-
-func errorsIsNoRows(err error) bool {
-	return err == sql.ErrNoRows
 }
 
 // CollectDigests is a helper that extracts digests from an envelope.

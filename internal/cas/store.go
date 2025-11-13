@@ -19,6 +19,15 @@ import (
 	"time"
 )
 
+const bufferSize = 32 * 1024
+
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, bufferSize)
+		return &buf
+	},
+}
+
 var (
 	// ErrNotFound is returned when the requested object is missing.
 	ErrNotFound = errors.New("cas: object not found")
@@ -79,7 +88,9 @@ func (s *Store) Put(ctx context.Context, r io.Reader, kind string, tags []string
 		_ = os.Remove(tmp.Name())
 	}()
 	var size int64
-	buf := make([]byte, 32*1024)
+	bufPtr := bufferPool.Get().(*[]byte)
+	buf := *bufPtr
+	defer bufferPool.Put(bufPtr)
 	for {
 		if err := ctx.Err(); err != nil {
 			return Object{}, err

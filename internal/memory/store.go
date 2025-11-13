@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/cas"
+	"github.com/jkatigb/agentctl/internal/dbutil"
+	"github.com/jkatigb/agentctl/internal/timeutil"
 	_ "modernc.org/sqlite" // sqlite driver
 )
 
@@ -56,6 +58,13 @@ func Open(ctx context.Context, root string, casPath string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
+
+	// Configure connection pool for optimal performance
+	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
+	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
+	db.SetConnMaxLifetime(time.Hour)        // Recycle connections after 1 hour
+	db.SetConnMaxIdleTime(15 * time.Minute) // Close idle connections after 15 min
+
 	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("memory: pragma: %w", err)
@@ -81,7 +90,7 @@ func (s *Store) Close() error {
 
 // Save inserts or updates a named memory.
 func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) {
-	now := time.Now().UTC()
+	now := timeutil.NowUTC()
 	if entry.ID == "" {
 		entry.ID = uuid.NewString()
 	}
@@ -111,7 +120,7 @@ ON CONFLICT(name, workspace) DO UPDATE SET
 	if err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: save: %w", err)
 	}
-	s.pin(entry.Digests)
+	s.pin(ctx, entry.Digests)
 	return entry, nil
 }
 
@@ -125,20 +134,19 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 	var digests string
 	var created, updated, last string
 	if err := row.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
-		if errorsIsNoRows(err) {
+		if dbutil.IsNoRows(err) {
 			return NamedEntry{}, ErrNotFound
 		}
 		return NamedEntry{}, fmt.Errorf("memory: get: %w", err)
 	}
-	_ = json.Unmarshal([]byte(digests), &entry.Digests)
-	entry.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-	entry.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
-	entry.LastAccess, _ = time.Parse(time.RFC3339Nano, last)
+	entry.Digests = dbutil.ScanJSONArray(digests)
+	times := dbutil.ScanTimestampsMust(created, updated, last)
+	entry.CreatedAt, entry.UpdatedAt, entry.LastAccess = times[0], times[1], times[2]
 
 	_, _ = s.db.ExecContext(ctx, `
 		UPDATE named_memory
 		SET last_accessed = ?, access_count = access_count + 1
-		WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), entry.ID)
+		WHERE id = ?`, timeutil.FormatNowUTC(), entry.ID)
 
 	return entry, nil
 }
@@ -159,7 +167,7 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 	}
 	defer func() { _ = rows.Close() }()
 
-	var entries []NamedEntry
+	entries := make([]NamedEntry, 0, limit)
 	for rows.Next() {
 		var entry NamedEntry
 		var digests string
@@ -167,10 +175,9 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
 			return nil, fmt.Errorf("memory: scan list: %w", err)
 		}
-		_ = json.Unmarshal([]byte(digests), &entry.Digests)
-		entry.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		entry.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
-		entry.LastAccess, _ = time.Parse(time.RFC3339Nano, last)
+		entry.Digests = dbutil.ScanJSONArray(digests)
+		times := dbutil.ScanTimestampsMust(created, updated, last)
+		entry.CreatedAt, entry.UpdatedAt, entry.LastAccess = times[0], times[1], times[2]
 		entries = append(entries, entry)
 	}
 	return entries, nil
@@ -181,7 +188,7 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 	row := s.db.QueryRowContext(ctx, `SELECT digests FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace)
 	var digests string
 	if err := row.Scan(&digests); err != nil {
-		if errorsIsNoRows(err) {
+		if dbutil.IsNoRows(err) {
 			return ErrNotFound
 		}
 		return fmt.Errorf("memory: scan digests: %w", err)
@@ -189,9 +196,8 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace); err != nil {
 		return fmt.Errorf("memory: delete: %w", err)
 	}
-	var arr []string
-	_ = json.Unmarshal([]byte(digests), &arr)
-	s.unpin(arr)
+	arr := dbutil.ScanJSONArray(digests)
+	s.unpin(ctx, arr)
 	return nil
 }
 
@@ -211,21 +217,29 @@ func (s *Store) SaveFromResult(ctx context.Context, name, typ, workspace, summar
 // ErrNotFound indicates missing entries.
 var ErrNotFound = fmt.Errorf("memory: not found")
 
-func (s *Store) pin(digests []string) {
+func (s *Store) pin(ctx context.Context, digests []string) {
 	if s.cas == nil {
 		return
 	}
 	for _, d := range digests {
-		_ = s.cas.Pin(context.Background(), d)
+		// Check for context cancellation
+		if ctx.Err() != nil {
+			return
+		}
+		_ = s.cas.Pin(ctx, d)
 	}
 }
 
-func (s *Store) unpin(digests []string) {
+func (s *Store) unpin(ctx context.Context, digests []string) {
 	if s.cas == nil {
 		return
 	}
 	for _, d := range digests {
-		_ = s.cas.Unpin(context.Background(), d)
+		// Check for context cancellation
+		if ctx.Err() != nil {
+			return
+		}
+		_ = s.cas.Unpin(ctx, d)
 	}
 }
 
@@ -250,10 +264,6 @@ CREATE TABLE IF NOT EXISTS named_memory (
 		return fmt.Errorf("memory: migrate: %w", err)
 	}
 	return nil
-}
-
-func errorsIsNoRows(err error) bool {
-	return err == sql.ErrNoRows
 }
 
 // Search finds entries whose name or summary contain the query string.
@@ -307,11 +317,11 @@ func (s *Store) Update(ctx context.Context, name, workspace string, summary, typ
 	if typ != nil && *typ != "" {
 		entry.Type = *typ
 	}
-	entry.UpdatedAt = time.Now().UTC()
+	entry.UpdatedAt = timeutil.NowUTC()
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE named_memory
 		SET summary = ?, type = ?, updated_at = ?
-		WHERE id = ?`, entry.Summary, entry.Type, entry.UpdatedAt.Format(time.RFC3339Nano), entry.ID); err != nil {
+		WHERE id = ?`, entry.Summary, entry.Type, timeutil.FormatRFC3339Nano(entry.UpdatedAt), entry.ID); err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: update: %w", err)
 	}
 	return entry, nil
@@ -362,10 +372,9 @@ func scanEntries(rows *sql.Rows) ([]NamedEntry, error) {
 		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
 			return nil, fmt.Errorf("memory: scan: %w", err)
 		}
-		_ = json.Unmarshal([]byte(digests), &entry.Digests)
-		entry.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		entry.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updated)
-		entry.LastAccess, _ = time.Parse(time.RFC3339Nano, last)
+		entry.Digests = dbutil.ScanJSONArray(digests)
+		times := dbutil.ScanTimestampsMust(created, updated, last)
+		entry.CreatedAt, entry.UpdatedAt, entry.LastAccess = times[0], times[1], times[2]
 		out = append(out, entry)
 	}
 	return out, nil
