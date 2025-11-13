@@ -42,21 +42,27 @@ func TestMemoryRecentAndCacheCommands(t *testing.T) {
 		t.Fatalf("cache put: %v", err)
 	}
 
-	// memory recent
-	recentCmd := newMemoryRecentCommand()
-	recentCmd.SetOut(&bytes.Buffer{})
+	recentCmd := newMemoryCommand()
+	recentOut := &bytes.Buffer{}
+	recentCmd.SetOut(recentOut)
 	recentCmd.SetErr(&bytes.Buffer{})
-	recentCmd.SetArgs([]string{"--workspace", cfg.Home})
+	recentCmd.SetArgs([]string{"recent", "--workspace", cfg.Home})
 	if err := recentCmd.Execute(); err != nil {
 		t.Fatalf("memory recent: %v", err)
 	}
+	var recentEnv envelope.Envelope
+	if err := json.Unmarshal(recentOut.Bytes(), &recentEnv); err != nil {
+		t.Fatalf("decode recent envelope: %v", err)
+	}
+	if recentEnv.Command != "agentctl.memory.recent" {
+		t.Fatalf("unexpected command %s", recentEnv.Command)
+	}
 
-	// memory cache
-	cacheCmd := newMemoryCacheCommand()
+	cacheCmd := newMemoryCommand()
 	cacheOut := &bytes.Buffer{}
 	cacheCmd.SetOut(cacheOut)
 	cacheCmd.SetErr(&bytes.Buffer{})
-	cacheCmd.SetArgs([]string{entry.CacheKey})
+	cacheCmd.SetArgs([]string{"cache", entry.CacheKey})
 	if err := cacheCmd.Execute(); err != nil {
 		t.Fatalf("memory cache: %v", err)
 	}
