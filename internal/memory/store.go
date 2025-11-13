@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -17,8 +16,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/dbutil"
+	"github.com/jkatigb/agentctl/internal/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/timeutil"
-	_ "modernc.org/sqlite" // sqlite driver
 )
 
 // NamedEntry represents a saved memory.
@@ -50,11 +49,8 @@ type Store struct {
 
 // Open initializes the memory store rooted at the provided path.
 func Open(ctx context.Context, root string, casPath string) (*Store, error) {
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, fmt.Errorf("memory: ensure root: %w", err)
-	}
 	dbPath := filepath.Join(root, "memory.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
@@ -65,14 +61,8 @@ func Open(ctx context.Context, root string, casPath string) (*Store, error) {
 	db.SetConnMaxLifetime(time.Hour)        // Recycle connections after 1 hour
 	db.SetConnMaxIdleTime(15 * time.Minute) // Close idle connections after 15 min
 
-	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("memory: pragma: %w", err)
-	}
-	if err := migrate(ctx, db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
+	// sqliteutil.OpenDB handles directory creation, WAL configuration, and migration execution.
+
 	var casStore *cas.Store
 	if casPath != "" {
 		if casStore, err = cas.NewStore(casPath); err != nil {

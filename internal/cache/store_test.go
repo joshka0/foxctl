@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestBuildKeyDeterministic(t *testing.T) {
 
 func TestStorePutAndGet(t *testing.T) {
 	ctx := context.Background()
-	root := t.TempDir()
+	root := filepath.Join(t.TempDir(), "cache")
 	store, err := Open(ctx, root, Options{AutoTTL: time.Minute})
 	if err != nil {
 		t.Fatalf("open: %v", err)
@@ -55,6 +56,21 @@ func TestStorePutAndGet(t *testing.T) {
 	}
 	if got.HitCount != 0 {
 		t.Fatalf("expected hit count tracked lazily, got %d", got.HitCount)
+	}
+}
+
+func TestOpenCreatesNestedRoot(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "nested", "cache")
+	store, err := Open(ctx, root, Options{AutoTTL: time.Minute})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("expected root directory to exist: %v", err)
 	}
 }
 

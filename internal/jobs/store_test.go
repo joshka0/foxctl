@@ -49,6 +49,21 @@ func TestSubmitEchoCreatesResult(t *testing.T) {
 	}
 }
 
+func TestOpenCreatesNestedRoot(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "nested", "jobs")
+	store, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("expected root directory to exist: %v", err)
+	}
+}
+
 func TestListJobsOrder(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

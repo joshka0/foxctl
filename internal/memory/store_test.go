@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -26,6 +28,21 @@ func TestSaveAndGet(t *testing.T) {
 	}
 	if len(entry.Digests) != 1 || entry.Digests[0] != "sha256:abc" {
 		t.Fatalf("expected digest recorded")
+	}
+}
+
+func TestOpenCreatesNestedRoot(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "nested", "memory")
+	store, err := Open(ctx, root, "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("expected root directory to exist: %v", err)
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,8 +20,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/dbutil"
 	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/timeutil"
-	_ "modernc.org/sqlite" // sqlite driver
 )
 
 // Mode controls cache behavior for runs.
@@ -71,29 +70,18 @@ func Open(ctx context.Context, root string, opts Options) (*Store, error) {
 	if opts.AutoTTL <= 0 {
 		opts.AutoTTL = 24 * time.Hour
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, fmt.Errorf("cache: ensure root: %w", err)
-	}
 	dbPath := filepath.Join(root, "cache.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("cache: open db: %w", err)
 	}
-
 	// Configure connection pool for optimal performance
 	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
 	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
 	db.SetConnMaxLifetime(time.Hour)        // Recycle connections after 1 hour
 	db.SetConnMaxIdleTime(15 * time.Minute) // Close idle connections after 15 min
+	// sqliteutil.OpenDB already ensures directory creation, WAL mode, and schema migrations.
 
-	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("cache: pragma: %w", err)
-	}
-	if err := migrate(ctx, db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	var casStore *cas.Store
 	if opts.CASPath != "" {
 		if casStore, err = cas.NewStore(opts.CASPath); err != nil {

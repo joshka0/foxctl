@@ -5,15 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/jobs/types"
+	"github.com/jkatigb/agentctl/internal/sqliteutil"
 	"github.com/oklog/ulid/v2"
-	_ "modernc.org/sqlite" // sqlite driver
 )
 
 // Store defines the persistence interface for job metadata.
@@ -36,21 +35,10 @@ type sqlStore struct {
 
 // Open initializes the persistent store rooted at the provided path.
 func Open(ctx context.Context, root string) (Store, error) {
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return nil, fmt.Errorf("jobs: ensure root: %w", err)
-	}
 	dbPath := filepath.Join(root, "jobs.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("jobs: open db: %w", err)
-	}
-	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("jobs: pragma: %w", err)
-	}
-	if err := migrate(ctx, db); err != nil {
-		_ = db.Close()
-		return nil, err
 	}
 	return &sqlStore{db: db}, nil
 }
