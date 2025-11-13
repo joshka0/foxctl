@@ -10,6 +10,7 @@ func newMemoryCommand() *cobra.Command {
 	cmd.AddCommand(
 		newMemoryRecentCommand(),
 		newMemoryCacheCommand(),
+		newMemoryStatsCommand(),
 		newMemoryListCommand(),
 		newMemorySearchCommand(),
 		newMemoryGetCommand(),

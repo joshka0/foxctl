@@ -53,6 +53,51 @@ Releases: goreleaser (snapshot in CI; tagged release by humans)
 
 ---
 
+## 🛠 Agentctl Usage Guide
+
+1. **Build the CLI**
+   ```bash
+   CGO_ENABLED=0 make build   # emits ./bin/agentctl
+   ```
+
+2. **Compile bundled skills**
+   ```bash
+   make skills-build   # populates dist/skills/
+   ```
+
+3. **Install needed skills** (example: `todo/manage`)
+   ```bash
+   ./bin/agentctl skills install \
+     --manifest dist/skills/todo/skill.yaml \
+     --binary   dist/skills/todo/bin
+   ```
+
+4. **List & inspect**
+   ```bash
+   ./bin/agentctl skills list
+   ./bin/agentctl skills describe todo/manage
+   ```
+
+5. **Run helpers or generic skills**
+   ```bash
+   ./bin/agentctl todo add --title "Integrate prcomments skill" \
+     --description "Package prcomments CLI as exec ci/prcomments skill"
+
+   ./bin/agentctl run todo/manage --input '{"operation":"list"}'
+   ```
+
+6. **Check jobs & storage**
+   - Job artifacts: `~/.agentctl/jobs/<ulid>/` (progress/result/stderr).
+   - CLI helpers: `./bin/agentctl jobs list|result`, `./bin/agentctl memory stats` (shows auto-cache + named memory health).
+
+7. **Config & secrets**
+   - Config: `~/.agentctl/config.yaml` (override via `--config`).
+   - Secrets/tokens: export env vars before running (`GITHUB_TOKEN`, etc.) or mount under `/run/secrets/<name>` for WASI skills.
+
+Following these steps keeps every run deterministic and fully observable.
+
+---
+
 ## 📚 Canonical Sources (Single Source of Truth)
 
 | Topic                              | Source                              |

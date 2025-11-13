@@ -164,6 +164,65 @@ func TestMemorySearchAndRelevantCommands(t *testing.T) {
 	}
 }
 
+func TestMemoryStatsCommand(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	ctx := context.Background()
+
+	cacheStore, err := cache.Open(ctx, cfg.Paths.Cache, cache.Options{
+		AutoTTL: cfg.Memory.AutoCacheTTL,
+		CASPath: cfg.Paths.CAS,
+	})
+	if err != nil {
+		t.Fatalf("open cache store: %v", err)
+	}
+	defer requireClose(t, cacheStore, "cache store stats")
+	if err := cacheStore.Put(ctx, cache.Entry{
+		CacheKey:     "sha256:stats",
+		SkillName:    "text/grep",
+		SkillVersion: "0.1.0",
+		Workspace:    cfg.Home,
+		Result:       []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`),
+		CreatedAt:    time.Now().UTC(),
+		ExpiresAt:    time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	mStore, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	defer requireClose(t, mStore, "memory store stats")
+	if _, err := mStore.SaveFromResult(ctx, "stats-entry", "result", cfg.Home, "stats", []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)); err != nil {
+		t.Fatalf("seed memory: %v", err)
+	}
+
+	statsCmd := newMemoryCommand()
+	out := &bytes.Buffer{}
+	statsCmd.SetOut(out)
+	statsCmd.SetErr(&bytes.Buffer{})
+	statsCmd.SetArgs([]string{"stats"})
+	if err := statsCmd.Execute(); err != nil {
+		t.Fatalf("memory stats: %v", err)
+	}
+	var env envelope.Envelope
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode stats envelope: %v", err)
+	}
+	if env.Command != "agentctl.memory.stats" {
+		t.Fatalf("unexpected command %s", env.Command)
+	}
+	data := env.Data.(map[string]any)
+	cacheData := data["cache"].(map[string]any)
+	if cacheData["entries"].(float64) < 1 {
+		t.Fatalf("expected cache entries recorded")
+	}
+	memoryData := data["memory"].(map[string]any)
+	if memoryData["entries"].(float64) < 1 {
+		t.Fatalf("expected memory entries recorded")
+	}
+}
+
 func setupMemoryTestEnv(t *testing.T) config.Config {
 	t.Helper()
 	tmp := t.TempDir()

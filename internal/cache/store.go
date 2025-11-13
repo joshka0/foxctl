@@ -65,6 +65,13 @@ type Store struct {
 	mu   sync.Mutex
 }
 
+// Stats provides a snapshot of cache metadata.
+type Stats struct {
+	Entries int64
+	Path    string
+	TTL     time.Duration
+}
+
 // Open initializes the cache store at the provided path.
 func Open(ctx context.Context, root string, opts Options) (*Store, error) {
 	if opts.AutoTTL <= 0 {
@@ -104,6 +111,15 @@ func Open(ctx context.Context, root string, opts Options) (*Store, error) {
 // Close releases resources.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// Stats returns entry counts and configuration metadata for observability commands.
+func (s *Store) Stats(ctx context.Context) (Stats, error) {
+	var count int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM auto_cache`).Scan(&count); err != nil {
+		return Stats{}, fmt.Errorf("cache: stats: %w", err)
+	}
+	return Stats{Entries: count, Path: s.path, TTL: s.ttl}, nil
 }
 
 // Put upserts an auto-cache entry and pins any referenced artifacts.

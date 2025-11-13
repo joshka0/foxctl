@@ -43,8 +43,15 @@ type ScoredEntry struct {
 
 // Store handles named memory persistence.
 type Store struct {
-	db  *sql.DB
-	cas *cas.Store
+	db   *sql.DB
+	cas  *cas.Store
+	path string
+}
+
+// Stats summarizes named memory storage metadata.
+type Stats struct {
+	Named int64
+	Path  string
 }
 
 // Open initializes the memory store rooted at the provided path.
@@ -70,12 +77,21 @@ func Open(ctx context.Context, root string, casPath string) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{db: db, cas: casStore}, nil
+	return &Store{db: db, cas: casStore, path: dbPath}, nil
 }
 
 // Close releases resources.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// Stats returns entry counts for named memories.
+func (s *Store) Stats(ctx context.Context) (Stats, error) {
+	var count int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory`).Scan(&count); err != nil {
+		return Stats{}, fmt.Errorf("memory: stats: %w", err)
+	}
+	return Stats{Named: count, Path: s.path}, nil
 }
 
 // Save inserts or updates a named memory.
