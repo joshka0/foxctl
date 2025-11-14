@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -19,7 +21,7 @@ func newSkillsSearchCommand() *cobra.Command {
 			}
 			query := args[0]
 			manifests, err := skill.Discover(cfg.Paths.Skills)
-			if err != nil {
+			if err != nil && !os.IsNotExist(err) {
 				return err
 			}
 			var matches []skill.Manifest
