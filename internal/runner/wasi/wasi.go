@@ -38,33 +38,20 @@ type Options struct {
 
 // Run executes the WASI module and captures stdout/stderr.
 func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
-	if r.Manifest.Distribution.Type != "wasi" {
-		return nil, nil, fmt.Errorf("wasi runner requires distribution.type=wasi")
-	}
-	if netCap := strings.TrimSpace(r.Manifest.Capabilities.Network); netCap != "" && netCap != "none" {
-		return nil, nil, fmt.Errorf("wasi runner only supports network:\"none\" (got %q)", netCap)
+	if err := r.validateManifest(); err != nil {
+		return nil, nil, err
 	}
 
-	// Apply timeout (default 5 minutes if not specified)
-	timeout := r.Options.Timeout
-	if timeout == 0 {
-		timeout = 5 * time.Minute
-	}
-	var cancel context.CancelFunc
-	ctx, cancel = context.WithTimeout(ctx, timeout)
+	ctx, cancel := r.applyTimeout(ctx)
 	defer cancel()
 
-	modulePath := r.ModulePath
-	if modulePath == "" && r.Manifest.Distribution.WASI != nil {
-		modulePath = r.Manifest.Distribution.WASI.Module
-	}
-	if modulePath == "" {
-		return nil, nil, fmt.Errorf("missing WASI module path")
-	}
-
-	moduleBytes, err := os.ReadFile(modulePath)
+	modulePath, err := r.resolveModulePath()
 	if err != nil {
-		return nil, nil, fmt.Errorf("read wasm module: %w", err)
+		return nil, nil, err
+	}
+	moduleBytes, err := r.loadModule(modulePath)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	workDir, cleanup, err := r.prepareWorkDir()
@@ -73,48 +60,25 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	}
 	defer cleanup()
 
-	stdout := bufferPool.Get().(*bytes.Buffer)
-	stderr := bufferPool.Get().(*bytes.Buffer)
-	stdout.Reset()
-	stderr.Reset()
+	stdout, stderr := r.allocateBuffers()
 	defer bufferPool.Put(stdout)
 	defer bufferPool.Put(stderr)
 
-	rt := wazero.NewRuntime(ctx)
-	defer func() {
-		errs.Ignore(rt.Close(ctx), "close wazero runtime")
-	}()
-
-	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
-		return nil, nil, fmt.Errorf("instantiate wasi: %w", err)
-	}
-
-	compiled, err := rt.CompileModule(ctx, moduleBytes)
+	runtime, closeRuntime, err := r.prepareRuntime(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compile wasm: %w", err)
+		return nil, nil, err
 	}
-	defer func() {
-		errs.Ignore(compiled.Close(ctx), "close compiled module")
-	}()
+	defer closeRuntime()
 
-	moduleName := strings.ReplaceAll(r.Manifest.Metadata.Name, "/", "_")
-	modConfig := wazero.NewModuleConfig().
-		WithStdout(stdout).
-		WithStderr(stderr).
-		WithStdin(bytes.NewReader(input)).
-		WithName(moduleName)
-
-	if workDir != "" {
-		fsCfg := wazero.NewFSConfig().WithDirMount(workDir, "/work")
-		modConfig = modConfig.WithFSConfig(fsCfg)
+	compiled, closeCompiled, err := r.compileModule(ctx, runtime, moduleBytes)
+	if err != nil {
+		return nil, nil, err
 	}
+	defer closeCompiled()
 
-	env := r.envVars()
-	for k, v := range env {
-		modConfig = modConfig.WithEnv(k, v)
-	}
+	modConfig := r.buildModuleConfig(input, workDir, stdout, stderr)
 
-	_, runErr := rt.InstantiateModule(ctx, compiled, modConfig)
+	_, runErr := runtime.InstantiateModule(ctx, compiled, modConfig)
 	return stdout.Bytes(), stderr.Bytes(), runErr
 }
 
@@ -147,4 +111,88 @@ func (r Runner) prepareWorkDir() (string, func(), error) {
 	return tmp, func() {
 		errs.Ignore(os.RemoveAll(tmp), "cleanup wasi workdir")
 	}, nil
+}
+
+func (r Runner) validateManifest() error {
+	if r.Manifest.Distribution.Type != "wasi" {
+		return fmt.Errorf("wasi runner requires distribution.type=wasi")
+	}
+	if netCap := strings.TrimSpace(r.Manifest.Capabilities.Network); netCap != "" && netCap != "none" {
+		return fmt.Errorf("wasi runner only supports network:\"none\" (got %q)", netCap)
+	}
+	return nil
+}
+
+func (r Runner) applyTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := r.Options.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func (r Runner) resolveModulePath() (string, error) {
+	if r.ModulePath != "" {
+		return r.ModulePath, nil
+	}
+	if r.Manifest.Distribution.WASI != nil && r.Manifest.Distribution.WASI.Module != "" {
+		return r.Manifest.Distribution.WASI.Module, nil
+	}
+	return "", fmt.Errorf("missing WASI module path")
+}
+
+func (r Runner) loadModule(path string) ([]byte, error) {
+	moduleBytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read wasm module: %w", err)
+	}
+	return moduleBytes, nil
+}
+
+func (r Runner) allocateBuffers() (*bytes.Buffer, *bytes.Buffer) {
+	stdout := bufferPool.Get().(*bytes.Buffer)
+	stderr := bufferPool.Get().(*bytes.Buffer)
+	stdout.Reset()
+	stderr.Reset()
+	return stdout, stderr
+}
+
+func (r Runner) prepareRuntime(ctx context.Context) (wazero.Runtime, func(), error) {
+	runtime := wazero.NewRuntime(ctx)
+	cleanup := func() {
+		errs.Ignore(runtime.Close(ctx), "close wazero runtime")
+	}
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("instantiate wasi: %w", err)
+	}
+	return runtime, cleanup, nil
+}
+
+func (r Runner) compileModule(ctx context.Context, runtime wazero.Runtime, moduleBytes []byte) (wazero.CompiledModule, func(), error) {
+	compiled, err := runtime.CompileModule(ctx, moduleBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("compile wasm: %w", err)
+	}
+	cleanup := func() {
+		errs.Ignore(compiled.Close(ctx), "close compiled module")
+	}
+	return compiled, cleanup, nil
+}
+
+func (r Runner) buildModuleConfig(input []byte, workDir string, stdout, stderr *bytes.Buffer) wazero.ModuleConfig {
+	moduleName := strings.ReplaceAll(r.Manifest.Metadata.Name, "/", "_")
+	config := wazero.NewModuleConfig().
+		WithStdout(stdout).
+		WithStderr(stderr).
+		WithStdin(bytes.NewReader(input)).
+		WithName(moduleName)
+	if workDir != "" {
+		fsCfg := wazero.NewFSConfig().WithDirMount(workDir, "/work")
+		config = config.WithFSConfig(fsCfg)
+	}
+	for k, v := range r.envVars() {
+		config = config.WithEnv(k, v)
+	}
+	return config
 }
