@@ -18,7 +18,7 @@ func newSkillsRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			data, err := loadSkillInput(cmd, input, inputFile)
+			data, err := loadSkillInput(cmd, cfg, input, inputFile)
 			if err != nil {
 				return err
 			}
