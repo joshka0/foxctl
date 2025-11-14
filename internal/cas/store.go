@@ -17,6 +17,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jkatigb/agentctl/internal/metrics"
+	"github.com/jkatigb/agentctl/internal/storage"
 )
 
 const bufferSize = 32 * 1024
@@ -45,20 +48,14 @@ type Store struct {
 	mu   sync.Mutex
 }
 
-// Metadata describes a stored object.
-type Metadata struct {
-	Digest    string    `json:"digest"`
-	Size      int64     `json:"size_bytes"`
-	Kind      string    `json:"kind,omitempty"`
-	Tags      []string  `json:"tags,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-}
+// Ensure Store implements storage.CASStore.
+var _ storage.CASStore = (*Store)(nil)
 
-// Object augments metadata with pinning info.
-type Object struct {
-	Metadata
-	Pinned bool `json:"pinned"`
-}
+// Metadata aliases the shared CAS metadata type.
+type Metadata = storage.CASMetadata
+
+// Object aliases the shared CAS object type.
+type Object = storage.CASObject
 
 // NewStore initializes a Store rooted at the provided directory.
 func NewStore(root string) (*Store, error) {
@@ -72,6 +69,11 @@ func NewStore(root string) (*Store, error) {
 		return nil, fmt.Errorf("cas: create tmp: %w", err)
 	}
 	return &Store{root: root}, nil
+}
+
+// Close satisfies the storage.Store interface. CAS stores do not hold open resources.
+func (s *Store) Close() error {
+	return nil
 }
 
 // Put streams data into the store, returning the metadata for the resulting object.
@@ -153,6 +155,7 @@ func (s *Store) Put(ctx context.Context, r io.Reader, kind string, tags []string
 	if err := s.writeMetadata(meta); err != nil {
 		return Object{}, err
 	}
+	metrics.Global().RecordCASOperation()
 	return s.objectFromMeta(meta)
 }
 
@@ -188,6 +191,7 @@ func (s *Store) Get(_ context.Context, digest string) (io.ReadCloser, Metadata, 
 		expected: digest,
 		h:        sha256.New(),
 	}
+	metrics.Global().RecordCASOperation()
 	return vr, meta, nil
 }
 
@@ -245,6 +249,7 @@ func (s *Store) Remove(_ context.Context, digest string) error {
 	}
 	metaPath := path + ".json"
 	_ = os.Remove(metaPath)
+	metrics.Global().RecordCASOperation()
 	return nil
 }
 
@@ -263,7 +268,11 @@ func (s *Store) Pin(_ context.Context, digest string) error {
 		return fmt.Errorf("cas: pin stat: %w", err)
 	}
 	pin := s.pinPath(digest)
-	return os.WriteFile(pin, []byte(time.Now().UTC().Format(time.RFC3339)), 0o644)
+	if err := os.WriteFile(pin, []byte(time.Now().UTC().Format(time.RFC3339)), 0o644); err != nil {
+		return err
+	}
+	metrics.Global().RecordCASOperation()
+	return nil
 }
 
 // Unpin removes a previously created pin record.
@@ -277,7 +286,35 @@ func (s *Store) Unpin(_ context.Context, digest string) error {
 		}
 		return fmt.Errorf("cas: unpin: %w", err)
 	}
+	metrics.Global().RecordCASOperation()
 	return nil
+}
+
+// AddTags adds tags to an existing object.
+func (s *Store) AddTags(_ context.Context, digest string, tags []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.readMetadata(digest)
+	if err != nil {
+		return err
+	}
+	tagSet := make(map[string]struct{}, len(meta.Tags)+len(tags))
+	for _, t := range meta.Tags {
+		tagSet[t] = struct{}{}
+	}
+	for _, t := range tags {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		tagSet[t] = struct{}{}
+	}
+	meta.Tags = meta.Tags[:0]
+	for t := range tagSet {
+		meta.Tags = append(meta.Tags, t)
+	}
+	sort.Strings(meta.Tags)
+	return s.writeMetadata(meta)
 }
 
 func (s *Store) objectFromMeta(meta Metadata) (Object, error) {

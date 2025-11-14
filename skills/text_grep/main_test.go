@@ -25,7 +25,7 @@ func TestGrepProducesPreview(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf, tmp)
+	rc := newTestRunnerContext(t, buf, work)
 	defer func() { _ = rc.Close() }()
 
 	in := input{
@@ -73,7 +73,7 @@ func TestGrepCreatesArtifactForLargeResults(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf, tmp)
+	rc := newTestRunnerContext(t, buf, work)
 	defer func() { _ = rc.Close() }()
 	rc.MaxPreview = 5
 
@@ -96,16 +96,27 @@ func TestGrepCreatesArtifactForLargeResults(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, tmp string) *skillslib.RunnerContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillslib.RunnerContext {
 	t.Helper()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldwd)
+	}()
+	state := t.TempDir()
 	cfg := config.Config{
-		Home:           tmp,
+		Home:           state,
 		InlineOutputKB: 32,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   filepath.Join(tmp, "cas"),
-			Jobs:  filepath.Join(tmp, "jobs"),
-			Cache: filepath.Join(tmp, "cache"),
+			CAS:   filepath.Join(state, "cas"),
+			Jobs:  filepath.Join(state, "jobs"),
+			Cache: filepath.Join(state, "cache"),
 		},
 	}
 	rc, err := skillslib.NewRunnerContext(cfg, stdout)

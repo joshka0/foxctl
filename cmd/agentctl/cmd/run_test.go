@@ -37,6 +37,7 @@ func TestRunCommandEmitsCompleteMeta(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{
 		"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, inputDir),
+		"--workspace", inputDir,
 		"text/grep",
 	})
 
@@ -84,6 +85,7 @@ func TestSkillsRunProducesInlineEnvelope(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{
 		"--input", fmt.Sprintf(`{"path":%q,"pattern":"only"}`, file),
+		"--workspace", filepath.Dir(file),
 		"text/grep",
 	})
 

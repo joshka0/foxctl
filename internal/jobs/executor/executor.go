@@ -5,17 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/logging"
+	"github.com/jkatigb/agentctl/internal/metrics"
 	"github.com/jkatigb/agentctl/internal/runner"
 	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/workspace"
 	"github.com/oklog/ulid/v2"
+	"github.com/rs/zerolog"
 )
 
 // RunnerFunc executes a skill manifest and returns stdout, stderr, and an error.
@@ -35,7 +38,7 @@ type Executor struct {
 	root            string
 	persist         Persistence
 	run             RunnerFunc
-	logger          *slog.Logger
+	logger          zerolog.Logger
 	progressFactory func(jobDir string) (*progressWriter, error)
 }
 
@@ -50,7 +53,7 @@ func WithRunner(run RunnerFunc) Option {
 }
 
 // WithLogger injects a logger used for best-effort warnings.
-func WithLogger(logger *slog.Logger) Option {
+func WithLogger(logger zerolog.Logger) Option {
 	return func(e *Executor) {
 		e.logger = logger
 	}
@@ -74,9 +77,6 @@ func New(root string, persist Persistence, opts ...Option) *Executor {
 	}
 	for _, opt := range opts {
 		opt(exec)
-	}
-	if exec.logger == nil {
-		exec.logger = logging.Default()
 	}
 	if exec.progressFactory == nil {
 		exec.progressFactory = newProgressWriter
@@ -160,39 +160,58 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	if err := e.persist.UpdateState(ctx, jobID, types.StateRunning, "", ""); err != nil {
 		return nil, err
 	}
+	if ws := e.jobWorkspace(jobID); ws != "" {
+		ctx = workspace.WithContext(ctx, ws)
+	}
+	metrics.Global().RecordSkillExecution()
+	start := time.Now()
 
 	var pw *progressWriter
 	if writer, err := e.progressFactory(e.jobDir(jobID)); err == nil {
 		pw = writer
 		defer func() {
 			if closeErr := pw.Close(); closeErr != nil {
-				e.logger.Warn("progress close failed",
-					"job_id", jobID,
-					"error", closeErr,
-				)
+				e.logger.Warn().
+					Str("job_id", jobID).
+					Err(closeErr).
+					Msg("progress close failed")
 			}
 		}()
 		if err := pw.WriteMessage("skill execution started"); err != nil {
 			e.warnProgress(jobID, "execution_start", err)
 		}
 	} else if err != nil {
-		e.logger.Warn("progress writer init failed",
-			"job_id", jobID,
-			"error", err,
-		)
+		e.logger.Warn().
+			Str("job_id", jobID).
+			Err(err).
+			Msg("progress writer init failed")
 	}
 
 	stdout, stderr, err := e.run(ctx, manifest, artifactPath, input)
+	metrics.Global().RecordExecutionTime(time.Since(start))
 	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
 	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
-		e.logger.Warn("stderr log write failed",
-			"job_id", jobID,
-			"path", stderrPath,
-			"error", writeErr,
-		)
+		e.logger.Warn().
+			Str("job_id", jobID).
+			Str("path", stderrPath).
+			Err(writeErr).
+			Msg("stderr log write failed")
 	}
 
 	if err != nil {
+		if detail := strings.TrimSpace(string(stderr)); detail != "" {
+			err = fmt.Errorf("%w: %s", err, detail)
+		}
+		if len(stdout) > 0 {
+			snippet := strings.TrimSpace(string(stdout))
+			const maxSnippet = 512
+			if len(snippet) > maxSnippet {
+				snippet = snippet[:maxSnippet] + "..."
+			}
+			if snippet != "" {
+				err = fmt.Errorf("%w; stdout: %s", err, snippet)
+			}
+		}
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
 				e.warnProgress(jobID, "execution_error", pwErr)
@@ -261,13 +280,21 @@ func (e *Executor) warnProgress(jobID, phase string, err error) {
 	if err == nil {
 		return
 	}
-	e.logger.Warn("progress write failed",
-		"job_id", jobID,
-		"phase", phase,
-		"error", err,
-	)
+	e.logger.Warn().
+		Str("job_id", jobID).
+		Str("phase", phase).
+		Err(err).
+		Msg("progress write failed")
 }
 
 func (e *Executor) jobDir(id string) string {
 	return filepath.Join(e.root, id)
+}
+
+func (e *Executor) jobWorkspace(id string) string {
+	data, err := os.ReadFile(filepath.Join(e.jobDir(id), "workspace"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }

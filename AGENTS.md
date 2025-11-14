@@ -218,6 +218,13 @@ Start
 * Exec runner may allow `network:"egress"` with optional `egressAllow`.
 * Secrets mounted at `/run/secrets/<name>`. Never log secret values; redact `"***"`.
 
+### 6) Filesystem Skills
+
+* All `fs/*` and `text/grep` skills must route user paths through `policy.PathValidator`.
+* The validator anchors to the current workspace and only allowlists explicit roots (`cfg.Home`, `os.TempDir()`).
+* Reject traversal attempts early so we fail with actionable `EPOLICY` guidance instead of touching the host filesystem.
+* The executor exports the workspace path via `AGENTCTL_WORKSPACE`; skills should prefer that over `os.Getwd()` when sandboxed.
+
 ---
 
 ## 🧭 Do / Ask / Act (Guardrails)
@@ -392,6 +399,7 @@ make test-race          # unit tests with -race
 make test-live          # integration tests (AGENTCTL_TEST_LIVE=1)
 make build              # build cmd/agentctl
 make snapshot           # goreleaser --snapshot
+make check-coverage     # enforce ≥85% coverage locally
 
 # OpenAPI convenience
 agentctl openapi import github.yaml --as=github
@@ -400,6 +408,9 @@ agentctl run http/openapi \
   --operationId=listReposForUser \
   --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' \
   --dry_run
+
+# CAS maintenance
+agentctl cas gc --older-than=168h --dry-run   # preview safe cleanup
 
 # All commands output JSON envelopes to stdout.
 ```
@@ -431,6 +442,7 @@ agentctl run http/openapi \
 * Using wall‑clock for duration; use monotonic clock for `duration_ms`.
 * Reading huge responses into RAM when they should be streamed → CAS.
 * Forgetting to set `meta.source:"cache"` on cache hits.
+* Attempting to read outside the workspace—`policy.PathValidator` now blocks traversal attempts.
 
 ---
 

@@ -9,7 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
-	memstore "github.com/jkatigb/agentctl/internal/memory"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +25,7 @@ func newMemoryListCommand() *cobra.Command {
 				return err
 			}
 			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				entries, err := store.List(cmd.Context(), ws, limit)
 				if err != nil {
 					return err
@@ -70,7 +70,7 @@ func newMemorySearchCommand() *cobra.Command {
 				return err
 			}
 			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				entries, err := store.Search(cmd.Context(), ws, query, limit)
 				if err != nil {
 					return err
@@ -112,7 +112,7 @@ func newMemoryGetCommand() *cobra.Command {
 				return err
 			}
 			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				entry, err := store.Get(cmd.Context(), args[0], ws)
 				if err != nil {
 					return err
@@ -162,7 +162,7 @@ func newMemoryPutCommand() *cobra.Command {
 			if summary == "" {
 				summary = summarizeResult(payload)
 			}
-			return withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				entry, err := store.SaveFromResult(cmd.Context(), name, typ, ws, summary, payload)
 				if err != nil {
 					return err
@@ -216,7 +216,7 @@ func newMemorySaveCommand() *cobra.Command {
 			if summary == "" {
 				summary = summarizeResult(result)
 			}
-			return withMemoryStore(cmd.Context(), cfg, func(mem *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(mem storage.MemoryStore) error {
 				entry, err := mem.SaveFromResult(cmd.Context(), name, typ, ws, summary, result)
 				if err != nil {
 					return err
@@ -256,7 +256,7 @@ func newMemoryUpdateCommand() *cobra.Command {
 				return err
 			}
 			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				var summaryPtr *string
 				var typePtr *string
 				if summary != "" {
@@ -298,7 +298,7 @@ func newMemoryDeleteCommand() *cobra.Command {
 				return err
 			}
 			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				if err := store.Delete(cmd.Context(), args[0], ws); err != nil {
 					return err
 				}
@@ -325,7 +325,7 @@ func newMemoryRelevantCommand() *cobra.Command {
 				return err
 			}
 			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				entries, err := store.Relevant(cmd.Context(), ws, limit)
 				if err != nil {
 					return err

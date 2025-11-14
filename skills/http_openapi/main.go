@@ -5,23 +5,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	openapiauth "github.com/jkatigb/agentctl/internal/openapi/auth"
+	"github.com/jkatigb/agentctl/internal/secrets"
 	"github.com/jkatigb/agentctl/internal/skillslib"
 )
 
 type input struct {
-	BaseURL string            `json:"base_url"`
-	Path    string            `json:"path"`
-	Method  string            `json:"method"`
-	Query   map[string]string `json:"query"`
-	Headers map[string]string `json:"headers"`
-	Body    any               `json:"body"`
-	DryRun  bool              `json:"dry_run"`
+	BaseURL string             `json:"base_url"`
+	Path    string             `json:"path"`
+	Method  string             `json:"method"`
+	Query   map[string]string  `json:"query"`
+	Headers map[string]string  `json:"headers"`
+	Body    any                `json:"body"`
+	DryRun  bool               `json:"dry_run"`
+	Auth    openapiauth.Config `json:"auth"`
 }
 
 func main() {
@@ -70,10 +74,27 @@ func run(rc *skillslib.RunnerContext, in input) error {
 	}
 	resolved.RawQuery = q.Encode()
 
+	req, err := http.NewRequest(method, resolved.String(), nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	for k, v := range in.Headers {
+		req.Header.Set(k, v)
+	}
+	if err := openapiauth.Apply(req, in.Auth); err != nil {
+		return err
+	}
+	resolved = req.URL
+	headers := map[string]string{}
+	for k, vals := range req.Header {
+		headers[k] = strings.Join(vals, ", ")
+	}
+	headers = secrets.RedactHeaders(headers)
+
 	plan := map[string]any{
 		"method":  method,
 		"url":     resolved.String(),
-		"headers": in.Headers,
+		"headers": headers,
 		"body":    in.Body,
 	}
 	data := map[string]any{

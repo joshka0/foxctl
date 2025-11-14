@@ -97,3 +97,57 @@ func TestCASCommandsHandleLargeArtifacts(t *testing.T) {
 		t.Fatalf("cas rm --force: %v", err)
 	}
 }
+
+func TestCASGCCommand(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{
+		Home: tmp,
+		Paths: config.Paths{
+			CAS:   filepath.Join(tmp, "cas"),
+			Jobs:  filepath.Join(tmp, "jobs"),
+			Cache: filepath.Join(tmp, "cache"),
+		},
+		InlineOutputKB: 32,
+		MaxCaptureKB:   10240,
+	}
+	store, err := cas.NewStore(cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	ctx := config.WithContext(context.Background(), cfg)
+
+	data := bytes.Repeat([]byte("x"), 1024)
+	if _, err := store.Put(ctx, bytes.NewReader(data), "application/octet-stream", nil); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	cmd := newCASGCCommand()
+	cmd.SetContext(ctx)
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--older-than", "0s", "--keep-pinned=false"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cas gc: %v", err)
+	}
+
+	var env map[string]any
+	if err := json.Unmarshal(out.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env["status"] != "ok" {
+		t.Fatalf("unexpected status: %v", env["status"])
+	}
+	dataMap := env["data"].(map[string]any)
+	if deleted := dataMap["objects_deleted"].(float64); deleted != 1 {
+		t.Fatalf("expected 1 deletion, got %v", deleted)
+	}
+
+	objects, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(objects) != 0 {
+		t.Fatalf("expected store to be empty after GC")
+	}
+}

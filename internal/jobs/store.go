@@ -8,14 +8,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/jobs/executor"
 	"github.com/jkatigb/agentctl/internal/jobs/persist"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -26,18 +29,20 @@ type Store struct {
 	executor *executor.Executor
 }
 
+// Ensure Store implements storage.JobStore.
+var _ storage.JobStore = (*Store)(nil)
+
 // Open initializes the job store rooted at the provided path.
-func Open(ctx context.Context, root string) (*Store, error) {
+func Open(ctx context.Context, root string) (store *Store, err error) {
 	logger := logging.FromContext(ctx)
-	if logger == nil {
-		logger = logging.Default()
-	}
 	p, err := persist.Open(ctx, root)
 	if err != nil {
 		return nil, err
 	}
+	defer errs.CloseOnErr(&err, p)
 	exec := executor.New(root, p, executor.WithLogger(logger))
-	return &Store{root: root, persist: p, executor: exec}, nil
+	store = &Store{root: root, persist: p, executor: exec}
+	return store, nil
 }
 
 // Close releases database resources.
@@ -172,6 +177,27 @@ func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifest
 		return nil, fmt.Errorf("jobs: load manifest: %w", err)
 	}
 	return s.executor.ExecutePrepared(ctx, jobID, manifest, artifactPath, data)
+}
+
+// SetWorkspace records the workspace path for a job so runners can enforce policy.
+func (s *Store) SetWorkspace(_ context.Context, jobID, workspacePath string) error {
+	if workspacePath == "" {
+		return nil
+	}
+	jobDir := s.jobDir(jobID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		return fmt.Errorf("jobs: ensure job dir: %w", err)
+	}
+	path := filepath.Join(jobDir, "workspace")
+	if existing, err := os.ReadFile(path); err == nil {
+		if strings.TrimSpace(string(existing)) != "" {
+			return nil
+		}
+	}
+	if err := os.WriteFile(path, []byte(workspacePath), 0o644); err != nil {
+		return fmt.Errorf("jobs: write workspace: %w", err)
+	}
+	return nil
 }
 
 // FindOrPrepareSkillJob atomically finds a duplicate job or creates a new one.

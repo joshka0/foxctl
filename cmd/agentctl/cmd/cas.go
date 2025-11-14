@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +29,7 @@ func newCASCommand() *cobra.Command {
 		newCASPinCommand(),
 		newCASUnpinCommand(),
 		newCASRemoveCommand(),
+		newCASGCCommand(),
 	)
 	return cmd
 }
@@ -240,7 +243,52 @@ func newCASRemoveCommand() *cobra.Command {
 	return cmd
 }
 
-func storeFromContext(ctx context.Context) (*cas.Store, error) {
+func newCASGCCommand() *cobra.Command {
+	var (
+		olderThan  time.Duration
+		dryRun     bool
+		keepPinned = true
+		maxDelete  int
+	)
+	cmd := &cobra.Command{
+		Use:   "gc",
+		Short: "Garbage collect CAS objects",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			store, err := storeFromContext(cmd.Context())
+			if err != nil {
+				return err
+			}
+			opts := cas.GCOptions{
+				DryRun:     dryRun,
+				OlderThan:  olderThan,
+				KeepPinned: keepPinned,
+				MaxDelete:  maxDelete,
+			}
+			result, err := store.GC(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			data := map[string]any{
+				"dry_run":         dryRun,
+				"older_than":      olderThan.String(),
+				"keep_pinned":     keepPinned,
+				"max_delete":      maxDelete,
+				"objects_deleted": result.ObjectsDeleted,
+				"objects_skipped": result.ObjectsSkipped,
+				"bytes_freed":     result.BytesFreed,
+				"errors":          result.Errors,
+			}
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.gc", data))
+		},
+	}
+	cmd.Flags().DurationVar(&olderThan, "older-than", 72*time.Hour, "Only delete objects older than this duration (e.g. 24h)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what would be deleted without removing files")
+	cmd.Flags().BoolVar(&keepPinned, "keep-pinned", true, "Skip pinned digests during GC")
+	cmd.Flags().IntVar(&maxDelete, "max-delete", 0, "Maximum number of objects to delete (0 = unlimited)")
+	return cmd
+}
+
+func storeFromContext(ctx context.Context) (storage.CASStore, error) {
 	cfg, err := commandConfig(ctx)
 	if err != nil {
 		return nil, err

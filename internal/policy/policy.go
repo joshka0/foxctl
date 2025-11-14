@@ -4,6 +4,7 @@ package policy
 import (
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -200,4 +201,111 @@ func isWithinWorkdir(path, workDir string) bool {
 
 	// If path is within workdir, it shouldn't start with ".."
 	return !strings.HasPrefix(rel, "..")
+}
+
+// PathValidator enforces that skill paths stay within the workspace (or approved roots).
+type PathValidator struct {
+	workspaceRoot string
+	allowedRoots  []string
+}
+
+// NewPathValidator builds a validator rooted at workspace with additional allowed roots.
+func NewPathValidator(workspace string, allowedRoots []string) (*PathValidator, error) {
+	if strings.TrimSpace(workspace) == "" {
+		return nil, fmt.Errorf("workspace cannot be empty")
+	}
+
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace: %w", err)
+	}
+	absWorkspace = filepath.Clean(absWorkspace)
+	if resolved, err := filepath.EvalSymlinks(absWorkspace); err == nil {
+		absWorkspace = filepath.Clean(resolved)
+	}
+
+	cleanRoots := make([]string, 0, len(allowedRoots))
+	seen := map[string]struct{}{absWorkspace: {}}
+	for _, root := range allowedRoots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		abs = filepath.Clean(abs)
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = filepath.Clean(resolved)
+		}
+		if _, ok := seen[abs]; ok {
+			continue
+		}
+		seen[abs] = struct{}{}
+		cleanRoots = append(cleanRoots, abs)
+	}
+
+	return &PathValidator{
+		workspaceRoot: absWorkspace,
+		allowedRoots:  cleanRoots,
+	}, nil
+}
+
+// ValidatePath ensures the requested path stays within workspace or allowed roots.
+func (pv *PathValidator) ValidatePath(requested string) (string, error) {
+	if pv == nil {
+		return "", fmt.Errorf("path validator not configured")
+	}
+	if strings.TrimSpace(requested) == "" {
+		return "", fmt.Errorf("path is required")
+	}
+
+	clean := filepath.Clean(requested)
+	abs := clean
+	if !filepath.IsAbs(clean) {
+		abs = filepath.Join(pv.workspaceRoot, clean)
+	}
+	abs = filepath.Clean(abs)
+
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	} else {
+		// If the requested path itself is a symlink that fails to resolve (e.g. dangling),
+		// treat it as an error to prevent sandbox escapes via late-bound links.
+		if info, lerr := os.Lstat(abs); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("path %q resolves through an invalid symlink: %w", requested, err)
+		}
+		if dirResolved, derr := filepath.EvalSymlinks(filepath.Dir(abs)); derr == nil {
+			abs = filepath.Join(dirResolved, filepath.Base(abs))
+		}
+	}
+
+	if pv.isWithinRoot(abs, pv.workspaceRoot) {
+		return abs, nil
+	}
+	for _, root := range pv.allowedRoots {
+		if pv.isWithinRoot(abs, root) {
+			return abs, nil
+		}
+	}
+	return "", fmt.Errorf("path %q is outside workspace %q", requested, pv.workspaceRoot)
+}
+
+// Workspace reports the configured workspace root.
+func (pv *PathValidator) Workspace() string {
+	if pv == nil {
+		return ""
+	}
+	return pv.workspaceRoot
+}
+
+func (pv *PathValidator) isWithinRoot(path, root string) bool {
+	if path == root {
+		return true
+	}
+	root = filepath.Clean(root)
+	if root == "." || root == string(filepath.Separator) {
+		return true
+	}
+	return strings.HasPrefix(path, root+string(filepath.Separator))
 }

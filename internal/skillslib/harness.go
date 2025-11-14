@@ -14,16 +14,18 @@ import (
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/policy"
 )
 
 // RunnerContext bundles dependencies skill binaries need.
 type RunnerContext struct {
-	Config     config.Config
-	CASStore   *cas.Store
-	InlineKB   int
-	Stdout     io.Writer
-	Now        func() time.Time
-	MaxPreview int
+	Config        config.Config
+	CASStore      *cas.Store
+	PathValidator *policy.PathValidator
+	InlineKB      int
+	Stdout        io.Writer
+	Now           func() time.Time
+	MaxPreview    int
 }
 
 // NewRunnerContext initializes a RunnerContext from configuration.
@@ -32,13 +34,33 @@ func NewRunnerContext(cfg config.Config, stdout io.Writer) (*RunnerContext, erro
 	if err != nil {
 		return nil, fmt.Errorf("skills: cas store: %w", err)
 	}
+	workspace := strings.TrimSpace(os.Getenv("AGENTCTL_WORKSPACE"))
+	if workspace == "" {
+		var err error
+		workspace, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("skills: resolve workspace: %w", err)
+		}
+	}
+	var allowedRoots []string
+	if cfg.Home != "" {
+		allowedRoots = append(allowedRoots, cfg.Home)
+	}
+	if tmp := os.TempDir(); tmp != "" {
+		allowedRoots = append(allowedRoots, tmp)
+	}
+	pathValidator, err := policy.NewPathValidator(workspace, allowedRoots)
+	if err != nil {
+		return nil, fmt.Errorf("skills: path validator: %w", err)
+	}
 	return &RunnerContext{
-		Config:     cfg,
-		CASStore:   store,
-		InlineKB:   cfg.InlineOutputKB,
-		Stdout:     stdout,
-		Now:        time.Now,
-		MaxPreview: 5,
+		Config:        cfg,
+		CASStore:      store,
+		PathValidator: pathValidator,
+		InlineKB:      cfg.InlineOutputKB,
+		Stdout:        stdout,
+		Now:           time.Now,
+		MaxPreview:    5,
 	}, nil
 }
 

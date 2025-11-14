@@ -1,26 +1,32 @@
-// Package logging provides structured logging helpers for agentctl.
+// Package logging provides structured logging helpers with automatic secret redaction.
 package logging
 
 import (
 	"context"
 	"io"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/jkatigb/agentctl/internal/secrets"
+	"github.com/mattn/go-colorable"
+	"github.com/rs/zerolog"
 )
 
 // Level represents the configured logging verbosity.
 type Level string
 
 const (
-	// LevelDebug enables debug messages.
+	// LevelTrace enables the most verbose log output.
+	LevelTrace Level = "trace"
+	// LevelDebug enables debug logging.
 	LevelDebug Level = "debug"
-	// LevelInfo enables informational messages (default).
+	// LevelInfo emits informational logging (default).
 	LevelInfo Level = "info"
-	// LevelWarn enables warning messages.
+	// LevelWarn emits warnings and errors only.
 	LevelWarn Level = "warn"
-	// LevelError enables error messages only.
+	// LevelError emits error messages only.
 	LevelError Level = "error"
 )
 
@@ -28,9 +34,9 @@ const (
 type Format string
 
 const (
-	// FormatText outputs human-readable text logs.
+	// FormatText outputs console-friendly logs.
 	FormatText Format = "text"
-	// FormatJSON outputs structured JSON logs.
+	// FormatJSON writes structured JSON logs.
 	FormatJSON Format = "json"
 )
 
@@ -45,34 +51,40 @@ type ctxKey struct{}
 
 var (
 	defaultOnce sync.Once
-	defaultLog  *slog.Logger
+	defaultLog  zerolog.Logger
 
 	discardOnce sync.Once
-	discardLog  *slog.Logger
+	discardLog  zerolog.Logger
 )
 
-// New builds a slog.Logger using the supplied configuration.
-func New(cfg Config) *slog.Logger {
+// New builds a zerolog.Logger using the supplied configuration.
+func New(cfg Config) zerolog.Logger {
 	writer := cfg.Writer
 	if writer == nil {
 		writer = os.Stderr
 	}
 
-	opts := &slog.HandlerOptions{Level: parseLevel(cfg.Level)}
-
-	var handler slog.Handler
-	switch ParseFormat(string(cfg.Format)) {
-	case FormatJSON:
-		handler = slog.NewJSONHandler(writer, opts)
-	default:
-		handler = slog.NewTextHandler(writer, opts)
+	useConsole := ParseFormat(string(cfg.Format)) == FormatText
+	if useConsole {
+		if f, ok := writer.(*os.File); ok {
+			writer = colorable.NewColorable(f)
+		}
+		writer = &zerolog.ConsoleWriter{Out: writer, TimeFormat: time.RFC3339, NoColor: false}
 	}
 
-	return slog.New(handler)
+	writer = &redactingWriter{w: writer}
+
+	lvl, err := zerolog.ParseLevel(strings.ToLower(string(cfg.Level)))
+	if err != nil {
+		lvl = zerolog.InfoLevel
+	}
+
+	logger := zerolog.New(writer).Level(lvl).With().Timestamp().Logger()
+	return logger
 }
 
 // Default returns a shared logger writing to stderr at info level.
-func Default() *slog.Logger {
+func Default() zerolog.Logger {
 	defaultOnce.Do(func() {
 		defaultLog = New(Config{Level: LevelInfo, Format: FormatText})
 	})
@@ -80,36 +92,34 @@ func Default() *slog.Logger {
 }
 
 // Discard returns a logger that drops all log records.
-func Discard() *slog.Logger {
+func Discard() zerolog.Logger {
 	discardOnce.Do(func() {
-		handler := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})
-		discardLog = slog.New(handler)
+		discardLog = zerolog.New(io.Discard)
 	})
 	return discardLog
 }
 
 // WithContext attaches the logger to the context for downstream consumers.
-func WithContext(ctx context.Context, logger *slog.Logger) context.Context {
-	if logger == nil {
-		return ctx
-	}
+func WithContext(ctx context.Context, logger zerolog.Logger) context.Context {
 	return context.WithValue(ctx, ctxKey{}, logger)
 }
 
 // FromContext retrieves the logger previously stored on the context.
-func FromContext(ctx context.Context) *slog.Logger {
+func FromContext(ctx context.Context) zerolog.Logger {
 	if ctx == nil {
-		return nil
+		return Default()
 	}
-	if logger, ok := ctx.Value(ctxKey{}).(*slog.Logger); ok {
+	if logger, ok := ctx.Value(ctxKey{}).(zerolog.Logger); ok {
 		return logger
 	}
-	return nil
+	return Default()
 }
 
 // ParseLevel normalizes the provided string into a Level value.
 func ParseLevel(s string) Level {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "trace":
+		return LevelTrace
 	case "debug":
 		return LevelDebug
 	case "warn":
@@ -133,15 +143,17 @@ func ParseFormat(s string) Format {
 	}
 }
 
-func parseLevel(level Level) slog.Leveler {
-	switch Level(strings.ToLower(string(level))) {
-	case LevelDebug:
-		return slog.LevelDebug
-	case LevelWarn:
-		return slog.LevelWarn
-	case LevelError:
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
+type redactingWriter struct {
+	w io.Writer
+}
+
+func (rw *redactingWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
 	}
+	redacted := secrets.Redact(string(p))
+	if _, err := rw.w.Write([]byte(redacted)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

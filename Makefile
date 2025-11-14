@@ -10,7 +10,7 @@ GOLANGCI ?= $(GO_CMD) run github.com/golangci/golangci-lint/cmd/golangci-lint@v1
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 
-.PHONY: fmt lint vet test test-race cover build snapshot tidy check skills-build skills-test completions
+.PHONY: fmt lint vet test test-race cover check-coverage build snapshot tidy check skills-build skills-test completions
 
 fmt:
 	@echo "Running gofumpt"
@@ -33,6 +33,16 @@ cover:
 	@mkdir -p coverage
 	@$(GO_CMD) test ./... -covermode=atomic -coverprofile=coverage/coverage.out
 	@$(GO_CMD) tool cover -func=coverage/coverage.out
+
+check-coverage:
+	@echo "Checking test coverage..."
+	@mkdir -p coverage
+	@$(GO_CMD) test ./... -coverprofile=coverage/coverage.out -covermode=atomic 2>&1 | grep -v "no test files" || true
+	@$(GO_CMD) tool cover -func=coverage/coverage.out | tee coverage/coverage.txt
+	@awk '/^total:/ {gsub("%",""); if ($$3 < 85.0) { \
+		print "❌ Coverage " $$3 "% is below 85% threshold"; exit 1; } \
+		else { print "✅ Coverage " $$3 "% meets threshold"; exit 0; }}' \
+		coverage/coverage.txt
 
 build:
 	@set -euo pipefail; \
@@ -77,7 +87,7 @@ snapshot:
 tidy:
 	@$(GO_CMD) mod tidy
 
-check: fmt lint vet test build
+check: fmt lint vet test check-coverage build
 
 completions: build
 	@mkdir -p dist

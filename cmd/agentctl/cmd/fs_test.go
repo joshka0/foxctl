@@ -29,7 +29,7 @@ func TestFSReadCommandOutputsPreview(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{file})
+	cmd.SetArgs([]string{"--workspace", tmp, file})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("fs read command: %v\nstderr: %s", err, stderr.String())

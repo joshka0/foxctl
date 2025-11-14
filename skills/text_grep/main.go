@@ -69,7 +69,17 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 		return err
 	}
 
-	entries, err := collectEntries(in.Path, in.Include, in.Exclude)
+	workspace := rc.PathValidator.Workspace()
+	basePath := workspace
+	if strings.TrimSpace(in.Path) != "" {
+		validated, err := rc.PathValidator.ValidatePath(in.Path)
+		if err != nil {
+			return fmt.Errorf("path validation failed: %w", err)
+		}
+		basePath = validated
+	}
+
+	entries, err := collectEntries(basePath, in.Include, in.Exclude)
 	if err != nil {
 		return err
 	}
@@ -88,14 +98,14 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 		if remaining <= 0 {
 			break
 		}
-		fileMatches, err := grepFile(entry.Path, re, remaining)
+		fileMatches, err := grepFile(entry.Path, workspace, re, remaining)
 		if err != nil {
 			return err
 		}
 		if len(fileMatches) == 0 {
 			continue
 		}
-		rel, _ := filepath.Rel(".", entry.Path)
+		rel := relativeTo(workspace, entry.Path)
 		fileHits[rel] += len(fileMatches)
 		allMatches = append(allMatches, fileMatches...)
 	}
@@ -160,7 +170,7 @@ func compileRegex(pattern string, ci bool) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-func grepFile(path string, re *regexp.Regexp, remaining int) ([]match, error) {
+func grepFile(path, workspace string, re *regexp.Regexp, remaining int) ([]match, error) {
 	if remaining <= 0 {
 		return nil, nil
 	}
@@ -179,9 +189,8 @@ func grepFile(path string, re *regexp.Regexp, remaining int) ([]match, error) {
 		line := scanner.Text()
 		if re.MatchString(line) {
 			snippet := trimLine(line, 240)
-			rel, _ := filepath.Rel(".", path)
 			matches = append(matches, match{
-				File:    rel,
+				File:    relativeTo(workspace, path),
 				Line:    lineNo,
 				Text:    line,
 				Snippet: snippet,
@@ -210,6 +219,23 @@ func storeMatches(ctx context.Context, rc *skillslib.RunnerContext, matches []ma
 		return "", 0, fmt.Errorf("cas put: %w", err)
 	}
 	return obj.Digest, obj.Size, nil
+}
+
+func relativeTo(base, target string) string {
+	if base == "" {
+		if rel, err := filepath.Rel(".", target); err == nil {
+			return filepath.ToSlash(rel)
+		}
+		return filepath.ToSlash(target)
+	}
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return filepath.ToSlash(target)
+	}
+	if strings.HasPrefix(rel, "..") {
+		return filepath.ToSlash(target)
+	}
+	return filepath.ToSlash(rel)
 }
 
 func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
