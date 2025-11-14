@@ -92,14 +92,18 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 	return nil
 }
 
-func (m *Migrator) appliedVersions(ctx context.Context) (map[int]struct{}, error) {
+func (m *Migrator) appliedVersions(ctx context.Context) (applied map[int]struct{}, err error) {
 	rows, err := m.db.QueryContext(ctx, `SELECT version FROM schema_migrations`)
 	if err != nil {
 		return nil, fmt.Errorf("sqlutil: select migrations: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("sqlutil: close migration rows: %w", closeErr)
+		}
+	}()
 
-	applied := make(map[int]struct{})
+	applied = make(map[int]struct{})
 	for rows.Next() {
 		var version int
 		if scanErr := rows.Scan(&version); scanErr != nil {
@@ -107,8 +111,8 @@ func (m *Migrator) appliedVersions(ctx context.Context) (map[int]struct{}, error
 		}
 		applied[version] = struct{}{}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("sqlutil: iterate migration versions: %w", err)
+	if iterErr := rows.Err(); iterErr != nil {
+		return nil, fmt.Errorf("sqlutil: iterate migration versions: %w", iterErr)
 	}
 	return applied, nil
 }
