@@ -3,8 +3,8 @@ package runservice
 import (
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/cache"
-	errs "github.com/jkatigb/agentctl/internal/errors"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/cache"
 )
 
 // TryServeCache attempts to serve the response from cache based on the provided input.

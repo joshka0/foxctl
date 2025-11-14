@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/cas"
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
 )
 
 func TestCASCommandsHandleLargeArtifacts(t *testing.T) {

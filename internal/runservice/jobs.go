@@ -3,8 +3,8 @@ package runservice
 import (
 	"fmt"
 
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	"github.com/jkatigb/agentctl/internal/jobs"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/jobs"
 )
 
 func (e *Executor) ensureJobStore() error {

@@ -14,12 +14,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/envelope"
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	"github.com/jkatigb/agentctl/internal/skillslib"
-	fsutil "github.com/jkatigb/agentctl/internal/skillslib/fs"
-	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib"
+	fsutil "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
+	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 type input struct {

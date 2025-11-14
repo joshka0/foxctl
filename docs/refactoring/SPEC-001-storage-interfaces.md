@@ -13,10 +13,10 @@ The agentctl codebase currently has **zero interfaces**, relying entirely on con
 4. **Violation of Dependency Inversion**: High-level modules depend on low-level details
 
 ### Affected Files
-- `internal/cache/store.go` (374 LOC)
-- `internal/jobs/store.go` (662 LOC)
-- `internal/cas/store.go` (400 LOC)
-- `internal/memory/store.go` (362 LOC)
+- `internal/storage/cache/store.go` (374 LOC)
+- `internal/storage/jobs/store.go` (662 LOC)
+- `internal/storage/cas/store.go` (400 LOC)
+- `internal/storage/memory/store.go` (362 LOC)
 - All files in `cmd/agentctl/cmd/` that use these stores
 
 ## Current State Analysis
@@ -202,7 +202,7 @@ type NamedEntry struct {
 Keep existing concrete implementations but make them implement the interfaces:
 
 ```go
-// internal/cache/store.go
+// internal/storage/cache/store.go
 package cache
 
 import "github.com/jkatigb/agentctl/internal/storage"
@@ -229,7 +229,7 @@ type Entry = storage.CacheEntry
 Create factory functions that return interfaces:
 
 ```go
-// internal/cache/factory.go
+// internal/storage/cache/factory.go
 package cache
 
 import (

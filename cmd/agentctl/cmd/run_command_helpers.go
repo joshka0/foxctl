@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/cache"
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/runservice"
-	"github.com/jkatigb/agentctl/internal/workspace"
+	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/spf13/cobra"
 )
 

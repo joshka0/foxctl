@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestArtifactFile(t *testing.T) {

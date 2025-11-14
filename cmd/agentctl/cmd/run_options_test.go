@@ -3,8 +3,8 @@ package cmd
 import (
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/runservice"
+	"github.com/jkatigb/agentctl/internal/storage/cache"
 )
 
 func TestRunOptions_Validate(t *testing.T) {

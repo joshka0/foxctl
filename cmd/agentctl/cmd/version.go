@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/jkatigb/agentctl/internal/buildinfo"
-	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/spf13/cobra"
 )
 

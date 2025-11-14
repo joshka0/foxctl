@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestDoctorOutputsEnvelope(t *testing.T) {

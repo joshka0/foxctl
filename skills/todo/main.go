@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/envelope"
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
+	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/oklog/ulid/v2"
 )
 

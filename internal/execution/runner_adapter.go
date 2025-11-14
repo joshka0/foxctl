@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/jkatigb/agentctl/internal/runner"
-	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/execution/runner"
 )
 
 // RunnerExecutor adapts the existing runner.Run to the SkillExecutor interface.

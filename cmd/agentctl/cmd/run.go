@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/spf13/cobra"
 )

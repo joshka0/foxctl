@@ -18,19 +18,19 @@ This leads to:
 - **Increased LOC**: ~15 lines of boilerplate per query
 
 ### Affected Files and Lines
-- `internal/cache/store.go:158-167` (Get method)
-- `internal/cache/store.go:212-219` (Recent method)
-- `internal/memory/store.go:127-136` (Get method)
-- `internal/memory/store.go:167-173` (List method)
-- `internal/jobs/store.go:143-152` (Get method)
-- `internal/jobs/store.go:171-180` (List method)
+- `internal/storage/cache/store.go:158-167` (Get method)
+- `internal/storage/cache/store.go:212-219` (Recent method)
+- `internal/storage/memory/store.go:127-136` (Get method)
+- `internal/storage/memory/store.go:167-173` (List method)
+- `internal/storage/jobs/store.go:143-152` (Get method)
+- `internal/storage/jobs/store.go:171-180` (List method)
 - Similar patterns in CAS store
 
 ## Current State Analysis
 
 ### Example 1: Cache Store Scanning
 ```go
-// internal/cache/store.go:158-167
+// internal/storage/cache/store.go:158-167
 func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
     // ... query ...
     var entry Entry
@@ -55,7 +55,7 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 
 ### Example 2: Memory Store Scanning (Nearly Identical)
 ```go
-// internal/memory/store.go:127-136
+// internal/storage/memory/store.go:127-136
 func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, error) {
     // ... query ...
     var entry NamedEntry
@@ -291,7 +291,7 @@ func NewScanRow(row *sql.Row) *ScanRow {
 
 #### Before: cache.Store.Get()
 ```go
-// internal/cache/store.go:158-167 (BEFORE)
+// internal/storage/cache/store.go:158-167 (BEFORE)
 func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
     row := s.db.QueryRowContext(ctx, `SELECT ...`)
 
@@ -319,7 +319,7 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 
 #### After: Using Helper Functions
 ```go
-// internal/cache/store.go (AFTER - Option 1: Helper functions)
+// internal/storage/cache/store.go (AFTER - Option 1: Helper functions)
 func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
     row := s.db.QueryRowContext(ctx, `SELECT ...`)
 
@@ -361,7 +361,7 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 
 #### After: Using Custom Types (Better)
 ```go
-// internal/cache/store.go (AFTER - Option 2: Custom types)
+// internal/storage/cache/store.go (AFTER - Option 2: Custom types)
 
 // Update Entry struct
 type Entry struct {

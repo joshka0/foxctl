@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	jobtypes "github.com/jkatigb/agentctl/internal/jobs/types"
+	jobtypes "github.com/jkatigb/agentctl/internal/storage/jobs/types"
 )
 
 // Store is the minimal interface implemented by all storage providers.

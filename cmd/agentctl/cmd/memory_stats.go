@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )

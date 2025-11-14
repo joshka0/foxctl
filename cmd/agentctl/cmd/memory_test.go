@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/cache"
-	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/envelope"
-	memstore "github.com/jkatigb/agentctl/internal/memory"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cache"
+	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/spf13/cobra"
 )
 
