@@ -60,6 +60,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-${{ matrix.go }}-
             ${{ runner.os }}-go-
+          fail-on-cache-read-error: false
 
       - name: Format (gofumpt)
         run: |

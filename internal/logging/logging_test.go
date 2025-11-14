@@ -25,3 +25,19 @@ func TestContextHelpers(t *testing.T) {
 		t.Fatalf("expected context logger level %v got %v", logger.GetLevel(), from.GetLevel())
 	}
 }
+
+func TestRedactingWriterReturnsInputLength(t *testing.T) {
+	buf := &bytes.Buffer{}
+	rw := &redactingWriter{w: buf}
+	input := []byte(`{"password":"secret"}`)
+	n, err := rw.Write(input)
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if n != len(input) {
+		t.Fatalf("expected %d bytes written, got %d", len(input), n)
+	}
+	if out := buf.String(); !strings.Contains(out, `"password":"***"`) {
+		t.Fatalf("expected redacted output, got %q", out)
+	}
+}

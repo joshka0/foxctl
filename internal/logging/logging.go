@@ -149,8 +149,11 @@ type redactingWriter struct {
 
 func (rw *redactingWriter) Write(p []byte) (int, error) {
 	if len(p) == 0 {
-		return rw.w.Write(p)
+		return 0, nil
 	}
 	redacted := secrets.Redact(string(p))
-	return rw.w.Write([]byte(redacted))
+	if _, err := rw.w.Write([]byte(redacted)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

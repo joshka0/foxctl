@@ -1,6 +1,9 @@
 package secrets
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRedact(t *testing.T) {
 	input := "Authorization: Bearer abcdefghijklmnopqrstuvwxyz"
@@ -45,5 +48,22 @@ func TestRedactHeaders(t *testing.T) {
 	}
 	if got["X-Trace"] != "abc" {
 		t.Fatalf("expected non-secret header unchanged")
+	}
+}
+
+func TestRedactJSONStyleKeys(t *testing.T) {
+	input := `{"password":"secret","api_key":"ABCDEFGHIJKLMNOPQRST","token":"tok12345678901234567890"}`
+	got := Redact(input)
+	if got == input {
+		t.Fatalf("expected redaction for JSON-style keys")
+	}
+	if want := `"password":"***"`; !strings.Contains(got, want) {
+		t.Fatalf("expected password redaction, got %q", got)
+	}
+	if want := `"api_key":"***"`; !strings.Contains(got, want) {
+		t.Fatalf("expected api_key redaction, got %q", got)
+	}
+	if want := `"token":"***"`; !strings.Contains(got, want) {
+		t.Fatalf("expected token redaction, got %q", got)
 	}
 }

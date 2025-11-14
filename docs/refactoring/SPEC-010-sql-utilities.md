@@ -189,6 +189,7 @@ job, isDup, err := sqlutil.WithTx(ctx, s.db, func(tx *sql.Tx) (Job, bool, error)
 package sqlutil
 
 import (
+    "fmt"
     "strings"
 )
 
@@ -318,10 +319,14 @@ query := "SELECT * FROM jobs " + where + " ORDER BY created_at DESC LIMIT ?"
 args = append(args, limit)
 
 // AFTER
-qb := sqlutil.NewQueryBuilder("jobs").
-    WhereEq("workspace", workspace).
-    WhereEq("state", state).
-    OrderBy("created_at", "DESC").
+qb := sqlutil.NewQueryBuilder("jobs")
+if workspace != "" {
+    qb = qb.WhereEq("workspace", workspace)
+}
+if state != "" {
+    qb = qb.WhereEq("state", state)
+}
+qb = qb.OrderBy("created_at", "DESC").
     Limit(limit)
 
 query, args := qb.Build()
@@ -398,14 +403,17 @@ func (m *Migrator) Migrate(ctx context.Context) error {
         }
 
         err = WithTransaction(ctx, m.db, func(tx *sql.Tx) error {
+            version := migration.Version
+            name := migration.Name
+
             if _, err := tx.ExecContext(ctx, migration.Up); err != nil {
-                return fmt.Errorf("migration %d (%s) failed: %w", migration.Version, migration.Name, err)
+                return fmt.Errorf("migration %d (%s) failed: %w", version, name, err)
             }
 
             _, err := tx.ExecContext(ctx, `
                 INSERT INTO schema_migrations (version, name, applied_at)
                 VALUES (?, ?, datetime('now'))
-            `, migration.Version, migration.Name)
+            `, version, name)
 
             return err
         })

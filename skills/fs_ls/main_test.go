@@ -57,9 +57,9 @@ func newFsLsRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *skills
 	if err := os.Chdir(workspace); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		_ = os.Chdir(oldwd)
-	}()
+	})
 	state := t.TempDir()
 	cfg := config.Config{
 		Home:           state,

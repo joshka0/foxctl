@@ -54,9 +54,10 @@ All storage interfaces must share the same behavioral guarantees so that middlew
 and commands can rely on consistent semantics:
 
 1. **Error Contracts**  
-   - Every `Get`/`Head` operation returns `ErrNotFound` (wrapped) when the target does not exist.  
+   - `CacheStore.Get` returns `(Entry, bool, error)`; the boolean indicates a cache hit, and errors represent actual failures (no `ErrNotFound` for misses).  
+   - All other `Get`/`Head` operations return `ErrNotFound` (wrapped) when the target does not exist.  
    - Mutations wrap lower-level I/O errors but must never return partial results.  
-   - Callers must rely on `errors.Is(err, ErrNotFound)` for miss detection instead of bespoke booleans.
+   - Callers must rely on `errors.Is(err, ErrNotFound)` for miss detection on CAS, memory, and job stores.
 2. **Concurrency**  
    - Implementations must be safe for concurrent use by multiple goroutines without additional locking.
      Long-running operations may take locks internally but cannot race or corrupt shared state.
@@ -84,11 +85,11 @@ type Store interface {
     Close() error
 }
 
-// CacheStore manages execution result caching with TTL support
-// All Get operations return ErrNotFound when the cache key is absent.
+// CacheStore manages execution result caching with TTL support.
+// Get returns (entry, hit, err) where hit indicates a cache match.
 type CacheStore interface {
     Store
-    Get(ctx context.Context, key string) (Entry, error)
+    Get(ctx context.Context, key string) (Entry, bool, error)
     Put(ctx context.Context, entry Entry) error
     Recent(ctx context.Context, workspace string, limit int) ([]Entry, error)
     Delete(ctx context.Context, key string) error
@@ -374,7 +375,7 @@ func TestWithMockStore(t *testing.T) {
 ## Success Criteria
 
 - [ ] All storage implementations implement their respective interfaces
-- [ ] Error contracts documented and enforced (callers use `errors.Is(err, ErrNotFound)` for misses)
+- [ ] Error contracts documented and enforced (`CacheStore.Get` uses a hit flag; other stores rely on `errors.Is(err, ErrNotFound)`)
 - [ ] Concurrency guarantees documented for each store (thread-safe vs caller-synchronized)
 - [ ] All consumers use interfaces instead of concrete types
 - [ ] Automated or checklist-based verification ensures all alias usages are removed before Phase 7

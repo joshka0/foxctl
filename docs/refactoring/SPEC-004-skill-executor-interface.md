@@ -228,11 +228,16 @@ func (s *Store) executeSkill(ctx context.Context, jobID, manifestPath, artifactP
 
     // Progress tracking setup
     progressPath := filepath.Join(s.root, jobID, "progress.ndjson")
-    progressFile, _ := os.OpenFile(progressPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+    progressFile, err := os.OpenFile(progressPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+    if err != nil {
+        return nil, fmt.Errorf("open progress file: %w", err)
+    }
     defer progressFile.Close()
 
     // Write start event
-    writeProgressEvent(progressFile, ProgressEvent{Kind: "start", Timestamp: time.Now()})
+    if err := writeProgressEvent(progressFile, ProgressEvent{Kind: "start", Timestamp: time.Now()}); err != nil {
+        return nil, fmt.Errorf("write start event: %w", err)
+    }
 
     // Execute using injected executor
     result, err := s.executor.Execute(ctx, execution.ExecuteOptions{
@@ -242,17 +247,21 @@ func (s *Store) executeSkill(ctx context.Context, jobID, manifestPath, artifactP
     })
 
     // Write result event
-    writeProgressEvent(progressFile, ProgressEvent{
+    if err := writeProgressEvent(progressFile, ProgressEvent{
         Kind:      "result",
         Timestamp: time.Now(),
         Stdout:    string(result.Stdout),
         Stderr:    string(result.Stderr),
         Error:     result.Error,
-    })
+    }); err != nil {
+        return nil, fmt.Errorf("write result event: %w", err)
+    }
 
     // Persist result
     resultPath := filepath.Join(s.root, jobID, "result.json")
-    os.WriteFile(resultPath, result.Stdout, 0644)
+    if err := os.WriteFile(resultPath, result.Stdout, 0o644); err != nil {
+        return nil, fmt.Errorf("write result file: %w", err)
+    }
 
     return result.Stdout, result.Error
 }
