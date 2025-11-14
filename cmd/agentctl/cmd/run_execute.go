@@ -98,13 +98,11 @@ func (e *runExecutor) remember(result []byte) error {
 	if strings.TrimSpace(e.options.RememberName) == "" {
 		return nil
 	}
-	return rememberResult(
-		e.ctx,
-		e.cfg,
-		e.options.RememberName,
-		e.options.RememberType,
-		e.options.RememberSummary,
-		e.options.Workspace,
-		result,
-	)
+	return rememberResult(e.ctx, e.cfg, RememberOptions{
+		Name:      e.options.RememberName,
+		Type:      e.options.RememberType,
+		Summary:   e.options.RememberSummary,
+		Workspace: e.options.Workspace,
+		Result:    result,
+	})
 }

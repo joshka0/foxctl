@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jkatigb/agentctl/internal/artifacts"
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/dbutil"
@@ -33,9 +34,10 @@ type ScoredEntry = storage.ScoredEntry
 
 // Store handles named memory persistence.
 type Store struct {
-	db   *sql.DB
-	cas  *cas.Store
-	path string
+	db              *sql.DB
+	cas             *cas.Store
+	artifactManager artifacts.Manager
+	path            string
 }
 
 // Stats aliases the shared memory stats type.
@@ -59,12 +61,14 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	// sqliteutil.OpenDB handles directory creation, WAL configuration, and migration execution.
 
 	var casStore *cas.Store
+	var artifactMgr artifacts.Manager
 	if casPath != "" {
 		if casStore, err = cas.NewStore(casPath); err != nil {
 			return nil, err
 		}
+		artifactMgr = artifacts.NewManager(casStore)
 	}
-	store = &Store{db: db, cas: casStore, path: dbPath}
+	store = &Store{db: db, cas: casStore, artifactManager: artifactMgr, path: dbPath}
 	return store, nil
 }
 
@@ -242,49 +246,66 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 	return nil
 }
 
-// SaveFromResult is a helper that stores a result envelope.
-func (s *Store) SaveFromResult(ctx context.Context, name, typ, workspace, summary string, result []byte) (NamedEntry, error) {
+// SaveOptions contains parameters for saving memory entries.
+type SaveOptions struct {
+	Name      string
+	Type      string
+	Workspace string
+	Summary   string
+	Result    []byte
+}
+
+// SaveResult stores a result envelope using structured options.
+func (s *Store) SaveResult(ctx context.Context, opts SaveOptions) (NamedEntry, error) {
 	entry := NamedEntry{
+		Name:      opts.Name,
+		Type:      opts.Type,
+		Workspace: opts.Workspace,
+		Summary:   opts.Summary,
+		Result:    opts.Result,
+		Digests:   cache.CollectDigests(opts.Result),
+	}
+	return s.Save(ctx, entry)
+}
+
+// SaveFromResult is a helper that stores a result envelope.
+// Deprecated: Use SaveResult with SaveOptions instead for better clarity.
+func (s *Store) SaveFromResult(ctx context.Context, name, typ, workspace, summary string, result []byte) (NamedEntry, error) {
+	return s.SaveResult(ctx, SaveOptions{
 		Name:      name,
 		Type:      typ,
 		Workspace: workspace,
 		Summary:   summary,
 		Result:    result,
-		Digests:   cache.CollectDigests(result),
-	}
-	return s.Save(ctx, entry)
+	})
 }
 
 // ErrNotFound indicates missing entries.
 var ErrNotFound = fmt.Errorf("memory: not found")
 
 func (s *Store) pin(ctx context.Context, digests []string) {
-	if s.cas == nil {
+	if s.artifactManager == nil {
 		return
 	}
-	for _, d := range digests {
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			return
-		}
-		if err := s.cas.Pin(ctx, d); err != nil {
-			errs.Ignore(err, "memory: pin digest")
-		}
+	// Check for context cancellation
+	if ctx.Err() != nil {
+		return
+	}
+	if err := s.artifactManager.Pin(ctx, digests...); err != nil {
+		errs.Ignore(err, "memory: pin digests")
 	}
 }
 
 func (s *Store) unpin(ctx context.Context, digests []string) {
-	if s.cas == nil {
+	if s.artifactManager == nil {
 		return
 	}
-	for _, d := range digests {
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			return
-		}
-		if err := s.cas.Unpin(ctx, d); err != nil {
-			errs.Ignore(err, "memory: unpin digest")
-		}
+	// Check for context cancellation
+	if ctx.Err() != nil {
+		return
+	}
+	if err := s.artifactManager.Unpin(ctx, digests...); err != nil {
+		errs.Ignore(err, "memory: unpin digests")
 	}
 }
 

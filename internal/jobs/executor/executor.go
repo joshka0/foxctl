@@ -221,7 +221,11 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 			err = fmt.Errorf("skill executor returned nil result without error")
 		}
 	} else {
-		stdout, stderr, err = runner.Run(ctx, manifest, artifactPath, input)
+		stdout, stderr, err = runner.RunWithOptions(ctx, runner.RunOptions{
+			Manifest:     manifest,
+			ArtifactPath: artifactPath,
+			Input:        input,
+		})
 	}
 	metrics.Global().RecordExecutionTime(time.Since(start))
 	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")

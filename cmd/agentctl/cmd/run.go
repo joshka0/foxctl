@@ -151,8 +151,17 @@ func annotateRunMeta(result []byte, workspacePath, skillVersion string) []byte {
 	return data
 }
 
-func rememberResult(ctx context.Context, cfg config.Config, name, typ, summary, workspacePath string, result []byte) error {
-	name = strings.TrimSpace(strings.TrimPrefix(name, "memory:"))
+// RememberOptions contains parameters for saving execution results to memory.
+type RememberOptions struct {
+	Name      string
+	Type      string
+	Summary   string
+	Workspace string
+	Result    []byte
+}
+
+func rememberResult(ctx context.Context, cfg config.Config, opts RememberOptions) error {
+	name := strings.TrimSpace(strings.TrimPrefix(opts.Name, "memory:"))
 	if name == "" {
 		return fmt.Errorf("memory name cannot be empty")
 	}
@@ -163,9 +172,16 @@ func rememberResult(ctx context.Context, cfg config.Config, name, typ, summary, 
 	defer func() {
 		errs.Ignore(store.Close(), "close memory store after remember")
 	}()
+	summary := opts.Summary
 	if summary == "" {
-		summary = summarizeResult(result)
+		summary = summarizeResult(opts.Result)
 	}
-	_, err = store.SaveFromResult(ctx, name, typ, workspacePath, summary, result)
+	_, err = store.SaveResult(ctx, memstore.SaveOptions{
+		Name:      name,
+		Type:      opts.Type,
+		Workspace: opts.Workspace,
+		Summary:   summary,
+		Result:    opts.Result,
+	})
 	return err
 }
