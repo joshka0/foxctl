@@ -51,6 +51,7 @@ jobs:
           echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
 
       - name: Cache Go modules and build cache
+        continue-on-error: true
         uses: actions/cache@v4
         with:
           path: |
@@ -60,7 +61,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-${{ matrix.go }}-
             ${{ runner.os }}-go-
-          fail-on-cache-read-error: false
 
       - name: Format (gofumpt)
         run: |

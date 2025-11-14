@@ -27,7 +27,7 @@ func TestFsLsListsEntries(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newFsLsRunner(t, buf, work)
+	rc := newFsLsRunner(t, buf)
 	defer func() { _ = rc.Close() }()
 
 	in := input{Path: work}
@@ -48,18 +48,8 @@ func TestFsLsListsEntries(t *testing.T) {
 	}
 }
 
-func newFsLsRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *skillslib.RunnerContext {
+func newFsLsRunner(t *testing.T, stdout *bytes.Buffer) *skillslib.RunnerContext {
 	t.Helper()
-	oldwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(workspace); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chdir(oldwd)
-	})
 	state := t.TempDir()
 	cfg := config.Config{
 		Home:           state,
