@@ -74,7 +74,7 @@ jobs:
         run: make vet
 
       - name: Unit tests (no race)
-        run: make test
+        run: make test-short
 
       - name: Race tests (Linux only)
         if: runner.os == 'Linux'
@@ -84,7 +84,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p coverage
-          go test ./... -covermode=atomic -coverprofile=coverage/coverage.out
+          go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
           go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
           awk '/total:/ { if ($3+0 < 50.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
 
@@ -115,8 +115,30 @@ jobs:
           use-quiet-mode: 'yes'
           config-file: .github/mlc_config.json
 
+  e2e-tests:
+    runs-on: self-hosted
+    needs: build-test
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.22.x']
+        test:
+          - TestFSReadCommandOutputsPreview
+          - TestFSReadCommandRemember
+          - TestEndToEndCacheMemoryWorkflow
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: Run ${{ matrix.test }} (cmd/agentctl/cmd)
+        run: |
+          CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
+
   all-checks:
-    needs: [build-test, docs-lint]
+    needs: [build-test, docs-lint, e2e-tests]
     runs-on: self-hosted
     steps:
       - run: echo "✅ All checks passed"

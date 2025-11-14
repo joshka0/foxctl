@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/execution"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/jkatigb/agentctl/internal/metrics"
@@ -37,7 +38,7 @@ type Persistence interface {
 type Executor struct {
 	root            string
 	persist         Persistence
-	run             RunnerFunc
+	skillExecutor   execution.SkillExecutor
 	logger          zerolog.Logger
 	progressFactory func(jobDir string) (*progressWriter, error)
 }
@@ -46,9 +47,18 @@ type Executor struct {
 type Option func(*Executor)
 
 // WithRunner overrides the runner invocation used by the executor.
+// Deprecated: Use WithSkillExecutor for better testability.
 func WithRunner(run RunnerFunc) Option {
 	return func(e *Executor) {
-		e.run = run
+		// Adapt the RunnerFunc to SkillExecutor interface
+		e.skillExecutor = newRunnerFuncAdapter(run)
+	}
+}
+
+// WithSkillExecutor sets a custom skill executor.
+func WithSkillExecutor(executor execution.SkillExecutor) Option {
+	return func(e *Executor) {
+		e.skillExecutor = executor
 	}
 }
 
@@ -71,7 +81,7 @@ func New(root string, persist Persistence, opts ...Option) *Executor {
 	exec := &Executor{
 		root:            root,
 		persist:         persist,
-		run:             runner.Run,
+		skillExecutor:   execution.NewRunnerExecutor(),
 		logger:          logging.Default(),
 		progressFactory: newProgressWriter,
 	}
@@ -187,7 +197,31 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 			Msg("progress writer init failed")
 	}
 
-	stdout, stderr, err := e.run(ctx, manifest, artifactPath, input)
+	var stdout, stderr []byte
+	var err error
+	if e.skillExecutor != nil {
+		result, execErr := e.skillExecutor.Execute(ctx, execution.ExecuteOptions{
+			Manifest:     manifest,
+			ArtifactPath: artifactPath,
+			Input:        input,
+		})
+		if result != nil {
+			stdout = result.Stdout
+			stderr = result.Stderr
+			if execErr != nil {
+				err = execErr
+			} else {
+				err = result.Error
+			}
+		} else {
+			err = execErr
+		}
+		if result == nil && execErr == nil {
+			err = fmt.Errorf("skill executor returned nil result without error")
+		}
+	} else {
+		stdout, stderr, err = runner.Run(ctx, manifest, artifactPath, input)
+	}
 	metrics.Global().RecordExecutionTime(time.Since(start))
 	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
 	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
@@ -297,4 +331,34 @@ func (e *Executor) jobWorkspace(id string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
+}
+
+// newRunnerFuncAdapter adapts a RunnerFunc to the SkillExecutor interface.
+func newRunnerFuncAdapter(run RunnerFunc) execution.SkillExecutor {
+	return execution.ExecutorFunc(func(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
+		manifest := opts.Manifest
+		if manifest.Metadata.Name == "" && opts.ManifestPath != "" {
+			var err error
+			manifest, err = skill.LoadManifest(opts.ManifestPath)
+			if err != nil {
+				return nil, fmt.Errorf("load manifest: %w", err)
+			}
+		}
+
+		// Call the runner function
+		stdout, stderr, runErr := run(ctx, manifest, opts.ArtifactPath, opts.Input)
+
+		// Determine exit code
+		exitCode := 0
+		if runErr != nil {
+			exitCode = 1
+		}
+
+		return &execution.Result{
+			Stdout:   stdout,
+			Stderr:   stderr,
+			ExitCode: exitCode,
+			Error:    runErr,
+		}, nil
+	})
 }

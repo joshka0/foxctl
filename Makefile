@@ -26,6 +26,9 @@ vet:
 test:
 	@$(GO_CMD) test ./...
 
+test-short:
+	@$(GO_CMD) test -short ./...
+
 test-race:
 	@env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO) test -race ./...
 
