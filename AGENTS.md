@@ -30,6 +30,19 @@ When in doubt, prefer the sources in **📚 Canonical Sources** and follow the *
 
 **Why:** keeps AI changes reviewable, secret‑free, and reproducible.
 
+### Mega-PR Workflow (spec batches)
+
+When multiple spec PRs need to land together, follow this script (or run the `/mega-pr` alias once available):
+
+1. **Rebase each source branch**: `git fetch origin <branch>` → `git switch <branch>` → `git rebase origin/main` → run `make fmt`, `make lint`, `CGO_ENABLED=0 go test ./...`, then `git push -f`.
+2. **Create aggregation branch**: `git checkout main && git pull --ff-only`, then `git checkout -b codex/<mega-name>`.
+3. **Merge or cherry-pick branches sequentially** onto the mega branch, resolving conflicts as you go.
+4. **Validate once** on the mega branch: `make fmt`, `make lint`, `CGO_ENABLED=0 go test ./...`.
+5. **Push & open** mega PR with `gh pr create --base main --head codex/<mega-name>` (mention the superseded PR numbers).
+6. **Close superseded PRs** with a comment like “Superseded by mega PR #XX” and delete their remote branches.
+
+This keeps CodeRabbit focused on a single diff and avoids repeated conflict resolution across overlapping spec branches.
+
 ---
 
 ## 📋 Quick Reference Card
