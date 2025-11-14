@@ -1,267 +1,196 @@
 # Refactoring Specifications
 
-This directory contains detailed specifications for refactoring and improving the agentctl codebase according to Go best practices.
+This directory contains detailed specifications for improving the agentctl codebase.
 
-## Overview
+## Status Overview
 
-These specifications address code quality issues identified through comprehensive codebase analysis, focusing on:
-- **Architecture**: Better separation of concerns and layered design
-- **Maintainability**: Reducing code duplication and complexity
-- **Testability**: Introducing interfaces and dependency injection
-- **Reliability**: Improving error handling and data integrity
+### ✅ Completed (8 specs - moved to completed/)
 
-## Specifications Index
+All Phase 1-2 refactoring specs have been implemented:
 
-### Critical Priority
+| Spec | Title | Status |
+|------|-------|--------|
+| SPEC-001 | Storage Interfaces | ✅ Completed |
+| SPEC-002 | Refactor Run Command | ✅ Completed |
+| SPEC-003 | Database Scanning Helpers | ✅ Completed |
+| SPEC-004 | SkillExecutor Interface | ✅ Completed |
+| SPEC-005 | Artifact Management | ✅ Completed |
+| SPEC-006 | Fix Error Handling | ✅ Completed |
+| SPEC-007 | Replace Long Parameter Lists | ✅ Completed |
+| SPEC-010 | SQL Utilities | ✅ Completed |
 
-| Spec | Title | Complexity | Est. Time | Status |
-|------|-------|------------|-----------|--------|
-| [SPEC-001](SPEC-001-storage-interfaces.md) | Storage Interfaces | High | 18h | Draft |
-| [SPEC-002](SPEC-002-refactor-run-command.md) | Refactor Run Command | High | 18h | Draft |
-| [SPEC-006](SPEC-006-fix-error-handling.md) | Fix Error Handling | Medium | 14h | Draft |
+See [completed/README.md](completed/README.md) for details.
 
-**Total Critical**: 50 hours
+### 🚧 In Progress (2 specs)
 
-### High Priority
+| Spec | Title | Progress | Effort Remaining |
+|------|-------|----------|------------------|
+| [SPEC-008](SPEC-008-reorganize-packages.md) | Reorganize Packages | 90% | 2-3h |
+| [SPEC-009](SPEC-009-extract-skill-discovery.md) | Extract Skill Discovery | 30% | 7h |
 
-| Spec | Title | Complexity | Est. Time | Status |
-|------|-------|------------|-----------|--------|
-| [SPEC-003](SPEC-003-database-scanning-helpers.md) | Database Scanning Helpers | Medium | 8h | Draft |
-| [SPEC-004](SPEC-004-skill-executor-interface.md) | SkillExecutor Interface | Medium | 11.5h | Draft |
-| [SPEC-005](SPEC-005-artifact-management.md) | Artifact Management Extraction | Medium | 13h | Draft |
+### 📋 Phase 6-8: Road to v1.0 (9 new specs)
 
-**Total High**: 32.5 hours
+#### Critical Priority (Security + OpenAPI Core)
 
-### Medium Priority
+| Spec | Title | Complexity | Estimate | Blocks |
+|------|-------|------------|----------|--------|
+| [SPEC-011](SPEC-011-pathvalidator-hardening.md) | PathValidator Hardening | Low | 5.5h | Security |
+| [SPEC-012](SPEC-012-openapi-spec-loader.md) | OpenAPI Spec Loader | Medium | 10h | SPEC-013/14 |
+| [SPEC-013](SPEC-013-openapi-request-builder.md) | OpenAPI Request Builder | High | 12h | SPEC-014 |
+| [SPEC-014](SPEC-014-openapi-http-client.md) | OpenAPI HTTP Client | High | 15h | SPEC-15/16 |
 
-| Spec | Title | Complexity | Est. Time | Status |
-|------|-------|------------|-----------|--------|
-| [SPEC-007](SPEC-007-replace-long-parameter-lists.md) | Replace Long Parameter Lists | Low | 9.5h | Draft |
-| [SPEC-008](SPEC-008-reorganize-packages.md) | Reorganize Internal Packages | High | 15h | Draft |
-| [SPEC-009](SPEC-009-extract-skill-discovery.md) | Extract Skill Discovery Logic | Low | 10.5h | Draft |
+**Subtotal Critical**: 42.5 hours
 
-**Total Medium**: 35 hours
+#### High Priority (OpenAPI Complete)
 
-### Low Priority
+| Spec | Title | Complexity | Estimate |
+|------|-------|------------|----------|
+| [SPEC-015](SPEC-015-openapi-pagination.md) | OpenAPI Pagination | Medium | 10h |
+| [SPEC-016](SPEC-016-openapi-retry-logic.md) | OpenAPI Retry Logic | Low | 8h |
 
-| Spec | Title | Complexity | Est. Time | Status |
-|------|-------|------------|-----------|--------|
-| [SPEC-010](SPEC-010-sql-utilities.md) | Create SQL Utilities Package | Low | 10h | Draft |
+**Subtotal High**: 18 hours
 
-**Total Low**: 10 hours
+#### Medium Priority (Extensibility + Quality)
 
-## Grand Total Estimate
+| Spec | Title | Complexity | Estimate |
+|------|-------|------------|----------|
+| [SPEC-017](SPEC-017-plugin-protocol.md) | Plugin Protocol | High | 20h |
+| [SPEC-018](SPEC-018-golden-test-fixtures.md) | Golden Test Fixtures | Low | 8h |
+| [SPEC-019](SPEC-019-documentation-readme.md) | Root README & Docs | Low | 5h |
 
-**127.5 hours** (~16 working days or 3-4 weeks)
+**Subtotal Medium**: 33 hours
+
+## Total Effort to v1.0
+
+**Remaining Work**: ~102 hours (13 working days)
+- In Progress (SPEC-008/009): ~9h
+- Critical (SPEC-011-014): ~42.5h
+- High (SPEC-015-016): ~18h
+- Medium (SPEC-017-019): ~33h
 
 ## Implementation Sequence
 
-### Phase 1: Foundation (Critical) - 50 hours
-Build the architectural foundation by introducing interfaces and fixing critical issues.
+### Phase 3A: Complete In-Progress (1 week)
+1. **SPEC-008**: Finish package reorganization (3h)
+2. **SPEC-009**: Extract skill discovery (7h)
 
-1. **SPEC-001: Storage Interfaces** (18h)
-   - Creates the interface layer for all storage implementations
-   - **Enables**: Better testing, dependency injection
-   - **Blocks**: SPEC-004, SPEC-005
+### Phase 3B: Security (1 week)
+3. **SPEC-011**: PathValidator hardening (5.5h)
 
-2. **SPEC-002: Refactor Run Command** (18h)
-   - Breaks down 180-line monolithic function
-   - **Enables**: Better maintainability, clearer code
-   - **Uses**: SPEC-001 interfaces
+### Phase 4: OpenAPI Core (3-4 weeks) 🎯
+4. **SPEC-012**: Spec Loader (10h)
+5. **SPEC-013**: Request Builder (12h)
+6. **SPEC-014**: HTTP Client & Response (15h)
+7. **SPEC-015**: Pagination (10h)
+8. **SPEC-016**: Retry Logic (8h)
 
-3. **SPEC-006: Fix Error Handling** (14h)
-   - Eliminates 306 ignored errors
-   - **Enables**: Better reliability, data integrity
-   - **Critical**: Prevents data corruption
+**Milestone**: Working OpenAPI skill, API calls functional
 
-### Phase 2: Cleanup (High Priority) - 32.5 hours
-Reduce duplication and improve architecture.
+### Phase 5: Quality & Extensibility (2 weeks)
+9. **SPEC-018**: Golden Fixtures (8h)
+10. **SPEC-019**: Documentation (5h)
+11. **SPEC-017**: Plugin Protocol (20h) - *optional for v1.0*
 
-4. **SPEC-003: Database Scanning Helpers** (8h)
-   - Eliminates repeated scanning code
-   - **Enables**: Consistent error handling
-   - **Depends on**: SPEC-006 (error handling patterns)
-
-5. **SPEC-004: SkillExecutor Interface** (11.5h)
-   - Decouples jobs from execution
-   - **Enables**: Better testing, flexibility
-   - **Depends on**: SPEC-001
-
-6. **SPEC-005: Artifact Management** (13h)
-   - Centralizes artifact lifecycle management
-   - **Enables**: Consistent artifact handling
-   - **Depends on**: SPEC-001
-
-### Phase 3: Organization (Medium Priority) - 35 hours
-Improve code organization and API design.
-
-7. **SPEC-007: Replace Long Parameter Lists** (9.5h)
-   - Makes APIs cleaner and more maintainable
-   - **Enables**: Better API design
-   - **Can run in parallel** with other specs
-
-8. **SPEC-008: Reorganize Packages** (15h)
-   - Creates layered architecture
-   - **Enables**: Clear boundaries, enforced dependencies
-   - **Should be done after**: All other specs (moves code created in earlier specs)
-
-9. **SPEC-009: Extract Skill Discovery** (10.5h)
-   - Moves business logic from cmd to domain
-   - **Enables**: Reusability, better architecture
-   - **Can run in parallel** with other specs
-
-### Phase 4: Polish (Low Priority) - 10 hours
-Add nice-to-have utilities.
-
-10. **SPEC-010: SQL Utilities** (10h)
-    - Adds transaction and query helpers
-    - **Enables**: Less boilerplate
-    - **Complementary to**: SPEC-003
+**Milestone**: v1.0 Release Candidate
 
 ## Dependency Graph
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Phase 1: Foundation                                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  SPEC-001: Storage Interfaces (18h)                        │
-│      │                                                       │
-│      ├──> SPEC-002: Refactor Run Command (18h)             │
-│      │                                                       │
-│      └──> SPEC-006: Fix Error Handling (14h)               │
-│                │                                             │
-└────────────────┼─────────────────────────────────────────────┘
-                 │
-┌────────────────┼─────────────────────────────────────────────┐
-│ Phase 2: Cleanup                                            │
-├────────────────┼─────────────────────────────────────────────┤
-│                │                                             │
-│                └──> SPEC-003: Database Scanning (8h)        │
-│                                                              │
-│  SPEC-001 ──> SPEC-004: SkillExecutor Interface (11.5h)    │
-│           │                                                  │
-│           └──> SPEC-005: Artifact Management (13h)          │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-                 │
-┌────────────────┼─────────────────────────────────────────────┐
-│ Phase 3: Organization                                       │
-├────────────────┼─────────────────────────────────────────────┤
-│                │                                             │
-│  (parallel) ──> SPEC-007: Replace Long Params (9.5h)        │
-│                │                                             │
-│  (parallel) ──> SPEC-009: Extract Skill Discovery (10.5h)   │
-│                │                                             │
-│  (all above) ──> SPEC-008: Reorganize Packages (15h)        │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-                 │
-┌────────────────┼─────────────────────────────────────────────┐
-│ Phase 4: Polish                                             │
-├────────────────┼─────────────────────────────────────────────┤
-│                │                                             │
-│  SPEC-003 ──> SPEC-010: SQL Utilities (10h)                │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+Phase 3A (Complete Refactoring)
+├─ SPEC-008: Reorganize Packages (90% done)
+└─ SPEC-009: Extract Skill Discovery (30% done)
+
+Phase 3B (Security)
+└─ SPEC-011: PathValidator Hardening
+    └─ Can run in parallel with Phase 4
+
+Phase 4 (OpenAPI - Critical Path)
+└─ SPEC-012: Spec Loader
+    └─ SPEC-013: Request Builder
+        └─ SPEC-014: HTTP Client
+            ├─ SPEC-015: Pagination
+            └─ SPEC-016: Retry Logic
+
+Phase 5 (Quality)
+├─ SPEC-018: Golden Fixtures (depends on OpenAPI completion)
+├─ SPEC-019: Documentation (can run anytime)
+└─ SPEC-017: Plugin Protocol (depends on SPEC-012-016)
 ```
+
+## Success Metrics for v1.0
+
+### Functionality
+- ✅ All Phase 0-5 features implemented
+- ✅ OpenAPI skill works with real APIs (GitHub, Stripe, Slack)
+- ✅ Pagination handles 100+ page responses
+- ✅ Retry logic resilient to 429/5xx errors
+- ✅ PathValidator prevents all escape attempts
+
+### Quality
+- ✅ Test coverage ≥ 85%
+- ✅ Golden fixtures for all envelope types
+- ✅ Zero critical security warnings
+- ✅ CI/CD passing (lint, test, race, coverage)
+
+### Documentation
+- ✅ Root README for new users
+- ✅ CONTRIBUTING guide
+- ✅ Security policy
+- ✅ Troubleshooting guide
+- ✅ API examples (5+ real-world cases)
+
+### Performance
+- ✅ Spec loading < 100ms (cached)
+- ✅ Request building < 10ms
+- ✅ CAS write/read < 50ms for 10MB files
 
 ## Quick Reference
 
-### By Impact
+### By Priority
 
-**Highest Impact** (Do First):
-1. SPEC-001: Storage Interfaces - Enables everything else
-2. SPEC-006: Fix Error Handling - Prevents data corruption
-3. SPEC-002: Refactor Run Command - Most visible improvement
+**Critical** (Must have for v1.0):
+- SPEC-008, 009, 011, 012, 013, 014
 
-**High Impact**:
-4. SPEC-004: SkillExecutor Interface - Major decoupling
-5. SPEC-003: Database Scanning - Eliminates most duplication
-6. SPEC-008: Reorganize Packages - Clearest architecture
+**High** (Should have for v1.0):
+- SPEC-015, 016, 018, 019
 
-**Medium Impact**:
-7. SPEC-005: Artifact Management - Centralizes scattered logic
-8. SPEC-009: Extract Skill Discovery - Better reusability
-
-**Lower Impact** (Polish):
-9. SPEC-007: Replace Long Parameters - API cleanup
-10. SPEC-010: SQL Utilities - Nice-to-have helpers
+**Medium** (Nice to have, can defer):
+- SPEC-017 (plugins optional for v1.0)
 
 ### By Effort
 
-**High Effort** (15+ hours):
-- SPEC-001: Storage Interfaces (18h)
-- SPEC-002: Refactor Run Command (18h)
-- SPEC-008: Reorganize Packages (15h)
+**Quick wins** (< 10h):
+- SPEC-008 (3h remaining)
+- SPEC-011 (5.5h)
+- SPEC-016 (8h)
+- SPEC-018 (8h)
+- SPEC-019 (5h)
 
-**Medium Effort** (10-14 hours):
-- SPEC-006: Fix Error Handling (14h)
-- SPEC-005: Artifact Management (13h)
-- SPEC-004: SkillExecutor Interface (11.5h)
-- SPEC-009: Extract Skill Discovery (10.5h)
-- SPEC-010: SQL Utilities (10h)
+**Medium effort** (10-15h):
+- SPEC-009 (7h remaining)
+- SPEC-012 (10h)
+- SPEC-013 (12h)
+- SPEC-014 (15h)
+- SPEC-015 (10h)
 
-**Low Effort** (< 10 hours):
-- SPEC-007: Replace Long Parameters (9.5h)
-- SPEC-003: Database Scanning (8h)
-
-### By Risk
-
-**Low Risk** (Safe to implement):
-- SPEC-003: Database Scanning (pure addition)
-- SPEC-007: Replace Long Parameters (backward compatible)
-- SPEC-009: Extract Skill Discovery (clear extraction)
-- SPEC-010: SQL Utilities (optional helpers)
-
-**Medium Risk** (Requires careful migration):
-- SPEC-001: Storage Interfaces (big change, but type aliases help)
-- SPEC-004: SkillExecutor Interface (dependency injection)
-- SPEC-005: Artifact Management (refactoring shared logic)
-
-**Higher Risk** (Complex refactoring):
-- SPEC-002: Refactor Run Command (major restructuring)
-- SPEC-006: Fix Error Handling (may expose edge cases)
-- SPEC-008: Reorganize Packages (moves everything)
-
-## Success Metrics
-
-### Code Quality Improvements
-- **Ignored Errors**: 306 → <60 (-80%)
-- **Lines of Duplicated Code**: ~145 → ~10 (-93%)
-- **Average Function Length**: 30 lines → 15 lines (-50%)
-- **Cyclomatic Complexity**: Max 15 → Max 10 (-33%)
-- **Package Coupling**: 13 flat packages → 5 layered domains
-
-### Architectural Improvements
-- **Interfaces**: 0 → 7+ core interfaces
-- **Testability**: Limited mocking → Full mock support
-- **Dependency Direction**: Unclear → Explicit layering
-- **Separation of Concerns**: Mixed → Clear boundaries
-
-### Maintainability Improvements
-- **Code Organization**: Flat → Layered
-- **Reusability**: CLI-only → Framework-ready
-- **Documentation**: Scattered → Comprehensive specs
-- **Onboarding**: Difficult → Clear architecture
+**Large effort** (15+h):
+- SPEC-017 (20h)
 
 ## Contributing
 
-When implementing these specs:
+When implementing specs:
 
 1. **Read the full spec** before starting
 2. **Follow the implementation plan** step-by-step
-3. **Run tests after each step**
-4. **Update the spec status** when complete
-5. **Document any deviations** from the plan
+3. **Run tests after each step** (`make test`)
+4. **Update spec status** when complete
+5. **Move to completed/** when merged
 
-## Questions or Feedback
+## Notes
 
-For questions or suggestions about these specs:
-- Open an issue in the repository
-- Reference the specific SPEC number
-- Include context about your use case
+- **Plugin protocol (SPEC-017)** is optional for v1.0 - can ship as v1.1
+- **SPEC-008/009** are 80% done, just need final cleanup
+- **OpenAPI specs (012-016)** are the critical path - ~55h of focused work
+- All completed specs moved to `completed/` for reference
 
-## License
-
-These specifications are part of the agentctl project and follow the same license.
+See [../spec/core_profile_v1.md](../spec/core_profile_v1.md) for the authoritative specification.
