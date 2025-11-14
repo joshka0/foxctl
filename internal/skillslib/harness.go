@@ -2,6 +2,9 @@
 package skillslib
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -79,6 +82,42 @@ func (rc *RunnerContext) Emit(command string, data any, _ string, meta envelope.
 	}
 	env := envelope.OK(command, data, envelope.WithMeta(meta))
 	return envelope.Write(rc.Stdout, env)
+}
+
+// Artifact describes a stored CAS object.
+type Artifact struct {
+	Digest string
+	Size   int64
+	Kind   string
+}
+
+// PersistJSON marshals value to JSON and stores it in CAS.
+func PersistJSON(ctx context.Context, rc *RunnerContext, value any, tags ...string) (Artifact, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("skills: marshal json: %w", err)
+	}
+	return PersistBuffer(ctx, rc, bytes.NewBuffer(payload), "application/json", tags...)
+}
+
+// PersistBuffer streams the provided buffer into CAS.
+func PersistBuffer(ctx context.Context, rc *RunnerContext, buf *bytes.Buffer, kind string, tags ...string) (Artifact, error) {
+	if buf == nil {
+		return Artifact{}, fmt.Errorf("skills: persist buffer: nil buffer")
+	}
+	obj, err := rc.CASStore.Put(ctx, bytes.NewReader(buf.Bytes()), kind, tags)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("skills: cas put: %w", err)
+	}
+	return Artifact{Digest: obj.Digest, Size: obj.Size, Kind: obj.Kind}, nil
+}
+
+// PreparePreview returns a truncated slice when the collection exceeds max.
+func PreparePreview[T any](items []T, max int) ([]T, bool) {
+	if max <= 0 || len(items) <= max {
+		return items, false
+	}
+	return items[:max], true
 }
 
 // ListOptions configures how filesystem entries are discovered.

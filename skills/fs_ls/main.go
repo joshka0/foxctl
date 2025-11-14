@@ -2,10 +2,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -50,9 +50,9 @@ func main() {
 		errs.Ignore(rc.Close(), "runner context close")
 	}()
 
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("fs/ls", "EARG", fmt.Errorf("decode input: %w", err))
+	in, err := parseInput(os.Stdin)
+	if err != nil {
+		fail("fs/ls", "EARG", err)
 	}
 	if err := run(ctx, rc, in); err != nil {
 		fail("fs/ls", "ERUNTIME", err)
@@ -60,45 +60,29 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
-	dir := in.Path
-	if dir == "" {
-		dir = "."
-	}
-	if in.MaxEntries <= 0 {
-		in.MaxEntries = 200
-	}
-
-	validDir, err := rc.PathValidator.ValidatePath(dir)
-	if err != nil {
-		return fmt.Errorf("path validation failed: %w", err)
-	}
-
-	entries, err := readDir(validDir, in)
+	validDir, err := resolveWorkspace(rc, in.Path)
 	if err != nil {
 		return err
 	}
 
-	total := len(entries)
-	preview := entries
-	if len(preview) > rc.MaxPreview {
-		preview = preview[:rc.MaxPreview]
+	allEntries, err := readDir(validDir, in)
+	if err != nil {
+		return err
 	}
 
-	var artifact string
-	var artifactSize int64
-	if len(entries) > rc.MaxPreview {
-		digest, size, err := storeEntries(ctx, rc, entries)
-		if err != nil {
-			return err
-		}
-		artifact = digest
-		artifactSize = size
+	totalEntries := len(allEntries)
+	limitedEntries, limited := limitEntries(allEntries, in.MaxEntries)
+
+	preview, previewTruncated := preparePreview(limitedEntries, rc.MaxPreview)
+	artifact, err := persistListingArtifact(ctx, rc, limitedEntries, previewTruncated)
+	if err != nil {
+		return err
 	}
 
 	files := 0
 	dirs := 0
 	var totalSize int64
-	for _, e := range entries {
+	for _, e := range allEntries {
 		if e.IsDir {
 			dirs++
 		} else {
@@ -109,22 +93,78 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 
 	data := map[string]any{
 		"path":        validDir,
-		"entry_count": total,
+		"entry_count": totalEntries,
 		"files":       files,
 		"directories": dirs,
 		"total_size":  totalSize,
 		"preview":     preview,
 	}
-	if artifact != "" {
-		data["artifact"] = artifact
-		data["artifact_kind"] = "application/json"
-		data["artifact_size_bytes"] = artifactSize
+	if limited {
+		data["truncated"] = true
+		data["limited_entries"] = len(limitedEntries)
+	}
+	if artifact.Digest != "" {
+		data["artifact"] = artifact.Digest
+		data["artifact_kind"] = artifact.Kind
+		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("fs/ls", data, "application/json", envelope.Meta{
 		Source: "run",
 		Runner: "exec",
 	})
+}
+
+func parseInput(r io.Reader) (input, error) {
+	var in input
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return input{}, fmt.Errorf("decode input: %w", err)
+	}
+	if strings.TrimSpace(in.Path) == "" {
+		in.Path = "."
+	}
+	if in.MaxEntries <= 0 {
+		in.MaxEntries = 200
+	}
+	return in, nil
+}
+
+func resolveWorkspace(rc *skillslib.RunnerContext, path string) (string, error) {
+	valid, err := rc.PathValidator.ValidatePath(path)
+	if err != nil {
+		return "", fmt.Errorf("path validation failed: %w", err)
+	}
+	return valid, nil
+}
+
+func preparePreview(entries []entry, max int) ([]entry, bool) {
+	preview, truncated := skillslib.PreparePreview(entries, max)
+	if truncated {
+		dup := make([]entry, len(preview))
+		copy(dup, preview)
+		preview = dup
+	}
+	return preview, truncated
+}
+
+func persistListingArtifact(ctx context.Context, rc *skillslib.RunnerContext, entries []entry, truncated bool) (skillslib.Artifact, error) {
+	if !truncated {
+		return skillslib.Artifact{}, nil
+	}
+	artifact, err := skillslib.PersistJSON(ctx, rc, entries, "fs_ls")
+	if err != nil {
+		return skillslib.Artifact{}, err
+	}
+	return artifact, nil
+}
+
+func limitEntries(entries []entry, max int) ([]entry, bool) {
+	if max <= 0 || len(entries) <= max {
+		return entries, false
+	}
+	clipped := make([]entry, max)
+	copy(clipped, entries[:max])
+	return clipped, true
 }
 
 func readDir(path string, in input) ([]entry, error) {
@@ -182,18 +222,6 @@ func matches(path string, globs []string) bool {
 		}
 	}
 	return false
-}
-
-func storeEntries(ctx context.Context, rc *skillslib.RunnerContext, entries []entry) (string, int64, error) {
-	buf, err := json.Marshal(entries)
-	if err != nil {
-		return "", 0, fmt.Errorf("marshal entries: %w", err)
-	}
-	obj, err := rc.CASStore.Put(ctx, bytes.NewReader(buf), "application/json", []string{"fs_ls"})
-	if err != nil {
-		return "", 0, fmt.Errorf("cas put: %w", err)
-	}
-	return obj.Digest, obj.Size, nil
 }
 
 func fail(command, code string, err error) {
