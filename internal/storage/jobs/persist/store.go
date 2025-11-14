@@ -4,6 +4,7 @@ package persist
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -319,7 +320,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_args_hash ON jobs(args_hash);
 }
 
 func errorsIsNoRows(err error) bool {
-	return err == sql.ErrNoRows
+	return errors.Is(err, sql.ErrNoRows)
 }
 
 func validSourceStates(target types.State) []types.State {

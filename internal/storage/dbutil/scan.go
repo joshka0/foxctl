@@ -4,6 +4,7 @@ package dbutil
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"time"
 
@@ -64,7 +65,7 @@ func ScanJSONArrayMust(jsonStr string) []string {
 
 // IsNoRows checks if an error is sql.ErrNoRows.
 func IsNoRows(err error) bool {
-	return err == sql.ErrNoRows
+	return errors.Is(err, sql.ErrNoRows)
 }
 
 // TimeScanner helps scan multiple timestamp columns with consistent error handling.

@@ -166,7 +166,7 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 	if _, updateErr := s.db.ExecContext(ctx, `
 		UPDATE named_memory
 		SET last_accessed = ?, access_count = access_count + 1
-		WHERE id = ?`, timeutil.FormatNowUTC(), entry.ID); updateErr != nil {
+		WHERE id = ?`, sqlutil.FormatTimestamp(timeutil.NowUTC()), entry.ID); updateErr != nil {
 		errs.Ignore(updateErr, "memory: refresh access metadata")
 	}
 
@@ -325,6 +325,7 @@ CREATE TABLE IF NOT EXISTS named_memory (
 	access_count INTEGER NOT NULL DEFAULT 0,
 	UNIQUE(name, workspace)
 );
+CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace, updated_at DESC);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("memory: migrate: %w", err)
@@ -389,7 +390,7 @@ func (s *Store) Update(ctx context.Context, name, workspace string, summary, typ
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE named_memory
 		SET summary = ?, type = ?, updated_at = ?
-		WHERE id = ?`, entry.Summary, entry.Type, timeutil.FormatRFC3339Nano(entry.UpdatedAt), entry.ID); err != nil {
+		WHERE id = ?`, entry.Summary, entry.Type, sqlutil.FormatTimestamp(entry.UpdatedAt), entry.ID); err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: update: %w", err)
 	}
 	return entry, nil
@@ -400,10 +401,15 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	if limit <= 0 {
 		limit = 10
 	}
+	// Fetch a larger window (500 most recently accessed entries) to score client-side.
+	// This prevents loading all entries for large datasets while still providing good ranking
+	const maxWindow = 500
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count
 		FROM named_memory
-		WHERE workspace = ?`, workspace)
+		WHERE workspace = ?
+		ORDER BY last_accessed DESC, updated_at DESC
+		LIMIT ?`, workspace, maxWindow)
 	if err != nil {
 		return nil, fmt.Errorf("memory: relevant: %w", err)
 	}

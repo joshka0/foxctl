@@ -466,6 +466,8 @@ CREATE TABLE IF NOT EXISTS auto_cache (
 	hit_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_auto_cache_workspace ON auto_cache(workspace);
+CREATE INDEX IF NOT EXISTS idx_cache_expires ON auto_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_cache_ws_created ON auto_cache(workspace, created_at DESC);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("cache: migrate: %w", err)
