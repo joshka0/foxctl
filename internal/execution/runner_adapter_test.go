@@ -57,7 +57,6 @@ func TestRunnerExecutor_Execute_Success(t *testing.T) {
 		ManifestPath: echoManifest,
 		Input:        []byte(`{"message": "hello"}`),
 	})
-
 	if err != nil {
 		// If execution fails, it might be due to missing artifact
 		// This is acceptable for this test
