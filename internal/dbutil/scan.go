@@ -41,10 +41,24 @@ func ScanTimestampsMust(timestamps ...string) []time.Time {
 }
 
 // ScanJSONArray unmarshals a JSON string into a string slice.
-// Returns nil if unmarshaling fails (for backward compatibility).
-func ScanJSONArray(jsonStr string) []string {
+// Returns an error if unmarshaling fails.
+func ScanJSONArray(jsonStr string) ([]string, error) {
 	var result []string
-	_ = json.Unmarshal([]byte(jsonStr), &result)
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// ScanJSONArrayMust unmarshals a JSON string into a string slice.
+// Returns nil if unmarshaling fails and logs a warning.
+// WARNING: Use ScanJSONArray instead to properly handle errors.
+func ScanJSONArrayMust(jsonStr string) []string {
+	var result []string
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		log.Printf("dbutil: WARNING - failed to unmarshal JSON array: %v (data: %q)", err, jsonStr)
+		return nil
+	}
 	return result
 }
 

@@ -1,70 +1,112 @@
-// Package errors provides error handling utilities for agentctl.
+// Package errors provides utilities for error handling patterns used across agentctl.
 package errors
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 )
 
-// MustClose logs an error if closing fails, but doesn't panic.
-// Use in defer statements where cleanup failure is non-fatal.
+// Closer is an interface for anything that can be closed.
+type Closer interface {
+	Close() error
+}
+
+// MustClose closes the resource and logs any error using the provided logger.
+// This is intended for use in defer statements where returning the error is not possible.
 //
 // Example:
 //
-//	defer errors.MustClose(store, logger)
-func MustClose(closer io.Closer, logger *slog.Logger) {
-	if closer == nil {
+//	defer errors.MustClose(file, logger)
+func MustClose(c Closer, logger *slog.Logger) {
+	if c == nil {
 		return
 	}
-	if err := closer.Close(); err != nil {
-		if logger != nil {
-			logger.Warn("close failed", "error", err)
-		}
+	if err := c.Close(); err != nil {
+		logger.Error("failed to close resource", "error", err)
 	}
 }
 
-// CloseOnErr closes a resource only if err is non-nil.
-// Useful for cleanup in error paths.
+// CloseOnErr closes the resource only if errPtr points to a non-nil error.
+// This is useful for cleanup in functions that return errors, where you want
+// to clean up only if the function is returning an error.
 //
 // Example:
 //
 //	func process() (err error) {
-//	    f, err := os.Open("file")
+//	    tx, err := db.Begin()
 //	    if err != nil {
 //	        return err
 //	    }
-//	    defer errors.CloseOnErr(&err, f)
-//	    // ... work that might fail ...
+//	    defer errors.CloseOnErr(tx, &err)
+//	    // ... do work ...
+//	    return nil
 //	}
-func CloseOnErr(err *error, closer io.Closer) {
-	if err == nil || closer == nil {
+func CloseOnErr(c Closer, errPtr *error) {
+	if c == nil || errPtr == nil || *errPtr == nil {
 		return
 	}
-	if *err != nil {
-		_ = closer.Close() // Already failing, ignore cleanup errors
+	if closeErr := c.Close(); closeErr != nil {
+		*errPtr = fmt.Errorf("%w (close error: %v)", *errPtr, closeErr)
 	}
 }
 
-// Must panics if err is non-nil.
-// Only use in init() or main() for must-succeed operations.
+// Must panics if err is non-nil. This is intended for initialization-time
+// operations where failure is unrecoverable and should prevent the program
+// from starting.
 //
 // Example:
 //
-//	func init() {
-//	    errors.Must(validateConfig())
-//	}
-func Must(err error) {
+//	config := errors.Must(loadConfig())
+func Must[T any](value T, err error) T {
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("unrecoverable error: %v", err))
 	}
+	return value
 }
 
-// Ignore returns a function that ignores an error.
-// Forces explicit acknowledgment of ignored errors.
+// Ignore explicitly acknowledges that an error is being ignored and documents
+// the reason. This function does nothing but serves as documentation.
 //
 // Example:
 //
-//	defer errors.Ignore()(file.Close())
-func Ignore() func(error) {
-	return func(error) {}
+//	errors.Ignore(os.Remove(tempFile), "temp file cleanup failure is not critical")
+func Ignore(err error, reason string) {
+	// This function intentionally does nothing.
+	// It exists solely for documentation purposes.
+	_ = err
+	_ = reason
+}
+
+// LogOnErr logs the error if it's non-nil. Returns the error unchanged.
+// This is useful for logging errors in places where you can't handle them
+// but want visibility.
+//
+// Example:
+//
+//	defer errors.LogOnErr(file.Close(), logger, "failed to close file")
+func LogOnErr(err error, logger *slog.Logger, msg string) error {
+	if err != nil && logger != nil {
+		logger.Error(msg, "error", err)
+	}
+	return err
+}
+
+// MultiClose closes multiple closers and returns the first error encountered.
+// All closers are attempted regardless of errors.
+//
+// Example:
+//
+//	return errors.MultiClose(file1, file2, conn)
+func MultiClose(closers ...io.Closer) error {
+	var firstErr error
+	for _, c := range closers {
+		if c == nil {
+			continue
+		}
+		if err := c.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

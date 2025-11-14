@@ -142,6 +142,65 @@ func TestScanJSONArray(t *testing.T) {
 		name    string
 		jsonStr string
 		want    []string
+		wantErr bool
+	}{
+		{
+			name:    "valid JSON array",
+			jsonStr: `["digest1","digest2","digest3"]`,
+			want:    []string{"digest1", "digest2", "digest3"},
+			wantErr: false,
+		},
+		{
+			name:    "empty JSON array",
+			jsonStr: `[]`,
+			want:    []string{},
+			wantErr: false,
+		},
+		{
+			name:    "single element array",
+			jsonStr: `["single"]`,
+			want:    []string{"single"},
+			wantErr: false,
+		},
+		{
+			name:    "invalid JSON returns error",
+			jsonStr: `not-json`,
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "empty string returns error",
+			jsonStr: "",
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "JSON object instead of array returns error",
+			jsonStr: `{"key":"value"}`,
+			want:    nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ScanJSONArray(tt.jsonStr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ScanJSONArray() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ScanJSONArray() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanJSONArrayMust(t *testing.T) {
+	tests := []struct {
+		name    string
+		jsonStr string
+		want    []string
 	}{
 		{
 			name:    "valid JSON array",
@@ -177,9 +236,9 @@ func TestScanJSONArray(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ScanJSONArray(tt.jsonStr)
+			got := ScanJSONArrayMust(tt.jsonStr)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ScanJSONArray() = %v, want %v", got, tt.want)
+				t.Errorf("ScanJSONArrayMust() = %v, want %v", got, tt.want)
 			}
 		})
 	}

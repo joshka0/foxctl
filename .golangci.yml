@@ -8,5 +8,22 @@ linters:
     - gofmt
     - gofumpt
     - revive
+    - errcheck
 issues:
   exclude-use-default: false
+
+linters-settings:
+  errcheck:
+    # Check blank assignments for unchecked errors
+    check-blank: true
+    # Ignore error checks in test cleanup defer statements
+    exclude-functions:
+      - (io.Closer).Close  # Allow _ = closer.Close() in defer for test cleanup
+  revive:
+    rules:
+      - name: unhandled-error
+        severity: warning
+        disabled: false
+        arguments:
+          - "fmt.Printf"
+          - "fmt.Println"

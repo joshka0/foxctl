@@ -35,7 +35,14 @@ func BenchmarkScanJSONArray(b *testing.B) {
 	b.Run("ScanJSONArray", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_ = ScanJSONArray(testJSONArray)
+			_, _ = ScanJSONArray(testJSONArray)
+		}
+	})
+
+	b.Run("ScanJSONArrayMust", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = ScanJSONArrayMust(testJSONArray)
 		}
 	})
 }
