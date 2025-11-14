@@ -1,7 +1,16 @@
 # SPEC-007: Replace Long Parameter Lists with Option Structs
 
 ## Status
-**Draft** | Priority: Medium | Complexity: Low
+**Complete – November 14, 2025** | Priority: Medium | Complexity: Low
+
+All targeted call sites have been converted to options structs on `main`:
+
+- `cmd/agentctl/cmd/run.go:154-187` now exposes `RememberOptions` and forwards to the memory store using named fields.
+- `internal/memory/store.go:249-281` ships `SaveOptions`/`SaveResult`; the legacy positional helper is just a shim.
+- `internal/jobs/executor/executor.go:30-333` routes `RunSkill`/`ExecutePrepared` through a private `executeOptions` struct so the 90‑line executor logic no longer takes positional args.
+- `internal/runner/runner.go:15-52` offers `RunWithOptions` with a deprecated thin wrapper around it.
+
+The remaining checklist below is preserved for historical context; all required items are satisfied in the codebase as of the date noted above.
 
 ## Problem Statement
 

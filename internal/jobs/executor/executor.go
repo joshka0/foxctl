@@ -26,6 +26,14 @@ import (
 // RunnerFunc executes a skill manifest and returns stdout, stderr, and an error.
 type RunnerFunc func(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error)
 
+// executeOptions captures the parameters used when running a skill.
+type executeOptions struct {
+	JobID        string
+	Manifest     skill.Manifest
+	ArtifactPath string
+	Input        []byte
+}
+
 // Persistence captures the persistence primitives required by the executor.
 type Persistence interface {
 	InsertJob(ctx context.Context, job types.Job) error
@@ -105,13 +113,23 @@ func (e *Executor) RunSkill(ctx context.Context, manifest skill.Manifest, artifa
 		// Should not happen when dedupe disabled, but guard regardless.
 		return job, nil, fmt.Errorf("jobs: unexpected duplicate during run")
 	}
-	result, err := e.executeSkill(ctx, job.ID, manifest, artifactPath, input)
+	result, err := e.executeSkill(ctx, executeOptions{
+		JobID:        job.ID,
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 	return job, result, err
 }
 
 // ExecutePrepared runs a previously prepared job.
 func (e *Executor) ExecutePrepared(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
-	return e.executeSkill(ctx, jobID, manifest, artifactPath, input)
+	return e.executeSkill(ctx, executeOptions{
+		JobID:        jobID,
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 }
 
 // PrepareSkillJob creates a queued skill job.
@@ -167,8 +185,8 @@ func (e *Executor) prepareSkillJob(ctx context.Context, name string, input []byt
 	return job, false, nil
 }
 
-func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
-	ctx, pw, cleanup, start, err := e.startExecution(ctx, jobID)
+func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byte, error) {
+	ctx, pw, cleanup, start, err := e.startExecution(ctx, opts.JobID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,15 +194,15 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 		defer cleanup()
 	}
 
-	stdout, stderr, runErr := e.runSkill(ctx, manifest, artifactPath, input)
+	stdout, stderr, runErr := e.runSkill(ctx, opts.Manifest, opts.ArtifactPath, opts.Input)
 	metrics.Global().RecordExecutionTime(time.Since(start))
-	e.writeStderrLog(jobID, stderr)
+	e.writeStderrLog(opts.JobID, stderr)
 
 	if runErr != nil {
-		return e.handleFailure(ctx, jobID, stdout, stderr, runErr, pw)
+		return e.handleFailure(ctx, opts.JobID, stdout, stderr, runErr, pw)
 	}
 
-	return e.handleSuccess(ctx, jobID, stdout, pw)
+	return e.handleSuccess(ctx, opts.JobID, stdout, pw)
 }
 
 func (e *Executor) startExecution(ctx context.Context, jobID string) (context.Context, *progressWriter, func(), time.Time, error) {
