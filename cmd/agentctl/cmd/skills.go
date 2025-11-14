@@ -10,6 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/policy"
 	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -33,6 +34,7 @@ func newSkillsCommand() *cobra.Command {
 func newSkillsRunCommand() *cobra.Command {
 	var input string
 	var inputFile string
+	var workspaceFlag string
 	cmd := &cobra.Command{
 		Use:   "run <skill-name>",
 		Short: "Run a local skill binary with JSON input",
@@ -50,7 +52,15 @@ func newSkillsRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			stdout, stderr, err := executeSkill(cmd.Context(), handle.Manifest, handle.ArtifactPath, data)
+			ws := workspace.Normalize(workspaceFlag)
+			if ws == "" {
+				ws = workspace.Detect("")
+			}
+			runCtx := cmd.Context()
+			if ws != "" {
+				runCtx = workspace.WithContext(runCtx, ws)
+			}
+			stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, data)
 			if len(stderr) > 0 {
 				if _, werr := cmd.ErrOrStderr().Write(append(stderr, '\n')); werr != nil {
 					return werr
@@ -64,6 +74,7 @@ func newSkillsRunCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&input, "input", "", "Inline JSON input (default: {})")
 	cmd.Flags().StringVar(&inputFile, "input-file", "", "Path to JSON input file ('-' for stdin)")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace override (default: auto-detect)")
 	return cmd
 }
 

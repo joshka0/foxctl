@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ func newMemoryRecentCommand() *cobra.Command {
 				return err
 			}
 			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withCacheStore(cmd.Context(), cfg, func(store *cache.Store) error {
+			return withCacheStore(cmd.Context(), cfg, func(store storage.CacheStore) error {
 				entries, err := store.Recent(cmd.Context(), ws, limit)
 				if err != nil {
 					return err
@@ -62,7 +62,7 @@ func newMemoryCacheCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return withCacheStore(cmd.Context(), cfg, func(store *cache.Store) error {
+			return withCacheStore(cmd.Context(), cfg, func(store storage.CacheStore) error {
 				entry, ok, err := store.Get(cmd.Context(), args[0])
 				if err != nil {
 					return err

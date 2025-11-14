@@ -19,8 +19,11 @@ import (
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/dbutil"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
+	"github.com/jkatigb/agentctl/internal/metrics"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/jkatigb/agentctl/internal/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/timeutil"
 )
 
@@ -36,19 +39,11 @@ const (
 	ModeOnly Mode = "only"
 )
 
-// Entry captures auto-cache metadata.
-type Entry struct {
-	CacheKey     string
-	SkillName    string
-	SkillVersion string
-	Workspace    string
-	Result       []byte
-	Digests      []string
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	LastAccessed time.Time
-	HitCount     int
-}
+// Ensure Store implements the storage.CacheStore interface.
+var _ storage.CacheStore = (*Store)(nil)
+
+// Entry aliases the shared cache entry type for backward compatibility.
+type Entry = storage.CacheEntry
 
 // Options controls store behavior.
 type Options struct {
@@ -65,15 +60,11 @@ type Store struct {
 	mu   sync.Mutex
 }
 
-// Stats provides a snapshot of cache metadata.
-type Stats struct {
-	Entries int64
-	Path    string
-	TTL     time.Duration
-}
+// Stats aliases the shared cache stats type.
+type Stats = storage.CacheStats
 
 // Open initializes the cache store at the provided path.
-func Open(ctx context.Context, root string, opts Options) (*Store, error) {
+func Open(ctx context.Context, root string, opts Options) (store *Store, err error) {
 	if opts.AutoTTL <= 0 {
 		opts.AutoTTL = 24 * time.Hour
 	}
@@ -82,6 +73,7 @@ func Open(ctx context.Context, root string, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cache: open db: %w", err)
 	}
+	defer errs.CloseOnErr(&err, db)
 	// Configure connection pool for optimal performance
 	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
 	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
@@ -92,11 +84,10 @@ func Open(ctx context.Context, root string, opts Options) (*Store, error) {
 	var casStore *cas.Store
 	if opts.CASPath != "" {
 		if casStore, err = cas.NewStore(opts.CASPath); err != nil {
-			_ = db.Close()
 			return nil, err
 		}
 	}
-	store := &Store{
+	store = &Store{
 		db:   db,
 		cas:  casStore,
 		ttl:  opts.AutoTTL,
@@ -170,10 +161,12 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 	var created, expires, last string
 	if err := row.Scan(&entry.CacheKey, &entry.SkillName, &entry.SkillVersion, &entry.Workspace, &entry.Result, &digests, &created, &expires, &last, &entry.HitCount); err != nil {
 		if dbutil.IsNoRows(err) {
+			metrics.Global().RecordCacheMiss()
 			return Entry{}, false, nil
 		}
 		return Entry{}, false, fmt.Errorf("cache: scan: %w", err)
 	}
+	metrics.Global().RecordCacheHit()
 	entry.Digests = dbutil.ScanJSONArray(digests)
 	times := dbutil.ScanTimestampsMust(created, expires, last)
 	entry.CreatedAt, entry.ExpiresAt, entry.LastAccessed = times[0], times[1], times[2]
@@ -230,6 +223,28 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// Delete removes a cache entry by key and unpins its artifacts.
+func (s *Store) Delete(ctx context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	row := s.db.QueryRowContext(ctx, `SELECT digests FROM auto_cache WHERE cache_key = ?`, key)
+	var digestsJSON string
+	if err := row.Scan(&digestsJSON); err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil
+		}
+		return fmt.Errorf("cache: get digests for delete: %w", err)
+	}
+	digests := dbutil.ScanJSONArray(digestsJSON)
+
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = ?`, key); err != nil {
+		return fmt.Errorf("cache: delete: %w", err)
+	}
+	s.unpinDigests(ctx, digests)
+	return nil
 }
 
 // AnnotateHit mutates the envelope metadata for cache hits.

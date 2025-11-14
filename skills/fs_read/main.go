@@ -52,28 +52,33 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 		return fmt.Errorf("path is required")
 	}
 
-	info, err := os.Stat(in.Path)
+	validPath, err := rc.PathValidator.ValidatePath(in.Path)
 	if err != nil {
-		return fmt.Errorf("stat %s: %w", in.Path, err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("path %s is a directory", in.Path)
+		return fmt.Errorf("path validation failed: %w", err)
 	}
 
-	file, err := os.Open(in.Path)
+	info, err := os.Stat(validPath)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", in.Path, err)
+		return fmt.Errorf("stat %s: %w", validPath, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("path %s is a directory", validPath)
+	}
+
+	file, err := os.Open(validPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", validPath, err)
 	}
 	defer func() { _ = file.Close() }()
 
-	kind := detectKind(in.Path)
+	kind := detectKind(validPath)
 	obj, err := rc.CASStore.Put(ctx, file, kind, []string{"fs_read"})
 	if err != nil {
-		return fmt.Errorf("cas put %s: %w", in.Path, err)
+		return fmt.Errorf("cas put %s: %w", validPath, err)
 	}
 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("rewind %s: %w", in.Path, err)
+		return fmt.Errorf("rewind %s: %w", validPath, err)
 	}
 
 	limit := previewLimit(rc, in)
@@ -89,7 +94,7 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 	}
 
 	data := map[string]any{
-		"path":                in.Path,
+		"path":                validPath,
 		"size_bytes":          obj.Size,
 		"sha256":              obj.Digest,
 		"mode":                info.Mode().String(),
@@ -109,7 +114,7 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 	if !isText {
 		data["hint"] = "content stored in CAS; fetch via agentctl cas get <digest>"
 	}
-	data["summary"] = fmt.Sprintf("Read %d bytes from %s", obj.Size, filepath.Base(in.Path))
+	data["summary"] = fmt.Sprintf("Read %d bytes from %s", obj.Size, filepath.Base(validPath))
 
 	meta := envelope.Meta{
 		Source: "run",

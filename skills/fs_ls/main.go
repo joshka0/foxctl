@@ -65,7 +65,12 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 		in.MaxEntries = 200
 	}
 
-	entries, err := readDir(dir, in)
+	validDir, err := rc.PathValidator.ValidatePath(dir)
+	if err != nil {
+		return fmt.Errorf("path validation failed: %w", err)
+	}
+
+	entries, err := readDir(validDir, in)
 	if err != nil {
 		return err
 	}
@@ -100,7 +105,7 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 	}
 
 	data := map[string]any{
-		"path":        dir,
+		"path":        validDir,
 		"entry_count": total,
 		"files":       files,
 		"directories": dirs,

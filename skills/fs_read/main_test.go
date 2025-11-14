@@ -119,16 +119,27 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 	}
 }
 
-func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, tmp string) *skillslib.RunnerContext {
+func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *skillslib.RunnerContext {
 	t.Helper()
+	oldwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldwd)
+	}()
+	state := t.TempDir()
 	cfg := config.Config{
-		Home:           tmp,
+		Home:           state,
 		InlineOutputKB: 4,
 		MaxCaptureKB:   config.DefaultMaxCaptureKB,
 		Paths: config.Paths{
-			CAS:   filepath.Join(tmp, "cas"),
-			Jobs:  filepath.Join(tmp, "jobs"),
-			Cache: filepath.Join(tmp, "cache"),
+			CAS:   filepath.Join(state, "cas"),
+			Jobs:  filepath.Join(state, "jobs"),
+			Cache: filepath.Join(state, "cache"),
 		},
 	}
 	rc, err := skillslib.NewRunnerContext(cfg, stdout)

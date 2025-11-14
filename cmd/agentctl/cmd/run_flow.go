@@ -11,6 +11,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/jobs"
+	"github.com/jkatigb/agentctl/internal/storage"
 )
 
 // runOptions captures the configurable behavior for a run invocation.
@@ -35,10 +36,10 @@ type runExecutor struct {
 
 	options runOptions
 
-	cacheStore *cache.Store
+	cacheStore storage.CacheStore
 	cacheKey   string
 
-	jobStore *jobs.Store
+	jobStore storage.JobStore
 
 	asyncRunner func(ctx context.Context, jobID, manifestPath, artifactPath string, stderr io.Writer) error
 }
@@ -137,7 +138,16 @@ func (e *runExecutor) prepareJob(input []byte) (jobs.Job, bool, error) {
 	if err := e.ensureJobStore(); err != nil {
 		return jobs.Job{}, false, err
 	}
-	return e.jobStore.FindOrPrepareSkillJob(e.ctx, e.handle.Manifest.Metadata.Name, input, e.options.dedupe)
+	job, dup, err := e.jobStore.FindOrPrepareSkillJob(e.ctx, e.handle.Manifest.Metadata.Name, input, e.options.dedupe)
+	if err != nil {
+		return job, dup, err
+	}
+	if e.options.workspace != "" {
+		if err := e.jobStore.SetWorkspace(e.ctx, job.ID, e.options.workspace); err != nil {
+			fmt.Fprintf(e.stderr, "warn: unable to persist workspace for job %s: %v\n", job.ID, err)
+		}
+	}
+	return job, dup, nil
 }
 
 // handleDuplicate responds when a matching job already exists.

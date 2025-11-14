@@ -1,10 +1,9 @@
 package cmd
 
 import (
-	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
-	memstore "github.com/jkatigb/agentctl/internal/memory"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -18,8 +17,8 @@ func newMemoryStatsCommand() *cobra.Command {
 				return err
 			}
 
-			var cacheStats cache.Stats
-			if err := withCacheStore(cmd.Context(), cfg, func(store *cache.Store) error {
+			var cacheStats storage.CacheStats
+			if err := withCacheStore(cmd.Context(), cfg, func(store storage.CacheStore) error {
 				stats, err := store.Stats(cmd.Context())
 				if err != nil {
 					return err
@@ -30,8 +29,8 @@ func newMemoryStatsCommand() *cobra.Command {
 				return err
 			}
 
-			var memoryStats memstore.Stats
-			if err := withMemoryStore(cmd.Context(), cfg, func(store *memstore.Store) error {
+			var memoryStats storage.MemoryStats
+			if err := withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
 				stats, err := store.Stats(cmd.Context())
 				if err != nil {
 					return err

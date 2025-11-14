@@ -16,30 +16,20 @@ import (
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/dbutil"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/timeutil"
 )
 
-// NamedEntry represents a saved memory.
-type NamedEntry struct {
-	ID          string
-	Name        string
-	Type        string
-	Workspace   string
-	Summary     string
-	Result      []byte
-	Digests     []string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	LastAccess  time.Time
-	AccessCount int
-}
+// Ensure Store implements storage.MemoryStore.
+var _ storage.MemoryStore = (*Store)(nil)
 
-// ScoredEntry couples a memory entry with its relevance score.
-type ScoredEntry struct {
-	Entry NamedEntry
-	Score float64
-}
+// NamedEntry aliases the shared storage type for backwards compatibility.
+type NamedEntry = storage.NamedEntry
+
+// ScoredEntry aliases the shared scored entry type.
+type ScoredEntry = storage.ScoredEntry
 
 // Store handles named memory persistence.
 type Store struct {
@@ -48,19 +38,17 @@ type Store struct {
 	path string
 }
 
-// Stats summarizes named memory storage metadata.
-type Stats struct {
-	Named int64
-	Path  string
-}
+// Stats aliases the shared memory stats type.
+type Stats = storage.MemoryStats
 
 // Open initializes the memory store rooted at the provided path.
-func Open(ctx context.Context, root string, casPath string) (*Store, error) {
+func Open(ctx context.Context, root string, casPath string) (store *Store, err error) {
 	dbPath := filepath.Join(root, "memory.db")
 	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
+	defer errs.CloseOnErr(&err, db)
 
 	// Configure connection pool for optimal performance
 	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
@@ -73,11 +61,11 @@ func Open(ctx context.Context, root string, casPath string) (*Store, error) {
 	var casStore *cas.Store
 	if casPath != "" {
 		if casStore, err = cas.NewStore(casPath); err != nil {
-			_ = db.Close()
 			return nil, err
 		}
 	}
-	return &Store{db: db, cas: casStore, path: dbPath}, nil
+	store = &Store{db: db, cas: casStore, path: dbPath}
+	return store, nil
 }
 
 // Close releases resources.

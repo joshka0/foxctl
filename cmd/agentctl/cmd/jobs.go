@@ -9,6 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/jobs"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -282,7 +283,7 @@ func newJobsRemoveCommand() *cobra.Command {
 	return cmd
 }
 
-func openJobStore(ctx context.Context) (*jobs.Store, func(), error) {
+func openJobStore(ctx context.Context) (storage.JobStore, func(), error) {
 	cfg, err := commandConfig(ctx)
 	if err != nil {
 		return nil, nil, err

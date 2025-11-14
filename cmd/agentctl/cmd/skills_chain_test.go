@@ -30,9 +30,9 @@ func TestFsReadSkillChainsThroughBash(t *testing.T) {
 	script := `
 set -euo pipefail
 python3 -c 'import json,os; print(json.dumps({"path": os.environ["WORKDIR"]}))' \
-  | "$AGENTCTL_BIN" skills run fs/ls --input-file - \
+  | "$AGENTCTL_BIN" skills run fs/ls --workspace "$WORKDIR" --input-file - \
   | python3 -c 'import json,sys; data=json.load(sys.stdin); path=data["data"]["preview"][0]["path"]; print(json.dumps({"path": path, "max_bytes": 128}))' \
-  | "$AGENTCTL_BIN" skills run fs/read --input-file -
+  | "$AGENTCTL_BIN" skills run fs/read --workspace "$WORKDIR" --input-file -
 `
 	cmd := exec.Command("bash", "-lc", script)
 	cmd.Dir = repoRoot(t)
