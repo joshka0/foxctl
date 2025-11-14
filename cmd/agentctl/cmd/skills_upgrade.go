@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )
@@ -37,10 +36,12 @@ func newSkillsUpgradeCommand() *cobra.Command {
 			if err := writeDistributionArtifacts(dest, manifest, binaryPath, modulePath); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "upgraded %s to version %s\n", manifest.Metadata.Name, manifest.Metadata.Version); err != nil {
-				return err
+			result := map[string]any{
+				"name":    manifest.Metadata.Name,
+				"version": manifest.Metadata.Version,
+				"path":    dest,
 			}
-			return nil
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.skills.upgrade", result))
 		},
 	}
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to new skill.yaml")

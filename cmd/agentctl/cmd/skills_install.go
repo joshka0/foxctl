@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"fmt"
-
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )
@@ -33,10 +32,12 @@ func newSkillsInstallCommand() *cobra.Command {
 			if err := writeDistributionArtifacts(dest, manifest, binaryPath, modulePath); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "installed %s\n", manifest.Metadata.Name); err != nil {
-				return err
+			result := map[string]any{
+				"name":    manifest.Metadata.Name,
+				"version": manifest.Metadata.Version,
+				"path":    dest,
 			}
-			return nil
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.skills.install", result))
 		},
 	}
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to skill.yaml")

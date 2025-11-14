@@ -25,7 +25,7 @@ type runCommandFlags struct {
 }
 
 func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
-	cmd.Flags().StringVar(&flags.Input, "input", "", "Inline JSON input (default: {})")
+	cmd.Flags().StringVar(&flags.Input, "input", "", "Inline JSON input (default: {}). Special values: 'stdin' to extract data from envelope, 'sha256:<hex>' to read from CAS")
 	cmd.Flags().StringVar(&flags.InputFile, "input-file", "", "Path to JSON input file ('-' for stdin)")
 	cmd.Flags().BoolVar(&flags.Async, "async", false, "Submit job and return immediately")
 	cmd.Flags().BoolVar(&flags.Dedupe, "dedupe", false, "Reuse existing job with same args_hash")

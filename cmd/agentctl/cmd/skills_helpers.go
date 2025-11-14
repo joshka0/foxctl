@@ -59,8 +59,13 @@ func ensureSkillDir(skillsRoot string, manifest skill.Manifest) (string, error) 
 		return "", fmt.Errorf("skill metadata name is required")
 	}
 	cleanName := filepath.Clean(name)
-	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) {
+	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
 		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
+	}
+	for _, segment := range strings.Split(cleanName, string(os.PathSeparator)) {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
+		}
 	}
 	root := filepath.Clean(skillsRoot)
 	dest := filepath.Join(root, cleanName)
@@ -70,6 +75,31 @@ func ensureSkillDir(skillsRoot string, manifest skill.Manifest) (string, error) 
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return "", err
+	}
+	return dest, nil
+}
+
+// skillDirPath validates and returns the skill directory path without requiring a valid manifest.
+// This is useful for operations like uninstall where the manifest may be corrupted.
+func skillDirPath(skillsRoot, name string) (string, error) {
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return "", fmt.Errorf("skill name is required")
+	}
+	cleanName = filepath.Clean(cleanName)
+	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
+		return "", fmt.Errorf("invalid skill name %q", name)
+	}
+	for _, segment := range strings.Split(cleanName, string(os.PathSeparator)) {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("invalid skill name %q", name)
+		}
+	}
+	root := filepath.Clean(skillsRoot)
+	dest := filepath.Join(root, cleanName)
+	dest = filepath.Clean(dest)
+	if rel, err := filepath.Rel(root, dest); err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("invalid skill name %q", name)
 	}
 	return dest, nil
 }
