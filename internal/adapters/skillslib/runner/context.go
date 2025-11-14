@@ -76,6 +76,7 @@ func (rc *RunnerContext) Close() error {
 }
 
 // Emit OK envelope with automatic CAS wrapping for large payloads.
+// The third parameter (contentType) is currently unused and reserved for future use.
 func (rc *RunnerContext) Emit(command string, data any, _ string, meta envelope.Meta) error {
 	if meta.CASDigest == "" {
 		if digest := artifactDigest(data); digest != "" {
