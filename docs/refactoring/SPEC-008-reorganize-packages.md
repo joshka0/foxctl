@@ -1,7 +1,7 @@
 # SPEC-008: Reorganize Internal Packages by Domain
 
 ## Status
-**Implemented** | Priority: Medium | Complexity: High
+**In Progress** | Priority: Medium | Complexity: High
 
 ## Problem Statement
 
