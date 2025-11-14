@@ -61,7 +61,15 @@ func determineExitCode(err error) int {
 }
 
 func resolveManifest(opts ExecuteOptions) (skill.Manifest, error) {
+	// If a pre-parsed manifest is provided, validate it has required fields
 	if opts.Manifest.Metadata.Name != "" || opts.Manifest.Distribution.Type != "" {
+		// Require both Name and Distribution.Type to prevent partial manifests
+		if opts.Manifest.Metadata.Name == "" {
+			return skill.Manifest{}, fmt.Errorf("manifest metadata.name is required")
+		}
+		if opts.Manifest.Distribution.Type == "" {
+			return skill.Manifest{}, fmt.Errorf("manifest distribution.type is required")
+		}
 		return opts.Manifest, nil
 	}
 	if opts.ManifestPath == "" {

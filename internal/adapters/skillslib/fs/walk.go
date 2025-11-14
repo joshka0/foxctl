@@ -13,6 +13,9 @@ type ListOptions struct {
 	BasePath string
 	Include  []string
 	Exclude  []string
+	// MaxDepth limits directory traversal depth. A depth of 0 means no limit.
+	// Directories at depth >= MaxDepth are pruned, which means files at exactly
+	// MaxDepth are included (since they reside in a parent directory at MaxDepth-1).
 	MaxDepth int
 }
 

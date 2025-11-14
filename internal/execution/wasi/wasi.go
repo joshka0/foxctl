@@ -118,7 +118,7 @@ func (r Runner) validateManifest() error {
 		return fmt.Errorf("wasi runner requires distribution.type=wasi")
 	}
 	if netCap := strings.TrimSpace(r.Manifest.Capabilities.Network); netCap != "" && netCap != "none" {
-		return fmt.Errorf("wasi runner only supports network:\"none\" (got %q)", netCap)
+		return fmt.Errorf("wasi runner only supports network capability \"none\" (got %q)", netCap)
 	}
 	return nil
 }
