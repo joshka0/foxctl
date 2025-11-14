@@ -16,7 +16,7 @@ type mockCASStore struct {
 	unpinErr         error
 }
 
-func (m *mockCASStore) Pin(ctx context.Context, digest string) error {
+func (m *mockCASStore) Pin(_ context.Context, digest string) error {
 	if m.pinErr != nil {
 		return m.pinErr
 	}
@@ -27,7 +27,7 @@ func (m *mockCASStore) Pin(ctx context.Context, digest string) error {
 	return nil
 }
 
-func (m *mockCASStore) Unpin(ctx context.Context, digest string) error {
+func (m *mockCASStore) Unpin(_ context.Context, digest string) error {
 	if m.unpinErr != nil {
 		return m.unpinErr
 	}
@@ -143,10 +143,10 @@ func TestManager_Pin(t *testing.T) {
 
 func TestManager_Unpin(t *testing.T) {
 	tests := []struct {
-		name      string
-		digests   []string
-		unpinErr  error
-		wantErr   bool
+		name     string
+		digests  []string
+		unpinErr error
+		wantErr  bool
 	}{
 		{
 			name:    "unpin single digest",
