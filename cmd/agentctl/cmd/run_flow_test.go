@@ -69,9 +69,9 @@ func TestRunExecutorTryServeCacheHit(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, runOptions{
-		cacheMode: cache.ModeAuto,
-		workspace: "ws",
+	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{
+		CacheMode: cache.ModeAuto,
+		Workspace: "ws",
 	})
 	defer executor.Close()
 
@@ -110,7 +110,7 @@ func TestRunExecutorSubmitAsyncUsesRunner(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 
-	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, runOptions{})
+	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{})
 	defer executor.Close()
 
 	called := false
@@ -161,11 +161,11 @@ func TestRunExecutorRememberStoresMemory(t *testing.T) {
 			Metadata: skill.Metadata{Name: "text/grep", Version: "1.0.0"},
 		},
 	}
-	executor := newRunExecutor(ctx, cfg, handle, io.Discard, io.Discard, runOptions{
-		rememberName:    "demo",
-		rememberType:    "result",
-		rememberSummary: "saved",
-		workspace:       "ws",
+	executor := newRunExecutor(ctx, cfg, handle, io.Discard, io.Discard, RunOptions{
+		RememberName:    "demo",
+		RememberType:    "result",
+		RememberSummary: "saved",
+		Workspace:       "ws",
 	})
 	defer executor.Close()
 
@@ -215,9 +215,9 @@ func TestRunExecutorHandleDuplicatePersistsCache(t *testing.T) {
 	}
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, runOptions{
-		cacheMode: cache.ModeAuto,
-		workspace: "ws",
+	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{
+		CacheMode: cache.ModeAuto,
+		Workspace: "ws",
 	})
 	defer executor.Close()
 
