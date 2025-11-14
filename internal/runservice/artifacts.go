@@ -32,15 +32,18 @@ func (e *Executor) handleArtifacts(jobID string, result []byte) error {
 	// Ensure job directory exists before writing artifacts.json
 	out := artifactFile(e.cfg.Paths.Jobs, jobID)
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return fmt.Errorf("ensure job dir: %w", err)
+		return artifactMetadataError{err: fmt.Errorf("ensure job dir: %w", err)}
 	}
 
 	meta := map[string]any{"digests": digests}
 	buf, err := json.Marshal(meta)
 	if err != nil {
-		return err
+		return artifactMetadataError{err: err}
 	}
-	return os.WriteFile(out, buf, 0o644)
+	if err := os.WriteFile(out, buf, 0o644); err != nil {
+		return artifactMetadataError{err: err}
+	}
+	return nil
 }
 
 func artifactFile(jobsPath, jobID string) string {
@@ -74,4 +77,16 @@ func ReleaseArtifacts(ctx context.Context, cfgPaths config.Paths, jobID string) 
 		return fmt.Errorf("unpin artifacts: %w", err)
 	}
 	return os.Remove(path)
+}
+
+type artifactMetadataError struct {
+	err error
+}
+
+func (e artifactMetadataError) Error() string {
+	return e.err.Error()
+}
+
+func (e artifactMetadataError) Unwrap() error {
+	return e.err
 }
