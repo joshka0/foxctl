@@ -3,7 +3,7 @@
 > **Bash for LLMs** — A single-binary CLI for structured, deterministic AI workflows
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/jkatigb/agentctl)](https://goreportcard.com/report/github.com/jkatigb/agentctl)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 [![Go Version](https://img.shields.io/badge/go-1.22+-blue.svg)](https://golang.org/dl/)
 
 **agentctl** implements the [Core Profile v1](docs/spec/core_profile_v1.md) specification, providing a universal toolkit for building reliable, reproducible AI-powered workflows with structured JSON I/O, content-addressable storage, and deterministic caching.
@@ -489,15 +489,13 @@ See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md) for detailed timeline.
 
 **Do not open public issues for security vulnerabilities.**
 
-Email security reports to: [security@agentctl.dev](mailto:security@agentctl.dev) (or create private security advisory on GitHub)
-
-See [docs/SECURITY.md](docs/SECURITY.md) for our security policy (coming soon).
+Please report security vulnerabilities responsibly by creating a private security advisory on GitHub or contacting the maintainers directly.
 
 ---
 
 ## 📄 License
 
-Apache License 2.0 — See [LICENSE](LICENSE) for details.
+Apache License 2.0
 
 ---
 
