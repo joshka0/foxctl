@@ -14,6 +14,8 @@ type mockCASStore struct {
 	pinned           map[string]bool
 	pinErr           error
 	unpinErr         error
+	perUnpinErr      map[string]error
+	unpinAttempts    []string
 }
 
 func (m *mockCASStore) Pin(_ context.Context, digest string) error {
@@ -28,11 +30,15 @@ func (m *mockCASStore) Pin(_ context.Context, digest string) error {
 }
 
 func (m *mockCASStore) Unpin(_ context.Context, digest string) error {
-	if m.unpinErr != nil {
-		return m.unpinErr
-	}
+	m.unpinAttempts = append(m.unpinAttempts, digest)
 	if m.pinned == nil {
 		m.pinned = make(map[string]bool)
+	}
+	if err, ok := m.perUnpinErr[digest]; ok && err != nil {
+		return err
+	}
+	if m.unpinErr != nil {
+		return m.unpinErr
 	}
 	delete(m.pinned, digest)
 	return nil
@@ -143,10 +149,12 @@ func TestManager_Pin(t *testing.T) {
 
 func TestManager_Unpin(t *testing.T) {
 	tests := []struct {
-		name     string
-		digests  []string
-		unpinErr error
-		wantErr  bool
+		name         string
+		digests      []string
+		unpinErr     error
+		perUnpinErr  map[string]error
+		wantErr      bool
+		expectPinned map[string]bool
 	}{
 		{
 			name:    "unpin single digest",
@@ -169,13 +177,26 @@ func TestManager_Unpin(t *testing.T) {
 			unpinErr: errors.New("unpin failed"),
 			wantErr:  true,
 		},
+		{
+			name:    "continues after individual error",
+			digests: []string{"sha256:bad", "sha256:ok"},
+			perUnpinErr: map[string]error{
+				"sha256:bad": errors.New("boom"),
+			},
+			wantErr: true,
+			expectPinned: map[string]bool{
+				"sha256:bad": true,
+				"sha256:ok":  false,
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockCAS := &mockCASStore{
-				pinned:   make(map[string]bool),
-				unpinErr: tt.unpinErr,
+				pinned:      make(map[string]bool),
+				unpinErr:    tt.unpinErr,
+				perUnpinErr: tt.perUnpinErr,
 			}
 			// Pre-pin digests
 			for _, d := range tt.digests {
@@ -190,12 +211,23 @@ func TestManager_Unpin(t *testing.T) {
 				return
 			}
 
-			if !tt.wantErr {
-				for _, d := range tt.digests {
-					if mockCAS.pinned[d] {
-						t.Errorf("Unpin() digest %s still pinned", d)
-					}
+			for _, d := range tt.digests {
+				expectedPinned := false
+				switch {
+				case tt.expectPinned != nil:
+					expectedPinned = tt.expectPinned[d]
+				case tt.wantErr:
+					expectedPinned = true
+				default:
+					expectedPinned = false
 				}
+				if mockCAS.pinned[d] != expectedPinned {
+					t.Errorf("Unpin() digest %s pinned=%v, want %v", d, mockCAS.pinned[d], expectedPinned)
+				}
+			}
+
+			if tt.name == "continues after individual error" && len(mockCAS.unpinAttempts) != len(tt.digests) {
+				t.Fatalf("expected attempts for all digests, got %v", mockCAS.unpinAttempts)
 			}
 		})
 	}

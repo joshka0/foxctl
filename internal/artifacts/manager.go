@@ -2,6 +2,7 @@ package artifacts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -63,12 +64,16 @@ func (m *CASManager) Unpin(ctx context.Context, digests ...string) error {
 		return nil
 	}
 
+	var errsSlice []error
 	for _, digest := range digests {
 		if err := m.store.Unpin(ctx, digest); err != nil {
-			return fmt.Errorf("unpin %s: %w", digest, err)
+			errsSlice = append(errsSlice, fmt.Errorf("unpin %s: %w", digest, err))
 		}
 	}
 
+	if len(errsSlice) > 0 {
+		return errors.Join(errsSlice...)
+	}
 	return nil
 }
 
