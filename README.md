@@ -2,7 +2,6 @@
 
 > **Bash for LLMs** — A single-binary CLI for structured, deterministic AI workflows
 
-[![CI](https://github.com/jkatigb/agentctl/workflows/CI/badge.svg)](https://github.com/jkatigb/agentctl/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/jkatigb/agentctl)](https://goreportcard.com/report/github.com/jkatigb/agentctl)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.22+-blue.svg)](https://golang.org/dl/)
@@ -517,10 +516,10 @@ agentctl builds on excellent open source projects:
 
 ## 📞 Community & Support
 
-- **Issues**: [GitHub Issues](https://github.com/jkatigb/agentctl/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/jkatigb/agentctl/discussions)
 - **Documentation**: [docs/](docs/)
 - **Specifications**: [docs/spec/](docs/spec/)
+- **Roadmap**: [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md)
+- **Contributing**: [AGENTS.md](AGENTS.md)
 
 ---
 
@@ -532,7 +531,7 @@ Ready to dive in?
 2. **Build** with `make build && make skills-build`
 3. **Try** the examples in [docs/examples/](docs/examples/)
 4. **Contribute** by picking a task from [IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md)
-5. **Join** the conversation in [GitHub Discussions](https://github.com/jkatigb/agentctl/discussions)
+5. **Explore** the [roadmap to v1.0](ROADMAP_TO_V1.md)
 
 ---
 
@@ -542,6 +541,6 @@ Ready to dive in?
 
 Built with ❤️ by the agentctl community
 
-[Documentation](docs/) • [Roadmap](ROADMAP_TO_V1.md) • [Contributing](AGENTS.md) • [Issues](https://github.com/jkatigb/agentctl/issues)
+[Documentation](docs/) • [Roadmap](ROADMAP_TO_V1.md) • [Contributing](AGENTS.md) • [Specifications](docs/spec/)
 
 </div>

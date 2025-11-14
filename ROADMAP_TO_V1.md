@@ -336,9 +336,9 @@ See [IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md) for detailed task b
 
 ## Communication
 
-- **Issues**: [GitHub Issues](https://github.com/jkatigb/agentctl/issues)
 - **Specs**: [docs/refactoring/](docs/refactoring/)
 - **Roadmap**: This document (updated monthly)
+- **Contributing**: [AGENTS.md](AGENTS.md)
 
 ---
 

@@ -208,4 +208,4 @@ func TestJobExecutionWithMock(t *testing.T) {
 
 - [Dependency Injection in Go](https://blog.golang.org/wire)
 - [Interface Segregation Principle](https://en.wikipedia.org/wiki/Interface_segregation_principle)
-- [SPEC-004 Full Document](../../docs/refactoring/SPEC-004-skill-executor-interface.md)
+- [SPEC-004 Full Document](../../docs/refactoring/completed/SPEC-004-skill-executor-interface.md)
