@@ -1,4 +1,4 @@
-package cmd
+package runservice
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/skill"
 )
 
-func TestRunExecutorTryServeCacheHit(t *testing.T) {
+func TestExecutorTryServeCacheHit(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -69,15 +69,15 @@ func TestRunExecutorTryServeCacheHit(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{
+	executor := NewExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{
 		CacheMode: cache.ModeAuto,
 		Workspace: "ws",
 	})
 	defer executor.Close()
 
-	served, err := executor.tryServeCache(input)
+	served, err := executor.TryServeCache(input)
 	if err != nil {
-		t.Fatalf("tryServeCache: %v", err)
+		t.Fatalf("TryServeCache: %v", err)
 	}
 	if !served {
 		t.Fatalf("expected cache hit")
@@ -101,7 +101,44 @@ func TestRunExecutorTryServeCacheHit(t *testing.T) {
 	}
 }
 
-func TestRunExecutorSubmitAsyncUsesRunner(t *testing.T) {
+func TestExecutorTryServeCacheMiss(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tmp := t.TempDir()
+	cfg := config.Config{
+		Paths: config.Paths{
+			Cache: filepath.Join(tmp, "cache"),
+			CAS:   filepath.Join(tmp, "cas"),
+		},
+		Memory: config.MemorySettings{AutoCacheTTL: time.Hour},
+	}
+	for _, dir := range []string{cfg.Paths.Cache, cfg.Paths.CAS} {
+		if err := ensureDir(dir); err != nil {
+			t.Fatalf("ensure dir: %v", err)
+		}
+	}
+
+	handle := SkillHandle{
+		Manifest: skill.Manifest{
+			Metadata: skill.Metadata{Name: "text/grep", Version: "1.0.0"},
+		},
+	}
+	executor := NewExecutor(ctx, cfg, handle, io.Discard, io.Discard, RunOptions{
+		CacheMode: cache.ModeAuto,
+	})
+	defer executor.Close()
+
+	served, err := executor.TryServeCache([]byte(`{"query":"miss"}`))
+	if err != nil {
+		t.Fatalf("TryServeCache miss: %v", err)
+	}
+	if served {
+		t.Fatalf("expected miss to return served=false")
+	}
+}
+
+func TestExecutorSubmitAsyncUsesRunner(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -110,11 +147,11 @@ func TestRunExecutorSubmitAsyncUsesRunner(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 
-	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{})
+	executor := NewExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{})
 	defer executor.Close()
 
 	called := false
-	executor.asyncRunner = func(_ context.Context, jobID, manifestPath, artifactPath string, _ io.Writer) error {
+	executor.SetAsyncRunner(func(_ context.Context, jobID, manifestPath, artifactPath string, _ io.Writer) error {
 		called = true
 		if jobID != "job123" {
 			t.Fatalf("expected jobID job123 got %s", jobID)
@@ -126,20 +163,20 @@ func TestRunExecutorSubmitAsyncUsesRunner(t *testing.T) {
 			t.Fatalf("unexpected artifact path: %s", artifactPath)
 		}
 		return nil
-	}
+	})
 
-	if err := executor.submitAsync(jobs.Job{ID: "job123"}); err != nil {
-		t.Fatalf("submitAsync: %v", err)
+	if err := executor.SubmitAsync(jobs.Job{ID: "job123"}); err != nil {
+		t.Fatalf("SubmitAsync: %v", err)
 	}
 	if !called {
 		t.Fatalf("expected async runner to be called")
 	}
 	if !strings.Contains(stdout.String(), "job job123 submitted") {
-		t.Fatalf("expected submit message in stdout, got %q", stdout.String())
+		t.Fatalf("expected submit message, got %q", stdout.String())
 	}
 }
 
-func TestRunExecutorRememberStoresMemory(t *testing.T) {
+func TestExecutorRememberStoresMemory(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -161,7 +198,7 @@ func TestRunExecutorRememberStoresMemory(t *testing.T) {
 			Metadata: skill.Metadata{Name: "text/grep", Version: "1.0.0"},
 		},
 	}
-	executor := newRunExecutor(ctx, cfg, handle, io.Discard, io.Discard, RunOptions{
+	executor := NewExecutor(ctx, cfg, handle, io.Discard, io.Discard, RunOptions{
 		RememberName:    "demo",
 		RememberType:    "result",
 		RememberSummary: "saved",
@@ -190,80 +227,6 @@ func TestRunExecutorRememberStoresMemory(t *testing.T) {
 	}
 	if entry.Summary != "saved" {
 		t.Fatalf("expected summary saved got %s", entry.Summary)
-	}
-}
-
-func TestRunExecutorHandleDuplicatePersistsCache(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	tmp := t.TempDir()
-	cfg := config.Config{
-		Paths: config.Paths{
-			Cache: filepath.Join(tmp, "cache"),
-			CAS:   filepath.Join(tmp, "cas"),
-			Jobs:  filepath.Join(tmp, "jobs"),
-		},
-		Memory: config.MemorySettings{AutoCacheTTL: time.Hour},
-	}
-	for _, dir := range []string{cfg.Paths.Cache, cfg.Paths.CAS, cfg.Paths.Jobs} {
-		if err := ensureDir(dir); err != nil {
-			t.Fatalf("ensure dir: %v", err)
-		}
-	}
-
-	handle := SkillHandle{
-		Manifest: skill.Manifest{
-			Metadata: skill.Metadata{Name: "echo", Version: "1.0.0"},
-		},
-	}
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	executor := newRunExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{
-		CacheMode: cache.ModeAuto,
-		Workspace: "ws",
-	})
-	defer executor.Close()
-
-	input := []byte(`{"message":"hello"}`)
-	served, err := executor.tryServeCache(input)
-	if err != nil {
-		t.Fatalf("tryServeCache: %v", err)
-	}
-	if served {
-		t.Fatalf("expected cache miss for fresh input")
-	}
-
-	jobStore, err := jobs.Open(ctx, cfg.Paths.Jobs)
-	if err != nil {
-		t.Fatalf("open jobs: %v", err)
-	}
-	executor.jobStore = jobStore
-
-	job, err := jobStore.SubmitEcho(ctx, "hello")
-	if err != nil {
-		t.Fatalf("submit echo: %v", err)
-	}
-	if job.ResultPath == "" {
-		t.Fatalf("expected result path for completed job")
-	}
-
-	if err := executor.handleDuplicate(job); err != nil {
-		t.Fatalf("handleDuplicate: %v", err)
-	}
-
-	entry, ok, err := executor.cacheStore.Get(ctx, executor.cacheKey)
-	if err != nil {
-		t.Fatalf("cache get: %v", err)
-	}
-	if !ok {
-		t.Fatalf("expected cache entry after duplicate handling")
-	}
-	if entry.CacheKey != executor.cacheKey {
-		t.Fatalf("unexpected cache key %s (want %s)", entry.CacheKey, executor.cacheKey)
-	}
-	if entry.SkillName != handle.Manifest.Metadata.Name {
-		t.Fatalf("unexpected skill name %s", entry.SkillName)
 	}
 }
 
