@@ -311,42 +311,12 @@ func newSkillsUpgradeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Load new manifest
-			manifest, err := skill.LoadManifest(manifestPath)
+			manifest, err := loadUpgradeManifest(manifestPath, args[0])
 			if err != nil {
 				return err
 			}
-			// Verify name matches
-			if manifest.Metadata.Name != args[0] {
-				return fmt.Errorf("manifest name %q does not match skill name %q", manifest.Metadata.Name, args[0])
-			}
-			// Validate WASI network policy
-			if err := policy.ValidateWASIPolicy(manifest); err != nil {
+			if err := applyUpgradeArtifacts(cfg, manifest, manifestPath, binaryPath, modulePath); err != nil {
 				return err
-			}
-			dest := filepath.Join(cfg.Paths.Skills, manifest.Metadata.Name)
-			// Copy new manifest
-			if err := copyFile(manifestPath, filepath.Join(dest, "skill.yaml")); err != nil {
-				return err
-			}
-			// Copy new artifact
-			switch manifest.Distribution.Type {
-			case "exec":
-				if binaryPath == "" {
-					return fmt.Errorf("--binary is required for exec skills")
-				}
-				if err := copyFile(binaryPath, filepath.Join(dest, "bin")); err != nil {
-					return err
-				}
-			case "wasi":
-				if modulePath == "" {
-					return fmt.Errorf("--module is required for wasi skills")
-				}
-				if err := copyFile(modulePath, filepath.Join(dest, "module.wasm")); err != nil {
-					return err
-				}
-			default:
-				return fmt.Errorf("unsupported distribution: %s", manifest.Distribution.Type)
 			}
 			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "upgraded %s to version %s\n", manifest.Metadata.Name, manifest.Metadata.Version); err != nil {
 				return err
@@ -361,6 +331,42 @@ func newSkillsUpgradeCommand() *cobra.Command {
 		panic(err)
 	}
 	return cmd
+}
+
+func loadUpgradeManifest(path string, skillName string) (skill.Manifest, error) {
+	manifest, err := skill.LoadManifest(path)
+	if err != nil {
+		return skill.Manifest{}, err
+	}
+	if manifest.Metadata.Name != skillName {
+		return skill.Manifest{}, fmt.Errorf("manifest name %q does not match skill name %q", manifest.Metadata.Name, skillName)
+	}
+	if err := policy.ValidateWASIPolicy(manifest); err != nil {
+		return skill.Manifest{}, err
+	}
+	return manifest, nil
+}
+
+func applyUpgradeArtifacts(cfg config.Config, manifest skill.Manifest, manifestPath, binaryPath, modulePath string) error {
+	dest := filepath.Join(cfg.Paths.Skills, manifest.Metadata.Name)
+	if err := copyFile(manifestPath, filepath.Join(dest, "skill.yaml")); err != nil {
+		return err
+	}
+
+	switch manifest.Distribution.Type {
+	case "exec":
+		if binaryPath == "" {
+			return fmt.Errorf("--binary is required for exec skills")
+		}
+		return copyFile(binaryPath, filepath.Join(dest, "bin"))
+	case "wasi":
+		if modulePath == "" {
+			return fmt.Errorf("--module is required for wasi skills")
+		}
+		return copyFile(modulePath, filepath.Join(dest, "module.wasm"))
+	default:
+		return fmt.Errorf("unsupported distribution: %s", manifest.Distribution.Type)
+	}
 }
 
 func matchesQuery(m skill.Manifest, query string) bool {
