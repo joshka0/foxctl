@@ -12,6 +12,7 @@ import (
 
 // TestExecutorFunc_Implements verifies ExecutorFunc implements SkillExecutor.
 func TestExecutorFunc_Implements(t *testing.T) {
+	t.Helper()
 	var _ execution.SkillExecutor = execution.ExecutorFunc(nil)
 }
 
@@ -24,7 +25,7 @@ func TestExecutorFunc_Execute(t *testing.T) {
 		ExitCode: 0,
 	}
 
-	fn := execution.ExecutorFunc(func(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
+	fn := execution.ExecutorFunc(func(_ context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
 		called = true
 		assert.Equal(t, "test.yaml", opts.ManifestPath)
 		assert.Equal(t, []byte("input"), opts.Input)
@@ -45,7 +46,7 @@ func TestExecutorFunc_Execute(t *testing.T) {
 func TestExecutorFunc_Error(t *testing.T) {
 	expectedErr := errors.New("execution failed")
 
-	fn := execution.ExecutorFunc(func(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
+	fn := execution.ExecutorFunc(func(_ context.Context, _ execution.ExecuteOptions) (*execution.Result, error) {
 		return nil, expectedErr
 	})
 

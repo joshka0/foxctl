@@ -197,9 +197,31 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 			Msg("progress writer init failed")
 	}
 
-	// Use runner.Run directly for now since we already have the manifest object loaded.
-	// The skillExecutor interface is primarily useful for testing with mocks.
-	stdout, stderr, err := runner.Run(ctx, manifest, artifactPath, input)
+	var stdout, stderr []byte
+	var err error
+	if e.skillExecutor != nil {
+		result, execErr := e.skillExecutor.Execute(ctx, execution.ExecuteOptions{
+			Manifest:     manifest,
+			ArtifactPath: artifactPath,
+			Input:        input,
+		})
+		if result != nil {
+			stdout = result.Stdout
+			stderr = result.Stderr
+			if execErr != nil {
+				err = execErr
+			} else {
+				err = result.Error
+			}
+		} else {
+			err = execErr
+		}
+		if result == nil && execErr == nil {
+			err = fmt.Errorf("skill executor returned nil result without error")
+		}
+	} else {
+		stdout, stderr, err = runner.Run(ctx, manifest, artifactPath, input)
+	}
 	metrics.Global().RecordExecutionTime(time.Since(start))
 	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
 	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
@@ -314,10 +336,13 @@ func (e *Executor) jobWorkspace(id string) string {
 // newRunnerFuncAdapter adapts a RunnerFunc to the SkillExecutor interface.
 func newRunnerFuncAdapter(run RunnerFunc) execution.SkillExecutor {
 	return execution.ExecutorFunc(func(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
-		// Load manifest
-		manifest, err := skill.LoadManifest(opts.ManifestPath)
-		if err != nil {
-			return nil, fmt.Errorf("load manifest: %w", err)
+		manifest := opts.Manifest
+		if manifest.Metadata.Name == "" && opts.ManifestPath != "" {
+			var err error
+			manifest, err = skill.LoadManifest(opts.ManifestPath)
+			if err != nil {
+				return nil, fmt.Errorf("load manifest: %w", err)
+			}
 		}
 
 		// Call the runner function

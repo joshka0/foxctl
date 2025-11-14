@@ -5,6 +5,8 @@ package execution
 import (
 	"context"
 	"io"
+
+	"github.com/jkatigb/agentctl/internal/skill"
 )
 
 // SkillExecutor executes a skill and returns the execution result.
@@ -16,6 +18,10 @@ type SkillExecutor interface {
 
 // ExecuteOptions contains all parameters for skill execution.
 type ExecuteOptions struct {
+	// Manifest provides an already-parsed manifest. When set, ManifestPath
+	// is optional and runners can skip re-reading the manifest from disk.
+	Manifest skill.Manifest
+
 	// Skill identification
 	ManifestPath string
 	ArtifactPath string

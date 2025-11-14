@@ -29,7 +29,13 @@ func TestExecutorRunSkillSuccess(t *testing.T) {
 	}
 	exec := New(root, persist, WithRunner(runner))
 
-	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "demo"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/echo"},
+		},
+	}
 	job, result, err := exec.RunSkill(ctx, manifest, "artifact", []byte(`{"foo":"bar"}`))
 	if err != nil {
 		t.Fatalf("run skill: %v", err)
@@ -62,7 +68,13 @@ func TestExecutorRunSkillValidationError(t *testing.T) {
 	}
 	exec := New(root, persist, WithRunner(runner))
 
-	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "demo"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/echo"},
+		},
+	}
 	job, _, err := exec.RunSkill(ctx, manifest, "artifact", []byte(`{"foo":"bar"}`))
 	if err == nil {
 		t.Fatalf("expected validation error")
@@ -134,7 +146,13 @@ func TestExecutorLogsProgressFailures(t *testing.T) {
 			}, nil
 		}),
 	)
-	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "demo"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/echo"},
+		},
+	}
 	if _, _, err := exec.RunSkill(ctx, manifest, "", []byte(`{"foo":"bar"}`)); err != nil {
 		t.Fatalf("run skill: %v", err)
 	}
@@ -238,7 +256,6 @@ func validTransition(current, next types.State) bool {
 // TestExecutorWithSkillExecutor demonstrates using the new SkillExecutor interface
 // with a mock executor for testing. This shows SPEC-004 integration.
 func TestExecutorWithSkillExecutor(t *testing.T) {
-	ctx := context.Background()
 	root := t.TempDir()
 	persist := newFakePersistence()
 

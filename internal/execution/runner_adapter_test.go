@@ -13,6 +13,7 @@ import (
 
 // TestRunnerExecutor_Implements verifies RunnerExecutor implements SkillExecutor.
 func TestRunnerExecutor_Implements(t *testing.T) {
+	t.Helper()
 	var _ execution.SkillExecutor = execution.NewRunnerExecutor()
 }
 

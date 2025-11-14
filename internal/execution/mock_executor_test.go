@@ -13,6 +13,7 @@ import (
 
 // TestMockExecutor_Implements verifies MockExecutor implements SkillExecutor.
 func TestMockExecutor_Implements(t *testing.T) {
+	t.Helper()
 	var _ execution.SkillExecutor = &execution.MockExecutor{}
 }
 
@@ -49,7 +50,7 @@ func TestMockExecutor_CustomBehavior(t *testing.T) {
 		ExitCode: 42,
 	}
 
-	mock.ExecuteFunc = func(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
+	mock.ExecuteFunc = func(_ context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
 		assert.Equal(t, "manifest.yaml", opts.ManifestPath)
 		return customResult, nil
 	}
@@ -67,7 +68,7 @@ func TestMockExecutor_ErrorBehavior(t *testing.T) {
 	mock := execution.NewMockExecutor()
 	expectedErr := errors.New("execution failed")
 
-	mock.ExecuteFunc = func(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
+	mock.ExecuteFunc = func(_ context.Context, _ execution.ExecuteOptions) (*execution.Result, error) {
 		return &execution.Result{
 			Stderr:   []byte("error message"),
 			ExitCode: 1,

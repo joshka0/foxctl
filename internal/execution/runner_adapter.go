@@ -19,10 +19,9 @@ func NewRunnerExecutor() SkillExecutor {
 
 // Execute implements SkillExecutor using runner.Run.
 func (e *RunnerExecutor) Execute(ctx context.Context, opts ExecuteOptions) (*Result, error) {
-	// Load manifest
-	manifest, err := skill.LoadManifest(opts.ManifestPath)
+	manifest, err := resolveManifest(opts)
 	if err != nil {
-		return nil, fmt.Errorf("load manifest: %w", err)
+		return nil, err
 	}
 
 	// Call existing runner
@@ -55,4 +54,18 @@ func determineExitCode(err error) int {
 
 	// Default to 1 for any other error
 	return 1
+}
+
+func resolveManifest(opts ExecuteOptions) (skill.Manifest, error) {
+	if opts.Manifest.Metadata.Name != "" || opts.Manifest.Distribution.Type != "" {
+		return opts.Manifest, nil
+	}
+	if opts.ManifestPath == "" {
+		return skill.Manifest{}, fmt.Errorf("manifest path required")
+	}
+	manifest, err := skill.LoadManifest(opts.ManifestPath)
+	if err != nil {
+		return skill.Manifest{}, fmt.Errorf("load manifest: %w", err)
+	}
+	return manifest, nil
 }
