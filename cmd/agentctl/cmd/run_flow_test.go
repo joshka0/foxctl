@@ -178,7 +178,11 @@ func TestRunExecutorRememberStoresMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close memory store: %v", err)
+		}
+	})
 
 	entry, err := store.Get(ctx, "demo", "ws")
 	if err != nil {

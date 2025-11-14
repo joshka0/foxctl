@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/metrics"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
@@ -87,7 +88,7 @@ func (s *Store) Put(ctx context.Context, r io.Reader, kind string, tags []string
 		return Object{}, fmt.Errorf("cas: temp file: %w", err)
 	}
 	defer func() {
-		_ = os.Remove(tmp.Name())
+		errs.Ignore(os.Remove(tmp.Name()), "cas temp removal")
 	}()
 	var size int64
 	bufPtr := bufferPool.Get().(*[]byte)
@@ -121,8 +122,8 @@ func (s *Store) Put(ctx context.Context, r io.Reader, kind string, tags []string
 	defer s.mu.Unlock()
 	if _, err := os.Stat(dest); err == nil {
 		// already exists; update metadata with merged tags if needed
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
+		errs.Ignore(tmp.Close(), "close duplicate temp file")
+		errs.Ignore(os.Remove(tmp.Name()), "remove duplicate temp file")
 		meta, err := s.readMetadata(digest)
 		if err != nil {
 			return Object{}, err
@@ -183,7 +184,7 @@ func (s *Store) Get(_ context.Context, digest string) (io.ReadCloser, Metadata, 
 	}
 	meta, err := s.readMetadata(digest)
 	if err != nil {
-		_ = file.Close()
+		errs.Ignore(file.Close(), "close file after metadata failure")
 		return nil, Metadata{}, err
 	}
 	vr := &verifyingReader{
@@ -248,7 +249,7 @@ func (s *Store) Remove(_ context.Context, digest string) error {
 		return fmt.Errorf("cas: remove: %w", err)
 	}
 	metaPath := path + ".json"
-	_ = os.Remove(metaPath)
+	errs.Ignore(os.Remove(metaPath), "remove cas metadata after delete")
 	metrics.Global().RecordCASOperation()
 	return nil
 }
@@ -368,16 +369,16 @@ func (s *Store) writeMetadata(meta Metadata) error {
 	}
 	tmpName := tmpFile.Name()
 	if _, err := tmpFile.Write(buf); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpName)
+		errs.Ignore(tmpFile.Close(), "close cas metadata tmp on write error")
+		errs.Ignore(os.Remove(tmpName), "remove cas metadata tmp on write error")
 		return fmt.Errorf("cas: meta tmp write: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpName)
+		errs.Ignore(os.Remove(tmpName), "remove cas metadata tmp on close error")
 		return fmt.Errorf("cas: meta tmp close: %w", err)
 	}
 	if err := os.Rename(tmpName, metaPath); err != nil {
-		_ = os.Remove(tmpName)
+		errs.Ignore(os.Remove(tmpName), "remove cas metadata tmp on rename error")
 		return fmt.Errorf("cas: meta replace: %w", err)
 	}
 	return nil
@@ -433,7 +434,7 @@ func (r *verifyingReader) Read(p []byte) (int, error) {
 func (r *verifyingReader) Close() error {
 	if !r.done {
 		if _, err := io.Copy(r.h, r.f); err != nil {
-			_ = r.f.Close()
+			errs.Ignore(r.f.Close(), "close verifying reader after copy failure")
 			return err
 		}
 	}

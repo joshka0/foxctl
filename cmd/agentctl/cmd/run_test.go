@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,7 +23,9 @@ func TestRunCommandEmitsCompleteMeta(t *testing.T) {
 	sample := filepath.Join(inputDir, "sample.txt")
 	var buf bytes.Buffer
 	for i := 0; i < 10; i++ {
-		fmt.Fprintf(&buf, "needle line %d\n", i)
+		if _, err := fmt.Fprintf(&buf, "needle line %d\n", i); err != nil {
+			t.Fatalf("build sample: %v", err)
+		}
 	}
 	if err := os.WriteFile(sample, buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write sample: %v", err)
@@ -136,6 +139,8 @@ func TestRunCommandRememberSavesMemory(t *testing.T) {
 	}
 }
 
+var skillBinaryCache sync.Map
+
 func installTextGrepSkill(t *testing.T) config.Config {
 	t.Helper()
 	tmp := t.TempDir()
@@ -170,7 +175,7 @@ func installTextGrepSkill(t *testing.T) config.Config {
 	if runtime.GOOS == "windows" {
 		binaryPath += ".exe"
 	}
-	buildSkillBinary(t, binaryPath)
+	installSkillBinary(t, binaryPath, "./skills/text_grep")
 	return cfg
 }
 
@@ -185,7 +190,7 @@ func installHTTPOpenAPISkill(t *testing.T, cfg config.Config) {
 	if runtime.GOOS == "windows" {
 		binaryPath += ".exe"
 	}
-	buildSkillBinaryFromSource(t, binaryPath, "./skills/http_openapi")
+	installSkillBinary(t, binaryPath, "./skills/http_openapi")
 }
 
 func installFSLsSkill(t *testing.T, cfg config.Config) {
@@ -199,7 +204,7 @@ func installFSLsSkill(t *testing.T, cfg config.Config) {
 	if runtime.GOOS == "windows" {
 		binaryPath += ".exe"
 	}
-	buildSkillBinaryFromSource(t, binaryPath, "./skills/fs_ls")
+	installSkillBinary(t, binaryPath, "./skills/fs_ls")
 }
 
 func installFSReadSkill(t *testing.T, cfg config.Config) {
@@ -213,11 +218,7 @@ func installFSReadSkill(t *testing.T, cfg config.Config) {
 	if runtime.GOOS == "windows" {
 		binaryPath += ".exe"
 	}
-	buildSkillBinaryFromSource(t, binaryPath, "./skills/fs_read")
-}
-
-func buildSkillBinary(t *testing.T, dest string) {
-	buildSkillBinaryFromSource(t, dest, "./skills/text_grep")
+	installSkillBinary(t, binaryPath, "./skills/fs_read")
 }
 
 func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
@@ -261,6 +262,33 @@ func copySkillFile(t *testing.T, src, dst string) {
 	if err := os.WriteFile(dst, data, 0o644); err != nil {
 		t.Fatalf("write %s: %v", dst, err)
 	}
+}
+
+func installSkillBinary(t *testing.T, dest, pkg string) {
+	t.Helper()
+	src := cachedSkillBinary(t, pkg)
+	copySkillFile(t, src, dest)
+	if err := os.Chmod(dest, 0o755); err != nil {
+		t.Fatalf("chmod skill binary: %v", err)
+	}
+}
+
+func cachedSkillBinary(t *testing.T, pkg string) string {
+	if bin, ok := skillBinaryCache.Load(pkg); ok {
+		return bin.(string)
+	}
+	tmpDir, err := os.MkdirTemp("", "agentctl-skill-")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	name := "skill"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	out := filepath.Join(tmpDir, name)
+	buildSkillBinaryFromSource(t, out, pkg)
+	skillBinaryCache.Store(pkg, out)
+	return out
 }
 
 func repoRoot(t *testing.T) string {

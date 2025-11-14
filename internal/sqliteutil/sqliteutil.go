@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	errs "github.com/jkatigb/agentctl/internal/errors"
+
 	_ "modernc.org/sqlite" // register sqlite driver
 )
 
@@ -27,12 +29,12 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		return nil, fmt.Errorf("sqliteutil: open: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		_ = db.Close()
+		errs.Ignore(db.Close(), "close sqlite db after WAL failure")
 		return nil, fmt.Errorf("sqliteutil: enable wal: %w", err)
 	}
 	if migrate != nil {
 		if err := migrate(ctx, db); err != nil {
-			_ = db.Close()
+			errs.Ignore(db.Close(), "close sqlite db after migrate failure")
 			return nil, err
 		}
 	}

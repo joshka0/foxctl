@@ -64,7 +64,10 @@ func TestGetDetectsCorruption(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 
-	path, _ := store.pathForDigest(obj.Digest)
+	path, err := store.pathForDigest(obj.Digest)
+	if err != nil {
+		t.Fatalf("path for digest: %v", err)
+	}
 	if err := os.WriteFile(path, []byte("tampered"), 0o644); err != nil {
 		t.Fatalf("write tampered: %v", err)
 	}
@@ -73,7 +76,9 @@ func TestGetDetectsCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	_, _ = io.ReadAll(rc)
+	if _, readErr := io.ReadAll(rc); readErr != nil {
+		t.Fatalf("read tampered data: %v", readErr)
+	}
 	if err := rc.Close(); err == nil {
 		t.Fatalf("expected digest mismatch error")
 	}
@@ -148,7 +153,9 @@ func TestPutHandlesLargeData(t *testing.T) {
 		t.Fatalf("get: %v", err)
 	}
 	defer func() {
-		_ = rc.Close()
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close reader: %v", err)
+		}
 	}()
 	buf, err := io.ReadAll(rc)
 	if err != nil {

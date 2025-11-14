@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jkatigb/agentctl/internal/cache"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 )
 
 // tryServeCache attempts to respond from the cache based on the provided input.
@@ -47,7 +48,9 @@ func (e *runExecutor) tryServeCache(input []byte) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		fmt.Fprintf(e.stderr, "cache hit %s\n", entry.CacheKey)
+		if _, warnErr := fmt.Fprintf(e.stderr, "cache hit %s\n", entry.CacheKey); warnErr != nil {
+			errs.Ignore(warnErr, "run: warn cache hit")
+		}
 		if err := writeEnvelope(e.stdout, hit); err != nil {
 			return true, err
 		}

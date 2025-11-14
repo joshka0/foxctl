@@ -16,7 +16,11 @@ func TestInsertAndGetJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	now := time.Now().UTC()
 	job := types.Job{
@@ -47,7 +51,11 @@ func TestUpdateStateValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	now := time.Now().UTC()
 	job := types.Job{
@@ -76,7 +84,11 @@ func TestFindOrInsertJobDedupes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	now := time.Now().UTC()
 	job := types.Job{
@@ -114,7 +126,11 @@ func TestRecoverOrphanedJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	now := time.Now().UTC()
 	job := types.Job{

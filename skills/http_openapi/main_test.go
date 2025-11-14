@@ -19,7 +19,11 @@ func TestPlanGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runner: %v", err)
 	}
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	in := input{BaseURL: "https://api.example.com", Path: "/users", Method: "get", Query: map[string]string{"page": "1"}}
 	if err := run(rc, in); err != nil {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/skillslib"
 	"github.com/oklog/ulid/v2"
 )
@@ -72,7 +73,9 @@ func main() {
 	if err != nil {
 		fail("todo/manage", "ERUNTIME", err)
 	}
-	defer func() { _ = rc.Close() }()
+	defer func() {
+		errs.Ignore(rc.Close(), "runner context close")
+	}()
 
 	var in input
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
@@ -330,6 +333,6 @@ func countStatus(s *store, status string) int {
 
 func fail(command, code string, err error) {
 	env := envelope.Error(command, code, err.Error(), nil)
-	_ = envelope.Write(os.Stdout, env)
+	errs.Ignore(envelope.Write(os.Stdout, env), "emit todo failure")
 	os.Exit(1)
 }

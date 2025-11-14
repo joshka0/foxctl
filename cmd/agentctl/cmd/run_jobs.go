@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/jobs"
 )
 
@@ -40,7 +41,9 @@ func (e *runExecutor) prepareJob(input []byte) (jobs.Job, bool, error) {
 	// Set workspace if provided
 	if e.options.Workspace != "" {
 		if err := e.jobStore.SetWorkspace(e.ctx, job.ID, e.options.Workspace); err != nil {
-			fmt.Fprintf(e.stderr, "warn: unable to persist workspace for job %s: %v\n", job.ID, err)
+			if _, warnErr := fmt.Fprintf(e.stderr, "warn: unable to persist workspace for job %s: %v\n", job.ID, err); warnErr != nil {
+				errs.Ignore(warnErr, "run: warn workspace persist failure")
+			}
 		}
 	}
 
@@ -51,11 +54,15 @@ func (e *runExecutor) prepareJob(input []byte) (jobs.Job, bool, error) {
 // For async mode, it simply returns the job ID.
 // For sync mode, it waits for completion if needed and returns the result.
 func (e *runExecutor) handleDuplicate(job jobs.Job) error {
-	fmt.Fprintf(e.stderr, "using existing job %s (deduplicated)\n", job.ID)
+	if _, warnErr := fmt.Fprintf(e.stderr, "using existing job %s (deduplicated)\n", job.ID); warnErr != nil {
+		errs.Ignore(warnErr, "run: warn duplicate job")
+	}
 
 	// For async mode, just return the job ID
 	if e.options.Async {
-		fmt.Fprintf(e.stdout, "job %s (existing)\n", job.ID)
+		if _, warnErr := fmt.Fprintf(e.stdout, "job %s (existing)\n", job.ID); warnErr != nil {
+			return fmt.Errorf("run: write existing job id: %w", warnErr)
+		}
 		return nil
 	}
 
@@ -96,12 +103,16 @@ func (e *runExecutor) handleResult(jobID string, result []byte) error {
 
 	// Save to cache
 	if err := e.persistCache(annotated); err != nil {
-		fmt.Fprintf(e.stderr, "cache put failed: %v\n", err)
+		if _, warnErr := fmt.Fprintf(e.stderr, "cache put failed: %v\n", err); warnErr != nil {
+			errs.Ignore(warnErr, "run: warn cache persist failure")
+		}
 	}
 
 	// Save to memory if requested
 	if err := e.remember(annotated); err != nil {
-		fmt.Fprintf(e.stderr, "remember failed: %v\n", err)
+		if _, warnErr := fmt.Fprintf(e.stderr, "remember failed: %v\n", err); warnErr != nil {
+			errs.Ignore(warnErr, "run: warn remember failure")
+		}
 	}
 
 	// Write result

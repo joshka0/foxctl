@@ -13,7 +13,11 @@ func BenchmarkBufferPoolPut(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			b.Fatalf("cleanup tmp dir: %v", err)
+		}
+	}()
 
 	store, err := NewStore(tmpDir)
 	if err != nil {
@@ -41,7 +45,9 @@ func BenchmarkBufferPoolPut(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				reader := bytes.NewReader(data)
-				_, _ = store.Put(context.Background(), reader, "benchmark", nil)
+				if _, err := store.Put(context.Background(), reader, "benchmark", nil); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

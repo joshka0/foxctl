@@ -7,6 +7,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	memstore "github.com/jkatigb/agentctl/internal/memory"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/workspace"
@@ -47,7 +48,9 @@ func withCacheStore(ctx context.Context, cfg config.Config, fn func(storage.Cach
 	if err != nil {
 		return err
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		errs.Ignore(store.Close(), "close cache store helper")
+	}()
 	return fn(store)
 }
 
@@ -56,6 +59,8 @@ func withMemoryStore(ctx context.Context, cfg config.Config, fn func(storage.Mem
 	if err != nil {
 		return err
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		errs.Ignore(store.Close(), "close memory store helper")
+	}()
 	return fn(store)
 }

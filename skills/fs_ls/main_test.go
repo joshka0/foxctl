@@ -28,7 +28,11 @@ func TestFsLsListsEntries(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	rc := newFsLsRunner(t, buf)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	in := input{Path: work}
 	if err := run(ctx, rc, in); err != nil {

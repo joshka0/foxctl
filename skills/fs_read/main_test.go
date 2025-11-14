@@ -24,7 +24,11 @@ func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	rc := newFsReadRunner(t, buf, tmp)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	if err := run(ctx, rc, input{Path: file}); err != nil {
 		t.Fatalf("run: %v", err)
@@ -64,7 +68,11 @@ func TestFsReadHonorsMaxBytesAndTruncates(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	rc := newFsReadRunner(t, buf, tmp)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	if err := run(ctx, rc, input{Path: file, MaxBytes: 8}); err != nil {
 		t.Fatalf("run: %v", err)
@@ -97,7 +105,11 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	rc := newFsReadRunner(t, buf, tmp)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	if err := run(ctx, rc, input{Path: file}); err != nil {
 		t.Fatalf("run: %v", err)
@@ -129,7 +141,9 @@ func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *skil
 		t.Fatalf("chdir: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = os.Chdir(oldwd)
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
 	})
 	state := t.TempDir()
 	cfg := config.Config{

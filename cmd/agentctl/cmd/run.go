@@ -10,6 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	memstore "github.com/jkatigb/agentctl/internal/memory"
 	"github.com/jkatigb/agentctl/internal/workspace"
 	"github.com/spf13/cobra"
@@ -168,7 +169,9 @@ func rememberResult(ctx context.Context, cfg config.Config, opts RememberOptions
 	if err != nil {
 		return err
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		errs.Ignore(store.Close(), "close memory store after remember")
+	}()
 	summary := opts.Summary
 	if summary == "" {
 		summary = summarizeResult(opts.Result)

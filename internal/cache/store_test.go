@@ -34,7 +34,11 @@ func TestStorePutAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	entry := Entry{
 		CacheKey:     "sha256:test",
@@ -67,7 +71,11 @@ func TestOpenCreatesNestedRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("expected root directory to exist: %v", err)
@@ -81,7 +89,11 @@ func TestStoreEvictsExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	entry := Entry{
 		CacheKey:     "sha256:expire",

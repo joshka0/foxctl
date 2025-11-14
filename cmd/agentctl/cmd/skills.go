@@ -8,6 +8,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/policy"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/jkatigb/agentctl/internal/workspace"
@@ -127,14 +128,18 @@ func newSkillsInstallCommand() *cobra.Command {
 			default:
 				return fmt.Errorf("unsupported distribution: %s", manifest.Distribution.Type)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "installed %s\n", manifest.Metadata.Name)
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "installed %s\n", manifest.Metadata.Name); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to skill.yaml")
 	cmd.Flags().StringVar(&binaryPath, "binary", "", "Path to skill binary")
 	cmd.Flags().StringVar(&modulePath, "module", "", "Path to WASM module (for wasi skills)")
-	_ = cmd.MarkFlagRequired("manifest")
+	if err := cmd.MarkFlagRequired("manifest"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 
@@ -174,7 +179,9 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = in.Close() }()
+	defer func() {
+		errs.Ignore(in.Close(), "close source file")
+	}()
 	info, err := in.Stat()
 	if err != nil {
 		return err
@@ -183,7 +190,9 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = out.Close() }()
+	defer func() {
+		errs.Ignore(out.Close(), "close dest file")
+	}()
 	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
@@ -275,7 +284,9 @@ func newSkillsUninstallCommand() *cobra.Command {
 			if err := os.RemoveAll(skillPath); err != nil {
 				return fmt.Errorf("failed to uninstall skill: %w", err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "uninstalled %s\n", args[0])
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "uninstalled %s\n", args[0]); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
@@ -337,14 +348,18 @@ func newSkillsUpgradeCommand() *cobra.Command {
 			default:
 				return fmt.Errorf("unsupported distribution: %s", manifest.Distribution.Type)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "upgraded %s to version %s\n", manifest.Metadata.Name, manifest.Metadata.Version)
+			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "upgraded %s to version %s\n", manifest.Metadata.Name, manifest.Metadata.Version); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to new skill.yaml")
 	cmd.Flags().StringVar(&binaryPath, "binary", "", "Path to new skill binary")
 	cmd.Flags().StringVar(&modulePath, "module", "", "Path to new WASM module (for wasi skills)")
-	_ = cmd.MarkFlagRequired("manifest")
+	if err := cmd.MarkFlagRequired("manifest"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 

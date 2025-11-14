@@ -7,7 +7,10 @@ import (
 )
 
 func TestBearerApply(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	if err := Apply(req, Config{Type: "bearer", Token: "secret"}); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -17,7 +20,10 @@ func TestBearerApply(t *testing.T) {
 }
 
 func TestAPIKeyHeader(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	cfg := Config{Type: "apiKey", APIKey: "abc", Header: "X-Key"}
 	if err := Apply(req, cfg); err != nil {
 		t.Fatalf("apply: %v", err)
@@ -28,7 +34,10 @@ func TestAPIKeyHeader(t *testing.T) {
 }
 
 func TestAPIKeyQuery(t *testing.T) {
-	u, _ := url.Parse("https://example.com")
+	u, err := url.Parse("https://example.com")
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
 	req := &http.Request{URL: u, Header: http.Header{}}
 	cfg := Config{Type: "apiKey", APIKey: "abc", Query: "token"}
 	if err := Apply(req, cfg); err != nil {
@@ -40,7 +49,10 @@ func TestAPIKeyQuery(t *testing.T) {
 }
 
 func TestBasicApply(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	cfg := Config{Type: "basic", User: "user", Pass: "pass"}
 	if err := Apply(req, cfg); err != nil {
 		t.Fatalf("apply: %v", err)

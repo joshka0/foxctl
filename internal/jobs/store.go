@@ -39,7 +39,7 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer errs.CloseOnErr(&err, p)
+	defer errs.CloseOnErr(p, &err)
 	exec := executor.New(root, p, executor.WithLogger(logger))
 	store = &Store{root: root, persist: p, executor: exec}
 	return store, nil
@@ -78,19 +78,19 @@ func (s *Store) SubmitEcho(ctx context.Context, message string) (Job, error) {
 
 	jobDir := s.jobDir(job.ID)
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
-		_ = s.persist.Delete(ctx, job.ID)
+		errs.Ignore(s.persist.Delete(ctx, job.ID), "delete echo job after mkdir failure")
 		return Job{}, fmt.Errorf("jobs: job dir: %w", err)
 	}
 
 	if err := s.persist.UpdateState(ctx, job.ID, StateRunning, "", ""); err != nil {
-		_ = s.persist.Delete(ctx, job.ID)
+		errs.Ignore(s.persist.Delete(ctx, job.ID), "delete echo job after state failure")
 		return Job{}, err
 	}
 
 	env := envelope.OK("jobs.echo", map[string]string{"message": message})
 	resultPath := filepath.Join(jobDir, "result.json")
 	if err := writeResult(resultPath, env); err != nil {
-		_ = s.persist.UpdateState(ctx, job.ID, StateError, err.Error(), "")
+		errs.Ignore(s.persist.UpdateState(ctx, job.ID, StateError, err.Error(), ""), "mark echo job error after result failure")
 		return Job{}, err
 	}
 

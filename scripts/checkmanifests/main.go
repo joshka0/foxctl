@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/policy"
 	"github.com/jkatigb/agentctl/internal/skill"
 )
@@ -20,7 +21,7 @@ type violation struct {
 func main() {
 	var violations []violation
 
-	_ = filepath.Walk("skills", func(path string, info os.FileInfo, err error) error {
+	walkErr := filepath.Walk("skills", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			violations = append(violations, violation{Path: path, Msg: err.Error()})
 			return nil
@@ -36,13 +37,18 @@ func main() {
 		violations = append(violations, validateManifest(path, m)...)
 		return nil
 	})
+	if walkErr != nil {
+		violations = append(violations, violation{Path: "skills", Msg: walkErr.Error()})
+	}
 
 	if len(violations) > 0 {
 		out := struct {
 			Errors []violation `json:"errors"`
 		}{Errors: violations}
 		if err := json.NewEncoder(os.Stdout).Encode(out); err != nil {
-			fmt.Fprintf(os.Stderr, "checkmanifests: encode: %v\n", err)
+			if _, writeErr := fmt.Fprintf(os.Stderr, "checkmanifests: encode: %v\n", err); writeErr != nil {
+				errors.Ignore(writeErr, "stderr logging failed")
+			}
 		}
 		os.Exit(1)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -60,7 +61,7 @@ func newCASPutCommand() *cobra.Command {
 				return err
 			}
 			defer func() {
-				_ = r.Close()
+				errs.Ignore(r.Close(), "close cas put input")
 			}()
 			obj, err := store.Put(cmd.Context(), r, kind, tags)
 			if err != nil {
@@ -132,15 +133,18 @@ func newCASGetCommand() *cobra.Command {
 				return fmt.Errorf("cas: create output: %w", err)
 			}
 			if _, err := io.Copy(file, rc); err != nil {
-				closeErr := file.Close()
-				_ = rc.Close()
-				if closeErr != nil {
-					return closeErr
+				fileErr := file.Close()
+				rcErr := rc.Close()
+				if fileErr != nil {
+					return fileErr
+				}
+				if rcErr != nil {
+					return rcErr
 				}
 				return fmt.Errorf("cas: copy: %w", err)
 			}
 			if err := file.Close(); err != nil {
-				_ = rc.Close()
+				errs.Ignore(rc.Close(), "close cas reader after file close failure")
 				return err
 			}
 			if err := rc.Close(); err != nil {

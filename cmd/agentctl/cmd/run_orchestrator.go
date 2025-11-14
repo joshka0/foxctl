@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/jkatigb/agentctl/internal/config"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -45,11 +46,11 @@ func newRunExecutor(ctx context.Context, cfg config.Config, handle SkillHandle, 
 // Close releases any resources held by the executor.
 func (e *runExecutor) Close() {
 	if e.cacheStore != nil {
-		_ = e.cacheStore.Close()
+		errs.Ignore(e.cacheStore.Close(), "close cache store")
 		e.cacheStore = nil
 	}
 	if e.jobStore != nil {
-		_ = e.jobStore.Close()
+		errs.Ignore(e.jobStore.Close(), "close job store")
 		e.jobStore = nil
 	}
 }

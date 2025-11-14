@@ -60,7 +60,9 @@ func newTodoAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&parentID, "parent", "", "Parent task ID")
 	cmd.Flags().StringSliceVar(&depends, "depends-on", nil, "Dependency task IDs")
 	cmd.Flags().StringVar(&storePath, "store", "", "Path to task store (default: ~/.agentctl/todo/tasks.json)")
-	_ = cmd.MarkFlagRequired("title")
+	if err := cmd.MarkFlagRequired("title"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 
@@ -99,7 +101,9 @@ func newTodoCompleteCommand() *cobra.Command {
 	cmd.Flags().StringVar(&notes, "notes", "", "Completion notes")
 	cmd.Flags().StringVar(&gotchas, "gotchas", "", "Gotchas to remember")
 	cmd.Flags().StringVar(&storePath, "store", "", "Path to task store (default: ~/.agentctl/todo/tasks.json)")
-	_ = cmd.MarkFlagRequired("id")
+	if err := cmd.MarkFlagRequired("id"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 

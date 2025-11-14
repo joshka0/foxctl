@@ -13,7 +13,11 @@ func TestSaveAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{"artifact":"sha256:abc"},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	if _, err := store.SaveFromResult(ctx, "spec", "openapi_spec", "/workspace", "demo", result); err != nil {
@@ -39,7 +43,11 @@ func TestOpenCreatesNestedRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("expected root directory to exist: %v", err)
@@ -52,7 +60,11 @@ func TestListFiltersWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	if _, err := store.SaveFromResult(ctx, "one", "result", "/ws1", "", result); err != nil {
@@ -77,7 +89,11 @@ func TestSearchAndUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	if _, err := store.SaveFromResult(ctx, "alpha", "result", "ws", "alpha summary", result); err != nil {
@@ -109,7 +125,11 @@ func TestRelevantRanking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	entry, err := store.SaveFromResult(ctx, "fresh", "result", "ws", "fresh", result)
@@ -121,8 +141,12 @@ func TestRelevantRanking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save old: %v", err)
 	}
-	_, _ = store.Get(ctx, old.Name, "ws")
-	_, _ = store.Get(ctx, old.Name, "ws")
+	if _, err := store.Get(ctx, old.Name, "ws"); err != nil {
+		t.Fatalf("get old first: %v", err)
+	}
+	if _, err := store.Get(ctx, old.Name, "ws"); err != nil {
+		t.Fatalf("get old second: %v", err)
+	}
 	// Manually adjust timestamps to ensure ordering difference
 	_, err = store.Update(ctx, entry.Name, "ws", nil, nil)
 	if err != nil {

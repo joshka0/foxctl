@@ -119,7 +119,10 @@ func WalkFiles(opts ListOptions) ([]FileEntry, error) {
 				return filepath.SkipDir
 			}
 			if opts.MaxDepth > 0 {
-				rel, _ := filepath.Rel(baseAbs, path)
+				rel, relErr := filepath.Rel(baseAbs, path)
+				if relErr != nil {
+					return relErr
+				}
 				if depth(rel) >= opts.MaxDepth {
 					return filepath.SkipDir
 				}
@@ -145,12 +148,10 @@ func WalkFiles(opts ListOptions) ([]FileEntry, error) {
 func matches(path string, globs []string) bool {
 	rel := filepath.ToSlash(path)
 	for _, g := range globs {
-		ok, _ := filepath.Match(g, filepath.Base(path))
-		if ok {
+		if ok, err := filepath.Match(g, filepath.Base(path)); err == nil && ok {
 			return true
 		}
-		ok, _ = filepath.Match(g, rel)
-		if ok {
+		if ok, err := filepath.Match(g, rel); err == nil && ok {
 			return true
 		}
 	}

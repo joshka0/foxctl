@@ -23,7 +23,11 @@ func TestOpenDBCreatesDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("close db: %v", err)
+		}
+	})
 
 	if !migrated {
 		t.Fatalf("expected migration to be invoked")

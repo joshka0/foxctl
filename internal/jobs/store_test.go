@@ -24,7 +24,11 @@ func TestSubmitEchoCreatesResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	job, err := store.SubmitEcho(ctx, "hello world")
 	if err != nil {
@@ -57,7 +61,11 @@ func TestOpenCreatesNestedRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("expected root directory to exist: %v", err)
@@ -71,7 +79,11 @@ func TestListJobsOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	if _, err := store.SubmitEcho(ctx, "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
@@ -100,7 +112,11 @@ func TestCancelRequiresPendingState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	job, err := store.SubmitEcho(ctx, "done")
 	if err != nil {
@@ -118,7 +134,11 @@ func TestResultReadsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	job, err := store.SubmitEcho(ctx, "result test")
 	if err != nil {
@@ -140,7 +160,11 @@ func TestJobDirectoriesCreated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	job, err := store.SubmitEcho(ctx, "dirs")
 	if err != nil {
@@ -159,7 +183,11 @@ func TestRunSkillCreatesJobAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	bin := buildTestSkill(t, `package main
 import (
@@ -194,7 +222,11 @@ func TestProgressStreamingWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	bin := buildTestSkill(t, `package main
 import (
@@ -246,7 +278,11 @@ func TestFindOrPrepareSkillJobDedupes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	input := []byte(`{"foo":"bar"}`)
 	job1, dup1, err := store.FindOrPrepareSkillJob(ctx, "test", input, true)
@@ -275,7 +311,11 @@ func TestWaitForCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	job, err := store.SubmitEcho(ctx, "wait test")
 	if err != nil {
@@ -314,13 +354,19 @@ func TestProgressReader(t *testing.T) {
 			t.Fatalf("encode event: %v", err)
 		}
 	}
-	_ = f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatalf("close progress file: %v", err)
+	}
 
 	pr, err := OpenProgressReader(jobDir)
 	if err != nil {
 		t.Fatalf("open progress reader: %v", err)
 	}
-	defer func() { _ = pr.Close() }()
+	t.Cleanup(func() {
+		if err := pr.Close(); err != nil {
+			t.Fatalf("close progress reader: %v", err)
+		}
+	})
 
 	readEvents := []ProgressEvent{}
 	for {
@@ -352,7 +398,11 @@ func TestComputeSkillArgsHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	input := []byte(`{"input":"value"}`)
 	hash1 := store.ComputeSkillArgsHash("test", input)
@@ -392,7 +442,11 @@ func TestTailProgressFollowReadsAfterEOF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
 
 	now := time.Now().UTC()
 	job := Job{
@@ -434,7 +488,9 @@ func TestTailProgressFollowReadsAfterEOF(t *testing.T) {
 			t.Fatalf("open progress for append: %v", openErr)
 		}
 		if _, writeErr := f.WriteString(line + "\n"); writeErr != nil {
-			_ = f.Close()
+			if closeErr := f.Close(); closeErr != nil {
+				t.Fatalf("close progress after write error: %v", closeErr)
+			}
 			t.Fatalf("append progress: %v", writeErr)
 		}
 		if closeErr := f.Close(); closeErr != nil {

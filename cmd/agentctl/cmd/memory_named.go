@@ -235,7 +235,9 @@ func newMemorySaveCommand() *cobra.Command {
 	cmd.Flags().StringVar(&typ, "type", "result", "Memory type label")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace path (default: auto-detect)")
 	cmd.Flags().StringVar(&summary, "summary", "", "Summary metadata")
-	_ = cmd.MarkFlagRequired("as")
+	if err := cmd.MarkFlagRequired("as"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 
