@@ -452,12 +452,13 @@ func appendProgressLine(t testing.TB, path, line string) {
 	if err != nil {
 		t.Fatalf("open progress for append: %v", err)
 	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Fatalf("close progress: %v", err)
+		}
+	}()
 	if _, err := f.WriteString(line + "\n"); err != nil {
-		_ = f.Close()
 		t.Fatalf("append progress: %v", err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatalf("close progress: %v", err)
 	}
 }
 

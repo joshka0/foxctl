@@ -212,13 +212,3 @@ func decodeData(t *testing.T, buf *bytes.Buffer) map[string]any {
 	}
 	return data
 }
-
-func extractTaskID(t *testing.T, buf *bytes.Buffer) string {
-	data := decodeData(t, buf)
-	task := data["task"].(map[string]any)
-	id, _ := task["id"].(string)
-	if id == "" {
-		t.Fatalf("task missing id: %#v", task)
-	}
-	return id
-}
