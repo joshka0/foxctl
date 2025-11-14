@@ -12,24 +12,41 @@ import (
 	"github.com/jkatigb/agentctl/internal/workspace"
 )
 
-// Run executes the appropriate runtime for a manifest.
-func Run(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
+// RunOptions contains parameters for executing a skill.
+type RunOptions struct {
+	Manifest     skill.Manifest
+	ArtifactPath string
+	Input        []byte
+}
+
+// RunWithOptions executes the appropriate runtime for a manifest using structured options.
+func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error) {
 	ws, _ := workspace.FromContext(ctx)
-	switch manifest.Distribution.Type {
+	switch opts.Manifest.Distribution.Type {
 	case "exec":
-		r := execrunner.Runner{Manifest: manifest, Binary: artifactPath}
+		r := execrunner.Runner{Manifest: opts.Manifest, Binary: opts.ArtifactPath}
 		if ws != "" {
 			env := append(os.Environ(), fmt.Sprintf("AGENTCTL_WORKSPACE=%s", ws))
 			r.Options.Env = env
 		}
-		return r.Run(ctx, input)
+		return r.Run(ctx, opts.Input)
 	case "wasi":
-		r := wasirunner.Runner{Manifest: manifest, ModulePath: artifactPath}
+		r := wasirunner.Runner{Manifest: opts.Manifest, ModulePath: opts.ArtifactPath}
 		if ws != "" {
 			r.Options.Env = append(r.Options.Env, fmt.Sprintf("AGENTCTL_WORKSPACE=%s", ws))
 		}
-		return r.Run(ctx, input)
+		return r.Run(ctx, opts.Input)
 	default:
-		return nil, nil, fmt.Errorf("unsupported distribution type %q", manifest.Distribution.Type)
+		return nil, nil, fmt.Errorf("unsupported distribution type %q", opts.Manifest.Distribution.Type)
 	}
+}
+
+// Run executes the appropriate runtime for a manifest.
+// Deprecated: Use RunWithOptions for better clarity and extensibility.
+func Run(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
+	return RunWithOptions(ctx, RunOptions{
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 }

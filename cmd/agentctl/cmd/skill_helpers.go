@@ -124,5 +124,9 @@ func normalizeSkillName(name string) string {
 }
 
 func executeSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
-	return runner.Run(ctx, manifest, artifactPath, input)
+	return runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 }

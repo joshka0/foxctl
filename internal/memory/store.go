@@ -238,17 +238,38 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 	return nil
 }
 
-// SaveFromResult is a helper that stores a result envelope.
-func (s *Store) SaveFromResult(ctx context.Context, name, typ, workspace, summary string, result []byte) (NamedEntry, error) {
+// SaveOptions contains parameters for saving memory entries.
+type SaveOptions struct {
+	Name      string
+	Type      string
+	Workspace string
+	Summary   string
+	Result    []byte
+}
+
+// SaveResult stores a result envelope using structured options.
+func (s *Store) SaveResult(ctx context.Context, opts SaveOptions) (NamedEntry, error) {
 	entry := NamedEntry{
+		Name:      opts.Name,
+		Type:      opts.Type,
+		Workspace: opts.Workspace,
+		Summary:   opts.Summary,
+		Result:    opts.Result,
+		Digests:   cache.CollectDigests(opts.Result),
+	}
+	return s.Save(ctx, entry)
+}
+
+// SaveFromResult is a helper that stores a result envelope.
+// Deprecated: Use SaveResult with SaveOptions instead for better clarity.
+func (s *Store) SaveFromResult(ctx context.Context, name, typ, workspace, summary string, result []byte) (NamedEntry, error) {
+	return s.SaveResult(ctx, SaveOptions{
 		Name:      name,
 		Type:      typ,
 		Workspace: workspace,
 		Summary:   summary,
 		Result:    result,
-		Digests:   cache.CollectDigests(result),
-	}
-	return s.Save(ctx, entry)
+	})
 }
 
 // ErrNotFound indicates missing entries.
