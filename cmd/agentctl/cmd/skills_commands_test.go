@@ -37,8 +37,15 @@ func TestSkillsInstallCommandInstallsExecSkill(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dest, "bin")); err != nil {
 		t.Fatalf("expected binary to be installed: %v", err)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "installed text/grep" {
-		t.Fatalf("unexpected install output: %q", got)
+	data := decodeEnvelopeData(t, stdout.Bytes())
+	if got := data["name"]; got != "text/grep" {
+		t.Fatalf("unexpected skill name: %v", got)
+	}
+	if got := data["version"]; got != "0.1.0" {
+		t.Fatalf("unexpected skill version: %v", got)
+	}
+	if got := data["path"]; got != filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep")) {
+		t.Fatalf("unexpected skill path: %v", got)
 	}
 }
 
@@ -146,19 +153,23 @@ func TestSkillsUninstallCommandRemovesSkill(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep"))); !os.IsNotExist(err) {
 		t.Fatalf("expected skill directory removed, got err=%v", err)
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "uninstalled text/grep" {
-		t.Fatalf("unexpected uninstall output: %q", got)
+	data := decodeEnvelopeData(t, stdout.Bytes())
+	if got := data["name"]; got != "text/grep" {
+		t.Fatalf("unexpected uninstall name: %v", got)
+	}
+	if got := data["path"]; got != filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep")) {
+		t.Fatalf("unexpected uninstall path: %v", got)
 	}
 }
 
 func TestSkillsUpgradeCommandUpdatesManifest(t *testing.T) {
 	cfg := installTextGrepSkill(t)
 	manifestSrc := filepath.Join(repoRoot(t), "skills", "text_grep", "skill.yaml")
-	data, err := os.ReadFile(manifestSrc)
+	manifestData, err := os.ReadFile(manifestSrc)
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	replaced := strings.Replace(string(data), "version: 0.1.0", "version: 0.2.0", 1)
+	replaced := strings.Replace(string(manifestData), "version: 0.1.0", "version: 0.2.0", 1)
 	manifestPath := filepath.Join(t.TempDir(), "upgraded.yaml")
 	if err := os.WriteFile(manifestPath, []byte(replaced), 0o644); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -184,8 +195,15 @@ func TestSkillsUpgradeCommandUpdatesManifest(t *testing.T) {
 	if !strings.Contains(string(installed), "version: 0.2.0") {
 		t.Fatalf("expected manifest version updated, got:\n%s", string(installed))
 	}
-	if got := strings.TrimSpace(stdout.String()); got != "upgraded text/grep to version 0.2.0" {
-		t.Fatalf("unexpected upgrade output: %q", got)
+	envData := decodeEnvelopeData(t, stdout.Bytes())
+	if got := envData["name"]; got != "text/grep" {
+		t.Fatalf("unexpected upgrade skill: %v", got)
+	}
+	if got := envData["version"]; got != "0.2.0" {
+		t.Fatalf("unexpected upgrade version: %v", got)
+	}
+	if got := envData["path"]; got != filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep")) {
+		t.Fatalf("unexpected upgrade path: %v", got)
 	}
 }
 
@@ -206,4 +224,17 @@ func newTestConfig(t *testing.T) config.Config {
 		},
 	}
 	return cfg
+}
+
+func decodeEnvelopeData(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var env envelope.Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected object payload, got %T", env.Data)
+	}
+	return data
 }

@@ -59,8 +59,13 @@ func ensureSkillDir(skillsRoot string, manifest skill.Manifest) (string, error) 
 		return "", fmt.Errorf("skill metadata name is required")
 	}
 	cleanName := filepath.Clean(name)
-	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) {
+	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
 		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
+	}
+	for _, segment := range strings.Split(cleanName, string(os.PathSeparator)) {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
+		}
 	}
 	root := filepath.Clean(skillsRoot)
 	dest := filepath.Join(root, cleanName)
@@ -82,8 +87,13 @@ func skillDirPath(skillsRoot, name string) (string, error) {
 		return "", fmt.Errorf("skill name is required")
 	}
 	cleanName = filepath.Clean(cleanName)
-	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) {
+	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
 		return "", fmt.Errorf("invalid skill name %q", name)
+	}
+	for _, segment := range strings.Split(cleanName, string(os.PathSeparator)) {
+		if segment == "" || segment == "." || segment == ".." {
+			return "", fmt.Errorf("invalid skill name %q", name)
+		}
 	}
 	root := filepath.Clean(skillsRoot)
 	dest := filepath.Join(root, cleanName)

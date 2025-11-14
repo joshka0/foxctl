@@ -133,8 +133,8 @@ func newCASGetCommand() *cobra.Command {
 				return fmt.Errorf("cas: create output: %w", err)
 			}
 			if _, err := io.Copy(file, rc); err != nil {
-				_ = file.Close()
-				_ = rc.Close()
+				errs.Ignore(file.Close(), "close output file after copy failure")
+				errs.Ignore(rc.Close(), "close cas reader after copy failure")
 				return fmt.Errorf("cas: copy: %w", err)
 			}
 			if err := file.Close(); err != nil {
