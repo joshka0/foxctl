@@ -13,106 +13,53 @@ import (
 )
 
 func TestTodoAddAndList(t *testing.T) {
-	ctx := context.Background()
-	tmp := t.TempDir()
-	rc := newRunner(t, tmp)
-	t.Cleanup(func() {
-		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
-		}
+	env := newTodoTestEnv(t)
+
+	data := env.addTask(t, addRequest{
+		Title:       "Ship feature",
+		Description: "Do the work",
 	})
-
-	storePath := filepath.Join(tmp, "tasks.json")
-
-	addInput := input{
-		Operation: "add",
-		StorePath: storePath,
-		Add: &addRequest{
-			Title:       "Ship feature",
-			Description: "Do the work",
-		},
-	}
-	out := runSkill(ctx, t, rc, addInput)
-	data := decodeData(t, out)
 	if data["total_tasks"].(float64) != 1 {
 		t.Fatalf("expected total tasks = 1 got %v", data["total_tasks"])
 	}
 
-	listBuf := runSkill(ctx, t, rc, input{
-		Operation: "list",
-		StorePath: storePath,
-	})
-	listData := decodeData(t, listBuf)
-	tasks := listData["tasks"].([]any)
+	tasks := env.listTasks(t)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(tasks))
 	}
-	first := tasks[0].(map[string]any)
-	if first["title"].(string) != "Ship feature" {
-		t.Fatalf("unexpected title: %v", first["title"])
+	if tasks[0]["title"].(string) != "Ship feature" {
+		t.Fatalf("unexpected title: %v", tasks[0]["title"])
 	}
 }
 
 func TestTodoChildAndComplete(t *testing.T) {
-	ctx := context.Background()
-	tmp := t.TempDir()
-	rc := newRunner(t, tmp)
-	t.Cleanup(func() {
-		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
-		}
+	env := newTodoTestEnv(t)
+
+	parentTask := env.addTask(t, addRequest{Title: "Parent"})
+	parentID := taskID(t, parentTask)
+
+	childTask := env.addTask(t, addRequest{
+		Title:     "Child",
+		ParentID:  parentID,
+		DependsOn: []string{parentID},
 	})
+	childID := taskID(t, childTask)
 
-	storePath := filepath.Join(tmp, "tasks.json")
-	parentID := extractTaskID(t, runSkill(ctx, t, rc, input{
-		Operation: "add",
-		StorePath: storePath,
-		Add: &addRequest{
-			Title: "Parent",
-		},
-	}))
-
-	childID := extractTaskID(t, runSkill(ctx, t, rc, input{
-		Operation: "add",
-		StorePath: storePath,
-		Add: &addRequest{
-			Title:     "Child",
-			ParentID:  parentID,
-			DependsOn: []string{parentID},
-		},
-	}))
-
-	// Completing child should fail because parent incomplete
-	err := runExpectError(ctx, rc, input{
+	if err := env.expectError(t, input{
 		Operation: "complete",
-		StorePath: storePath,
-		Complete: &completeRequest{
-			ID: childID,
-		},
-	})
-	if err == nil {
+		Complete:  &completeRequest{ID: childID},
+	}); err == nil {
 		t.Fatalf("expected dependency error")
 	}
 
-	runSkill(ctx, t, rc, input{
-		Operation: "complete",
-		StorePath: storePath,
-		Complete: &completeRequest{
-			ID: parentID,
-		},
-	})
+	env.completeTask(t, completeRequest{ID: parentID})
 
-	out := runSkill(ctx, t, rc, input{
-		Operation: "complete",
-		StorePath: storePath,
-		Complete: &completeRequest{
-			ID:      childID,
-			Notes:   "done",
-			Gotchas: "remember config",
-		},
+	result := env.completeTask(t, completeRequest{
+		ID:      childID,
+		Notes:   "done",
+		Gotchas: "remember config",
 	})
-	data := decodeData(t, out)
-	task := data["task"].(map[string]any)
+	task := taskFromData(t, result)
 	if task["status"].(string) != statusDone {
 		t.Fatalf("expected child complete, got %s", task["status"])
 	}
@@ -122,6 +69,27 @@ func TestTodoChildAndComplete(t *testing.T) {
 }
 
 func TestTodoRejectsBackticks(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	if err := env.expectError(t, input{
+		Operation: "add",
+		Add: &addRequest{
+			Title:       "bad ` title",
+			Description: "desc",
+		},
+	}); err == nil {
+		t.Fatalf("expected title validation error")
+	}
+}
+
+type todoTestEnv struct {
+	ctx       context.Context
+	storePath string
+	rc        *skillslib.RunnerContext
+}
+
+func newTodoTestEnv(t *testing.T) *todoTestEnv {
+	t.Helper()
 	ctx := context.Background()
 	tmp := t.TempDir()
 	rc := newRunner(t, tmp)
@@ -130,18 +98,72 @@ func TestTodoRejectsBackticks(t *testing.T) {
 			t.Fatalf("close runner context: %v", err)
 		}
 	})
-	storePath := filepath.Join(tmp, "tasks.json")
 
-	if err := runExpectError(ctx, rc, input{
-		Operation: "add",
-		StorePath: storePath,
-		Add: &addRequest{
-			Title:       "bad ` title",
-			Description: "desc",
-		},
-	}); err == nil {
-		t.Fatalf("expected title validation error")
+	return &todoTestEnv{
+		ctx:       ctx,
+		storePath: filepath.Join(tmp, "tasks.json"),
+		rc:        rc,
 	}
+}
+
+func (env *todoTestEnv) addTask(t *testing.T, req addRequest) map[string]any {
+	t.Helper()
+	data := env.run(t, input{Operation: "add", StorePath: env.storePath, Add: &req})
+	return data
+}
+
+func (env *todoTestEnv) completeTask(t *testing.T, req completeRequest) map[string]any {
+	t.Helper()
+	return env.run(t, input{Operation: "complete", StorePath: env.storePath, Complete: &req})
+}
+
+func (env *todoTestEnv) listTasks(t *testing.T) []map[string]any {
+	t.Helper()
+	data := env.run(t, input{Operation: "list", StorePath: env.storePath})
+	items, ok := data["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks slice, got %T", data["tasks"])
+	}
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		task, ok := item.(map[string]any)
+		if !ok {
+			t.Fatalf("expected task map, got %T", item)
+		}
+		result = append(result, task)
+	}
+	return result
+}
+
+func (env *todoTestEnv) expectError(t *testing.T, in input) error {
+	t.Helper()
+	in.StorePath = env.storePath
+	return runExpectError(env.ctx, env.rc, in)
+}
+
+func (env *todoTestEnv) run(t *testing.T, in input) map[string]any {
+	t.Helper()
+	buf := runSkill(env.ctx, t, env.rc, in)
+	return decodeData(t, buf)
+}
+
+func taskFromData(t *testing.T, data map[string]any) map[string]any {
+	t.Helper()
+	task, ok := data["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task map, got %T", data["task"])
+	}
+	return task
+}
+
+func taskID(t *testing.T, data map[string]any) string {
+	t.Helper()
+	task := taskFromData(t, data)
+	id, _ := task["id"].(string)
+	if id == "" {
+		t.Fatalf("task missing id: %#v", task)
+	}
+	return id
 }
 
 func newRunner(t *testing.T, tmp string) *skillslib.RunnerContext {
@@ -189,14 +211,4 @@ func decodeData(t *testing.T, buf *bytes.Buffer) map[string]any {
 		t.Fatalf("expected map data, got %T", env.Data)
 	}
 	return data
-}
-
-func extractTaskID(t *testing.T, buf *bytes.Buffer) string {
-	data := decodeData(t, buf)
-	task := data["task"].(map[string]any)
-	id, _ := task["id"].(string)
-	if id == "" {
-		t.Fatalf("task missing id: %#v", task)
-	}
-	return id
 }
