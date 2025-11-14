@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 func TestGrepProducesPreview(t *testing.T) {
@@ -106,7 +106,7 @@ func TestGrepCreatesArtifactForLargeResults(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillslib.RunnerContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -131,7 +131,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := skillslib.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}

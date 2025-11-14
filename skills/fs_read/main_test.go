@@ -10,7 +10,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
@@ -131,7 +131,7 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 	}
 }
 
-func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *skillslib.RunnerContext {
+func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -156,7 +156,7 @@ func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *skil
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := skillslib.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}

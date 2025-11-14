@@ -17,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/envelope"
 	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 type input struct {
@@ -42,7 +43,7 @@ func main() {
 	if err != nil {
 		fail("fs/ls", "ECONFIG", err)
 	}
-	rc, err := skillslib.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("fs/ls", "ERUNTIME", err)
 	}
@@ -59,7 +60,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	validDir, err := resolveWorkspace(rc, in.Path)
 	if err != nil {
 		return err
@@ -129,7 +130,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveWorkspace(rc *skillslib.RunnerContext, path string) (string, error) {
+func resolveWorkspace(rc *runner.RunnerContext, path string) (string, error) {
 	valid, err := rc.PathValidator.ValidatePath(path)
 	if err != nil {
 		return "", fmt.Errorf("path validation failed: %w", err)
@@ -147,13 +148,13 @@ func preparePreview(entries []entry, max int) ([]entry, bool) {
 	return preview, truncated
 }
 
-func persistListingArtifact(ctx context.Context, rc *skillslib.RunnerContext, entries []entry, truncated bool) (skillslib.Artifact, error) {
+func persistListingArtifact(ctx context.Context, rc *runner.RunnerContext, entries []entry, truncated bool) (runner.Artifact, error) {
 	if !truncated {
-		return skillslib.Artifact{}, nil
+		return runner.Artifact{}, nil
 	}
-	artifact, err := skillslib.PersistJSON(ctx, rc, entries, "fs_ls")
+	artifact, err := runner.PersistJSON(ctx, rc, entries, "fs_ls")
 	if err != nil {
-		return skillslib.Artifact{}, err
+		return runner.Artifact{}, err
 	}
 	return artifact, nil
 }
