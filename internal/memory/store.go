@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jkatigb/agentctl/internal/artifacts"
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/cas"
 	"github.com/jkatigb/agentctl/internal/dbutil"
@@ -33,9 +34,10 @@ type ScoredEntry = storage.ScoredEntry
 
 // Store handles named memory persistence.
 type Store struct {
-	db   *sql.DB
-	cas  *cas.Store
-	path string
+	db              *sql.DB
+	cas             *cas.Store
+	artifactManager artifacts.Manager
+	path            string
 }
 
 // Stats aliases the shared memory stats type.
@@ -59,12 +61,14 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	// sqliteutil.OpenDB handles directory creation, WAL configuration, and migration execution.
 
 	var casStore *cas.Store
+	var artifactMgr artifacts.Manager
 	if casPath != "" {
 		if casStore, err = cas.NewStore(casPath); err != nil {
 			return nil, err
 		}
+		artifactMgr = artifacts.NewManager(casStore)
 	}
-	store = &Store{db: db, cas: casStore, path: dbPath}
+	store = &Store{db: db, cas: casStore, artifactManager: artifactMgr, path: dbPath}
 	return store, nil
 }
 
@@ -276,29 +280,25 @@ func (s *Store) SaveFromResult(ctx context.Context, name, typ, workspace, summar
 var ErrNotFound = fmt.Errorf("memory: not found")
 
 func (s *Store) pin(ctx context.Context, digests []string) {
-	if s.cas == nil {
+	if s.artifactManager == nil {
 		return
 	}
-	for _, d := range digests {
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			return
-		}
-		_ = s.cas.Pin(ctx, d)
+	// Check for context cancellation
+	if ctx.Err() != nil {
+		return
 	}
+	_ = s.artifactManager.Pin(ctx, digests...)
 }
 
 func (s *Store) unpin(ctx context.Context, digests []string) {
-	if s.cas == nil {
+	if s.artifactManager == nil {
 		return
 	}
-	for _, d := range digests {
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			return
-		}
-		_ = s.cas.Unpin(ctx, d)
+	// Check for context cancellation
+	if ctx.Err() != nil {
+		return
 	}
+	_ = s.artifactManager.Unpin(ctx, digests...)
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

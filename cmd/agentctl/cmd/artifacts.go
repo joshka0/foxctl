@@ -13,19 +13,20 @@ import (
 )
 
 func handleArtifacts(ctx context.Context, cfg config.Config, jobID string, result []byte) error {
-	digests := artifacts.Digests(result)
-	if len(digests) == 0 {
-		return nil
-	}
-	store, err := cas.NewStore(cfg.Paths.CAS)
+	casStore, err := cas.NewStore(cfg.Paths.CAS)
 	if err != nil {
 		return err
 	}
-	for _, d := range digests {
-		if err := store.Pin(ctx, d); err != nil {
-			return fmt.Errorf("pin artifact %s: %w", d, err)
-		}
+	mgr := artifacts.NewManager(casStore)
+
+	digests, err := mgr.PinFromEnvelope(ctx, result)
+	if err != nil {
+		return fmt.Errorf("pin artifacts: %w", err)
 	}
+	if len(digests) == 0 {
+		return nil
+	}
+
 	meta := map[string]any{"digests": digests}
 	buf, _ := json.Marshal(meta)
 	return os.WriteFile(artifactFile(cfg, jobID), buf, 0o644)
@@ -46,15 +47,17 @@ func releaseArtifacts(ctx context.Context, cfg config.Config, jobID string) erro
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return err
 	}
-	store, err := cas.NewStore(cfg.Paths.CAS)
+
+	casStore, err := cas.NewStore(cfg.Paths.CAS)
 	if err != nil {
 		return err
 	}
-	for _, d := range meta.Digests {
-		if err := store.Unpin(ctx, d); err != nil {
-			return fmt.Errorf("unpin artifact %s: %w", d, err)
-		}
+	mgr := artifacts.NewManager(casStore)
+
+	if err := mgr.Unpin(ctx, meta.Digests...); err != nil {
+		return fmt.Errorf("unpin artifacts: %w", err)
 	}
+
 	return os.Remove(path)
 }
 
