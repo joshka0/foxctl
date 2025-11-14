@@ -401,14 +401,14 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	if limit <= 0 {
 		limit = 10
 	}
-	// Fetch a larger window (500 most recent entries) to score client-side
+	// Fetch a larger window (500 most recently accessed entries) to score client-side.
 	// This prevents loading all entries for large datasets while still providing good ranking
 	const maxWindow = 500
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count
 		FROM named_memory
 		WHERE workspace = ?
-		ORDER BY updated_at DESC
+		ORDER BY last_accessed DESC, updated_at DESC
 		LIMIT ?`, workspace, maxWindow)
 	if err != nil {
 		return nil, fmt.Errorf("memory: relevant: %w", err)
