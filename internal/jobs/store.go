@@ -221,80 +221,12 @@ func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool, w i
 	if w == nil {
 		return fmt.Errorf("progress: writer cannot be nil")
 	}
-	jobDir := s.jobDir(jobID)
-	progressPath := filepath.Join(jobDir, "progress.ndjson")
-
 	if _, err := s.persist.Get(ctx, jobID); err != nil {
 		return err
 	}
 
-	var f *os.File
-	var err error
-	for {
-		f, err = os.Open(progressPath)
-		if err == nil {
-			break
-		}
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("progress: open: %w", err)
-		}
-		if !follow {
-			return fmt.Errorf("progress: no progress file yet")
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
-			if retErr == nil {
-				retErr = fmt.Errorf("progress: close: %w", closeErr)
-			} else {
-				retErr = fmt.Errorf("%v; close error: %w", retErr, closeErr)
-			}
-		}
-	}()
-
-	scanner := bufio.NewScanner(f)
-	for {
-		for scanner.Scan() {
-			if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
-				return fmt.Errorf("progress: write: %w", err)
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			return fmt.Errorf("progress: scan: %w", err)
-		}
-
-		if !follow {
-			return nil
-		}
-
-		job, err := s.persist.Get(ctx, jobID)
-		if err != nil {
-			return err
-		}
-		if job.State == StateOK || job.State == StateError || job.State == StateCanceled {
-			scanner = bufio.NewScanner(f)
-			for scanner.Scan() {
-				if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
-					return fmt.Errorf("progress: write: %w", err)
-				}
-			}
-			return scanner.Err()
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-
-		scanner = bufio.NewScanner(f)
-	}
+	follower := newProgressFollower(ctx, s.persist, jobID, filepath.Join(s.jobDir(jobID), "progress.ndjson"), follow)
+	return follower.stream(w)
 }
 
 // WaitForCompletion blocks until the job reaches a terminal state.
@@ -342,4 +274,109 @@ func writeResult(path string, env envelope.Envelope) error {
 
 func newJobID() string {
 	return ulid.Make().String()
+}
+
+type progressFollower struct {
+	ctx     context.Context
+	persist persist.Store
+	jobID   string
+	path    string
+	follow  bool
+	file    *os.File
+}
+
+func newProgressFollower(ctx context.Context, p persist.Store, jobID, path string, follow bool) *progressFollower {
+	return &progressFollower{ctx: ctx, persist: p, jobID: jobID, path: path, follow: follow}
+}
+
+func (pf *progressFollower) stream(w io.Writer) (retErr error) {
+	file, err := pf.openFile()
+	if err != nil {
+		return err
+	}
+	pf.file = file
+	defer func() {
+		if closeErr := pf.file.Close(); closeErr != nil {
+			if retErr == nil {
+				retErr = fmt.Errorf("progress: close: %w", closeErr)
+			} else {
+				retErr = fmt.Errorf("%v; close error: %w", retErr, closeErr)
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(pf.file)
+	for {
+		for scanner.Scan() {
+			if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+				return fmt.Errorf("progress: write: %w", err)
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("progress: scan: %w", err)
+		}
+		if !pf.follow {
+			return nil
+		}
+		done, err := pf.jobComplete()
+		if err != nil {
+			return err
+		}
+		if done {
+			scanner = bufio.NewScanner(pf.file)
+			for scanner.Scan() {
+				if _, err := fmt.Fprintln(w, scanner.Text()); err != nil {
+					return fmt.Errorf("progress: write: %w", err)
+				}
+			}
+			if err := scanner.Err(); err != nil {
+				return fmt.Errorf("progress: scan: %w", err)
+			}
+			return nil
+		}
+		if err := pf.waitForChange(); err != nil {
+			return err
+		}
+		scanner = bufio.NewScanner(pf.file)
+	}
+}
+
+func (pf *progressFollower) openFile() (*os.File, error) {
+	for {
+		f, err := os.Open(pf.path)
+		if err == nil {
+			return f, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("progress: open: %w", err)
+		}
+		if !pf.follow {
+			return nil, fmt.Errorf("progress: no progress file yet")
+		}
+		if err := pf.waitForChange(); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func (pf *progressFollower) waitForChange() error {
+	select {
+	case <-pf.ctx.Done():
+		return pf.ctx.Err()
+	case <-time.After(100 * time.Millisecond):
+		return nil
+	}
+}
+
+func (pf *progressFollower) jobComplete() (bool, error) {
+	job, err := pf.persist.Get(pf.ctx, pf.jobID)
+	if err != nil {
+		return false, err
+	}
+	switch job.State {
+	case StateOK, StateError, StateCanceled:
+		return true, nil
+	default:
+		return false, nil
+	}
 }

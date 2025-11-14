@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/workspace"
 )
 
 func TestExecutorRunSkillSuccess(t *testing.T) {
@@ -164,6 +165,201 @@ func TestExecutorLogsProgressFailures(t *testing.T) {
 	}
 	if !bytes.Contains(logBuf.Bytes(), []byte("progress write failed")) {
 		t.Fatalf("expected progress warning, got %q", logBuf.String())
+	}
+}
+
+func TestExecutorStartExecutionInitializesProgress(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	job := types.Job{
+		ID:        "job-start",
+		Command:   "skill:demo",
+		ArgsJSON:  "{}",
+		ArgsHash:  "hash",
+		State:     types.StateQueued,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := persist.InsertJob(ctx, job); err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+
+	jobDir := filepath.Join(root, job.ID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		t.Fatalf("mkdir job dir: %v", err)
+	}
+	workspacePath := filepath.Join(root, "workspace")
+	if err := os.WriteFile(filepath.Join(jobDir, "workspace"), []byte(workspacePath), 0o644); err != nil {
+		t.Fatalf("write workspace: %v", err)
+	}
+
+	var messages []string
+	exec := New(root, persist, withProgressWriterFactory(func(string) (*progressWriter, error) {
+		return &progressWriter{
+			writeOverride: func(ev ProgressEvent) error {
+				messages = append(messages, ev.Message)
+				return nil
+			},
+			closeOverride: func() error { return nil },
+		}, nil
+	}))
+
+	newCtx, pw, cleanup, start, err := exec.startExecution(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("start execution: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("expected cleanup function")
+	}
+	cleanup()
+	if pw == nil {
+		t.Fatal("expected progress writer")
+	}
+	if start.IsZero() {
+		t.Fatal("expected start timestamp")
+	}
+	if len(messages) == 0 || messages[0] != "skill execution started" {
+		t.Fatalf("expected progress message, got %v", messages)
+	}
+	if ws, ok := workspace.FromContext(newCtx); !ok || ws != workspacePath {
+		t.Fatalf("expected workspace %q, got %q", workspacePath, ws)
+	}
+	stored, err := persist.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if stored.State != types.StateRunning {
+		t.Fatalf("expected state running, got %s", stored.State)
+	}
+}
+
+func TestExecutorHandleFailureUpdatesState(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	job := types.Job{
+		ID:        "job-fail",
+		Command:   "skill:demo",
+		ArgsJSON:  "{}",
+		ArgsHash:  "hash",
+		State:     types.StateRunning,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := persist.InsertJob(ctx, job); err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+
+	exec := New(root, persist)
+	stdout := []byte("ok output")
+	stderr := []byte("boom")
+
+	result, err := exec.handleFailure(ctx, job.ID, stdout, stderr, errors.New("fail"), nil)
+	if err == nil {
+		t.Fatal("expected failure error")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("boom")) {
+		t.Fatalf("expected stderr detail in error, got %v", err)
+	}
+	if !bytes.Equal(result, stdout) {
+		t.Fatalf("expected stdout passthrough")
+	}
+	stored, getErr := persist.Get(ctx, job.ID)
+	if getErr != nil {
+		t.Fatalf("get job: %v", getErr)
+	}
+	if stored.State != types.StateError {
+		t.Fatalf("expected error state, got %s", stored.State)
+	}
+	if stored.Error == "" {
+		t.Fatal("expected error message recorded")
+	}
+}
+
+func TestExecutorHandleSuccessWritesResult(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	job := types.Job{
+		ID:        "job-success",
+		Command:   "skill:demo",
+		ArgsJSON:  "{}",
+		ArgsHash:  "hash",
+		State:     types.StateRunning,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := persist.InsertJob(ctx, job); err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	jobDir := filepath.Join(root, job.ID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		t.Fatalf("mkdir job dir: %v", err)
+	}
+
+	var events []ProgressEvent
+	pw := &progressWriter{
+		writeOverride: func(ev ProgressEvent) error {
+			events = append(events, ev)
+			return nil
+		},
+		closeOverride: func() error { return nil },
+	}
+
+	exec := New(root, persist)
+	env := envelope.OK("test", map[string]string{"message": "ok"})
+	stdout, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal env: %v", err)
+	}
+
+	result, err := exec.handleSuccess(ctx, job.ID, stdout, pw)
+	if err != nil {
+		t.Fatalf("handle success: %v", err)
+	}
+	if !bytes.Equal(result, stdout) {
+		t.Fatalf("expected stdout passthrough")
+	}
+	stored, getErr := persist.Get(ctx, job.ID)
+	if getErr != nil {
+		t.Fatalf("get job: %v", getErr)
+	}
+	if stored.State != types.StateOK {
+		t.Fatalf("expected ok state, got %s", stored.State)
+	}
+	if stored.ResultPath == "" {
+		t.Fatal("expected result path recorded")
+	}
+	if _, statErr := os.Stat(stored.ResultPath); statErr != nil {
+		t.Fatalf("stat result: %v", statErr)
+	}
+	if len(events) == 0 || events[len(events)-1].Message != "skill completed" {
+		t.Fatalf("expected completion event, got %v", events)
+	}
+}
+
+func TestExecutorRunSkillUsesExecutor(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	mockExec := execution.NewMockExecutor()
+	mockExec.ExecuteFunc = func(context.Context, execution.ExecuteOptions) (*execution.Result, error) {
+		return &execution.Result{Stdout: []byte("out"), Stderr: []byte("err")}, nil
+	}
+
+	exec := New(root, persist, WithSkillExecutor(mockExec))
+	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	stdout, stderr, err := exec.runSkill(ctx, manifest, "artifact", []byte("input"))
+	if err != nil {
+		t.Fatalf("runSkill: %v", err)
+	}
+	if string(stdout) != "out" || string(stderr) != "err" {
+		t.Fatalf("unexpected outputs: %q %q", stdout, stderr)
 	}
 }
 
