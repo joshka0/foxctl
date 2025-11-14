@@ -26,6 +26,14 @@ import (
 // RunnerFunc executes a skill manifest and returns stdout, stderr, and an error.
 type RunnerFunc func(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error)
 
+// executeOptions captures the parameters used when running a skill.
+type executeOptions struct {
+	JobID        string
+	Manifest     skill.Manifest
+	ArtifactPath string
+	Input        []byte
+}
+
 // Persistence captures the persistence primitives required by the executor.
 type Persistence interface {
 	InsertJob(ctx context.Context, job types.Job) error
@@ -105,13 +113,23 @@ func (e *Executor) RunSkill(ctx context.Context, manifest skill.Manifest, artifa
 		// Should not happen when dedupe disabled, but guard regardless.
 		return job, nil, fmt.Errorf("jobs: unexpected duplicate during run")
 	}
-	result, err := e.executeSkill(ctx, job.ID, manifest, artifactPath, input)
+	result, err := e.executeSkill(ctx, executeOptions{
+		JobID:        job.ID,
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 	return job, result, err
 }
 
 // ExecutePrepared runs a previously prepared job.
 func (e *Executor) ExecutePrepared(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
-	return e.executeSkill(ctx, jobID, manifest, artifactPath, input)
+	return e.executeSkill(ctx, executeOptions{
+		JobID:        jobID,
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 }
 
 // PrepareSkillJob creates a queued skill job.
@@ -167,33 +185,33 @@ func (e *Executor) prepareSkillJob(ctx context.Context, name string, input []byt
 	return job, false, nil
 }
 
-func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
-	if err := e.persist.UpdateState(ctx, jobID, types.StateRunning, "", ""); err != nil {
+func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byte, error) {
+	if err := e.persist.UpdateState(ctx, opts.JobID, types.StateRunning, "", ""); err != nil {
 		return nil, err
 	}
-	if ws := e.jobWorkspace(jobID); ws != "" {
+	if ws := e.jobWorkspace(opts.JobID); ws != "" {
 		ctx = workspace.WithContext(ctx, ws)
 	}
 	metrics.Global().RecordSkillExecution()
 	start := time.Now()
 
 	var pw *progressWriter
-	if writer, err := e.progressFactory(e.jobDir(jobID)); err == nil {
+	if writer, err := e.progressFactory(e.jobDir(opts.JobID)); err == nil {
 		pw = writer
 		defer func() {
 			if closeErr := pw.Close(); closeErr != nil {
 				e.logger.Warn().
-					Str("job_id", jobID).
+					Str("job_id", opts.JobID).
 					Err(closeErr).
 					Msg("progress close failed")
 			}
 		}()
 		if err := pw.WriteMessage("skill execution started"); err != nil {
-			e.warnProgress(jobID, "execution_start", err)
+			e.warnProgress(opts.JobID, "execution_start", err)
 		}
 	} else if err != nil {
 		e.logger.Warn().
-			Str("job_id", jobID).
+			Str("job_id", opts.JobID).
 			Err(err).
 			Msg("progress writer init failed")
 	}
@@ -202,9 +220,9 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	var err error
 	if e.skillExecutor != nil {
 		result, execErr := e.skillExecutor.Execute(ctx, execution.ExecuteOptions{
-			Manifest:     manifest,
-			ArtifactPath: artifactPath,
-			Input:        input,
+			Manifest:     opts.Manifest,
+			ArtifactPath: opts.ArtifactPath,
+			Input:        opts.Input,
 		})
 		if result != nil {
 			stdout = result.Stdout
@@ -222,16 +240,16 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 		}
 	} else {
 		stdout, stderr, err = runner.RunWithOptions(ctx, runner.RunOptions{
-			Manifest:     manifest,
-			ArtifactPath: artifactPath,
-			Input:        input,
+			Manifest:     opts.Manifest,
+			ArtifactPath: opts.ArtifactPath,
+			Input:        opts.Input,
 		})
 	}
 	metrics.Global().RecordExecutionTime(time.Since(start))
-	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
+	stderrPath := filepath.Join(e.jobDir(opts.JobID), "stderr.log")
 	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
 		e.logger.Warn().
-			Str("job_id", jobID).
+			Str("job_id", opts.JobID).
 			Str("path", stderrPath).
 			Err(writeErr).
 			Msg("stderr log write failed")
@@ -253,10 +271,10 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 		}
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
-				e.warnProgress(jobID, "execution_error", pwErr)
+				e.warnProgress(opts.JobID, "execution_error", pwErr)
 			}
 		}
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
+		if stateErr := e.persist.UpdateState(ctx, opts.JobID, types.StateError, err.Error(), ""); stateErr != nil {
 			return stdout, fmt.Errorf("skill run failed: %w (state update also failed: %v)", err, stateErr)
 		}
 		return stdout, fmt.Errorf("skill run failed: %w", err)
@@ -267,10 +285,10 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 		validationErr := fmt.Errorf("invalid result envelope: %w", unmarshalErr)
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr)); pwErr != nil {
-				e.warnProgress(jobID, "decode_error", pwErr)
+				e.warnProgress(opts.JobID, "decode_error", pwErr)
 			}
 		}
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, validationErr.Error(), ""); stateErr != nil {
+		if stateErr := e.persist.UpdateState(ctx, opts.JobID, types.StateError, validationErr.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", validationErr, stateErr)
 		}
 		return nil, validationErr
@@ -280,35 +298,35 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 		wrapped := fmt.Errorf("envelope validation failed: %w", validationErr)
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", wrapped)); pwErr != nil {
-				e.warnProgress(jobID, "validation_error", pwErr)
+				e.warnProgress(opts.JobID, "validation_error", pwErr)
 			}
 		}
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, wrapped.Error(), ""); stateErr != nil {
+		if stateErr := e.persist.UpdateState(ctx, opts.JobID, types.StateError, wrapped.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", wrapped, stateErr)
 		}
 		return nil, wrapped
 	}
 
-	resultPath := filepath.Join(e.jobDir(jobID), "result.json")
+	resultPath := filepath.Join(e.jobDir(opts.JobID), "result.json")
 	if err := os.WriteFile(resultPath, stdout, 0o644); err != nil {
 		if pw != nil {
 			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err)); pwErr != nil {
-				e.warnProgress(jobID, "result_error", pwErr)
+				e.warnProgress(opts.JobID, "result_error", pwErr)
 			}
 		}
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
+		if stateErr := e.persist.UpdateState(ctx, opts.JobID, types.StateError, err.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("jobs: write result: %w (state update also failed: %v)", err, stateErr)
 		}
 		return nil, fmt.Errorf("jobs: write result: %w", err)
 	}
 
-	if err := e.persist.UpdateState(ctx, jobID, types.StateOK, "", resultPath); err != nil {
+	if err := e.persist.UpdateState(ctx, opts.JobID, types.StateOK, "", resultPath); err != nil {
 		return nil, err
 	}
 
 	if pw != nil {
 		if err := pw.Write(ProgressEvent{Percent: 100, Message: "skill completed"}); err != nil {
-			e.warnProgress(jobID, "execution_complete", err)
+			e.warnProgress(opts.JobID, "execution_complete", err)
 		}
 	}
 
