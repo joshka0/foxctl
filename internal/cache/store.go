@@ -199,11 +199,12 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 	}
 
 	// refresh access metadata (best-effort)
+	entry.LastAccessed = timeutil.NowUTC()
 	if _, updateErr := s.db.ExecContext(ctx, `
 		UPDATE auto_cache
 		SET last_accessed = ?, hit_count = hit_count + 1
 		WHERE cache_key = ?`,
-		timeutil.FormatNowUTC(), key); updateErr != nil {
+		sqlutil.FormatTimestamp(entry.LastAccessed), key); updateErr != nil {
 		errs.Ignore(updateErr, "cache: refresh access metadata")
 	}
 	return entry, true, nil
