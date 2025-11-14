@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/cache"
+	"github.com/jkatigb/agentctl/internal/runservice"
 )
 
 func TestRunOptions_Validate(t *testing.T) {
@@ -11,13 +12,13 @@ func TestRunOptions_Validate(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		opts    RunOptions
+		opts    runservice.RunOptions
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "valid options",
-			opts: RunOptions{
+			opts: runservice.RunOptions{
 				SkillName: "test-skill",
 				Input:     []byte(`{}`),
 				CacheMode: cache.ModeAuto,
@@ -26,7 +27,7 @@ func TestRunOptions_Validate(t *testing.T) {
 		},
 		{
 			name: "empty skill name",
-			opts: RunOptions{
+			opts: runservice.RunOptions{
 				SkillName: "",
 				Input:     []byte(`{}`),
 			},
@@ -35,7 +36,7 @@ func TestRunOptions_Validate(t *testing.T) {
 		},
 		{
 			name: "async with cache-only",
-			opts: RunOptions{
+			opts: runservice.RunOptions{
 				SkillName: "test-skill",
 				Input:     []byte(`{}`),
 				Async:     true,
@@ -46,7 +47,7 @@ func TestRunOptions_Validate(t *testing.T) {
 		},
 		{
 			name: "async with remember",
-			opts: RunOptions{
+			opts: runservice.RunOptions{
 				SkillName:    "test-skill",
 				Input:        []byte(`{}`),
 				Async:        true,
@@ -57,7 +58,7 @@ func TestRunOptions_Validate(t *testing.T) {
 		},
 		{
 			name: "valid async without cache-only",
-			opts: RunOptions{
+			opts: runservice.RunOptions{
 				SkillName: "test-skill",
 				Input:     []byte(`{}`),
 				Async:     true,
@@ -67,7 +68,7 @@ func TestRunOptions_Validate(t *testing.T) {
 		},
 		{
 			name: "valid with remember",
-			opts: RunOptions{
+			opts: runservice.RunOptions{
 				SkillName:    "test-skill",
 				Input:        []byte(`{}`),
 				Async:        false,
@@ -77,7 +78,7 @@ func TestRunOptions_Validate(t *testing.T) {
 		},
 		{
 			name: "valid cache modes",
-			opts: RunOptions{
+			opts: runservice.RunOptions{
 				SkillName: "test-skill",
 				Input:     []byte(`{}`),
 				CacheMode: cache.ModeOff,

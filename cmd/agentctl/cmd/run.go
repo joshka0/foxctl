@@ -1,15 +1,8 @@
 package cmd
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"strings"
-
 	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/envelope"
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	memstore "github.com/jkatigb/agentctl/internal/memory"
+	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/spf13/cobra"
 )
 
@@ -31,56 +24,42 @@ func init() {
 	rootCmd.AddCommand(newRunCommand())
 }
 
-func annotateRunMeta(result []byte, workspacePath, skillVersion string) []byte {
-	var env envelope.Envelope
-	if err := json.Unmarshal(result, &env); err != nil {
-		return result
-	}
-	env.Meta.Source = "run"
-	if workspacePath != "" {
-		env.Meta.Workspace = workspacePath
-	}
-	if skillVersion != "" {
-		env.Meta.SkillVer = skillVersion
-	}
-	data, err := json.Marshal(env)
-	if err != nil {
-		return result
-	}
-	return data
-}
-
-// RememberOptions contains parameters for saving execution results to memory.
-type RememberOptions struct {
-	Name      string
-	Type      string
-	Summary   string
-	Workspace string
-	Result    []byte
-}
-
-func rememberResult(ctx context.Context, cfg config.Config, opts RememberOptions) error {
-	name := strings.TrimSpace(strings.TrimPrefix(opts.Name, "memory:"))
-	if name == "" {
-		return fmt.Errorf("memory name cannot be empty")
-	}
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags) error {
+	cfg, err := config.Load(cmd.Context())
 	if err != nil {
 		return err
 	}
-	defer func() {
-		errs.Ignore(store.Close(), "close memory store after remember")
-	}()
-	summary := opts.Summary
-	if summary == "" {
-		summary = summarizeResult(opts.Result)
+	data, err := loadSkillInput(cmd, flags.Input, flags.InputFile)
+	if err != nil {
+		return err
 	}
-	_, err = store.SaveResult(ctx, memstore.SaveOptions{
-		Name:      name,
-		Type:      opts.Type,
-		Workspace: opts.Workspace,
-		Summary:   summary,
-		Result:    opts.Result,
-	})
-	return err
+	handle, err := findSkill(cfg, args[0])
+	if err != nil {
+		return err
+	}
+	opts, err := buildRunOptions(cfg, args[0], flags, data)
+	if err != nil {
+		return err
+	}
+	executor := runservice.NewExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+	executor.SetAsyncRunner(defaultAsyncRunner)
+	defer executor.Close()
+
+	if done, err := executor.TryServeCache(data); err != nil {
+		return err
+	} else if done {
+		return nil
+	}
+
+	job, isDuplicate, err := executor.PrepareJob(data)
+	if err != nil {
+		return err
+	}
+	if isDuplicate {
+		return executor.HandleDuplicate(job)
+	}
+	if opts.Async {
+		return executor.SubmitAsync(job)
+	}
+	return executor.ExecuteSync(job)
 }

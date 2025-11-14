@@ -13,16 +13,13 @@ import (
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/policy"
 	"github.com/jkatigb/agentctl/internal/runner"
+	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/spf13/cobra"
 )
 
 // SkillHandle captures manifest and artifact path for execution.
-type SkillHandle struct {
-	Manifest     skill.Manifest
-	ManifestPath string
-	ArtifactPath string
-}
+type SkillHandle = runservice.SkillHandle
 
 func loadSkillInput(cmd *cobra.Command, inline, file string) ([]byte, error) {
 	switch {

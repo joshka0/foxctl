@@ -7,6 +7,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/jkatigb/agentctl/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -35,46 +36,7 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 	cmd.Flags().StringVar(&flags.RememberSummary, "remember-summary", "", "Summary to record for remembered result")
 }
 
-func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags) error {
-	cfg, err := config.Load(cmd.Context())
-	if err != nil {
-		return err
-	}
-	data, err := loadSkillInput(cmd, flags.Input, flags.InputFile)
-	if err != nil {
-		return err
-	}
-	handle, err := findSkill(cfg, args[0])
-	if err != nil {
-		return err
-	}
-	opts, err := buildRunOptions(cfg, args[0], flags, data)
-	if err != nil {
-		return err
-	}
-	executor := newRunExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
-	defer executor.Close()
-
-	if done, err := executor.tryServeCache(data); err != nil {
-		return err
-	} else if done {
-		return nil
-	}
-
-	job, isDuplicate, err := executor.prepareJob(data)
-	if err != nil {
-		return err
-	}
-	if isDuplicate {
-		return executor.handleDuplicate(job)
-	}
-	if opts.Async {
-		return executor.submitAsync(job)
-	}
-	return executor.executeSync(job)
-}
-
-func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags, input []byte) (RunOptions, error) {
+func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags, input []byte) (runservice.RunOptions, error) {
 	ws := workspace.Normalize(flags.Workspace)
 	if ws == "" && cfg.Memory.AutoLoadWorkspace {
 		ws = workspace.Detect("")
@@ -86,10 +48,10 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 
 	cacheMode, err := parseCacheMode(flags.CacheMode, cfg.Cache.DefaultMode)
 	if err != nil {
-		return RunOptions{}, err
+		return runservice.RunOptions{}, err
 	}
 
-	opts := RunOptions{
+	opts := runservice.RunOptions{
 		SkillName:       skillName,
 		Input:           input,
 		Async:           flags.Async,
@@ -101,7 +63,7 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 		RememberSummary: flags.RememberSummary,
 	}
 	if err := opts.Validate(); err != nil {
-		return RunOptions{}, err
+		return runservice.RunOptions{}, err
 	}
 	return opts, nil
 }
