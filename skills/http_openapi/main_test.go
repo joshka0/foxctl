@@ -3,19 +3,21 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 func TestPlanGeneration(t *testing.T) {
+	temp := t.TempDir()
 	cfg := config.Config{
 		InlineOutputKB: 32,
-		Paths:          config.Paths{},
+		Paths:          config.Paths{CAS: filepath.Join(temp, "cas")},
 	}
 	buf := &bytes.Buffer{}
-	rc, err := skillslib.NewRunnerContext(cfg, buf)
+	rc, err := runner.NewRunnerContext(cfg, buf)
 	if err != nil {
 		t.Fatalf("runner: %v", err)
 	}

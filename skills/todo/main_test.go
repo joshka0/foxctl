@@ -9,7 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 func TestTodoAddAndList(t *testing.T) {
@@ -85,7 +85,7 @@ func TestTodoRejectsBackticks(t *testing.T) {
 type todoTestEnv struct {
 	ctx       context.Context
 	storePath string
-	rc        *skillslib.RunnerContext
+	rc        *runner.RunnerContext
 }
 
 func newTodoTestEnv(t *testing.T) *todoTestEnv {
@@ -166,7 +166,7 @@ func taskID(t *testing.T, data map[string]any) string {
 	return id
 }
 
-func newRunner(t *testing.T, tmp string) *skillslib.RunnerContext {
+func newRunner(t *testing.T, tmp string) *runner.RunnerContext {
 	t.Helper()
 	cfg := config.Config{
 		Home:           tmp,
@@ -178,14 +178,14 @@ func newRunner(t *testing.T, tmp string) *skillslib.RunnerContext {
 			Cache: filepath.Join(tmp, "cache"),
 		},
 	}
-	rc, err := skillslib.NewRunnerContext(cfg, &bytes.Buffer{})
+	rc, err := runner.NewRunnerContext(cfg, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
 	return rc
 }
 
-func runSkill(ctx context.Context, t *testing.T, rc *skillslib.RunnerContext, in input) *bytes.Buffer {
+func runSkill(ctx context.Context, t *testing.T, rc *runner.RunnerContext, in input) *bytes.Buffer {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	rc.Stdout = buf
@@ -195,7 +195,7 @@ func runSkill(ctx context.Context, t *testing.T, rc *skillslib.RunnerContext, in
 	return buf
 }
 
-func runExpectError(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
+func runExpectError(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	rc.Stdout = &bytes.Buffer{}
 	return run(ctx, rc, rc.Config, in)
 }

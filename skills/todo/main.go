@@ -14,7 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
 	errs "github.com/jkatigb/agentctl/internal/errors"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -69,7 +69,7 @@ func main() {
 	if err != nil {
 		fail("todo/manage", "ECONFIG", err)
 	}
-	rc, err := skillslib.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("todo/manage", "ERUNTIME", err)
 	}
@@ -86,7 +86,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *skillslib.RunnerContext, cfg config.Config, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
 	_ = ctx
 	storePath := in.StorePath
 	if storePath == "" {

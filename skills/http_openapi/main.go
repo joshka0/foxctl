@@ -15,7 +15,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/errors"
 	openapiauth "github.com/jkatigb/agentctl/internal/openapi/auth"
 	"github.com/jkatigb/agentctl/internal/secrets"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 type input struct {
@@ -34,7 +34,7 @@ func main() {
 	if err != nil {
 		fail("http/openapi", "ECONFIG", err)
 	}
-	rc, err := skillslib.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("http/openapi", "ERUNTIME", err)
 	}
@@ -51,7 +51,7 @@ func main() {
 	}
 }
 
-func run(rc *skillslib.RunnerContext, in input) error {
+func run(rc *runner.RunnerContext, in input) error {
 	if in.BaseURL == "" {
 		return fmt.Errorf("base_url is required")
 	}
