@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/jobs/fsutil"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/skill"
 )
@@ -342,7 +343,7 @@ func TestTailProgressFollowReadsAfterEOF(t *testing.T) {
 		t.Fatalf("insert job: %v", err)
 	}
 
-	jobDir := testEnv.store.jobDir(job.ID)
+	jobDir := fsutil.JobDir(testEnv.root, job.ID)
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		t.Fatalf("job dir: %v", err)
 	}
