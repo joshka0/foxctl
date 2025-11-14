@@ -1,18 +1,18 @@
 # SPEC-008: Reorganize Internal Packages by Domain
 
 ## Status
-**Draft** | Priority: Medium | Complexity: High
+**In Progress** | Priority: Medium | Complexity: High
 
 ## Problem Statement
 
-The current `internal/` package structure is **flat** with 13 packages at the same level, making it difficult to:
+The legacy `internal/` package structure was **flat** with 13 packages at the same level, making it difficult to:
 - Understand architectural boundaries
 - Identify dependencies between layers
 - Enforce clean architecture principles
 - Navigate the codebase
 - Determine what depends on what
 
-### Current Structure (Flat)
+### Previous Structure (Flat)
 ```
 internal/
 ├── artifacts/      # Artifact wrapping
@@ -395,10 +395,10 @@ git diff pre-package-reorg refactor/package-reorg
 ### Before
 ```go
 import (
-    "github.com/jkatigb/agentctl/internal/envelope"
-    "github.com/jkatigb/agentctl/internal/cache"
-    "github.com/jkatigb/agentctl/internal/runner"
-    "github.com/jkatigb/agentctl/internal/config"
+    "github.com/jkatigb/agentctl/internal/domain/envelope"
+    "github.com/jkatigb/agentctl/internal/storage/cache"
+    "github.com/jkatigb/agentctl/internal/execution/runner"
+    "github.com/jkatigb/agentctl/internal/platform/config"
 )
 ```
 

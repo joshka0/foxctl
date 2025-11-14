@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/cache"
-	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/envelope"
-	"github.com/jkatigb/agentctl/internal/jobs"
-	memstore "github.com/jkatigb/agentctl/internal/memory"
-	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/jkatigb/agentctl/internal/storage/jobs"
+	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 func TestExecutorTryServeCacheHit(t *testing.T) {

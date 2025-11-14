@@ -54,9 +54,9 @@ build:
 	DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
 	$(GO_CMD) build -trimpath \
 		-ldflags="-s -w \
-		-X github.com/jkatigb/agentctl/internal/buildinfo.Version=$$VERSION \
-		-X github.com/jkatigb/agentctl/internal/buildinfo.Commit=$$COMMIT \
-		-X github.com/jkatigb/agentctl/internal/buildinfo.Date=$$DATE" \
+		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Version=$$VERSION \
+		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Commit=$$COMMIT \
+		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Date=$$DATE" \
 		-o bin/$(BINARY) ./cmd/agentctl
 
 skills-build:

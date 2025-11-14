@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,28 +11,76 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/policy"
-	"github.com/jkatigb/agentctl/internal/runner"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/runservice"
-	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/spf13/cobra"
 )
 
 // SkillHandle captures manifest and artifact path for execution.
 type SkillHandle = runservice.SkillHandle
 
-func loadSkillInput(cmd *cobra.Command, inline, file string) ([]byte, error) {
+func loadSkillInput(cmd *cobra.Command, cfg config.Config, inline, file string) ([]byte, error) {
+	trimmed := strings.TrimSpace(inline)
 	switch {
 	case file == "-":
 		return io.ReadAll(cmd.InOrStdin())
 	case file != "":
 		return os.ReadFile(file)
-	case inline != "":
+	case strings.EqualFold(trimmed, "stdin"):
+		data, err := extractEnvelopeData(cmd.InOrStdin())
+		if err != nil {
+			return nil, fmt.Errorf("read stdin envelope: %w", err)
+		}
+		return data, nil
+	case strings.HasPrefix(trimmed, "sha256:"):
+		store, err := cas.NewStore(cfg.Paths.CAS)
+		if err != nil {
+			return nil, fmt.Errorf("open cas store: %w", err)
+		}
+		ctx := cmd.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		rc, _, err := store.Get(ctx, trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("read cas %s: %w", trimmed, err)
+		}
+		data, readErr := io.ReadAll(rc)
+		closeErr := rc.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read cas %s: %w", trimmed, readErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("verify cas %s: %w", trimmed, closeErr)
+		}
+		return data, nil
+	case trimmed != "":
 		return []byte(inline), nil
 	default:
 		return []byte("{}"), nil
 	}
+}
+
+func extractEnvelopeData(r io.Reader) ([]byte, error) {
+	dec := json.NewDecoder(r)
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := dec.Decode(&env); err != nil {
+		return nil, err
+	}
+	if len(env.Data) == 0 {
+		return []byte("null"), nil
+	}
+	trimmed := bytes.TrimSpace(env.Data)
+	if len(trimmed) == 0 {
+		return []byte("null"), nil
+	}
+	return trimmed, nil
 }
 
 func writeEnvelope(out io.Writer, data []byte) error {

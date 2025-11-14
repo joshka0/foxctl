@@ -7,9 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jkatigb/agentctl/internal/artifacts"
-	"github.com/jkatigb/agentctl/internal/cas"
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
 )
 
 func (e *Executor) handleArtifacts(jobID string, result []byte) error {

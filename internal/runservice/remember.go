@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/envelope"
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	memstore "github.com/jkatigb/agentctl/internal/memory"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 func (e *Executor) remember(result []byte) error {

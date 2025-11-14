@@ -10,9 +10,9 @@ Artifact management logic (pinning, unpinning, digest extraction) is **duplicate
 ### Current State
 
 **Duplicate pin/unpin logic in 3 locations**:
-- `internal/cache/store.go:327-343` (pin digests method)
-- `internal/cache/store.go:336-343` (unpin digests method)
-- `internal/memory/store.go:214-230` (pin/unpin in Save method)
+- `internal/storage/cache/store.go:327-343` (pin digests method)
+- `internal/storage/cache/store.go:336-343` (unpin digests method)
+- `internal/storage/memory/store.go:214-230` (pin/unpin in Save method)
 - `cmd/agentctl/cmd/artifacts.go` (artifact commands)
 
 ### Problems
@@ -23,8 +23,8 @@ Artifact management logic (pinning, unpinning, digest extraction) is **duplicate
 5. **Inconsistent Behavior**: Each location may handle errors differently
 
 ### Affected Files
-- `internal/cache/store.go` (depends on CAS)
-- `internal/memory/store.go` (depends on CAS)
+- `internal/storage/cache/store.go` (depends on CAS)
+- `internal/storage/memory/store.go` (depends on CAS)
 - `internal/artifacts/artifact.go` (only wrapping, no management)
 - `cmd/agentctl/cmd/artifacts.go` (CLI commands)
 - `cmd/agentctl/cmd/run.go:145-151` (artifact pinning in run command)
@@ -33,7 +33,7 @@ Artifact management logic (pinning, unpinning, digest extraction) is **duplicate
 
 ### Example: Cache Store Pin Logic
 ```go
-// internal/cache/store.go:327-343
+// internal/storage/cache/store.go:327-343
 func (s *Store) pinDigests(ctx context.Context, digests []string, casPath string) error {
     if len(digests) == 0 {
         return nil
@@ -56,7 +56,7 @@ func (s *Store) pinDigests(ctx context.Context, digests []string, casPath string
 
 ### Example: Memory Store Has Identical Code
 ```go
-// internal/memory/store.go:214-230
+// internal/storage/memory/store.go:214-230
 func (s *Store) SaveFromResult(ctx context.Context, ...) (NamedEntry, error) {
     // ... save logic ...
 
@@ -295,11 +295,11 @@ func (b *BatchOperation) Execute(ctx context.Context) error {
 ### Refactored Cache Store Usage
 
 ```go
-// internal/cache/store.go (REFACTORED)
+// internal/storage/cache/store.go (REFACTORED)
 package cache
 
 import (
-    "github.com/jkatigb/agentctl/internal/artifacts"
+    "github.com/jkatigb/agentctl/internal/adapters/artifacts"
     "github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -382,11 +382,11 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 ### Refactored Memory Store Usage
 
 ```go
-// internal/memory/store.go (REFACTORED)
+// internal/storage/memory/store.go (REFACTORED)
 package memory
 
 import (
-    "github.com/jkatigb/agentctl/internal/artifacts"
+    "github.com/jkatigb/agentctl/internal/adapters/artifacts"
 )
 
 type Store struct {
@@ -554,7 +554,7 @@ func TestManager_PinFromEnvelope(t *testing.T) {
 
 ### Cache Store Tests with Mock
 ```go
-// internal/cache/store_test.go
+// internal/storage/cache/store_test.go
 func TestCache_Put_PinsArtifacts(t *testing.T) {
     mockMgr := &artifacts.MockManager{}
 

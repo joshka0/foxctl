@@ -6,7 +6,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/jkatigb/agentctl/internal/skill"
+	"github.com/jkatigb/agentctl/internal/domain/skill"
 )
 
 // SkillExecutor executes a skill and returns the execution result.

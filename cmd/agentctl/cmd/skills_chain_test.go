@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 )
 
 func TestFsReadSkillChainsThroughBash(t *testing.T) {

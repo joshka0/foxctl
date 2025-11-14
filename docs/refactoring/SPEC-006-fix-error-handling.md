@@ -15,9 +15,9 @@ There are **306 instances** of ignored errors across the codebase (using `_ =` o
 4. **Resource Cleanup Errors** - Failed Close() calls hidden
 
 ### Affected Files (Top Offenders)
-- `internal/cache/store.go` - 12 ignored errors
-- `internal/memory/store.go` - 10 ignored errors
-- `internal/jobs/store.go` - 8 ignored errors
+- `internal/storage/cache/store.go` - 12 ignored errors
+- `internal/storage/memory/store.go` - 10 ignored errors
+- `internal/storage/jobs/store.go` - 8 ignored errors
 - `cmd/agentctl/cmd/*.go` - 30+ ignored errors across all command files
 
 ## Current State Analysis
@@ -26,7 +26,7 @@ There are **306 instances** of ignored errors across the codebase (using `_ =` o
 
 #### Example 1: JSON Unmarshal Errors
 ```go
-// internal/cache/store.go:164-167
+// internal/storage/cache/store.go:164-167
 func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
     // ... query database ...
     var digests string
@@ -54,7 +54,7 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 
 #### Example 2: Time Parsing Errors
 ```go
-// internal/cache/store.go:165-167
+// internal/storage/cache/store.go:165-167
 entry.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
 entry.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expires)
 entry.LastAccessed, _ = time.Parse(time.RFC3339Nano, last)
@@ -105,7 +105,7 @@ func listJobs(cmd *cobra.Command, args []string) error {
 
 #### Example 4: Progress Write Errors
 ```go
-// internal/jobs/store.go:560-565
+// internal/storage/jobs/store.go:560-565
 func (s *Store) executeSkill(...) {
     progressFile, _ := os.OpenFile(progressPath, ...)
     defer progressFile.Close()
@@ -353,7 +353,7 @@ linters-settings:
 
 ### Error Injection Tests
 ```go
-// internal/cache/store_test.go
+// internal/storage/cache/store_test.go
 func TestGet_CorruptJSON(t *testing.T) {
     store := setupTestStore(t)
 
@@ -420,9 +420,9 @@ func TestClose_ErrorLogged(t *testing.T) {
 
 | File | Ignored Errors | Priority |
 |------|---------------|----------|
-| internal/cache/store.go | 12 | Critical |
-| internal/memory/store.go | 10 | Critical |
-| internal/jobs/store.go | 8 | Critical |
+| internal/storage/cache/store.go | 12 | Critical |
+| internal/storage/memory/store.go | 10 | Critical |
+| internal/storage/jobs/store.go | 8 | Critical |
 | cmd/agentctl/cmd/run.go | 6 | High |
 | cmd/agentctl/cmd/jobs.go | 5 | High |
 

@@ -6,9 +6,9 @@
 All targeted call sites have been converted to options structs on `main`:
 
 - `cmd/agentctl/cmd/run.go:53-62` now exposes `RememberOptions` and forwards to the memory store using named fields.
-- `internal/memory/store.go:249-281` ships `SaveOptions`/`SaveResult`; the legacy positional helper is just a shim.
-- `internal/jobs/executor/executor.go:30-120` defines an `executeOptions` struct and routes `RunSkill`/`ExecutePrepared` through it so the executor logic no longer takes positional args.
-- `internal/runner/runner.go:15-52` offers `RunWithOptions` with a deprecated thin wrapper around it.
+- `internal/storage/memory/store.go:249-281` ships `SaveOptions`/`SaveResult`; the legacy positional helper is just a shim.
+- `internal/storage/jobs/executor/executor.go:30-120` defines an `executeOptions` struct and routes `RunSkill`/`ExecutePrepared` through it so the executor logic no longer takes positional args.
+- `internal/execution/runner/runner.go:15-52` offers `RunWithOptions` with a deprecated thin wrapper around it.
 
 The remaining checklist below is preserved for historical context; all required items are satisfied in the codebase as of the date noted above.
 
@@ -31,18 +31,18 @@ func rememberResult(ctx context.Context, cfg config.Config,
 
 #### 6 Parameters
 ```go
-// internal/memory/store.go:199
+// internal/storage/memory/store.go:199
 func (s *Store) SaveFromResult(ctx context.Context,
     name, typ, workspace, summary string, result []byte) (NamedEntry, error)
 ```
 
 #### 5 Parameters (Multiple Locations)
 ```go
-// internal/jobs/store.go:552
+// internal/storage/jobs/store.go:552
 func (s *Store) executeSkill(ctx context.Context, jobID string,
     manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error)
 
-// internal/runner/runner.go:14
+// internal/execution/runner/runner.go:14
 func Run(ctx context.Context, manifest skill.Manifest,
     artifactPath string, input []byte, opts Options) ([]byte, []byte, error)
 
@@ -146,7 +146,7 @@ rememberResult(ctx, cfg, RememberOptions{
 
 #### Before
 ```go
-// internal/memory/store.go:199
+// internal/storage/memory/store.go:199
 func (s *Store) SaveFromResult(ctx context.Context,
     name, typ, workspace, summary string, result []byte) (NamedEntry, error) {
 
@@ -170,7 +170,7 @@ func (s *Store) SaveFromResult(ctx context.Context,
 
 #### After
 ```go
-// internal/memory/store.go
+// internal/storage/memory/store.go
 type SaveOptions struct {
     Name      string
     Type      string
@@ -213,7 +213,7 @@ entry, err := store.Save(ctx, memory.SaveOptions{
 
 #### Before
 ```go
-// internal/jobs/store.go:552
+// internal/storage/jobs/store.go:552
 func (s *Store) executeSkill(ctx context.Context, jobID string,
     manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
 
@@ -226,7 +226,7 @@ result, err := s.executeSkill(ctx, job.ID, manifest, handle.ArtifactPath, input)
 
 #### After
 ```go
-// internal/jobs/store.go
+// internal/storage/jobs/store.go
 type executeOptions struct {
     JobID        string
     Manifest     skill.Manifest
@@ -252,7 +252,7 @@ result, err := s.executeSkill(ctx, executeOptions{
 ### Solution 4: runner.Run (Already Partially Done!)
 
 ```go
-// internal/runner/runner.go:14
+// internal/execution/runner/runner.go:14
 // This one already uses Options for the last param
 func Run(ctx context.Context, manifest skill.Manifest,
     artifactPath string, input []byte, opts Options) ([]byte, []byte, error)
@@ -274,9 +274,9 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 
 ### Step 1: Define Options Structs (2 hours)
 - [ ] Create RememberOptions in cmd/run.go
-- [ ] Create SaveOptions in internal/memory/
-- [ ] Create executeOptions in internal/jobs/
-- [ ] Create RunOptions in internal/runner/
+- [ ] Create SaveOptions in internal/storage/memory/
+- [ ] Create executeOptions in internal/storage/jobs/
+- [ ] Create RunOptions in internal/execution/runner/
 - [ ] Add godoc to all option structs
 
 ### Step 2: Refactor memory Package (1.5 hours)
@@ -317,7 +317,7 @@ func Run(ctx context.Context, opts RunOptions) (*Result, error) {
 
 ### Validation Tests
 ```go
-// internal/memory/save_options_test.go
+// internal/storage/memory/save_options_test.go
 func TestSaveOptions_Validation(t *testing.T) {
     tests := []struct {
         name    string

@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/jkatigb/agentctl/internal/config"
-	errs "github.com/jkatigb/agentctl/internal/errors"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 

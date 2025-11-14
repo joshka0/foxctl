@@ -3,7 +3,7 @@ package runservice
 import (
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/cache"
+	"github.com/jkatigb/agentctl/internal/storage/cache"
 )
 
 // RunOptions captures the configurable behavior for a run invocation.

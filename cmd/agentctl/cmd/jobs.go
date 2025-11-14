@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jkatigb/agentctl/internal/envelope"
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	"github.com/jkatigb/agentctl/internal/jobs"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/jobs"
 	"github.com/spf13/cobra"
 )
 

@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +29,7 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 	if err != nil {
 		return err
 	}
-	data, err := loadSkillInput(cmd, flags.Input, flags.InputFile)
+	data, err := loadSkillInput(cmd, cfg, flags.Input, flags.InputFile)
 	if err != nil {
 		return err
 	}

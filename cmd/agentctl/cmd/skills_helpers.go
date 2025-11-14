@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	"github.com/jkatigb/agentctl/internal/policy"
-	"github.com/jkatigb/agentctl/internal/skill"
-	"github.com/jkatigb/agentctl/internal/workspace"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/domain/skill"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
 func resolveWorkspaceContext(ctx context.Context, workspaceOverride string) context.Context {

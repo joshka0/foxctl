@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/envelope"
-	errs "github.com/jkatigb/agentctl/internal/errors"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 func (e *Executor) HandleResult(jobID string, result []byte) error {

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/config"
-	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
+	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestPlanGeneration(t *testing.T) {

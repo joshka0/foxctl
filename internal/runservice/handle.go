@@ -1,6 +1,6 @@
 package runservice
 
-import "github.com/jkatigb/agentctl/internal/skill"
+import "github.com/jkatigb/agentctl/internal/domain/skill"
 
 // SkillHandle captures manifest and artifact metadata required for execution.
 type SkillHandle struct {

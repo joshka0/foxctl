@@ -103,7 +103,7 @@ package cmd
 
 import (
     "context"
-    "github.com/jkatigb/agentctl/internal/config"
+    "github.com/jkatigb/agentctl/internal/platform/config"
     "github.com/jkatigb/agentctl/internal/storage"
 )
 

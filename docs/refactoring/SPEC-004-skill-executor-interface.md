@@ -24,15 +24,15 @@ jobs.Store
 5. **Circular Concerns**: Jobs manages state transitions AND runs skills
 
 ### Affected Files
-- `internal/jobs/store.go:552-644` (executeSkill method, 92 lines)
-- `internal/jobs/store.go:211-219` (RunSkill method)
-- `internal/jobs/store.go:17-18` (imports runner and skill)
+- `internal/storage/jobs/store.go:552-644` (executeSkill method, 92 lines)
+- `internal/storage/jobs/store.go:211-219` (RunSkill method)
+- `internal/storage/jobs/store.go:17-18` (imports runner and skill)
 
 ## Current State Analysis
 
 ### executeSkill Method
 ```go
-// internal/jobs/store.go:552-644
+// internal/storage/jobs/store.go:552-644
 func (s *Store) executeSkill(ctx context.Context, jobID string,
     manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
 
@@ -68,7 +68,7 @@ func (s *Store) executeSkill(ctx context.Context, jobID string,
 
 ### RunSkill Method
 ```go
-// internal/jobs/store.go:211-219
+// internal/storage/jobs/store.go:211-219
 func (s *Store) RunSkill(ctx context.Context, manifest skill.Manifest,
     artifactPath string, input []byte) (Job, []byte, error) {
 
@@ -147,8 +147,8 @@ package execution
 
 import (
     "context"
-    "github.com/jkatigb/agentctl/internal/runner"
-    "github.com/jkatigb/agentctl/internal/skill"
+    "github.com/jkatigb/agentctl/internal/execution/runner"
+    "github.com/jkatigb/agentctl/internal/domain/skill"
 )
 
 // RunnerExecutor adapts the existing runner.Run to SkillExecutor interface
@@ -190,7 +190,7 @@ func determineExitCode(err error) int {
 ### Refactor jobs.Store to Accept Executor
 
 ```go
-// internal/jobs/store.go (REFACTORED)
+// internal/storage/jobs/store.go (REFACTORED)
 package jobs
 
 import (
@@ -379,7 +379,7 @@ func TestRunnerExecutor_InvalidManifest(t *testing.T) {
 
 ### Jobs Store Tests with Mock
 ```go
-// internal/jobs/store_test.go (REFACTORED)
+// internal/storage/jobs/store_test.go (REFACTORED)
 func TestStore_ExecuteSkill_Success(t *testing.T) {
     mockExec := execution.NewMockExecutor()
     mockExec.ExecuteFunc = func(ctx context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
@@ -432,7 +432,7 @@ func setupTestStore(t *testing.T, executor execution.SkillExecutor) *jobs.Store 
 
 ### Integration Tests
 ```go
-// internal/jobs/integration_test.go
+// internal/storage/jobs/integration_test.go
 func TestJobExecution_EndToEnd(t *testing.T) {
     // Use real executor for integration test
     store, _ := jobs.Open(context.Background(), t.TempDir())
@@ -455,10 +455,10 @@ func TestJobExecution_EndToEnd(t *testing.T) {
 
 ### Before
 ```go
-// internal/jobs/store.go
+// internal/storage/jobs/store.go
 import (
-    "github.com/jkatigb/agentctl/internal/runner"  // Direct dependency
-    "github.com/jkatigb/agentctl/internal/skill"   // Direct dependency
+    "github.com/jkatigb/agentctl/internal/execution/runner"  // Direct dependency
+    "github.com/jkatigb/agentctl/internal/domain/skill"   // Direct dependency
 )
 
 func (s *Store) executeSkill(...) {
@@ -470,7 +470,7 @@ func (s *Store) executeSkill(...) {
 
 ### After
 ```go
-// internal/jobs/store.go
+// internal/storage/jobs/store.go
 import (
     "github.com/jkatigb/agentctl/internal/execution"  // Interface only
 )

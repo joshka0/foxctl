@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/jkatigb/agentctl/internal/config"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +18,7 @@ func newSkillsRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			data, err := loadSkillInput(cmd, input, inputFile)
+			data, err := loadSkillInput(cmd, cfg, input, inputFile)
 			if err != nil {
 				return err
 			}

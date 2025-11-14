@@ -22,7 +22,7 @@ This spec covers the **broader SQL utilities** beyond just scanning.
 
 #### 1. Transaction Boilerplate (Repeated 6+ times)
 ```go
-// internal/jobs/store.go:457
+// internal/storage/jobs/store.go:457
 func (s *Store) FindOrPrepareSkillJob(...) (Job, bool, error) {
     tx, err := s.db.BeginTx(ctx, nil)
     if err != nil {
@@ -47,7 +47,7 @@ func (s *Store) FindOrPrepareSkillJob(...) (Job, bool, error) {
 
 #### 2. Schema Creation (Repeated in each store)
 ```go
-// internal/cache/store.go, jobs/store.go, memory/store.go
+// internal/storage/cache/store.go, jobs/store.go, memory/store.go
 func Open(ctx context.Context, path string) (*Store, error) {
     db, err := sql.Open("sqlite", dbPath)
     if err != nil {
