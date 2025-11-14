@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
@@ -20,32 +23,30 @@ func newMemoryListCommand() *cobra.Command {
 		Use:   "list",
 		Short: "List named memories",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
-				entries, err := store.List(cmd.Context(), ws, limit)
-				if err != nil {
-					return err
-				}
-				var payload []map[string]any
-				for _, e := range entries {
-					payload = append(payload, map[string]any{
-						"name":         e.Name,
-						"type":         e.Type,
-						"workspace":    e.Workspace,
-						"summary":      e.Summary,
-						"created_at":   e.CreatedAt,
-						"updated_at":   e.UpdatedAt,
-						"access_count": e.AccessCount,
-					})
-				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.list", map[string]any{
-					"entries":   payload,
-					"workspace": ws,
-				}))
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
+					entries, err := store.List(ctx, ws, limit)
+					if err != nil {
+						return err
+					}
+					payload := struct {
+						Entries   []map[string]any `json:"entries"`
+						Workspace string           `json:"workspace"`
+					}{Workspace: ws}
+					for _, e := range entries {
+						payload.Entries = append(payload.Entries, map[string]any{
+							"name":         e.Name,
+							"type":         e.Type,
+							"workspace":    e.Workspace,
+							"summary":      e.Summary,
+							"created_at":   e.CreatedAt,
+							"updated_at":   e.UpdatedAt,
+							"access_count": e.AccessCount,
+						})
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.list", payload)
+				})
 			})
 		},
 	}
@@ -65,32 +66,30 @@ func newMemorySearchCommand() *cobra.Command {
 			if strings.TrimSpace(query) == "" {
 				return fmt.Errorf("--query is required")
 			}
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
-				entries, err := store.Search(cmd.Context(), ws, query, limit)
-				if err != nil {
-					return err
-				}
-				var payload []map[string]any
-				for _, e := range entries {
-					entry := e.Entry
-					payload = append(payload, map[string]any{
-						"name":       entry.Name,
-						"type":       entry.Type,
-						"workspace":  entry.Workspace,
-						"summary":    entry.Summary,
-						"updated_at": entry.UpdatedAt,
-						"score":      e.Score,
-					})
-				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.search", map[string]any{
-					"entries":   payload,
-					"workspace": ws,
-				}))
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
+					entries, err := store.Search(ctx, ws, query, limit)
+					if err != nil {
+						return err
+					}
+					payload := struct {
+						Entries   []map[string]any `json:"entries"`
+						Workspace string           `json:"workspace"`
+					}{Workspace: ws}
+					for _, e := range entries {
+						entry := e.Entry
+						payload.Entries = append(payload.Entries, map[string]any{
+							"name":       entry.Name,
+							"type":       entry.Type,
+							"workspace":  entry.Workspace,
+							"summary":    entry.Summary,
+							"updated_at": entry.UpdatedAt,
+							"score":      e.Score,
+						})
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.search", payload)
+				})
 			})
 		},
 	}
@@ -107,25 +106,23 @@ func newMemoryGetCommand() *cobra.Command {
 		Short: "Retrieve a named memory envelope",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
-				entry, err := store.Get(cmd.Context(), args[0], ws)
-				if err != nil {
-					return err
-				}
-				modified, err := cache.AnnotateMemory(entry.Result, envelope.MemoryRef{
-					Name:      entry.Name,
-					Type:      entry.Type,
-					Workspace: entry.Workspace,
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
+					entry, err := store.Get(ctx, args[0], ws)
+					if err != nil {
+						return err
+					}
+					modified, err := cache.AnnotateMemory(entry.Result, envelope.MemoryRef{
+						Name:      entry.Name,
+						Type:      entry.Type,
+						Workspace: entry.Workspace,
+					})
+					if err != nil {
+						return err
+					}
+					return memorycmd.WriteEnvelope(cmd.OutOrStdout(), modified)
 				})
-				if err != nil {
-					return err
-				}
-				return writeEnvelope(cmd.OutOrStdout(), modified)
 			})
 		},
 	}
@@ -147,33 +144,36 @@ func newMemoryPutCommand() *cobra.Command {
 			if name == "" {
 				return fmt.Errorf("--name is required")
 			}
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			payload, err := readMemoryPayload(cmd, file, data)
-			if err != nil {
-				return err
-			}
-			if !json.Valid(payload) {
-				return fmt.Errorf("payload must be valid JSON envelope")
-			}
-			if summary == "" {
-				summary = summarizeResult(payload)
-			}
-			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
-				entry, err := store.SaveFromResult(cmd.Context(), name, typ, ws, summary, payload)
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				payload, err := readMemoryPayload(cmd, file, data)
 				if err != nil {
 					return err
 				}
-				resp := map[string]any{
-					"name":      entry.Name,
-					"type":      entry.Type,
-					"workspace": entry.Workspace,
-					"summary":   entry.Summary,
+				if !json.Valid(payload) {
+					return fmt.Errorf("payload must be valid JSON envelope")
 				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.put", resp))
+				if summary == "" {
+					summary = summarizeResult(payload)
+				}
+				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
+					entry, err := store.SaveFromResult(ctx, name, typ, ws, summary, payload)
+					if err != nil {
+						return err
+					}
+					resp := struct {
+						Name      string `json:"name"`
+						Type      string `json:"type"`
+						Workspace string `json:"workspace"`
+						Summary   string `json:"summary"`
+					}{
+						Name:      entry.Name,
+						Type:      entry.Type,
+						Workspace: entry.Workspace,
+						Summary:   entry.Summary,
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.put", resp)
+				})
 			})
 		},
 	}
@@ -199,35 +199,38 @@ func newMemorySaveCommand() *cobra.Command {
 			if name == "" {
 				return fmt.Errorf("--as is required")
 			}
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			store, cleanup, err := openJobStore(cmd.Context())
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			result, err := store.Result(cmd.Context(), args[0])
-			if err != nil {
-				return err
-			}
-			if summary == "" {
-				summary = summarizeResult(result)
-			}
-			return withMemoryStore(cmd.Context(), cfg, func(mem storage.MemoryStore) error {
-				entry, err := mem.SaveFromResult(cmd.Context(), name, typ, ws, summary, result)
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				jobStore, cleanup, err := openJobStore(ctx)
 				if err != nil {
 					return err
 				}
-				payload := map[string]any{
-					"name":      entry.Name,
-					"type":      entry.Type,
-					"workspace": entry.Workspace,
-					"summary":   entry.Summary,
+				defer cleanup()
+				result, err := jobStore.Result(ctx, args[0])
+				if err != nil {
+					return err
 				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.save", payload))
+				if summary == "" {
+					summary = summarizeResult(result)
+				}
+				return memorycmd.WithMemoryStore(ctx, cfg, func(mem storage.MemoryStore) error {
+					entry, err := mem.SaveFromResult(ctx, name, typ, ws, summary, result)
+					if err != nil {
+						return err
+					}
+					payload := struct {
+						Name      string `json:"name"`
+						Type      string `json:"type"`
+						Workspace string `json:"workspace"`
+						Summary   string `json:"summary"`
+					}{
+						Name:      entry.Name,
+						Type:      entry.Type,
+						Workspace: entry.Workspace,
+						Summary:   entry.Summary,
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.save", payload)
+				})
 			})
 		},
 	}
@@ -253,32 +256,36 @@ func newMemoryUpdateCommand() *cobra.Command {
 			if summary == "" && typ == "" {
 				return fmt.Errorf("at least one of --summary or --type must be set")
 			}
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
-				var summaryPtr *string
-				var typePtr *string
-				if summary != "" {
-					summaryPtr = &summary
-				}
-				if typ != "" {
-					typePtr = &typ
-				}
-				entry, err := store.Update(cmd.Context(), args[0], ws, summaryPtr, typePtr)
-				if err != nil {
-					return err
-				}
-				payload := map[string]any{
-					"name":       entry.Name,
-					"type":       entry.Type,
-					"workspace":  entry.Workspace,
-					"summary":    entry.Summary,
-					"updated_at": entry.UpdatedAt,
-				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.update", payload))
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
+					var summaryPtr *string
+					var typePtr *string
+					if summary != "" {
+						summaryPtr = &summary
+					}
+					if typ != "" {
+						typePtr = &typ
+					}
+					entry, err := store.Update(ctx, args[0], ws, summaryPtr, typePtr)
+					if err != nil {
+						return err
+					}
+					payload := struct {
+						Name      string    `json:"name"`
+						Type      string    `json:"type"`
+						Workspace string    `json:"workspace"`
+						Summary   string    `json:"summary"`
+						UpdatedAt time.Time `json:"updated_at"`
+					}{
+						Name:      entry.Name,
+						Type:      entry.Type,
+						Workspace: entry.Workspace,
+						Summary:   entry.Summary,
+						UpdatedAt: entry.UpdatedAt,
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.update", payload)
+				})
 			})
 		},
 	}
@@ -295,19 +302,21 @@ func newMemoryDeleteCommand() *cobra.Command {
 		Short: "Delete a named memory entry",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
-				if err := store.Delete(cmd.Context(), args[0], ws); err != nil {
-					return err
-				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.delete", map[string]any{
-					"name":      args[0],
-					"workspace": ws,
-				}))
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
+					if err := store.Delete(ctx, args[0], ws); err != nil {
+						return err
+					}
+					payload := struct {
+						Name      string `json:"name"`
+						Workspace string `json:"workspace"`
+					}{
+						Name:      args[0],
+						Workspace: ws,
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.delete", payload)
+				})
 			})
 		},
 	}
@@ -322,32 +331,30 @@ func newMemoryRelevantCommand() *cobra.Command {
 		Use:   "relevant",
 		Short: "Rank memories by recency and usage",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withMemoryStore(cmd.Context(), cfg, func(store storage.MemoryStore) error {
-				entries, err := store.Relevant(cmd.Context(), ws, limit)
-				if err != nil {
-					return err
-				}
-				var payload []map[string]any
-				for _, e := range entries {
-					payload = append(payload, map[string]any{
-						"name":          e.Entry.Name,
-						"type":          e.Entry.Type,
-						"workspace":     e.Entry.Workspace,
-						"summary":       e.Entry.Summary,
-						"score":         e.Score,
-						"access_count":  e.Entry.AccessCount,
-						"last_accessed": e.Entry.LastAccess,
-					})
-				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.relevant", map[string]any{
-					"entries":   payload,
-					"workspace": ws,
-				}))
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
+					entries, err := store.Relevant(ctx, ws, limit)
+					if err != nil {
+						return err
+					}
+					payload := struct {
+						Entries   []map[string]any `json:"entries"`
+						Workspace string           `json:"workspace"`
+					}{Workspace: ws}
+					for _, e := range entries {
+						payload.Entries = append(payload.Entries, map[string]any{
+							"name":          e.Entry.Name,
+							"type":          e.Entry.Type,
+							"workspace":     e.Entry.Workspace,
+							"summary":       e.Entry.Summary,
+							"score":         e.Score,
+							"access_count":  e.Entry.AccessCount,
+							"last_accessed": e.Entry.LastAccess,
+						})
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.relevant", payload)
+				})
 			})
 		},
 	}

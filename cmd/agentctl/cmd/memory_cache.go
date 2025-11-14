@@ -1,11 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
+	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/envelope"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
 )
@@ -17,33 +18,31 @@ func newMemoryRecentCommand() *cobra.Command {
 		Use:   "recent",
 		Short: "Show recent auto-cache entries",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			ws := resolveWorkspace(cfg, workspaceFlag)
-			return withCacheStore(cmd.Context(), cfg, func(store storage.CacheStore) error {
-				entries, err := store.Recent(cmd.Context(), ws, limit)
-				if err != nil {
-					return err
-				}
-				var payload []map[string]any
-				for _, e := range entries {
-					payload = append(payload, map[string]any{
-						"cache_key":     e.CacheKey,
-						"skill":         e.SkillName,
-						"version":       e.SkillVersion,
-						"workspace":     e.Workspace,
-						"created_at":    e.CreatedAt,
-						"expires_at":    e.ExpiresAt,
-						"hit_count":     e.HitCount,
-						"last_accessed": e.LastAccessed,
-					})
-				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.recent", map[string]any{
-					"entries":   payload,
-					"workspace": ws,
-				}))
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceFlag)
+				return memorycmd.WithCacheStore(ctx, cfg, func(store storage.CacheStore) error {
+					entries, err := store.Recent(ctx, ws, limit)
+					if err != nil {
+						return err
+					}
+					payload := struct {
+						Entries   []map[string]any `json:"entries"`
+						Workspace string           `json:"workspace"`
+					}{Workspace: ws}
+					for _, e := range entries {
+						payload.Entries = append(payload.Entries, map[string]any{
+							"cache_key":     e.CacheKey,
+							"skill":         e.SkillName,
+							"version":       e.SkillVersion,
+							"workspace":     e.Workspace,
+							"created_at":    e.CreatedAt,
+							"expires_at":    e.ExpiresAt,
+							"hit_count":     e.HitCount,
+							"last_accessed": e.LastAccessed,
+						})
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.recent", payload)
+				})
 			})
 		},
 	}
@@ -58,27 +57,31 @@ func newMemoryCacheCommand() *cobra.Command {
 		Short: "Fetch a cached result by cache key",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
-			return withCacheStore(cmd.Context(), cfg, func(store storage.CacheStore) error {
-				entry, ok, err := store.Get(cmd.Context(), args[0])
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return fmt.Errorf("cache entry %s not found", args[0])
-				}
-				decoded := decodeResult(entry.Result)
-				data := map[string]any{
-					"cache_key": entry.CacheKey,
-					"skill":     entry.SkillName,
-					"version":   entry.SkillVersion,
-					"workspace": entry.Workspace,
-					"result":    decoded,
-				}
-				return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.memory.cache", data))
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return memorycmd.WithCacheStore(ctx, cfg, func(store storage.CacheStore) error {
+					entry, ok, err := store.Get(ctx, args[0])
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return fmt.Errorf("cache entry %s not found", args[0])
+					}
+					decoded := decodeResult(entry.Result)
+					data := struct {
+						CacheKey  string `json:"cache_key"`
+						Skill     string `json:"skill"`
+						Version   string `json:"version"`
+						Workspace string `json:"workspace"`
+						Result    any    `json:"result"`
+					}{
+						CacheKey:  entry.CacheKey,
+						Skill:     entry.SkillName,
+						Version:   entry.SkillVersion,
+						Workspace: entry.Workspace,
+						Result:    decoded,
+					}
+					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.cache", data)
+				})
 			})
 		},
 	}

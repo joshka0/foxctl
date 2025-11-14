@@ -1,15 +1,10 @@
 package cmd
 
 import (
-	"context"
 	"io"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/cache"
 	"github.com/jkatigb/agentctl/internal/config"
-	errs "github.com/jkatigb/agentctl/internal/errors"
-	memstore "github.com/jkatigb/agentctl/internal/memory"
-	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -38,29 +33,4 @@ func readMemoryPayload(cmd *cobra.Command, file, data string) ([]byte, error) {
 	default:
 		return io.ReadAll(cmd.InOrStdin())
 	}
-}
-
-func withCacheStore(ctx context.Context, cfg config.Config, fn func(storage.CacheStore) error) error {
-	store, err := cache.Open(ctx, cfg.Paths.Cache, cache.Options{
-		AutoTTL: cfg.Memory.AutoCacheTTL,
-		CASPath: cfg.Paths.CAS,
-	})
-	if err != nil {
-		return err
-	}
-	defer func() {
-		errs.Ignore(store.Close(), "close cache store helper")
-	}()
-	return fn(store)
-}
-
-func withMemoryStore(ctx context.Context, cfg config.Config, fn func(storage.MemoryStore) error) error {
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		errs.Ignore(store.Close(), "close memory store helper")
-	}()
-	return fn(store)
 }
