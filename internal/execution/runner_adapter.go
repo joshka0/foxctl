@@ -17,15 +17,19 @@ func NewRunnerExecutor() SkillExecutor {
 	return &RunnerExecutor{}
 }
 
-// Execute implements SkillExecutor using runner.Run.
+// Execute implements SkillExecutor using runner.RunWithOptions.
 func (e *RunnerExecutor) Execute(ctx context.Context, opts ExecuteOptions) (*Result, error) {
 	manifest, err := resolveManifest(opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Call existing runner
-	stdout, stderr, err := runner.Run(ctx, manifest, opts.ArtifactPath, opts.Input)
+	// Call existing runner with options
+	stdout, stderr, err := runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     manifest,
+		ArtifactPath: opts.ArtifactPath,
+		Input:        opts.Input,
+	})
 
 	// Determine exit code
 	exitCode := 0
