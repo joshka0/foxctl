@@ -41,9 +41,9 @@ func main() {
 		errs.Ignore(rc.Close(), "runner context close")
 	}()
 
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("fs/read", "EARG", fmt.Errorf("decode input: %w", err))
+	in, err := parseInput(os.Stdin)
+	if err != nil {
+		fail("fs/read", "EARG", err)
 	}
 	if err := run(ctx, rc, in); err != nil {
 		fail("fs/read", "ERUNTIME", err)
@@ -51,13 +51,9 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
-	if strings.TrimSpace(in.Path) == "" {
-		return fmt.Errorf("path is required")
-	}
-
-	validPath, err := rc.PathValidator.ValidatePath(in.Path)
+	validPath, err := resolveWorkspace(rc, in.Path)
 	if err != nil {
-		return fmt.Errorf("path validation failed: %w", err)
+		return err
 	}
 
 	info, err := os.Stat(validPath)
@@ -127,6 +123,28 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 	}
 
 	return rc.Emit("fs/read", data, "application/json", meta)
+}
+
+func parseInput(r io.Reader) (input, error) {
+	var in input
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return input{}, fmt.Errorf("decode input: %w", err)
+	}
+	if strings.TrimSpace(in.Path) == "" {
+		return input{}, fmt.Errorf("path is required")
+	}
+	if in.MaxBytes < 0 {
+		return input{}, fmt.Errorf("max_bytes cannot be negative")
+	}
+	return in, nil
+}
+
+func resolveWorkspace(rc *skillslib.RunnerContext, path string) (string, error) {
+	valid, err := rc.PathValidator.ValidatePath(path)
+	if err != nil {
+		return "", fmt.Errorf("path validation failed: %w", err)
+	}
+	return valid, nil
 }
 
 func previewLimit(rc *skillslib.RunnerContext, in input) int {
