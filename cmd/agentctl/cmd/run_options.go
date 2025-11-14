@@ -37,7 +37,13 @@ type RunOptions struct {
 }
 
 // Validate checks if the RunOptions are valid and returns an error if not.
-func (o RunOptions) Validate() error {
+func (o *RunOptions) Validate() error {
+	if o == nil {
+		return fmt.Errorf("options cannot be nil")
+	}
+	if o.CacheMode == "" {
+		o.CacheMode = cache.ModeAuto
+	}
 	if o.SkillName == "" {
 		return fmt.Errorf("skill name cannot be empty")
 	}
