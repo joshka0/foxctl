@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/jkatigb/agentctl/internal/execution"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/logging"
 	"github.com/jkatigb/agentctl/internal/skill"
@@ -28,7 +29,13 @@ func TestExecutorRunSkillSuccess(t *testing.T) {
 	}
 	exec := New(root, persist, WithRunner(runner))
 
-	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "demo"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/echo"},
+		},
+	}
 	job, result, err := exec.RunSkill(ctx, manifest, "artifact", []byte(`{"foo":"bar"}`))
 	if err != nil {
 		t.Fatalf("run skill: %v", err)
@@ -61,7 +68,13 @@ func TestExecutorRunSkillValidationError(t *testing.T) {
 	}
 	exec := New(root, persist, WithRunner(runner))
 
-	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "demo"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/echo"},
+		},
+	}
 	job, _, err := exec.RunSkill(ctx, manifest, "artifact", []byte(`{"foo":"bar"}`))
 	if err == nil {
 		t.Fatalf("expected validation error")
@@ -133,7 +146,13 @@ func TestExecutorLogsProgressFailures(t *testing.T) {
 			}, nil
 		}),
 	)
-	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "demo"}}
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "demo"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/echo"},
+		},
+	}
 	if _, _, err := exec.RunSkill(ctx, manifest, "", []byte(`{"foo":"bar"}`)); err != nil {
 		t.Fatalf("run skill: %v", err)
 	}
@@ -232,4 +251,48 @@ func validTransition(current, next types.State) bool {
 	default:
 		return false
 	}
+}
+
+// TestExecutorWithSkillExecutor demonstrates using the new SkillExecutor interface
+// with a mock executor for testing. This shows SPEC-004 integration.
+func TestExecutorWithSkillExecutor(t *testing.T) {
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	// Create a mock executor
+	mockExec := execution.NewMockExecutor()
+	mockExec.ExecuteFunc = func(_ context.Context, opts execution.ExecuteOptions) (*execution.Result, error) {
+		// Verify options
+		if opts.ManifestPath == "" {
+			t.Error("expected manifest path")
+		}
+
+		// Return a success result
+		env := envelope.OK("test", map[string]string{"mock": "true"})
+		buf, _ := json.Marshal(env)
+		return &execution.Result{
+			Stdout:   buf,
+			Stderr:   []byte("mock stderr"),
+			ExitCode: 0,
+		}, nil
+	}
+
+	// Create executor with mock
+	exec := New(root, persist, WithSkillExecutor(mockExec))
+
+	// The current implementation still uses runner.Run directly for executeSkill,
+	// but the interface is in place for future use and demonstrates the pattern.
+	// The mock executor can be used for testing new methods that work with manifest paths.
+
+	// Verify the executor was created successfully
+	if exec == nil {
+		t.Fatal("expected executor to be created")
+	}
+	if exec.skillExecutor == nil {
+		t.Fatal("expected skillExecutor to be set")
+	}
+
+	// This demonstrates that the executor can be created with a mock,
+	// which enables better testing in the future.
+	t.Log("Successfully created executor with mock SkillExecutor")
 }

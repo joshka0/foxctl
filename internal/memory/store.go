@@ -4,7 +4,6 @@ package memory
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"math"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/dbutil"
 	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/sqlutil"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/timeutil"
 )
@@ -96,9 +96,14 @@ func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) 
 	if entry.Type == "" {
 		entry.Type = "result"
 	}
-	digestsJSON, _ := json.Marshal(entry.Digests)
 
-	_, err := s.db.ExecContext(ctx, `
+	// Format digests with proper error handling
+	digestsJSON, err := sqlutil.FormatJSON(entry.Digests)
+	if err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: format digests: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
 INSERT INTO named_memory (id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 ON CONFLICT(name, workspace) DO UPDATE SET
@@ -109,8 +114,8 @@ ON CONFLICT(name, workspace) DO UPDATE SET
 	digests = excluded.digests,
 	updated_at = excluded.updated_at,
 	last_accessed = excluded.last_accessed
-`, entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, string(digestsJSON),
-		entry.CreatedAt.Format(time.RFC3339Nano), entry.UpdatedAt.Format(time.RFC3339Nano), entry.LastAccess.Format(time.RFC3339Nano))
+`, entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON,
+		sqlutil.FormatTimestamp(entry.CreatedAt), sqlutil.FormatTimestamp(entry.UpdatedAt), sqlutil.FormatTimestamp(entry.LastAccess))
 	if err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: save: %w", err)
 	}
@@ -133,9 +138,26 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 		}
 		return NamedEntry{}, fmt.Errorf("memory: get: %w", err)
 	}
-	entry.Digests = dbutil.ScanJSONArray(digests)
-	times := dbutil.ScanTimestampsMust(created, updated, last)
-	entry.CreatedAt, entry.UpdatedAt, entry.LastAccess = times[0], times[1], times[2]
+
+	// Parse digests with proper error handling
+	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: scan digests: %w", err)
+	}
+
+	// Parse timestamps with proper error handling
+	var err error
+	entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
+	if err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: scan created_at: %w", err)
+	}
+	entry.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
+	if err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: scan updated_at: %w", err)
+	}
+	entry.LastAccess, err = sqlutil.ScanTimestamp(last)
+	if err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: scan last_accessed: %w", err)
+	}
 
 	_, _ = s.db.ExecContext(ctx, `
 		UPDATE named_memory
@@ -169,9 +191,26 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
 			return nil, fmt.Errorf("memory: scan list: %w", err)
 		}
-		entry.Digests = dbutil.ScanJSONArray(digests)
-		times := dbutil.ScanTimestampsMust(created, updated, last)
-		entry.CreatedAt, entry.UpdatedAt, entry.LastAccess = times[0], times[1], times[2]
+
+		// Parse digests with proper error handling
+		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+			return nil, fmt.Errorf("memory: scan list digests: %w", err)
+		}
+
+		// Parse timestamps with proper error handling
+		entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan list created_at: %w", err)
+		}
+		entry.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan list updated_at: %w", err)
+		}
+		entry.LastAccess, err = sqlutil.ScanTimestamp(last)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan list last_accessed: %w", err)
+		}
+
 		entries = append(entries, entry)
 	}
 	return entries, nil
@@ -190,7 +229,11 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace); err != nil {
 		return fmt.Errorf("memory: delete: %w", err)
 	}
-	arr := dbutil.ScanJSONArray(digests)
+
+	var arr []string
+	if err := sqlutil.ScanJSON(digests, &arr); err != nil {
+		return fmt.Errorf("memory: scan delete digests: %w", err)
+	}
 	s.unpin(ctx, arr)
 	return nil
 }
@@ -366,9 +409,27 @@ func scanEntries(rows *sql.Rows) ([]NamedEntry, error) {
 		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
 			return nil, fmt.Errorf("memory: scan: %w", err)
 		}
-		entry.Digests = dbutil.ScanJSONArray(digests)
-		times := dbutil.ScanTimestampsMust(created, updated, last)
-		entry.CreatedAt, entry.UpdatedAt, entry.LastAccess = times[0], times[1], times[2]
+
+		// Parse digests with proper error handling
+		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+			return nil, fmt.Errorf("memory: scan digests: %w", err)
+		}
+
+		// Parse timestamps with proper error handling
+		var err error
+		entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan created_at: %w", err)
+		}
+		entry.UpdatedAt, err = sqlutil.ScanTimestamp(updated)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan updated_at: %w", err)
+		}
+		entry.LastAccess, err = sqlutil.ScanTimestamp(last)
+		if err != nil {
+			return nil, fmt.Errorf("memory: scan last_accessed: %w", err)
+		}
+
 		out = append(out, entry)
 	}
 	return out, nil

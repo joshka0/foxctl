@@ -16,6 +16,9 @@ import (
 )
 
 func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow end-to-end cache/memory workflow")
+	}
 	cfg := installTextGrepSkill(t)
 	installHTTPOpenAPISkill(t, cfg)
 

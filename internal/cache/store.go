@@ -23,6 +23,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/metrics"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/jkatigb/agentctl/internal/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/sqlutil"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/timeutil"
 )
@@ -126,9 +127,14 @@ func (s *Store) Put(ctx context.Context, entry Entry) error {
 	if entry.ExpiresAt.IsZero() {
 		entry.ExpiresAt = entry.CreatedAt.Add(s.ttl)
 	}
-	digestJSON, _ := json.Marshal(entry.Digests)
 
-	_, err := s.db.ExecContext(ctx, `
+	// Format digests with proper error handling
+	digestJSON, err := sqlutil.FormatJSON(entry.Digests)
+	if err != nil {
+		return fmt.Errorf("cache: format digests: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO auto_cache (cache_key, skill_name, skill_version, workspace, result, digests, created_at, expires_at, last_accessed, hit_count)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		ON CONFLICT(cache_key) DO UPDATE SET
@@ -138,8 +144,8 @@ func (s *Store) Put(ctx context.Context, entry Entry) error {
 			created_at = excluded.created_at,
 			expires_at = excluded.expires_at,
 			last_accessed = excluded.last_accessed
-	`, entry.CacheKey, entry.SkillName, entry.SkillVersion, entry.Workspace, entry.Result, string(digestJSON),
-		entry.CreatedAt.Format(time.RFC3339Nano), entry.ExpiresAt.Format(time.RFC3339Nano), entry.LastAccessed.Format(time.RFC3339Nano))
+	`, entry.CacheKey, entry.SkillName, entry.SkillVersion, entry.Workspace, entry.Result, digestJSON,
+		sqlutil.FormatTimestamp(entry.CreatedAt), sqlutil.FormatTimestamp(entry.ExpiresAt), sqlutil.FormatTimestamp(entry.LastAccessed))
 	if err != nil {
 		return fmt.Errorf("cache: put: %w", err)
 	}
@@ -167,9 +173,26 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 		return Entry{}, false, fmt.Errorf("cache: scan: %w", err)
 	}
 	metrics.Global().RecordCacheHit()
-	entry.Digests = dbutil.ScanJSONArray(digests)
-	times := dbutil.ScanTimestampsMust(created, expires, last)
-	entry.CreatedAt, entry.ExpiresAt, entry.LastAccessed = times[0], times[1], times[2]
+
+	// Parse digests with proper error handling
+	if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+		return Entry{}, false, fmt.Errorf("cache: scan digests: %w", err)
+	}
+
+	// Parse timestamps with proper error handling
+	var err error
+	entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("cache: scan created_at: %w", err)
+	}
+	entry.ExpiresAt, err = sqlutil.ScanTimestamp(expires)
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("cache: scan expires_at: %w", err)
+	}
+	entry.LastAccessed, err = sqlutil.ScanTimestamp(last)
+	if err != nil {
+		return Entry{}, false, fmt.Errorf("cache: scan last_accessed: %w", err)
+	}
 
 	// refresh access metadata
 	_, _ = s.db.ExecContext(ctx, `
@@ -217,9 +240,26 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 		if err := rows.Scan(&entry.CacheKey, &entry.SkillName, &entry.SkillVersion, &entry.Workspace, &entry.Result, &digests, &created, &expires, &last, &entry.HitCount); err != nil {
 			return nil, fmt.Errorf("cache: scan recent: %w", err)
 		}
-		entry.Digests = dbutil.ScanJSONArray(digests)
-		times := dbutil.ScanTimestampsMust(created, expires, last)
-		entry.CreatedAt, entry.ExpiresAt, entry.LastAccessed = times[0], times[1], times[2]
+
+		// Parse digests with proper error handling
+		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+			return nil, fmt.Errorf("cache: scan recent digests: %w", err)
+		}
+
+		// Parse timestamps with proper error handling
+		entry.CreatedAt, err = sqlutil.ScanTimestamp(created)
+		if err != nil {
+			return nil, fmt.Errorf("cache: scan recent created_at: %w", err)
+		}
+		entry.ExpiresAt, err = sqlutil.ScanTimestamp(expires)
+		if err != nil {
+			return nil, fmt.Errorf("cache: scan recent expires_at: %w", err)
+		}
+		entry.LastAccessed, err = sqlutil.ScanTimestamp(last)
+		if err != nil {
+			return nil, fmt.Errorf("cache: scan recent last_accessed: %w", err)
+		}
+
 		entries = append(entries, entry)
 	}
 	return entries, nil
@@ -238,7 +278,11 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 		}
 		return fmt.Errorf("cache: get digests for delete: %w", err)
 	}
-	digests := dbutil.ScanJSONArray(digestsJSON)
+
+	var digests []string
+	if err := sqlutil.ScanJSON(digestsJSON, &digests); err != nil {
+		return fmt.Errorf("cache: scan digests for delete: %w", err)
+	}
 
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = ?`, key); err != nil {
 		return fmt.Errorf("cache: delete: %w", err)
@@ -338,7 +382,9 @@ func (s *Store) evictExpired(ctx context.Context) error {
 		if err := rows.Scan(&d.key, &digests); err != nil {
 			return fmt.Errorf("cache: scan expired: %w", err)
 		}
-		_ = json.Unmarshal([]byte(digests), &d.digests)
+		if err := sqlutil.ScanJSON(digests, &d.digests); err != nil {
+			return fmt.Errorf("cache: scan expired digests: %w", err)
+		}
 		expired = append(expired, d)
 	}
 	for _, d := range expired {
