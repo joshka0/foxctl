@@ -65,14 +65,16 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 		return err
 	}
 
-	entries, err := readDir(validDir, in)
+	allEntries, err := readDir(validDir, in)
 	if err != nil {
 		return err
 	}
 
-	total := len(entries)
-	preview, truncated := preparePreview(entries, rc.MaxPreview)
-	artifact, err := persistListingArtifact(ctx, rc, entries, truncated)
+	totalEntries := len(allEntries)
+	limitedEntries, limited := limitEntries(allEntries, in.MaxEntries)
+
+	preview, previewTruncated := preparePreview(limitedEntries, rc.MaxPreview)
+	artifact, err := persistListingArtifact(ctx, rc, limitedEntries, previewTruncated)
 	if err != nil {
 		return err
 	}
@@ -80,7 +82,7 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 	files := 0
 	dirs := 0
 	var totalSize int64
-	for _, e := range entries {
+	for _, e := range allEntries {
 		if e.IsDir {
 			dirs++
 		} else {
@@ -91,11 +93,15 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 
 	data := map[string]any{
 		"path":        validDir,
-		"entry_count": total,
+		"entry_count": totalEntries,
 		"files":       files,
 		"directories": dirs,
 		"total_size":  totalSize,
 		"preview":     preview,
+	}
+	if limited {
+		data["truncated"] = true
+		data["limited_entries"] = len(limitedEntries)
 	}
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
@@ -152,6 +158,15 @@ func persistListingArtifact(ctx context.Context, rc *skillslib.RunnerContext, en
 	return artifact, nil
 }
 
+func limitEntries(entries []entry, max int) ([]entry, bool) {
+	if max <= 0 || len(entries) <= max {
+		return entries, false
+	}
+	clipped := make([]entry, max)
+	copy(clipped, entries[:max])
+	return clipped, true
+}
+
 func readDir(path string, in input) ([]entry, error) {
 	ents, err := os.ReadDir(path)
 	if err != nil {
@@ -182,9 +197,6 @@ func readDir(path string, in input) ([]entry, error) {
 			Mode:      info.Mode().String(),
 			ModTime:   info.ModTime().UTC().Format(time.RFC3339),
 		})
-		if in.MaxEntries > 0 && len(out) >= in.MaxEntries {
-			break
-		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
