@@ -56,22 +56,24 @@ func newRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if async && cacheMode == cache.ModeOnly {
-				return fmt.Errorf("--cache=only cannot be combined with --async")
+
+			// Build and validate options
+			opts := RunOptions{
+				SkillName:       args[0],
+				Input:           data,
+				Async:           async,
+				Dedupe:          dedupe,
+				CacheMode:       cacheMode,
+				Workspace:       ws,
+				RememberName:    rememberName,
+				RememberType:    rememberType,
+				RememberSummary: rememberSummary,
 			}
-			if async && rememberName != "" {
-				return fmt.Errorf("--remember cannot be used with --async")
+			if err := opts.Validate(); err != nil {
+				return err
 			}
 
-			executor := newRunExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOptions{
-				async:           async,
-				dedupe:          dedupe,
-				cacheMode:       cacheMode,
-				workspace:       ws,
-				rememberName:    rememberName,
-				rememberType:    rememberType,
-				rememberSummary: rememberSummary,
-			})
+			executor := newRunExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 			defer executor.Close()
 
 			if done, err := executor.tryServeCache(data); err != nil {
