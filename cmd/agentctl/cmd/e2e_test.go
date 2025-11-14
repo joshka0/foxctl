@@ -147,6 +147,9 @@ func (h *casHarness) assertCASArtifact(t *testing.T, env envelope.Envelope) {
 	if env.Meta.CASDigest == "" {
 		t.Fatalf("expected CAS digest on first run")
 	}
+	if !strings.HasPrefix(env.Meta.CASDigest, "sha256:") {
+		t.Fatalf("expected sha256: prefix in CAS digest, got: %s", env.Meta.CASDigest)
+	}
 	casPath := filepath.Join(h.cfg.Paths.CAS, "sha256", env.Meta.CASDigest[len("sha256:"):])
 	if _, err := os.Stat(casPath); err != nil {
 		t.Fatalf("cas artifact missing: %v", err)

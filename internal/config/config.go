@@ -141,7 +141,7 @@ func configureConfigFile(v *viper.Viper, l *loader, defaultHome string) {
 func readConfig(v *viper.Viper, explicit string) error {
 	if err := v.ReadInConfig(); err != nil {
 		var configErr viper.ConfigFileNotFoundError
-		if !errors.As(err, &configErr) && explicit != "" {
+		if explicit != "" || !errors.As(err, &configErr) {
 			return fmt.Errorf("config: %w", err)
 		}
 	}
