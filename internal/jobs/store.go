@@ -8,12 +8,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
 	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/jobs/executor"
+	"github.com/jkatigb/agentctl/internal/jobs/fsutil"
 	"github.com/jkatigb/agentctl/internal/jobs/persist"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/logging"
@@ -25,8 +25,8 @@ import (
 // Store composes persistence and execution primitives for job management.
 type Store struct {
 	root     string
-	persist  persist.Store
-	executor *executor.Executor
+	persist  Persistence
+	executor SkillExecutor
 }
 
 // Ensure Store implements storage.JobStore.
@@ -41,8 +41,12 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 	}
 	defer errs.CloseOnErr(p, &err)
 	exec := executor.New(root, p, executor.WithLogger(logger))
-	store = &Store{root: root, persist: p, executor: exec}
-	return store, nil
+	return New(root, p, exec), nil
+}
+
+// New constructs a Store instance from the provided dependencies.
+func New(root string, p Persistence, exec SkillExecutor) *Store {
+	return &Store{root: root, persist: p, executor: exec}
 }
 
 // Close releases database resources.
@@ -76,10 +80,10 @@ func (s *Store) SubmitEcho(ctx context.Context, message string) (Job, error) {
 		return Job{}, err
 	}
 
-	jobDir := s.jobDir(job.ID)
-	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+	jobDir, err := fsutil.EnsureJobDir(s.root, job.ID)
+	if err != nil {
 		errs.Ignore(s.persist.Delete(ctx, job.ID), "delete echo job after mkdir failure")
-		return Job{}, fmt.Errorf("jobs: job dir: %w", err)
+		return Job{}, err
 	}
 
 	if err := s.persist.UpdateState(ctx, job.ID, StateRunning, "", ""); err != nil {
@@ -167,7 +171,7 @@ func (s *Store) PrepareSkillJob(ctx context.Context, name string, input []byte) 
 
 // ExecutePreparedSkill runs a previously prepared job.
 func (s *Store) ExecutePreparedSkill(ctx context.Context, jobID string, manifestPath string, artifactPath string) ([]byte, error) {
-	inputPath := filepath.Join(s.jobDir(jobID), "input.json")
+	inputPath := filepath.Join(fsutil.JobDir(s.root, jobID), "input.json")
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return nil, fmt.Errorf("jobs: read input: %w", err)
@@ -184,20 +188,8 @@ func (s *Store) SetWorkspace(_ context.Context, jobID, workspacePath string) err
 	if workspacePath == "" {
 		return nil
 	}
-	jobDir := s.jobDir(jobID)
-	if err := os.MkdirAll(jobDir, 0o755); err != nil {
-		return fmt.Errorf("jobs: ensure job dir: %w", err)
-	}
-	path := filepath.Join(jobDir, "workspace")
-	if existing, err := os.ReadFile(path); err == nil {
-		if strings.TrimSpace(string(existing)) != "" {
-			return nil
-		}
-	}
-	if err := os.WriteFile(path, []byte(workspacePath), 0o644); err != nil {
-		return fmt.Errorf("jobs: write workspace: %w", err)
-	}
-	return nil
+	jobDir := fsutil.JobDir(s.root, jobID)
+	return fsutil.RecordWorkspace(jobDir, workspacePath)
 }
 
 // FindOrPrepareSkillJob atomically finds a duplicate job or creates a new one.
@@ -225,7 +217,7 @@ func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool, w i
 		return err
 	}
 
-	follower := newProgressFollower(ctx, s.persist, jobID, filepath.Join(s.jobDir(jobID), "progress.ndjson"), follow)
+	follower := newProgressFollower(ctx, s.persist, jobID, filepath.Join(fsutil.JobDir(s.root, jobID), "progress.ndjson"), follow)
 	return follower.stream(w)
 }
 
@@ -257,10 +249,6 @@ func (s *Store) WaitForCompletion(ctx context.Context, jobID string, pollInterva
 	}
 }
 
-func (s *Store) jobDir(id string) string {
-	return filepath.Join(s.root, id)
-}
-
 func writeResult(path string, env envelope.Envelope) error {
 	buf, err := json.MarshalIndent(env, "", "  ")
 	if err != nil {
@@ -278,14 +266,14 @@ func newJobID() string {
 
 type progressFollower struct {
 	ctx     context.Context
-	persist persist.Store
+	persist Persistence
 	jobID   string
 	path    string
 	follow  bool
 	file    *os.File
 }
 
-func newProgressFollower(ctx context.Context, p persist.Store, jobID, path string, follow bool) *progressFollower {
+func newProgressFollower(ctx context.Context, p Persistence, jobID, path string, follow bool) *progressFollower {
 	return &progressFollower{ctx: ctx, persist: p, jobID: jobID, path: path, follow: follow}
 }
 

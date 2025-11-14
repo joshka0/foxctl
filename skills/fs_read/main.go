@@ -18,7 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
 	errs "github.com/jkatigb/agentctl/internal/errors"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 type input struct {
@@ -33,7 +33,7 @@ func main() {
 		fail("fs/read", "ECONFIG", err)
 	}
 
-	rc, err := skillslib.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("fs/read", "ERUNTIME", err)
 	}
@@ -50,7 +50,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	validPath, err := resolveWorkspace(rc, in.Path)
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveWorkspace(rc *skillslib.RunnerContext, path string) (string, error) {
+func resolveWorkspace(rc *runner.RunnerContext, path string) (string, error) {
 	valid, err := rc.PathValidator.ValidatePath(path)
 	if err != nil {
 		return "", fmt.Errorf("path validation failed: %w", err)
@@ -147,7 +147,7 @@ func resolveWorkspace(rc *skillslib.RunnerContext, path string) (string, error) 
 	return valid, nil
 }
 
-func previewLimit(rc *skillslib.RunnerContext, in input) int {
+func previewLimit(rc *runner.RunnerContext, in input) int {
 	maxInline := rc.InlineKB * 1024
 	if maxInline <= 0 {
 		maxInline = config.DefaultInlineOutputKB * 1024

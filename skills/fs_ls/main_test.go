@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/config"
-	"github.com/jkatigb/agentctl/internal/skillslib"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 func TestFsLsListsEntries(t *testing.T) {
@@ -52,7 +52,7 @@ func TestFsLsListsEntries(t *testing.T) {
 	}
 }
 
-func newFsLsRunner(t *testing.T, stdout *bytes.Buffer) *skillslib.RunnerContext {
+func newFsLsRunner(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
@@ -65,7 +65,7 @@ func newFsLsRunner(t *testing.T, stdout *bytes.Buffer) *skillslib.RunnerContext 
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := skillslib.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}

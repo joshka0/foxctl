@@ -18,6 +18,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/envelope"
 	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/skillslib"
+	fsutil "github.com/jkatigb/agentctl/internal/skillslib/fs"
+	runner "github.com/jkatigb/agentctl/internal/skillslib/runner"
 )
 
 type input struct {
@@ -43,7 +45,7 @@ func main() {
 		fail("text/grep", "ECONFIG", err)
 	}
 
-	rc, err := skillslib.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("text/grep", "ERUNTIME", err)
 	}
@@ -60,7 +62,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	re, err := compileRegex(in.Pattern, in.CI)
 	if err != nil {
 		return err
@@ -140,7 +142,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveWorkspace(rc *skillslib.RunnerContext, candidate string) (string, string, error) {
+func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, string, error) {
 	workspace := rc.PathValidator.Workspace()
 	if strings.TrimSpace(candidate) == "" {
 		return workspace, workspace, nil
@@ -162,33 +164,33 @@ func preparePreview(matches []match, max int) ([]match, bool) {
 	return preview, truncated
 }
 
-func persistMatchesArtifact(ctx context.Context, rc *skillslib.RunnerContext, matches []match, truncated bool) (skillslib.Artifact, error) {
+func persistMatchesArtifact(ctx context.Context, rc *runner.RunnerContext, matches []match, truncated bool) (runner.Artifact, error) {
 	if !truncated {
-		return skillslib.Artifact{}, nil
+		return runner.Artifact{}, nil
 	}
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
 	for _, m := range matches {
 		if err := enc.Encode(m); err != nil {
-			return skillslib.Artifact{}, fmt.Errorf("encode match: %w", err)
+			return runner.Artifact{}, fmt.Errorf("encode match: %w", err)
 		}
 	}
-	return skillslib.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_grep")
+	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_grep")
 }
 
-func collectEntries(path string, include, exclude []string) ([]skillslib.FileEntry, error) {
+func collectEntries(path string, include, exclude []string) ([]fsutil.FileEntry, error) {
 	if path != "" {
 		info, err := os.Stat(path)
 		if err == nil && !info.IsDir() {
-			return []skillslib.FileEntry{{Path: path, Info: info}}, nil
+			return []fsutil.FileEntry{{Path: path, Info: info}}, nil
 		}
 	}
-	opts := skillslib.ListOptions{
+	opts := fsutil.ListOptions{
 		BasePath: path,
 		Include:  include,
 		Exclude:  append([]string{".git", "node_modules"}, exclude...),
 	}
-	return skillslib.WalkFiles(opts)
+	return fsutil.WalkFiles(opts)
 }
 
 func compileRegex(pattern string, ci bool) (*regexp.Regexp, error) {
