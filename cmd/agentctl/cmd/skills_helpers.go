@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/policy"
@@ -53,7 +54,20 @@ func copyFile(src, dst string) error {
 }
 
 func ensureSkillDir(skillsRoot string, manifest skill.Manifest) (string, error) {
-	dest := filepath.Join(skillsRoot, manifest.Metadata.Name)
+	name := strings.TrimSpace(manifest.Metadata.Name)
+	if name == "" {
+		return "", fmt.Errorf("skill metadata name is required")
+	}
+	cleanName := filepath.Clean(name)
+	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
+	}
+	root := filepath.Clean(skillsRoot)
+	dest := filepath.Join(root, cleanName)
+	dest = filepath.Clean(dest)
+	if rel, err := filepath.Rel(root, dest); err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
+	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return "", err
 	}
