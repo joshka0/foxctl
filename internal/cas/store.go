@@ -116,26 +116,53 @@ func (s *Store) Put(ctx context.Context, r io.Reader, kind string, tags []string
 		}
 	}
 	digest := "sha256:" + hex.EncodeToString(h.Sum(nil))
-	hexDigest := strings.TrimPrefix(digest, "sha256:")
-	dest := filepath.Join(s.root, "sha256", hexDigest)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := os.Stat(dest); err == nil {
-		// already exists; update metadata with merged tags if needed
-		errs.Ignore(tmp.Close(), "close duplicate temp file")
-		errs.Ignore(os.Remove(tmp.Name()), "remove duplicate temp file")
-		meta, err := s.readMetadata(digest)
-		if err != nil {
-			return Object{}, err
+	if obj, handled, err := s.handleDuplicateObject(digest, tmp, tags); err != nil {
+		return Object{}, err
+	} else if handled {
+		return obj, nil
+	}
+
+	return s.finalizeUpload(tmp, digest, kind, tags, size)
+}
+
+func (s *Store) handleDuplicateObject(digest string, tmp *os.File, tags []string) (Object, bool, error) {
+	dest, err := s.pathForDigest(digest)
+	if err != nil {
+		return Object{}, false, err
+	}
+	if _, err := os.Stat(dest); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Object{}, false, nil
 		}
-		merged := mergeTags(meta.Tags, tags)
-		if len(merged) != len(meta.Tags) {
-			meta.Tags = merged
-			if err := s.writeMetadata(meta); err != nil {
-				return Object{}, err
-			}
+		return Object{}, false, fmt.Errorf("cas: stat existing: %w", err)
+	}
+	errs.Ignore(tmp.Close(), "close duplicate temp file")
+	errs.Ignore(os.Remove(tmp.Name()), "remove duplicate temp file")
+
+	meta, err := s.readMetadata(digest)
+	if err != nil {
+		return Object{}, false, err
+	}
+	merged := mergeTags(meta.Tags, tags)
+	if len(merged) != len(meta.Tags) {
+		meta.Tags = merged
+		if err := s.writeMetadata(meta); err != nil {
+			return Object{}, false, err
 		}
-		return s.objectFromMeta(meta)
+	}
+	obj, err := s.objectFromMeta(meta)
+	if err != nil {
+		return Object{}, false, err
+	}
+	return obj, true, nil
+}
+
+func (s *Store) finalizeUpload(tmp *os.File, digest, kind string, tags []string, size int64) (Object, error) {
+	dest, err := s.pathForDigest(digest)
+	if err != nil {
+		return Object{}, err
 	}
 	if err := tmp.Close(); err != nil {
 		return Object{}, fmt.Errorf("cas: close temp: %w", err)

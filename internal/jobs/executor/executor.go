@@ -26,6 +26,14 @@ import (
 // RunnerFunc executes a skill manifest and returns stdout, stderr, and an error.
 type RunnerFunc func(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error)
 
+// executeOptions captures the parameters used when running a skill.
+type executeOptions struct {
+	JobID        string
+	Manifest     skill.Manifest
+	ArtifactPath string
+	Input        []byte
+}
+
 // Persistence captures the persistence primitives required by the executor.
 type Persistence interface {
 	InsertJob(ctx context.Context, job types.Job) error
@@ -105,13 +113,23 @@ func (e *Executor) RunSkill(ctx context.Context, manifest skill.Manifest, artifa
 		// Should not happen when dedupe disabled, but guard regardless.
 		return job, nil, fmt.Errorf("jobs: unexpected duplicate during run")
 	}
-	result, err := e.executeSkill(ctx, job.ID, manifest, artifactPath, input)
+	result, err := e.executeSkill(ctx, executeOptions{
+		JobID:        job.ID,
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 	return job, result, err
 }
 
 // ExecutePrepared runs a previously prepared job.
 func (e *Executor) ExecutePrepared(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
-	return e.executeSkill(ctx, jobID, manifest, artifactPath, input)
+	return e.executeSkill(ctx, executeOptions{
+		JobID:        jobID,
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
 }
 
 // PrepareSkillJob creates a queued skill job.
@@ -167,9 +185,29 @@ func (e *Executor) prepareSkillJob(ctx context.Context, name string, input []byt
 	return job, false, nil
 }
 
-func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, error) {
-	if err := e.persist.UpdateState(ctx, jobID, types.StateRunning, "", ""); err != nil {
+func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byte, error) {
+	ctx, pw, cleanup, start, err := e.startExecution(ctx, opts.JobID)
+	if err != nil {
 		return nil, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	stdout, stderr, runErr := e.runSkill(ctx, opts.Manifest, opts.ArtifactPath, opts.Input)
+	metrics.Global().RecordExecutionTime(time.Since(start))
+	e.writeStderrLog(opts.JobID, stderr)
+
+	if runErr != nil {
+		return e.handleFailure(ctx, opts.JobID, stdout, stderr, runErr, pw)
+	}
+
+	return e.handleSuccess(ctx, opts.JobID, stdout, pw)
+}
+
+func (e *Executor) startExecution(ctx context.Context, jobID string) (context.Context, *progressWriter, func(), time.Time, error) {
+	if err := e.persist.UpdateState(ctx, jobID, types.StateRunning, "", ""); err != nil {
+		return nil, nil, nil, time.Time{}, err
 	}
 	if ws := e.jobWorkspace(jobID); ws != "" {
 		ctx = workspace.WithContext(ctx, ws)
@@ -177,99 +215,74 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	metrics.Global().RecordSkillExecution()
 	start := time.Now()
 
-	var pw *progressWriter
-	if writer, err := e.progressFactory(e.jobDir(jobID)); err == nil {
-		pw = writer
-		defer func() {
-			if closeErr := pw.Close(); closeErr != nil {
-				e.logger.Warn().
-					Str("job_id", jobID).
-					Err(closeErr).
-					Msg("progress close failed")
-			}
-		}()
-		if err := pw.WriteMessage("skill execution started"); err != nil {
-			e.warnProgress(jobID, "execution_start", err)
-		}
-	} else if err != nil {
+	writer, err := e.progressFactory(e.jobDir(jobID))
+	if err != nil {
 		e.logger.Warn().
 			Str("job_id", jobID).
 			Err(err).
 			Msg("progress writer init failed")
+		return ctx, nil, nil, start, nil
 	}
 
-	var stdout, stderr []byte
-	var err error
+	cleanup := func() {
+		if closeErr := writer.Close(); closeErr != nil {
+			e.logger.Warn().
+				Str("job_id", jobID).
+				Err(closeErr).
+				Msg("progress close failed")
+		}
+	}
+	if err := writer.WriteMessage("skill execution started"); err != nil {
+		e.warnProgress(jobID, "execution_start", err)
+	}
+	return ctx, writer, cleanup, start, nil
+}
+
+func (e *Executor) runSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
 	if e.skillExecutor != nil {
 		result, execErr := e.skillExecutor.Execute(ctx, execution.ExecuteOptions{
 			Manifest:     manifest,
 			ArtifactPath: artifactPath,
 			Input:        input,
 		})
-		if result != nil {
-			stdout = result.Stdout
-			stderr = result.Stderr
-			if execErr != nil {
-				err = execErr
-			} else {
-				err = result.Error
+		if result == nil {
+			if execErr == nil {
+				execErr = fmt.Errorf("skill executor returned nil result without error")
 			}
-		} else {
-			err = execErr
+			return nil, nil, execErr
 		}
-		if result == nil && execErr == nil {
-			err = fmt.Errorf("skill executor returned nil result without error")
+		stdout := result.Stdout
+		stderr := result.Stderr
+		if execErr != nil {
+			return stdout, stderr, execErr
 		}
-	} else {
-		stdout, stderr, err = runner.RunWithOptions(ctx, runner.RunOptions{
-			Manifest:     manifest,
-			ArtifactPath: artifactPath,
-			Input:        input,
-		})
+		return stdout, stderr, result.Error
 	}
-	metrics.Global().RecordExecutionTime(time.Since(start))
-	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
-	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
-		e.logger.Warn().
-			Str("job_id", jobID).
-			Str("path", stderrPath).
-			Err(writeErr).
-			Msg("stderr log write failed")
-	}
+	return runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     manifest,
+		ArtifactPath: artifactPath,
+		Input:        input,
+	})
+}
 
-	if err != nil {
-		if detail := strings.TrimSpace(string(stderr)); detail != "" {
-			err = fmt.Errorf("%w: %s", err, detail)
+func (e *Executor) handleFailure(ctx context.Context, jobID string, stdout, stderr []byte, runErr error, pw *progressWriter) ([]byte, error) {
+	err := augmentError(runErr, stdout, stderr)
+	if pw != nil {
+		if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
+			e.warnProgress(jobID, "execution_error", pwErr)
 		}
-		if len(stdout) > 0 {
-			snippet := strings.TrimSpace(string(stdout))
-			const maxSnippet = 512
-			if len(snippet) > maxSnippet {
-				snippet = snippet[:maxSnippet] + "..."
-			}
-			if snippet != "" {
-				err = fmt.Errorf("%w; stdout: %s", err, snippet)
-			}
-		}
-		if pw != nil {
-			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
-				e.warnProgress(jobID, "execution_error", pwErr)
-			}
-		}
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
-			return stdout, fmt.Errorf("skill run failed: %w (state update also failed: %v)", err, stateErr)
-		}
-		return stdout, fmt.Errorf("skill run failed: %w", err)
 	}
+	if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
+		return stdout, fmt.Errorf("skill run failed: %w (state update also failed: %v)", err, stateErr)
+	}
+	return stdout, fmt.Errorf("skill run failed: %w", err)
+}
 
+func (e *Executor) handleSuccess(ctx context.Context, jobID string, stdout []byte, pw *progressWriter) ([]byte, error) {
 	var resultEnv envelope.Envelope
 	if unmarshalErr := json.Unmarshal(stdout, &resultEnv); unmarshalErr != nil {
 		validationErr := fmt.Errorf("invalid result envelope: %w", unmarshalErr)
-		if pw != nil {
-			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", validationErr)); pwErr != nil {
-				e.warnProgress(jobID, "decode_error", pwErr)
-			}
-		}
+		e.recordProgressFailure(jobID, pw, "decode_error", validationErr)
 		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, validationErr.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", validationErr, stateErr)
 		}
@@ -278,11 +291,7 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 
 	if validationErr := envelope.Validate(resultEnv); validationErr != nil {
 		wrapped := fmt.Errorf("envelope validation failed: %w", validationErr)
-		if pw != nil {
-			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", wrapped)); pwErr != nil {
-				e.warnProgress(jobID, "validation_error", pwErr)
-			}
-		}
+		e.recordProgressFailure(jobID, pw, "validation_error", wrapped)
 		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, wrapped.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", wrapped, stateErr)
 		}
@@ -291,11 +300,7 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 
 	resultPath := filepath.Join(e.jobDir(jobID), "result.json")
 	if err := os.WriteFile(resultPath, stdout, 0o644); err != nil {
-		if pw != nil {
-			if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed to write result: %s", err)); pwErr != nil {
-				e.warnProgress(jobID, "result_error", pwErr)
-			}
-		}
+		e.recordProgressFailure(jobID, pw, "result_error", fmt.Errorf("skill failed to write result: %w", err))
 		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("jobs: write result: %w (state update also failed: %v)", err, stateErr)
 		}
@@ -313,6 +318,43 @@ func (e *Executor) executeSkill(ctx context.Context, jobID string, manifest skil
 	}
 
 	return stdout, nil
+}
+
+func (e *Executor) recordProgressFailure(jobID string, pw *progressWriter, phase string, err error) {
+	if pw == nil {
+		return
+	}
+	if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
+		e.warnProgress(jobID, phase, pwErr)
+	}
+}
+
+func augmentError(runErr error, stdout, stderr []byte) error {
+	if detail := strings.TrimSpace(string(stderr)); detail != "" {
+		runErr = fmt.Errorf("%w: %s", runErr, detail)
+	}
+	if len(stdout) > 0 {
+		snippet := strings.TrimSpace(string(stdout))
+		const maxSnippet = 512
+		if len(snippet) > maxSnippet {
+			snippet = snippet[:maxSnippet] + "..."
+		}
+		if snippet != "" {
+			runErr = fmt.Errorf("%w; stdout: %s", runErr, snippet)
+		}
+	}
+	return runErr
+}
+
+func (e *Executor) writeStderrLog(jobID string, stderr []byte) {
+	stderrPath := filepath.Join(e.jobDir(jobID), "stderr.log")
+	if writeErr := os.WriteFile(stderrPath, append(stderr, '\n'), 0o644); writeErr != nil {
+		e.logger.Warn().
+			Str("job_id", jobID).
+			Str("path", stderrPath).
+			Err(writeErr).
+			Msg("stderr log write failed")
+	}
 }
 
 func (e *Executor) warnProgress(jobID, phase string, err error) {

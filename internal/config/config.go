@@ -73,23 +73,47 @@ func WithConfigFile(path string) Option {
 
 // Load returns the hydrated configuration by applying defaults, config file, and env overrides.
 func Load(_ context.Context, opts ...Option) (Config, error) {
-	l := &loader{}
-	for _, opt := range opts {
-		opt(l)
-	}
+	l := parseOptions(opts)
 
 	home, err := userHomeDir()
 	if err != nil {
 		return Config{}, err
 	}
 
+	v := newConfiguredViper()
+	defaultHome := filepath.Join(home, ".agentctl")
+	applyDefaults(v, defaultHome)
+	configureConfigFile(v, l, defaultHome)
+	if err := readConfig(v, l.configFile); err != nil {
+		return Config{}, err
+	}
+
+	cfg, err := decodeConfig(v)
+	if err != nil {
+		return Config{}, err
+	}
+
+	return finalizeConfig(cfg, home), nil
+}
+
+func parseOptions(opts []Option) *loader {
+	l := &loader{}
+	for _, opt := range opts {
+		opt(l)
+	}
+	return l
+}
+
+func newConfiguredViper() *viper.Viper {
 	v := viper.New()
 	v.SetConfigType("yaml")
 	v.SetEnvPrefix("AGENTCTL")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	return v
+}
 
-	defaultHome := filepath.Join(home, ".agentctl")
+func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("home", defaultHome)
 	v.SetDefault("inline_output_kb", DefaultInlineOutputKB)
 	v.SetDefault("max_capture_kb", DefaultMaxCaptureKB)
@@ -103,26 +127,36 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	v.SetDefault("cache.default_mode", "auto")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
+}
 
+func configureConfigFile(v *viper.Viper, l *loader, defaultHome string) {
 	if l.configFile != "" {
 		v.SetConfigFile(l.configFile)
-	} else {
-		v.SetConfigName("config")
-		v.AddConfigPath(defaultHome)
+		return
 	}
+	v.SetConfigName("config")
+	v.AddConfigPath(defaultHome)
+}
 
+func readConfig(v *viper.Viper, explicit string) error {
 	if err := v.ReadInConfig(); err != nil {
 		var configErr viper.ConfigFileNotFoundError
-		if !errors.As(err, &configErr) && l.configFile != "" {
-			return Config{}, fmt.Errorf("config: %w", err)
+		if explicit != "" || !errors.As(err, &configErr) {
+			return fmt.Errorf("config: %w", err)
 		}
 	}
+	return nil
+}
 
+func decodeConfig(v *viper.Viper) (Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return Config{}, fmt.Errorf("config decode: %w", err)
 	}
+	return cfg, nil
+}
 
+func finalizeConfig(cfg Config, home string) Config {
 	cfg.Home = absPath(cfg.Home, home)
 	cfg.Paths.CAS = resolvePath(cfg.Paths.CAS, cfg.Home, home)
 	cfg.Paths.Jobs = resolvePath(cfg.Paths.Jobs, cfg.Home, home)
@@ -144,6 +178,7 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	if cfg.Cache.DefaultMode == "" {
 		cfg.Cache.DefaultMode = "auto"
 	}
+
 	cfg.Logging.Level = strings.ToLower(strings.TrimSpace(cfg.Logging.Level))
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
@@ -152,8 +187,7 @@ func Load(_ context.Context, opts ...Option) (Config, error) {
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = "text"
 	}
-
-	return cfg, nil
+	return cfg
 }
 
 func userHomeDir() (string, error) {

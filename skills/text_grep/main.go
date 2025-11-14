@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,9 +51,9 @@ func main() {
 		errs.Ignore(rc.Close(), "runner context close")
 	}()
 
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("text/grep", "EARG", fmt.Errorf("decode input: %w", err))
+	in, err := parseInput(os.Stdin)
+	if err != nil {
+		fail("text/grep", "EARG", err)
 	}
 	if err := run(ctx, rc, in); err != nil {
 		fail("text/grep", "ERUNTIME", err)
@@ -60,26 +61,14 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
-	if in.Pattern == "" {
-		return fmt.Errorf("pattern is required")
-	}
-	if in.MaxMatches <= 0 {
-		in.MaxMatches = 100000
-	}
-
 	re, err := compileRegex(in.Pattern, in.CI)
 	if err != nil {
 		return err
 	}
 
-	workspace := rc.PathValidator.Workspace()
-	basePath := workspace
-	if strings.TrimSpace(in.Path) != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		basePath = validated
+	workspace, basePath, err := resolveWorkspace(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	entries, err := collectEntries(basePath, in.Include, in.Exclude)
@@ -113,20 +102,10 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 		allMatches = append(allMatches, fileMatches...)
 	}
 
-	preview := allMatches
-	if len(preview) > rc.MaxPreview {
-		preview = preview[:rc.MaxPreview]
-	}
-
-	var artifactDigest string
-	var artifactSize int64
-	if len(allMatches) > rc.MaxPreview {
-		digest, size, err := storeMatches(ctx, rc, allMatches)
-		if err != nil {
-			return err
-		}
-		artifactDigest = digest
-		artifactSize = size
+	preview, truncated := preparePreview(allMatches, rc.MaxPreview)
+	artifact, err := persistMatchesArtifact(ctx, rc, allMatches, truncated)
+	if err != nil {
+		return err
 	}
 
 	data := map[string]any{
@@ -138,13 +117,63 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 		"top_files":        summarizeTopFiles(fileHits, 5),
 		"max_matches":      in.MaxMatches,
 	}
-	if artifactDigest != "" {
-		data["artifact"] = artifactDigest
-		data["artifact_kind"] = "application/x-ndjson"
-		data["artifact_size_bytes"] = artifactSize
+	if artifact.Digest != "" {
+		data["artifact"] = artifact.Digest
+		data["artifact_kind"] = artifact.Kind
+		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("text/grep", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+}
+
+func parseInput(r io.Reader) (input, error) {
+	var in input
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return input{}, fmt.Errorf("decode input: %w", err)
+	}
+	if strings.TrimSpace(in.Pattern) == "" {
+		return input{}, fmt.Errorf("pattern is required")
+	}
+	if in.MaxMatches <= 0 {
+		in.MaxMatches = 100000
+	}
+	return in, nil
+}
+
+func resolveWorkspace(rc *skillslib.RunnerContext, candidate string) (string, string, error) {
+	workspace := rc.PathValidator.Workspace()
+	if strings.TrimSpace(candidate) == "" {
+		return workspace, workspace, nil
+	}
+	resolved, err := rc.PathValidator.ValidatePath(candidate)
+	if err != nil {
+		return "", "", fmt.Errorf("path validation failed: %w", err)
+	}
+	return workspace, resolved, nil
+}
+
+func preparePreview(matches []match, max int) ([]match, bool) {
+	preview, truncated := skillslib.PreparePreview(matches, max)
+	if truncated {
+		dup := make([]match, len(preview))
+		copy(dup, preview)
+		preview = dup
+	}
+	return preview, truncated
+}
+
+func persistMatchesArtifact(ctx context.Context, rc *skillslib.RunnerContext, matches []match, truncated bool) (skillslib.Artifact, error) {
+	if !truncated {
+		return skillslib.Artifact{}, nil
+	}
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	for _, m := range matches {
+		if err := enc.Encode(m); err != nil {
+			return skillslib.Artifact{}, fmt.Errorf("encode match: %w", err)
+		}
+	}
+	return skillslib.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_grep")
 }
 
 func collectEntries(path string, include, exclude []string) ([]skillslib.FileEntry, error) {
@@ -209,21 +238,6 @@ func grepFile(path, workspace string, re *regexp.Regexp, remaining int) ([]match
 		return nil, fmt.Errorf("scan %s: %w", path, err)
 	}
 	return matches, nil
-}
-
-func storeMatches(ctx context.Context, rc *skillslib.RunnerContext, matches []match) (string, int64, error) {
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, m := range matches {
-		if err := enc.Encode(m); err != nil {
-			return "", 0, fmt.Errorf("encode match: %w", err)
-		}
-	}
-	obj, err := rc.CASStore.Put(ctx, bytes.NewReader(buf.Bytes()), "application/x-ndjson", []string{"text_grep"})
-	if err != nil {
-		return "", 0, fmt.Errorf("cas put: %w", err)
-	}
-	return obj.Digest, obj.Size, nil
 }
 
 func relativeTo(base, target string) string {

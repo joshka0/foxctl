@@ -13,17 +13,80 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	"github.com/spf13/cobra"
 )
 
 func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
+	h := newCASHarness(t)
+
+	t.Run("text-grep cache lifecycle", func(t *testing.T) {
+		env, stderr := withRunExecutor(t, h.ctx, []string{
+			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
+			"--remember", "grep-first",
+			"--workspace", h.workdir,
+			"--cache", "auto",
+			"text/grep",
+		})
+		h.assertCASArtifact(t, env)
+		jobID := extractJobID(t, stderr.String())
+		h.saveJobAsMemory(t, jobID, "grep-job")
+
+		stdout := h.execMemoryCommand(t, newMemoryGetCommand(), "--workspace", h.workdir, "grep-job")
+		h.assertMemoryMetadata(t, stdout.Bytes(), "grep-job")
+
+		env2, _ := withRunExecutor(t, h.ctx, []string{
+			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
+			"--workspace", h.workdir,
+			"--cache", "auto",
+			"text/grep",
+		})
+		assertCacheHit(t, env2)
+	})
+
+	t.Run("openapi memory relevance", func(t *testing.T) {
+		env, stderr := withRunExecutor(t, h.ctx, []string{
+			"--input", h.openapiInput,
+			"--remember", "openapi-plan",
+			"--workspace", h.workdir,
+			"http/openapi",
+		})
+		assertCommand(t, env, "http/openapi")
+		h.saveJobAsMemory(t, extractJobID(t, stderr.String()), "openapi-plan")
+
+		relevant := h.execMemoryCommand(t, newMemoryRelevantCommand(), "--workspace", h.workdir, "--limit", "5")
+		h.assertRelevantContains(t, relevant.Bytes(), "openapi-plan")
+	})
+}
+
+type casHarness struct {
+	cfg          config.Config
+	ctx          context.Context
+	workdir      string
+	samplePath   string
+	openapiInput string
+}
+
+func newCASHarness(t *testing.T) *casHarness {
 	if testing.Short() {
 		t.Skip("slow end-to-end cache/memory workflow")
 	}
 	cfg := installTextGrepSkill(t)
 	installHTTPOpenAPISkill(t, cfg)
-
 	workdir := t.TempDir()
-	sampleFile := filepath.Join(workdir, "sample.txt")
+	samplePath := filepath.Join(workdir, "sample.txt")
+	buildSampleFile(t, samplePath)
+	ctx := config.WithContext(context.Background(), cfg)
+	return &casHarness{
+		cfg:          cfg,
+		ctx:          ctx,
+		workdir:      workdir,
+		samplePath:   samplePath,
+		openapiInput: `{"base_url":"https://api.example.com","path":"/todos","method":"GET","dry_run":true,"query":{"limit":"5"}}`,
+	}
+}
+
+func buildSampleFile(t *testing.T, path string) {
+	t.Helper()
 	var builder strings.Builder
 	for i := 0; i < 400; i++ {
 		if _, err := builder.WriteString("needle line "); err != nil {
@@ -36,122 +99,12 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 			t.Fatalf("build sample newline: %v", err)
 		}
 	}
-	if err := os.WriteFile(sampleFile, []byte(builder.String()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(builder.String()), 0o644); err != nil {
 		t.Fatalf("write sample: %v", err)
-	}
-
-	ctx := config.WithContext(context.Background(), cfg)
-
-	// Initial run to generate CAS artifact and remember entry
-	env1, stderr1 := runSkillCommand(ctx, t, []string{
-		"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, sampleFile),
-		"--remember", "grep-first",
-		"--workspace", workdir,
-		"--cache", "auto",
-		"text/grep",
-	})
-	if env1.Meta.CASDigest == "" {
-		t.Fatalf("expected CAS digest on first run")
-	}
-	casPath := filepath.Join(cfg.Paths.CAS, "sha256", env1.Meta.CASDigest[len("sha256:"):])
-	if _, err := os.Stat(casPath); err != nil {
-		t.Fatalf("cas artifact missing: %v", err)
-	}
-	jobID := extractJobID(t, stderr1.String())
-
-	// Save job output under another name
-	saveCmd := newMemorySaveCommand()
-	saveCmd.SetContext(ctx)
-	saveCmd.SetArgs([]string{"--as", "grep-job", "--workspace", workdir, jobID})
-	saveCmd.SetOut(&bytes.Buffer{})
-	saveCmd.SetErr(&bytes.Buffer{})
-	if err := saveCmd.Execute(); err != nil {
-		t.Fatalf("memory save: %v", err)
-	}
-
-	// Ensure memory get returns memory metadata
-	getCmd := newMemoryGetCommand()
-	getCmd.SetContext(ctx)
-	getStdout := &bytes.Buffer{}
-	getCmd.SetOut(getStdout)
-	getCmd.SetErr(&bytes.Buffer{})
-	getCmd.SetArgs([]string{"--workspace", workdir, "grep-job"})
-	if err := getCmd.Execute(); err != nil {
-		t.Fatalf("memory get: %v", err)
-	}
-	var memEnv envelope.Envelope
-	if err := json.Unmarshal(getStdout.Bytes(), &memEnv); err != nil {
-		t.Fatalf("decode memory get envelope: %v", err)
-	}
-	if memEnv.Meta.Memory == nil || memEnv.Meta.Memory.Name != "grep-job" {
-		t.Fatalf("expected memory metadata for grep-job")
-	}
-
-	// Second run should hit cache
-	env2, _ := runSkillCommand(ctx, t, []string{
-		"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, sampleFile),
-		"--workspace", workdir,
-		"--cache", "auto",
-		"text/grep",
-	})
-	if env2.Meta.Source != "cache" {
-		t.Fatalf("expected cache hit, got source=%s", env2.Meta.Source)
-	}
-
-	// Run http/openapi skill (dry-run) and remember result
-	openapiInput := `{"base_url":"https://api.example.com","path":"/todos","method":"GET","dry_run":true,"query":{"limit":"5"}}`
-	env3, stderr3 := runSkillCommand(ctx, t, []string{
-		"--input", openapiInput,
-		"--remember", "openapi-plan",
-		"--workspace", workdir,
-		"http/openapi",
-	})
-	if env3.Command != "http/openapi" {
-		t.Fatalf("expected http/openapi command, got %s", env3.Command)
-	}
-	jobID2 := extractJobID(t, stderr3.String())
-	saveOpenCmd := newMemorySaveCommand()
-	saveOpenCmd.SetContext(ctx)
-	saveOpenCmd.SetArgs([]string{"--as", "openapi-plan", "--workspace", workdir, jobID2})
-	saveOpenCmd.SetOut(&bytes.Buffer{})
-	saveOpenCmd.SetErr(&bytes.Buffer{})
-	if err := saveOpenCmd.Execute(); err != nil {
-		t.Fatalf("memory save openapi: %v", err)
-	}
-
-	// Relevant memories should include both entries
-	relCmd := newMemoryRelevantCommand()
-	relCmd.SetContext(ctx)
-	relStdout := &bytes.Buffer{}
-	relCmd.SetOut(relStdout)
-	relCmd.SetErr(&bytes.Buffer{})
-	relCmd.SetArgs([]string{"--workspace", workdir, "--limit", "5"})
-	if err := relCmd.Execute(); err != nil {
-		t.Fatalf("memory relevant: %v", err)
-	}
-	var relEnv envelope.Envelope
-	if err := json.Unmarshal(relStdout.Bytes(), &relEnv); err != nil {
-		t.Fatalf("decode relevant: %v", err)
-	}
-	data, _ := relEnv.Data.(map[string]any)
-	entries, _ := data["entries"].([]any)
-	if len(entries) == 0 {
-		t.Fatalf("expected at least one relevant entry")
-	}
-	foundOpenAPI := false
-	for _, entry := range entries {
-		if m, ok := entry.(map[string]any); ok {
-			if name, _ := m["name"].(string); name == "openapi-plan" {
-				foundOpenAPI = true
-			}
-		}
-	}
-	if !foundOpenAPI {
-		t.Fatalf("expected openapi-plan in relevant entries: %#v", entries)
 	}
 }
 
-func runSkillCommand(ctx context.Context, t *testing.T, args []string) (envelope.Envelope, *bytes.Buffer) {
+func withRunExecutor(t *testing.T, ctx context.Context, args []string) (envelope.Envelope, *bytes.Buffer) {
 	t.Helper()
 	cmd := newRunCommand()
 	cmd.SetContext(ctx)
@@ -168,6 +121,85 @@ func runSkillCommand(ctx context.Context, t *testing.T, args []string) (envelope
 		t.Fatalf("decode envelope: %v", err)
 	}
 	return env, stderr
+}
+
+func (h *casHarness) saveJobAsMemory(t *testing.T, jobID, name string) {
+	t.Helper()
+	args := []string{"--as", name, "--workspace", h.workdir, jobID}
+	_ = h.execMemoryCommand(t, newMemorySaveCommand(), args...)
+}
+
+func (h *casHarness) execMemoryCommand(t *testing.T, cmd *cobra.Command, args ...string) *bytes.Buffer {
+	t.Helper()
+	cmd.SetContext(h.ctx)
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("memory command failed: %v", err)
+	}
+	return stdout
+}
+
+func (h *casHarness) assertCASArtifact(t *testing.T, env envelope.Envelope) {
+	t.Helper()
+	if env.Meta.CASDigest == "" {
+		t.Fatalf("expected CAS digest on first run")
+	}
+	if !strings.HasPrefix(env.Meta.CASDigest, "sha256:") {
+		t.Fatalf("expected sha256: prefix in CAS digest, got: %s", env.Meta.CASDigest)
+	}
+	casPath := filepath.Join(h.cfg.Paths.CAS, "sha256", env.Meta.CASDigest[len("sha256:"):])
+	if _, err := os.Stat(casPath); err != nil {
+		t.Fatalf("cas artifact missing: %v", err)
+	}
+}
+
+func (h *casHarness) assertMemoryMetadata(t *testing.T, payload []byte, name string) {
+	t.Helper()
+	var env envelope.Envelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		t.Fatalf("decode memory envelope: %v", err)
+	}
+	if env.Meta.Memory == nil || env.Meta.Memory.Name != name {
+		t.Fatalf("expected memory metadata for %s", name)
+	}
+}
+
+func (h *casHarness) assertRelevantContains(t *testing.T, payload []byte, name string) {
+	t.Helper()
+	var env envelope.Envelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		t.Fatalf("decode relevant envelope: %v", err)
+	}
+	data, _ := env.Data.(map[string]any)
+	entries, _ := data["entries"].([]any)
+	if len(entries) == 0 {
+		t.Fatalf("expected at least one relevant entry")
+	}
+	for _, entry := range entries {
+		if m, ok := entry.(map[string]any); ok {
+			if entryName, _ := m["name"].(string); entryName == name {
+				return
+			}
+		}
+	}
+	t.Fatalf("expected %s in relevant entries: %#v", name, entries)
+}
+
+func assertCacheHit(t *testing.T, env envelope.Envelope) {
+	t.Helper()
+	if env.Meta.Source != "cache" {
+		t.Fatalf("expected cache hit, got source=%s", env.Meta.Source)
+	}
+}
+
+func assertCommand(t *testing.T, env envelope.Envelope, command string) {
+	t.Helper()
+	if env.Command != command {
+		t.Fatalf("expected %s command, got %s", command, env.Command)
+	}
 }
 
 func extractJobID(t *testing.T, stderr string) string {
