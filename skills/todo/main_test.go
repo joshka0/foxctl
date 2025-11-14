@@ -16,7 +16,11 @@ func TestTodoAddAndList(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
 	rc := newRunner(t, tmp)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	storePath := filepath.Join(tmp, "tasks.json")
 
@@ -53,7 +57,11 @@ func TestTodoChildAndComplete(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
 	rc := newRunner(t, tmp)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	storePath := filepath.Join(tmp, "tasks.json")
 	parentID := extractTaskID(t, runSkill(ctx, t, rc, input{
@@ -117,7 +125,11 @@ func TestTodoRejectsBackticks(t *testing.T) {
 	ctx := context.Background()
 	tmp := t.TempDir()
 	rc := newRunner(t, tmp)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 	storePath := filepath.Join(tmp, "tasks.json")
 
 	if err := runExpectError(ctx, rc, input{

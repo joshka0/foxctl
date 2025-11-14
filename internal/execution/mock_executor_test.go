@@ -88,18 +88,22 @@ func TestMockExecutor_CallTracking(t *testing.T) {
 	mock := execution.NewMockExecutor()
 
 	// First call
-	_, _ = mock.Execute(context.Background(), execution.ExecuteOptions{
+	if _, err := mock.Execute(context.Background(), execution.ExecuteOptions{
 		ManifestPath: "first.yaml",
 		Input:        []byte("first"),
-	})
+	}); err != nil {
+		t.Fatalf("execute first: %v", err)
+	}
 
 	assert.Equal(t, 1, mock.CallCount())
 
 	// Second call
-	_, _ = mock.Execute(context.Background(), execution.ExecuteOptions{
+	if _, err := mock.Execute(context.Background(), execution.ExecuteOptions{
 		ManifestPath: "second.yaml",
 		Input:        []byte("second"),
-	})
+	}); err != nil {
+		t.Fatalf("execute second: %v", err)
+	}
 
 	assert.Equal(t, 2, mock.CallCount())
 
@@ -119,10 +123,12 @@ func TestMockExecutor_LastCall(t *testing.T) {
 	assert.Nil(t, mock.LastCall())
 
 	// Make a call
-	_, _ = mock.Execute(context.Background(), execution.ExecuteOptions{
+	if _, err := mock.Execute(context.Background(), execution.ExecuteOptions{
 		ManifestPath: "test.yaml",
 		ArtifactPath: "/path/to/artifact",
-	})
+	}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
 
 	lastCall := mock.LastCall()
 	require.NotNil(t, lastCall)
@@ -135,8 +141,12 @@ func TestMockExecutor_Reset(t *testing.T) {
 	mock := execution.NewMockExecutor()
 
 	// Make some calls
-	_, _ = mock.Execute(context.Background(), execution.ExecuteOptions{})
-	_, _ = mock.Execute(context.Background(), execution.ExecuteOptions{})
+	if _, err := mock.Execute(context.Background(), execution.ExecuteOptions{}); err != nil {
+		t.Fatalf("execute first: %v", err)
+	}
+	if _, err := mock.Execute(context.Background(), execution.ExecuteOptions{}); err != nil {
+		t.Fatalf("execute second: %v", err)
+	}
 
 	assert.Equal(t, 2, mock.CallCount())
 
@@ -159,7 +169,9 @@ func TestMockExecutor_ConcurrentCalls(t *testing.T) {
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = mock.Execute(context.Background(), execution.ExecuteOptions{})
+			if _, err := mock.Execute(context.Background(), execution.ExecuteOptions{}); err != nil {
+				panic(err)
+			}
 		}()
 	}
 

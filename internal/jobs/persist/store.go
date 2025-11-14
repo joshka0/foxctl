@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/sqlutil"
@@ -60,7 +61,9 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("jobs: list: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		errs.Ignore(rows.Close(), "close jobs list rows")
+	}()
 
 	var jobs []types.Job
 	for rows.Next() {
@@ -149,7 +152,10 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 		return fmt.Errorf("jobs: update state: %w", execErr)
 	}
 
-	rows, _ := res.RowsAffected()
+	rows, rowsErr := res.RowsAffected()
+	if rowsErr != nil {
+		return fmt.Errorf("jobs: update state rows affected: %w", rowsErr)
+	}
 	if rows == 0 {
 		var exists bool
 		checkErr := s.db.QueryRowContext(ctx, `SELECT 1 FROM jobs WHERE id = ?`, id).Scan(&exists)
@@ -160,7 +166,9 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 			return fmt.Errorf("jobs: check existence: %w", checkErr)
 		}
 		var currentState types.State
-		_ = s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = ?`, id).Scan(&currentState)
+		if scanErr := s.db.QueryRowContext(ctx, `SELECT state FROM jobs WHERE id = ?`, id).Scan(&currentState); scanErr != nil {
+			return fmt.Errorf("jobs: fetch current state: %w", scanErr)
+		}
 		return fmt.Errorf("%w: cannot transition from %s to %s", types.ErrInvalidState, currentState, newState)
 	}
 	return nil
@@ -171,7 +179,10 @@ func (s *sqlStore) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("jobs: delete: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, rowsErr := res.RowsAffected()
+	if rowsErr != nil {
+		return fmt.Errorf("jobs: delete rows affected: %w", rowsErr)
+	}
 	if rows == 0 {
 		return types.ErrNotFound
 	}
@@ -227,7 +238,9 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	if err != nil {
 		return types.Job{}, false, fmt.Errorf("jobs: begin transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		errs.Ignore(tx.Rollback(), "rollback job find-or-insert txn")
+	}()
 
 	row := tx.QueryRowContext(ctx, `
         SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at

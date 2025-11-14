@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/execution"
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/logging"
@@ -155,12 +156,12 @@ func (e *Executor) prepareSkillJob(ctx context.Context, name string, input []byt
 
 	jobDir := e.jobDir(job.ID)
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
-		_ = e.persist.Delete(ctx, job.ID)
+		errs.Ignore(e.persist.Delete(ctx, job.ID), "delete job after mkdir failure")
 		return types.Job{}, false, fmt.Errorf("jobs: job dir: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(jobDir, "input.json"), input, 0o644); err != nil {
-		_ = os.RemoveAll(jobDir)
-		_ = e.persist.Delete(ctx, job.ID)
+		errs.Ignore(os.RemoveAll(jobDir), "cleanup job dir after write failure")
+		errs.Ignore(e.persist.Delete(ctx, job.ID), "delete job after write failure")
 		return types.Job{}, false, fmt.Errorf("jobs: write input: %w", err)
 	}
 	return job, false, nil

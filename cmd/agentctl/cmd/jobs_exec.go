@@ -32,8 +32,14 @@ func newJobsExecSkillCommand() *cobra.Command {
 	cmd.Flags().StringVar(&jobID, "job-id", "", "Job identifier")
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to skill manifest")
 	cmd.Flags().StringVar(&artifactPath, "artifact", "", "Path to skill binary/module")
-	_ = cmd.MarkFlagRequired("job-id")
-	_ = cmd.MarkFlagRequired("manifest")
-	_ = cmd.MarkFlagRequired("artifact")
+	if err := cmd.MarkFlagRequired("job-id"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkFlagRequired("manifest"); err != nil {
+		panic(err)
+	}
+	if err := cmd.MarkFlagRequired("artifact"); err != nil {
+		panic(err)
+	}
 	return cmd
 }

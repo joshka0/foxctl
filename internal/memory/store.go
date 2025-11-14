@@ -48,7 +48,7 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
-	defer errs.CloseOnErr(&err, db)
+	defer errs.CloseOnErr(db, &err)
 
 	// Configure connection pool for optimal performance
 	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
@@ -159,10 +159,12 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 		return NamedEntry{}, fmt.Errorf("memory: scan last_accessed: %w", err)
 	}
 
-	_, _ = s.db.ExecContext(ctx, `
+	if _, updateErr := s.db.ExecContext(ctx, `
 		UPDATE named_memory
 		SET last_accessed = ?, access_count = access_count + 1
-		WHERE id = ?`, timeutil.FormatNowUTC(), entry.ID)
+		WHERE id = ?`, timeutil.FormatNowUTC(), entry.ID); updateErr != nil {
+		errs.Ignore(updateErr, "memory: refresh access metadata")
+	}
 
 	return entry, nil
 }
@@ -181,7 +183,9 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 	if err != nil {
 		return nil, fmt.Errorf("memory: list: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		errs.Ignore(rows.Close(), "close memory list rows")
+	}()
 
 	entries := make([]NamedEntry, 0, limit)
 	for rows.Next() {
@@ -263,7 +267,9 @@ func (s *Store) pin(ctx context.Context, digests []string) {
 		if ctx.Err() != nil {
 			return
 		}
-		_ = s.cas.Pin(ctx, d)
+		if err := s.cas.Pin(ctx, d); err != nil {
+			errs.Ignore(err, "memory: pin digest")
+		}
 	}
 }
 
@@ -276,7 +282,9 @@ func (s *Store) unpin(ctx context.Context, digests []string) {
 		if ctx.Err() != nil {
 			return
 		}
-		_ = s.cas.Unpin(ctx, d)
+		if err := s.cas.Unpin(ctx, d); err != nil {
+			errs.Ignore(err, "memory: unpin digest")
+		}
 	}
 }
 
@@ -318,7 +326,9 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 	if err != nil {
 		return nil, fmt.Errorf("memory: search: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		errs.Ignore(rows.Close(), "close memory search rows")
+	}()
 	entries, err := scanEntries(rows)
 	if err != nil {
 		return nil, err
@@ -376,7 +386,9 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	if err != nil {
 		return nil, fmt.Errorf("memory: relevant: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		errs.Ignore(rows.Close(), "close memory relevant rows")
+	}()
 	entries, err := scanEntries(rows)
 	if err != nil {
 		return nil, err

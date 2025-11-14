@@ -24,7 +24,10 @@ func TestExecutorRunSkillSuccess(t *testing.T) {
 	persist := newFakePersistence()
 	runner := func(_ context.Context, _ skill.Manifest, _ string, _ []byte) ([]byte, []byte, error) {
 		env := envelope.OK("test", map[string]string{"message": "ok"})
-		buf, _ := json.Marshal(env)
+		buf, err := json.Marshal(env)
+		if err != nil {
+			return nil, nil, err
+		}
 		return buf, []byte("stderr"), nil
 	}
 	exec := New(root, persist, WithRunner(runner))
@@ -133,7 +136,10 @@ func TestExecutorLogsProgressFailures(t *testing.T) {
 	})
 	runner := func(_ context.Context, _ skill.Manifest, _ string, _ []byte) ([]byte, []byte, error) {
 		env := envelope.OK("test", map[string]string{"message": "ok"})
-		buf, _ := json.Marshal(env)
+		buf, err := json.Marshal(env)
+		if err != nil {
+			return nil, nil, err
+		}
 		return buf, nil, nil
 	}
 	exec := New(root, persist,
@@ -269,7 +275,10 @@ func TestExecutorWithSkillExecutor(t *testing.T) {
 
 		// Return a success result
 		env := envelope.OK("test", map[string]string{"mock": "true"})
-		buf, _ := json.Marshal(env)
+		buf, err := json.Marshal(env)
+		if err != nil {
+			return nil, err
+		}
 		return &execution.Result{
 			Stdout:   buf,
 			Stderr:   []byte("mock stderr"),

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/skill"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
@@ -80,7 +81,9 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	defer bufferPool.Put(stderr)
 
 	rt := wazero.NewRuntime(ctx)
-	defer func() { _ = rt.Close(ctx) }()
+	defer func() {
+		errs.Ignore(rt.Close(ctx), "close wazero runtime")
+	}()
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
 		return nil, nil, fmt.Errorf("instantiate wasi: %w", err)
@@ -90,7 +93,9 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("compile wasm: %w", err)
 	}
-	defer func() { _ = compiled.Close(ctx) }()
+	defer func() {
+		errs.Ignore(compiled.Close(ctx), "close compiled module")
+	}()
 
 	moduleName := strings.ReplaceAll(r.Manifest.Metadata.Name, "/", "_")
 	modConfig := wazero.NewModuleConfig().
@@ -139,5 +144,7 @@ func (r Runner) prepareWorkDir() (string, func(), error) {
 	if err != nil {
 		return "", nil, err
 	}
-	return tmp, func() { _ = os.RemoveAll(tmp) }, nil
+	return tmp, func() {
+		errs.Ignore(os.RemoveAll(tmp), "cleanup wasi workdir")
+	}, nil
 }

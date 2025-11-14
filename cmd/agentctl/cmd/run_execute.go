@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/jobs"
 )
 
@@ -28,7 +29,9 @@ func (e *runExecutor) submitAsync(job jobs.Job) error {
 	if err := e.asyncRunner(e.ctx, job.ID, e.handle.ManifestPath, e.handle.ArtifactPath, e.stderr); err != nil {
 		return err
 	}
-	fmt.Fprintf(e.stdout, "job %s submitted\n", job.ID)
+	if _, err := fmt.Fprintf(e.stdout, "job %s submitted\n", job.ID); err != nil {
+		return fmt.Errorf("run: write async status: %w", err)
+	}
 	return nil
 }
 
@@ -40,7 +43,9 @@ func (e *runExecutor) executeSync(job jobs.Job) error {
 	// Fetch the latest job state
 	latest, getErr := e.jobStore.Get(e.ctx, job.ID)
 	if getErr != nil {
-		fmt.Fprintf(e.stderr, "warning: failed to fetch job %s after execution: %v\n", job.ID, getErr)
+		if _, warnErr := fmt.Fprintf(e.stderr, "warning: failed to fetch job %s after execution: %v\n", job.ID, getErr); warnErr != nil {
+			errs.Ignore(warnErr, "run: warn fetch job failure")
+		}
 		if runErr == nil {
 			return fmt.Errorf("execution completed but failed to fetch final job state for %s: %w", job.ID, getErr)
 		}
@@ -61,12 +66,16 @@ func (e *runExecutor) executeSync(job jobs.Job) error {
 
 	// Save to cache
 	if err := e.persistCache(annotated); err != nil {
-		fmt.Fprintf(e.stderr, "cache put failed: %v\n", err)
+		if _, warnErr := fmt.Fprintf(e.stderr, "cache put failed: %v\n", err); warnErr != nil {
+			errs.Ignore(warnErr, "run: warn cache failure")
+		}
 	}
 
 	// Save to memory if requested
 	if err := e.remember(annotated); err != nil {
-		fmt.Fprintf(e.stderr, "remember failed: %v\n", err)
+		if _, warnErr := fmt.Fprintf(e.stderr, "remember failed: %v\n", err); warnErr != nil {
+			errs.Ignore(warnErr, "run: warn remember failure")
+		}
 	}
 
 	// Write result to output
@@ -76,7 +85,9 @@ func (e *runExecutor) executeSync(job jobs.Job) error {
 
 	// Log final job state
 	if getErr == nil {
-		fmt.Fprintf(e.stderr, "job %s state %s\n", latest.ID, latest.State)
+		if _, warnErr := fmt.Fprintf(e.stderr, "job %s state %s\n", latest.ID, latest.State); warnErr != nil {
+			errs.Ignore(warnErr, "run: warn final state")
+		}
 	}
 
 	return nil

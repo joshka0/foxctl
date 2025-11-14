@@ -31,7 +31,9 @@ func BenchmarkTimeParsing(b *testing.B) {
 	b.Run("ParseRFC3339Nano", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, _ = ParseRFC3339Nano(testTimestamp)
+			if _, err := ParseRFC3339Nano(testTimestamp); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -45,7 +47,9 @@ func BenchmarkTimeParsing(b *testing.B) {
 	b.Run("DirectParse", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, _ = time.Parse(time.RFC3339Nano, testTimestamp)
+			if _, err := time.Parse(time.RFC3339Nano, testTimestamp); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 }

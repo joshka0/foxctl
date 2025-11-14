@@ -17,6 +17,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/config"
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/skillslib"
 )
 
@@ -36,7 +37,9 @@ func main() {
 	if err != nil {
 		fail("fs/read", "ERUNTIME", err)
 	}
-	defer func() { _ = rc.Close() }()
+	defer func() {
+		errs.Ignore(rc.Close(), "runner context close")
+	}()
 
 	var in input
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
@@ -69,7 +72,9 @@ func run(ctx context.Context, rc *skillslib.RunnerContext, in input) error {
 	if err != nil {
 		return fmt.Errorf("open %s: %w", validPath, err)
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		errs.Ignore(file.Close(), "close input file")
+	}()
 
 	kind := detectKind(validPath)
 	obj, err := rc.CASStore.Put(ctx, file, kind, []string{"fs_read"})
@@ -185,6 +190,6 @@ func detectKind(path string) string {
 
 func fail(command, code string, err error) {
 	env := envelope.Error(command, code, err.Error(), nil)
-	_ = envelope.Write(os.Stdout, env)
+	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
 	os.Exit(1)
 }

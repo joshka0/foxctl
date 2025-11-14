@@ -134,9 +134,7 @@ func TestMemorySearchAndRelevantCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer func() {
-		_ = store.Close()
-	}()
+	defer requireClose(t, store, "memory store search relevant")
 	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
 	if _, err := store.SaveFromResult(ctx, "alpha", "result", cfg.Home, "alpha summary", result); err != nil {
 		t.Fatalf("save alpha: %v", err)

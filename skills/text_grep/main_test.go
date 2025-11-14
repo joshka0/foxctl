@@ -26,7 +26,11 @@ func TestGrepProducesPreview(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, buf, work)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 
 	in := input{
 		Path:       work,
@@ -66,7 +70,9 @@ func TestGrepCreatesArtifactForLargeResults(t *testing.T) {
 	}
 	var builder bytes.Buffer
 	for i := 0; i < 20; i++ {
-		builder.WriteString("match line\n")
+		if _, err := builder.WriteString("match line\n"); err != nil {
+			t.Fatalf("build content: %v", err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(work, "many.txt"), builder.Bytes(), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
@@ -74,7 +80,11 @@ func TestGrepCreatesArtifactForLargeResults(t *testing.T) {
 
 	buf := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, buf, work)
-	defer func() { _ = rc.Close() }()
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close runner context: %v", err)
+		}
+	})
 	rc.MaxPreview = 5
 
 	in := input{
@@ -105,9 +115,11 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 	if err := os.Chdir(workspace); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
-	defer func() {
-		_ = os.Chdir(oldwd)
-	}()
+	t.Cleanup(func() {
+		if err := os.Chdir(oldwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
 	state := t.TempDir()
 	cfg := config.Config{
 		Home:           state,

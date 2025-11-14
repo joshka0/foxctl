@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -48,8 +49,12 @@ var (
 // HashArgs deterministically hashes a command and its JSON arguments payload.
 func HashArgs(command string, argsJSON []byte) string {
 	h := sha256.New()
-	h.Write([]byte(command))
-	h.Write(argsJSON)
+	if _, err := h.Write([]byte(command)); err != nil {
+		panic(fmt.Sprintf("hash command write: %v", err))
+	}
+	if _, err := h.Write(argsJSON); err != nil {
+		panic(fmt.Sprintf("hash args write: %v", err))
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

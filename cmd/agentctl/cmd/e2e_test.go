@@ -26,9 +26,15 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	sampleFile := filepath.Join(workdir, "sample.txt")
 	var builder strings.Builder
 	for i := 0; i < 400; i++ {
-		builder.WriteString("needle line ")
-		builder.WriteString(fmt.Sprint(i))
-		builder.WriteString("\n")
+		if _, err := builder.WriteString("needle line "); err != nil {
+			t.Fatalf("build sample prefix: %v", err)
+		}
+		if _, err := builder.WriteString(fmt.Sprint(i)); err != nil {
+			t.Fatalf("build sample idx: %v", err)
+		}
+		if _, err := builder.WriteString("\n"); err != nil {
+			t.Fatalf("build sample newline: %v", err)
+		}
 	}
 	if err := os.WriteFile(sampleFile, []byte(builder.String()), 0o644); err != nil {
 		t.Fatalf("write sample: %v", err)

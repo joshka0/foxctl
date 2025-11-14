@@ -74,7 +74,7 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 	if err != nil {
 		return nil, fmt.Errorf("cache: open db: %w", err)
 	}
-	defer errs.CloseOnErr(&err, db)
+	defer errs.CloseOnErr(db, &err)
 	// Configure connection pool for optimal performance
 	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
 	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
@@ -194,12 +194,14 @@ func (s *Store) Get(ctx context.Context, key string) (Entry, bool, error) {
 		return Entry{}, false, fmt.Errorf("cache: scan last_accessed: %w", err)
 	}
 
-	// refresh access metadata
-	_, _ = s.db.ExecContext(ctx, `
+	// refresh access metadata (best-effort)
+	if _, updateErr := s.db.ExecContext(ctx, `
 		UPDATE auto_cache
 		SET last_accessed = ?, hit_count = hit_count + 1
 		WHERE cache_key = ?`,
-		timeutil.FormatNowUTC(), key)
+		timeutil.FormatNowUTC(), key); updateErr != nil {
+		errs.Ignore(updateErr, "cache: refresh access metadata")
+	}
 	return entry, true, nil
 }
 
@@ -230,7 +232,9 @@ func (s *Store) Recent(ctx context.Context, workspace string, limit int) ([]Entr
 	if err != nil {
 		return nil, fmt.Errorf("cache: recent: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		errs.Ignore(rows.Close(), "close cache recent rows")
+	}()
 
 	entries := make([]Entry, 0, limit)
 	for rows.Next() {
@@ -340,14 +344,28 @@ func BuildKey(manifest skill.Manifest, input []byte, extraDigests []string) (str
 	sort.Strings(digests)
 
 	h := sha256.New()
-	h.Write([]byte(manifest.Metadata.Name))
-	h.Write([]byte{0})
-	h.Write([]byte(manifest.Metadata.Version))
-	h.Write([]byte{0})
-	h.Write(args)
+	if _, err := h.Write([]byte(manifest.Metadata.Name)); err != nil {
+		return "", fmt.Errorf("cache: hash skill name: %w", err)
+	}
+	if _, err := h.Write([]byte{0}); err != nil {
+		return "", fmt.Errorf("cache: hash separator: %w", err)
+	}
+	if _, err := h.Write([]byte(manifest.Metadata.Version)); err != nil {
+		return "", fmt.Errorf("cache: hash version: %w", err)
+	}
+	if _, err := h.Write([]byte{0}); err != nil {
+		return "", fmt.Errorf("cache: hash separator: %w", err)
+	}
+	if _, err := h.Write(args); err != nil {
+		return "", fmt.Errorf("cache: hash args: %w", err)
+	}
 	for _, d := range digests {
-		h.Write([]byte{0})
-		h.Write([]byte(d))
+		if _, err := h.Write([]byte{0}); err != nil {
+			return "", fmt.Errorf("cache: hash digest separator: %w", err)
+		}
+		if _, err := h.Write([]byte(d)); err != nil {
+			return "", fmt.Errorf("cache: hash digest: %w", err)
+		}
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -370,7 +388,9 @@ func (s *Store) evictExpired(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("cache: select expired: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		errs.Ignore(rows.Close(), "close cache eviction rows")
+	}()
 	type doomed struct {
 		key     string
 		digests []string
@@ -409,7 +429,9 @@ func (s *Store) pinDigests(ctx context.Context, digests []string) {
 		if ctx.Err() != nil {
 			return
 		}
-		_ = s.cas.Pin(ctx, d)
+		if err := s.cas.Pin(ctx, d); err != nil {
+			errs.Ignore(err, "cache: pin digest best-effort")
+		}
 	}
 }
 
@@ -422,7 +444,9 @@ func (s *Store) unpinDigests(ctx context.Context, digests []string) {
 		if ctx.Err() != nil {
 			return
 		}
-		_ = s.cas.Unpin(ctx, d)
+		if err := s.cas.Unpin(ctx, d); err != nil {
+			errs.Ignore(err, "cache: unpin digest best-effort")
+		}
 	}
 }
 

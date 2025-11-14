@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/skill"
 )
 
@@ -59,7 +60,7 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 			return nil, nil, err
 		}
 		workDir = tmp
-		cleanup = func() { _ = os.RemoveAll(tmp) }
+		cleanup = func() { errors.Ignore(os.RemoveAll(tmp), "exec runner temp cleanup") }
 	} else {
 		cleanup = func() {}
 	}

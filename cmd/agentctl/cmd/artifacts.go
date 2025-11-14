@@ -27,7 +27,10 @@ func handleArtifacts(ctx context.Context, cfg config.Config, jobID string, resul
 		}
 	}
 	meta := map[string]any{"digests": digests}
-	buf, _ := json.Marshal(meta)
+	buf, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
 	return os.WriteFile(artifactFile(cfg, jobID), buf, 0o644)
 }
 

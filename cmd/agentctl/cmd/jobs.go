@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/jkatigb/agentctl/internal/envelope"
+	errs "github.com/jkatigb/agentctl/internal/errors"
 	"github.com/jkatigb/agentctl/internal/jobs"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/spf13/cobra"
@@ -293,7 +294,7 @@ func openJobStore(ctx context.Context) (storage.JobStore, func(), error) {
 		return nil, nil, err
 	}
 	cleanup := func() {
-		_ = store.Close()
+		errs.Ignore(store.Close(), "close job store")
 	}
 	return store, cleanup, nil
 }

@@ -18,7 +18,9 @@ func BenchmarkScanTimestamps(b *testing.B) {
 	b.Run("ScanTimestamps", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, _ = ScanTimestamps(testTimestamps...)
+			if _, err := ScanTimestamps(testTimestamps...); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -35,7 +37,9 @@ func BenchmarkScanJSONArray(b *testing.B) {
 	b.Run("ScanJSONArray", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, _ = ScanJSONArray(testJSONArray)
+			if _, err := ScanJSONArray(testJSONArray); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 
@@ -58,7 +62,9 @@ func BenchmarkTimeScanner(b *testing.B) {
 	b.Run("Parse", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, _, _, _ = scanner.Parse()
+			if _, _, _, err := scanner.Parse(); err != nil {
+				b.Fatal(err)
+			}
 		}
 	})
 

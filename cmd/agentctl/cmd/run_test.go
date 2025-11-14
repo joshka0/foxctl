@@ -22,7 +22,9 @@ func TestRunCommandEmitsCompleteMeta(t *testing.T) {
 	sample := filepath.Join(inputDir, "sample.txt")
 	var buf bytes.Buffer
 	for i := 0; i < 10; i++ {
-		fmt.Fprintf(&buf, "needle line %d\n", i)
+		if _, err := fmt.Fprintf(&buf, "needle line %d\n", i); err != nil {
+			t.Fatalf("build sample: %v", err)
+		}
 	}
 	if err := os.WriteFile(sample, buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write sample: %v", err)
