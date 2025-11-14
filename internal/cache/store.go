@@ -54,11 +54,12 @@ type Options struct {
 
 // Store persists auto-cache entries.
 type Store struct {
-	db   *sql.DB
-	cas  *cas.Store
-	ttl  time.Duration
-	path string
-	mu   sync.Mutex
+	db              *sql.DB
+	cas             *cas.Store
+	artifactManager artifacts.Manager
+	ttl             time.Duration
+	path            string
+	mu              sync.Mutex
 }
 
 // Stats aliases the shared cache stats type.
@@ -83,16 +84,19 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 	// sqliteutil.OpenDB already ensures directory creation, WAL mode, and schema migrations.
 
 	var casStore *cas.Store
+	var artifactMgr artifacts.Manager
 	if opts.CASPath != "" {
 		if casStore, err = cas.NewStore(opts.CASPath); err != nil {
 			return nil, err
 		}
+		artifactMgr = artifacts.NewManager(casStore)
 	}
 	store = &Store{
-		db:   db,
-		cas:  casStore,
-		ttl:  opts.AutoTTL,
-		path: dbPath,
+		db:              db,
+		cas:             casStore,
+		artifactManager: artifactMgr,
+		ttl:             opts.AutoTTL,
+		path:            dbPath,
 	}
 	if err := store.evictExpired(ctx); err != nil {
 		return nil, err
@@ -401,29 +405,25 @@ func (s *Store) evictExpired(ctx context.Context) error {
 }
 
 func (s *Store) pinDigests(ctx context.Context, digests []string) {
-	if s.cas == nil {
+	if s.artifactManager == nil {
 		return
 	}
-	for _, d := range digests {
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			return
-		}
-		_ = s.cas.Pin(ctx, d)
+	// Check for context cancellation
+	if ctx.Err() != nil {
+		return
 	}
+	_ = s.artifactManager.Pin(ctx, digests...)
 }
 
 func (s *Store) unpinDigests(ctx context.Context, digests []string) {
-	if s.cas == nil {
+	if s.artifactManager == nil {
 		return
 	}
-	for _, d := range digests {
-		// Check for context cancellation
-		if ctx.Err() != nil {
-			return
-		}
-		_ = s.cas.Unpin(ctx, d)
+	// Check for context cancellation
+	if ctx.Err() != nil {
+		return
 	}
+	_ = s.artifactManager.Unpin(ctx, digests...)
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
