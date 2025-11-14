@@ -18,19 +18,9 @@ import (
 )
 
 func TestSubmitEchoCreatesResult(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
-	job, err := store.SubmitEcho(ctx, "hello world")
+	job, err := testEnv.store.SubmitEcho(testEnv.ctx, "hello world")
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
@@ -57,15 +47,7 @@ func TestOpenCreatesNestedRoot(t *testing.T) {
 	ctx := context.Background()
 	base := t.TempDir()
 	root := filepath.Join(base, "nested", "jobs")
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	_ = openStoreForTest(t, ctx, root)
 
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("expected root directory to exist: %v", err)
@@ -73,27 +55,17 @@ func TestOpenCreatesNestedRoot(t *testing.T) {
 }
 
 func TestListJobsOrder(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
-	if _, err := store.SubmitEcho(ctx, "first"); err != nil {
+	if _, err := testEnv.store.SubmitEcho(testEnv.ctx, "first"); err != nil {
 		t.Fatalf("submit first: %v", err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	if _, err := store.SubmitEcho(ctx, "second"); err != nil {
+	if _, err := testEnv.store.SubmitEcho(testEnv.ctx, "second"); err != nil {
 		t.Fatalf("submit second: %v", err)
 	}
 
-	jobs, err := store.List(ctx, 10)
+	jobs, err := testEnv.store.List(testEnv.ctx, 10)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -106,45 +78,25 @@ func TestListJobsOrder(t *testing.T) {
 }
 
 func TestCancelRequiresPendingState(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
-	job, err := store.SubmitEcho(ctx, "done")
+	job, err := testEnv.store.SubmitEcho(testEnv.ctx, "done")
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if err := store.Cancel(ctx, job.ID); err == nil {
+	if err := testEnv.store.Cancel(testEnv.ctx, job.ID); err == nil {
 		t.Fatalf("expected cancel to fail on completed job")
 	}
 }
 
 func TestResultReadsFile(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
-	job, err := store.SubmitEcho(ctx, "result test")
+	job, err := testEnv.store.SubmitEcho(testEnv.ctx, "result test")
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	data, err := store.Result(ctx, job.ID)
+	data, err := testEnv.store.Result(testEnv.ctx, job.ID)
 	if err != nil {
 		t.Fatalf("result: %v", err)
 	}
@@ -154,41 +106,20 @@ func TestResultReadsFile(t *testing.T) {
 }
 
 func TestJobDirectoriesCreated(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
-	job, err := store.SubmitEcho(ctx, "dirs")
+	job, err := testEnv.store.SubmitEcho(testEnv.ctx, "dirs")
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	dir := filepath.Join(root, job.ID)
+	dir := filepath.Join(testEnv.root, job.ID)
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("expected job dir: %v", err)
 	}
 }
 
 func TestRunSkillCreatesJobAndResult(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
-
+	testEnv := newStoreTestEnv(t)
 	bin := buildTestSkill(t, `package main
 import (
   "encoding/json"
@@ -203,7 +134,7 @@ func main() {
 `)
 	input := []byte(`{"foo":"bar"}`)
 	manifest := testExecManifest("test/skill")
-	job, result, err := store.RunSkill(ctx, manifest, bin, input)
+	job, result, err := testEnv.store.RunSkill(testEnv.ctx, manifest, bin, input)
 	if err != nil {
 		t.Fatalf("run skill: %v", err)
 	}
@@ -216,18 +147,7 @@ func main() {
 }
 
 func TestProgressStreamingWrites(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
-
+	testEnv := newStoreTestEnv(t)
 	bin := buildTestSkill(t, `package main
 import (
   "encoding/json"
@@ -244,12 +164,12 @@ func main() {
 `)
 	input := []byte(`{"foo":"bar"}`)
 	manifest := testExecManifest("test/skill")
-	job, _, err := store.RunSkill(ctx, manifest, bin, input)
+	job, _, err := testEnv.store.RunSkill(testEnv.ctx, manifest, bin, input)
 	if err != nil {
 		t.Fatalf("run skill: %v", err)
 	}
 
-	progressPath := filepath.Join(root, job.ID, "progress.ndjson")
+	progressPath := filepath.Join(testEnv.root, job.ID, "progress.ndjson")
 	if _, err := os.Stat(progressPath); err != nil {
 		t.Fatalf("expected progress file: %v", err)
 	}
@@ -272,27 +192,17 @@ func main() {
 }
 
 func TestFindOrPrepareSkillJobDedupes(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
 	input := []byte(`{"foo":"bar"}`)
-	job1, dup1, err := store.FindOrPrepareSkillJob(ctx, "test", input, true)
+	job1, dup1, err := testEnv.store.FindOrPrepareSkillJob(testEnv.ctx, "test", input, true)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	if dup1 {
 		t.Fatalf("expected first job not to be duplicate")
 	}
-	job2, dup2, err := store.FindOrPrepareSkillJob(ctx, "test", input, true)
+	job2, dup2, err := testEnv.store.FindOrPrepareSkillJob(testEnv.ctx, "test", input, true)
 	if err != nil {
 		t.Fatalf("second prepare: %v", err)
 	}
@@ -305,24 +215,14 @@ func TestFindOrPrepareSkillJobDedupes(t *testing.T) {
 }
 
 func TestWaitForCompletion(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
-	job, err := store.SubmitEcho(ctx, "wait test")
+	job, err := testEnv.store.SubmitEcho(testEnv.ctx, "wait test")
 	if err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 
-	finalJob, err := store.WaitForCompletion(ctx, job.ID, 0)
+	finalJob, err := testEnv.store.WaitForCompletion(testEnv.ctx, job.ID, 0)
 	if err != nil {
 		t.Fatalf("wait: %v", err)
 	}
@@ -332,8 +232,8 @@ func TestWaitForCompletion(t *testing.T) {
 }
 
 func TestProgressReader(t *testing.T) {
-	root := t.TempDir()
-	jobDir := filepath.Join(root, "test-job")
+	testEnv := newStoreTestEnv(t)
+	jobDir := filepath.Join(testEnv.root, "test-job")
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -392,21 +292,11 @@ func TestProgressReader(t *testing.T) {
 }
 
 func TestComputeSkillArgsHash(t *testing.T) {
-	ctx := context.Background()
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
+	testEnv := newStoreTestEnv(t)
 
 	input := []byte(`{"input":"value"}`)
-	hash1 := store.ComputeSkillArgsHash("test", input)
-	job, dup, err := store.FindOrPrepareSkillJob(ctx, "test", input, false)
+	hash1 := testEnv.store.ComputeSkillArgsHash("test", input)
+	job, dup, err := testEnv.store.FindOrPrepareSkillJob(testEnv.ctx, "test", input, false)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -416,7 +306,7 @@ func TestComputeSkillArgsHash(t *testing.T) {
 	if hash1 != job.ArgsHash {
 		t.Fatalf("expected hash %s, got %s", hash1, job.ArgsHash)
 	}
-	hash2 := store.ComputeSkillArgsHash("test", []byte(`{"input":"different"}`))
+	hash2 := testEnv.store.ComputeSkillArgsHash("test", []byte(`{"input":"different"}`))
 	if hash1 == hash2 {
 		t.Fatalf("expected different hashes for different inputs")
 	}
@@ -426,27 +316,17 @@ func TestComputeSkillArgsHash(t *testing.T) {
 	if len(sameLen1) != len(sameLen2) {
 		t.Fatalf("test inputs must be same length")
 	}
-	hash3 := store.ComputeSkillArgsHash("test", sameLen1)
-	hash4 := store.ComputeSkillArgsHash("test", sameLen2)
+	hash3 := testEnv.store.ComputeSkillArgsHash("test", sameLen1)
+	hash4 := testEnv.store.ComputeSkillArgsHash("test", sameLen2)
 	if hash3 == hash4 {
 		t.Fatalf("expected hashes to differ for same length inputs")
 	}
 }
 
 func TestTailProgressFollowReadsAfterEOF(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	testEnv := newStoreTestEnv(t)
+	ctx, cancel := context.WithTimeout(testEnv.ctx, 5*time.Second)
 	defer cancel()
-
-	root := t.TempDir()
-	store, err := Open(ctx, root)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Fatalf("close store: %v", err)
-		}
-	})
 
 	now := time.Now().UTC()
 	job := Job{
@@ -458,11 +338,11 @@ func TestTailProgressFollowReadsAfterEOF(t *testing.T) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if err := store.persist.InsertJob(ctx, job); err != nil {
+	if err := testEnv.store.persist.InsertJob(ctx, job); err != nil {
 		t.Fatalf("insert job: %v", err)
 	}
 
-	jobDir := store.jobDir(job.ID)
+	jobDir := testEnv.store.jobDir(job.ID)
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		t.Fatalf("job dir: %v", err)
 	}
@@ -471,42 +351,19 @@ func TestTailProgressFollowReadsAfterEOF(t *testing.T) {
 		t.Fatalf("create progress: %v", err)
 	}
 
-	var buf bytes.Buffer
-	var wg sync.WaitGroup
-	errCh := make(chan error, 1)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		errCh <- store.TailProgress(ctx, job.ID, true, &buf)
-	}()
+	watch := startTailWatcher(ctx, t, testEnv.store, job.ID, true)
 
 	time.Sleep(200 * time.Millisecond)
 
-	appendLine := func(line string) {
-		f, openErr := os.OpenFile(progressPath, os.O_APPEND|os.O_WRONLY, 0)
-		if openErr != nil {
-			t.Fatalf("open progress for append: %v", openErr)
-		}
-		if _, writeErr := f.WriteString(line + "\n"); writeErr != nil {
-			if closeErr := f.Close(); closeErr != nil {
-				t.Fatalf("close progress after write error: %v", closeErr)
-			}
-			t.Fatalf("append progress: %v", writeErr)
-		}
-		if closeErr := f.Close(); closeErr != nil {
-			t.Fatalf("close progress: %v", closeErr)
-		}
-	}
-
-	appendLine(`{"message":"ready"}`)
+	appendProgressLine(t, progressPath, `{"message":"ready"}`)
 	time.Sleep(200 * time.Millisecond)
 
-	if err := store.persist.UpdateState(ctx, job.ID, StateOK, "", ""); err != nil {
+	if err := testEnv.store.persist.UpdateState(ctx, job.ID, StateOK, "", ""); err != nil {
 		t.Fatalf("update state: %v", err)
 	}
 
 	select {
-	case err := <-errCh:
+	case err := <-watch.ErrCh():
 		if err != nil {
 			t.Fatalf("tail progress: %v", err)
 		}
@@ -514,11 +371,93 @@ func TestTailProgressFollowReadsAfterEOF(t *testing.T) {
 		t.Fatalf("context done before tail returned: %v", ctx.Err())
 	}
 
-	wg.Wait()
+	watch.Wait()
 
-	output := strings.TrimSpace(buf.String())
+	output := strings.TrimSpace(watch.Buffer().String())
 	if !strings.Contains(output, `{"message":"ready"}`) {
 		t.Fatalf("expected progress output, got %q", output)
+	}
+}
+
+type storeTestEnv struct {
+	ctx   context.Context
+	root  string
+	store *Store
+}
+
+func newStoreTestEnv(t *testing.T) storeTestEnv {
+	t.Helper()
+	ctx := context.Background()
+	root := t.TempDir()
+	store := openStoreForTest(t, ctx, root)
+	return storeTestEnv{ctx: ctx, root: root, store: store}
+}
+
+func openStoreForTest(t testing.TB, ctx context.Context, root string) *Store {
+	t.Helper()
+	store, err := Open(ctx, root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+	return store
+}
+
+type tailWatcher struct {
+	buf    *bytes.Buffer
+	errCh  <-chan error
+	waitFn func()
+}
+
+func startTailWatcher(ctx context.Context, t testing.TB, store *Store, jobID string, follow bool) tailWatcher {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	errCh := make(chan error, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errCh <- store.TailProgress(ctx, jobID, follow, buf)
+	}()
+	return tailWatcher{
+		buf:   buf,
+		errCh: errCh,
+		waitFn: func() {
+			wg.Wait()
+		},
+	}
+}
+
+func (tw tailWatcher) Buffer() *bytes.Buffer {
+	return tw.buf
+}
+
+func (tw tailWatcher) ErrCh() <-chan error {
+	return tw.errCh
+}
+
+func (tw tailWatcher) Wait() {
+	if tw.waitFn != nil {
+		tw.waitFn()
+	}
+}
+
+func appendProgressLine(t testing.TB, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open progress for append: %v", err)
+	}
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		_ = f.Close()
+		t.Fatalf("append progress: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close progress: %v", err)
 	}
 }
 

@@ -6,167 +6,145 @@ import (
 	"github.com/jkatigb/agentctl/internal/skill"
 )
 
-func TestValidateNetworkAccess(t *testing.T) {
-	tests := []struct {
-		name        string
-		manifest    skill.Manifest
-		host        string
-		port        int
-		expectError bool
+func TestValidateNetworkAccess_AllowsEgressPatterns(t *testing.T) {
+	cases := []struct {
+		name     string
+		manifest skill.Manifest
+		host     string
+		port     int
 	}{
 		{
-			name: "network none blocks all access",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network: "none",
-				},
-			},
-			host:        "api.github.com",
-			port:        443,
-			expectError: true,
+			name:     "network egress with empty allowlist allows all",
+			manifest: manifestWithNetwork("egress"),
+			host:     "api.github.com",
+			port:     443,
 		},
 		{
-			name: "network egress with empty allowlist allows all",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network:     "egress",
-					EgressAllow: []string{},
-				},
-			},
-			host:        "api.github.com",
-			port:        443,
-			expectError: false,
+			name:     "exact match allows access",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+			host:     "api.github.com",
+			port:     443,
 		},
 		{
-			name: "exact match allows access",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network:     "egress",
-					EgressAllow: []string{"api.github.com:443"},
-				},
-			},
-			host:        "api.github.com",
-			port:        443,
-			expectError: false,
+			name:     "wildcard domain match allows access",
+			manifest: manifestWithNetwork("egress", "*.amazonaws.com:443"),
+			host:     "s3.amazonaws.com",
+			port:     443,
 		},
 		{
-			name: "exact match blocks different port",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network:     "egress",
-					EgressAllow: []string{"api.github.com:443"},
-				},
-			},
-			host:        "api.github.com",
-			port:        80,
-			expectError: true,
+			name:     "wildcard domain match subdomain",
+			manifest: manifestWithNetwork("egress", "*.amazonaws.com:443"),
+			host:     "s3.us-east-1.amazonaws.com",
+			port:     443,
 		},
 		{
-			name: "wildcard domain match allows access",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network:     "egress",
-					EgressAllow: []string{"*.amazonaws.com:443"},
-				},
-			},
-			host:        "s3.amazonaws.com",
-			port:        443,
-			expectError: false,
+			name:     "wildcard port allows any port",
+			manifest: manifestWithNetwork("egress", "example.com:*"),
+			host:     "example.com",
+			port:     8080,
 		},
 		{
-			name: "wildcard port allows any port",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network:     "egress",
-					EgressAllow: []string{"example.com:*"},
-				},
-			},
-			host:        "example.com",
-			port:        8080,
-			expectError: false,
-		},
-		{
-			name: "CIDR match allows IP in range",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network:     "egress",
-					EgressAllow: []string{"10.0.0.0/8:*"},
-				},
-			},
-			host:        "10.5.10.20",
-			port:        443,
-			expectError: false,
-		},
-		{
-			name: "CIDR blocks IP out of range",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network:     "egress",
-					EgressAllow: []string{"10.0.0.0/8:*"},
-				},
-			},
-			host:        "192.168.1.1",
-			port:        443,
-			expectError: true,
+			name:     "CIDR match allows IP in range",
+			manifest: manifestWithNetwork("egress", "10.0.0.0/8:*"),
+			host:     "10.5.10.20",
+			port:     443,
 		},
 		{
 			name: "multiple patterns - first matches",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network: "egress",
-					EgressAllow: []string{
-						"api.github.com:443",
-						"*.amazonaws.com:443",
-					},
-				},
-			},
-			host:        "api.github.com",
-			port:        443,
-			expectError: false,
+			manifest: manifestWithNetwork("egress",
+				"api.github.com:443",
+				"*.amazonaws.com:443",
+			),
+			host: "api.github.com",
+			port: 443,
 		},
 		{
 			name: "multiple patterns - second matches",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network: "egress",
-					EgressAllow: []string{
-						"api.github.com:443",
-						"*.amazonaws.com:443",
-					},
-				},
-			},
-			host:        "s3.amazonaws.com",
-			port:        443,
-			expectError: false,
-		},
-		{
-			name: "multiple patterns - none match",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Network: "egress",
-					EgressAllow: []string{
-						"api.github.com:443",
-						"*.amazonaws.com:443",
-					},
-				},
-			},
-			host:        "example.com",
-			port:        80,
-			expectError: true,
+			manifest: manifestWithNetwork("egress",
+				"api.github.com:443",
+				"*.amazonaws.com:443",
+			),
+			host: "s3.amazonaws.com",
+			port: 443,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := NewValidator(tt.manifest)
-			err := v.ValidateNetworkAccess(tt.host, tt.port)
-			if tt.expectError && err == nil {
-				t.Errorf("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
+	cases[0].manifest.Capabilities.EgressAllow = []string{}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := NewValidator(tc.manifest)
+			if err := v.ValidateNetworkAccess(tc.host, tc.port); err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateNetworkAccess_BlocksDisallowedAccess(t *testing.T) {
+	cases := []struct {
+		name     string
+		manifest skill.Manifest
+		host     string
+		port     int
+	}{
+		{
+			name:     "network none blocks all access",
+			manifest: manifestWithNetwork("none"),
+			host:     "api.github.com",
+			port:     443,
+		},
+		{
+			name:     "exact match blocks different port",
+			manifest: manifestWithNetwork("egress", "api.github.com:443"),
+			host:     "api.github.com",
+			port:     80,
+		},
+		{
+			name:     "CIDR blocks IP out of range",
+			manifest: manifestWithNetwork("egress", "10.0.0.0/8:*"),
+			host:     "192.168.1.1",
+			port:     443,
+		},
+		{
+			name: "multiple patterns - none match",
+			manifest: manifestWithNetwork("egress",
+				"api.github.com:443",
+				"*.amazonaws.com:443",
+			),
+			host: "example.com",
+			port: 80,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := NewValidator(tc.manifest)
+			if err := v.ValidateNetworkAccess(tc.host, tc.port); err == nil {
+				t.Fatalf("expected error but got none")
+			}
+		})
+	}
+}
+
+func manifestWithNetwork(network string, allow ...string) skill.Manifest {
+	return skill.Manifest{
+		Capabilities: skill.Capabilities{
+			Network:     network,
+			EgressAllow: append([]string{}, allow...),
+		},
+	}
+}
+
+func manifestWithFilesystem(types ...string) skill.Manifest {
+	accesses := make([]skill.FileAccess, 0, len(types))
+	for _, typ := range types {
+		accesses = append(accesses, skill.FileAccess{Type: typ})
+	}
+	return skill.Manifest{
+		Capabilities: skill.Capabilities{
+			Filesystem: accesses,
+		},
 	}
 }
 
@@ -274,148 +252,99 @@ func TestMatchesCIDR(t *testing.T) {
 	}
 }
 
-func TestValidateFilesystemAccess(t *testing.T) {
-	tests := []struct {
+func TestValidateFilesystemAccess_Allows(t *testing.T) {
+	cases := []struct {
 		name          string
 		manifest      skill.Manifest
 		requestedPath string
 		workDir       string
-		expectError   bool
 	}{
 		{
-			name: "workdir capability allows access within workdir",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "workdir"}},
-				},
-			},
+			name:          "workdir capability allows access within workdir",
+			manifest:      manifestWithFilesystem("workdir"),
 			requestedPath: "/tmp/work/file.txt",
 			workDir:       "/tmp/work",
-			expectError:   false,
 		},
 		{
-			name: "workdir capability blocks access outside workdir",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "workdir"}},
-				},
-			},
-			requestedPath: "/etc/passwd",
-			workDir:       "/tmp/work",
-			expectError:   true,
-		},
-		{
-			name: "no filesystem capability blocks all access",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{},
-				},
-			},
-			requestedPath: "/tmp/work/file.txt",
-			workDir:       "/tmp/work",
-			expectError:   true,
-		},
-		{
-			name: "relative path within workdir allowed",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "workdir"}},
-				},
-			},
+			name:          "relative path within workdir allowed",
+			manifest:      manifestWithFilesystem("workdir"),
 			requestedPath: "subdir/file.txt",
 			workDir:       "/tmp/work",
-			expectError:   false,
-		},
-		{
-			name: "path traversal blocked",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "workdir"}},
-				},
-			},
-			requestedPath: "../../../etc/passwd",
-			workDir:       "/tmp/work",
-			expectError:   true,
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := NewValidator(tt.manifest)
-			err := v.ValidateFilesystemAccess(tt.requestedPath, tt.workDir)
-			if tt.expectError && err == nil {
-				t.Errorf("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := NewValidator(tc.manifest)
+			if err := v.ValidateFilesystemAccess(tc.requestedPath, tc.workDir); err != nil {
+				t.Fatalf("unexpected error: %v", err)
 			}
 		})
 	}
 }
 
-func TestValidateFilesystemCapabilities(t *testing.T) {
-	tests := []struct {
-		name        string
-		manifest    skill.Manifest
-		expectError bool
+func TestValidateFilesystemAccess_Blocks(t *testing.T) {
+	cases := []struct {
+		name          string
+		manifest      skill.Manifest
+		requestedPath string
+		workDir       string
 	}{
 		{
-			name: "workdir capability is valid",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "workdir"}},
-				},
-			},
-			expectError: false,
+			name:          "workdir capability blocks access outside workdir",
+			manifest:      manifestWithFilesystem("workdir"),
+			requestedPath: "/etc/passwd",
+			workDir:       "/tmp/work",
 		},
 		{
-			name: "home capability is valid (future)",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "home"}},
-				},
-			},
-			expectError: false,
+			name:          "no filesystem capability blocks all access",
+			manifest:      manifestWithFilesystem(),
+			requestedPath: "/tmp/work/file.txt",
+			workDir:       "/tmp/work",
 		},
 		{
-			name: "tmp capability is valid (future)",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "tmp"}},
-				},
-			},
-			expectError: false,
-		},
-		{
-			name: "unknown capability type is invalid",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{{Type: "invalid"}},
-				},
-			},
-			expectError: true,
-		},
-		{
-			name: "empty filesystem list is valid",
-			manifest: skill.Manifest{
-				Capabilities: skill.Capabilities{
-					Filesystem: []skill.FileAccess{},
-				},
-			},
-			expectError: false,
+			name:          "path traversal blocked",
+			manifest:      manifestWithFilesystem("workdir"),
+			requestedPath: "../../../etc/passwd",
+			workDir:       "/tmp/work",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateFilesystemCapabilities(tt.manifest)
-			if tt.expectError && err == nil {
-				t.Errorf("expected error but got none")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := NewValidator(tc.manifest)
+			if err := v.ValidateFilesystemAccess(tc.requestedPath, tc.workDir); err == nil {
+				t.Fatalf("expected error but got none")
 			}
 		})
+	}
+}
+
+func TestValidateFilesystemCapabilities_Valid(t *testing.T) {
+	cases := []struct {
+		name     string
+		manifest skill.Manifest
+	}{
+		{name: "workdir", manifest: manifestWithFilesystem("workdir")},
+		{name: "home", manifest: manifestWithFilesystem("home")},
+		{name: "tmp", manifest: manifestWithFilesystem("tmp")},
+		{name: "empty", manifest: manifestWithFilesystem()},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateFilesystemCapabilities(tc.manifest); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateFilesystemCapabilities_Invalid(t *testing.T) {
+	manifest := manifestWithFilesystem("invalid")
+
+	if err := ValidateFilesystemCapabilities(manifest); err == nil {
+		t.Fatalf("expected error but got none")
 	}
 }
 
