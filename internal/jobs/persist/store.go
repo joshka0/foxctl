@@ -12,6 +12,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/jobs/types"
 	"github.com/jkatigb/agentctl/internal/sqliteutil"
+	"github.com/jkatigb/agentctl/internal/sqlutil"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -69,13 +70,13 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 			return nil, fmt.Errorf("jobs: scan: %w", err)
 		}
 		var parseErr error
-		job.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
+		job.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
 		if parseErr != nil {
-			return nil, fmt.Errorf("jobs: parse created_at: %w", parseErr)
+			return nil, fmt.Errorf("jobs: scan created_at: %w", parseErr)
 		}
-		job.UpdatedAt, parseErr = time.Parse(time.RFC3339Nano, updated)
+		job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
 		if parseErr != nil {
-			return nil, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
+			return nil, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
 		}
 		jobs = append(jobs, job)
 	}
@@ -95,13 +96,13 @@ func (s *sqlStore) Get(ctx context.Context, id string) (types.Job, error) {
 		return types.Job{}, fmt.Errorf("jobs: get: %w", err)
 	}
 	var parseErr error
-	job.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
+	job.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
 	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: parse created_at: %w", parseErr)
+		return types.Job{}, fmt.Errorf("jobs: scan created_at: %w", parseErr)
 	}
-	job.UpdatedAt, parseErr = time.Parse(time.RFC3339Nano, updated)
+	job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
 	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
+		return types.Job{}, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
 	}
 	return job, nil
 }
@@ -110,7 +111,7 @@ func (s *sqlStore) InsertJob(ctx context.Context, job types.Job) error {
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,
-		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, job.CreatedAt.Format(time.RFC3339Nano), job.UpdatedAt.Format(time.RFC3339Nano))
+		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("jobs: insert: %w", err)
 	}
@@ -136,7 +137,7 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 	}
 	query := fmt.Sprintf(`UPDATE jobs SET state = ?, error = ?, updated_at = ?%s WHERE id = ? AND %s`, setResult, stateConstraint)
 
-	args := []any{newState, errMsg, time.Now().UTC().Format(time.RFC3339Nano)}
+	args := []any{newState, errMsg, sqlutil.FormatTimestamp(time.Now().UTC())}
 	if resultPath != "" {
 		args = append(args, resultPath)
 	}
@@ -182,7 +183,7 @@ func (s *sqlStore) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
         UPDATE jobs
         SET state = ?, error = ?, updated_at = ?
         WHERE state = ?`,
-		types.StateError, "ERUNTIME_RESTART: process restarted", time.Now().UTC().Format(time.RFC3339Nano), types.StateRunning)
+		types.StateError, "ERUNTIME_RESTART: process restarted", sqlutil.FormatTimestamp(time.Now().UTC()), types.StateRunning)
 	if err != nil {
 		return 0, fmt.Errorf("recover orphans: %w", err)
 	}
@@ -210,13 +211,13 @@ func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types
 		return types.Job{}, fmt.Errorf("jobs: find duplicate: %w", err)
 	}
 	var parseErr error
-	job.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
+	job.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
 	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: parse created_at: %w", parseErr)
+		return types.Job{}, fmt.Errorf("jobs: scan created_at: %w", parseErr)
 	}
-	job.UpdatedAt, parseErr = time.Parse(time.RFC3339Nano, updated)
+	job.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
 	if parseErr != nil {
-		return types.Job{}, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
+		return types.Job{}, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
 	}
 	return job, nil
 }
@@ -240,13 +241,13 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	scanErr := row.Scan(&existing.ID, &existing.Command, &existing.ArgsJSON, &existing.ArgsHash, &existing.State, &existing.ResultPath, &existing.Error, &created, &updated)
 	if scanErr == nil {
 		var parseErr error
-		existing.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, created)
+		existing.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
 		if parseErr != nil {
-			return types.Job{}, false, fmt.Errorf("jobs: parse created_at: %w", parseErr)
+			return types.Job{}, false, fmt.Errorf("jobs: scan created_at: %w", parseErr)
 		}
-		existing.UpdatedAt, parseErr = time.Parse(time.RFC3339Nano, updated)
+		existing.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
 		if parseErr != nil {
-			return types.Job{}, false, fmt.Errorf("jobs: parse updated_at: %w", parseErr)
+			return types.Job{}, false, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
 		}
 		if err := tx.Commit(); err != nil {
 			return types.Job{}, false, fmt.Errorf("jobs: commit transaction: %w", err)
@@ -270,7 +271,7 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	_, err = tx.ExecContext(ctx, `
         INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,
-		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, job.CreatedAt.Format(time.RFC3339Nano), job.UpdatedAt.Format(time.RFC3339Nano))
+		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt))
 	if err != nil {
 		return types.Job{}, false, fmt.Errorf("jobs: insert: %w", err)
 	}
