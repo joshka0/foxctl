@@ -8,8 +8,9 @@ This package wraps `internal/domain/envelope` and provides:
 
 1. **Canonical error codes** - All error codes from Core Profile v1 (EARG, EOPENAPI, EAUTH, etc.)
 2. **Helper functions** - Simplified API for building and writing envelopes
-3. **Validation** - Centralized envelope validation before emission
-4. **Annotation helpers** - Functions for annotating envelopes with run/cache metadata
+3. **Extended validation** - Protocol-level checks for CAS digests, cache metadata, and status codes
+4. **Typed error helpers** - Specialized constructors for common error scenarios (HTTP, validation, auth, etc.)
+5. **Annotation helpers** - Functions for annotating envelopes with run/cache metadata
 
 ## Error Codes
 
@@ -124,16 +125,143 @@ env := protocol.OK("cmd", data,
 )
 ```
 
-## Validation
+## Typed Error Helpers
+
+The protocol package provides specialized error envelope constructors with typed data payloads for common error scenarios:
+
+### Validation Errors
 
 ```go
-// Validate an envelope
+env := protocol.ValidationError("user.create", "invalid email", protocol.ValidationErrorData{
+    Field:  "email",
+    Value:  "not-an-email",
+    Reason: "must be a valid email address",
+    Hint:   "use format: user@example.com",
+})
+```
+
+### HTTP Errors
+
+```go
+env := protocol.HTTPError("api.call", "request failed", protocol.HTTPErrorData{
+    Summary: protocol.HTTPSummary{
+        StatusCode: 401,
+        Method:     "GET",
+        URL:        "https://api.example.com/users",
+        Headers:    map[string]string{"content-type": "application/json"},
+    },
+    Hint: "check your API key",
+})
+// Error code is automatically mapped: 401 -> EAUTH, 404 -> ENOTFOUND, etc.
+```
+
+### Auth Errors
+
+```go
+env := protocol.AuthError("auth.login", "authentication failed", "check your credentials")
+```
+
+### Not Found Errors
+
+```go
+env := protocol.NotFoundError("skill.get", "skill", "foo/bar")
+// Generates: "skill not found" with context {"resource": "skill", "identifier": "foo/bar"}
+```
+
+### Timeout Errors
+
+```go
+env := protocol.TimeoutError("job.wait", "skill execution", "30s")
+```
+
+### Rate Limit Errors
+
+```go
+env := protocol.RateLimitError("api.call", "rate limit exceeded", "60s")
+```
+
+### Policy Errors
+
+```go
+env := protocol.PolicyError("skill.run", "network.egress", "egress to example.com not allowed")
+```
+
+### Generic Error with Data
+
+```go
+env := protocol.ErrorWithData("op.fail", protocol.ErrorCodeEIO, "I/O error", protocol.ErrorData{
+    Detail: "failed to write file",
+    Hint:   "check disk space",
+    Context: map[string]any{
+        "path": "/tmp/file.txt",
+    },
+})
+```
+
+## Validation
+
+The protocol package extends base envelope validation with protocol-level checks:
+
+### Base Validation
+
+```go
+// Validate an envelope (includes extended checks)
 if err := protocol.Validate(env); err != nil {
     // Handle validation error
 }
 
 // Panic on invalid envelope (for tests)
 protocol.MustValidate(env)
+```
+
+### Extended Validation Rules
+
+The `Validate` function performs these protocol-level checks:
+
+**1. CAS Digest Matching**
+- If `data.artifact` exists, `meta.cas_digest` must match
+- Artifact field must use `sha256:` prefix
+```go
+// Valid
+env := protocol.OK("cmd", map[string]any{
+    "artifact": "sha256:abc123",
+}, protocol.WithCASDigest("sha256:abc123"))
+
+// Invalid - digest mismatch
+env := protocol.OK("cmd", map[string]any{
+    "artifact": "sha256:abc123",
+}, protocol.WithCASDigest("sha256:different"))
+```
+
+**2. Cache Metadata Consistency**
+- If `meta.source == "cache"`, `meta.cache_key` must be set
+```go
+// Valid
+env := protocol.OK("cmd", nil,
+    protocol.WithSource("cache"),
+    protocol.WithCacheKey("key123"),
+)
+
+// Invalid - missing cache_key
+env := protocol.OK("cmd", nil, protocol.WithSource("cache"))
+```
+
+**3. Error Status Code Validation**
+- Error envelopes with `data.summary.status_code` must have codes in 400-599 range
+```go
+// Valid
+env := protocol.Error("cmd", protocol.ErrorCodeERuntime, "error", map[string]any{
+    "summary": map[string]any{
+        "status_code": 500,
+    },
+})
+
+// Invalid - 2xx status in error envelope
+env := protocol.Error("cmd", protocol.ErrorCodeERuntime, "error", map[string]any{
+    "summary": map[string]any{
+        "status_code": 200,
+    },
+})
 ```
 
 ## Utility Functions

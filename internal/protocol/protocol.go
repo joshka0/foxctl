@@ -169,11 +169,126 @@ func Error(command string, code ErrorCode, message string, data any, opts ...Opt
 }
 
 // Validate ensures the envelope conforms to Core Profile v1 invariants.
-// This wraps envelope.Validate and may be extended with protocol-level checks.
+// This wraps envelope.Validate and extends it with protocol-level checks.
 func Validate(env envelope.Envelope) error {
+	// First run base envelope validation
 	if err := envelope.Validate(env); err != nil {
 		return fmt.Errorf("protocol: %w", err)
 	}
+
+	// Protocol-level validation extensions
+	if err := validateCASDigest(env); err != nil {
+		return fmt.Errorf("protocol: %w", err)
+	}
+
+	if err := validateCacheMetadata(env); err != nil {
+		return fmt.Errorf("protocol: %w", err)
+	}
+
+	if err := validateErrorStatusCode(env); err != nil {
+		return fmt.Errorf("protocol: %w", err)
+	}
+
+	return nil
+}
+
+// validateCASDigest ensures that if data contains an artifact field,
+// meta.cas_digest matches it.
+func validateCASDigest(env envelope.Envelope) error {
+	if env.Data == nil {
+		return nil
+	}
+
+	// Try to extract artifact field from data
+	dataMap, ok := env.Data.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	artifact, hasArtifact := dataMap["artifact"]
+	if !hasArtifact {
+		return nil
+	}
+
+	artifactStr, ok := artifact.(string)
+	if !ok || artifactStr == "" {
+		return nil
+	}
+
+	// If we have an artifact, meta.cas_digest must match
+	if !strings.HasPrefix(artifactStr, "sha256:") {
+		return fmt.Errorf("artifact field must use sha256: prefix, got: %s", artifactStr)
+	}
+
+	if env.Meta.CASDigest == "" {
+		return fmt.Errorf("data.artifact is set but meta.cas_digest is empty")
+	}
+
+	if env.Meta.CASDigest != artifactStr {
+		return fmt.Errorf("meta.cas_digest (%s) does not match data.artifact (%s)",
+			env.Meta.CASDigest, artifactStr)
+	}
+
+	return nil
+}
+
+// validateCacheMetadata ensures cache-related metadata is consistent.
+func validateCacheMetadata(env envelope.Envelope) error {
+	// If source is cache, cache_key should be set
+	if env.Meta.Source == "cache" && strings.TrimSpace(env.Meta.CacheKey) == "" {
+		return fmt.Errorf("meta.source is 'cache' but meta.cache_key is empty")
+	}
+
+	return nil
+}
+
+// validateErrorStatusCode checks if error envelopes have valid status codes
+// in their data.summary.status_code field.
+func validateErrorStatusCode(env envelope.Envelope) error {
+	if env.Status != envelope.StatusError {
+		return nil
+	}
+
+	if env.Data == nil {
+		return nil
+	}
+
+	dataMap, ok := env.Data.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	summary, hasSummary := dataMap["summary"]
+	if !hasSummary {
+		return nil
+	}
+
+	summaryMap, ok := summary.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	statusCode, hasStatusCode := summaryMap["status_code"]
+	if !hasStatusCode {
+		return nil
+	}
+
+	// Check if status_code is a number
+	var code int
+	switch v := statusCode.(type) {
+	case int:
+		code = v
+	case float64:
+		code = int(v)
+	default:
+		return nil // Not a numeric status code, skip validation
+	}
+
+	// For error envelopes, status_code should be in error range (400-599)
+	if code < 400 || code >= 600 {
+		return fmt.Errorf("error envelope has data.summary.status_code=%d, expected 400-599", code)
+	}
+
 	return nil
 }
 
@@ -306,4 +421,133 @@ func GetErrorCode(env envelope.Envelope) ErrorCode {
 		return ""
 	}
 	return ErrorCode(strings.TrimSpace(env.Error.Code))
+}
+
+// ErrorData represents common data structure for error envelopes.
+type ErrorData struct {
+	Summary map[string]any `json:"summary,omitempty"`
+	Detail  string         `json:"detail,omitempty"`
+	Hint    string         `json:"hint,omitempty"`
+	Context map[string]any `json:"context,omitempty"`
+}
+
+// ValidationErrorData represents data for validation/argument errors.
+type ValidationErrorData struct {
+	Field   string         `json:"field,omitempty"`
+	Value   any            `json:"value,omitempty"`
+	Reason  string         `json:"reason,omitempty"`
+	Hint    string         `json:"hint,omitempty"`
+	Context map[string]any `json:"context,omitempty"`
+}
+
+// HTTPErrorData represents data for HTTP-related errors.
+type HTTPErrorData struct {
+	Summary    HTTPSummary    `json:"summary"`
+	Body       any            `json:"body,omitempty"`
+	Hint       string         `json:"hint,omitempty"`
+	RequestID  string         `json:"request_id,omitempty"`
+	RetryAfter string         `json:"retry_after,omitempty"`
+}
+
+// HTTPSummary contains HTTP response summary information.
+type HTTPSummary struct {
+	StatusCode int               `json:"status_code"`
+	Method     string            `json:"method,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	Headers    map[string]string `json:"headers,omitempty"`
+}
+
+// ErrorWithData builds an error envelope with structured ErrorData.
+func ErrorWithData(command string, code ErrorCode, message string, data ErrorData, opts ...Option) envelope.Envelope {
+	return Error(command, code, message, data, opts...)
+}
+
+// ValidationError builds an error envelope for validation/argument errors.
+func ValidationError(command string, message string, data ValidationErrorData, opts ...Option) envelope.Envelope {
+	return Error(command, ErrorCodeEARG, message, data, opts...)
+}
+
+// HTTPError builds an error envelope for HTTP-related errors.
+// The error code is automatically determined based on the status code.
+func HTTPError(command string, message string, data HTTPErrorData, opts ...Option) envelope.Envelope {
+	code := httpStatusToErrorCode(data.Summary.StatusCode)
+	return Error(command, code, message, data, opts...)
+}
+
+// AuthError builds an error envelope for authentication failures.
+func AuthError(command string, message string, hint string, opts ...Option) envelope.Envelope {
+	data := ErrorData{
+		Hint: hint,
+	}
+	return Error(command, ErrorCodeEAuth, message, data, opts...)
+}
+
+// NotFoundError builds an error envelope for resource not found errors.
+func NotFoundError(command string, resource string, identifier string, opts ...Option) envelope.Envelope {
+	data := ErrorData{
+		Detail: fmt.Sprintf("%s not found: %s", resource, identifier),
+		Context: map[string]any{
+			"resource":   resource,
+			"identifier": identifier,
+		},
+	}
+	message := fmt.Sprintf("%s not found", resource)
+	return Error(command, ErrorCodeENotFound, message, data, opts...)
+}
+
+// TimeoutError builds an error envelope for timeout errors.
+func TimeoutError(command string, operation string, duration string, opts ...Option) envelope.Envelope {
+	data := ErrorData{
+		Detail: fmt.Sprintf("operation '%s' timed out after %s", operation, duration),
+		Context: map[string]any{
+			"operation": operation,
+			"duration":  duration,
+		},
+	}
+	message := fmt.Sprintf("operation timed out: %s", operation)
+	return Error(command, ErrorCodeETimeout, message, data, opts...)
+}
+
+// RateLimitError builds an error envelope for rate limit errors.
+func RateLimitError(command string, message string, retryAfter string, opts ...Option) envelope.Envelope {
+	data := ErrorData{
+		Hint: fmt.Sprintf("retry after %s", retryAfter),
+		Context: map[string]any{
+			"retry_after": retryAfter,
+		},
+	}
+	return Error(command, ErrorCodeERateLimit, message, data, opts...)
+}
+
+// PolicyError builds an error envelope for policy violation errors.
+func PolicyError(command string, policyName string, reason string, opts ...Option) envelope.Envelope {
+	data := ErrorData{
+		Detail: reason,
+		Context: map[string]any{
+			"policy": policyName,
+			"reason": reason,
+		},
+	}
+	message := fmt.Sprintf("policy violation: %s", policyName)
+	return Error(command, ErrorCodeEPolicy, message, data, opts...)
+}
+
+// httpStatusToErrorCode maps HTTP status codes to error codes.
+func httpStatusToErrorCode(statusCode int) ErrorCode {
+	switch {
+	case statusCode == 401 || statusCode == 403:
+		return ErrorCodeEAuth
+	case statusCode == 404:
+		return ErrorCodeENotFound
+	case statusCode == 408:
+		return ErrorCodeETimeout
+	case statusCode == 429:
+		return ErrorCodeERateLimit
+	case statusCode >= 400 && statusCode < 500:
+		return ErrorCodeEARG
+	case statusCode >= 500:
+		return ErrorCodeERuntime
+	default:
+		return ErrorCodeERuntime
+	}
 }

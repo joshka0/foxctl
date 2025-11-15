@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -639,5 +640,364 @@ func TestErrorWithOptions(t *testing.T) {
 	}
 	if err := Validate(env); err != nil {
 		t.Fatalf("validation failed: %v", err)
+	}
+}
+
+// Tests for validation extensions
+
+func TestValidateCASDigest(t *testing.T) {
+	t.Run("valid artifact and cas_digest", func(t *testing.T) {
+		digest := "sha256:abc123"
+		env := OK("test", map[string]any{
+			"artifact": digest,
+		}, WithCASDigest(digest))
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass: %v", err)
+		}
+	})
+
+	t.Run("artifact without cas_digest", func(t *testing.T) {
+		env := OK("test", map[string]any{
+			"artifact": "sha256:abc123",
+		})
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when artifact exists but cas_digest is missing")
+		}
+	})
+
+	t.Run("mismatched artifact and cas_digest", func(t *testing.T) {
+		env := OK("test", map[string]any{
+			"artifact": "sha256:abc123",
+		}, WithCASDigest("sha256:different"))
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when artifact and cas_digest don't match")
+		}
+	})
+
+	t.Run("artifact without sha256 prefix", func(t *testing.T) {
+		env := OK("test", map[string]any{
+			"artifact": "baddigest",
+		}, WithCASDigest("baddigest"))
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when artifact doesn't have sha256: prefix")
+		}
+	})
+
+	t.Run("no artifact field", func(t *testing.T) {
+		env := OK("test", map[string]string{"key": "value"})
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass when no artifact field: %v", err)
+		}
+	})
+}
+
+func TestValidateCacheMetadata(t *testing.T) {
+	t.Run("cache source with cache_key", func(t *testing.T) {
+		env := OK("test", nil,
+			WithSource("cache"),
+			WithCacheKey("key123"),
+		)
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass: %v", err)
+		}
+	})
+
+	t.Run("cache source without cache_key", func(t *testing.T) {
+		env := OK("test", nil, WithSource("cache"))
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when source is cache but cache_key is empty")
+		}
+	})
+
+	t.Run("non-cache source", func(t *testing.T) {
+		env := OK("test", nil, WithSource("run"))
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass for non-cache source: %v", err)
+		}
+	})
+}
+
+func TestValidateErrorStatusCode(t *testing.T) {
+	t.Run("error envelope with valid status code", func(t *testing.T) {
+		env := Error("test", ErrorCodeERuntime, "server error", map[string]any{
+			"summary": map[string]any{
+				"status_code": 500,
+			},
+		})
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass: %v", err)
+		}
+	})
+
+	t.Run("error envelope with 4xx status code", func(t *testing.T) {
+		env := Error("test", ErrorCodeEARG, "bad request", map[string]any{
+			"summary": map[string]any{
+				"status_code": 400,
+			},
+		})
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass: %v", err)
+		}
+	})
+
+	t.Run("error envelope with 2xx status code", func(t *testing.T) {
+		env := Error("test", ErrorCodeERuntime, "error", map[string]any{
+			"summary": map[string]any{
+				"status_code": 200,
+			},
+		})
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when error envelope has 2xx status code")
+		}
+	})
+
+	t.Run("error envelope without status code", func(t *testing.T) {
+		env := Error("test", ErrorCodeERuntime, "error", map[string]string{
+			"detail": "some detail",
+		})
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass when no status_code field: %v", err)
+		}
+	})
+
+	t.Run("ok envelope with any status code", func(t *testing.T) {
+		env := OK("test", map[string]any{
+			"summary": map[string]any{
+				"status_code": 200,
+			},
+		})
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass for ok envelope: %v", err)
+		}
+	})
+}
+
+// Tests for typed error helpers
+
+func TestValidationError(t *testing.T) {
+	env := ValidationError("test.validate", "invalid field", ValidationErrorData{
+		Field:  "email",
+		Value:  "not-an-email",
+		Reason: "must be a valid email address",
+		Hint:   "use format: user@example.com",
+	})
+
+	if env.Status != envelope.StatusError {
+		t.Fatal("expected error status")
+	}
+	if env.Error.Code != "EARG" {
+		t.Fatalf("expected EARG code, got %s", env.Error.Code)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(ValidationErrorData)
+	if !ok {
+		t.Fatal("expected ValidationErrorData")
+	}
+	if data.Field != "email" {
+		t.Fatalf("expected field email, got %s", data.Field)
+	}
+}
+
+func TestHTTPError(t *testing.T) {
+	env := HTTPError("http.get", "request failed", HTTPErrorData{
+		Summary: HTTPSummary{
+			StatusCode: 401,
+			Method:     "GET",
+			URL:        "https://api.example.com/users",
+		},
+		Hint: "check your API key",
+	})
+
+	if env.Status != envelope.StatusError {
+		t.Fatal("expected error status")
+	}
+	if env.Error.Code != "EAUTH" {
+		t.Fatalf("expected EAUTH code for 401, got %s", env.Error.Code)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(HTTPErrorData)
+	if !ok {
+		t.Fatal("expected HTTPErrorData")
+	}
+	if data.Summary.StatusCode != 401 {
+		t.Fatalf("expected status code 401, got %d", data.Summary.StatusCode)
+	}
+}
+
+func TestHTTPStatusToErrorCode(t *testing.T) {
+	tests := []struct {
+		statusCode int
+		expected   ErrorCode
+	}{
+		{401, ErrorCodeEAuth},
+		{403, ErrorCodeEAuth},
+		{404, ErrorCodeENotFound},
+		{408, ErrorCodeETimeout},
+		{429, ErrorCodeERateLimit},
+		{400, ErrorCodeEARG},
+		{422, ErrorCodeEARG},
+		{500, ErrorCodeERuntime},
+		{502, ErrorCodeERuntime},
+		{503, ErrorCodeERuntime},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("status_%d", tt.statusCode), func(t *testing.T) {
+			code := httpStatusToErrorCode(tt.statusCode)
+			if code != tt.expected {
+				t.Fatalf("expected %s for status %d, got %s", tt.expected, tt.statusCode, code)
+			}
+		})
+	}
+}
+
+func TestAuthError(t *testing.T) {
+	env := AuthError("auth.login", "authentication failed", "check your credentials")
+
+	if env.Error.Code != "EAUTH" {
+		t.Fatalf("expected EAUTH code, got %s", env.Error.Code)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(ErrorData)
+	if !ok {
+		t.Fatal("expected ErrorData")
+	}
+	if data.Hint != "check your credentials" {
+		t.Fatalf("expected hint, got %s", data.Hint)
+	}
+}
+
+func TestNotFoundError(t *testing.T) {
+	env := NotFoundError("resource.get", "skill", "foo/bar")
+
+	if env.Error.Code != "ENOTFOUND" {
+		t.Fatalf("expected ENOTFOUND code, got %s", env.Error.Code)
+	}
+	if env.Error.Message != "skill not found" {
+		t.Fatalf("unexpected message: %s", env.Error.Message)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(ErrorData)
+	if !ok {
+		t.Fatal("expected ErrorData")
+	}
+	if data.Context["resource"] != "skill" {
+		t.Fatal("expected resource in context")
+	}
+	if data.Context["identifier"] != "foo/bar" {
+		t.Fatal("expected identifier in context")
+	}
+}
+
+func TestTimeoutError(t *testing.T) {
+	env := TimeoutError("job.wait", "skill execution", "30s")
+
+	if env.Error.Code != "ETIMEOUT" {
+		t.Fatalf("expected ETIMEOUT code, got %s", env.Error.Code)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(ErrorData)
+	if !ok {
+		t.Fatal("expected ErrorData")
+	}
+	if data.Context["operation"] != "skill execution" {
+		t.Fatal("expected operation in context")
+	}
+	if data.Context["duration"] != "30s" {
+		t.Fatal("expected duration in context")
+	}
+}
+
+func TestRateLimitError(t *testing.T) {
+	env := RateLimitError("api.call", "rate limit exceeded", "60s")
+
+	if env.Error.Code != "ERATELIMIT" {
+		t.Fatalf("expected ERATELIMIT code, got %s", env.Error.Code)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(ErrorData)
+	if !ok {
+		t.Fatal("expected ErrorData")
+	}
+	if data.Context["retry_after"] != "60s" {
+		t.Fatal("expected retry_after in context")
+	}
+}
+
+func TestPolicyError(t *testing.T) {
+	env := PolicyError("skill.run", "network.egress", "egress to example.com not allowed")
+
+	if env.Error.Code != "EPOLICY" {
+		t.Fatalf("expected EPOLICY code, got %s", env.Error.Code)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(ErrorData)
+	if !ok {
+		t.Fatal("expected ErrorData")
+	}
+	if data.Context["policy"] != "network.egress" {
+		t.Fatal("expected policy in context")
+	}
+}
+
+func TestErrorWithData(t *testing.T) {
+	env := ErrorWithData("test.error", ErrorCodeEIO, "I/O error", ErrorData{
+		Detail: "failed to write file",
+		Hint:   "check disk space",
+		Context: map[string]any{
+			"path": "/tmp/file.txt",
+		},
+	})
+
+	if env.Error.Code != "EIO" {
+		t.Fatalf("expected EIO code, got %s", env.Error.Code)
+	}
+	if err := Validate(env); err != nil {
+		t.Fatalf("validation failed: %v", err)
+	}
+
+	data, ok := env.Data.(ErrorData)
+	if !ok {
+		t.Fatal("expected ErrorData")
+	}
+	if data.Detail != "failed to write file" {
+		t.Fatalf("unexpected detail: %s", data.Detail)
+	}
+	if data.Hint != "check disk space" {
+		t.Fatalf("unexpected hint: %s", data.Hint)
 	}
 }
