@@ -302,14 +302,18 @@ See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md) for detailed timeline.
 
 ## 📚 Documentation
 
-### Specifications
+### Core Specifications
 
-- **[Core Profile v1](docs/spec/core_profile_v1.md)** (802 lines) — Authoritative specification
-- **[OpenAPI Skill](docs/spec/openapi_skill.md)** (2156 lines) — Detailed design (implementation in progress)
-- **[Plugin Protocol](docs/spec/plugin_protocol.md)** — Plugin design (v1.1)
+- **[Protocol v1](docs/spec/protocol_v1.md)** — Canonical wire contract (envelope, commands, errors, artifactization)
+- **[Core Profile v1](docs/spec/core_profile_v1.md)** — Complete agentctl specification
+- **[OpenAPI Skill](docs/spec/openapi_skill.md)** — Universal REST API client (implementation in progress)
+- **[Plugin Protocol v1](docs/spec/plugin_protocol.md)** — Extensibility via auth/pagination plugins
+- **[Agent Profile v1](docs/spec/agent_profile_v1.md)** — Multi-agent orchestration (optional, v1.1+)
 
 ### Implementation Guides
 
+- **[Protocol v1 Implementation](docs/guides/protocol_v1_implementation.md)** — Build-out plan, code organization, acceptance criteria
+- **[Agent Loop Guide](docs/guides/agent_loop.md)** — Using agentctl as LLM agent substrate
 - **[ROADMAP_TO_V1.md](ROADMAP_TO_V1.md)** — High-level roadmap and timeline
 - **[IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md)** — Prioritized task breakdown
 - **[Refactoring Specs](docs/refactoring/README.md)** — Detailed implementation specs (SPEC-001 through SPEC-019)
