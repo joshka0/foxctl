@@ -95,15 +95,31 @@ func run(rc *runner.RunnerContext, in input) error {
 	headers = secrets.RedactHeaders(headers)
 
 	plan := map[string]any{
-		"method":  method,
-		"url":     resolved.String(),
-		"headers": headers,
-		"body":    in.Body,
+		"method": method,
+		"url":    resolved.String(),
 	}
+	if len(in.Query) > 0 {
+		query := make(map[string]string, len(in.Query))
+		for k, v := range in.Query {
+			query[k] = v
+		}
+		plan["query"] = query
+	}
+	if len(headers) > 0 {
+		plan["headers"] = headers
+	}
+	if in.Body != nil {
+		plan["body"] = in.Body
+	} else {
+		plan["body"] = nil
+	}
+
 	data := map[string]any{
-		"request_plan": plan,
-		"dry_run":      true,
+		"summary": map[string]any{
+			"request_plan": plan,
+		},
 	}
+
 	return rc.Emit("http/openapi", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
 }
 

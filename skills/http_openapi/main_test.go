@@ -36,8 +36,16 @@ func TestPlanGeneration(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	data := env["data"].(map[string]any)
-	plan := data["request_plan"].(map[string]any)
+	summary := data["summary"].(map[string]any)
+	plan := summary["request_plan"].(map[string]any)
 	if plan["method"].(string) != "GET" {
 		t.Fatalf("expected GET")
+	}
+	if plan["url"].(string) != "https://api.example.com/users?page=1" {
+		t.Fatalf("unexpected url: %s", plan["url"].(string))
+	}
+	query := plan["query"].(map[string]any)
+	if query["page"].(string) != "1" {
+		t.Fatalf("unexpected query value")
 	}
 }
