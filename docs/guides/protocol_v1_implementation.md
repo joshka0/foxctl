@@ -829,7 +829,7 @@ which agentctl-plugin-aws-sigv4
 
 **APIs**:
 - GitHub (https://api.github.com)
-- Stripe (https://api.stripe.com) - test mode
+- Stripe (https://stripe.com/docs/api) - test mode
 - OpenWeatherMap (https://api.openweathermap.org)
 
 **Scenarios**:
