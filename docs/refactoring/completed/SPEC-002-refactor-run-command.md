@@ -362,7 +362,7 @@ func (o *RunOrchestrator) saveToCache(ctx context.Context, opts RunOptions, resu
         Result:    result,
         Digests:   digests,
         CreatedAt: time.Now(),
-        ExpiresAt: time.Now().Add(24 * time.Hour), // TODO: configurable TTL
+        ExpiresAt: time.Now().Add(o.config.Memory.AutoCacheTTL), // Configurable via config.Memory.AutoCacheTTL
     }
 
     return o.cache.Put(ctx, entry)
