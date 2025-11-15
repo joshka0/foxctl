@@ -21,11 +21,16 @@ All Phase 1-2 refactoring specs have been implemented:
 
 See [completed/README.md](completed/README.md) for details.
 
-### 🚧 In Progress (2 specs)
+### ✅ Recently Completed
+
+| Spec | Title | Status |
+|------|-------|--------|
+| [SPEC-008](SPEC-008-reorganize-packages.md) | Reorganize Packages | ✅ Completed (minor violations to fix) |
+
+### 🚧 In Progress (1 spec)
 
 | Spec | Title | Progress | Effort Remaining |
 |------|-------|----------|------------------|
-| [SPEC-008](SPEC-008-reorganize-packages.md) | Reorganize Packages | 90% | 2-3h |
 | [SPEC-009](SPEC-009-extract-skill-discovery.md) | Extract Skill Discovery | 30% | 7h |
 
 ### 📋 Phase 6-8: Road to v1.0 (9 new specs)
@@ -62,8 +67,9 @@ See [completed/README.md](completed/README.md) for details.
 
 ## Total Effort to v1.0
 
-**Remaining Work**: ~102 hours (13 working days)
-- In Progress (SPEC-008/009): ~9h
+**Remaining Work**: ~99 hours (12.5 working days)
+- In Progress (SPEC-009): ~7h
+- Follow-up (SPEC-008 violations): ~3h
 - Critical (SPEC-011-014): ~42.5h
 - High (SPEC-015-016): ~18h
 - Medium (SPEC-017-019): ~33h
@@ -71,7 +77,8 @@ See [completed/README.md](completed/README.md) for details.
 ## Implementation Sequence
 
 ### Phase 3A: Complete In-Progress (1 week)
-1. **SPEC-008**: Finish package reorganization (3h)
+1. ~~**SPEC-008**: Finish package reorganization~~ ✅ **COMPLETED**
+   - Follow-up: Fix layer violations (3h) - can be deferred
 2. **SPEC-009**: Extract skill discovery (7h)
 
 ### Phase 3B: Security (1 week)
