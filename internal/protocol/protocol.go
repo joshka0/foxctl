@@ -8,58 +8,12 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 )
-
-// ErrorCode represents a canonical error code from Core Profile v1.
-type ErrorCode string
-
-const (
-	// ErrorCodeEARG indicates invalid arguments or validation errors.
-	ErrorCodeEARG ErrorCode = "EARG"
-	// ErrorCodeEOpenAPI indicates OpenAPI spec parsing or validation errors.
-	ErrorCodeEOpenAPI ErrorCode = "EOPENAPI"
-	// ErrorCodeEAuth indicates authentication or credential problems.
-	ErrorCodeEAuth ErrorCode = "EAUTH"
-	// ErrorCodeEPagination indicates pagination-related failures.
-	ErrorCodeEPagination ErrorCode = "EPAGINATION"
-	// ErrorCodeERateLimit indicates rate limit or backoff exhaustion.
-	ErrorCodeERateLimit ErrorCode = "ERATELIMIT"
-	// ErrorCodeERuntime indicates runtime or generic execution failure (HTTP 5xx, runner crash, etc.).
-	ErrorCodeERuntime ErrorCode = "ERUNTIME"
-	// ErrorCodeEOutputTooLarge indicates output exceeded capture limits.
-	ErrorCodeEOutputTooLarge ErrorCode = "EOUTPUT_TOO_LARGE"
-	// ErrorCodeEPolicy indicates capability or policy violations.
-	ErrorCodeEPolicy ErrorCode = "EPOLICY"
-	// ErrorCodeENotFound indicates resource not found.
-	ErrorCodeENotFound ErrorCode = "ENOTFOUND"
-	// ErrorCodeETimeout indicates operation timeout.
-	ErrorCodeETimeout ErrorCode = "ETIMEOUT"
-	// ErrorCodeESkillDown indicates skill unavailability.
-	ErrorCodeESkillDown ErrorCode = "ESKILLDOWN"
-	// ErrorCodeEParse indicates JSON parse or invalid UTF-8 errors.
-	ErrorCodeEParse ErrorCode = "EPARSE"
-	// ErrorCodeEEnvelope indicates invalid or malformed envelope.
-	ErrorCodeEEnvelope ErrorCode = "EENVELOPE"
-	// ErrorCodeEIO indicates filesystem or I/O errors.
-	ErrorCodeEIO ErrorCode = "EIO"
-	// ErrorCodeECanceled indicates job was canceled by user.
-	ErrorCodeECanceled ErrorCode = "ECANCELED"
-)
-
-// IsRetryable returns true if the error code indicates a transient failure
-// that may succeed on retry.
-func IsRetryable(code ErrorCode) bool {
-	switch code {
-	case ErrorCodeERuntime, ErrorCodeERateLimit, ErrorCodeETimeout:
-		return true
-	default:
-		return false
-	}
-}
 
 // Option is a function that modifies an envelope.
 type Option func(*envelope.Envelope)
@@ -113,11 +67,18 @@ func WithMemoryRef(ref *envelope.MemoryRef) Option {
 	}
 }
 
-// WithMeta applies a custom function to mutate the meta section.
-func WithMeta(fn func(*envelope.Meta)) Option {
+// WithMetaMutator applies a custom function to mutate the meta section.
+func WithMetaMutator(fn func(*envelope.Meta)) Option {
 	return func(env *envelope.Envelope) {
-		fn(&env.Meta)
+		if fn != nil {
+			fn(&env.Meta)
+		}
 	}
+}
+
+// WithMeta is kept for backward compatibility. Prefer WithMetaMutator.
+func WithMeta(fn func(*envelope.Meta)) Option {
+	return WithMetaMutator(fn)
 }
 
 // WithData replaces the data payload.
@@ -186,6 +147,10 @@ func Validate(env envelope.Envelope) error {
 		return fmt.Errorf("protocol: %w", err)
 	}
 
+	if err := validateMemoryMetadata(env); err != nil {
+		return fmt.Errorf("protocol: %w", err)
+	}
+
 	if err := validateErrorStatusCode(env); err != nil {
 		return fmt.Errorf("protocol: %w", err)
 	}
@@ -196,7 +161,10 @@ func Validate(env envelope.Envelope) error {
 // validateCASDigest ensures that if data contains an artifact field,
 // meta.cas_digest matches it.
 func validateCASDigest(env envelope.Envelope) error {
-	artifactStr, ok := extractArtifactValue(env.Data)
+	artifactStr, ok, err := extractArtifactValue(env.Data)
+	if err != nil {
+		return fmt.Errorf("extract artifact: %w", err)
+	}
 	if !ok {
 		return nil
 	}
@@ -218,20 +186,6 @@ func validateCASDigest(env envelope.Envelope) error {
 	return nil
 }
 
-func extractArtifactValue(data any) (string, bool) {
-	switch v := data.(type) {
-	case map[string]any:
-		if artifact, ok := v["artifact"].(string); ok && artifact != "" {
-			return artifact, true
-		}
-	case map[string]string:
-		if artifact, ok := v["artifact"]; ok && artifact != "" {
-			return artifact, true
-		}
-	}
-	return "", false
-}
-
 // validateCacheMetadata ensures cache-related metadata is consistent.
 func validateCacheMetadata(env envelope.Envelope) error {
 	// If source is cache, cache_key should be set
@@ -240,6 +194,97 @@ func validateCacheMetadata(env envelope.Envelope) error {
 	}
 
 	return nil
+}
+
+func validateMemoryMetadata(env envelope.Envelope) error {
+	if env.Meta.Source != "memory" {
+		return nil
+	}
+
+	if env.Meta.Memory == nil {
+		return fmt.Errorf("meta.source is 'memory' but meta.memory is nil")
+	}
+
+	if strings.TrimSpace(env.Meta.Memory.Name) == "" {
+		return fmt.Errorf("meta.source is 'memory' but meta.memory.name is empty")
+	}
+
+	if strings.TrimSpace(env.Meta.Memory.Type) == "" {
+		return fmt.Errorf("meta.source is 'memory' but meta.memory.type is empty")
+	}
+
+	return nil
+}
+
+func extractArtifactValue(data any) (string, bool, error) {
+	if data == nil {
+		return "", false, nil
+	}
+
+	if raw, ok := data.(json.RawMessage); ok {
+		if len(raw) == 0 {
+			return "", false, nil
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return "", false, fmt.Errorf("decode artifact raw message: %w", err)
+		}
+		if artifact, ok := decoded["artifact"].(string); ok && artifact != "" {
+			return artifact, true, nil
+		}
+		return "", false, nil
+	}
+
+	rv := reflect.ValueOf(data)
+	for rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return "", false, nil
+		}
+		rv = rv.Elem()
+	}
+
+	switch rv.Kind() {
+	case reflect.Pointer:
+		if rv.IsNil() {
+			return "", false, nil
+		}
+		return extractArtifactValue(rv.Elem().Interface())
+	case reflect.Map:
+		for _, key := range rv.MapKeys() {
+			if key.Kind() != reflect.String || key.String() != "artifact" {
+				continue
+			}
+			val := rv.MapIndex(key)
+			if !val.IsValid() {
+				return "", false, nil
+			}
+			if val.Kind() == reflect.Interface || val.Kind() == reflect.Pointer {
+				if val.IsNil() {
+					return "", false, nil
+				}
+				val = val.Elem()
+			}
+			if !val.CanInterface() {
+				continue
+			}
+			if artifact, ok := val.Interface().(string); ok && artifact != "" {
+				return artifact, true, nil
+			}
+			if raw, ok := val.Interface().(json.RawMessage); ok {
+				return extractArtifactValue(raw)
+			}
+		}
+	case reflect.Struct:
+		field := rv.FieldByName("Artifact")
+		if field.IsValid() && field.Kind() == reflect.String {
+			artifact := field.String()
+			if artifact != "" {
+				return artifact, true, nil
+			}
+		}
+	}
+
+	return "", false, nil
 }
 
 // validateErrorStatusCode checks if error envelopes have valid status codes
@@ -345,7 +390,13 @@ func Write(w io.Writer, env envelope.Envelope) error {
 	if err := Validate(env); err != nil {
 		return fmt.Errorf("write envelope (cmd=%s, status=%s): %w", env.Command, env.Status, err)
 	}
-	return envelope.Write(w, env)
+	return envelope.NewWriter(w).Write(env)
+}
+
+// MustWrite validates and writes an envelope, returning any encountered error.
+// It is a convenience alias for Write and exists to mirror future variations.
+func MustWrite(w io.Writer, env envelope.Envelope) error {
+	return Write(w, env)
 }
 
 // WriteOK builds, validates, and writes an OK envelope.

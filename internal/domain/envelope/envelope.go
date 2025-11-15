@@ -31,6 +31,8 @@ var (
 	ErrMissingCommand  = errors.New("envelope: missing command")
 	ErrMissingTS       = errors.New("envelope: missing timestamp")
 	ErrMissingErrCode  = errors.New("envelope: missing error.code")
+	ErrMissingErrMsg   = errors.New("envelope: missing error.message")
+	ErrInvalidTS       = errors.New("envelope: invalid timestamp")
 	ErrUnexpectedError = errors.New("envelope: unexpected error fields for ok status")
 )
 
@@ -144,9 +146,6 @@ func Error(command, code, message string, data any, opts ...Option) Envelope {
 }
 
 func applyMetaDefaults(env *Envelope) {
-	if strings.TrimSpace(env.Command) == "" {
-		env.Command = "unknown"
-	}
 	if env.Meta.TS == "" {
 		env.Meta.TS = now().Format(time.RFC3339)
 	}
@@ -169,11 +168,22 @@ func Validate(env Envelope) error {
 		if env.Error.Code == "" {
 			return fmt.Errorf("%w: %w", ErrValidation, ErrMissingErrCode)
 		}
+		if strings.TrimSpace(env.Error.Message) == "" {
+			return fmt.Errorf("%w: %w", ErrValidation, ErrMissingErrMsg)
+		}
 	default:
 		return fmt.Errorf("%w: %w", ErrValidation, ErrInvalidStatus)
 	}
-	if strings.TrimSpace(env.Meta.TS) == "" {
+	ts := strings.TrimSpace(env.Meta.TS)
+	if ts == "" {
 		return fmt.Errorf("%w: %w", ErrValidation, ErrMissingTS)
+	}
+	parsed, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrValidation, ErrInvalidTS)
+	}
+	if parsed.Location() != time.UTC {
+		return fmt.Errorf("%w: %w", ErrValidation, ErrInvalidTS)
 	}
 	return nil
 }
