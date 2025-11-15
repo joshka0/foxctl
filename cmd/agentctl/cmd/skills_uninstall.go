@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +37,7 @@ func newSkillsUninstallCommand() *cobra.Command {
 				"name": args[0],
 				"path": skillPath,
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.skills.uninstall", result))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.uninstall", result, protocol.WithSource("run"))
 		},
 	}
 	return cmd
