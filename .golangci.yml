@@ -3,12 +3,13 @@ run:
   tests: true
 linters:
   enable:
-    - govet
-    - staticcheck
     - gofmt
     - gofumpt
+    - govet
+    - staticcheck
     - revive
     - errcheck
+    - depguard
 issues:
   exclude-use-default: false
 
@@ -27,3 +28,26 @@ linters-settings:
         arguments:
           - "fmt.Printf"
           - "fmt.Println"
+
+  # Enforce layered architecture - prevent layer violations
+  depguard:
+    rules:
+      domain-no-deps:
+        files:
+          - "**/internal/domain/**/*.go"
+        deny:
+          - pkg: "github.com/jkatigb/agentctl/internal/storage"
+            desc: "domain layer must not depend on storage"
+          - pkg: "github.com/jkatigb/agentctl/internal/execution"
+            desc: "domain layer must not depend on execution"
+          - pkg: "github.com/jkatigb/agentctl/internal/platform"
+            desc: "domain layer must not depend on platform"
+          - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+            desc: "domain layer must not depend on adapters"
+
+      execution-limited-deps:
+        files:
+          - "**/internal/execution/**/*.go"
+        deny:
+          - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+            desc: "execution layer should not depend on adapters"

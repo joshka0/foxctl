@@ -113,16 +113,16 @@ Following these steps keeps every run deterministic and fully observable.
 
 ## 📚 Canonical Sources (Single Source of Truth)
 
-| Topic                              | Source                              |
-| ---------------------------------- | ----------------------------------- |
-| Envelope fields & rules            | `docs/spec/core_profile_v1.md` §2   |
-| Large result CAS rules + summaries | `docs/spec/core_profile_v1.md` §4   |
-| Cache key formula (RFC 8785)       | `docs/spec/core_profile_v1.md` §8.1 |
-| Job lifecycle & DB schema          | `docs/spec/core_profile_v1.md` §7   |
-| WASI vs exec runner rules          | `docs/spec/core_profile_v1.md` §10  |
-| OpenAPI generic skill              | `docs/spec/openapi_skill.md`        |
-| Plugin protocol (auth/pagination)  | `docs/spec/plugin_protocol.md`      |
-| Error codes table                  | `docs/spec/core_profile_v1.md` §13  |
+| Topic                              | Source                                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| Envelope fields & rules            | [`docs/spec/core_profile_v1.md`](docs/spec/core_profile_v1.md) §2      |
+| Large result CAS rules + summaries | [`docs/spec/core_profile_v1.md`](docs/spec/core_profile_v1.md) §4      |
+| Cache key formula (RFC 8785)       | [`docs/spec/core_profile_v1.md`](docs/spec/core_profile_v1.md) §8.1    |
+| Job lifecycle & DB schema          | [`docs/spec/core_profile_v1.md`](docs/spec/core_profile_v1.md) §7      |
+| WASI vs exec runner rules          | [`docs/spec/core_profile_v1.md`](docs/spec/core_profile_v1.md) §10     |
+| OpenAPI generic skill              | [`docs/spec/openapi_skill.md`](docs/spec/openapi_skill.md)             |
+| Plugin protocol (auth/pagination)  | [`docs/spec/plugin_protocol.md`](docs/spec/plugin_protocol.md)         |
+| Error codes table                  | [`docs/spec/core_profile_v1.md`](docs/spec/core_profile_v1.md) §13     |
 
 > If documents disagree, prefer the spec sections above. If still ambiguous, **ASK for human approval** in the PR.
 
