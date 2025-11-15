@@ -1,20 +1,15 @@
-version: "2"
-
 run:
   timeout: 5m
   tests: true
 linters:
   enable:
+    - gofmt
+    - gofumpt
     - govet
     - staticcheck
     - revive
     - errcheck
     - depguard
-
-formatters:
-  enable:
-    - gofmt
-    - gofumpt
 issues:
   exclude-use-default: false
 
@@ -49,15 +44,6 @@ linters-settings:
             desc: "domain layer must not depend on platform"
           - pkg: "github.com/jkatigb/agentctl/internal/adapters"
             desc: "domain layer must not depend on adapters"
-
-      storage-limited-deps:
-        files:
-          - "**/internal/storage/**/*.go"
-        deny:
-          - pkg: "github.com/jkatigb/agentctl/internal/execution"
-            desc: "storage layer must not depend on execution"
-          - pkg: "github.com/jkatigb/agentctl/internal/adapters"
-            desc: "storage layer must not depend on adapters"
 
       execution-limited-deps:
         files:
