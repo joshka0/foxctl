@@ -694,6 +694,27 @@ func TestValidateCASDigest(t *testing.T) {
 			t.Fatalf("validation should pass when no artifact field: %v", err)
 		}
 	})
+
+	t.Run("artifact map string string", func(t *testing.T) {
+		digest := "sha256:def456"
+		env := OK("test", map[string]string{
+			"artifact": digest,
+		}, WithCASDigest(digest))
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass for map[string]string artifact: %v", err)
+		}
+	})
+
+	t.Run("artifact map string string mismatch", func(t *testing.T) {
+		env := OK("test", map[string]string{
+			"artifact": "sha256:def456",
+		}, WithCASDigest("sha256:notmatch"))
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when map[string]string artifact mismatches cas_digest")
+		}
+	})
 }
 
 func TestValidateCacheMetadata(t *testing.T) {
@@ -781,6 +802,42 @@ func TestValidateErrorStatusCode(t *testing.T) {
 
 		if err := Validate(env); err != nil {
 			t.Fatalf("validation should pass for ok envelope: %v", err)
+		}
+	})
+
+	t.Run("http error data summary struct", func(t *testing.T) {
+		env := HTTPError("test", "bad gateway", HTTPErrorData{
+			Summary: HTTPSummary{
+				StatusCode: 502,
+			},
+		})
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass for HTTPErrorData summary: %v", err)
+		}
+	})
+
+	t.Run("http error data summary invalid", func(t *testing.T) {
+		env := HTTPError("test", "bad request", HTTPErrorData{
+			Summary: HTTPSummary{
+				StatusCode: 200,
+			},
+		})
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail for HTTPErrorData with 2xx status")
+		}
+	})
+
+	t.Run("summary map string string", func(t *testing.T) {
+		env := Error("test", ErrorCodeERuntime, "server error", map[string]any{
+			"summary": map[string]string{
+				"status_code": "503",
+			},
+		})
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass for summary map[string]string: %v", err)
 		}
 	})
 }

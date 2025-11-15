@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -195,23 +196,8 @@ func Validate(env envelope.Envelope) error {
 // validateCASDigest ensures that if data contains an artifact field,
 // meta.cas_digest matches it.
 func validateCASDigest(env envelope.Envelope) error {
-	if env.Data == nil {
-		return nil
-	}
-
-	// Try to extract artifact field from data
-	dataMap, ok := env.Data.(map[string]any)
+	artifactStr, ok := extractArtifactValue(env.Data)
 	if !ok {
-		return nil
-	}
-
-	artifact, hasArtifact := dataMap["artifact"]
-	if !hasArtifact {
-		return nil
-	}
-
-	artifactStr, ok := artifact.(string)
-	if !ok || artifactStr == "" {
 		return nil
 	}
 
@@ -232,6 +218,20 @@ func validateCASDigest(env envelope.Envelope) error {
 	return nil
 }
 
+func extractArtifactValue(data any) (string, bool) {
+	switch v := data.(type) {
+	case map[string]any:
+		if artifact, ok := v["artifact"].(string); ok && artifact != "" {
+			return artifact, true
+		}
+	case map[string]string:
+		if artifact, ok := v["artifact"]; ok && artifact != "" {
+			return artifact, true
+		}
+	}
+	return "", false
+}
+
 // validateCacheMetadata ensures cache-related metadata is consistent.
 func validateCacheMetadata(env envelope.Envelope) error {
 	// If source is cache, cache_key should be set
@@ -249,39 +249,9 @@ func validateErrorStatusCode(env envelope.Envelope) error {
 		return nil
 	}
 
-	if env.Data == nil {
-		return nil
-	}
-
-	dataMap, ok := env.Data.(map[string]any)
+	code, ok := extractStatusCode(env.Data)
 	if !ok {
 		return nil
-	}
-
-	summary, hasSummary := dataMap["summary"]
-	if !hasSummary {
-		return nil
-	}
-
-	summaryMap, ok := summary.(map[string]any)
-	if !ok {
-		return nil
-	}
-
-	statusCode, hasStatusCode := summaryMap["status_code"]
-	if !hasStatusCode {
-		return nil
-	}
-
-	// Check if status_code is a number
-	var code int
-	switch v := statusCode.(type) {
-	case int:
-		code = v
-	case float64:
-		code = int(v)
-	default:
-		return nil // Not a numeric status code, skip validation
 	}
 
 	// For error envelopes, status_code should be in error range (400-599)
@@ -290,6 +260,83 @@ func validateErrorStatusCode(env envelope.Envelope) error {
 	}
 
 	return nil
+}
+
+func extractStatusCode(data any) (int, bool) {
+	switch v := data.(type) {
+	case map[string]any:
+		return statusCodeFromSummary(v["summary"])
+	case map[string]string:
+		if summary, ok := v["summary"]; ok {
+			return parseStatusCodeValue(summary)
+		}
+	case ErrorData:
+		return statusCodeFromSummary(v.Summary)
+	case *ErrorData:
+		if v != nil {
+			return statusCodeFromSummary(v.Summary)
+		}
+	case HTTPErrorData:
+		return statusCodeFromSummary(v.Summary)
+	case *HTTPErrorData:
+		if v != nil {
+			return statusCodeFromSummary(v.Summary)
+		}
+	}
+	return 0, false
+}
+
+func statusCodeFromSummary(summary any) (int, bool) {
+	if summary == nil {
+		return 0, false
+	}
+
+	switch v := summary.(type) {
+	case map[string]any:
+		return parseStatusCodeValue(v["status_code"])
+	case map[string]string:
+		if value, ok := v["status_code"]; ok {
+			return parseStatusCodeValue(value)
+		}
+	case HTTPSummary:
+		return v.StatusCode, true
+	case *HTTPSummary:
+		if v != nil {
+			return v.StatusCode, true
+		}
+	}
+
+	return 0, false
+}
+
+func parseStatusCodeValue(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int32:
+		return int(v), true
+	case int64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return int(i), true
+		}
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0, false
+		}
+		if code, err := strconv.Atoi(s); err == nil {
+			return code, true
+		}
+	default:
+		return 0, false
+	}
+	return 0, false
 }
 
 // Write writes an envelope to w as JSON, ensuring validation passes.
