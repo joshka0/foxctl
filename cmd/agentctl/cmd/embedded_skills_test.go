@@ -41,6 +41,42 @@ func TestFindSkillInstallsEmbeddedWASI(t *testing.T) {
 	}
 }
 
+func TestFindSkillRepairsCorruptInstall(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := config.Config{
+		Home:           tmp,
+		InlineOutputKB: config.DefaultInlineOutputKB,
+		MaxCaptureKB:   config.DefaultMaxCaptureKB,
+		Paths: config.Paths{
+			CAS:    filepath.Join(tmp, "cas"),
+			Jobs:   filepath.Join(tmp, "jobs"),
+			Cache:  filepath.Join(tmp, "cache"),
+			Skills: filepath.Join(tmp, "skills"),
+		},
+	}
+
+	corruptDir := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("wasi/echo"))
+	if err := os.MkdirAll(corruptDir, 0o755); err != nil {
+		t.Fatalf("mkdir corrupt dir: %v", err)
+	}
+	copySkillFile(t,
+		filepath.Join(repoRoot(t), "skills", "wasi_echo", "skill.yaml"),
+		filepath.Join(corruptDir, "skill.yaml"),
+	)
+	// Intentionally omit module.wasm to simulate incomplete install.
+
+	handle, err := findSkill(cfg, "wasi/echo")
+	if err != nil {
+		t.Fatalf("find skill: %v", err)
+	}
+	if handle.Manifest.Metadata.Name != "wasi/echo" {
+		t.Fatalf("unexpected skill: %s", handle.Manifest.Metadata.Name)
+	}
+	if _, err := os.Stat(filepath.Join(corruptDir, "module.wasm")); err != nil {
+		t.Fatalf("module still missing: %v", err)
+	}
+}
+
 func TestLoadSkillDirRejectsWASINetwork(t *testing.T) {
 	dir := t.TempDir()
 	manifest := `

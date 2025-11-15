@@ -13,10 +13,10 @@ import (
 func TestResolver_Resolve_AbsolutePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "myskill")
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 
 	manifestPath := filepath.Join(skillDir, "skill.yaml")
-	require.NoError(t, os.WriteFile(manifestPath, []byte("name: myskill\n"), 0644))
+	require.NoError(t, os.WriteFile(manifestPath, []byte("name: myskill\n"), 0o644))
 
 	resolver := NewResolver()
 
@@ -31,10 +31,10 @@ func TestResolver_Resolve_AbsolutePath(t *testing.T) {
 func TestResolver_Resolve_AbsolutePathToManifest(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "myskill")
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 
 	manifestPath := filepath.Join(skillDir, "skill.yaml")
-	require.NoError(t, os.WriteFile(manifestPath, []byte("name: myskill\n"), 0644))
+	require.NoError(t, os.WriteFile(manifestPath, []byte("name: myskill\n"), 0o644))
 
 	resolver := NewResolver()
 
@@ -50,15 +50,18 @@ func TestResolver_Resolve_AbsolutePathToManifest(t *testing.T) {
 func TestResolver_Resolve_RelativePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "myskill")
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 
 	manifestPath := filepath.Join(skillDir, "skill.yaml")
-	require.NoError(t, os.WriteFile(manifestPath, []byte("name: myskill\n"), 0644))
+	require.NoError(t, os.WriteFile(manifestPath, []byte("name: myskill\n"), 0o644))
 
 	// Change to tmpDir so relative path works
 	oldWd, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(oldWd)
+	defer func() {
+		err := os.Chdir(oldWd)
+		require.NoError(t, err)
+	}()
 	require.NoError(t, os.Chdir(tmpDir))
 
 	resolver := NewResolver()
@@ -74,8 +77,8 @@ func TestResolver_Resolve_RelativePath(t *testing.T) {
 func TestResolver_Resolve_FromSearchPaths(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "echo")
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte("name: echo\n"), 0644))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte("name: echo\n"), 0o644))
 
 	resolver := NewResolver(WithSearchPaths(tmpDir))
 
@@ -90,8 +93,8 @@ func TestResolver_Resolve_NormalizedName(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Create skill directory with normalized name
 	skillDir := filepath.Join(tmpDir, "text_grep")
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte("name: text/grep\n"), 0644))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte("name: text/grep\n"), 0o644))
 
 	resolver := NewResolver(WithSearchPaths(tmpDir))
 
@@ -116,7 +119,7 @@ func TestResolver_Resolve_NotFound(t *testing.T) {
 func TestResolver_Resolve_ManifestNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "broken")
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	// Don't create skill.yaml
 
 	resolver := NewResolver()
@@ -192,7 +195,7 @@ func TestResolver_List_IgnoresFiles(t *testing.T) {
 	createSkill(t, tmpDir, "valid_skill")
 
 	// Create a file (not a directory) - should be ignored
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "not_a_skill.txt"), []byte("test"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "not_a_skill.txt"), []byte("test"), 0o644))
 
 	resolver := NewResolver(WithSearchPaths(tmpDir))
 
@@ -210,7 +213,7 @@ func TestResolver_List_IgnoresDirectoriesWithoutManifest(t *testing.T) {
 	createSkill(t, tmpDir, "valid_skill")
 
 	// Create a directory without skill.yaml
-	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "invalid_skill"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "invalid_skill"), 0o755))
 
 	resolver := NewResolver(WithSearchPaths(tmpDir))
 
@@ -332,10 +335,10 @@ func TestResolver_isPath(t *testing.T) {
 func createSkill(t *testing.T, base, name string) {
 	t.Helper()
 	skillDir := filepath.Join(base, name)
-	require.NoError(t, os.MkdirAll(skillDir, 0755))
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(skillDir, "skill.yaml"),
 		[]byte(fmt.Sprintf("name: %s\n", name)),
-		0644,
+		0o644,
 	))
 }
