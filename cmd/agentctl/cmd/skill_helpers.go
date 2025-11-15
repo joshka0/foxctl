@@ -84,17 +84,15 @@ func extractEnvelopeData(r io.Reader) ([]byte, error) {
 }
 
 func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
-	paths := []string{
-		filepath.Join(cfg.Paths.Skills, requested),
-		filepath.Join("dist", "skills", normalizeSkillName(requested)),
-		filepath.Join("skills", normalizeSkillName(requested)),
+	// Use the Resolver to find the skill
+	resolver := createSkillResolver(cfg)
+	handle, err := resolver.Resolve(requested)
+	if err == nil {
+		// Found via resolver, now load the full skill directory
+		return loadSkillDir(filepath.Dir(handle.ManifestPath))
 	}
-	for _, dir := range paths {
-		handle, err := loadSkillDir(dir)
-		if err == nil && handle.ArtifactPath != "" {
-			return handle, nil
-		}
-	}
+
+	// Not found via resolver, try to install embedded skill
 	if installed, err := installEmbeddedSkill(cfg, requested); err == nil {
 		if installed {
 			return findSkill(cfg, requested)
@@ -103,6 +101,22 @@ func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
 		return SkillHandle{}, err
 	}
 	return SkillHandle{}, fmt.Errorf("skill %s not found; run make skills-build or agentctl skills install", requested)
+}
+
+// createSkillResolver creates a resolver with paths from config.
+func createSkillResolver(cfg config.Config) *skill.Resolver {
+	// Build search paths from config
+	searchPaths := []string{cfg.Paths.Skills}
+
+	// Add current directory development paths
+	if pwd, err := os.Getwd(); err == nil {
+		searchPaths = append(searchPaths,
+			filepath.Join(pwd, "dist", "skills"),
+			filepath.Join(pwd, "skills"),
+		)
+	}
+
+	return skill.NewResolver(skill.WithSearchPaths(searchPaths...))
 }
 
 func loadSkillDir(dir string) (SkillHandle, error) {
@@ -150,12 +164,6 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 		ManifestPath: manifestPath,
 		ArtifactPath: artifact,
 	}, nil
-}
-
-func normalizeSkillName(name string) string {
-	n := strings.ReplaceAll(name, "/", "_")
-	n = strings.ReplaceAll(n, "-", "_")
-	return n
 }
 
 func executeSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
