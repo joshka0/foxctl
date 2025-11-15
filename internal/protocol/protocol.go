@@ -442,11 +442,11 @@ type ValidationErrorData struct {
 
 // HTTPErrorData represents data for HTTP-related errors.
 type HTTPErrorData struct {
-	Summary    HTTPSummary    `json:"summary"`
-	Body       any            `json:"body,omitempty"`
-	Hint       string         `json:"hint,omitempty"`
-	RequestID  string         `json:"request_id,omitempty"`
-	RetryAfter string         `json:"retry_after,omitempty"`
+	Summary    HTTPSummary `json:"summary"`
+	Body       any         `json:"body,omitempty"`
+	Hint       string      `json:"hint,omitempty"`
+	RequestID  string      `json:"request_id,omitempty"`
+	RetryAfter string      `json:"retry_after,omitempty"`
 }
 
 // HTTPSummary contains HTTP response summary information.

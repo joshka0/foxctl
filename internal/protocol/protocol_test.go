@@ -399,18 +399,18 @@ func TestSummarizeForMemory(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "with workspace",
-			env: OK("fs/read", nil, WithWorkspace("/home/user/project")),
+			name:     "with workspace",
+			env:      OK("fs/read", nil, WithWorkspace("/home/user/project")),
 			expected: "fs/read (project)",
 		},
 		{
-			name: "without workspace",
-			env: OK("http/get", nil),
+			name:     "without workspace",
+			env:      OK("http/get", nil),
 			expected: "http/get",
 		},
 		{
-			name: "with nested workspace path",
-			env: OK("text/grep", nil, WithWorkspace("/home/user/repos/myapp/src")),
+			name:     "with nested workspace path",
+			env:      OK("text/grep", nil, WithWorkspace("/home/user/repos/myapp/src")),
 			expected: "text/grep (src)",
 		},
 	}
