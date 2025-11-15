@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 // Installer manages skill installation and removal.
@@ -89,7 +87,10 @@ func (i *Installer) Install(ctx context.Context, opts InstallOptions) (Handle, e
 	// Copy distribution artifacts
 	if err := i.writeDistributionArtifacts(destDir, manifest, opts); err != nil {
 		// Clean up on failure
-		_ = os.RemoveAll(destDir)
+		cleanupErr := os.RemoveAll(destDir)
+		if cleanupErr != nil {
+			return Handle{}, fmt.Errorf("write distribution artifacts: %w (cleanup failed: %v)", err, cleanupErr)
+		}
 		return Handle{}, fmt.Errorf("write distribution artifacts: %w", err)
 	}
 
@@ -215,13 +216,15 @@ func (i *Installer) resolveArtifactPath(destDir string, manifest Manifest) (stri
 }
 
 // copyFile copies a file from src to dst, preserving permissions.
-func copyFile(src, dst string) error {
+func copyFile(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
 	}
 	defer func() {
-		errs.Ignore(in.Close(), "close source file")
+		if cerr := in.Close(); err == nil && cerr != nil {
+			err = fmt.Errorf("close source: %w", cerr)
+		}
 	}()
 
 	info, err := in.Stat()
@@ -234,7 +237,9 @@ func copyFile(src, dst string) error {
 		return fmt.Errorf("create destination: %w", err)
 	}
 	defer func() {
-		errs.Ignore(out.Close(), "close destination file")
+		if cerr := out.Close(); err == nil && cerr != nil {
+			err = fmt.Errorf("close destination: %w", cerr)
+		}
 	}()
 
 	if _, err := io.Copy(out, in); err != nil {

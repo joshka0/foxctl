@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"path/filepath"
+
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -42,7 +44,7 @@ func newSkillsInstallCommand() *cobra.Command {
 			result := map[string]any{
 				"name":    handle.Name,
 				"version": manifest.Metadata.Version,
-				"path":    handle.ArtifactPath,
+				"path":    filepath.Dir(handle.ManifestPath),
 			}
 			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.install", result, protocol.WithSource("run"))
 		},
