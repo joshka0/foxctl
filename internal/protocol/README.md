@@ -218,7 +218,7 @@ protocol.MustValidate(env)
 
 The `Validate` function performs these protocol-level checks:
 
-**1. CAS Digest Matching**
+#### 1. CAS Digest Matching
 - If `data.artifact` exists, `meta.cas_digest` must match
 - Artifact field must use `sha256:` prefix
 ```go
@@ -233,7 +233,7 @@ env := protocol.OK("cmd", map[string]any{
 }, protocol.WithCASDigest("sha256:different"))
 ```
 
-**2. Cache Metadata Consistency**
+#### 2. Cache Metadata Consistency
 - If `meta.source == "cache"`, `meta.cache_key` must be set
 ```go
 // Valid
@@ -246,7 +246,7 @@ env := protocol.OK("cmd", nil,
 env := protocol.OK("cmd", nil, protocol.WithSource("cache"))
 ```
 
-**3. Error Status Code Validation**
+#### 3. Error Status Code Validation
 - Error envelopes with `data.summary.status_code` must have codes in 400-599 range
 ```go
 // Valid
