@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"path/filepath"
+
+	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
@@ -10,6 +13,8 @@ func newSkillsInstallCommand() *cobra.Command {
 	var manifestPath string
 	var binaryPath string
 	var modulePath string
+	var force bool
+
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install a skill manifest and binary",
@@ -18,31 +23,37 @@ func newSkillsInstallCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			manifest, err := loadValidatedManifest(manifestPath)
+
+			installer := skill.NewInstaller(cfg.Paths.Skills)
+			handle, err := installer.Install(cmd.Context(), skill.InstallOptions{
+				ManifestPath: manifestPath,
+				BinaryPath:   binaryPath,
+				ModulePath:   modulePath,
+				Force:        force,
+			})
 			if err != nil {
 				return err
 			}
-			dest, err := ensureSkillDir(cfg.Paths.Skills, manifest)
+
+			// Load manifest to get version for output
+			manifest, err := skill.LoadManifest(handle.ManifestPath)
 			if err != nil {
 				return err
 			}
-			if err := writeManifest(dest, manifestPath); err != nil {
-				return err
-			}
-			if err := writeDistributionArtifacts(dest, manifest, binaryPath, modulePath); err != nil {
-				return err
-			}
+
 			result := map[string]any{
-				"name":    manifest.Metadata.Name,
+				"name":    handle.Name,
 				"version": manifest.Metadata.Version,
-				"path":    dest,
+				"path":    filepath.Dir(handle.ManifestPath),
 			}
 			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.install", result, protocol.WithSource("run"))
 		},
 	}
+
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to skill.yaml")
 	cmd.Flags().StringVar(&binaryPath, "binary", "", "Path to skill binary")
 	cmd.Flags().StringVar(&modulePath, "module", "", "Path to WASM module (for wasi skills)")
+	cmd.Flags().BoolVar(&force, "force", false, "Force reinstall if skill already exists")
 	if err := cmd.MarkFlagRequired("manifest"); err != nil {
 		panic(err)
 	}

@@ -46,11 +46,9 @@ func (v *Validator) ValidateNetworkAccess(host string, port int) error {
 }
 
 // ValidateWASIPolicy ensures WASI skills have network set to "none".
+// This is a convenience wrapper around skill.ValidateWASIPolicy.
 func ValidateWASIPolicy(m skill.Manifest) error {
-	if m.Distribution.Type == "wasi" && m.Capabilities.Network != "none" {
-		return fmt.Errorf("WASI skills must have capabilities.network set to 'none', got %q", m.Capabilities.Network)
-	}
-	return nil
+	return skill.ValidateWASIPolicy(m)
 }
 
 // matchesEgressPattern checks if a host:port matches an egress pattern.
@@ -155,20 +153,10 @@ func (v *Validator) ValidateFilesystemAccess(requestedPath, workDir string) erro
 	return fmt.Errorf("filesystem access denied: %q not allowed by manifest", requestedPath)
 }
 
-// ValidateFilesystemCapabilities checks that the manifest's filesystem capabilities are valid.
+// ValidateFilesystemCapabilities checks that filesystem capabilities are valid.
+// This is a convenience wrapper around skill.ValidateFilesystemCapabilities.
 func ValidateFilesystemCapabilities(m skill.Manifest) error {
-	for _, fs := range m.Capabilities.Filesystem {
-		switch fs.Type {
-		case "workdir":
-			// Valid
-		case "home", "tmp":
-			// Future capabilities - warn but don't error
-			// Could add warning logging here
-		default:
-			return fmt.Errorf("unknown filesystem capability type: %q", fs.Type)
-		}
-	}
-	return nil
+	return skill.ValidateFilesystemCapabilities(m)
 }
 
 // isWithinWorkdir checks if a path is within the workdir.
