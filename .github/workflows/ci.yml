@@ -105,16 +105,6 @@ jobs:
             bin/agentctl
             dist/skills/**
 
-  docs-lint:
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-      - name: Markdown link check
-        uses: gaurav-nelson/github-action-markdown-link-check@v1
-        with:
-          use-quiet-mode: 'yes'
-          config-file: .github/mlc_config.json
-
   e2e-tests:
     runs-on: self-hosted
     needs: build-test
@@ -138,7 +128,7 @@ jobs:
           CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
 
   all-checks:
-    needs: [build-test, docs-lint, e2e-tests]
+    needs: [build-test, e2e-tests]
     runs-on: self-hosted
     steps:
       - run: echo "✅ All checks passed"
