@@ -34,7 +34,7 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 		return false, err
 	}
 	if ok {
-		hit, err := cache.AnnotateHit(entry.Result, entry.CacheKey, e.options.Workspace, e.handle.Manifest.Metadata.Version)
+		hit, err := cache.AnnotateHitBytes(entry.Result, entry.CacheKey, e.options.Workspace, e.handle.Manifest.Metadata.Version)
 		if err != nil {
 			return false, err
 		}

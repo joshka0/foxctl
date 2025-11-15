@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +21,7 @@ func newDoctorCommand() *cobra.Command {
 			data := map[string]any{
 				"config": cfg,
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.doctor", data))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.doctor", data, protocol.WithSource("run"))
 		},
 	}
 

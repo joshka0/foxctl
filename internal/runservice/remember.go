@@ -2,14 +2,12 @@ package runservice
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
@@ -62,12 +60,5 @@ func rememberResult(ctx context.Context, cfg config.Config, opts RememberOptions
 }
 
 func summarizeResult(result []byte) string {
-	var env envelope.Envelope
-	if err := json.Unmarshal(result, &env); err == nil {
-		if env.Meta.Workspace != "" {
-			return fmt.Sprintf("%s (%s)", env.Command, filepath.Base(env.Meta.Workspace))
-		}
-		return env.Command
-	}
-	return ""
+	return protocol.SummarizeForMemoryBytes(result)
 }

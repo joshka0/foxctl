@@ -3,9 +3,9 @@ package cmd
 import (
 	"os"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ func newSkillsListCommand() *cobra.Command {
 			if err != nil && !os.IsNotExist(err) {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.skills.list", map[string]any{"skills": summarizeSkills(manifests)}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.list", map[string]any{"skills": summarizeSkills(manifests)}, protocol.WithSource("run"))
 		},
 	}
 	return cmd
