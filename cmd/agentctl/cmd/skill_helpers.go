@@ -84,25 +84,48 @@ func extractEnvelopeData(r io.Reader) ([]byte, error) {
 }
 
 func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
-	paths := []string{
-		filepath.Join(cfg.Paths.Skills, requested),
-		filepath.Join("dist", "skills", normalizeSkillName(requested)),
-		filepath.Join("skills", normalizeSkillName(requested)),
-	}
-	for _, dir := range paths {
-		handle, err := loadSkillDir(dir)
-		if err == nil && handle.ArtifactPath != "" {
-			return handle, nil
+	// Use the Resolver to find the skill
+	resolver := createSkillResolver(cfg)
+	var firstErr error
+	var allowReinstall bool
+	handle, err := resolver.Resolve(requested)
+	if err == nil {
+		if result, ok := loadResolvedSkill(handle, cfg.Paths.Skills, &firstErr, &allowReinstall); ok {
+			return result, nil
+		}
+		if result, ok := resolveAlternateSkill(resolver, requested, handle, &firstErr); ok {
+			return result, nil
 		}
 	}
-	if installed, err := installEmbeddedSkill(cfg, requested); err == nil {
+
+	// Not found via resolver, try to install embedded skill
+	if installed, err := installEmbeddedSkill(cfg, requested, allowReinstall); err == nil {
 		if installed {
 			return findSkill(cfg, requested)
 		}
 	} else if !errors.Is(err, errUnknownEmbeddedSkill) {
 		return SkillHandle{}, err
 	}
+	if firstErr != nil {
+		return SkillHandle{}, firstErr
+	}
 	return SkillHandle{}, fmt.Errorf("skill %s not found; run make skills-build or agentctl skills install", requested)
+}
+
+// createSkillResolver creates a resolver with paths from config.
+func createSkillResolver(cfg config.Config) *skill.Resolver {
+	// Build search paths from config
+	searchPaths := []string{cfg.Paths.Skills}
+
+	// Add current directory development paths
+	if pwd, err := os.Getwd(); err == nil {
+		searchPaths = append(searchPaths,
+			filepath.Join(pwd, "dist", "skills"),
+			filepath.Join(pwd, "skills"),
+		)
+	}
+
+	return skill.NewResolver(skill.WithSearchPaths(searchPaths...))
 }
 
 func loadSkillDir(dir string) (SkillHandle, error) {
@@ -152,16 +175,79 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 	}, nil
 }
 
-func normalizeSkillName(name string) string {
-	n := strings.ReplaceAll(name, "/", "_")
-	n = strings.ReplaceAll(n, "-", "_")
-	return n
-}
-
 func executeSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) ([]byte, []byte, error) {
 	return runner.RunWithOptions(ctx, runner.RunOptions{
 		Manifest:     manifest,
 		ArtifactPath: artifactPath,
 		Input:        input,
 	})
+}
+
+func loadResolvedSkill(handle skill.Handle, skillsRoot string, firstErr *error, allowReinstall *bool) (SkillHandle, bool) {
+	dir := filepath.Dir(handle.ManifestPath)
+	result, err := loadSkillDir(dir)
+	if err == nil {
+		return result, true
+	}
+	if allowReinstall != nil && skillsRoot != "" && withinDir(skillsRoot, dir) {
+		*allowReinstall = true
+	}
+	if firstErr != nil && *firstErr == nil {
+		*firstErr = err
+	}
+	return SkillHandle{}, false
+}
+
+func resolveAlternateSkill(resolver *skill.Resolver, requested string, failed skill.Handle, firstErr *error) (SkillHandle, bool) {
+	searchPaths := resolver.SearchPaths()
+	candidates := []string{requested}
+	if norm := normalizeSkillCandidate(requested); norm != requested {
+		candidates = append(candidates, norm)
+	}
+	skipSource := filepath.Clean(failed.Source)
+	skipDir := filepath.Clean(filepath.Dir(failed.ManifestPath))
+	for _, base := range searchPaths {
+		if base == "" {
+			continue
+		}
+		base = filepath.Clean(base)
+		if skipSource != "" && base == skipSource {
+			continue
+		}
+		for _, candidate := range candidates {
+			dir := filepath.Join(base, filepath.FromSlash(candidate))
+			if skipDir != "" && filepath.Clean(dir) == skipDir {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, "skill.yaml")); err != nil {
+				continue
+			}
+			result, err := loadSkillDir(dir)
+			if err == nil {
+				return result, true
+			}
+			if firstErr != nil && *firstErr == nil {
+				*firstErr = err
+			}
+		}
+	}
+	return SkillHandle{}, false
+}
+
+func normalizeSkillCandidate(name string) string {
+	name = strings.ReplaceAll(name, "/", "_")
+	return strings.ReplaceAll(name, "-", "_")
+}
+
+func withinDir(root, target string) bool {
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return !strings.HasPrefix(rel, "..")
 }
