@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/spf13/cobra"
@@ -76,7 +76,7 @@ func newCASPutCommand() *cobra.Command {
 					return err
 				}
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.put", obj))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.put", obj, protocol.WithSource("run"))
 		},
 	}
 	cmd.Flags().StringVar(&kind, "kind", "application/octet-stream", "MIME type for the stored object")
@@ -99,7 +99,7 @@ func newCASHeadCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.head", obj))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.head", obj, protocol.WithSource("run"))
 		},
 	}
 	return cmd
@@ -149,7 +149,7 @@ func newCASGetCommand() *cobra.Command {
 				"size_bytes": meta.Size,
 				"output":     dest,
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.get", data))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.get", data, protocol.WithSource("run"))
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "File to write (default: <digest hex>)")
@@ -169,7 +169,7 @@ func newCASListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.list", map[string]any{"objects": objects}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.list", map[string]any{"objects": objects}, protocol.WithSource("run"))
 		},
 	}
 	return cmd
@@ -188,7 +188,7 @@ func newCASPinCommand() *cobra.Command {
 			if err := store.Pin(cmd.Context(), args[0]); err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.pin", map[string]string{"digest": args[0]}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.pin", map[string]string{"digest": args[0]}, protocol.WithSource("run"))
 		},
 	}
 	return cmd
@@ -207,7 +207,7 @@ func newCASUnpinCommand() *cobra.Command {
 			if err := store.Unpin(cmd.Context(), args[0]); err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.unpin", map[string]string{"digest": args[0]}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.unpin", map[string]string{"digest": args[0]}, protocol.WithSource("run"))
 		},
 	}
 	return cmd
@@ -234,7 +234,7 @@ func newCASRemoveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.rm", map[string]string{"digest": args[0]}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.rm", map[string]string{"digest": args[0]}, protocol.WithSource("run"))
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Allow deletion of pinned objects")
@@ -276,7 +276,7 @@ func newCASGCCommand() *cobra.Command {
 				"bytes_freed":     result.BytesFreed,
 				"errors":          result.Errors,
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.cas.gc", data))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.gc", data, protocol.WithSource("run"))
 		},
 	}
 	cmd.Flags().DurationVar(&olderThan, "older-than", 72*time.Hour, "Only delete objects older than this duration (e.g. 24h)")

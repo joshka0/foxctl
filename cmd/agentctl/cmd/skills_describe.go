@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +37,7 @@ func newSkillsDescribeCommand() *cobra.Command {
 					"pure":        m.Capabilities.Pure,
 				},
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.skills.describe", details))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.describe", details, protocol.WithSource("run"))
 		},
 	}
 	return cmd

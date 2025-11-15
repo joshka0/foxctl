@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +37,7 @@ func newSkillsInstallCommand() *cobra.Command {
 				"version": manifest.Metadata.Version,
 				"path":    dest,
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.skills.install", result))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.install", result, protocol.WithSource("run"))
 		},
 	}
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "Path to skill.yaml")

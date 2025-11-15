@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
 	"github.com/spf13/cobra"
@@ -54,7 +54,7 @@ func newJobsSubmitCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.jobs.submit", job))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.jobs.submit", job, protocol.WithSource("run"))
 		},
 	}
 	cmd.Flags().StringVar(&message, "message", "hello world", "Message to echo")
@@ -76,7 +76,7 @@ func newJobsListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.jobs.list", map[string]any{"jobs": jobsList}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.jobs.list", map[string]any{"jobs": jobsList}, protocol.WithSource("run"))
 		},
 	}
 	return cmd
@@ -98,7 +98,7 @@ func newJobsStatusCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.jobs.status", job))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.jobs.status", job, protocol.WithSource("run"))
 		},
 	}
 	return cmd
@@ -226,7 +226,7 @@ func newJobsWaitCommand() *cobra.Command {
 				return nil
 			}
 
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.jobs.wait", job))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.jobs.wait", job, protocol.WithSource("run"))
 		},
 	}
 	cmd.Flags().BoolVar(&showResult, "result", false, "Show result after completion")
@@ -248,7 +248,7 @@ func newJobsCancelCommand() *cobra.Command {
 			if err := store.Cancel(cmd.Context(), args[0]); err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.jobs.cancel", map[string]string{"id": args[0]}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.jobs.cancel", map[string]string{"id": args[0]}, protocol.WithSource("run"))
 		},
 	}
 	return cmd
@@ -278,7 +278,7 @@ func newJobsRemoveCommand() *cobra.Command {
 			if err := store.Delete(cmd.Context(), args[0]); err != nil {
 				return err
 			}
-			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.jobs.rm", map[string]string{"id": args[0]}))
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.jobs.rm", map[string]string{"id": args[0]}, protocol.WithSource("run"))
 		},
 	}
 	return cmd

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
@@ -64,7 +64,7 @@ func WithMemoryStore(ctx context.Context, cfg config.Config, fn func(storage.Mem
 
 // WriteOK renders a success envelope with the provided command name and payload.
 func WriteOK(out io.Writer, command string, data any) error {
-	return envelope.Write(out, envelope.OK(command, data))
+	return protocol.WriteOK(out, command, data, protocol.WithSource("run"))
 }
 
 // WriteEnvelope writes a serialized JSON envelope to the output, ensuring it is newline terminated.

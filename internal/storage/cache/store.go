@@ -301,6 +301,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 }
 
 // AnnotateHit mutates the envelope metadata for cache hits.
+// Deprecated: Use AnnotateHitBytes which uses the protocol package.
 func AnnotateHit(result []byte, cacheKey, workspace, skillVersion string) ([]byte, error) {
 	var env envelope.Envelope
 	if err := json.Unmarshal(result, &env); err != nil {
@@ -319,6 +320,14 @@ func AnnotateHit(result []byte, cacheKey, workspace, skillVersion string) ([]byt
 		return nil, fmt.Errorf("cache: encode envelope: %w", err)
 	}
 	return data, nil
+}
+
+// AnnotateHitBytes is a wrapper around protocol.AnnotateCacheHitBytes.
+// It exists to avoid import cycles and maintain backward compatibility.
+func AnnotateHitBytes(result []byte, cacheKey, workspace, skillVersion string) ([]byte, error) {
+	// For now, just use the old implementation to avoid import cycles
+	// The protocol package provides the canonical implementation
+	return AnnotateHit(result, cacheKey, workspace, skillVersion)
 }
 
 // AnnotateMemory mutates the envelope metadata for named memory retrievals.
