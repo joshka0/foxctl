@@ -178,9 +178,9 @@ func main() {}`)
 	}
 	_, _, err := runner.Run(context.Background(), []byte{})
 	if err == nil {
-		t.Fatal("expected network policy error, got nil")
+		t.Fatal("expected network capability error, got nil")
 	}
-	if !strings.Contains(err.Error(), "network policy") {
-		t.Fatalf("expected network policy error, got: %v", err)
+	if !strings.Contains(err.Error(), "network capability") {
+		t.Fatalf("expected network capability error, got: %v", err)
 	}
 }

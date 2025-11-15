@@ -42,7 +42,7 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("runner: manifest distribution %s not exec", r.Manifest.Distribution.Type)
 	}
 	if r.Manifest.Capabilities.Network != "" && r.Manifest.Capabilities.Network != "none" {
-		return nil, nil, fmt.Errorf("runner: network policy %s not supported", r.Manifest.Capabilities.Network)
+		return nil, nil, fmt.Errorf("exec runner only supports network capability \"none\" (got %q)", r.Manifest.Capabilities.Network)
 	}
 
 	// Apply timeout only if explicitly set

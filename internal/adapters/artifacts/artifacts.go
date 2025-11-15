@@ -1,7 +1,10 @@
 // Package artifacts extracts CAS digests from envelopes.
 package artifacts
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Digests parses an envelope JSON document and returns any sha256 digests
 // referenced via data.artifact or data.artifacts[].
@@ -30,5 +33,5 @@ func Digests(result []byte) []string {
 }
 
 func isDigest(s string) bool {
-	return len(s) > 7 && s[:7] == "sha256:"
+	return strings.HasPrefix(s, "sha256:")
 }

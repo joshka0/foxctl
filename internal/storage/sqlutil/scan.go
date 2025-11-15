@@ -5,6 +5,7 @@ package sqlutil
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -89,7 +90,7 @@ func (s *ScanRow) Err() error {
 
 // NoRows returns true if the error is sql.ErrNoRows.
 func (s *ScanRow) NoRows() bool {
-	return s.err == sql.ErrNoRows
+	return errors.Is(s.err, sql.ErrNoRows)
 }
 
 // NewScanRow creates a ScanRow wrapper for error-handling convenience.

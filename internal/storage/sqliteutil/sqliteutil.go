@@ -32,6 +32,14 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		errs.Ignore(db.Close(), "close sqlite db after WAL failure")
 		return nil, fmt.Errorf("sqliteutil: enable wal: %w", err)
 	}
+	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=5000;`); err != nil {
+		errs.Ignore(db.Close(), "close sqlite db after busy_timeout failure")
+		return nil, fmt.Errorf("sqliteutil: set busy_timeout: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON;`); err != nil {
+		errs.Ignore(db.Close(), "close sqlite db after foreign_keys failure")
+		return nil, fmt.Errorf("sqliteutil: enable foreign_keys: %w", err)
+	}
 	if migrate != nil {
 		if err := migrate(ctx, db); err != nil {
 			errs.Ignore(db.Close(), "close sqlite db after migrate failure")

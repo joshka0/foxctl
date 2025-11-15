@@ -27,6 +27,12 @@ func handleArtifacts(ctx context.Context, cfg config.Config, jobID string, resul
 		return nil
 	}
 
+	// Ensure the job directory exists before writing artifacts.json
+	jobDir := filepath.Join(cfg.Paths.Jobs, jobID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		return fmt.Errorf("prepare job dir: %w", err)
+	}
+
 	meta := map[string]any{"digests": digests}
 	buf, err := json.Marshal(meta)
 	if err != nil {

@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )
@@ -19,18 +19,25 @@ func newSkillsUninstallCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			handle, err := findSkill(cfg, args[0])
+			// Resolve skill directory path without requiring a valid manifest
+			// This allows uninstalling corrupted or partially installed skills
+			skillPath, err := skillDirPath(cfg.Paths.Skills, args[0])
 			if err != nil {
 				return err
 			}
-			skillPath := filepath.Dir(handle.ManifestPath)
+			if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+				return fmt.Errorf("skill %s is not installed", args[0])
+			} else if err != nil {
+				return fmt.Errorf("failed to check skill directory: %w", err)
+			}
 			if err := os.RemoveAll(skillPath); err != nil {
 				return fmt.Errorf("failed to uninstall skill: %w", err)
 			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "uninstalled %s\n", args[0]); err != nil {
-				return err
+			result := map[string]any{
+				"name": args[0],
+				"path": skillPath,
 			}
-			return nil
+			return envelope.Write(cmd.OutOrStdout(), envelope.OK("agentctl.skills.uninstall", result))
 		},
 	}
 	return cmd

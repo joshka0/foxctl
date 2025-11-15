@@ -222,13 +222,15 @@ func (s *Store) TailProgress(ctx context.Context, jobID string, follow bool, w i
 }
 
 // WaitForCompletion blocks until the job reaches a terminal state.
+// Uses exponential backoff to reduce database churn on long-running jobs.
 func (s *Store) WaitForCompletion(ctx context.Context, jobID string, pollInterval time.Duration) (Job, error) {
 	if pollInterval <= 0 {
 		pollInterval = 500 * time.Millisecond
 	}
 
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
+	currentInterval := pollInterval
+	const maxInterval = 10 * time.Second
+	const backoffMultiplier = 1.5
 
 	for {
 		job, err := s.persist.Get(ctx, jobID)
@@ -241,10 +243,17 @@ func (s *Store) WaitForCompletion(ctx context.Context, jobID string, pollInterva
 			return job, nil
 		}
 
+		timer := time.NewTimer(currentInterval)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return Job{}, ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
+			// Exponential backoff: increase interval for next iteration
+			currentInterval = time.Duration(float64(currentInterval) * backoffMultiplier)
+			if currentInterval > maxInterval {
+				currentInterval = maxInterval
+			}
 		}
 	}
 }

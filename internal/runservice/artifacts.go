@@ -9,6 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 )
 
@@ -17,6 +18,8 @@ func (e *Executor) handleArtifacts(jobID string, result []byte) error {
 	if err != nil {
 		return err
 	}
+	defer errs.Ignore(casStore.Close(), "close cas store")
+
 	mgr := artifacts.NewManager(casStore)
 	digests, err := mgr.PinFromEnvelope(e.ctx, result)
 	if err != nil {
@@ -25,12 +28,22 @@ func (e *Executor) handleArtifacts(jobID string, result []byte) error {
 	if len(digests) == 0 {
 		return nil
 	}
+
+	// Ensure job directory exists before writing artifacts.json
+	out := artifactFile(e.cfg.Paths.Jobs, jobID)
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return artifactMetadataError{err: fmt.Errorf("ensure job dir: %w", err)}
+	}
+
 	meta := map[string]any{"digests": digests}
 	buf, err := json.Marshal(meta)
 	if err != nil {
-		return err
+		return artifactMetadataError{err: err}
 	}
-	return os.WriteFile(artifactFile(e.cfg.Paths.Jobs, jobID), buf, 0o644)
+	if err := os.WriteFile(out, buf, 0o644); err != nil {
+		return artifactMetadataError{err: err}
+	}
+	return nil
 }
 
 func artifactFile(jobsPath, jobID string) string {
@@ -57,9 +70,23 @@ func ReleaseArtifacts(ctx context.Context, cfgPaths config.Paths, jobID string) 
 	if err != nil {
 		return err
 	}
+	defer errs.Ignore(casStore.Close(), "close cas store")
+
 	mgr := artifacts.NewManager(casStore)
 	if err := mgr.Unpin(ctx, meta.Digests...); err != nil {
 		return fmt.Errorf("unpin artifacts: %w", err)
 	}
 	return os.Remove(path)
+}
+
+type artifactMetadataError struct {
+	err error
+}
+
+func (e artifactMetadataError) Error() string {
+	return e.err.Error()
+}
+
+func (e artifactMetadataError) Unwrap() error {
+	return e.err
 }

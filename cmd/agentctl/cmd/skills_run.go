@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )
@@ -36,10 +37,10 @@ func newSkillsRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return writeEnvelope(cmd.OutOrStdout(), stdout)
+			return memorycmd.WriteEnvelope(cmd.OutOrStdout(), stdout)
 		},
 	}
-	cmd.Flags().StringVar(&input, "input", "", "Inline JSON input (default: {})")
+	cmd.Flags().StringVar(&input, "input", "", "Inline JSON input (default: {}). Special values: 'stdin' to extract data from envelope, 'sha256:<hex>' to read from CAS")
 	cmd.Flags().StringVar(&inputFile, "input-file", "", "Path to JSON input file ('-' for stdin)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace override (default: auto-detect)")
 	return cmd
