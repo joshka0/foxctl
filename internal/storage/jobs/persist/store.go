@@ -12,6 +12,7 @@ import (
 	"time"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
@@ -195,7 +196,10 @@ func (s *sqlStore) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
         UPDATE jobs
         SET state = ?, error = ?, updated_at = ?
         WHERE state = ?`,
-		types.StateError, "ERUNTIME_RESTART: process restarted", sqlutil.FormatTimestamp(time.Now().UTC()), types.StateRunning)
+		types.StateError,
+		fmt.Sprintf("%s: process restarted", protocol.ErrorCodeERuntimeRestart),
+		sqlutil.FormatTimestamp(time.Now().UTC()),
+		types.StateRunning)
 	if err != nil {
 		return 0, fmt.Errorf("recover orphans: %w", err)
 	}

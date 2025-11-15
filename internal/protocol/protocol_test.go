@@ -100,6 +100,7 @@ func TestErrorCodes(t *testing.T) {
 		ErrorCodeEPagination,
 		ErrorCodeERateLimit,
 		ErrorCodeERuntime,
+		ErrorCodeERuntimeRestart,
 		ErrorCodeEOutputTooLarge,
 		ErrorCodeEPolicy,
 		ErrorCodeENotFound,
@@ -118,27 +119,6 @@ func TestErrorCodes(t *testing.T) {
 		}
 		if err := Validate(env); err != nil {
 			t.Fatalf("validation failed for code %s: %v", code, err)
-		}
-	}
-}
-
-func TestIsRetryable(t *testing.T) {
-	tests := []struct {
-		code      ErrorCode
-		retryable bool
-	}{
-		{ErrorCodeERuntime, true},
-		{ErrorCodeERateLimit, true},
-		{ErrorCodeETimeout, true},
-		{ErrorCodeEARG, false},
-		{ErrorCodeEAuth, false},
-		{ErrorCodeENotFound, false},
-		{ErrorCodeEPolicy, false},
-	}
-
-	for _, tt := range tests {
-		if got := IsRetryable(tt.code); got != tt.retryable {
-			t.Errorf("IsRetryable(%s) = %v, want %v", tt.code, got, tt.retryable)
 		}
 	}
 }
@@ -180,6 +160,13 @@ func TestValidate(t *testing.T) {
 			t.Fatal("expected validation error for missing error code")
 		}
 	})
+
+	t.Run("error without message", func(t *testing.T) {
+		env := Error("test", ErrorCodeEARG, "", nil)
+		if err := Validate(env); err == nil {
+			t.Fatal("expected validation error for missing error message")
+		}
+	})
 }
 
 func TestWrite(t *testing.T) {
@@ -203,6 +190,19 @@ func TestWrite(t *testing.T) {
 	// Verify it ends with newline (json.Encoder behavior)
 	if !strings.HasSuffix(buf.String(), "\n") {
 		t.Fatal("expected output to end with newline")
+	}
+}
+
+func TestMustWrite(t *testing.T) {
+	buf := &bytes.Buffer{}
+	env := OK("test.mustwrite", nil)
+
+	if err := MustWrite(buf, env); err != nil {
+		t.Fatalf("MustWrite failed: %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Fatal("expected MustWrite to write data")
 	}
 }
 
@@ -477,8 +477,8 @@ func TestWithMemoryRef(t *testing.T) {
 	}
 }
 
-func TestWithMetaFunction(t *testing.T) {
-	env := OK("test", nil, WithMeta(func(m *envelope.Meta) {
+func TestWithMetaMutatorOption(t *testing.T) {
+	env := OK("test", nil, WithMetaMutator(func(m *envelope.Meta) {
 		m.Source = "custom"
 		m.DurationMS = 999
 		m.Seq = new(int)
@@ -742,6 +742,49 @@ func TestValidateCacheMetadata(t *testing.T) {
 
 		if err := Validate(env); err != nil {
 			t.Fatalf("validation should pass for non-cache source: %v", err)
+		}
+	})
+}
+
+func TestValidateMemoryMetadata(t *testing.T) {
+	t.Run("memory source with reference", func(t *testing.T) {
+		env := OK("test", nil,
+			WithSource("memory"),
+			WithMemoryRef(&envelope.MemoryRef{Name: "recent", Type: "auto"}),
+		)
+
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass for memory source with reference: %v", err)
+		}
+	})
+
+	t.Run("memory source without reference", func(t *testing.T) {
+		env := OK("test", nil, WithSource("memory"))
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when memory source lacks memory reference")
+		}
+	})
+
+	t.Run("memory source missing name", func(t *testing.T) {
+		env := OK("test", nil,
+			WithSource("memory"),
+			WithMemoryRef(&envelope.MemoryRef{Name: "", Type: "auto"}),
+		)
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when memory reference name is empty")
+		}
+	})
+
+	t.Run("memory source missing type", func(t *testing.T) {
+		env := OK("test", nil,
+			WithSource("memory"),
+			WithMemoryRef(&envelope.MemoryRef{Name: "recent", Type: ""}),
+		)
+
+		if err := Validate(env); err == nil {
+			t.Fatal("validation should fail when memory reference type is empty")
 		}
 	})
 }

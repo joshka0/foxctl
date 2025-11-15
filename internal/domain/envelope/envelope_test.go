@@ -43,6 +43,15 @@ func TestErrorRequiresCode(t *testing.T) {
 	}
 }
 
+func TestErrorRequiresMessage(t *testing.T) {
+	env := Error("cmd", "ERR", "", nil)
+
+	err := Validate(env)
+	if !errors.Is(err, ErrValidation) || !errors.Is(err, ErrMissingErrMsg) {
+		t.Fatalf("expected missing error message error, got %v", err)
+	}
+}
+
 func TestValidateRejectsInvalidStatus(t *testing.T) {
 	env := OK("cmd", nil)
 	env.Status = "maybe"
@@ -209,6 +218,26 @@ func TestValidateMissingTimestamp(t *testing.T) {
 	}
 }
 
+func TestValidateInvalidTimestampFormat(t *testing.T) {
+	env := OK("cmd", nil)
+	env.Meta.TS = "invalid"
+
+	err := Validate(env)
+	if !errors.Is(err, ErrValidation) || !errors.Is(err, ErrInvalidTS) {
+		t.Fatalf("expected invalid timestamp error, got %v", err)
+	}
+}
+
+func TestValidateNonUTCTimestamp(t *testing.T) {
+	env := OK("cmd", nil)
+	env.Meta.TS = time.Date(2024, 1, 1, 10, 0, 0, 0, time.FixedZone("-0700", -7*3600)).Format(time.RFC3339)
+
+	err := Validate(env)
+	if !errors.Is(err, ErrValidation) || !errors.Is(err, ErrInvalidTS) {
+		t.Fatalf("expected invalid timestamp error, got %v", err)
+	}
+}
+
 func TestValidateInvalidVersion(t *testing.T) {
 	env := OK("cmd", nil)
 	env.Version = 999
@@ -240,51 +269,32 @@ func TestValidateOKStatusWithErrorFields(t *testing.T) {
 }
 
 func TestApplyMetaDefaults(t *testing.T) {
-	tests := []struct {
-		name        string
-		env         Envelope
-		wantCommand string
-		checkTS     bool
-	}{
-		{
-			name: "empty command gets default",
-			env: Envelope{
-				Command: "",
-				Meta:    Meta{TS: "2024-01-01T00:00:00Z"},
-			},
-			wantCommand: "unknown",
-			checkTS:     false,
-		},
-		{
-			name: "whitespace command gets default",
-			env: Envelope{
-				Command: "   ",
-				Meta:    Meta{TS: "2024-01-01T00:00:00Z"},
-			},
-			wantCommand: "unknown",
-			checkTS:     false,
-		},
-		{
-			name: "missing timestamp gets default",
-			env: Envelope{
-				Command: "test",
-				Meta:    Meta{TS: ""},
-			},
-			wantCommand: "test",
-			checkTS:     true,
-		},
+	env := Envelope{
+		Command: "test",
+		Meta:    Meta{TS: ""},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			applyMetaDefaults(&tt.env)
-			if tt.env.Command != tt.wantCommand {
-				t.Errorf("expected command %s, got %s", tt.wantCommand, tt.env.Command)
-			}
-			if tt.checkTS && tt.env.Meta.TS == "" {
-				t.Errorf("expected timestamp to be set")
-			}
-		})
+	applyMetaDefaults(&env)
+
+	if env.Meta.TS == "" {
+		t.Fatalf("expected timestamp to be set")
+	}
+
+	if env.Command != "test" {
+		t.Fatalf("expected command to remain unchanged, got %q", env.Command)
+	}
+}
+
+func TestApplyMetaDefaultsDoesNotFillCommand(t *testing.T) {
+	env := Envelope{
+		Command: "",
+		Meta:    Meta{TS: "2024-01-01T00:00:00Z"},
+	}
+
+	applyMetaDefaults(&env)
+
+	if env.Command != "" {
+		t.Fatalf("expected command to remain empty, got %q", env.Command)
 	}
 }
 
