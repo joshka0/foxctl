@@ -291,7 +291,15 @@ func (l *Loader) parse(ctx context.Context, data []byte, source, digest string, 
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
 	loader.Context = ctx
-	doc, err := loader.LoadFromData(data)
+	var (
+		doc *openapi3.T
+		err error
+	)
+	if base := baseURLForSource(source); base != nil {
+		doc, err = loader.LoadFromDataWithPath(data, base)
+	} else {
+		doc, err = loader.LoadFromData(data)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("parse OpenAPI: %w", err)
 	}
@@ -397,4 +405,31 @@ func firstDigest(digests []string) string {
 		}
 	}
 	return ""
+}
+
+func baseURLForSource(source string) *url.URL {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return nil
+	}
+	if isHTTPURL(source) || strings.HasPrefix(source, "file://") {
+		u, err := url.Parse(source)
+		if err == nil {
+			return u
+		}
+		return nil
+	}
+	if isCASDigest(source) || isMemoryRef(source) {
+		return nil
+	}
+	if filepath.IsAbs(source) {
+		return &url.URL{Scheme: "file", Path: source}
+	}
+	if strings.Contains(source, "://") {
+		return nil
+	}
+	if abs, err := filepath.Abs(source); err == nil {
+		return &url.URL{Scheme: "file", Path: abs}
+	}
+	return nil
 }

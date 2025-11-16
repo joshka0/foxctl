@@ -290,7 +290,7 @@ func (m *Manager) invoke(ctx context.Context, info *pluginInfo, command string, 
 	if err != nil {
 		return envelope.Envelope{}, newInvocationError(protocol.ErrorCodeEEnvelope, "encode plugin request", err, m.errorDetails(info, nil, nil))
 	}
-	if len(body) > m.limits.maxInput {
+	if len(body)+1 > m.limits.maxInput { // +1 for trailing newline
 		return envelope.Envelope{}, newInvocationError(protocol.ErrorCodeEOutputTooLarge, fmt.Sprintf("plugin input exceeds limit (%d bytes)", m.limits.maxInput), nil, m.errorDetails(info, nil, nil))
 	}
 	body = append(body, '\n')

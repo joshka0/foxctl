@@ -3,7 +3,7 @@ module github.com/jkatigb/agentctl
 go 1.22.5
 
 require (
-	github.com/getkin/kin-openapi v0.129.0
+	github.com/getkin/kin-openapi v0.133.0
 	github.com/gibson042/canonicaljson-go v1.0.3
 	github.com/golangci/golangci-lint v1.61.0
 	github.com/google/uuid v1.6.0
@@ -133,8 +133,8 @@ require (
 	github.com/nishanths/exhaustive v0.12.0 // indirect
 	github.com/nishanths/predeclared v0.2.2 // indirect
 	github.com/nunnatsa/ginkgolinter v0.16.2 // indirect
-	github.com/oasdiff/yaml v0.0.0-20241210131133-6b86fb107d80 // indirect
-	github.com/oasdiff/yaml3 v0.0.0-20241210130736-a94c01f36349 // indirect
+	github.com/oasdiff/yaml v0.0.0-20250309154309-f31be36b4037 // indirect
+	github.com/oasdiff/yaml3 v0.0.0-20250309153720-d2182401db90 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
@@ -182,6 +182,7 @@ require (
 	github.com/ultraware/funlen v0.1.0 // indirect
 	github.com/ultraware/whitespace v0.1.1 // indirect
 	github.com/uudashr/gocognit v1.1.3 // indirect
+	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	github.com/xen0n/gosmopolitan v1.2.2 // indirect
 	github.com/yagipy/maintidx v1.0.0 // indirect
 	github.com/yeya24/promlinter v0.3.0 // indirect

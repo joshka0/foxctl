@@ -97,7 +97,7 @@ Adds **OCI** to Core runners:
 }
 ```
 
-**Delivery semantics**
+### Delivery semantics
 
 * **At‑least‑once**: messages may be delivered more than once; consumers **MUST** de‑dupe by `id`.
 * **Lease**: `agentctl agent watch` obtains messages with a lease; `ack` deletes; `nack` requeues after `visibility_timeout`.
@@ -181,9 +181,9 @@ Adds **OCI** to Core runners:
 
 ### 4.2 Spawn
 
-**CLI**
+#### CLI
 
-```
+```bash
 agentctl agent spawn \
   --ns=org/app/main \
   --role=codex \
@@ -193,7 +193,7 @@ agentctl agent spawn \
   --share-bb=scoped
 ```
 
-**Response (envelope)**
+#### Response (envelope)
 
 ```json
 {
@@ -243,7 +243,7 @@ If any rule fails → **EPOLICY** with a diff listing violating fields.
 
 ### 5.2 Operations (CLI)
 
-```
+```bash
 agentctl bb post <topic> --ns=<ns> --data=@payload.json [--ttl=24h] [--cas=sha256:...]
 agentctl bb watch <topic> --ns=<ns> [--filter='<expr>']                # NDJSON envelopes
 agentctl bb search <topic> --ns=<ns> --query="<fts query>"
@@ -281,7 +281,7 @@ Mirroring rules are configured at spawn or via policy.
 * Per `(namespace, skill)`: if `> N` failures in window `T`, breaker **opens** (new jobs → `ESKILLDOWN`).
 * Jobs exceeding retry thresholds go to a **dead‑letter queue**:
 
-  ```
+  ```bash
   agentctl jobs dlq list --ns=<ns>
   agentctl jobs dlq requeue <job_id>
   agentctl jobs dlq delete <job_id>
@@ -320,7 +320,7 @@ OCI runs **MUST** enforce:
 
 ## 8. CLI (Agent Profile additions)
 
-```
+```bash
 # Agents
 agentctl agent spawn  --ns=<parent_ns> --role=<role> --prompt-file=<path>|--prompt=<str> \
                       --skills-allow="a,b,c" --policy=@policy.json --share-bb=all|scoped|none
