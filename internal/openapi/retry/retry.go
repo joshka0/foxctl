@@ -60,6 +60,9 @@ func (r *Retryer) Execute(ctx context.Context, fn func() (*http.Response, error)
 
 		resp, err := fn()
 		if err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 			return nil, err
 		}
 
@@ -114,6 +117,9 @@ func (r *Retryer) nextDelay(resp *http.Response, current time.Duration) (time.Du
 	if r.jitterEnabled() && wait > 0 {
 		factor := 0.5 + r.randFloat()
 		wait = time.Duration(float64(wait) * factor)
+		if wait > r.config.MaxDelay {
+			wait = r.config.MaxDelay
+		}
 	}
 
 	return wait, false

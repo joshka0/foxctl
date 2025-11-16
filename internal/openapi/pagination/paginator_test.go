@@ -13,11 +13,14 @@ func TestLinkPagination(t *testing.T) {
 		t.Fatalf("new paginator: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/repos?per_page=2", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/repos?per_page=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp := &Response{
 		Request: req,
 		Headers: http.Header{
-			"Link": {"<https://api.example.com/repos?page=2>; rel=\"next\", <https://api.example.com/repos?page=10>; rel=\"last\""},
+			"Link": []string{"<https://api.example.com/repos?page=2>; rel=\"next\", <https://api.example.com/repos?page=10>; rel=\"last\""},
 		},
 		Body:         []byte(`[1,2]`),
 		ItemCount:    2,
@@ -46,7 +49,10 @@ func TestCursorPaginationAutoDetection(t *testing.T) {
 		t.Fatalf("new paginator: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/items?page_token=first&limit=2", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/items?page_token=first&limit=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp := &Response{
 		Request: req,
 		Headers: make(http.Header),
@@ -73,7 +79,10 @@ func TestCursorPaginationCustomFields(t *testing.T) {
 		t.Fatalf("new paginator: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/search?cursor=", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/search?cursor=", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp := &Response{
 		Request: req,
 		Headers: make(http.Header),
@@ -92,6 +101,38 @@ func TestCursorPaginationCustomFields(t *testing.T) {
 	}
 }
 
+func TestCursorPaginationNestedPaginationField(t *testing.T) {
+	cfg := Config{}
+	paginator, err := New(cfg)
+	if err != nil {
+		t.Fatalf("new paginator: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/items?cursor=", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp := &Response{
+		Request: req,
+		Headers: make(http.Header),
+		Body:    []byte(`{"items":[1],"pagination":{"next":"nested-token"}}`),
+	}
+
+	nextReq, done, err := paginator.ShouldContinue(resp)
+	if err != nil {
+		t.Fatalf("should continue: %v", err)
+	}
+	if done {
+		t.Fatalf("expected to continue for nested pagination")
+	}
+	if nextReq == nil {
+		t.Fatal("expected next request")
+	}
+	if got := nextReq.URL.Query().Get("cursor"); got != "nested-token" {
+		t.Fatalf("expected nested token, got %q", got)
+	}
+}
+
 func TestOffsetPagination(t *testing.T) {
 	cfg := Config{}
 	paginator, err := New(cfg)
@@ -99,7 +140,10 @@ func TestOffsetPagination(t *testing.T) {
 		t.Fatalf("new paginator: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/items?offset=0&limit=2", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/items?offset=0&limit=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp1 := &Response{
 		Request:      req,
 		Headers:      make(http.Header),
@@ -143,7 +187,10 @@ func TestPagePerPagePagination(t *testing.T) {
 		t.Fatalf("new paginator: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/items?page=1&per_page=2", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/items?page=1&per_page=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp := &Response{
 		Request:      req,
 		Headers:      make(http.Header),
@@ -175,7 +222,10 @@ func TestMaxRecordsStopsPagination(t *testing.T) {
 		t.Fatalf("new paginator: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/items?per_page=5", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/items?per_page=5", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp := &Response{
 		Request:      req,
 		Headers:      make(http.Header),
@@ -207,7 +257,10 @@ func TestMaxPagesStopsPagination(t *testing.T) {
 		t.Fatalf("new paginator: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/items?per_page=2", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/items?per_page=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp := &Response{
 		Request:      req,
 		Headers:      make(http.Header),
@@ -234,12 +287,18 @@ func TestMaxPagesStopsPagination(t *testing.T) {
 
 func TestSummaryTracking(t *testing.T) {
 	cfg := Config{}
-	paginator, _ := New(cfg)
+	paginator, err := New(cfg)
+	if err != nil {
+		t.Fatalf("new paginator: %v", err)
+	}
 
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/repos?per_page=2", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/repos?per_page=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	resp1 := &Response{
 		Request:      req,
-		Headers:      http.Header{"Link": {"<https://api.example.com/repos?page=2>; rel=\"next\""}},
+		Headers:      http.Header{"Link": []string{"<https://api.example.com/repos?page=2>; rel=\"next\""}},
 		Body:         []byte(`[1,2]`),
 		ItemCount:    2,
 		hasItemCount: true,
@@ -277,7 +336,10 @@ func TestSummaryTracking(t *testing.T) {
 }
 
 func TestDetectOffsetParamsFallback(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/items?skip=0&top=10", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.example.com/items?skip=0&top=10", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	off, lim, page, per := detectOffsetParams(req, Config{})
 	if off != "skip" {
 		t.Fatalf("expected skip offset, got %q", off)
@@ -302,7 +364,10 @@ func TestParseNextLink(t *testing.T) {
 }
 
 func TestCloneRequestPreservesQuery(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodPost, "https://api.example.com/items?limit=2", nil)
+	req, err := http.NewRequest(http.MethodPost, "https://api.example.com/items?limit=2", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
 	clone := cloneRequest(req)
 	if clone.Method != http.MethodPost {
 		t.Fatalf("expected method preserved")
@@ -314,11 +379,14 @@ func TestCloneRequestPreservesQuery(t *testing.T) {
 
 func TestApplyRecordLimit(t *testing.T) {
 	cfg := Config{MaxRecords: 3}
-	paginator, _ := New(cfg)
+	paginator, err := New(cfg)
+	if err != nil {
+		t.Fatalf("new paginator: %v", err)
+	}
 	paginator.limitParam = "limit"
 	paginator.perPageParam = "per_page"
 	paginator.collected = 2
-	q := url.Values{"limit": {"5"}, "per_page": {"5"}}
+	q := url.Values{"limit": []string{"5"}, "per_page": []string{"5"}}
 	paginator.applyRecordLimit(&q)
 	if q.Get("limit") != "1" {
 		t.Fatalf("expected limit adjusted to remaining, got %q", q.Get("limit"))

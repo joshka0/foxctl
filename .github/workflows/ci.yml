@@ -29,8 +29,6 @@ jobs:
   build-test:
     name: Go ${{ matrix.go }} • ${{ matrix.os }}
     runs-on: self-hosted
-    env:
-      GOTOOLCHAIN: go1.24.3
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +68,8 @@ jobs:
           git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
 
       - name: Lint (golangci-lint)
+        env:
+          GOTOOLCHAIN: go1.23.3
         run: make lint
 
       - name: Vet
@@ -110,8 +110,6 @@ jobs:
   e2e-tests:
     runs-on: self-hosted
     needs: build-test
-    env:
-      GOTOOLCHAIN: go1.24.3
     strategy:
       fail-fast: false
       matrix:

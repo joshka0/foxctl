@@ -234,6 +234,17 @@ func extractArtifactValue(data any) (string, bool, error) {
 		}
 		return "", false, nil
 	}
+	if m, ok := data.(map[string]string); ok {
+		if artifact := strings.TrimSpace(m["artifact"]); artifact != "" {
+			return artifact, true, nil
+		}
+		return "", false, nil
+	}
+	if m, ok := data.(map[string]json.RawMessage); ok {
+		if raw, ok := m["artifact"]; ok {
+			return extractArtifactValue(raw)
+		}
+	}
 
 	rv := reflect.ValueOf(data)
 	for rv.Kind() == reflect.Interface {
@@ -315,6 +326,10 @@ func extractStatusCode(data any) (int, bool) {
 		if summary, ok := v["summary"]; ok {
 			return parseStatusCodeValue(summary)
 		}
+	case map[string]json.RawMessage:
+		if summary, ok := v["summary"]; ok {
+			return statusCodeFromJSONRaw(summary)
+		}
 	case ErrorData:
 		return statusCodeFromSummary(v.Summary)
 	case *ErrorData:
@@ -343,15 +358,32 @@ func statusCodeFromSummary(summary any) (int, bool) {
 		if value, ok := v["status_code"]; ok {
 			return parseStatusCodeValue(value)
 		}
+	case map[string]json.RawMessage:
+		if raw, ok := v["status_code"]; ok {
+			return statusCodeFromJSONRaw(raw)
+		}
 	case HTTPSummary:
 		return v.StatusCode, true
 	case *HTTPSummary:
 		if v != nil {
 			return v.StatusCode, true
 		}
+	case json.RawMessage:
+		return statusCodeFromJSONRaw(v)
 	}
 
 	return 0, false
+}
+
+func statusCodeFromJSONRaw(raw json.RawMessage) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return 0, false
+	}
+	return statusCodeFromSummary(decoded)
 }
 
 func parseStatusCodeValue(value any) (int, bool) {

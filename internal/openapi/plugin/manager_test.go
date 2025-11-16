@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -25,7 +26,7 @@ func TestManagerInvokeAuthSuccess(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}))
+	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
 
 	payload := AuthRequestPayload{
 		Request: HTTPRequest{
@@ -60,7 +61,7 @@ func TestManagerInvokeAuthPluginError(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}))
+	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
 
 	payload := AuthRequestPayload{
 		Request: HTTPRequest{Method: "GET", URL: "https://example.com"},
@@ -90,7 +91,7 @@ func TestManagerInvokeAuthTimeout(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}))
+	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
 
 	payload := AuthRequestPayload{
 		Request: HTTPRequest{Method: "GET", URL: "https://example.com"},
@@ -124,7 +125,7 @@ func TestManagerInvokePagination(t *testing.T) {
 	buildPluginBinary(t, tmp, "paging-custom")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}))
+	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
 
 	body := map[string]any{
 		"items": []any{1, 2, 3},
@@ -172,7 +173,9 @@ func expectedHMACHeader(req HTTPRequest, ctx AuthContext) string {
 		base += string(req.Body)
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(base))
+	if _, err := mac.Write([]byte(base)); err != nil {
+		panic(fmt.Sprintf("write hmac: %v", err))
+	}
 	sig := hex.EncodeToString(mac.Sum(nil))
 	return fmt.Sprintf("HMAC %s:%s", key, sig)
 }

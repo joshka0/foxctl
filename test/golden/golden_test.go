@@ -63,7 +63,11 @@ func TestGoldenProgressStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open progress stream: %v", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Fatalf("close progress stream: %v", err)
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	lineNo := 0

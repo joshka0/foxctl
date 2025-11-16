@@ -177,6 +177,40 @@ func TestRetryerExecute_JitterApplied(t *testing.T) {
 	}
 }
 
+func TestRetryerNextDelayCapsJitterToMax(t *testing.T) {
+	retryer := New(Config{
+		InitialDelay: 100 * time.Millisecond,
+		MaxDelay:     150 * time.Millisecond,
+		Jitter:       boolPtr(true),
+	})
+	retryer.randFloat = func() float64 { return 1.0 }
+
+	resp := &http.Response{Header: http.Header{}}
+	wait, _ := retryer.nextDelay(resp, 200*time.Millisecond)
+	if wait != 150*time.Millisecond {
+		t.Fatalf("expected wait capped to 150ms, got %v", wait)
+	}
+}
+
+func TestRetryerExecute_ClosesResponseBodyOnError(t *testing.T) {
+	retryer := New(Config{})
+	closed := false
+	body := &trackingBody{closed: &closed}
+
+	gotResp, err := retryer.Execute(context.Background(), func() (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: body, Header: http.Header{}}, io.ErrUnexpectedEOF
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if gotResp != nil {
+		t.Fatalf("expected nil response")
+	}
+	if !closed {
+		t.Fatalf("expected body to be closed")
+	}
+}
+
 func newResponse(status int) *http.Response {
 	return &http.Response{
 		StatusCode: status,
@@ -192,4 +226,19 @@ func withRetryAfter(resp *http.Response, value string) *http.Response {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+type trackingBody struct {
+	closed *bool
+}
+
+func (tb *trackingBody) Read(p []byte) (int, error) {
+	return 0, io.EOF
+}
+
+func (tb *trackingBody) Close() error {
+	if tb.closed != nil {
+		*tb.closed = true
+	}
+	return nil
 }

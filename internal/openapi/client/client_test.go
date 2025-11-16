@@ -20,10 +20,12 @@ func TestExecuteInlineJSON(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Api-Key", "secret")
-		_ = json.NewEncoder(w).Encode([]map[string]any{
+		if err := json.NewEncoder(w).Encode([]map[string]any{
 			{"id": 1, "name": "alpha"},
 			{"id": 2, "name": "beta"},
-		})
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -68,11 +70,13 @@ func TestExecuteInlineJSON(t *testing.T) {
 func TestExecuteStoresLargeBodyInCAS(t *testing.T) {
 	t.Parallel()
 
-	payload := buildLargeJSONArray(200)
+	payload := buildLargeJSONArray(t, 200)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(payload)
+		if _, err := w.Write(payload); err != nil {
+			t.Fatalf("write payload: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -115,7 +119,9 @@ func TestExecuteReturnsHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid"})
+		if err := json.NewEncoder(w).Encode(map[string]any{"error": "invalid"}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
 	}))
 	t.Cleanup(srv.Close)
 
@@ -198,12 +204,15 @@ func newTestCAS(t *testing.T) *cas.Store {
 	return store
 }
 
-func buildLargeJSONArray(n int) []byte {
+func buildLargeJSONArray(t *testing.T, n int) []byte {
+	t.Helper()
 	records := make([]map[string]any, 0, n)
 	for i := 0; i < n; i++ {
 		records = append(records, map[string]any{"id": i, "name": "item"})
 	}
 	buf := &bytes.Buffer{}
-	_ = json.NewEncoder(buf).Encode(records)
+	if err := json.NewEncoder(buf).Encode(records); err != nil {
+		t.Fatalf("encode array: %v", err)
+	}
 	return buf.Bytes()
 }

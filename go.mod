@@ -2,8 +2,6 @@ module github.com/jkatigb/agentctl
 
 go 1.22.5
 
-toolchain go1.24.3
-
 require (
 	github.com/getkin/kin-openapi v0.129.0
 	github.com/gibson042/canonicaljson-go v1.0.3

@@ -21,7 +21,10 @@ func main() {
 			Commands:  []string{plugin.CommandAuth},
 			Protocols: []string{"core/v1"},
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(handshake)
+		if err := json.NewEncoder(os.Stdout).Encode(handshake); err != nil {
+			safeStderr("write handshake: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -59,7 +62,10 @@ func main() {
 	}
 
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(dataToSign))
+	if _, err := mac.Write([]byte(dataToSign)); err != nil {
+		emitRuntimeError(fmt.Errorf("generate signature: %w", err))
+		return
+	}
 	signature := hex.EncodeToString(mac.Sum(nil))
 
 	headers := map[string]string{
@@ -67,7 +73,7 @@ func main() {
 	}
 	result := plugin.AuthResult{Headers: headers}
 	out := envelope.OK(plugin.CommandAuth, result)
-	_ = envelope.Write(os.Stdout, out)
+	writeEnvelope(out)
 }
 
 func emitAuthError(message string) {
@@ -75,12 +81,22 @@ func emitAuthError(message string) {
 		"hint": "Provide both key and secret credentials",
 	}
 	env := envelope.Error(plugin.CommandAuth, "EAUTH", message, data)
-	_ = envelope.Write(os.Stdout, env)
+	writeEnvelope(env)
 }
 
 func emitRuntimeError(err error) {
 	env := envelope.Error(plugin.CommandAuth, "ERUNTIME", err.Error(), nil)
-	_ = envelope.Write(os.Stdout, env)
+	writeEnvelope(env)
+}
+
+func writeEnvelope(env envelope.Envelope) {
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		safeStderr("write envelope: %v\n", err)
+	}
+}
+
+func safeStderr(format string, args ...any) {
+	_, _ = fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func decodePayload(data any, v any) error {

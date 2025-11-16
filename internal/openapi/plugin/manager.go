@@ -52,7 +52,7 @@ type Manager struct {
 // RuntimeLimits controls the execution limits enforced for plugin processes.
 type RuntimeLimits struct {
 	WallTimeout    time.Duration
-	CPUTimout      time.Duration
+	CPUTimeout     time.Duration
 	MaxOutputBytes int
 	MaxInputBytes  int
 	MaxStderrBytes int
@@ -106,11 +106,11 @@ func WithRuntimeLimits(limits RuntimeLimits) Option {
 			}
 			m.limits.wall = limits.WallTimeout
 		}
-		if limits.CPUTimout > 0 {
-			if limits.CPUTimout > maxAllowedCPUTimeout {
-				limits.CPUTimout = maxAllowedCPUTimeout
+		if limits.CPUTimeout > 0 {
+			if limits.CPUTimeout > maxAllowedCPUTimeout {
+				limits.CPUTimeout = maxAllowedCPUTimeout
 			}
-			m.limits.cpu = limits.CPUTimout
+			m.limits.cpu = limits.CPUTimeout
 		}
 		if limits.MaxOutputBytes > 0 {
 			if limits.MaxOutputBytes > maxAllowedOutputBytes {
@@ -423,7 +423,8 @@ func (m *Manager) resolve(ref string) (*pluginInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	absPath, err := filepath.Abs(path)
+	resolvedPath := resolvePath(m.home, path)
+	absPath, err := filepath.Abs(resolvedPath)
 	if err != nil {
 		return nil, newInvocationError(protocol.ErrorCodeEIO, fmt.Sprintf("resolve plugin path %s", path), err, nil)
 	}
@@ -701,7 +702,9 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 		return len(p), errLimitExceeded
 	}
 	if len(p) > remaining {
-		b.buf.Write(p[:remaining])
+		if _, err := b.buf.Write(p[:remaining]); err != nil {
+			return 0, err
+		}
 		b.truncated = true
 		b.err = errLimitExceeded
 		return len(p), errLimitExceeded

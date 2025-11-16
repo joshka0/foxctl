@@ -48,10 +48,16 @@ func newProtoValidateCommand() *cobra.Command {
 				file, err := os.Open(filepath.Clean(inputPath))
 				if err != nil {
 					payload := map[string]any{"input": inputPath, "hint": "Provide a readable JSON envelope"}
-					_ = protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, fmt.Sprintf("open input: %v", err), payload, opts()...)
+					if writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, fmt.Sprintf("open input: %v", err), payload, opts()...); writeErr != nil {
+						return fmt.Errorf("write envelope: %w", writeErr)
+					}
 					return fmt.Errorf("open input: %w", err)
 				}
-				defer file.Close()
+				defer func() {
+					if err := file.Close(); err != nil {
+						cmd.PrintErrf("close input %s: %v\n", inputPath, err)
+					}
+				}()
 				reader = file
 				inputDesc = inputPath
 			}
@@ -59,12 +65,16 @@ func newProtoValidateCommand() *cobra.Command {
 			raw, err := io.ReadAll(reader)
 			if err != nil {
 				payload := map[string]any{"input": inputDesc}
-				_ = protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, fmt.Sprintf("read input: %v", err), payload, opts()...)
+				if writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, fmt.Sprintf("read input: %v", err), payload, opts()...); writeErr != nil {
+					return fmt.Errorf("write envelope: %w", writeErr)
+				}
 				return fmt.Errorf("read input: %w", err)
 			}
 			if len(bytes.TrimSpace(raw)) == 0 {
 				payload := map[string]any{"input": inputDesc, "hint": "Envelope input cannot be empty"}
-				_ = protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, "no input provided", payload, opts()...)
+				if writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, "no input provided", payload, opts()...); writeErr != nil {
+					return fmt.Errorf("write envelope: %w", writeErr)
+				}
 				return fmt.Errorf("no input provided")
 			}
 
@@ -75,7 +85,9 @@ func newProtoValidateCommand() *cobra.Command {
 			var env envelope.Envelope
 			if err := dec.Decode(&env); err != nil {
 				payload := map[string]any{"input": inputDesc, "hint": "Ensure the payload is valid JSON"}
-				_ = protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, fmt.Sprintf("decode envelope: %v", err), payload, opts()...)
+				if writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, fmt.Sprintf("decode envelope: %v", err), payload, opts()...); writeErr != nil {
+					return fmt.Errorf("write envelope: %w", writeErr)
+				}
 				return fmt.Errorf("decode envelope: %w", err)
 			}
 			if strict {
@@ -88,7 +100,9 @@ func newProtoValidateCommand() *cobra.Command {
 							"hint":     "Remove trailing data when using --strict",
 							"trailing": string(trailing),
 						}
-						_ = protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, "unexpected trailing data after envelope", payload, opts()...)
+						if writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, "unexpected trailing data after envelope", payload, opts()...); writeErr != nil {
+							return fmt.Errorf("write envelope: %w", writeErr)
+						}
 						return fmt.Errorf("unexpected trailing data after envelope")
 					}
 				}
@@ -99,7 +113,9 @@ func newProtoValidateCommand() *cobra.Command {
 				if strict {
 					payload["strict"] = true
 				}
-				_ = protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, "protocol validation failed", payload, opts()...)
+				if writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, "protocol validation failed", payload, opts()...); writeErr != nil {
+					return fmt.Errorf("write envelope: %w", writeErr)
+				}
 				return fmt.Errorf("protocol validation failed: %w", err)
 			}
 

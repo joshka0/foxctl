@@ -17,7 +17,10 @@ func main() {
 			Commands:  []string{plugin.CommandPagination},
 			Protocols: []string{"core/v1"},
 		}
-		_ = json.NewEncoder(os.Stdout).Encode(handshake)
+		if err := json.NewEncoder(os.Stdout).Encode(handshake); err != nil {
+			safeStderr("write handshake: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -39,7 +42,10 @@ func main() {
 
 	var body map[string]any
 	if len(payload.LastResponse.Body) > 0 {
-		_ = json.Unmarshal(payload.LastResponse.Body, &body)
+		if err := json.Unmarshal(payload.LastResponse.Body, &body); err != nil {
+			emitError(fmt.Errorf("decode last response: %w", err))
+			return
+		}
 	}
 
 	cursor := extractCursor(body)
@@ -61,7 +67,7 @@ func main() {
 	}
 
 	out := envelope.OK(plugin.CommandPagination, result)
-	_ = envelope.Write(os.Stdout, out)
+	writeEnvelope(out)
 }
 
 func extractCursor(body map[string]any) string {
@@ -97,7 +103,17 @@ func extractItems(body map[string]any) []any {
 
 func emitError(err error) {
 	env := envelope.Error(plugin.CommandPagination, "ERUNTIME", err.Error(), nil)
-	_ = envelope.Write(os.Stdout, env)
+	writeEnvelope(env)
+}
+
+func writeEnvelope(env envelope.Envelope) {
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		safeStderr("write envelope: %v\n", err)
+	}
+}
+
+func safeStderr(format string, args ...any) {
+	_, _ = fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func decodePayload(data any, v any) error {

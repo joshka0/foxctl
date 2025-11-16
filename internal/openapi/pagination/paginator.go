@@ -31,9 +31,7 @@ const (
 	StrategyPlugin Strategy = "plugin"
 )
 
-var (
-	errMissingRequest = errors.New("pagination: response request is required")
-)
+var errMissingRequest = errors.New("pagination: response request is required")
 
 // Config captures pagination configuration provided by the user or spec hints.
 type Config struct {
@@ -184,7 +182,14 @@ func New(cfg Config) (*Paginator, error) {
 	if cfg.MaxRecords < 0 {
 		return nil, fmt.Errorf("pagination: max_records cannot be negative")
 	}
-	p := &Paginator{config: cfg, totalField: cfg.TotalField}
+	p := &Paginator{
+		config:       cfg,
+		totalField:   cfg.TotalField,
+		offsetParam:  cfg.OffsetParam,
+		limitParam:   cfg.LimitParam,
+		pageParam:    cfg.PageParam,
+		perPageParam: cfg.PerPageParam,
+	}
 	if cfg.Strategy == StrategyNone {
 		p.strategy = StrategyNone
 	}
@@ -537,8 +542,10 @@ func (p *Paginator) extractCursor(resp *Response) (string, bool) {
 	if val, ok := extractString(data, []string{"next_page_token"}); ok {
 		return val, true
 	}
-	if val, ok := extractString(data, []string{"nextToken", "pagination.next", "pagination.next_cursor", "pagination.nextToken"}); ok {
-		return val, true
+	for _, candidate := range []string{"nextToken", "pagination.next", "pagination.next_cursor", "pagination.nextToken"} {
+		if val, ok := extractString(data, strings.Split(candidate, ".")); ok {
+			return val, true
+		}
 	}
 	return "", false
 }
@@ -565,25 +572,31 @@ func splitLinkHeader(header string) []string {
 		switch r {
 		case '<':
 			depth++
-			current.WriteRune(r)
+			appendRune(&current, r)
 		case '>':
 			depth--
-			current.WriteRune(r)
+			appendRune(&current, r)
 		case ',':
 			if depth == 0 {
 				parts = append(parts, strings.TrimSpace(current.String()))
 				current.Reset()
 				continue
 			}
-			current.WriteRune(r)
+			appendRune(&current, r)
 		default:
-			current.WriteRune(r)
+			appendRune(&current, r)
 		}
 	}
 	if current.Len() > 0 {
 		parts = append(parts, strings.TrimSpace(current.String()))
 	}
 	return parts
+}
+
+func appendRune(b *strings.Builder, r rune) {
+	if _, err := b.WriteRune(r); err != nil {
+		panic(fmt.Sprintf("write rune: %v", err))
+	}
 }
 
 func parseLinkPart(part string) (string, string) {
@@ -804,6 +817,18 @@ func extractString(data any, path []string) (string, bool) {
 	for _, segment := range path {
 		switch v := current.(type) {
 		case map[string]any:
+			next, ok := v[segment]
+			if !ok {
+				return "", false
+			}
+			current = next
+		case map[string]string:
+			next, ok := v[segment]
+			if !ok {
+				return "", false
+			}
+			current = next
+		case map[string]json.RawMessage:
 			next, ok := v[segment]
 			if !ok {
 				return "", false

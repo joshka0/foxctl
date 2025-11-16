@@ -5,8 +5,8 @@ unexport GOTOOLDIR
 GO ?= go
 GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
 BINARY ?= agentctl
-GOFUMPT ?= $(GO_CMD) run mvdan.cc/gofumpt@v0.6.0
-GOLANGCI ?= $(GO_CMD) run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.58.2
+GOFUMPT ?= $(GO_CMD) run mvdan.cc/gofumpt@v0.7.0
+GOLANGCI ?= $(GO_CMD) run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 
