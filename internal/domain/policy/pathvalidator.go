@@ -66,8 +66,9 @@ func NewPathValidator(workspace string, allowedRoots []string) (*PathValidator, 
 	}
 
 	return &PathValidator{
-		workspace:    canonicalWorkspace,
-		allowedRoots: canonicalRoots,
+		workspace:      canonicalWorkspace,
+		allowedRoots:   canonicalRoots,
+		followSymlinks: true,
 	}, nil
 }
 
@@ -92,7 +93,7 @@ func (v *PathValidator) ValidatePath(userPath string) (string, error) {
 	}
 	absPath = filepath.Clean(absPath)
 
-	canonical, err := v.resolve(absPath)
+	canonical, usedSymlink, err := v.resolve(absPath)
 	if err != nil {
 		return "", err
 	}
@@ -105,12 +106,13 @@ func (v *PathValidator) ValidatePath(userPath string) (string, error) {
 		return canonical, nil
 	}
 
-	for _, root := range v.allowedRoots {
-		if v.hasPrefix(canonical, root) {
-			return canonical, nil
-		}
+	if v.pathInsideRoots(canonical) {
+		return canonical, nil
 	}
 
+	if usedSymlink && v.pathInsideRoots(absPath) {
+		return "", ErrSymlinkEscape
+	}
 	return "", ErrPathEscape
 }
 
@@ -130,31 +132,56 @@ func (v *PathValidator) AllowedRoots() []string {
 	return out
 }
 
-func (v *PathValidator) resolve(absPath string) (string, error) {
+func (v *PathValidator) resolve(absPath string) (string, bool, error) {
 	if v.followSymlinks {
-		canonical, err := filepath.EvalSymlinks(absPath)
-		if err == nil {
-			return canonical, nil
-		}
-
-		parent := filepath.Dir(absPath)
-		if parent == absPath {
-			return "", fmt.Errorf("resolve path %q: %w", absPath, err)
-		}
-
-		canonicalParent, perr := filepath.EvalSymlinks(parent)
-		if perr != nil {
-			return "", fmt.Errorf("resolve parent %q: %w", parent, perr)
-		}
-
-		return filepath.Join(canonicalParent, filepath.Base(absPath)), nil
+		return resolveWithSymlinks(absPath)
 	}
 
 	if err := ensureNoSymlink(absPath); err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	return absPath, nil
+	return absPath, false, nil
+}
+
+func resolveWithSymlinks(path string) (string, bool, error) {
+	cleaned := filepath.Clean(path)
+	pending := []string{}
+	current := cleaned
+	usedSymlink := false
+
+	for {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				usedSymlink = true
+			}
+			break
+		}
+		if os.IsNotExist(err) {
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			pending = append([]string{filepath.Base(current)}, pending...)
+			current = parent
+			continue
+		}
+		return "", false, fmt.Errorf("stat %q: %w", current, err)
+	}
+
+	canonical, err := filepath.EvalSymlinks(current)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve path %q: %w", current, err)
+	}
+	if canonical != current {
+		usedSymlink = true
+	}
+	for _, part := range pending {
+		canonical = filepath.Join(canonical, part)
+	}
+
+	return filepath.Clean(canonical), usedSymlink, nil
 }
 
 func ensureNoSymlink(path string) error {
@@ -204,4 +231,16 @@ func (v *PathValidator) hasPrefix(path, root string) bool {
 	}
 
 	return strings.HasPrefix(path, root)
+}
+
+func (v *PathValidator) pathInsideRoots(path string) bool {
+	if v.hasPrefix(path, v.workspace) {
+		return true
+	}
+	for _, root := range v.allowedRoots {
+		if v.hasPrefix(path, root) {
+			return true
+		}
+	}
+	return false
 }
