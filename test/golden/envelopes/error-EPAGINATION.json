@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "http/openapi",
+  "data": {
+    "hint": "Pagination plugin failed to produce next cursor",
+    "last_response": { "status_code": 200, "body": { "next": null } }
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:15Z",
+    "duration_ms": 612,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EPAGINATION",
+    "message": "pagination halted: missing cursor in plugin response"
+  }
+}

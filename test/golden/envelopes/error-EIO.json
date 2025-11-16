@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "fs/ls",
+  "data": {
+    "hint": "Failed to read directory contents",
+    "path": "/root/protected"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:32:10Z",
+    "duration_ms": 21,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EIO",
+    "message": "read /root/protected: permission denied"
+  }
+}

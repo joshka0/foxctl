@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "fs/read",
+  "data": {
+    "hint": "Access to /etc/shadow denied by workspace policy",
+    "policy": "path_validator"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:40Z",
+    "duration_ms": 14,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EPOLICY",
+    "message": "path violates workspace policy"
+  }
+}

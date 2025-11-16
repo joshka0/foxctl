@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "http/openapi",
+  "data": {
+    "hint": "Request exceeded 30s timeout; consider reducing page size",
+    "timeout_ms": 30000
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:50Z",
+    "duration_ms": 30000,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "ETIMEOUT",
+    "message": "operation timed out after 30s"
+  }
+}

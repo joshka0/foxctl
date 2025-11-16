@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "agentctl.jobs.wait",
+  "data": {
+    "hint": "Job canceled by user request",
+    "job_id": "01HF456DEF7890ABC123"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:32:15Z",
+    "duration_ms": 5120,
+    "source": "run",
+    "runner": "exec",
+    "partial": true
+  },
+  "error": {
+    "code": "ECANCELED",
+    "message": "operation canceled"
+  }
+}
