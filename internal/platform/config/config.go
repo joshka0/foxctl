@@ -29,6 +29,7 @@ type Config struct {
 	Memory         MemorySettings  `mapstructure:"memory" json:"memory"`
 	Cache          CacheSettings   `mapstructure:"cache" json:"cache"`
 	Logging        LoggingSettings `mapstructure:"logging" json:"logging"`
+	OpenAPI        OpenAPISettings `mapstructure:"openapi" json:"openapi"`
 }
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
@@ -55,6 +56,15 @@ type CacheSettings struct {
 type LoggingSettings struct {
 	Level  string `mapstructure:"level" json:"level"`
 	Format string `mapstructure:"format" json:"format"`
+}
+
+// OpenAPISettings hold configuration for the generic http/openapi skill.
+type OpenAPISettings struct {
+	// PluginPath is a colon-separated search path that locates plugin binaries.
+	// Each entry is resolved relative to the agentctl home directory when not
+	// absolute. Environment variables may override this value via
+	// AGENTCTL_OPENAPI_PLUGIN_PATH.
+	PluginPath []string `mapstructure:"plugin_path" json:"plugin_path"`
 }
 
 // Option customizes the loader.
@@ -127,6 +137,7 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("cache.default_mode", "auto")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
+	v.SetDefault("openapi.plugin_path", filepath.Join(defaultHome, "plugins"))
 }
 
 func configureConfigFile(v *viper.Viper, l *loader, defaultHome string) {
@@ -153,6 +164,7 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return Config{}, fmt.Errorf("config decode: %w", err)
 	}
+	cfg.OpenAPI.PluginPath = parsePluginPathList(v.Get("openapi.plugin_path"))
 	return cfg, nil
 }
 
@@ -162,6 +174,10 @@ func finalizeConfig(cfg Config, home string) Config {
 	cfg.Paths.Jobs = resolvePath(cfg.Paths.Jobs, cfg.Home, home)
 	cfg.Paths.Cache = resolvePath(cfg.Paths.Cache, cfg.Home, home)
 	cfg.Paths.Skills = resolvePath(cfg.Paths.Skills, cfg.Home, home)
+	if len(cfg.OpenAPI.PluginPath) == 0 {
+		cfg.OpenAPI.PluginPath = []string{filepath.Join(cfg.Home, "plugins")}
+	}
+	cfg.OpenAPI.PluginPath = normalizePluginPaths(cfg.OpenAPI.PluginPath, cfg.Home, home)
 
 	if cfg.InlineOutputKB <= 0 {
 		cfg.InlineOutputKB = DefaultInlineOutputKB
@@ -218,4 +234,70 @@ func resolvePath(p, base, userHome string) string {
 		return filepath.Clean(p)
 	}
 	return filepath.Join(base, p)
+}
+
+func parsePluginPathList(raw any) []string {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		return splitPathList(v)
+	case []string:
+		return normalizeStringSlice(v)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, strings.TrimSpace(s))
+			}
+		}
+		return normalizeStringSlice(out)
+	default:
+		return nil
+	}
+}
+
+func splitPathList(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, string(os.PathListSeparator))
+	return normalizeStringSlice(parts)
+}
+
+func normalizeStringSlice(parts []string) []string {
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func normalizePluginPaths(paths []string, base, userHome string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, p := range paths {
+		resolved := resolvePath(p, base, userHome)
+		if resolved == "" {
+			continue
+		}
+		if _, ok := seen[resolved]; ok {
+			continue
+		}
+		seen[resolved] = struct{}{}
+		out = append(out, resolved)
+	}
+	return out
 }
