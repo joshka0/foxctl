@@ -167,6 +167,31 @@ func TestValidate(t *testing.T) {
 			t.Fatal("expected validation error for missing error message")
 		}
 	})
+
+	t.Run("rejects http summary below error range", func(t *testing.T) {
+		data := HTTPErrorData{Summary: HTTPSummary{StatusCode: 200}}
+		env := HTTPError("test.http", "unexpected", data)
+		if err := Validate(env); err == nil || !strings.Contains(err.Error(), "status_code=200") {
+			t.Fatalf("expected status code validation error, got %v", err)
+		}
+	})
+
+	t.Run("rejects structured summary map", func(t *testing.T) {
+		data := &ErrorData{Summary: map[string]any{"status_code": 201}}
+		env := Error("test.struct", ErrorCodeEARG, "oops", data)
+		if err := Validate(env); err == nil || !strings.Contains(err.Error(), "status_code=201") {
+			t.Fatalf("expected structured status code error, got %v", err)
+		}
+	})
+
+	t.Run("enforces cas digest for map data", func(t *testing.T) {
+		data := map[string]string{"artifact": "sha256:deadbeef"}
+		env := OK("test.cas", data)
+		env.Meta.CASDigest = "sha256:beaded"
+		if err := Validate(env); err == nil || !strings.Contains(err.Error(), "meta.cas_digest") {
+			t.Fatalf("expected cas digest mismatch error, got %v", err)
+		}
+	})
 }
 
 func TestWrite(t *testing.T) {

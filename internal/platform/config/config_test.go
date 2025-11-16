@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,6 +42,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Logging.Format != "text" {
 		t.Fatalf("expected default logging format text got %s", cfg.Logging.Format)
 	}
+	expectedPluginPath := filepath.Join(expectedHome, "plugins")
+	if len(cfg.OpenAPI.PluginPath) != 1 || cfg.OpenAPI.PluginPath[0] != expectedPluginPath {
+		t.Fatalf("expected default plugin path %s got %v", expectedPluginPath, cfg.OpenAPI.PluginPath)
+	}
 }
 
 func TestLoadWithConfigFile(t *testing.T) {
@@ -53,7 +58,7 @@ func TestLoadWithConfigFile(t *testing.T) {
 	}
 
 	cfgFile := filepath.Join(home, "config.yaml")
-	content := []byte("inline_output_kb: 1024\nlogging:\n  level: warn\n  format: json\npaths:\n  cas: custom/cas\n")
+	content := []byte("inline_output_kb: 1024\nlogging:\n  level: warn\n  format: json\npaths:\n  cas: custom/cas\nopenapi:\n  plugin_path: plugins:/opt/agentctl/plugins\n")
 	if err := os.WriteFile(cfgFile, content, 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -76,6 +81,13 @@ func TestLoadWithConfigFile(t *testing.T) {
 	if cfg.Logging.Format != "json" {
 		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
 	}
+	expectedPluginPaths := []string{
+		filepath.Join(cfg.Home, "plugins"),
+		"/opt/agentctl/plugins",
+	}
+	if diff := cmpSlices(expectedPluginPaths, cfg.OpenAPI.PluginPath); diff != "" {
+		t.Fatalf("unexpected plugin paths: %s", diff)
+	}
 }
 
 func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
@@ -86,6 +98,7 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	t.Setenv("AGENTCTL_PATHS_CAS", "~/custom/cas")
 	t.Setenv("AGENTCTL_LOGGING_LEVEL", "DEBUG")
 	t.Setenv("AGENTCTL_LOGGING_FORMAT", "JSON")
+	t.Setenv("AGENTCTL_OPENAPI_PLUGIN_PATH", "~/plugins:/usr/local/agentctl/plugins")
 
 	cfg, err := Load(context.Background())
 	if err != nil {
@@ -104,6 +117,13 @@ func TestLoadWithEnvOverridesAndTildePaths(t *testing.T) {
 	}
 	if cfg.Logging.Format != "json" {
 		t.Fatalf("expected logging format json got %s", cfg.Logging.Format)
+	}
+	expectedPluginPaths := []string{
+		filepath.Join(tmp, "plugins"),
+		"/usr/local/agentctl/plugins",
+	}
+	if diff := cmpSlices(expectedPluginPaths, cfg.OpenAPI.PluginPath); diff != "" {
+		t.Fatalf("unexpected plugin paths: %s", diff)
 	}
 }
 
@@ -141,4 +161,16 @@ func TestInvalidInlineOutputFallsBackToDefault(t *testing.T) {
 	if cfg.InlineOutputKB != DefaultInlineOutputKB {
 		t.Fatalf("expected inline_output_kb default %d got %d", DefaultInlineOutputKB, cfg.InlineOutputKB)
 	}
+}
+
+func cmpSlices(expected, actual []string) string {
+	if len(expected) != len(actual) {
+		return fmt.Sprintf("length mismatch expected %d got %d (%v)", len(expected), len(actual), actual)
+	}
+	for i := range expected {
+		if expected[i] != actual[i] {
+			return fmt.Sprintf("at %d expected %s got %s", i, expected[i], actual[i])
+		}
+	}
+	return ""
 }

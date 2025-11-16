@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "http/openapi",
+  "data": {
+    "summary": {
+      "status_code": 401,
+      "headers": {
+        "www-authenticate": "Bearer realm=\"api\""
+      }
+    },
+    "hint": "Check auth credentials. Expected bearer token in Authorization header."
+  },
+  "meta": {
+    "ts": "2025-11-12T10:30:05Z",
+    "duration_ms": 156,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EAUTH",
+    "message": "Authentication failed: 401 Unauthorized"
+  }
+}

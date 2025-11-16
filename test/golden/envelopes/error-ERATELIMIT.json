@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "http/openapi",
+  "data": {
+    "summary": { "status_code": 429, "headers": { "retry-after": "15" } },
+    "hint": "Retry after 15 seconds; consider lowering concurrency",
+    "attempts": 5
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:20Z",
+    "duration_ms": 8023,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "ERATELIMIT",
+    "message": "rate limit exceeded after retry budget"
+  }
+}

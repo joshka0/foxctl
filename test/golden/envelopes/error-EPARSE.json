@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "agentctl.example.run",
+  "data": {
+    "hint": "Input payload was not valid JSON",
+    "offset": 17
+  },
+  "meta": {
+    "ts": "2025-11-12T10:32:00Z",
+    "duration_ms": 3,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EPARSE",
+    "message": "failed to parse JSON input at byte 17"
+  }
+}

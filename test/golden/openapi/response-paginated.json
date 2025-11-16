@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "status": "ok",
+  "command": "http/openapi",
+  "data": {
+    "summary": {
+      "status_code": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "pagination": {
+        "has_more": true,
+        "total_items": 150,
+        "strategy_used": "cursor",
+        "next_cursor": "cursor-3"
+      },
+      "record_count": 100
+    },
+    "pages_fetched": 2,
+    "body": [
+      { "id": "item-101", "name": "Item 101" },
+      { "id": "item-150", "name": "Item 150" }
+    ],
+    "next_cursor": "cursor-3"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:30:45Z",
+    "duration_ms": 1890,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {}
+}

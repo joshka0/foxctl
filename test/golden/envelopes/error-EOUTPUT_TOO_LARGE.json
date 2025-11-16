@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "fs/read",
+  "data": {
+    "hint": "Output exceeded inline capture limit; use --max-bytes or fetch from CAS",
+    "captured_kb": 256,
+    "limit_kb": 128
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:35Z",
+    "duration_ms": 98,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EOUTPUT_TOO_LARGE",
+    "message": "result exceeded configured capture limit"
+  }
+}

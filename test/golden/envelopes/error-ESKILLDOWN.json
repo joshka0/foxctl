@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "text/grep",
+  "data": {
+    "hint": "Skill circuit breaker is open after repeated failures",
+    "cooldown_seconds": 60
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:55Z",
+    "duration_ms": 12,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "ESKILLDOWN",
+    "message": "skill text/grep temporarily unavailable"
+  }
+}

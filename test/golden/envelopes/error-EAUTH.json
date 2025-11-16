@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "http/openapi",
+  "data": {
+    "summary": { "status_code": 401 },
+    "hint": "Check bearer token or set AGENTCTL_BEARER_TOKEN"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:10Z",
+    "duration_ms": 156,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EAUTH",
+    "message": "Authentication failed: 401 Unauthorized"
+  }
+}

@@ -1,0 +1,11 @@
+openapi: 3.0.0
+info:
+  title: Bad API
+  version: "1.0"
+paths:
+  /oops:
+    get:
+      operationId: bad
+      responses:
+        "200":
+          description: "Missing closing quote
