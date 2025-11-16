@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "status": "ok",
+  "command": "agentctl.example.cas",
+  "data": {
+    "summary": {
+      "status_code": 200,
+      "headers": {
+        "content-type": "application/json",
+        "etag": "W/\"def456\""
+      },
+      "record_count": 3,
+      "pagination": {
+        "has_more": false,
+        "total_items": 3,
+        "total_pages": 1,
+        "strategy_used": "cursor"
+      },
+      "preview": {
+        "first_keys": ["id", "name", "updated_at"],
+        "sample_record": {
+          "id": 1,
+          "name": "first-record",
+          "updated_at": "2025-11-12T09:15:00Z"
+        }
+      }
+    },
+    "artifact": "sha256:2f62d6b4c828c1c1fef205f75c1ad7b5b8d65f5cbe9eb1bbde1234567890abcd",
+    "artifact_kind": "application/json",
+    "artifact_size_bytes": 1048576,
+    "kind": "application/json"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:30:05Z",
+    "duration_ms": 512,
+    "source": "run",
+    "runner": "exec",
+    "workspace": "/home/user/project",
+    "cas_digest": "sha256:2f62d6b4c828c1c1fef205f75c1ad7b5b8d65f5cbe9eb1bbde1234567890abcd",
+    "cache_key": "sha256:7b3fd908c3d245b179a86bd27ab88fe12bb600f0a6e4cbf772e032a3f54d18e9"
+  },
+  "error": {}
+}

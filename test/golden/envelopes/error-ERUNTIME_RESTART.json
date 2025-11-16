@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "agentctl.example.run",
+  "data": {
+    "hint": "Execution environment restarted mid-run; no state was persisted",
+    "attempt": 2
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:30Z",
+    "duration_ms": 215,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "ERUNTIME_RESTART",
+    "message": "runner restarted unexpectedly"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "status": "ok",
+  "command": "fs/ls",
+  "data": {
+    "path": "/workspace/agentctl",
+    "entry_count": 6,
+    "files": 4,
+    "directories": 2,
+    "total_size": 40960,
+    "preview": [
+      {
+        "name": "README.md",
+        "path": "/workspace/agentctl/README.md",
+        "is_dir": false,
+        "size_bytes": 32768,
+        "mode": "-rw-r--r--",
+        "mod_time": "2025-11-08T10:00:00Z"
+      },
+      {
+        "name": "cmd",
+        "path": "/workspace/agentctl/cmd",
+        "is_dir": true,
+        "size_bytes": 4096,
+        "mode": "drwxr-xr-x",
+        "mod_time": "2025-11-08T10:00:00Z"
+      }
+    ],
+    "truncated": true,
+    "limited_entries": 2,
+    "artifact": "sha256:4dfe3b7f1d8f5e5bc2485be7f1f74bb1e3a50f6a82a3a6e5c1f88391c4c2de11",
+    "artifact_kind": "application/json",
+    "artifact_size_bytes": 8192
+  },
+  "meta": {
+    "ts": "2025-11-12T10:29:30Z",
+    "source": "run",
+    "runner": "exec",
+    "cas_digest": "sha256:4dfe3b7f1d8f5e5bc2485be7f1f74bb1e3a50f6a82a3a6e5c1f88391c4c2de11"
+  },
+  "error": {}
+}

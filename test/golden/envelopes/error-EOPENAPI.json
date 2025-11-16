@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "http/openapi",
+  "data": {
+    "hint": "operationId listReposForUser was not found in the loaded spec",
+    "spec_digest": "sha256:7a2b9d2151d4b73aa7c3bd9451f55a09bb21dd2a6be3fcdf04f7a8200e7d4caa"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:31:05Z",
+    "duration_ms": 87,
+    "source": "run",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EOPENAPI",
+    "message": "operationId listReposForUser not found"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "error",
+  "command": "agentctl.proto.validate",
+  "data": {
+    "hint": "Envelope missing meta.ts field",
+    "validation_errors": ["meta.ts is required"]
+  },
+  "meta": {
+    "ts": "2025-11-12T10:32:05Z",
+    "duration_ms": 4,
+    "source": "proto",
+    "runner": "exec"
+  },
+  "error": {
+    "code": "EENVELOPE",
+    "message": "invalid envelope: missing meta.ts"
+  }
+}

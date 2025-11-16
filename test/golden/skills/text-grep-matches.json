@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "status": "ok",
+  "command": "text/grep",
+  "data": {
+    "pattern": "TODO",
+    "case_insensitive": true,
+    "match_count": 120,
+    "files_touched": 8,
+    "preview": [
+      {
+        "file": "cmd/agentctl/main.go",
+        "line_no": 42,
+        "line": "// TODO: replace stub",
+        "snippet": "// TODO: replace stub"
+      },
+      {
+        "file": "docs/README.md",
+        "line_no": 10,
+        "line": "- TODO: document caching",
+        "snippet": "- TODO: document caching"
+      }
+    ],
+    "top_files": [
+      { "file": "docs/README.md", "matches": 35 },
+      { "file": "cmd/agentctl/main.go", "matches": 20 }
+    ],
+    "max_matches": 200,
+    "artifact": "sha256:0b8b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f",
+    "artifact_kind": "application/x-ndjson",
+    "artifact_size_bytes": 16384
+  },
+  "meta": {
+    "ts": "2025-11-12T10:30:10Z",
+    "source": "run",
+    "runner": "exec",
+    "cas_digest": "sha256:0b8b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f"
+  },
+  "error": {}
+}

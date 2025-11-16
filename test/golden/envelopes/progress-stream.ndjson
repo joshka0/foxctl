@@ -1,0 +1,3 @@
+{"ts":"2025-11-12T10:30:00Z","message":"Starting task","percent":5.0}
+{"ts":"2025-11-12T10:30:10Z","message":"Fetched dependencies","percent":45.5,"meta":{"stage":"fetch"}}
+{"ts":"2025-11-12T10:30:25Z","message":"Completed","percent":100,"meta":{"stage":"complete","result":"ok"}}

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "status": "ok",
+  "command": "agentctl.example.inline",
+  "data": {
+    "message": "Hello from inline envelope",
+    "items": [
+      { "id": "alpha", "value": 1 },
+      { "id": "bravo", "value": 2 }
+    ],
+    "summary": "Sample inline response"
+  },
+  "meta": {
+    "ts": "2025-11-12T10:30:00Z",
+    "duration_ms": 128,
+    "source": "run",
+    "runner": "exec",
+    "workspace": "/home/user/project",
+    "skill_version": "1.0.0"
+  },
+  "error": {}
+}
