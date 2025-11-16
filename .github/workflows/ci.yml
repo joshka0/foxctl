@@ -29,6 +29,8 @@ jobs:
   build-test:
     name: Go ${{ matrix.go }} • ${{ matrix.os }}
     runs-on: self-hosted
+    env:
+      GOTOOLCHAIN: go1.24.3
     strategy:
       fail-fast: false
       matrix:
@@ -108,6 +110,8 @@ jobs:
   e2e-tests:
     runs-on: self-hosted
     needs: build-test
+    env:
+      GOTOOLCHAIN: go1.24.3
     strategy:
       fail-fast: false
       matrix:
