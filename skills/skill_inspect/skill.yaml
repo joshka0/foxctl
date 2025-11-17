@@ -1,0 +1,40 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: skill/inspect
+  version: 0.1.0
+  description: "Inspect skill implementation details for LLM analysis and troubleshooting"
+  tags: ["skill", "inspect", "meta", "debug"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/skill_inspect/skill_inspect
+io:
+  format: JSON
+  inline_output_kb: 128
+signature:
+  command: skill/inspect
+  parameters:
+    - name: skill_name
+      type: string
+      required: true
+      description: "Skill name to inspect (e.g., 'fs/ls', 'git/worktree')"
+    - name: view
+      type: string
+      required: false
+      description: "What to show: manifest, types, api, implementation, full, examples"
+      enum: ["manifest", "types", "api", "implementation", "full", "examples", "all"]
+      default: "api"
+    - name: function
+      type: string
+      required: false
+      description: "Specific function name to show (for implementation view)"
+returns:
+  - name: inspection
+    type: object
+    description: "Skill inspection results"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
