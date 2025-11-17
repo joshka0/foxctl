@@ -226,7 +226,7 @@ func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
 	cmd := exec.Command("go", "build", "-o", dest, pkg)
 	cmd.Dir = repoRoot(t)
 	env := append([]string{}, os.Environ()...)
-	env = append(env, "CGO_ENABLED=0", "GOFLAGS=-modcacherw")
+	env = append(env, "CGO_ENABLED=1", "GOFLAGS=-modcacherw")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -244,7 +244,7 @@ func buildAgentctlBinary(t *testing.T) string {
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/agentctl")
 	cmd.Dir = repoRoot(t)
 	env := append([]string{}, os.Environ()...)
-	env = append(env, "CGO_ENABLED=0", "GOFLAGS=-modcacherw")
+	env = append(env, "CGO_ENABLED=1", "GOFLAGS=-modcacherw")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
