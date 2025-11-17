@@ -57,11 +57,23 @@ type FilesystemPolicy struct {
 
 // Quotas defines resource limits for a namespace.
 type Quotas struct {
-	MaxConcurrentJobs  int `json:"max_concurrent_jobs,omitempty"`
-	CPULimit           int `json:"cpu_limit,omitempty"`
-	MemoryMBLimit      int `json:"memMB_limit,omitempty"`
-	LLMCallsPerMin     int `json:"llm_calls_per_min,omitempty"`
-	EgressBytesPerMin  int `json:"egress_bytes_per_min,omitempty"`
+	Namespace          string `json:"ns"`
+	MaxConcurrentJobs  int    `json:"max_concurrent_jobs,omitempty"`
+	CPULimit           int    `json:"cpu_limit,omitempty"`
+	MemMBLimit         int    `json:"memMB_limit,omitempty"`
+	LLMCallsPerMin     int    `json:"llm_calls_per_min,omitempty"`
+	EgressBytesPerMin  int    `json:"egress_bytes_per_min,omitempty"`
+}
+
+// QuotaConsumption tracks current resource usage for a namespace.
+type QuotaConsumption struct {
+	Namespace        string `json:"ns"`
+	ActiveJobs       int    `json:"active_jobs"`
+	CPUUsed          int    `json:"cpu_used"`
+	MemMBUsed        int    `json:"memMB_used"`
+	LLMCalls1Min     int    `json:"llm_calls_1min"`
+	EgressBytes1Min  int    `json:"egress_bytes_1min"`
+	LastResetTS      int64  `json:"last_reset_ts"`
 }
 
 // MarshalPolicyJSON serializes a policy to JSON bytes.
