@@ -125,33 +125,47 @@ func init() {
 	bbPostCmd.Flags().StringVar(&bbPostDataFile, "data-file", "", "Path to JSON data file")
 	bbPostCmd.Flags().IntVar(&bbPostTTL, "ttl", 86400, "TTL in seconds (default: 24h)")
 	bbPostCmd.Flags().StringVar(&bbPostCASRef, "cas", "", "CAS reference (optional)")
-	_ = bbPostCmd.MarkFlagRequired("ns")
+	if err := bbPostCmd.MarkFlagRequired("ns"); err != nil {
+		panic(err)
+	}
 
 	// Search flags
 	bbSearchCmd.Flags().StringVar(&bbSearchNS, "ns", "", "Namespace (required)")
 	bbSearchCmd.Flags().IntVar(&bbSearchLimit, "limit", 20, "Maximum number of items to return")
-	_ = bbSearchCmd.MarkFlagRequired("ns")
+	if err := bbSearchCmd.MarkFlagRequired("ns"); err != nil {
+		panic(err)
+	}
 
 	// Claim flags
 	bbClaimCmd.Flags().StringVar(&bbClaimNS, "ns", "", "Namespace (required)")
 	bbClaimCmd.Flags().StringVar(&bbClaimAgentID, "agent", "", "Agent ID claiming the item (required)")
 	bbClaimCmd.Flags().IntVar(&bbClaimDuration, "lease", 300, "Lease duration in seconds (default: 5m)")
-	_ = bbClaimCmd.MarkFlagRequired("ns")
-	_ = bbClaimCmd.MarkFlagRequired("agent")
+	if err := bbClaimCmd.MarkFlagRequired("ns"); err != nil {
+		panic(err)
+	}
+	if err := bbClaimCmd.MarkFlagRequired("agent"); err != nil {
+		panic(err)
+	}
 
 	// Release flags
 	bbReleaseCmd.Flags().StringVar(&bbReleaseNS, "ns", "", "Namespace (required)")
-	_ = bbReleaseCmd.MarkFlagRequired("ns")
+	if err := bbReleaseCmd.MarkFlagRequired("ns"); err != nil {
+		panic(err)
+	}
 
 	// List flags
 	bbListCmd.Flags().StringVar(&bbListNS, "ns", "", "Namespace (required)")
 	bbListCmd.Flags().IntVar(&bbListLimit, "limit", 20, "Maximum number of items to return")
-	_ = bbListCmd.MarkFlagRequired("ns")
+	if err := bbListCmd.MarkFlagRequired("ns"); err != nil {
+		panic(err)
+	}
 
 	// Watch flags
 	bbWatchCmd.Flags().StringVar(&bbWatchNS, "ns", "", "Namespace (required)")
 	bbWatchCmd.Flags().Int64Var(&bbWatchFromTS, "from", 0, "Start timestamp (unix seconds, 0=now)")
-	_ = bbWatchCmd.MarkFlagRequired("ns")
+	if err := bbWatchCmd.MarkFlagRequired("ns"); err != nil {
+		panic(err)
+	}
 }
 
 func runBBPost(cmd *cobra.Command, args []string) error {

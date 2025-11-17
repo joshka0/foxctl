@@ -65,7 +65,9 @@ func init() {
 
 	// Set-weight flags
 	schedulerSetWeightCmd.Flags().IntVar(&schedulerWeight, "weight", 1, "Scheduling weight (higher = more capacity)")
-	_ = schedulerSetWeightCmd.MarkFlagRequired("weight")
+	if err := schedulerSetWeightCmd.MarkFlagRequired("weight"); err != nil {
+		panic(err)
+	}
 }
 
 func runSchedulerStats(cmd *cobra.Command, args []string) error {

@@ -135,8 +135,12 @@ func TestWFQSchedulerFairness(t *testing.T) {
 		}
 
 		mu.Lock()
-		_ = scheduler.Enqueue(job1)
-		_ = scheduler.Enqueue(job2)
+		if err := scheduler.Enqueue(job1); err != nil {
+			t.Errorf("failed to enqueue job1: %v", err)
+		}
+		if err := scheduler.Enqueue(job2); err != nil {
+			t.Errorf("failed to enqueue job2: %v", err)
+		}
 		mu.Unlock()
 	}
 
@@ -178,8 +182,12 @@ func TestWFQSchedulerVirtualTime(t *testing.T) {
 		Execute:   func(ctx context.Context) error { return nil },
 	}
 
-	_ = scheduler.Enqueue(job1)
-	_ = scheduler.Enqueue(job2)
+	if err := scheduler.Enqueue(job1); err != nil {
+		t.Fatalf("failed to enqueue job1: %v", err)
+	}
+	if err := scheduler.Enqueue(job2); err != nil {
+		t.Fatalf("failed to enqueue job2: %v", err)
+	}
 
 	// Virtual finish time for ns1 (weight 2) should be 0.5
 	// Virtual finish time for ns2 (weight 1) should be 1.0

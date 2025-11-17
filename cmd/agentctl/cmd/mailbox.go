@@ -90,7 +90,9 @@ func init() {
 	mailboxSendCmd.Flags().StringVar(&mailboxSendPayloadFile, "payload-file", "", "Path to JSON payload file")
 	mailboxSendCmd.Flags().IntVar(&mailboxSendTTL, "ttl", 300000, "TTL in milliseconds (default: 5m)")
 	mailboxSendCmd.Flags().StringVar(&mailboxSendCorrelation, "correlation", "", "Correlation ID (for ask/reply)")
-	_ = mailboxSendCmd.MarkFlagRequired("from")
+	if err := mailboxSendCmd.MarkFlagRequired("from"); err != nil {
+		panic(err)
+	}
 
 	// Poll flags
 	mailboxPollCmd.Flags().IntVar(&mailboxPollTimeout, "timeout", 30, "Timeout in seconds")

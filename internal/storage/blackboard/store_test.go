@@ -20,7 +20,7 @@ func TestBlackboardStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Test Post
 	t.Run("Post", func(t *testing.T) {
@@ -29,7 +29,10 @@ func TestBlackboardStore(t *testing.T) {
 			"title":    "Process webhook",
 			"priority": 5,
 		}
-		payloadBytes, _ := json.Marshal(payload)
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("failed to marshal payload: %v", err)
+		}
 
 		record := agent.BlackboardRecord{
 			ID:      "bb-item-001",
@@ -123,7 +126,10 @@ func TestBlackboardStore(t *testing.T) {
 			"task_id": "task-002",
 			"title":   "Send notification",
 		}
-		payloadBytes, _ := json.Marshal(payload)
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("failed to marshal payload: %v", err)
+		}
 
 		record := agent.BlackboardRecord{
 			ID:      "bb-item-002",
@@ -263,7 +269,7 @@ func TestBlackboardWatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Start watching from 1 second ago to ensure we catch records created "now"
 	fromTS := time.Now().Add(-1 * time.Second).Unix()
@@ -276,7 +282,11 @@ func TestBlackboardWatch(t *testing.T) {
 			"task_id": "watch-task-001",
 			"title":   "Watch test task",
 		}
-		payloadBytes, _ := json.Marshal(payload)
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			t.Errorf("failed to marshal payload: %v", err)
+			return
+		}
 
 		record := agent.BlackboardRecord{
 			ID:      "watch-item-001",
