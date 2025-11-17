@@ -31,7 +31,10 @@ func TestMailboxStore(t *testing.T) {
 				"arg1": "value1",
 			},
 		}
-		payloadBytes, _ := json.Marshal(payload)
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("failed to marshal payload: %v", err)
+		}
 
 		msg := agent.Message{
 			ID:        "msg-001",
@@ -110,7 +113,10 @@ func TestMailboxStore(t *testing.T) {
 		payload := map[string]interface{}{
 			"test": "data",
 		}
-		payloadBytes, _ := json.Marshal(payload)
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("failed to marshal payload: %v", err)
+		}
 
 		msg := agent.Message{
 			ID:        "msg-002",
@@ -219,7 +225,10 @@ func TestMailboxMessageTypes(t *testing.T) {
 			payload := map[string]interface{}{
 				"type": msgType,
 			}
-			payloadBytes, _ := json.Marshal(payload)
+			payloadBytes, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("failed to marshal payload: %v", err)
+			}
 
 			msg := agent.Message{
 				ID:        fmt.Sprintf("msg-type-%d", i),

@@ -19,7 +19,7 @@ func TestQuotasStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Test Set
 	t.Run("Set", func(t *testing.T) {
@@ -181,7 +181,7 @@ func TestQuotasConsumption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ns := "org/team/project"
 
@@ -330,7 +330,7 @@ func TestQuotasZeroLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Test setting quotas with all zeros (unlimited)
 	t.Run("ZeroQuotas", func(t *testing.T) {

@@ -262,9 +262,11 @@ func TestManagerConcurrentAccess(t *testing.T) {
 		go func(id int) {
 			serviceName := "concurrent-service"
 			for j := 0; j < 100; j++ {
-				_ = manager.Execute(ctx, serviceName, func(ctx context.Context) error {
+				// Intentionally ignoring error for concurrency test
+				err := manager.Execute(ctx, serviceName, func(ctx context.Context) error {
 					return nil
 				})
+				_ = err
 			}
 			done <- true
 		}(i)

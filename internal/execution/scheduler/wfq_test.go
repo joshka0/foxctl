@@ -135,8 +135,8 @@ func TestWFQSchedulerFairness(t *testing.T) {
 		}
 
 		mu.Lock()
-		scheduler.Enqueue(job1)
-		scheduler.Enqueue(job2)
+		_ = scheduler.Enqueue(job1)
+		_ = scheduler.Enqueue(job2)
 		mu.Unlock()
 	}
 
@@ -178,8 +178,8 @@ func TestWFQSchedulerVirtualTime(t *testing.T) {
 		Execute:   func(ctx context.Context) error { return nil },
 	}
 
-	scheduler.Enqueue(job1)
-	scheduler.Enqueue(job2)
+	_ = scheduler.Enqueue(job1)
+	_ = scheduler.Enqueue(job2)
 
 	// Virtual finish time for ns1 (weight 2) should be 0.5
 	// Virtual finish time for ns2 (weight 1) should be 1.0

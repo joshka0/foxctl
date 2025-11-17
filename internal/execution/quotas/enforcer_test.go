@@ -198,7 +198,10 @@ func TestEnforcerLLMCalls(t *testing.T) {
 	// Test: After counter reset, call should be allowed
 	t.Run("AllowedAfterReset", func(t *testing.T) {
 		// Manually set last reset timestamp to > 60 seconds ago
-		consumption, _ := store.GetConsumption(ctx, ns)
+		consumption, err := store.GetConsumption(ctx, ns)
+		if err != nil {
+			t.Fatalf("failed to get consumption: %v", err)
+		}
 		delta := agent.QuotaConsumption{
 			Namespace:   ns,
 			LastResetTS: time.Now().Unix() - 61,
