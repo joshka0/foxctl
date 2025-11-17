@@ -9,6 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/oklog/ulid/v2"
@@ -124,33 +125,33 @@ func init() {
 	bbPostCmd.Flags().StringVar(&bbPostDataFile, "data-file", "", "Path to JSON data file")
 	bbPostCmd.Flags().IntVar(&bbPostTTL, "ttl", 86400, "TTL in seconds (default: 24h)")
 	bbPostCmd.Flags().StringVar(&bbPostCASRef, "cas", "", "CAS reference (optional)")
-	bbPostCmd.MarkFlagRequired("ns")
+	_ = bbPostCmd.MarkFlagRequired("ns")
 
 	// Search flags
 	bbSearchCmd.Flags().StringVar(&bbSearchNS, "ns", "", "Namespace (required)")
 	bbSearchCmd.Flags().IntVar(&bbSearchLimit, "limit", 20, "Maximum number of items to return")
-	bbSearchCmd.MarkFlagRequired("ns")
+	_ = bbSearchCmd.MarkFlagRequired("ns")
 
 	// Claim flags
 	bbClaimCmd.Flags().StringVar(&bbClaimNS, "ns", "", "Namespace (required)")
 	bbClaimCmd.Flags().StringVar(&bbClaimAgentID, "agent", "", "Agent ID claiming the item (required)")
 	bbClaimCmd.Flags().IntVar(&bbClaimDuration, "lease", 300, "Lease duration in seconds (default: 5m)")
-	bbClaimCmd.MarkFlagRequired("ns")
-	bbClaimCmd.MarkFlagRequired("agent")
+	_ = bbClaimCmd.MarkFlagRequired("ns")
+	_ = bbClaimCmd.MarkFlagRequired("agent")
 
 	// Release flags
 	bbReleaseCmd.Flags().StringVar(&bbReleaseNS, "ns", "", "Namespace (required)")
-	bbReleaseCmd.MarkFlagRequired("ns")
+	_ = bbReleaseCmd.MarkFlagRequired("ns")
 
 	// List flags
 	bbListCmd.Flags().StringVar(&bbListNS, "ns", "", "Namespace (required)")
 	bbListCmd.Flags().IntVar(&bbListLimit, "limit", 20, "Maximum number of items to return")
-	bbListCmd.MarkFlagRequired("ns")
+	_ = bbListCmd.MarkFlagRequired("ns")
 
 	// Watch flags
 	bbWatchCmd.Flags().StringVar(&bbWatchNS, "ns", "", "Namespace (required)")
 	bbWatchCmd.Flags().Int64Var(&bbWatchFromTS, "from", 0, "Start timestamp (unix seconds, 0=now)")
-	bbWatchCmd.MarkFlagRequired("ns")
+	_ = bbWatchCmd.MarkFlagRequired("ns")
 }
 
 func runBBPost(cmd *cobra.Command, args []string) error {
@@ -183,7 +184,7 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer bbStore.Close()
+	defer errs.Ignore(bbStore.Close(), "close blackboard store")
 
 	// Create blackboard record
 	now := time.Now().UTC().Unix()
@@ -231,7 +232,7 @@ func runBBSearch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/search", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer bbStore.Close()
+	defer errs.Ignore(bbStore.Close(), "close blackboard store")
 
 	// Search blackboard
 	records, err := bbStore.Search(ctx, bbSearchNS, topic, bbSearchLimit)
@@ -265,7 +266,7 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer bbStore.Close()
+	defer errs.Ignore(bbStore.Close(), "close blackboard store")
 
 	// Claim item
 	leaseDuration := time.Duration(bbClaimDuration) * time.Second
@@ -314,7 +315,7 @@ func runBBRelease(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/release", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer bbStore.Close()
+	defer errs.Ignore(bbStore.Close(), "close blackboard store")
 
 	// Release item
 	if err := bbStore.Release(ctx, itemID); err != nil {
@@ -352,7 +353,7 @@ func runBBList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer bbStore.Close()
+	defer errs.Ignore(bbStore.Close(), "close blackboard store")
 
 	// List items by topic
 	records, err := bbStore.ListByTopic(ctx, bbListNS, topic, bbListLimit)
@@ -386,7 +387,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer bbStore.Close()
+	defer errs.Ignore(bbStore.Close(), "close blackboard store")
 
 	// Determine start timestamp
 	fromTS := bbWatchFromTS

@@ -156,16 +156,6 @@ func buildNamespace(parentNS, agentID string) string {
 	return parentNS + "/child-" + agentID
 }
 
-// extractParentID extracts the parent agent ID from a namespace.
-func extractParentID(parentNS string) string {
-	if parentNS == "" {
-		return ""
-	}
-	// This is a simplified implementation
-	// In a real system, you'd parse the namespace properly
-	return parentNS
-}
-
 // validatePolicyNarrowing ensures child policy is narrower than parent.
 func validatePolicyNarrowing(parent, child agent.Policy) error {
 	// CPU: child must not exceed parent

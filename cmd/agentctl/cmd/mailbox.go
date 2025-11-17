@@ -9,6 +9,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/oklog/ulid/v2"
@@ -89,7 +90,7 @@ func init() {
 	mailboxSendCmd.Flags().StringVar(&mailboxSendPayloadFile, "payload-file", "", "Path to JSON payload file")
 	mailboxSendCmd.Flags().IntVar(&mailboxSendTTL, "ttl", 300000, "TTL in milliseconds (default: 5m)")
 	mailboxSendCmd.Flags().StringVar(&mailboxSendCorrelation, "correlation", "", "Correlation ID (for ask/reply)")
-	mailboxSendCmd.MarkFlagRequired("from")
+	_ = mailboxSendCmd.MarkFlagRequired("from")
 
 	// Poll flags
 	mailboxPollCmd.Flags().IntVar(&mailboxPollTimeout, "timeout", 30, "Timeout in seconds")
@@ -138,7 +139,7 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer mbStore.Close()
+	defer errs.Ignore(mbStore.Close(), "close mailbox store")
 
 	// Create message
 	now := time.Now().Unix()
@@ -199,7 +200,7 @@ func runMailboxPoll(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/poll", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer mbStore.Close()
+	defer errs.Ignore(mbStore.Close(), "close mailbox store")
 
 	// Poll messages
 	timeout := time.Duration(mailboxPollTimeout) * time.Second
@@ -234,7 +235,7 @@ func runMailboxAck(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/ack", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer mbStore.Close()
+	defer errs.Ignore(mbStore.Close(), "close mailbox store")
 
 	// Acknowledge message
 	if err := mbStore.Ack(ctx, messageID); err != nil {
@@ -272,7 +273,7 @@ func runMailboxList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer mbStore.Close()
+	defer errs.Ignore(mbStore.Close(), "close mailbox store")
 
 	// List messages
 	messages, err := mbStore.List(ctx, agentNS, mailboxListLimit)

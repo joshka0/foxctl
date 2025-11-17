@@ -7,6 +7,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/quotas"
 	"github.com/spf13/cobra"
@@ -94,7 +95,7 @@ func runQuotasShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/show", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer quotasStore.Close()
+	defer errs.Ignore(quotasStore.Close(), "close quotas store")
 
 	// Get quotas
 	q, err := quotasStore.Get(ctx, ns)
@@ -140,7 +141,7 @@ func runQuotasSet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer quotasStore.Close()
+	defer errs.Ignore(quotasStore.Close(), "close quotas store")
 
 	// Create quotas
 	q := agent.Quotas{
@@ -194,7 +195,7 @@ func runQuotasDelete(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/delete", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer quotasStore.Close()
+	defer errs.Ignore(quotasStore.Close(), "close quotas store")
 
 	// Delete quotas
 	if err := quotasStore.Delete(ctx, ns); err != nil {
@@ -231,7 +232,7 @@ func runQuotasList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer quotasStore.Close()
+	defer errs.Ignore(quotasStore.Close(), "close quotas store")
 
 	// List all quotas
 	allQuotas, err := quotasStore.ListAll(ctx)
@@ -267,7 +268,7 @@ func runQuotasConsumption(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/consumption", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer quotasStore.Close()
+	defer errs.Ignore(quotasStore.Close(), "close quotas store")
 
 	// Get consumption
 	consumption, err := quotasStore.GetConsumption(ctx, ns)

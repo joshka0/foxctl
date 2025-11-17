@@ -12,6 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
@@ -154,13 +155,13 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer agentStore.Close()
+	defer errs.Ignore(agentStore.Close(), "close agent store")
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer mailboxStore.Close()
+	defer errs.Ignore(mailboxStore.Close(), "close mailbox store")
 
 	// Create manager
 	mgr := agentmanager.New(agentStore, mailboxStore)
@@ -207,7 +208,7 @@ func runAgentList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer agentStore.Close()
+	defer errs.Ignore(agentStore.Close(), "close agent store")
 
 	// List agents
 	list, err := agentStore.List(ctx, listLimit)
@@ -240,13 +241,13 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer agentStore.Close()
+	defer errs.Ignore(agentStore.Close(), "close agent store")
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer mailboxStore.Close()
+	defer errs.Ignore(mailboxStore.Close(), "close mailbox store")
 
 	// Create manager
 	mgr := agentmanager.New(agentStore, mailboxStore)
@@ -291,7 +292,7 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/info", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer agentStore.Close()
+	defer errs.Ignore(agentStore.Close(), "close agent store")
 
 	// Get agent
 	a, err := agentStore.Get(ctx, agentID)
@@ -327,13 +328,13 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer agentStore.Close()
+	defer errs.Ignore(agentStore.Close(), "close agent store")
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer mailboxStore.Close()
+	defer errs.Ignore(mailboxStore.Close(), "close mailbox store")
 
 	// Verify agent exists
 	a, err := agentStore.Get(ctx, agentID)

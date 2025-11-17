@@ -7,6 +7,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 // Job represents a schedulable unit of work.
@@ -240,7 +242,7 @@ func (s *WFQScheduler) worker(ctx context.Context, id int) {
 			}
 
 			// Execute the job
-			_ = job.Execute(ctx) // Ignore errors for now
+			errs.Ignore(job.Execute(ctx), "scheduler: execute job")
 
 			// Update namespace stats
 			s.mu.Lock()
