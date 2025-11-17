@@ -20,7 +20,7 @@ func TestBlackboardStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() { _ = store.Close() }() //nolint:errcheck
 
 	// Test Post
 	t.Run("Post", func(t *testing.T) {
@@ -269,7 +269,7 @@ func TestBlackboardWatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() { _ = store.Close() }() //nolint:errcheck
 
 	// Start watching from 1 second ago to ensure we catch records created "now"
 	fromTS := time.Now().Add(-1 * time.Second).Unix()

@@ -229,7 +229,9 @@ func TestWFQSchedulerMultipleNamespaces(t *testing.T) {
 					return nil
 				},
 			}
-			scheduler.Enqueue(job)
+			if err := scheduler.Enqueue(job); err != nil {
+				t.Errorf("failed to enqueue job: %v", err)
+			}
 		}
 	}
 
@@ -268,8 +270,12 @@ func TestWFQSchedulerStats(t *testing.T) {
 		Execute:   func(ctx context.Context) error { return nil },
 	}
 
-	scheduler.Enqueue(job1)
-	scheduler.Enqueue(job2)
+	if err := scheduler.Enqueue(job1); err != nil {
+		t.Fatalf("failed to enqueue job1: %v", err)
+	}
+	if err := scheduler.Enqueue(job2); err != nil {
+		t.Fatalf("failed to enqueue job2: %v", err)
+	}
 
 	stats := scheduler.Stats()
 
