@@ -107,12 +107,19 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 		result["output_size"] = len(outputStr)
 
-		// Store as artifact if large
-		if len(outputStr) > rc.MaxPreview {
+		// Store as artifact if large (use InlineKB threshold, not MaxPreview)
+		inlineThreshold := rc.InlineKB * 1024
+		if len(outputStr) > inlineThreshold {
 			result["output_preview"] = outputStr[:rc.MaxPreview] + "\n... (truncated)"
 
+			// Determine content type based on output format
+			contentType := "application/json"
+			if in.RawOutput {
+				contentType = "text/plain"
+			}
+
 			buf := bytes.NewBufferString(outputStr)
-			artifact, err := runner.PersistBuffer(ctx, rc, buf, "application/json", "jq_output")
+			artifact, err := runner.PersistBuffer(ctx, rc, buf, contentType, "jq_output")
 			if err == nil && artifact.Digest != "" {
 				result["artifact"] = artifact.Digest
 				result["artifact_kind"] = artifact.Kind

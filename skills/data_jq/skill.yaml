@@ -47,7 +47,7 @@ signature:
       type: boolean
       required: false
       default: false
-      description: "Parse input as YAML"
+      description: "Parse input as YAML (requires gojq; standard jq does not support --yaml-input)"
 returns:
   - name: result
     type: object

@@ -470,7 +470,8 @@ func extractParametersFromManifest(manifest string) []map[string]string {
 				desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "description:"))
 				currentParam["description"] = strings.Trim(desc, "\"")
 			} else if strings.HasPrefix(trimmed, "default:") {
-				currentParam["default"] = strings.TrimSpace(strings.TrimPrefix(trimmed, "default:"))
+				def := strings.TrimSpace(strings.TrimPrefix(trimmed, "default:"))
+				currentParam["default"] = strings.Trim(def, "\"")
 			}
 		}
 	}

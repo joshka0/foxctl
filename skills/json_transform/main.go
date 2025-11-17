@@ -50,7 +50,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(_ context.Context, rc *runner.RunnerContext, in input) error {
 	// Parse input JSON
 	var data any
 	if err := json.Unmarshal([]byte(in.Input), &data); err != nil {

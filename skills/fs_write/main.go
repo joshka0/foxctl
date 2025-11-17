@@ -229,8 +229,24 @@ func performWrite(path string, content []byte, mode string, perm fs.FileMode) (i
 	}
 
 	// Calculate checksum
-	hash := sha256.Sum256(content)
-	checksum := hex.EncodeToString(hash[:])
+	var checksum string
+	if mode == "append" {
+		// For append mode, checksum should cover the entire final file
+		if err := f.Close(); err != nil {
+			return n, "", fmt.Errorf("close file before checksum: %w", err)
+		}
+
+		finalContent, err := os.ReadFile(path)
+		if err != nil {
+			return n, "", fmt.Errorf("read file for checksum: %w", err)
+		}
+		hash := sha256.Sum256(finalContent)
+		checksum = hex.EncodeToString(hash[:])
+	} else {
+		// For create/overwrite, checksum only needs to cover written content
+		hash := sha256.Sum256(content)
+		checksum = hex.EncodeToString(hash[:])
+	}
 
 	return n, checksum, nil
 }

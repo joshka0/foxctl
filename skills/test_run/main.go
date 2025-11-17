@@ -163,9 +163,12 @@ func buildTestCommand(ctx context.Context, mode, path string, in input) (*exec.C
 	case "race":
 		args = []string{"test", "-race"}
 	case "bench":
-		args = []string{"test", "-bench=."}
+		args = []string{"test"}
 		if in.Pattern != "" {
+			args = append(args, "-bench="+in.Pattern)
 			args = append(args, "-run=^$") // Don't run tests, only benchmarks
+		} else {
+			args = append(args, "-bench=.")
 		}
 	case "coverage":
 		args = []string{"test", "-cover", "-covermode=atomic"}
@@ -180,7 +183,8 @@ func buildTestCommand(ctx context.Context, mode, path string, in input) (*exec.C
 	if in.Verbose {
 		args = append(args, "-v")
 	}
-	if in.Pattern != "" {
+	if in.Pattern != "" && mode != "bench" {
+		// For bench mode, pattern is already handled above with -bench flag
 		args = append(args, "-run="+in.Pattern)
 	}
 	if in.Timeout != "" {
