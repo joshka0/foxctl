@@ -52,19 +52,32 @@ type Envelope struct {
 
 // Meta captures timestamps and other metadata for responses.
 type Meta struct {
-	TS         string     `json:"ts"`
-	DurationMS int64      `json:"duration_ms,omitempty"`
-	Source     string     `json:"source,omitempty"`
-	Runner     string     `json:"runner,omitempty"`
-	Seq        *int       `json:"seq,omitempty"`
-	Final      *bool      `json:"final,omitempty"`
-	CASDigest  string     `json:"cas_digest,omitempty"`
-	Memory     *MemoryRef `json:"memory,omitempty"`
-	JobID      string     `json:"job_id,omitempty"`
-	SkillVer   string     `json:"skill_version,omitempty"`
-	Workspace  string     `json:"workspace,omitempty"`
-	CacheKey   string     `json:"cache_key,omitempty"`
-	Partial    bool       `json:"partial,omitempty"`
+	TS         string        `json:"ts"`
+	DurationMS int64         `json:"duration_ms,omitempty"`
+	Source     string        `json:"source,omitempty"`
+	Runner     string        `json:"runner,omitempty"`
+	Seq        *int          `json:"seq,omitempty"`
+	Final      *bool         `json:"final,omitempty"`
+	CASDigest  string        `json:"cas_digest,omitempty"`
+	Memory     *MemoryRef    `json:"memory,omitempty"`
+	JobID      string        `json:"job_id,omitempty"`
+	SkillVer   string        `json:"skill_version,omitempty"`
+	Workspace  string        `json:"workspace,omitempty"`
+	CacheKey   string        `json:"cache_key,omitempty"`
+	Partial    bool          `json:"partial,omitempty"`
+	Profiles   []string      `json:"profiles,omitempty"`       // Agent Profile: e.g. ["core/v1", "agent/v1"]
+	AgentID    string        `json:"agent_id,omitempty"`       // Agent Profile: agent identifier
+	MailboxID  string        `json:"mailbox_id,omitempty"`     // Agent Profile: mailbox identifier
+	CorrelID   string        `json:"correlation_id,omitempty"` // Agent Profile: correlation ID for ask/reply
+	ParentJob  string        `json:"parent_job_id,omitempty"`  // Agent Profile: parent job ID
+	QuotaRem   *QuotaRemain  `json:"quota_remaining,omitempty"` // Agent Profile: remaining quotas
+}
+
+// QuotaRemain captures remaining resource quotas for agent profile.
+type QuotaRemain struct {
+	CPUMS     int `json:"cpu_ms,omitempty"`
+	MemoryMB  int `json:"memory_mb,omitempty"`
+	NetworkMB int `json:"network_mb,omitempty"`
 }
 
 // MemoryRef describes a named memory reference included with an envelope.
