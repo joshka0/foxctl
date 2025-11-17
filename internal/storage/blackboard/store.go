@@ -133,11 +133,6 @@ func (s *sqlStore) Claim(ctx context.Context, id, agentID string, leaseDuration 
 		return agent.BlackboardRecord{}, err
 	}
 
-	// Check if already leased
-	if record.IsLeased() {
-		return agent.BlackboardRecord{}, ErrAlreadyLeased
-	}
-
 	// Create new lease
 	lease := &agent.Lease{
 		Holder: agentID,
@@ -149,10 +144,24 @@ func (s *sqlStore) Claim(ctx context.Context, id, agentID string, leaseDuration 
 		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: marshal lease: %w", err)
 	}
 
-	// Update the lease
-	_, err = tx.ExecContext(ctx, `UPDATE blackboard SET lease = ? WHERE id = ?`, string(leaseJSON), id)
+	// Update the lease only if still unleased (covers both SQL NULL and textual "null")
+	// This makes the claim operation atomic and prevents concurrent leasing
+	res, err := tx.ExecContext(ctx, `
+		UPDATE blackboard
+		SET lease = ?
+		WHERE id = ? AND (lease IS NULL OR lease = '' OR lease = 'null')
+	`, string(leaseJSON), id)
 	if err != nil {
 		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: update lease: %w", err)
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: claim rows affected: %w", err)
+	}
+	if rows == 0 {
+		// Someone else claimed first
+		return agent.BlackboardRecord{}, ErrAlreadyLeased
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -231,6 +240,7 @@ func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<
 		defer close(errCh)
 
 		lastTS := fromTS
+		lastID := "" // Track last ID for tie-breaking
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -239,12 +249,13 @@ func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				// Query for new records since lastTS
+				// Query for new records since lastTS, using ID as tie-breaker
+				// This ensures we don't miss records created in the same second
 				rows, err := s.db.QueryContext(ctx, `
 					SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
 					FROM blackboard
-					WHERE ns = ? AND topic = ? AND ts > ?
-					ORDER BY ts ASC`, ns, topic, lastTS)
+					WHERE ns = ? AND topic = ? AND (ts > ? OR (ts = ? AND id > ?))
+					ORDER BY ts ASC, id ASC`, ns, topic, lastTS, lastTS, lastID)
 				if err != nil {
 					errCh <- fmt.Errorf("blackboard: watch query: %w", err)
 					return
@@ -259,9 +270,9 @@ func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<
 						return
 					}
 					newRecords = append(newRecords, record)
-					if record.TS > lastTS {
-						lastTS = record.TS
-					}
+					// Update cursor: both timestamp and ID for proper tie-breaking
+					lastTS = record.TS
+					lastID = record.ID
 				}
 				errs.Ignore(rows.Close(), "close blackboard watch rows")
 

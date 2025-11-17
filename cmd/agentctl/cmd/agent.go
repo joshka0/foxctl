@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -32,7 +34,7 @@ var agentSpawnCmd = &cobra.Command{
 var agentListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List agents",
-	Long:  "List all agents or agents under a specific namespace",
+	Long:  "List all agents with optional limit",
 	RunE:  runAgentList,
 }
 
@@ -123,9 +125,15 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 	// Parse skills allow
 	var skillsAllow []string
 	if spawnSkillsAllow != "" {
-		if err := json.Unmarshal([]byte(spawnSkillsAllow), &skillsAllow); err != nil {
-			// Try comma-separated
-			skillsAllow = parseCommaSeparated(spawnSkillsAllow)
+		trimmed := strings.TrimSpace(spawnSkillsAllow)
+		if strings.HasPrefix(trimmed, "[") {
+			// Looks like JSON, require valid JSON
+			if err := json.Unmarshal([]byte(trimmed), &skillsAllow); err != nil {
+				return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeEARG, fmt.Sprintf("invalid JSON in skills-allow: %v", err))
+			}
+		} else {
+			// Treat as comma-separated
+			skillsAllow = parseCommaSeparated(trimmed)
 		}
 	}
 
@@ -288,7 +296,13 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 	// Get agent
 	a, err := agentStore.Get(ctx, agentID)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/info", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("agent not found: %v", err))
+		code := protocol.ErrorCodeERUNTIME
+		msg := fmt.Sprintf("failed to get agent: %v", err)
+		if errors.Is(err, agents.ErrNotFound) {
+			code = protocol.ErrorCodeENOTFOUND
+			msg = fmt.Sprintf("agent not found: %v", err)
+		}
+		return writeErrorEnvelope(cmd, "agent/info", code, msg)
 	}
 
 	// Write success envelope

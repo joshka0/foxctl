@@ -281,6 +281,10 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
+	if record.Lease == nil {
+		return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeERUNTIME, "claim succeeded but lease not set")
+	}
+
 	data := map[string]interface{}{
 		"item_id":           record.ID,
 		"lease_id":          record.Lease.Holder + "-" + fmt.Sprintf("%d", record.Lease.Until),

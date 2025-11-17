@@ -265,8 +265,8 @@ func TestBlackboardWatch(t *testing.T) {
 	}
 	defer store.Close()
 
-	// Start watching from now
-	fromTS := time.Now().Unix()
+	// Start watching from 1 second ago to ensure we catch records created "now"
+	fromTS := time.Now().Add(-1 * time.Second).Unix()
 	recordCh, errCh := store.Watch(ctx, "org/test", "/tasks/watch", fromTS)
 
 	// Post a record after starting watch

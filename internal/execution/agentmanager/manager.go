@@ -45,6 +45,8 @@ type SpawnResponse struct {
 
 // Spawn creates a new agent instance.
 func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, error) {
+	var parentID string
+
 	// Validate policy narrowing if parent exists
 	if req.ParentNS != "" {
 		parent, err := m.agentStore.GetByNamespace(ctx, req.ParentNS)
@@ -60,6 +62,8 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 		if err := validateSkillsAllowlist(parent.SkillsAllow, req.SkillsAllow); err != nil {
 			return SpawnResponse{}, fmt.Errorf("skills allowlist validation failed: %w", err)
 		}
+
+		parentID = parent.ID
 	}
 
 	// Generate agent ID
@@ -72,7 +76,7 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 	now := time.Now().UTC()
 	a := agent.Agent{
 		ID:          agentID,
-		ParentID:    extractParentID(req.ParentNS),
+		ParentID:    parentID,
 		Namespace:   ns,
 		Role:        req.Role,
 		Prompt:      req.Prompt,
@@ -110,9 +114,10 @@ type KillResponse struct {
 }
 
 // Kill terminates an agent.
+// TODO: Graceful and TimeoutS fields are currently unused and will be wired
+// into the runtime when termination logic is implemented.
 func (m *Manager) Kill(ctx context.Context, req KillRequest) (KillResponse, error) {
-	a, err := m.agentStore.Get(ctx, req.AgentID)
-	if err != nil {
+	if _, err := m.agentStore.Get(ctx, req.AgentID); err != nil {
 		return KillResponse{}, fmt.Errorf("get agent: %w", err)
 	}
 
@@ -124,7 +129,7 @@ func (m *Manager) Kill(ctx context.Context, req KillRequest) (KillResponse, erro
 	return KillResponse{
 		AgentID:     req.AgentID,
 		FinalStatus: agent.StateStopped,
-		ExitCode:    0,
+		ExitCode:    0, // TODO: surface real exit code once the runtime provides it
 	}, nil
 }
 
