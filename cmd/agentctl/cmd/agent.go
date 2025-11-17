@@ -117,7 +117,7 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 	if spawnPromptFile != "" {
 		data, err := os.ReadFile(spawnPromptFile)
 		if err != nil {
-			return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeEARG, fmt.Sprintf("failed to read prompt file: %v", err))
+			return writeErrorEnvelope(cmd, "agent/spawn", string(string(protocol.ErrorCodeEARG)), fmt.Sprintf("failed to read prompt file: %v", err))
 		}
 		prompt = string(data)
 	}
@@ -129,7 +129,7 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 		if strings.HasPrefix(trimmed, "[") {
 			// Looks like JSON, require valid JSON
 			if err := json.Unmarshal([]byte(trimmed), &skillsAllow); err != nil {
-				return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeEARG, fmt.Sprintf("invalid JSON in skills-allow: %v", err))
+				return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON in skills-allow: %v", err))
 			}
 		} else {
 			// Treat as comma-separated
@@ -142,23 +142,23 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 	if spawnPolicyFile != "" {
 		data, err := os.ReadFile(spawnPolicyFile)
 		if err != nil {
-			return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeEARG, fmt.Sprintf("failed to read policy file: %v", err))
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read policy file: %v", err))
 		}
 		if err := json.Unmarshal(data, &policy); err != nil {
-			return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeEARG, fmt.Sprintf("failed to parse policy JSON: %v", err))
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to parse policy JSON: %v", err))
 		}
 	}
 
 	// Open stores
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open agent store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
 	defer agentStore.Close()
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer mailboxStore.Close()
 
@@ -177,7 +177,7 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 
 	resp, err := mgr.Spawn(ctx, req)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/spawn", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to spawn agent: %v", err))
+		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to spawn agent: %v", err))
 	}
 
 	// Write success envelope
@@ -205,14 +205,14 @@ func runAgentList(cmd *cobra.Command, args []string) error {
 	// Open agent store
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open agent store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
 	defer agentStore.Close()
 
 	// List agents
 	list, err := agentStore.List(ctx, listLimit)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to list agents: %v", err))
+		return writeErrorEnvelope(cmd, "agent/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to list agents: %v", err))
 	}
 
 	// Write success envelope
@@ -238,13 +238,13 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 	// Open stores
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/kill", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open agent store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
 	defer agentStore.Close()
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/kill", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer mailboxStore.Close()
 
@@ -260,7 +260,7 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 
 	resp, err := mgr.Kill(ctx, req)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/kill", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to kill agent: %v", err))
+		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to kill agent: %v", err))
 	}
 
 	// Write success envelope
@@ -289,17 +289,17 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 	// Open agent store
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/info", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open agent store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/info", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
 	defer agentStore.Close()
 
 	// Get agent
 	a, err := agentStore.Get(ctx, agentID)
 	if err != nil {
-		code := protocol.ErrorCodeERUNTIME
+		code := string(protocol.ErrorCodeERuntime)
 		msg := fmt.Sprintf("failed to get agent: %v", err)
 		if errors.Is(err, agents.ErrNotFound) {
-			code = protocol.ErrorCodeENOTFOUND
+			code = string(protocol.ErrorCodeENotFound)
 			msg = fmt.Sprintf("agent not found: %v", err)
 		}
 		return writeErrorEnvelope(cmd, "agent/info", code, msg)
@@ -325,20 +325,20 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 	// Open stores
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open agent store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
 	defer agentStore.Close()
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+		return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer mailboxStore.Close()
 
 	// Verify agent exists
 	a, err := agentStore.Get(ctx, agentID)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("agent not found: %v", err))
+		return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
 	}
 
 	// Create NDJSON writer
@@ -377,7 +377,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 			// Check for agent updates
 			current, err := agentStore.Get(ctx, agentID)
 			if err != nil {
-				return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to get agent: %v", err))
+				return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to get agent: %v", err))
 			}
 
 			// Check for state change
@@ -448,7 +448,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 			// Check for new mailbox messages
 			messages, err := mailboxStore.List(ctx, a.Namespace, 10)
 			if err != nil {
-				return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to list messages: %v", err))
+				return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to list messages: %v", err))
 			}
 
 			if len(messages) > 0 {

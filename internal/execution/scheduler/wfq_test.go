@@ -15,12 +15,10 @@ func TestWFQSchedulerEnqueue(t *testing.T) {
 	}
 	scheduler := NewWFQScheduler(config)
 
-	executed := false
 	job := &Job{
 		ID:        "job-1",
 		Namespace: "ns1",
 		Execute: func(ctx context.Context) error {
-			executed = true
 			return nil
 		},
 	}
