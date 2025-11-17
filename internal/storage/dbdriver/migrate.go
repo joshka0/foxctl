@@ -109,7 +109,7 @@ func (m *Migrator) getTablesToMigrate(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tables []string
 	for rows.Next() {
@@ -180,7 +180,7 @@ func (m *Migrator) getTableColumns(ctx context.Context, tableName string) ([]str
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	columns, err := rows.Columns()
 	if err != nil {
@@ -198,7 +198,7 @@ func (m *Migrator) migrateTableData(ctx context.Context, tableName string, colum
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Prepare insert statement
 	placeholders := make([]string, len(columns))
@@ -270,13 +270,13 @@ func (m *Migrator) insertBatch(ctx context.Context, insertQuery string, batch []
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, insertQuery)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, values := range batch {
 		if _, err := stmt.ExecContext(ctx, values...); err != nil {
@@ -301,7 +301,9 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(writer, "%s;\n\n", schema)
+		if _, err := fmt.Fprintf(writer, "%s;\n\n", schema); err != nil {
+			return err
+		}
 
 		// Write INSERT statements
 		columns, err := m.getTableColumns(ctx, table)
@@ -323,7 +325,7 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 			}
 
 			if err := rows.Scan(valuePtrs...); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return err
 			}
 
@@ -342,12 +344,17 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 				}
 			}
 
-			fmt.Fprintf(writer, "INSERT INTO %s (%s) VALUES (%s);\n",
-				table, strings.Join(columns, ", "), strings.Join(valueStrs, ", "))
+			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (%s) VALUES (%s);\n",
+				table, strings.Join(columns, ", "), strings.Join(valueStrs, ", ")); err != nil {
+				_ = rows.Close()
+				return err
+			}
 		}
-		rows.Close()
+		_ = rows.Close()
 
-		fmt.Fprintf(writer, "\n")
+		if _, err := fmt.Fprintf(writer, "\n"); err != nil {
+			return err
+		}
 	}
 
 	return nil

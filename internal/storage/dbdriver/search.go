@@ -299,7 +299,6 @@ func (h *HybridSearcher) Search(
 	queryTerms := Tokenize(queryText)
 	results := make(SearchResults, 0)
 	bm25Scores := make([]float64, 0)
-	vectorScores := make([]float64, 0)
 
 	for rows.Next() {
 		var docID string
@@ -326,7 +325,6 @@ func (h *HybridSearcher) Search(
 		})
 
 		bm25Scores = append(bm25Scores, bm25Score)
-		vectorScores = append(vectorScores, vectorSim)
 	}
 
 	if err := rows.Err(); err != nil {

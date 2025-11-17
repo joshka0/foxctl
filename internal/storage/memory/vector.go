@@ -41,46 +41,6 @@ func (s *Store) EnableVectorSearch(db dbdriver.DB) (*VectorStore, error) {
 	}, nil
 }
 
-// migrateVectorSchema adds vector search columns to the memory store
-// This should be called during migration if vector search is enabled
-func migrateVectorSchema(ctx context.Context, db *sql.DB, dimensions int) error {
-	// Add vector embedding column
-	alterQuery := fmt.Sprintf(`
-		ALTER TABLE named_memory
-		ADD COLUMN embedding F32_BLOB(%d)
-	`, dimensions)
-
-	if _, err := db.ExecContext(ctx, alterQuery); err != nil {
-		// Check if column already exists (ignore error if it does)
-		if !isColumnExistsError(err) {
-			return fmt.Errorf("failed to add embedding column: %w", err)
-		}
-	}
-
-	// Create vector index for fast similarity search
-	indexQuery := `
-		CREATE INDEX IF NOT EXISTS idx_memory_vector
-		ON named_memory (libsql_vector_idx(embedding))
-	`
-
-	if _, err := db.ExecContext(ctx, indexQuery); err != nil {
-		return fmt.Errorf("failed to create vector index: %w", err)
-	}
-
-	return nil
-}
-
-// isColumnExistsError checks if the error is due to column already existing
-func isColumnExistsError(err error) bool {
-	if err == nil {
-		return false
-	}
-	// SQLite error for duplicate column
-	return err.Error() == "duplicate column name: embedding" ||
-		// Check for other variations of the error message
-		err.Error() == "table named_memory has no column named embedding"
-}
-
 // SaveWithEmbedding saves a memory entry with vector embedding
 func (vs *VectorStore) SaveWithEmbedding(ctx context.Context, entry VectorEntry) (VectorEntry, error) {
 	// Validate vector dimensions

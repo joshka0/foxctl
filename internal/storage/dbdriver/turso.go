@@ -84,8 +84,8 @@ func ensureVectorSupport(ctx context.Context, db *sql.DB, dimensions int) error 
 		return fmt.Errorf("vector search not available (ensure your Turso group supports vectors): %w", err)
 	}
 
-	// Clean up test table
-	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS _vector_test")
+	// Clean up test table (ignore errors on cleanup)
+	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS _vector_test") //nolint:errcheck
 
 	return nil
 }
