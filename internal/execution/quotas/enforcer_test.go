@@ -225,7 +225,7 @@ func TestEnforcerLLMCalls(t *testing.T) {
 		}
 
 		// Verify counter was reset
-		consumption, err := store.GetConsumption(ctx, ns)
+		consumption, err = store.GetConsumption(ctx, ns)
 		if err != nil {
 			t.Fatalf("failed to get consumption: %v", err)
 		}
