@@ -1,6 +1,8 @@
 module github.com/jkatigb/agentctl
 
-go 1.22.5
+go 1.23
+
+toolchain go1.24.7
 
 require (
 	github.com/getkin/kin-openapi v0.133.0
@@ -183,7 +185,6 @@ require (
 	github.com/timonwong/loggercheck v0.9.4 // indirect
 	github.com/tomarrell/wrapcheck/v2 v2.9.0 // indirect
 	github.com/tommy-muehle/go-mnd/v2 v2.5.1 // indirect
-	github.com/tursodatabase/go-libsql v0.0.0-20251025125656-00da49cd4a6e // indirect
 	github.com/ultraware/funlen v0.1.0 // indirect
 	github.com/ultraware/whitespace v0.1.1 // indirect
 	github.com/uudashr/gocognit v1.1.3 // indirect

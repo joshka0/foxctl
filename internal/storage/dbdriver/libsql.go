@@ -47,14 +47,14 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 
 	// Test the connection
 	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
+		_ = db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("failed to connect to libsql database: %w", err)
 	}
 
 	// Run migrations if provided
 	if migrate != nil {
 		if err := migrate(ctx, db); err != nil {
-			_ = db.Close()
+			_ = db.Close() //nolint:errcheck
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 	}
@@ -62,7 +62,7 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 	// If vector search is enabled, ensure vector columns exist
 	if cfg.EnableVectorSearch {
 		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
-			_ = db.Close()
+			_ = db.Close() //nolint:errcheck
 			return nil, fmt.Errorf("failed to enable vector search: %w", err)
 		}
 	}

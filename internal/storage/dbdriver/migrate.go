@@ -109,7 +109,7 @@ func (m *Migrator) getTablesToMigrate(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() { _ = rows.Close() }() //nolint:errcheck
 
 	var tables []string
 	for rows.Next() {
@@ -180,7 +180,7 @@ func (m *Migrator) getTableColumns(ctx context.Context, tableName string) ([]str
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() { _ = rows.Close() }() //nolint:errcheck
 
 	columns, err := rows.Columns()
 	if err != nil {
@@ -198,7 +198,7 @@ func (m *Migrator) migrateTableData(ctx context.Context, tableName string, colum
 	if err != nil {
 		return err
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() { _ = rows.Close() }() //nolint:errcheck
 
 	// Prepare insert statement
 	placeholders := make([]string, len(columns))
@@ -270,13 +270,13 @@ func (m *Migrator) insertBatch(ctx context.Context, insertQuery string, batch []
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = tx.Rollback() }() //nolint:errcheck
 
 	stmt, err := tx.PrepareContext(ctx, insertQuery)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = stmt.Close() }()
+	defer func() { _ = stmt.Close() }() //nolint:errcheck
 
 	for _, values := range batch {
 		if _, err := stmt.ExecContext(ctx, values...); err != nil {
