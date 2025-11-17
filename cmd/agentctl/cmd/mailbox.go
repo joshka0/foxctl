@@ -110,18 +110,18 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 	if mailboxSendPayloadFile != "" {
 		payloadBytes, err = os.ReadFile(mailboxSendPayloadFile)
 		if err != nil {
-			return writeErrorEnvelope(cmd, "mailbox/send", protocol.ErrorCodeEARG, fmt.Sprintf("failed to read payload file: %v", err))
+			return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read payload file: %v", err))
 		}
 	} else if mailboxSendPayload != "" {
 		payloadBytes = []byte(mailboxSendPayload)
 	} else {
-		return writeErrorEnvelope(cmd, "mailbox/send", protocol.ErrorCodeEARG, "either --payload or --payload-file is required")
+		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), "either --payload or --payload-file is required")
 	}
 
 	// Validate JSON
 	var payload map[string]interface{}
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/send", protocol.ErrorCodeEARG, fmt.Sprintf("invalid JSON payload: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON payload: %v", err))
 	}
 
 	// Validate message type
@@ -130,13 +130,13 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 	case agent.MessageTypeAsk, agent.MessageTypeReply, agent.MessageTypeCmd, agent.MessageTypeEvent:
 		// Valid
 	default:
-		return writeErrorEnvelope(cmd, "mailbox/send", protocol.ErrorCodeEARG, fmt.Sprintf("invalid message type: %s", mailboxSendType))
+		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid message type: %s", mailboxSendType))
 	}
 
 	// Open mailbox store
 	mbStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/send", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer mbStore.Close()
 
@@ -162,7 +162,7 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 
 	// Send message
 	if err := mbStore.Send(ctx, msg); err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/send", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to send message: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to send message: %v", err))
 	}
 
 	// Write success envelope
@@ -197,7 +197,7 @@ func runMailboxPoll(cmd *cobra.Command, args []string) error {
 	// Open mailbox store
 	mbStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/poll", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/poll", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer mbStore.Close()
 
@@ -205,7 +205,7 @@ func runMailboxPoll(cmd *cobra.Command, args []string) error {
 	timeout := time.Duration(mailboxPollTimeout) * time.Second
 	messages, err := mbStore.Poll(ctx, agentNS, timeout, mailboxPollMax)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/poll", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to poll messages: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/poll", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to poll messages: %v", err))
 	}
 
 	// Write success envelope
@@ -232,16 +232,16 @@ func runMailboxAck(cmd *cobra.Command, args []string) error {
 	// Open mailbox store
 	mbStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/ack", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/ack", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer mbStore.Close()
 
 	// Acknowledge message
 	if err := mbStore.Ack(ctx, messageID); err != nil {
 		if err == mailbox.ErrNotFound {
-			return writeErrorEnvelope(cmd, "mailbox/ack", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("message not found: %v", err))
+			return writeErrorEnvelope(cmd, "mailbox/ack", string(protocol.ErrorCodeENotFound), fmt.Sprintf("message not found: %v", err))
 		}
-		return writeErrorEnvelope(cmd, "mailbox/ack", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to ack message: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/ack", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to ack message: %v", err))
 	}
 
 	// Write success envelope
@@ -270,14 +270,14 @@ func runMailboxList(cmd *cobra.Command, args []string) error {
 	// Open mailbox store
 	mbStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
 	defer mbStore.Close()
 
 	// List messages
 	messages, err := mbStore.List(ctx, agentNS, mailboxListLimit)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "mailbox/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to list messages: %v", err))
+		return writeErrorEnvelope(cmd, "mailbox/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to list messages: %v", err))
 	}
 
 	// Write success envelope

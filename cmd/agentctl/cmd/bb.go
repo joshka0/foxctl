@@ -164,24 +164,24 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 	if bbPostDataFile != "" {
 		dataBytes, err = os.ReadFile(bbPostDataFile)
 		if err != nil {
-			return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeEARG, fmt.Sprintf("failed to read data file: %v", err))
+			return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read data file: %v", err))
 		}
 	} else if bbPostData != "" {
 		dataBytes = []byte(bbPostData)
 	} else {
-		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeEARG, "either --data or --data-file is required")
+		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), "either --data or --data-file is required")
 	}
 
 	// Validate JSON
 	var payload map[string]interface{}
 	if err := json.Unmarshal(dataBytes, &payload); err != nil {
-		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeEARG, fmt.Sprintf("invalid JSON data: %v", err))
+		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON data: %v", err))
 	}
 
 	// Open blackboard store
 	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
 	defer bbStore.Close()
 
@@ -199,7 +199,7 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 
 	// Post to blackboard
 	if err := bbStore.Post(ctx, record); err != nil {
-		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to post to blackboard: %v", err))
+		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to post to blackboard: %v", err))
 	}
 
 	// Write success envelope
@@ -229,14 +229,14 @@ func runBBSearch(cmd *cobra.Command, args []string) error {
 	// Open blackboard store
 	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/search", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+		return writeErrorEnvelope(cmd, "bb/search", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
 	defer bbStore.Close()
 
 	// Search blackboard
 	records, err := bbStore.Search(ctx, bbSearchNS, topic, bbSearchLimit)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/search", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to search blackboard: %v", err))
+		return writeErrorEnvelope(cmd, "bb/search", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to search blackboard: %v", err))
 	}
 
 	// Write success envelope
@@ -263,7 +263,7 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 	// Open blackboard store
 	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+		return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
 	defer bbStore.Close()
 
@@ -272,17 +272,17 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 	record, err := bbStore.Claim(ctx, itemID, bbClaimAgentID, leaseDuration)
 	if err != nil {
 		if err == blackboard.ErrAlreadyLeased {
-			return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeEPOLICY, "item already leased")
+			return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeEPolicy), "item already leased")
 		}
 		if err == blackboard.ErrNotFound {
-			return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("item not found: %v", err))
+			return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeENotFound), fmt.Sprintf("item not found: %v", err))
 		}
-		return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to claim item: %v", err))
+		return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to claim item: %v", err))
 	}
 
 	// Write success envelope
 	if record.Lease == nil {
-		return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeERUNTIME, "claim succeeded but lease not set")
+		return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeERuntime), "claim succeeded but lease not set")
 	}
 
 	data := map[string]interface{}{
@@ -312,16 +312,16 @@ func runBBRelease(cmd *cobra.Command, args []string) error {
 	// Open blackboard store
 	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/release", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+		return writeErrorEnvelope(cmd, "bb/release", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
 	defer bbStore.Close()
 
 	// Release item
 	if err := bbStore.Release(ctx, itemID); err != nil {
 		if err == blackboard.ErrNotFound {
-			return writeErrorEnvelope(cmd, "bb/release", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("item not found: %v", err))
+			return writeErrorEnvelope(cmd, "bb/release", string(protocol.ErrorCodeENotFound), fmt.Sprintf("item not found: %v", err))
 		}
-		return writeErrorEnvelope(cmd, "bb/release", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to release item: %v", err))
+		return writeErrorEnvelope(cmd, "bb/release", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to release item: %v", err))
 	}
 
 	// Write success envelope
@@ -350,14 +350,14 @@ func runBBList(cmd *cobra.Command, args []string) error {
 	// Open blackboard store
 	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+		return writeErrorEnvelope(cmd, "bb/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
 	defer bbStore.Close()
 
 	// List items by topic
 	records, err := bbStore.ListByTopic(ctx, bbListNS, topic, bbListLimit)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to list blackboard items: %v", err))
+		return writeErrorEnvelope(cmd, "bb/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to list blackboard items: %v", err))
 	}
 
 	// Write success envelope
@@ -384,7 +384,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 	// Open blackboard store
 	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "bb/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+		return writeErrorEnvelope(cmd, "bb/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
 	defer bbStore.Close()
 
@@ -424,7 +424,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 
 		case err := <-errCh:
 			if err != nil {
-				return writeErrorEnvelope(cmd, "bb/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("watch error: %v", err))
+				return writeErrorEnvelope(cmd, "bb/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("watch error: %v", err))
 			}
 			return nil
 

@@ -92,7 +92,7 @@ func runQuotasShow(cmd *cobra.Command, args []string) error {
 	// Open quotas store
 	quotasStore, err := quotas.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/show", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open quotas store: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/show", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
 	defer quotasStore.Close()
 
@@ -100,15 +100,15 @@ func runQuotasShow(cmd *cobra.Command, args []string) error {
 	q, err := quotasStore.Get(ctx, ns)
 	if err != nil {
 		if err == quotas.ErrNotFound {
-			return writeErrorEnvelope(cmd, "quotas/show", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("no quotas defined for namespace: %s", ns))
+			return writeErrorEnvelope(cmd, "quotas/show", string(protocol.ErrorCodeENotFound), fmt.Sprintf("no quotas defined for namespace: %s", ns))
 		}
-		return writeErrorEnvelope(cmd, "quotas/show", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to get quotas: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/show", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to get quotas: %v", err))
 	}
 
 	// Get consumption
 	consumption, err := quotasStore.GetConsumption(ctx, ns)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/show", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to get consumption: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/show", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to get consumption: %v", err))
 	}
 
 	// Write success envelope
@@ -138,7 +138,7 @@ func runQuotasSet(cmd *cobra.Command, args []string) error {
 	// Open quotas store
 	quotasStore, err := quotas.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/set", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open quotas store: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
 	defer quotasStore.Close()
 
@@ -158,10 +158,10 @@ func runQuotasSet(cmd *cobra.Command, args []string) error {
 		if err == quotas.ErrNotFound {
 			// Not found, create new
 			if err := quotasStore.Set(ctx, ns, q); err != nil {
-				return writeErrorEnvelope(cmd, "quotas/set", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to set quotas: %v", err))
+				return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to set quotas: %v", err))
 			}
 		} else {
-			return writeErrorEnvelope(cmd, "quotas/set", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to update quotas: %v", err))
+			return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to update quotas: %v", err))
 		}
 	}
 
@@ -192,16 +192,16 @@ func runQuotasDelete(cmd *cobra.Command, args []string) error {
 	// Open quotas store
 	quotasStore, err := quotas.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/delete", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open quotas store: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/delete", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
 	defer quotasStore.Close()
 
 	// Delete quotas
 	if err := quotasStore.Delete(ctx, ns); err != nil {
 		if err == quotas.ErrNotFound {
-			return writeErrorEnvelope(cmd, "quotas/delete", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("no quotas found for namespace: %s", ns))
+			return writeErrorEnvelope(cmd, "quotas/delete", string(protocol.ErrorCodeENotFound), fmt.Sprintf("no quotas found for namespace: %s", ns))
 		}
-		return writeErrorEnvelope(cmd, "quotas/delete", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to delete quotas: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/delete", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to delete quotas: %v", err))
 	}
 
 	// Write success envelope
@@ -229,14 +229,14 @@ func runQuotasList(cmd *cobra.Command, args []string) error {
 	// Open quotas store
 	quotasStore, err := quotas.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open quotas store: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
 	defer quotasStore.Close()
 
 	// List all quotas
 	allQuotas, err := quotasStore.ListAll(ctx)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to list quotas: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to list quotas: %v", err))
 	}
 
 	// Write success envelope
@@ -265,14 +265,14 @@ func runQuotasConsumption(cmd *cobra.Command, args []string) error {
 	// Open quotas store
 	quotasStore, err := quotas.Open(ctx, cfg.Storage.Root)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/consumption", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open quotas store: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/consumption", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
 	defer quotasStore.Close()
 
 	// Get consumption
 	consumption, err := quotasStore.GetConsumption(ctx, ns)
 	if err != nil {
-		return writeErrorEnvelope(cmd, "quotas/consumption", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to get consumption: %v", err))
+		return writeErrorEnvelope(cmd, "quotas/consumption", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to get consumption: %v", err))
 	}
 
 	// Write success envelope
