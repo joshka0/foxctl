@@ -19,7 +19,7 @@ func TestAgentStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() { _ = store.Close() }() //nolint:errcheck
 
 	// Test Create
 	t.Run("Create", func(t *testing.T) {

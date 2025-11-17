@@ -327,7 +327,9 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 		},
 	}
 
-	scheduler.Enqueue(job)
+	if err := scheduler.Enqueue(job); err != nil {
+		t.Fatalf("failed to enqueue job: %v", err)
+	}
 	time.Sleep(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&executed) != 1 {
@@ -347,7 +349,9 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 		},
 	}
 
-	scheduler.Enqueue(job2)
+	if err := scheduler.Enqueue(job2); err != nil {
+		t.Fatalf("failed to enqueue job2: %v", err)
+	}
 	time.Sleep(100 * time.Millisecond)
 
 	// Should still be 1 (job2 not executed)
