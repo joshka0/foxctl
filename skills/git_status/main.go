@@ -138,14 +138,18 @@ func getStatus(ctx context.Context, rc *runner.RunnerContext, repoPath string) (
 	files, branch, upstream := parseStatusOutput(string(output))
 
 	// Get HEAD info
+	var headHash string
 	headCmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "HEAD")
-	headOutput, _ := headCmd.Output()
-	headHash := strings.TrimSpace(string(headOutput))
+	if headOutput, err := headCmd.Output(); err == nil {
+		headHash = strings.TrimSpace(string(headOutput))
+	}
 
 	// Get short hash
+	var shortHash string
 	shortCmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--short", "HEAD")
-	shortOutput, _ := shortCmd.Output()
-	shortHash := strings.TrimSpace(string(shortOutput))
+	if shortOutput, err := shortCmd.Output(); err == nil {
+		shortHash = strings.TrimSpace(string(shortOutput))
+	}
 
 	data := map[string]any{
 		"operation":       "status",

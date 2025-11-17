@@ -91,9 +91,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	// Get file info
-	info, _ := os.Stat(targetPath)
 	var fileSize int64
-	if info != nil {
+	if info, err := os.Stat(targetPath); err == nil {
 		fileSize = info.Size()
 	}
 

@@ -504,13 +504,14 @@ func generateExamples(skillName string, params []map[string]string) []map[string
 	}
 
 	if len(basicInput) > 0 {
-		inputJSON, _ := json.MarshalIndent(basicInput, "", "  ")
-		examples = append(examples, map[string]string{
-			"name":        "basic",
-			"description": "Basic usage with required parameters",
-			"input":       string(inputJSON),
-			"command":     fmt.Sprintf("echo '%s' | agentctl run %s", string(inputJSON), skillName),
-		})
+		if inputJSON, err := json.MarshalIndent(basicInput, "", "  "); err == nil {
+			examples = append(examples, map[string]string{
+				"name":        "basic",
+				"description": "Basic usage with required parameters",
+				"input":       string(inputJSON),
+				"command":     fmt.Sprintf("echo '%s' | agentctl run %s", string(inputJSON), skillName),
+			})
+		}
 	}
 
 	// Generate full example
@@ -520,13 +521,14 @@ func generateExamples(skillName string, params []map[string]string) []map[string
 	}
 
 	if len(fullInput) > 0 {
-		inputJSON, _ := json.MarshalIndent(fullInput, "", "  ")
-		examples = append(examples, map[string]string{
-			"name":        "full",
-			"description": "Full usage with all parameters",
-			"input":       string(inputJSON),
-			"command":     fmt.Sprintf("echo '%s' | agentctl run %s", string(inputJSON), skillName),
-		})
+		if inputJSON, err := json.MarshalIndent(fullInput, "", "  "); err == nil {
+			examples = append(examples, map[string]string{
+				"name":        "full",
+				"description": "Full usage with all parameters",
+				"input":       string(inputJSON),
+				"command":     fmt.Sprintf("echo '%s' | agentctl run %s", string(inputJSON), skillName),
+			})
+		}
 	}
 
 	return examples
