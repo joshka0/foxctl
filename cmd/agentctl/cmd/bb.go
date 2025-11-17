@@ -61,6 +61,14 @@ var bbListCmd = &cobra.Command{
 	RunE:  runBBList,
 }
 
+var bbWatchCmd = &cobra.Command{
+	Use:   "watch [topic]",
+	Short: "Watch blackboard topic for updates",
+	Long:  "Stream blackboard updates in real-time (NDJSON)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runBBWatch,
+}
+
 // Flags for bb post
 var (
 	bbPostNS       string
@@ -94,6 +102,12 @@ var (
 	bbListLimit int
 )
 
+// Flags for bb watch
+var (
+	bbWatchNS     string
+	bbWatchFromTS int64
+)
+
 func init() {
 	// Add bb commands to root
 	rootCmd.AddCommand(bbCmd)
@@ -102,6 +116,7 @@ func init() {
 	bbCmd.AddCommand(bbClaimCmd)
 	bbCmd.AddCommand(bbReleaseCmd)
 	bbCmd.AddCommand(bbListCmd)
+	bbCmd.AddCommand(bbWatchCmd)
 
 	// Post flags
 	bbPostCmd.Flags().StringVar(&bbPostNS, "ns", "", "Namespace (required)")
@@ -131,6 +146,11 @@ func init() {
 	bbListCmd.Flags().StringVar(&bbListNS, "ns", "", "Namespace (required)")
 	bbListCmd.Flags().IntVar(&bbListLimit, "limit", 20, "Maximum number of items to return")
 	bbListCmd.MarkFlagRequired("ns")
+
+	// Watch flags
+	bbWatchCmd.Flags().StringVar(&bbWatchNS, "ns", "", "Namespace (required)")
+	bbWatchCmd.Flags().Int64Var(&bbWatchFromTS, "from", 0, "Start timestamp (unix seconds, 0=now)")
+	bbWatchCmd.MarkFlagRequired("ns")
 }
 
 func runBBPost(cmd *cobra.Command, args []string) error {
@@ -350,4 +370,106 @@ func runBBList(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runBBWatch(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	topic := args[0]
+
+	// Open blackboard store
+	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+	}
+	defer bbStore.Close()
+
+	// Determine start timestamp
+	fromTS := bbWatchFromTS
+	if fromTS == 0 {
+		fromTS = time.Now().Unix()
+	}
+
+	// Start watching
+	recordCh, errCh := bbStore.Watch(ctx, bbWatchNS, topic, fromTS)
+
+	// Create NDJSON writer
+	writer := envelope.NewWriter(os.Stdout)
+
+	// Track sequence number
+	seq := 0
+
+	// Stream records as progress envelopes
+	for {
+		select {
+		case <-ctx.Done():
+			// Write final envelope
+			finalBool := true
+			env := envelope.OK("bb/watch", map[string]interface{}{
+				"status": "stopped",
+			}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+				m.Source = "run"
+				m.Profiles = []string{"core/v1", "agent/v1"}
+				m.Seq = &seq
+				m.Final = &finalBool
+			}))
+			if err := writer.Write(env); err != nil {
+				return fmt.Errorf("write final envelope: %w", err)
+			}
+			return nil
+
+		case err := <-errCh:
+			if err != nil {
+				return writeErrorEnvelope(cmd, "bb/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("watch error: %v", err))
+			}
+			return nil
+
+		case record, ok := <-recordCh:
+			if !ok {
+				// Channel closed
+				finalBool := true
+				env := envelope.OK("bb/watch", map[string]interface{}{
+					"status": "completed",
+				}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+					m.Source = "run"
+					m.Profiles = []string{"core/v1", "agent/v1"}
+					m.Seq = &seq
+					m.Final = &finalBool
+				}))
+				if err := writer.Write(env); err != nil {
+					return fmt.Errorf("write final envelope: %w", err)
+				}
+				return nil
+			}
+
+			// Write progress envelope with record
+			seq++
+			finalBool := false
+			data := map[string]interface{}{
+				"event":  "blackboard_update",
+				"topic":  record.Topic,
+				"item_id": record.ID,
+				"item":   json.RawMessage(record.Payload),
+				"ts":     time.Unix(record.TS, 0).UTC().Format(time.RFC3339),
+			}
+
+			env := envelope.Envelope{
+				Version: envelope.Version,
+				Status:  "progress",
+				Command: "bb/watch",
+				Data:    data,
+				Meta: envelope.Meta{
+					TS:       time.Now().UTC().Format(time.RFC3339),
+					Source:   "run",
+					Profiles: []string{"core/v1", "agent/v1"},
+					Seq:      &seq,
+					Final:    &finalBool,
+				},
+			}
+
+			if err := writer.Write(env); err != nil {
+				return fmt.Errorf("write progress envelope: %w", err)
+			}
+		}
+	}
 }

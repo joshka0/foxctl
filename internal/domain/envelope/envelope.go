@@ -21,6 +21,8 @@ const (
 	StatusOK = "ok"
 	// StatusError indicates the command failed.
 	StatusError = "error"
+	// StatusProgress indicates the command is streaming progress (Agent Profile).
+	StatusProgress = "progress"
 )
 
 // ErrValidation captures canonical envelope validation failures.

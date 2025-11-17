@@ -250,3 +250,62 @@ func TestBlackboardRecordLease(t *testing.T) {
 		})
 	}
 }
+
+func TestBlackboardWatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Create temporary directory for test
+	tmpDir := t.TempDir()
+
+	// Open store
+	store, err := Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	// Start watching from now
+	fromTS := time.Now().Unix()
+	recordCh, errCh := store.Watch(ctx, "org/test", "/tasks/watch", fromTS)
+
+	// Post a record after starting watch
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		payload := map[string]interface{}{
+			"task_id": "watch-task-001",
+			"title":   "Watch test task",
+		}
+		payloadBytes, _ := json.Marshal(payload)
+
+		record := agent.BlackboardRecord{
+			ID:      "watch-item-001",
+			NS:      "org/test",
+			Topic:   "/tasks/watch",
+			TS:      time.Now().Unix(),
+			TTLSec:  3600,
+			Payload: json.RawMessage(payloadBytes),
+		}
+
+		if err := store.Post(ctx, record); err != nil {
+			t.Logf("failed to post record: %v", err)
+		}
+	}()
+
+	// Wait for the record to be streamed
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("watch error: %v", err)
+		}
+	case record := <-recordCh:
+		if record.ID != "watch-item-001" {
+			t.Errorf("expected record ID watch-item-001, got %s", record.ID)
+		}
+		if record.Topic != "/tasks/watch" {
+			t.Errorf("expected topic /tasks/watch, got %s", record.Topic)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for watch record")
+	}
+}

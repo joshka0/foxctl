@@ -25,6 +25,7 @@ type Store interface {
 	Release(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	ListByTopic(ctx context.Context, ns, topic string, limit int) ([]agent.BlackboardRecord, error)
+	Watch(ctx context.Context, ns, topic string, fromTS int64) (<-chan agent.BlackboardRecord, <-chan error)
 }
 
 type sqlStore struct {
@@ -219,6 +220,64 @@ func (s *sqlStore) ListByTopic(ctx context.Context, ns, topic string, limit int)
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<-chan agent.BlackboardRecord, <-chan error) {
+	recordCh := make(chan agent.BlackboardRecord, 10)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(recordCh)
+		defer close(errCh)
+
+		lastTS := fromTS
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Query for new records since lastTS
+				rows, err := s.db.QueryContext(ctx, `
+					SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
+					FROM blackboard
+					WHERE ns = ? AND topic = ? AND ts > ?
+					ORDER BY ts ASC`, ns, topic, lastTS)
+				if err != nil {
+					errCh <- fmt.Errorf("blackboard: watch query: %w", err)
+					return
+				}
+
+				var newRecords []agent.BlackboardRecord
+				for rows.Next() {
+					record, err := scanRecordFromRows(rows)
+					if err != nil {
+						errs.Ignore(rows.Close(), "close blackboard watch rows")
+						errCh <- fmt.Errorf("blackboard: watch scan: %w", err)
+						return
+					}
+					newRecords = append(newRecords, record)
+					if record.TS > lastTS {
+						lastTS = record.TS
+					}
+				}
+				errs.Ignore(rows.Close(), "close blackboard watch rows")
+
+				// Send new records
+				for _, record := range newRecords {
+					select {
+					case <-ctx.Done():
+						return
+					case recordCh <- record:
+					}
+				}
+			}
+		}
+	}()
+
+	return recordCh, errCh
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {

@@ -52,6 +52,14 @@ var agentInfoCmd = &cobra.Command{
 	RunE:  runAgentInfo,
 }
 
+var agentWatchCmd = &cobra.Command{
+	Use:   "watch [agent-id]",
+	Short: "Watch agent events",
+	Long:  "Stream agent events in real-time (NDJSON)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentWatch,
+}
+
 // Flags for agent spawn
 var (
 	spawnParentNS    string
@@ -80,6 +88,7 @@ func init() {
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentKillCmd)
 	agentCmd.AddCommand(agentInfoCmd)
+	agentCmd.AddCommand(agentWatchCmd)
 
 	// Spawn flags
 	agentSpawnCmd.Flags().StringVar(&spawnParentNS, "ns", "", "Parent namespace (optional)")
@@ -292,6 +301,173 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func runAgentWatch(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	agentID := args[0]
+
+	// Open stores
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open agent store: %v", err))
+	}
+	defer agentStore.Close()
+
+	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open mailbox store: %v", err))
+	}
+	defer mailboxStore.Close()
+
+	// Verify agent exists
+	a, err := agentStore.Get(ctx, agentID)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("agent not found: %v", err))
+	}
+
+	// Create NDJSON writer
+	writer := envelope.NewWriter(os.Stdout)
+
+	// Track sequence number
+	seq := 0
+
+	// Create ticker for periodic checks
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	lastHeartbeat := a.HeartbeatAt
+	lastState := a.State
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Write final envelope
+			finalBool := true
+			env := envelope.OK("agent/watch", map[string]interface{}{
+				"status": "stopped",
+			}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+				m.Source = "run"
+				m.Profiles = []string{"core/v1", "agent/v1"}
+				m.AgentID = agentID
+				m.Seq = &seq
+				m.Final = &finalBool
+			}))
+			if err := writer.Write(env); err != nil {
+				return fmt.Errorf("write final envelope: %w", err)
+			}
+			return nil
+
+		case <-ticker.C:
+			// Check for agent updates
+			current, err := agentStore.Get(ctx, agentID)
+			if err != nil {
+				return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to get agent: %v", err))
+			}
+
+			// Check for state change
+			if current.State != lastState {
+				seq++
+				finalBool := false
+				data := map[string]interface{}{
+					"event":     "agent_state_changed",
+					"agent_id":  agentID,
+					"old_state": lastState,
+					"new_state": current.State,
+				}
+
+				env := envelope.Envelope{
+					Version: envelope.Version,
+					Status:  "progress",
+					Command: "agent/watch",
+					Data:    data,
+					Meta: envelope.Meta{
+						TS:       time.Now().UTC().Format(time.RFC3339),
+						Source:   "run",
+						Profiles: []string{"core/v1", "agent/v1"},
+						AgentID:  agentID,
+						Seq:      &seq,
+						Final:    &finalBool,
+					},
+				}
+
+				if err := writer.Write(env); err != nil {
+					return fmt.Errorf("write progress envelope: %w", err)
+				}
+
+				lastState = current.State
+			}
+
+			// Check for heartbeat update
+			if current.HeartbeatAt.After(lastHeartbeat) {
+				seq++
+				finalBool := false
+				data := map[string]interface{}{
+					"event":        "agent_heartbeat",
+					"agent_id":     agentID,
+					"heartbeat_at": current.HeartbeatAt.Format(time.RFC3339),
+				}
+
+				env := envelope.Envelope{
+					Version: envelope.Version,
+					Status:  "progress",
+					Command: "agent/watch",
+					Data:    data,
+					Meta: envelope.Meta{
+						TS:       time.Now().UTC().Format(time.RFC3339),
+						Source:   "run",
+						Profiles: []string{"core/v1", "agent/v1"},
+						AgentID:  agentID,
+						Seq:      &seq,
+						Final:    &finalBool,
+					},
+				}
+
+				if err := writer.Write(env); err != nil {
+					return fmt.Errorf("write progress envelope: %w", err)
+				}
+
+				lastHeartbeat = current.HeartbeatAt
+			}
+
+			// Check for new mailbox messages
+			messages, err := mailboxStore.List(ctx, a.Namespace, 10)
+			if err != nil {
+				return writeErrorEnvelope(cmd, "agent/watch", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to list messages: %v", err))
+			}
+
+			if len(messages) > 0 {
+				seq++
+				finalBool := false
+				data := map[string]interface{}{
+					"event":         "mailbox_messages",
+					"agent_id":      agentID,
+					"message_count": len(messages),
+				}
+
+				env := envelope.Envelope{
+					Version: envelope.Version,
+					Status:  "progress",
+					Command: "agent/watch",
+					Data:    data,
+					Meta: envelope.Meta{
+						TS:       time.Now().UTC().Format(time.RFC3339),
+						Source:   "run",
+						Profiles: []string{"core/v1", "agent/v1"},
+						AgentID:  agentID,
+						MailboxID: "mailbox:" + a.Namespace,
+						Seq:      &seq,
+						Final:    &finalBool,
+					},
+				}
+
+				if err := writer.Write(env); err != nil {
+					return fmt.Errorf("write progress envelope: %w", err)
+				}
+			}
+		}
+	}
 }
 
 func writeErrorEnvelope(cmd *cobra.Command, command, code, message string) error {
