@@ -15,7 +15,7 @@ func main() {
 	ctx := context.Background()
 
 	// Setup: Open memory store and enable search
-	fmt.Println("=== Setting up search demo ===\n")
+	fmt.Println("=== Setting up search demo ===")
 
 	store, db := setupStore(ctx)
 	searchStore, err := store.EnableSearch(db, "demo-workspace")
@@ -26,7 +26,7 @@ func main() {
 	// Populate with sample data
 	fmt.Println("Populating with sample memories...")
 	populateSampleData(ctx, store, db)
-	fmt.Println("Done!\n")
+	fmt.Println("Done!")
 
 	// Demo 1: BM25 Lexical Search
 	fmt.Println("=== Demo 1: BM25 Lexical Search ===")
@@ -266,7 +266,7 @@ func demoHybridSearch(ctx context.Context, searchStore *memory.SearchableStore) 
 
 func demoParameterTuning(ctx context.Context, searchStore *memory.SearchableStore) {
 	fmt.Println("\nShowing effect of different alpha values on hybrid search:")
-	fmt.Println("(alpha = BM25 weight, 1-alpha = vector weight)\n")
+	fmt.Println("(alpha = BM25 weight, 1-alpha = vector weight)")
 
 	query := "optimization gradient descent"
 	queryEmbedding := generateMockEmbedding(query, 384)
