@@ -2,7 +2,6 @@ package dbdriver
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"strings"

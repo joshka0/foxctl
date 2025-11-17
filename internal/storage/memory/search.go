@@ -335,7 +335,7 @@ func (ss *SearchableStore) searchHybrid(
 		// Fetch full entry
 		entry, err := ss.Get(ctx, result.DocumentID, workspace)
 		if err != nil {
-			if err == storage.ErrNotFound {
+			if err == ErrNotFound {
 				continue
 			}
 			return nil, fmt.Errorf("failed to fetch entry %s: %w", result.DocumentID, err)
@@ -432,7 +432,7 @@ func (ss *SearchableStore) Get(ctx context.Context, id, workspace string) (stora
 	)
 
 	if err == sql.ErrNoRows {
-		return entry, storage.ErrNotFound
+		return entry, ErrNotFound
 	}
 
 	if err != nil {
