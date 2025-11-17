@@ -1,0 +1,353 @@
+package cmd
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/oklog/ulid/v2"
+	"github.com/spf13/cobra"
+)
+
+var bbCmd = &cobra.Command{
+	Use:   "bb",
+	Short: "Manage blackboard (Agent Profile v1)",
+	Long:  "Manage shared blackboard for agent coordination",
+}
+
+var bbPostCmd = &cobra.Command{
+	Use:   "post [topic]",
+	Short: "Post item to blackboard topic",
+	Long:  "Post a new item to a blackboard topic for agent coordination",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runBBPost,
+}
+
+var bbSearchCmd = &cobra.Command{
+	Use:   "search [topic]",
+	Short: "Search blackboard topic",
+	Long:  "Search for items in a blackboard topic",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runBBSearch,
+}
+
+var bbClaimCmd = &cobra.Command{
+	Use:   "claim [id]",
+	Short: "Claim a blackboard item",
+	Long:  "Claim a blackboard item with a lease for processing",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runBBClaim,
+}
+
+var bbReleaseCmd = &cobra.Command{
+	Use:   "release [id]",
+	Short: "Release a blackboard item",
+	Long:  "Release a claimed blackboard item",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runBBRelease,
+}
+
+var bbListCmd = &cobra.Command{
+	Use:   "list [topic]",
+	Short: "List blackboard items by topic",
+	Long:  "List all items in a blackboard topic",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runBBList,
+}
+
+// Flags for bb post
+var (
+	bbPostNS       string
+	bbPostData     string
+	bbPostDataFile string
+	bbPostTTL      int
+	bbPostCASRef   string
+)
+
+// Flags for bb search
+var (
+	bbSearchNS    string
+	bbSearchLimit int
+)
+
+// Flags for bb claim
+var (
+	bbClaimNS       string
+	bbClaimAgentID  string
+	bbClaimDuration int
+)
+
+// Flags for bb release
+var (
+	bbReleaseNS string
+)
+
+// Flags for bb list
+var (
+	bbListNS    string
+	bbListLimit int
+)
+
+func init() {
+	// Add bb commands to root
+	rootCmd.AddCommand(bbCmd)
+	bbCmd.AddCommand(bbPostCmd)
+	bbCmd.AddCommand(bbSearchCmd)
+	bbCmd.AddCommand(bbClaimCmd)
+	bbCmd.AddCommand(bbReleaseCmd)
+	bbCmd.AddCommand(bbListCmd)
+
+	// Post flags
+	bbPostCmd.Flags().StringVar(&bbPostNS, "ns", "", "Namespace (required)")
+	bbPostCmd.Flags().StringVar(&bbPostData, "data", "", "JSON data payload")
+	bbPostCmd.Flags().StringVar(&bbPostDataFile, "data-file", "", "Path to JSON data file")
+	bbPostCmd.Flags().IntVar(&bbPostTTL, "ttl", 86400, "TTL in seconds (default: 24h)")
+	bbPostCmd.Flags().StringVar(&bbPostCASRef, "cas", "", "CAS reference (optional)")
+	bbPostCmd.MarkFlagRequired("ns")
+
+	// Search flags
+	bbSearchCmd.Flags().StringVar(&bbSearchNS, "ns", "", "Namespace (required)")
+	bbSearchCmd.Flags().IntVar(&bbSearchLimit, "limit", 20, "Maximum number of items to return")
+	bbSearchCmd.MarkFlagRequired("ns")
+
+	// Claim flags
+	bbClaimCmd.Flags().StringVar(&bbClaimNS, "ns", "", "Namespace (required)")
+	bbClaimCmd.Flags().StringVar(&bbClaimAgentID, "agent", "", "Agent ID claiming the item (required)")
+	bbClaimCmd.Flags().IntVar(&bbClaimDuration, "lease", 300, "Lease duration in seconds (default: 5m)")
+	bbClaimCmd.MarkFlagRequired("ns")
+	bbClaimCmd.MarkFlagRequired("agent")
+
+	// Release flags
+	bbReleaseCmd.Flags().StringVar(&bbReleaseNS, "ns", "", "Namespace (required)")
+	bbReleaseCmd.MarkFlagRequired("ns")
+
+	// List flags
+	bbListCmd.Flags().StringVar(&bbListNS, "ns", "", "Namespace (required)")
+	bbListCmd.Flags().IntVar(&bbListLimit, "limit", 20, "Maximum number of items to return")
+	bbListCmd.MarkFlagRequired("ns")
+}
+
+func runBBPost(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	topic := args[0]
+
+	// Load data payload
+	var dataBytes []byte
+	var err error
+	if bbPostDataFile != "" {
+		dataBytes, err = os.ReadFile(bbPostDataFile)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeEARG, fmt.Sprintf("failed to read data file: %v", err))
+		}
+	} else if bbPostData != "" {
+		dataBytes = []byte(bbPostData)
+	} else {
+		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeEARG, "either --data or --data-file is required")
+	}
+
+	// Validate JSON
+	var payload map[string]interface{}
+	if err := json.Unmarshal(dataBytes, &payload); err != nil {
+		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeEARG, fmt.Sprintf("invalid JSON data: %v", err))
+	}
+
+	// Open blackboard store
+	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+	}
+	defer bbStore.Close()
+
+	// Create blackboard record
+	now := time.Now().UTC().Unix()
+	record := agent.BlackboardRecord{
+		ID:      ulid.Make().String(),
+		NS:      bbPostNS,
+		Topic:   topic,
+		TS:      now,
+		TTLSec:  bbPostTTL,
+		Payload: json.RawMessage(dataBytes),
+		CASRef:  bbPostCASRef,
+	}
+
+	// Post to blackboard
+	if err := bbStore.Post(ctx, record); err != nil {
+		return writeErrorEnvelope(cmd, "bb/post", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to post to blackboard: %v", err))
+	}
+
+	// Write success envelope
+	data := map[string]interface{}{
+		"item_id":    record.ID,
+		"topic":      record.Topic,
+		"created_at": time.Unix(record.TS, 0).UTC().Format(time.RFC3339),
+	}
+
+	env := envelope.OK("bb/post", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
+		m.Source = "run"
+		m.Profiles = []string{"core/v1", "agent/v1"}
+	}))
+
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+
+	return nil
+}
+
+func runBBSearch(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	topic := args[0]
+
+	// Open blackboard store
+	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/search", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+	}
+	defer bbStore.Close()
+
+	// Search blackboard
+	records, err := bbStore.Search(ctx, bbSearchNS, topic, bbSearchLimit)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/search", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to search blackboard: %v", err))
+	}
+
+	// Write success envelope
+	env := envelope.OK("bb/search", map[string]interface{}{
+		"results": records,
+		"count":   len(records),
+	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+		m.Source = "run"
+		m.Profiles = []string{"core/v1", "agent/v1"}
+	}))
+
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+
+	return nil
+}
+
+func runBBClaim(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	itemID := args[0]
+
+	// Open blackboard store
+	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+	}
+	defer bbStore.Close()
+
+	// Claim item
+	leaseDuration := time.Duration(bbClaimDuration) * time.Second
+	record, err := bbStore.Claim(ctx, itemID, bbClaimAgentID, leaseDuration)
+	if err != nil {
+		if err == blackboard.ErrAlreadyLeased {
+			return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeEPOLICY, "item already leased")
+		}
+		if err == blackboard.ErrNotFound {
+			return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("item not found: %v", err))
+		}
+		return writeErrorEnvelope(cmd, "bb/claim", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to claim item: %v", err))
+	}
+
+	// Write success envelope
+	data := map[string]interface{}{
+		"item_id":           record.ID,
+		"lease_id":          record.Lease.Holder + "-" + fmt.Sprintf("%d", record.Lease.Until),
+		"item":              json.RawMessage(record.Payload),
+		"lease_expires_at":  time.Unix(record.Lease.Until, 0).UTC().Format(time.RFC3339),
+	}
+
+	env := envelope.OK("bb/claim", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
+		m.Source = "run"
+		m.Profiles = []string{"core/v1", "agent/v1"}
+	}))
+
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+
+	return nil
+}
+
+func runBBRelease(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	itemID := args[0]
+
+	// Open blackboard store
+	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/release", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+	}
+	defer bbStore.Close()
+
+	// Release item
+	if err := bbStore.Release(ctx, itemID); err != nil {
+		if err == blackboard.ErrNotFound {
+			return writeErrorEnvelope(cmd, "bb/release", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("item not found: %v", err))
+		}
+		return writeErrorEnvelope(cmd, "bb/release", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to release item: %v", err))
+	}
+
+	// Write success envelope
+	data := map[string]interface{}{
+		"item_id":  itemID,
+		"released": true,
+	}
+
+	env := envelope.OK("bb/release", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
+		m.Source = "run"
+		m.Profiles = []string{"core/v1", "agent/v1"}
+	}))
+
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+
+	return nil
+}
+
+func runBBList(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	topic := args[0]
+
+	// Open blackboard store
+	bbStore, err := blackboard.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to open blackboard store: %v", err))
+	}
+	defer bbStore.Close()
+
+	// List items by topic
+	records, err := bbStore.ListByTopic(ctx, bbListNS, topic, bbListLimit)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/list", protocol.ErrorCodeERUNTIME, fmt.Sprintf("failed to list blackboard items: %v", err))
+	}
+
+	// Write success envelope
+	env := envelope.OK("bb/list", map[string]interface{}{
+		"items": records,
+		"count": len(records),
+	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+		m.Source = "run"
+		m.Profiles = []string{"core/v1", "agent/v1"}
+	}))
+
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+
+	return nil
+}
