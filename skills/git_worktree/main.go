@@ -18,12 +18,12 @@ import (
 )
 
 type input struct {
-	Operation  string `json:"operation"`
-	Path       string `json:"path"`
-	Branch     string `json:"branch"`
-	RepoPath   string `json:"repo_path"`
-	Force      bool   `json:"force"`
-	NewBranch  bool   `json:"new_branch"`
+	Operation string `json:"operation"`
+	Path      string `json:"path"`
+	Branch    string `json:"branch"`
+	RepoPath  string `json:"repo_path"`
+	Force     bool   `json:"force"`
+	NewBranch bool   `json:"new_branch"`
 }
 
 type worktree struct {
@@ -122,9 +122,7 @@ func listWorktrees(ctx context.Context, repoPath string) (map[string]any, error)
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "list", "--porcelain")
 	output, err := cmd.Output()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors, ok := err.(*exec.ExitError); ok {
-			exitErr = errors
+		if exitErr, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("git worktree list failed: %s", string(exitErr.Stderr))
 		}
 		return nil, fmt.Errorf("git worktree list failed: %w", err)

@@ -110,21 +110,24 @@ cd /home/user/myproject
 
 ## Advanced: Using with Jobs
 
-For long-running operations, use agentctl jobs:
+For long-running operations, use agentctl jobs (note: CLI flag syntax for jobs is planned but not yet implemented):
 
 ```bash
-# Submit worktree creation as a job
-JOB_ID=$(agentctl jobs submit git/worktree \
-  --operation add \
-  --path /tmp/big-refactor \
-  --branch refactor-v2 \
-  --new_branch true | jq -r '.data.job_id')
+# Current workaround: use synchronous run command
+echo '{
+  "operation": "add",
+  "path": "/tmp/big-refactor",
+  "branch": "refactor-v2",
+  "new_branch": true
+}' | agentctl run git/worktree
 
-# Check status
-agentctl jobs status $JOB_ID
-
-# Get result
-agentctl jobs result $JOB_ID
+# Async jobs support is planned for future releases
+# Future syntax (not yet implemented):
+# JOB_ID=$(agentctl jobs submit git/worktree \
+#   --operation add \
+#   --path /tmp/big-refactor \
+#   --branch refactor-v2 \
+#   --new_branch true | jq -r '.data.job_id')
 ```
 
 ## Integration with Other Skills

@@ -288,14 +288,14 @@ func showAll(info *skillInfo) (map[string]any, error) {
 	examples := generateExamples(info.Name, params)
 
 	return map[string]any{
-		"view":        "all",
-		"skill_name":  info.Name,
-		"manifest":    string(manifestContent),
-		"types":       types,
-		"functions":   functions,
-		"parameters":  params,
-		"examples":    examples,
-		"source_size": len(content),
+		"view":         "all",
+		"skill_name":   info.Name,
+		"manifest":     string(manifestContent),
+		"types":        types,
+		"functions":    functions,
+		"parameters":   params,
+		"examples":     examples,
+		"source_size":  len(content),
 		"source_lines": strings.Count(string(content), "\n") + 1,
 	}, nil
 }

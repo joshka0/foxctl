@@ -29,10 +29,10 @@ type input struct {
 }
 
 type fileStatus struct {
-	Path         string `json:"path"`
-	Status       string `json:"status"`
-	StagingArea  string `json:"staging_area"`
-	WorkingTree  string `json:"working_tree"`
+	Path        string `json:"path"`
+	Status      string `json:"status"`
+	StagingArea string `json:"staging_area"`
+	WorkingTree string `json:"working_tree"`
 }
 
 type commitInfo struct {
@@ -148,16 +148,16 @@ func getStatus(ctx context.Context, rc *runner.RunnerContext, repoPath string) (
 	shortHash := strings.TrimSpace(string(shortOutput))
 
 	data := map[string]any{
-		"operation":      "status",
-		"branch":         branch,
-		"upstream":       upstream,
-		"head":           headHash,
-		"short_head":     shortHash,
-		"file_count":     len(files),
-		"files":          files,
-		"modified_count": countByStatus(files, "M"),
-		"added_count":    countByStatus(files, "A"),
-		"deleted_count":  countByStatus(files, "D"),
+		"operation":       "status",
+		"branch":          branch,
+		"upstream":        upstream,
+		"head":            headHash,
+		"short_head":      shortHash,
+		"file_count":      len(files),
+		"files":           files,
+		"modified_count":  countByStatus(files, "M"),
+		"added_count":     countByStatus(files, "A"),
+		"deleted_count":   countByStatus(files, "D"),
 		"untracked_count": countByStatus(files, "?"),
 	}
 

@@ -18,13 +18,13 @@ import (
 )
 
 type input struct {
-	Query      string `json:"query"`
-	Input      string `json:"input"`
-	RawOutput  bool   `json:"raw_output"`
-	Compact    bool   `json:"compact"`
-	Slurp      bool   `json:"slurp"`
-	SortKeys   bool   `json:"sort_keys"`
-	YAMLInput  bool   `json:"yaml_input"`
+	Query     string `json:"query"`
+	Input     string `json:"input"`
+	RawOutput bool   `json:"raw_output"`
+	Compact   bool   `json:"compact"`
+	Slurp     bool   `json:"slurp"`
+	SortKeys  bool   `json:"sort_keys"`
+	YAMLInput bool   `json:"yaml_input"`
 }
 
 func main() {
