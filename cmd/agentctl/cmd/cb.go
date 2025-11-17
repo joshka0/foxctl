@@ -96,7 +96,7 @@ func runCBShow(cmd *cobra.Command, args []string) error {
 
 	breaker := globalCBManager.Get(name)
 	if breaker == nil {
-		return writeErrorEnvelope(cmd, "cb/show", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("circuit breaker not found: %s", name))
+		return writeErrorEnvelope(cmd, "cb/show", string(protocol.ErrorCodeENotFound), fmt.Sprintf("circuit breaker not found: %s", name))
 	}
 
 	stats := breaker.Stats()
@@ -128,7 +128,7 @@ func runCBReset(cmd *cobra.Command, args []string) error {
 
 	success := globalCBManager.Reset(name)
 	if !success {
-		return writeErrorEnvelope(cmd, "cb/reset", protocol.ErrorCodeENOTFOUND, fmt.Sprintf("circuit breaker not found: %s", name))
+		return writeErrorEnvelope(cmd, "cb/reset", string(protocol.ErrorCodeENotFound), fmt.Sprintf("circuit breaker not found: %s", name))
 	}
 
 	data := map[string]interface{}{

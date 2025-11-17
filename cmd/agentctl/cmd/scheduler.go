@@ -94,7 +94,7 @@ func runSchedulerSetWeight(cmd *cobra.Command, args []string) error {
 	namespace := args[0]
 
 	if schedulerWeight <= 0 {
-		return writeErrorEnvelope(cmd, "scheduler/set-weight", protocol.ErrorCodeEARG, "weight must be positive")
+		return writeErrorEnvelope(cmd, "scheduler/set-weight", string(protocol.ErrorCodeEARG), "weight must be positive")
 	}
 
 	globalScheduler.SetWeight(namespace, schedulerWeight)
