@@ -325,7 +325,7 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 			}
 
 			if err := rows.Scan(valuePtrs...); err != nil {
-				_ = rows.Close()
+				_ = rows.Close() //nolint:errcheck
 				return err
 			}
 
@@ -346,11 +346,11 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 
 			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (%s) VALUES (%s);\n",
 				table, strings.Join(columns, ", "), strings.Join(valueStrs, ", ")); err != nil {
-				_ = rows.Close()
+				_ = rows.Close() //nolint:errcheck
 				return err
 			}
 		}
-		_ = rows.Close()
+		_ = rows.Close() //nolint:errcheck
 
 		if _, err := fmt.Fprintf(writer, "\n"); err != nil {
 			return err

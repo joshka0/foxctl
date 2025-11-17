@@ -33,7 +33,7 @@ func openSQLite(ctx context.Context, cfg SQLiteConfig, migrate MigrationFunc) (D
 	// Enable WAL mode for better concurrency
 	if cfg.EnableWAL {
 		if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=WAL;"); err != nil {
-			db.Close()
+			_ = db.Close() //nolint:errcheck
 			return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
 		}
 	}
@@ -44,13 +44,13 @@ func openSQLite(ctx context.Context, cfg SQLiteConfig, migrate MigrationFunc) (D
 		busyTimeout = 5000
 	}
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d;", busyTimeout)); err != nil {
-		db.Close()
+		_ = db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
 	}
 
 	// Enable foreign keys
 	if _, err := db.ExecContext(ctx, "PRAGMA foreign_keys=ON;"); err != nil {
-		db.Close()
+		_ = db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
 	}
 
