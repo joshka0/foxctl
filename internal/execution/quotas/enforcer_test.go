@@ -219,18 +219,23 @@ func TestEnforcerLLMCalls(t *testing.T) {
 			}
 		}
 
-		// Check should succeed and reset counter
+		// Check should succeed (window expired, so treats current consumption as 0)
 		if err := enforcer.CheckLLMCall(ctx, ns); err != nil {
 			t.Errorf("expected call to be allowed after reset, got error: %v", err)
 		}
 
-		// Verify counter was reset
+		// Record the call, which should reset the counter to 1 for the new window
+		if err := enforcer.RecordLLMCall(ctx, ns); err != nil {
+			t.Fatalf("failed to record LLM call: %v", err)
+		}
+
+		// Verify counter was reset to 1 (first call in new window)
 		consumption, err = store.GetConsumption(ctx, ns)
 		if err != nil {
 			t.Fatalf("failed to get consumption: %v", err)
 		}
-		if consumption.LLMCalls1Min != 0 {
-			t.Errorf("expected counter to be reset to 0, got %d", consumption.LLMCalls1Min)
+		if consumption.LLMCalls1Min != 1 {
+			t.Errorf("expected counter to be reset to 1, got %d", consumption.LLMCalls1Min)
 		}
 	})
 }
