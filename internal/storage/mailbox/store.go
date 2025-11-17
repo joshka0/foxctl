@@ -98,13 +98,16 @@ func (s *sqlStore) Poll(ctx context.Context, agentNS string, timeout time.Durati
 		if len(messages) > 0 {
 			// Update visibility timeout for leased messages (30 seconds default)
 			newVisibleAt := time.Now().Add(30 * time.Second).Unix()
-			for _, msg := range messages {
+			for i := range messages {
 				_, err := s.db.ExecContext(ctx, `
 					UPDATE mailbox SET visible_at = ?, attempt = attempt + 1 WHERE id = ?`,
-					newVisibleAt, msg.ID)
+					newVisibleAt, messages[i].ID)
 				if err != nil {
 					return nil, fmt.Errorf("mailbox: update visibility: %w", err)
 				}
+				// Update the message struct to reflect new values
+				messages[i].VisibleAt = newVisibleAt
+				messages[i].Attempt++
 			}
 			return messages, nil
 		}
