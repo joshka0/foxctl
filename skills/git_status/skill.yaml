@@ -1,0 +1,55 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: git/status
+  version: 0.1.0
+  description: "Get git repository status, diffs, and information"
+  tags: ["git", "status", "diff", "vcs"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/git_status/git_status
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: git/status
+  parameters:
+    - name: operation
+      type: string
+      required: false
+      description: "Operation: status, diff, log"
+      enum: ["status", "diff", "log"]
+      default: "status"
+    - name: repo_path
+      type: string
+      required: false
+      description: "Path to git repository (default: current directory)"
+    - name: staged
+      type: boolean
+      required: false
+      default: false
+      description: "Show staged changes (for diff operation)"
+    - name: commit
+      type: string
+      required: false
+      description: "Commit hash or ref (for diff/log operations)"
+    - name: limit
+      type: integer
+      required: false
+      default: 10
+      description: "Number of log entries (for log operation)"
+    - name: stat
+      type: boolean
+      required: false
+      default: false
+      description: "Show stat summary (for diff operation)"
+returns:
+  - name: status
+    type: object
+    description: "Repository status information"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
