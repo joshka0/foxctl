@@ -103,22 +103,22 @@ func (e *Enforcer) CheckLLMCall(ctx context.Context, ns string) error {
 	// Reset counters if a minute has passed
 	now := time.Now().Unix()
 	if now-consumption.LastResetTS >= 60 {
-		// Reset counter to 1 for this call
+		// Reset counter to 0
 		delta := agent.QuotaConsumption{
 			Namespace:    ns,
-			LLMCalls1Min: 1 - consumption.LLMCalls1Min,
+			LLMCalls1Min: -consumption.LLMCalls1Min,
 			LastResetTS:  now,
 		}
 		if err := e.store.UpdateConsumption(ctx, ns, delta); err != nil {
 			return fmt.Errorf("quota check: reset LLM counter: %w", err)
 		}
-		// Counter reset to 1, check against limit
+		// Check if the current request (which will be the first in the new window) would exceed limit
 		if 1 > q.LLMCallsPerMin {
 			return &QuotaExceededError{
 				Namespace: ns,
 				Resource:  "llm_calls_per_min",
 				Limit:     q.LLMCallsPerMin,
-				Current:   1,
+				Current:   0,
 				Requested: 1,
 			}
 		}
@@ -160,22 +160,22 @@ func (e *Enforcer) CheckEgress(ctx context.Context, ns string, bytes int) error 
 	// Reset counters if a minute has passed
 	now := time.Now().Unix()
 	if now-consumption.LastResetTS >= 60 {
-		// Reset the counter to include current bytes
+		// Reset the counter to 0
 		delta := agent.QuotaConsumption{
 			Namespace:       ns,
-			EgressBytes1Min: bytes - consumption.EgressBytes1Min,
+			EgressBytes1Min: -consumption.EgressBytes1Min,
 			LastResetTS:     now,
 		}
 		if err := e.store.UpdateConsumption(ctx, ns, delta); err != nil {
 			return fmt.Errorf("quota check: reset egress counter: %w", err)
 		}
-		// Check if current bytes exceed limit
+		// Check if the current request (which will be the first in the new window) would exceed limit
 		if bytes > q.EgressBytesPerMin {
 			return &QuotaExceededError{
 				Namespace: ns,
 				Resource:  "egress_bytes_per_min",
 				Limit:     q.EgressBytesPerMin,
-				Current:   bytes,
+				Current:   0,
 				Requested: bytes,
 			}
 		}
@@ -230,11 +230,9 @@ func (e *Enforcer) RecordLLMCall(ctx context.Context, ns string) error {
 		LLMCalls1Min: 1,
 	}
 
-	// Set reset timestamp and reset counter if window expired
-	if consumption.LastResetTS == 0 || now-consumption.LastResetTS >= 60 {
+	// Initialize timestamp on first call
+	if consumption.LastResetTS == 0 {
 		delta.LastResetTS = now
-		// Reset counter to 1 for this call (not increment from old value)
-		delta.LLMCalls1Min = 1 - consumption.LLMCalls1Min
 	}
 
 	return e.store.UpdateConsumption(ctx, ns, delta)
@@ -253,11 +251,9 @@ func (e *Enforcer) RecordEgress(ctx context.Context, ns string, bytes int) error
 		EgressBytes1Min: bytes,
 	}
 
-	// Set reset timestamp and reset counter if window expired
-	if consumption.LastResetTS == 0 || now-consumption.LastResetTS >= 60 {
+	// Initialize timestamp on first call
+	if consumption.LastResetTS == 0 {
 		delta.LastResetTS = now
-		// Reset counter to current bytes (not increment from old value)
-		delta.EgressBytes1Min = bytes - consumption.EgressBytes1Min
 	}
 
 	return e.store.UpdateConsumption(ctx, ns, delta)
