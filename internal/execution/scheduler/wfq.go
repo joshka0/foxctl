@@ -142,14 +142,7 @@ func (s *WFQScheduler) Enqueue(job *Job) error {
 	// Add to global priority queue (ordered by virtual finish time)
 	heap.Push(s.globalQueue, job)
 
-	// Signal workers if scheduler is running
-	if s.running {
-		select {
-		case s.workCh <- job:
-		default:
-			// Channel full, job will be picked up by next worker cycle
-		}
-	}
+	// Job will be dispatched by schedulerLoop based on virtual finish time
 
 	return nil
 }
