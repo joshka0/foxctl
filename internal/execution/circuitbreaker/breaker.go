@@ -97,8 +97,10 @@ func (b *Breaker) Allow() bool {
 
 	case StateOpen:
 		// Check if enough time has passed to try half-open
-		if now.Sub(b.lastStateChange) > b.config.ResetTimeout {
+		// ResetTimeout of 0 means never auto-transition
+		if b.config.ResetTimeout > 0 && now.Sub(b.lastStateChange) > b.config.ResetTimeout {
 			b.toHalfOpen()
+			b.halfOpenAllowed++
 			return true
 		}
 		return false
