@@ -55,7 +55,7 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 	// If vector search is enabled for memory database, ensure vector columns exist
 	if cfg.EnableVectorSearch {
 		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
-			db.Close()
+			_ = db.Close() //nolint:errcheck
 			return nil, fmt.Errorf("failed to enable vector search: %w", err)
 		}
 	}

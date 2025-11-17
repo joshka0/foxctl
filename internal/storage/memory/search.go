@@ -167,7 +167,7 @@ func (ss *SearchableStore) searchBM25(
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	// Score each document with BM25
 	queryTerms := dbdriver.Tokenize(query)
@@ -260,7 +260,7 @@ func (ss *SearchableStore) searchVector(
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	results := make([]MemorySearchResult, 0)
 
@@ -492,7 +492,7 @@ func buildCorpusStatsForWorkspace(
 	if err != nil {
 		return stats, fmt.Errorf("text query failed: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	totalTokens := 0
 	docFreqs := make(map[string]map[string]bool) // term -> set of doc IDs
