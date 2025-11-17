@@ -293,7 +293,7 @@ func (h *HybridSearcher) Search(
 	if err != nil {
 		return nil, fmt.Errorf("candidate query failed: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	// Phase 2: Compute BM25 scores for candidates
 	queryTerms := Tokenize(queryText)
@@ -374,7 +374,7 @@ func BuildCorpusStats(ctx context.Context, db DB, tableName, textColumn string) 
 	if err != nil {
 		return stats, fmt.Errorf("text query failed: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	totalTokens := 0
 	seenTerms := make(map[string]map[string]bool) // term -> set of doc IDs

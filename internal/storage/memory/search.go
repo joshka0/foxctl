@@ -58,7 +58,7 @@ func (s *Store) EnableSearch(db dbdriver.DB, workspace string) (*SearchableStore
 	if err != nil {
 		return nil, fmt.Errorf("failed to query for corpus stats: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var totalDocs int
 	var totalTokens int

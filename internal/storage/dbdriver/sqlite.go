@@ -57,7 +57,7 @@ func openSQLite(ctx context.Context, cfg SQLiteConfig, migrate MigrationFunc) (D
 	// Run migrations if provided
 	if migrate != nil {
 		if err := migrate(ctx, db); err != nil {
-			db.Close()
+			_ = db.Close() //nolint:errcheck
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 	}

@@ -40,14 +40,14 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 
 	// Test the connection
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("failed to connect to turso database: %w", err)
 	}
 
 	// Run migrations if provided
 	if migrate != nil {
 		if err := migrate(ctx, db); err != nil {
-			db.Close()
+			_ = db.Close() //nolint:errcheck
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 	}
