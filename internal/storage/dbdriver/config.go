@@ -57,7 +57,7 @@ type LibSQLConfig struct {
 }
 
 // TursoConfig holds Turso-specific configuration
-type TursoConfig struct{
+type TursoConfig struct {
 	// URL is the Turso database URL (e.g., libsql://your-database.turso.io)
 	URL string `json:"url" yaml:"url"`
 

@@ -40,26 +40,26 @@ type TermFrequency map[string]int
 
 // DocumentStats holds statistics about a document
 type DocumentStats struct {
-	ID         string
-	Length     int // Token count
-	TermFreqs  TermFrequency
-	AvgLength  float64 // Average document length in corpus
+	ID        string
+	Length    int // Token count
+	TermFreqs TermFrequency
+	AvgLength float64 // Average document length in corpus
 }
 
 // CorpusStats holds statistics about the entire corpus
 type CorpusStats struct {
-	TotalDocs     int
-	AvgDocLength  float64
-	DocFreqs      map[string]int // Number of docs containing each term
+	TotalDocs    int
+	AvgDocLength float64
+	DocFreqs     map[string]int // Number of docs containing each term
 }
 
 // SearchResult represents a single search result
 type SearchResult struct {
-	DocumentID string
-	Score      float64
-	BM25Score  float64
+	DocumentID  string
+	Score       float64
+	BM25Score   float64
 	VectorScore float64
-	Metadata   map[string]interface{}
+	Metadata    map[string]interface{}
 }
 
 // SearchResults is a collection of search results
@@ -271,7 +271,6 @@ func (h *HybridSearcher) Search(
 	additionalWhere string,
 	args ...any,
 ) (SearchResults, error) {
-
 	// Phase 1: Get candidate documents using vector search
 	// This gives us a reasonable subset to score with BM25
 	candidateQuery := fmt.Sprintf(`

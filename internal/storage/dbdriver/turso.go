@@ -11,11 +11,11 @@ import (
 
 // tursoDB wraps libsql connection to implement our DB interface
 type tursoDB struct {
-	db                   *sql.DB
-	connector            *libsql.Connector
-	enableVectorSearch   bool
-	vectorDimensions     int
-	driverType           DriverType
+	db                 *sql.DB
+	connector          *libsql.Connector
+	enableVectorSearch bool
+	vectorDimensions   int
+	driverType         DriverType
 }
 
 // openTurso opens a Turso database connection
@@ -58,11 +58,11 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 	}
 
 	return &tursoDB{
-		db:                   db,
-		connector:            connector,
-		enableVectorSearch:   cfg.EnableVectorSearch,
-		vectorDimensions:     vectorDims,
-		driverType:           DriverTurso,
+		db:                 db,
+		connector:          connector,
+		enableVectorSearch: cfg.EnableVectorSearch,
+		vectorDimensions:   vectorDims,
+		driverType:         DriverTurso,
 	}, nil
 }
 

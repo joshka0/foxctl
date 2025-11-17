@@ -19,7 +19,7 @@ type sqliteDB struct {
 func openSQLite(ctx context.Context, cfg SQLiteConfig, migrate MigrationFunc) (DB, error) {
 	// Create parent directories if they don't exist
 	if dir := filepath.Dir(cfg.Path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}

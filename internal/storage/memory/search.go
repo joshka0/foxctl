@@ -136,7 +136,6 @@ func (ss *SearchableStore) Search(
 	mode dbdriver.SearchMode,
 	limit int,
 ) ([]MemorySearchResult, error) {
-
 	switch mode {
 	case dbdriver.SearchModeBM25:
 		return ss.searchBM25(ctx, query, workspace, limit)
@@ -156,7 +155,6 @@ func (ss *SearchableStore) searchBM25(
 	workspace string,
 	limit int,
 ) ([]MemorySearchResult, error) {
-
 	// Get all documents in workspace
 	listQuery := `
 		SELECT id, name, type, workspace, summary, result, digests,
@@ -231,7 +229,6 @@ func (ss *SearchableStore) searchVector(
 	workspace string,
 	limit int,
 ) ([]MemorySearchResult, error) {
-
 	if !ss.db.IsVectorSearchEnabled() {
 		return nil, fmt.Errorf("vector search is not enabled")
 	}
@@ -310,7 +307,6 @@ func (ss *SearchableStore) searchHybrid(
 	workspace string,
 	limit int,
 ) ([]MemorySearchResult, error) {
-
 	if ss.hybridSearcher == nil {
 		return nil, fmt.Errorf("hybrid search is not available (requires vector search)")
 	}
@@ -322,13 +318,12 @@ func (ss *SearchableStore) searchHybrid(
 		queryVector,
 		"named_memory",
 		"name || ' ' || COALESCE(summary, '')", // Text column expression
-		"embedding",                             // Vector column
-		"idx_memory_vector",                     // Index name
+		"embedding",                            // Vector column
+		"idx_memory_vector",                    // Index name
 		limit,
 		"workspace = ?", // Additional filter
 		workspace,
 	)
-
 	if err != nil {
 		return nil, err
 	}

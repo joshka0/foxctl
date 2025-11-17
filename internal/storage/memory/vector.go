@@ -203,7 +203,6 @@ func (vs *VectorStore) GetWithEmbedding(ctx context.Context, name, workspace str
 		&entry.AccessCount,
 		&embeddingStr,
 	)
-
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return VectorEntry{}, storage.ErrNotFound

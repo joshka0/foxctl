@@ -13,18 +13,18 @@ import (
 
 // libsqlDB wraps libsql connection for local file-based database
 type libsqlDB struct {
-	db                   *sql.DB
-	connector            *libsql.Connector
-	enableVectorSearch   bool
-	vectorDimensions     int
-	driverType           DriverType
+	db                 *sql.DB
+	connector          *libsql.Connector
+	enableVectorSearch bool
+	vectorDimensions   int
+	driverType         DriverType
 }
 
 // openLibSQL opens a local libSQL database file
 func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (DB, error) {
 	// Create parent directories if they don't exist
 	if dir := filepath.Dir(cfg.Path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
@@ -71,11 +71,11 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 	}
 
 	return &libsqlDB{
-		db:                   db,
-		connector:            connector,
-		enableVectorSearch:   cfg.EnableVectorSearch,
-		vectorDimensions:     vectorDims,
-		driverType:           DriverLibSQL,
+		db:                 db,
+		connector:          connector,
+		enableVectorSearch: cfg.EnableVectorSearch,
+		vectorDimensions:   vectorDims,
+		driverType:         DriverLibSQL,
 	}, nil
 }
 
