@@ -100,7 +100,7 @@ func (vs *VectorStore) SearchSimilar(
 	if err != nil {
 		return nil, fmt.Errorf("vector search failed: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var results []VectorEntry
 	for rows.Next() {
