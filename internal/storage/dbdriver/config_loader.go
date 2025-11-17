@@ -53,6 +53,8 @@ func (cl *ConfigLoader) loadConfig(prefix, defaultPath string) Config {
 	driverType := DriverType(strings.ToLower(driver))
 
 	switch driverType {
+	case DriverLibSQL:
+		return cl.loadLibSQLConfig(prefix, defaultPath)
 	case DriverTurso:
 		return cl.loadTursoConfig(prefix, strings.ToLower(prefix))
 	case DriverSQLite:
@@ -95,6 +97,44 @@ func (cl *ConfigLoader) loadSQLiteConfig(prefix, defaultPath string) Config {
 			Path:        dbPath,
 			EnableWAL:   enableWAL,
 			BusyTimeout: busyTimeout,
+		},
+	}
+}
+
+// loadLibSQLConfig loads local libSQL configuration
+func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
+	// Check for custom path via environment variable
+	// Format: AGENTCTL_<PREFIX>_DB_PATH (e.g., AGENTCTL_MEMORY_DB_PATH)
+	pathEnv := fmt.Sprintf("AGENTCTL_%s_DB_PATH", strings.ToUpper(prefix))
+	dbPath := os.Getenv(pathEnv)
+
+	if dbPath == "" {
+		// Default to .libsql extension to distinguish from SQLite
+		dbPath = filepath.Join(cl.rootDir, strings.Replace(defaultPath, ".db", ".libsql", 1))
+	}
+
+	// Check if vector search should be enabled
+	vectorEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
+	enableVector := false
+	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
+		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
+	}
+
+	// Get vector dimensions
+	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
+	vectorDims := 384 // default
+	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
+		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
+			vectorDims = dims
+		}
+	}
+
+	return Config{
+		Driver: DriverLibSQL,
+		LibSQL: LibSQLConfig{
+			Path:               dbPath,
+			EnableVectorSearch: enableVector,
+			VectorDimensions:   vectorDims,
 		},
 	}
 }

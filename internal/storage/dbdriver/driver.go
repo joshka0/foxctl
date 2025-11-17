@@ -78,6 +78,8 @@ func OpenDB(ctx context.Context, cfg Config, migrate MigrationFunc) (DB, error) 
 	switch cfg.Driver {
 	case DriverSQLite:
 		return openSQLite(ctx, cfg.SQLite, migrate)
+	case DriverLibSQL:
+		return openLibSQL(ctx, cfg.LibSQL, migrate)
 	case DriverTurso:
 		return openTurso(ctx, cfg.Turso, migrate)
 	default:

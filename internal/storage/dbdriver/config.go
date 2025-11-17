@@ -9,21 +9,26 @@ import (
 type DriverType string
 
 const (
-	// DriverSQLite uses local SQLite database
+	// DriverSQLite uses local SQLite database (standard SQLite, no vector search)
 	DriverSQLite DriverType = "sqlite"
-	// DriverTurso uses Turso cloud database with libSQL
+	// DriverLibSQL uses local libSQL database file (supports vector search locally)
+	DriverLibSQL DriverType = "libsql"
+	// DriverTurso uses Turso cloud database with libSQL (cloud, replicated)
 	DriverTurso DriverType = "turso"
 )
 
 // Config holds database configuration
 type Config struct {
-	// Driver specifies which database driver to use (sqlite or turso)
+	// Driver specifies which database driver to use (sqlite, libsql, or turso)
 	Driver DriverType `json:"driver" yaml:"driver"`
 
 	// SQLite specific configuration
 	SQLite SQLiteConfig `json:"sqlite,omitempty" yaml:"sqlite,omitempty"`
 
-	// Turso specific configuration
+	// LibSQL specific configuration (local file-based libSQL)
+	LibSQL LibSQLConfig `json:"libsql,omitempty" yaml:"libsql,omitempty"`
+
+	// Turso specific configuration (cloud libSQL)
 	Turso TursoConfig `json:"turso,omitempty" yaml:"turso,omitempty"`
 }
 
@@ -39,8 +44,20 @@ type SQLiteConfig struct {
 	BusyTimeout int `json:"busy_timeout" yaml:"busy_timeout"`
 }
 
+// LibSQLConfig holds local libSQL-specific configuration
+type LibSQLConfig struct {
+	// Path to the libSQL database file
+	Path string `json:"path" yaml:"path"`
+
+	// EnableVectorSearch enables vector search capabilities
+	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
+
+	// VectorDimensions specifies the dimension of vector embeddings (default: 384)
+	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
+}
+
 // TursoConfig holds Turso-specific configuration
-type TursoConfig struct {
+type TursoConfig struct{
 	// URL is the Turso database URL (e.g., libsql://your-database.turso.io)
 	URL string `json:"url" yaml:"url"`
 
@@ -65,6 +82,10 @@ func (c *Config) Validate() error {
 		if c.SQLite.Path == "" {
 			return errors.New("sqlite path is required")
 		}
+	case DriverLibSQL:
+		if c.LibSQL.Path == "" {
+			return errors.New("libsql path is required")
+		}
 	case DriverTurso:
 		if c.Turso.URL == "" {
 			return errors.New("turso url is required")
@@ -88,6 +109,18 @@ func DefaultSQLiteConfig(path string) Config {
 			Path:        path,
 			EnableWAL:   true,
 			BusyTimeout: 5000,
+		},
+	}
+}
+
+// DefaultLibSQLConfig returns a default local libSQL configuration
+func DefaultLibSQLConfig(path string, enableVectors bool) Config {
+	return Config{
+		Driver: DriverLibSQL,
+		LibSQL: LibSQLConfig{
+			Path:               path,
+			EnableVectorSearch: enableVectors,
+			VectorDimensions:   384, // Default to all-MiniLM-L6-v2 dimensions
 		},
 	}
 }
