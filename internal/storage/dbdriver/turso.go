@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tursodatabase/libsql-client-go/libsql"
+	"github.com/tursodatabase/go-libsql"
 )
 
 // tursoDB wraps libsql connection to implement our DB interface
@@ -26,8 +26,11 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 		vectorDims = 384 // Default to all-MiniLM-L6-v2 dimensions
 	}
 
-	// Create libSQL connector
-	connector, err := libsql.NewConnector(cfg.URL, libsql.WithAuthToken(cfg.AuthToken))
+	// Create libSQL connector for remote Turso database
+	// Use empty string for local path to indicate remote-only mode
+	connector, err := libsql.NewEmbeddedReplicaConnector("", cfg.URL,
+		libsql.WithAuthToken(cfg.AuthToken),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create turso connector: %w", err)
 	}
@@ -89,10 +92,16 @@ func ensureVectorSupport(ctx context.Context, db *sql.DB, dimensions int) error 
 
 // Close closes the database connection
 func (t *tursoDB) Close() error {
+	var err error
 	if t.db != nil {
-		return t.db.Close()
+		err = t.db.Close()
 	}
-	return nil
+	if t.connector != nil {
+		if closeErr := t.connector.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 // Exec executes a query without returning any rows

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tursodatabase/libsql-client-go/libsql"
+	"github.com/tursodatabase/go-libsql"
 )
 
 // libsqlDB wraps libsql connection for local file-based database
@@ -35,12 +35,9 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 		vectorDims = 384 // Default to all-MiniLM-L6-v2 dimensions
 	}
 
-	// Create file:// URL for local database
-	// libSQL uses file:// URLs for local databases
-	fileURL := "file:" + cfg.Path
-
-	// Create libSQL connector for local file
-	connector, err := libsql.NewConnector(fileURL)
+	// Create libSQL connector for local file database
+	// For local files, just pass the path directly
+	connector, err := libsql.NewEmbeddedReplicaConnector(cfg.Path, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create libsql connector: %w", err)
 	}
@@ -81,10 +78,16 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 
 // Close closes the database connection
 func (l *libsqlDB) Close() error {
+	var err error
 	if l.db != nil {
-		return l.db.Close()
+		err = l.db.Close()
 	}
-	return nil
+	if l.connector != nil {
+		if closeErr := l.connector.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 // Exec executes a query without returning any rows
