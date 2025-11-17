@@ -2,7 +2,6 @@ package agent
 
 import (
 	"encoding/json"
-	"time"
 )
 
 // MessageType defines the type of inter-agent message.
