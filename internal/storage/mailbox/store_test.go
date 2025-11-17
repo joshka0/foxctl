@@ -21,7 +21,7 @@ func TestMailboxStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }() //nolint:errcheck
 
 	// Test Send
 	t.Run("Send", func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestMailboxPollTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }() //nolint:errcheck
 
 	// Test Poll with timeout when no messages
 	t.Run("PollTimeout", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestMailboxMessageTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }() //nolint:errcheck
 
 	messageTypes := []agent.MessageType{
 		agent.MessageTypeAsk,
