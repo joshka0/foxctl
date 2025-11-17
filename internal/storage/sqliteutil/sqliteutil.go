@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 
 	_ "modernc.org/sqlite" // register sqlite driver
@@ -47,4 +48,33 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		}
 	}
 	return db, nil
+}
+
+// OpenDBWithDriver opens a database using the new driver abstraction system.
+// This supports both SQLite and Turso databases based on configuration.
+// The config can be loaded from environment variables using dbdriver.ConfigLoader.
+func OpenDBWithDriver(ctx context.Context, cfg dbdriver.Config, migrate func(context.Context, *sql.DB) error) (*sql.DB, error) {
+	return dbdriver.OpenDBCompat(ctx, cfg, migrate)
+}
+
+// OpenDBWithAutoConfig opens a database with automatic configuration detection.
+// It checks environment variables to determine whether to use SQLite or Turso.
+// dbType should be one of: "cache", "jobs", or "memory"
+// defaultPath is the default SQLite path (e.g., "cache.db")
+func OpenDBWithAutoConfig(ctx context.Context, rootDir string, dbType string, defaultPath string, migrate func(context.Context, *sql.DB) error) (*sql.DB, error) {
+	loader := dbdriver.NewConfigLoader(rootDir)
+
+	var cfg dbdriver.Config
+	switch dbType {
+	case "cache":
+		cfg = loader.LoadCacheConfig()
+	case "jobs":
+		cfg = loader.LoadJobsConfig()
+	case "memory":
+		cfg = loader.LoadMemoryConfig()
+	default:
+		return nil, fmt.Errorf("sqliteutil: unknown database type: %s", dbType)
+	}
+
+	return OpenDBWithDriver(ctx, cfg, migrate)
 }
