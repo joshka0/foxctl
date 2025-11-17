@@ -246,8 +246,8 @@ func runMailboxAck(cmd *cobra.Command, args []string) error {
 
 	// Write success envelope
 	data := map[string]interface{}{
-		"message_id":    messageID,
-		"acknowledged":  true,
+		"message_id":   messageID,
+		"acknowledged": true,
 	}
 
 	env := envelope.OK("mailbox/ack", data, envelope.WithMetaMutator(func(m *envelope.Meta) {

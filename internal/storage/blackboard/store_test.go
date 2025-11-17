@@ -25,8 +25,8 @@ func TestBlackboardStore(t *testing.T) {
 	// Test Post
 	t.Run("Post", func(t *testing.T) {
 		payload := map[string]interface{}{
-			"task_id": "task-001",
-			"title":   "Process webhook",
+			"task_id":  "task-001",
+			"title":    "Process webhook",
 			"priority": 5,
 		}
 		payloadBytes, _ := json.Marshal(payload)

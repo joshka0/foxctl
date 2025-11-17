@@ -286,10 +286,10 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 	}
 
 	data := map[string]interface{}{
-		"item_id":           record.ID,
-		"lease_id":          record.Lease.Holder + "-" + fmt.Sprintf("%d", record.Lease.Until),
-		"item":              json.RawMessage(record.Payload),
-		"lease_expires_at":  time.Unix(record.Lease.Until, 0).UTC().Format(time.RFC3339),
+		"item_id":          record.ID,
+		"lease_id":         record.Lease.Holder + "-" + fmt.Sprintf("%d", record.Lease.Until),
+		"item":             json.RawMessage(record.Payload),
+		"lease_expires_at": time.Unix(record.Lease.Until, 0).UTC().Format(time.RFC3339),
 	}
 
 	env := envelope.OK("bb/claim", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
@@ -450,11 +450,11 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 			seq++
 			finalBool := false
 			data := map[string]interface{}{
-				"event":  "blackboard_update",
-				"topic":  record.Topic,
+				"event":   "blackboard_update",
+				"topic":   record.Topic,
 				"item_id": record.ID,
-				"item":   json.RawMessage(record.Payload),
-				"ts":     time.Unix(record.TS, 0).UTC().Format(time.RFC3339),
+				"item":    json.RawMessage(record.Payload),
+				"ts":      time.Unix(record.TS, 0).UTC().Format(time.RFC3339),
 			}
 
 			env := envelope.Envelope{

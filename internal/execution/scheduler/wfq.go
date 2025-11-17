@@ -23,16 +23,16 @@ type Job struct {
 
 // WFQScheduler implements weighted fair queueing for namespace-based scheduling.
 type WFQScheduler struct {
-	mu              sync.Mutex
-	queues          map[string]*namespaceQueue
-	globalQueue     *priorityQueue
-	weights         map[string]int
-	defaultWeight   int
-	virtualTime     float64
-	running         bool
-	stopCh          chan struct{}
-	workerCount     int
-	workCh          chan *Job
+	mu            sync.Mutex
+	queues        map[string]*namespaceQueue
+	globalQueue   *priorityQueue
+	weights       map[string]int
+	defaultWeight int
+	virtualTime   float64
+	running       bool
+	stopCh        chan struct{}
+	workerCount   int
+	workCh        chan *Job
 }
 
 // namespaceQueue tracks per-namespace state.

@@ -101,9 +101,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 
 // KillRequest contains parameters for terminating an agent.
 type KillRequest struct {
-	AgentID   string
-	Graceful  bool
-	TimeoutS  int
+	AgentID  string
+	Graceful bool
+	TimeoutS int
 }
 
 // KillResponse contains the result of killing an agent.

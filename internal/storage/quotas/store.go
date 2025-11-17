@@ -136,6 +136,10 @@ func (s *sqlStore) ListAll(ctx context.Context) (map[string]agent.Quotas, error)
 		result[quotas.Namespace] = quotas
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("quotas: list all iteration: %w", err)
+	}
+
 	return result, nil
 }
 

@@ -60,10 +60,10 @@ var quotasConsumptionCmd = &cobra.Command{
 
 // Flags for quotas set
 var (
-	quotasSetMaxJobs    int
-	quotasSetCPU        int
-	quotasSetMemMB      int
-	quotasSetLLMPerMin  int
+	quotasSetMaxJobs      int
+	quotasSetCPU          int
+	quotasSetMemMB        int
+	quotasSetLLMPerMin    int
 	quotasSetEgressPerMin int
 )
 

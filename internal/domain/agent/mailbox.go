@@ -21,25 +21,25 @@ const (
 
 // Message represents a mailbox message for inter-agent communication.
 type Message struct {
-	ID         string            `json:"id"`
-	FromNS     string            `json:"from_ns"`
-	ToNS       string            `json:"to_ns"`
-	Type       MessageType       `json:"type"`
-	TTLMS      int64             `json:"ttl_ms"`
-	Headers    map[string]string `json:"headers,omitempty"`
-	Payload    json.RawMessage   `json:"payload"` // Envelope JSON
-	VisibleAt  int64             `json:"visible_at"`
-	Attempt    int               `json:"attempt"`
-	Timestamp  int64             `json:"ts"`
+	ID        string            `json:"id"`
+	FromNS    string            `json:"from_ns"`
+	ToNS      string            `json:"to_ns"`
+	Type      MessageType       `json:"type"`
+	TTLMS     int64             `json:"ttl_ms"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Payload   json.RawMessage   `json:"payload"` // Envelope JSON
+	VisibleAt int64             `json:"visible_at"`
+	Attempt   int               `json:"attempt"`
+	Timestamp int64             `json:"ts"`
 }
 
 // AskData represents the data payload for an agent.ask message.
 type AskData struct {
-	AskID      string                 `json:"ask_id"`
-	Kind       string                 `json:"kind"` // context|secret|approval|toolhint|other
-	Question   string                 `json:"question"`
-	NeedsByMS  int64                  `json:"needs_by_ms,omitempty"`
-	Context    map[string]interface{} `json:"context,omitempty"`
+	AskID     string                 `json:"ask_id"`
+	Kind      string                 `json:"kind"` // context|secret|approval|toolhint|other
+	Question  string                 `json:"question"`
+	NeedsByMS int64                  `json:"needs_by_ms,omitempty"`
+	Context   map[string]interface{} `json:"context,omitempty"`
 }
 
 // ReplyData represents the data payload for an agent.reply message.

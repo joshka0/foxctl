@@ -466,13 +466,13 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 					Command: "agent/watch",
 					Data:    data,
 					Meta: envelope.Meta{
-						TS:       time.Now().UTC().Format(time.RFC3339),
-						Source:   "run",
-						Profiles: []string{"core/v1", "agent/v1"},
-						AgentID:  agentID,
+						TS:        time.Now().UTC().Format(time.RFC3339),
+						Source:    "run",
+						Profiles:  []string{"core/v1", "agent/v1"},
+						AgentID:   agentID,
 						MailboxID: "mailbox:" + a.Namespace,
-						Seq:      &seq,
-						Final:    &finalBool,
+						Seq:       &seq,
+						Final:     &finalBool,
 					},
 				}
 

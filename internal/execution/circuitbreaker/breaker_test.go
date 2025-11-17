@@ -141,7 +141,6 @@ func TestCircuitBreakerExecuteSuccess(t *testing.T) {
 		executed = true
 		return nil
 	})
-
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}

@@ -76,7 +76,6 @@ func (b *Breaker) Execute(ctx context.Context, fn func(context.Context) error) e
 	}
 
 	err := fn(ctx)
-
 	if err != nil {
 		b.RecordFailure()
 		return err

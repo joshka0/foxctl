@@ -24,7 +24,7 @@ func NewEnforcer(store quotas.Store) *Enforcer {
 // Returns an error if the quota would be exceeded.
 func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest, memMBRequest int) error {
 	// Get namespace quotas
-	quotas, err := e.store.Get(ctx, ns)
+	q, err := e.store.Get(ctx, ns)
 	if err != nil {
 		if err == quotas.ErrNotFound {
 			// No quotas defined means unlimited
@@ -40,12 +40,12 @@ func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest
 	}
 
 	// Check concurrent jobs limit
-	if quotas.MaxConcurrentJobs > 0 {
-		if consumption.ActiveJobs >= quotas.MaxConcurrentJobs {
+	if q.MaxConcurrentJobs > 0 {
+		if consumption.ActiveJobs >= q.MaxConcurrentJobs {
 			return &QuotaExceededError{
 				Namespace: ns,
 				Resource:  "concurrent_jobs",
-				Limit:     quotas.MaxConcurrentJobs,
+				Limit:     q.MaxConcurrentJobs,
 				Current:   consumption.ActiveJobs,
 				Requested: 1,
 			}
@@ -53,12 +53,12 @@ func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest
 	}
 
 	// Check CPU limit
-	if quotas.CPULimit > 0 {
-		if consumption.CPUUsed+cpuRequest > quotas.CPULimit {
+	if q.CPULimit > 0 {
+		if consumption.CPUUsed+cpuRequest > q.CPULimit {
 			return &QuotaExceededError{
 				Namespace: ns,
 				Resource:  "cpu",
-				Limit:     quotas.CPULimit,
+				Limit:     q.CPULimit,
 				Current:   consumption.CPUUsed,
 				Requested: cpuRequest,
 			}
@@ -66,12 +66,12 @@ func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest
 	}
 
 	// Check memory limit
-	if quotas.MemMBLimit > 0 {
-		if consumption.MemMBUsed+memMBRequest > quotas.MemMBLimit {
+	if q.MemMBLimit > 0 {
+		if consumption.MemMBUsed+memMBRequest > q.MemMBLimit {
 			return &QuotaExceededError{
 				Namespace: ns,
 				Resource:  "memory_mb",
-				Limit:     quotas.MemMBLimit,
+				Limit:     q.MemMBLimit,
 				Current:   consumption.MemMBUsed,
 				Requested: memMBRequest,
 			}
@@ -83,7 +83,7 @@ func (e *Enforcer) CheckJobSubmission(ctx context.Context, ns string, cpuRequest
 
 // CheckLLMCall verifies if a namespace can make an LLM API call.
 func (e *Enforcer) CheckLLMCall(ctx context.Context, ns string) error {
-	quotas, err := e.store.Get(ctx, ns)
+	q, err := e.store.Get(ctx, ns)
 	if err != nil {
 		if err == quotas.ErrNotFound {
 			return nil
@@ -91,7 +91,7 @@ func (e *Enforcer) CheckLLMCall(ctx context.Context, ns string) error {
 		return fmt.Errorf("quota check: %w", err)
 	}
 
-	if quotas.LLMCallsPerMin <= 0 {
+	if q.LLMCallsPerMin <= 0 {
 		return nil // No limit
 	}
 
@@ -103,23 +103,33 @@ func (e *Enforcer) CheckLLMCall(ctx context.Context, ns string) error {
 	// Reset counters if a minute has passed
 	now := time.Now().Unix()
 	if now-consumption.LastResetTS >= 60 {
-		// Reset the counter
+		// Reset counter to 1 for this call
 		delta := agent.QuotaConsumption{
 			Namespace:    ns,
-			LLMCalls1Min: -consumption.LLMCalls1Min,
+			LLMCalls1Min: 1 - consumption.LLMCalls1Min,
 			LastResetTS:  now,
 		}
 		if err := e.store.UpdateConsumption(ctx, ns, delta); err != nil {
 			return fmt.Errorf("quota check: reset LLM counter: %w", err)
 		}
-		return nil // Counter reset, call allowed
+		// Counter reset to 1, check against limit
+		if 1 > q.LLMCallsPerMin {
+			return &QuotaExceededError{
+				Namespace: ns,
+				Resource:  "llm_calls_per_min",
+				Limit:     q.LLMCallsPerMin,
+				Current:   1,
+				Requested: 1,
+			}
+		}
+		return nil
 	}
 
-	if consumption.LLMCalls1Min >= quotas.LLMCallsPerMin {
+	if consumption.LLMCalls1Min >= q.LLMCallsPerMin {
 		return &QuotaExceededError{
 			Namespace: ns,
 			Resource:  "llm_calls_per_min",
-			Limit:     quotas.LLMCallsPerMin,
+			Limit:     q.LLMCallsPerMin,
 			Current:   consumption.LLMCalls1Min,
 			Requested: 1,
 		}
@@ -130,7 +140,7 @@ func (e *Enforcer) CheckLLMCall(ctx context.Context, ns string) error {
 
 // CheckEgress verifies if a namespace can send egress bytes.
 func (e *Enforcer) CheckEgress(ctx context.Context, ns string, bytes int) error {
-	quotas, err := e.store.Get(ctx, ns)
+	q, err := e.store.Get(ctx, ns)
 	if err != nil {
 		if err == quotas.ErrNotFound {
 			return nil
@@ -138,7 +148,7 @@ func (e *Enforcer) CheckEgress(ctx context.Context, ns string, bytes int) error 
 		return fmt.Errorf("quota check: %w", err)
 	}
 
-	if quotas.EgressBytesPerMin <= 0 {
+	if q.EgressBytesPerMin <= 0 {
 		return nil // No limit
 	}
 
@@ -150,23 +160,33 @@ func (e *Enforcer) CheckEgress(ctx context.Context, ns string, bytes int) error 
 	// Reset counters if a minute has passed
 	now := time.Now().Unix()
 	if now-consumption.LastResetTS >= 60 {
-		// Reset the counter
+		// Reset the counter to include current bytes
 		delta := agent.QuotaConsumption{
 			Namespace:       ns,
-			EgressBytes1Min: -consumption.EgressBytes1Min,
+			EgressBytes1Min: bytes - consumption.EgressBytes1Min,
 			LastResetTS:     now,
 		}
 		if err := e.store.UpdateConsumption(ctx, ns, delta); err != nil {
 			return fmt.Errorf("quota check: reset egress counter: %w", err)
 		}
-		return nil // Counter reset, egress allowed
+		// Check if current bytes exceed limit
+		if bytes > q.EgressBytesPerMin {
+			return &QuotaExceededError{
+				Namespace: ns,
+				Resource:  "egress_bytes_per_min",
+				Limit:     q.EgressBytesPerMin,
+				Current:   bytes,
+				Requested: bytes,
+			}
+		}
+		return nil
 	}
 
-	if consumption.EgressBytes1Min+bytes > quotas.EgressBytesPerMin {
+	if consumption.EgressBytes1Min+bytes > q.EgressBytesPerMin {
 		return &QuotaExceededError{
 			Namespace: ns,
 			Resource:  "egress_bytes_per_min",
-			Limit:     quotas.EgressBytesPerMin,
+			Limit:     q.EgressBytesPerMin,
 			Current:   consumption.EgressBytes1Min,
 			Requested: bytes,
 		}
@@ -199,8 +219,10 @@ func (e *Enforcer) RecordJobEnd(ctx context.Context, ns string, cpuRequest, memM
 
 // RecordLLMCall increments the LLM call counter.
 func (e *Enforcer) RecordLLMCall(ctx context.Context, ns string) error {
-	// Initialize timestamp if this is the first call
-	consumption, _ := e.store.GetConsumption(ctx, ns)
+	consumption, err := e.store.GetConsumption(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("get consumption: %w", err)
+	}
 	now := time.Now().Unix()
 
 	delta := agent.QuotaConsumption{
@@ -208,9 +230,11 @@ func (e *Enforcer) RecordLLMCall(ctx context.Context, ns string) error {
 		LLMCalls1Min: 1,
 	}
 
-	// Set reset timestamp if not set or expired
+	// Set reset timestamp and reset counter if window expired
 	if consumption.LastResetTS == 0 || now-consumption.LastResetTS >= 60 {
 		delta.LastResetTS = now
+		// Reset counter to 1 for this call (not increment from old value)
+		delta.LLMCalls1Min = 1 - consumption.LLMCalls1Min
 	}
 
 	return e.store.UpdateConsumption(ctx, ns, delta)
@@ -218,8 +242,10 @@ func (e *Enforcer) RecordLLMCall(ctx context.Context, ns string) error {
 
 // RecordEgress increments the egress byte counter.
 func (e *Enforcer) RecordEgress(ctx context.Context, ns string, bytes int) error {
-	// Initialize timestamp if this is the first egress
-	consumption, _ := e.store.GetConsumption(ctx, ns)
+	consumption, err := e.store.GetConsumption(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("get consumption: %w", err)
+	}
 	now := time.Now().Unix()
 
 	delta := agent.QuotaConsumption{
@@ -227,9 +253,11 @@ func (e *Enforcer) RecordEgress(ctx context.Context, ns string, bytes int) error
 		EgressBytes1Min: bytes,
 	}
 
-	// Set reset timestamp if not set or expired
+	// Set reset timestamp and reset counter if window expired
 	if consumption.LastResetTS == 0 || now-consumption.LastResetTS >= 60 {
 		delta.LastResetTS = now
+		// Reset counter to current bytes (not increment from old value)
+		delta.EgressBytes1Min = bytes - consumption.EgressBytes1Min
 	}
 
 	return e.store.UpdateConsumption(ctx, ns, delta)
