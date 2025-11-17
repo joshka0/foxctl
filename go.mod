@@ -14,6 +14,7 @@ require (
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.9.0
 	github.com/tetratelabs/wazero v1.7.0
+	github.com/tursodatabase/libsql-client-go v0.0.0-20240902231107-85af5b9d094d
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.27.0
 	mvdan.cc/gofumpt v0.7.0
