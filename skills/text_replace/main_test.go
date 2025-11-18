@@ -500,7 +500,7 @@ func TestReplaceDryRun(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
 	t.Helper()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -525,7 +525,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}

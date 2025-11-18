@@ -114,7 +114,7 @@ func main() {
 		fail("text/replace", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewContext(cfg, os.Stdout)
 	if err != nil {
 		fail("text/replace", "ERUNTIME", err)
 	}
@@ -131,7 +131,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.Context, in input) error {
 	// Build list of operations
 	ops := buildOperations(in)
 	if len(ops) == 0 {
@@ -376,7 +376,7 @@ func buildReplacer(op operation, caseInsensitive, wordBoundary, multiline bool) 
 	}, nil
 }
 
-func collectEntries(rc *runner.RunnerContext, paths []string, includeHidden bool, extensions []string) ([]fsutil.FileEntry, error) {
+func collectEntries(rc *runner.Context, paths []string, includeHidden bool, extensions []string) ([]fsutil.FileEntry, error) {
 	var allEntries []fsutil.FileEntry
 	seen := make(map[string]bool)
 
@@ -734,7 +734,7 @@ func preparePreview(changes []fileChange, max int) ([]fileChange, bool) {
 	return preview, truncated
 }
 
-func persistChangesArtifact(ctx context.Context, rc *runner.RunnerContext, changes []fileChange, truncated bool) (runner.Artifact, error) {
+func persistChangesArtifact(ctx context.Context, rc *runner.Context, changes []fileChange, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}
