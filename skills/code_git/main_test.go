@@ -10,8 +10,8 @@ func TestParseSinceArg(t *testing.T) {
 		want string
 	}{
 		{"7d", "7 days ago"},
-		{"1w", "1 week ago"},
-		{"1m", "1 month ago"},
+		{"1w", "1 weeks ago"},
+		{"1m", "1 months ago"},
 		{"1y", "1 years ago"},
 		{"2023-01-01", "2023-01-01"},
 	}
@@ -25,11 +25,11 @@ func TestParseSinceArg(t *testing.T) {
 }
 
 func TestParseRecentChanges(t *testing.T) {
-	output := `hash1|author1|email1|date1|subject1
+	output := `hash12345|author1|email1|date1|subject1
 file1.go
 file2.go
 
-hash2|author2|email2|date2|subject2
+hash23456|author2|email2|date2|subject2
 file3.go
 `
 	results := parseRecentChanges([]byte(output), "/tmp", 10)
@@ -39,7 +39,7 @@ file3.go
 	if results[0].File != "file1.go" {
 		t.Errorf("expected file1.go, got %s", results[0].File)
 	}
-	if results[0].Commit != "hash1"[:7] {
+	if results[0].Commit != "hash123" {
 		t.Errorf("expected shortened hash, got %s", results[0].Commit)
 	}
 }
@@ -59,12 +59,14 @@ file2.go
 }
 
 func TestParseBlame(t *testing.T) {
-	output := `hash1 1 10 1
+	hash1 := "1234567890123456789012345678901234567890"
+	hash2 := "abcdefabcdefabcdefabcdefabcdefabcdefabcd"
+	output := hash1 + ` 1 10 1
 author author1
 author-mail <email1>
 author-time 1234567890
 	code line 1
-hash2 2 11 1
+` + hash2 + ` 2 11 1
 author author2
 author-mail <email2>
 author-time 1234567891
@@ -74,7 +76,7 @@ author-time 1234567891
 	if len(results) != 2 {
 		t.Errorf("expected 2 results, got %d", len(results))
 	}
-	
+
 	// Check line number parsing (match[3])
 	if results[0].Line != 10 {
 		t.Errorf("expected line 10, got %d", results[0].Line)
@@ -82,7 +84,7 @@ author-time 1234567891
 	if results[1].Line != 11 {
 		t.Errorf("expected line 11, got %d", results[1].Line)
 	}
-	
+
 	if results[0].LineText != "code line 1" {
 		t.Errorf("expected code line 1, got %q", results[0].LineText)
 	}

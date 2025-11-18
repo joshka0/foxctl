@@ -188,11 +188,11 @@ func validatePolicyNarrowing(parent, child agent.Policy) error {
 	if len(child.Filesystem) > 0 {
 		parentMounts := make(map[string]bool)
 		for _, fs := range parent.Filesystem {
-			parentMounts[fs.Path] = true // Simplified check: path match only for now
+			parentMounts[fs.To] = true // Simplified check: mount point match only for now
 		}
 		for _, fs := range child.Filesystem {
-			if !parentMounts[fs.Path] {
-				return fmt.Errorf("child filesystem mount %s not allowed by parent", fs.Path)
+			if !parentMounts[fs.To] {
+				return fmt.Errorf("child filesystem mount %s not allowed by parent", fs.To)
 			}
 		}
 	}

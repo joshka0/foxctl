@@ -77,8 +77,8 @@ func OpenDBWithAutoConfig(ctx context.Context, rootDir string, dbType string, de
 	}
 
 	// Apply default path if not configured and using SQLite
-	if (cfg.Driver == "" || cfg.Driver == dbdriver.DriverSQLite) && cfg.Path == "" {
-		cfg.Path = defaultPath
+	if (cfg.Driver == "" || cfg.Driver == dbdriver.DriverSQLite) && cfg.SQLite.Path == "" {
+		cfg.SQLite.Path = defaultPath
 	}
 
 	return OpenDBWithDriver(ctx, cfg, migrate)

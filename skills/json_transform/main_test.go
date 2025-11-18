@@ -3,20 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func TestJsonTransform(t *testing.T) {
-	// Setup runner context
-	ctx := context.Background()
-	buf := &bytes.Buffer{}
-	
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
+	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
 		Home:           state,
@@ -28,43 +25,76 @@ func TestJsonTransform(t *testing.T) {
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, buf)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
-	defer rc.Close()
+	return rc
+}
 
-	tests := []struct {
-		name    string
-		in      input
-		wantErr bool
-	}{
-		{
-			name: "extract operation",
-			in: input{
-				Data:      map[string]any{"foo": "bar"},
-				Operation: "extract",
-				Path:      "foo",
-			},
-			wantErr: false,
-		},
-		{
-			name: "keys operation",
-			in: input{
-				Data:      map[string]any{"a": 1, "b": 2},
-				Operation: "keys",
-			},
-			wantErr: false,
-		},
+func TestRunJsonTransform(t *testing.T) {
+	ctx := context.Background()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunnerContext(t, stdout)
+	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+
+	in := input{
+		Input:     `{"a": 1, "b": 2}`,
+		Operation: "keys",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := run(ctx, rc, tt.in)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("run() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+	if err := run(ctx, rc, in); err != nil {
+		t.Errorf("run failed: %v", err)
+	}
+}
+
+func TestRunJsonFormat(t *testing.T) {
+	ctx := context.Background()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunnerContext(t, stdout)
+	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+
+	in := input{
+		Input:     `{"a":1}`,
+		Operation: "format",
+		Indent:    2,
+	}
+
+	if err := run(ctx, rc, in); err != nil {
+		t.Errorf("run failed: %v", err)
+	}
+}
+
+func TestRunJsonValidate(t *testing.T) {
+	ctx := context.Background()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunnerContext(t, stdout)
+	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+
+	in := input{
+		Input:     `{"a":1}`,
+		Operation: "validate",
+	}
+
+	if err := run(ctx, rc, in); err != nil {
+		t.Errorf("run failed: %v", err)
+	}
+}
+
+func TestRunJsonMerge(t *testing.T) {
+	ctx := context.Background()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunnerContext(t, stdout)
+	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+
+	in := input{
+		Input:     `{"a":1}`,
+		Operation: "merge",
+		MergeWith: `{"b":2}`,
+	}
+
+	if err := run(ctx, rc, in); err != nil {
+		t.Errorf("run failed: %v", err)
 	}
 }
 
@@ -79,23 +109,14 @@ func TestExtractPath(t *testing.T) {
 		path string
 		want any
 	}{
-		{"foo.bar.0", "baz"},
+		{"foo.bar[0]", "baz"},
 		{"foo", map[string]any{"bar": []any{"baz"}}},
 	}
 
 	for _, tt := range tests {
-		got, err := extractPath(data, tt.path)
-		if err != nil {
-			t.Errorf("extractPath(%s) error: %v", tt.path, err)
-			continue
-		}
-		// Basic equality check - might need reflection for complex types
-		if got != tt.want {
-			// For map/slice simple compare fails, but this is just a smoke test
-			// Just check non-nil
-			if got == nil {
-				t.Errorf("extractPath(%s) got nil", tt.path)
-			}
+		got := extractPath(data, tt.path)
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("extractPath(%s) = %v, want %v", tt.path, got, tt.want)
 		}
 	}
 }

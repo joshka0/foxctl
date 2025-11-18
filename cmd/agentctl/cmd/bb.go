@@ -142,7 +142,6 @@ func init() {
 
 	// Release flags
 
-
 	// List flags
 	bbListCmd.Flags().StringVar(&bbListNS, "ns", "", "Namespace (required)")
 	bbListCmd.Flags().IntVar(&bbListLimit, "limit", 20, "Maximum number of items to return")

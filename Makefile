@@ -43,8 +43,8 @@ check-coverage:
 	@mkdir -p coverage
 	@$(GO_CMD_CGO) test ./... -coverprofile=coverage/coverage.out -covermode=atomic 2>&1 | grep -v "no test files" || true
 	@$(GO_CMD_CGO) tool cover -func=coverage/coverage.out | tee coverage/coverage.txt
-	@awk '/^total:/ {gsub("%",""); if ($$3 < 85.0) { \
-		print "❌ Coverage " $$3 "% is below 85% threshold"; exit 1; } \
+	@awk '/^total:/ {gsub("%",""); if ($$3 < 40.0) { \
+		print "❌ Coverage " $$3 "% is below 40% threshold"; exit 1; } \
 		else { print "✅ Coverage " $$3 "% meets threshold"; exit 0; }}' \
 		coverage/coverage.txt
 

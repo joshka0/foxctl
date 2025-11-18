@@ -141,11 +141,11 @@ func populateSampleData(ctx context.Context, store *memory.Store, db dbdriver.DB
 				NamedEntry: entry,
 				Embedding:  generateMockEmbedding(sample.summary, 384),
 			}
-			if err := vectorStore.SaveWithEmbedding(ctx, vectorEntry); err != nil {
+			if _, err := vectorStore.SaveWithEmbedding(ctx, vectorEntry); err != nil {
 				panic(fmt.Errorf("save with embedding: %w", err))
 			}
 		} else {
-			if err := store.Save(ctx, entry); err != nil {
+			if _, err := store.Save(ctx, entry); err != nil {
 				panic(fmt.Errorf("save entry: %w", err))
 			}
 		}

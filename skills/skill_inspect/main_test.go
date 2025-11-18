@@ -1,41 +1,63 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-func TestFormatType(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"string", "string"},
-		{"integer", "integer"},
-		{"array", "array"},
-		{"", "any"},
+func TestRunSkillInspect(t *testing.T) {
+	// We need to mock the finding of skills or create a fake skill structure
+	// Since findSkill looks in "skills" dir relative to cwd, we can set up a fake environment
+	// But since we can't easily change the CWD for the whole process safely in tests without side effects,
+	// we might need to test the helper functions instead of run, or ensure "skills" dir exists.
+
+	// Alternatively, we can skip the 'run' test that depends on filesystem structure and test logic.
+
+	// Let's test showManifest logic by mocking the info
+	tmp := t.TempDir()
+	manifestPath := filepath.Join(tmp, "skill.yaml")
+	if err := os.WriteFile(manifestPath, []byte("name: test-skill"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tt := range tests {
-		if got := formatType(tt.in); got != tt.want {
-			t.Errorf("formatType(%q) = %q, want %q", tt.in, got, tt.want)
-		}
+	info := &skillInfo{
+		Name:         "test-skill",
+		ManifestPath: manifestPath,
+	}
+
+	data, err := showManifest(info)
+	if err != nil {
+		t.Fatalf("showManifest failed: %v", err)
+	}
+
+	if data["skill_name"] != "test-skill" {
+		t.Errorf("expected skill_name test-skill, got %v", data["skill_name"])
 	}
 }
 
-func TestExtractDescription(t *testing.T) {
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"", ""},
-		{"Short desc", "Short desc"},
-		{"Long description that is definitely longer than the truncate limit we have set in the function which is around fifty characters...", "Long description that is definitely longer than th..."},
+func TestShowTypes(t *testing.T) {
+	tmp := t.TempDir()
+	mainPath := filepath.Join(tmp, "main.go")
+	if err := os.WriteFile(mainPath, []byte("package main\ntype Foo struct { Bar string }"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tt := range tests {
-		got := extractDescription(tt.in)
-		if got != tt.want {
-			t.Errorf("extractDescription(%q) = %q, want %q", tt.in, got, tt.want)
-		}
+	info := &skillInfo{
+		Name:       "test-skill",
+		MainGoPath: mainPath,
+	}
+
+	data, err := showTypes(info)
+	if err != nil {
+		t.Fatalf("showTypes failed: %v", err)
+	}
+
+	types := data["types"].([]map[string]any)
+	if len(types) != 1 {
+		t.Errorf("expected 1 type, got %d", len(types))
+	}
+	if types[0]["name"] != "Foo" {
+		t.Errorf("expected Foo type")
 	}
 }
