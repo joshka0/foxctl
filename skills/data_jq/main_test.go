@@ -10,7 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer) *runner.Context {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
@@ -23,7 +23,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerCont
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestRunDataJq(t *testing.T) {
 	// But we can test the error case if jq is missing.
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout)
+	rc := newTestContext(t, stdout)
 	defer func() { _ = rc.Close() }()
 
 	in := input{

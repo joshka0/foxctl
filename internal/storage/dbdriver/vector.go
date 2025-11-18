@@ -20,10 +20,10 @@ func NewVectorHelper(db DB) (*VectorHelper, error) {
 		return nil, fmt.Errorf("vector search is not enabled for this database")
 	}
 
-	// Get vector dimensions from Turso DB
+	// Get vector dimensions from DB if available
 	dimensions := 384 // default
-	if turso, ok := db.(*tursoDB); ok {
-		dimensions = turso.GetVectorDimensions()
+	if vd, ok := db.(interface{ GetVectorDimensions() int }); ok {
+		dimensions = vd.GetVectorDimensions()
 	}
 
 	return &VectorHelper{
@@ -83,7 +83,7 @@ func (vh *VectorHelper) CreateVectorIndex(ctx context.Context, tableName, column
 	return err
 }
 
-// InsertVector inserts a vector into the database using the vector() SQL function
+// VectorExpression inserts a vector into the database using the vector() SQL function
 // Returns a SQL expression that can be used in INSERT/UPDATE statements
 func (vh *VectorHelper) VectorExpression(vector Vector) string {
 	return fmt.Sprintf("vector('%s')", vector.String())

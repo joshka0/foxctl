@@ -223,7 +223,7 @@ func (s *WFQScheduler) dispatchNext() {
 }
 
 // worker executes jobs from the work channel.
-func (s *WFQScheduler) worker(ctx context.Context, id int) {
+func (s *WFQScheduler) worker(ctx context.Context, _ int) {
 	for {
 		select {
 		case <-ctx.Done():

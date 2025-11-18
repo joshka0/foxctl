@@ -18,7 +18,7 @@ func TestWFQSchedulerEnqueue(t *testing.T) {
 	job := &Job{
 		ID:        "job-1",
 		Namespace: "ns1",
-		Execute: func(ctx context.Context) error {
+		Execute: func(_ context.Context) error {
 			return nil
 		},
 	}
@@ -73,7 +73,7 @@ func TestWFQSchedulerExecution(t *testing.T) {
 	job := &Job{
 		ID:        "job-1",
 		Namespace: "ns1",
-		Execute: func(ctx context.Context) error {
+		Execute: func(_ context.Context) error {
 			atomic.AddInt32(&executed, 1)
 			return nil
 		},
@@ -117,7 +117,7 @@ func TestWFQSchedulerFairness(t *testing.T) {
 		job1 := &Job{
 			ID:        "ns1-job-" + string(rune(i)),
 			Namespace: "ns1",
-			Execute: func(ctx context.Context) error {
+			Execute: func(_ context.Context) error {
 				atomic.AddInt32(&ns1Count, 1)
 				time.Sleep(10 * time.Millisecond)
 				return nil
@@ -127,7 +127,7 @@ func TestWFQSchedulerFairness(t *testing.T) {
 		job2 := &Job{
 			ID:        "ns2-job-" + string(rune(i)),
 			Namespace: "ns2",
-			Execute: func(ctx context.Context) error {
+			Execute: func(_ context.Context) error {
 				atomic.AddInt32(&ns2Count, 1)
 				time.Sleep(10 * time.Millisecond)
 				return nil
@@ -173,13 +173,13 @@ func TestWFQSchedulerVirtualTime(t *testing.T) {
 	job1 := &Job{
 		ID:        "job1",
 		Namespace: "ns1",
-		Execute:   func(ctx context.Context) error { return nil },
+		Execute:   func(_ context.Context) error { return nil },
 	}
 
 	job2 := &Job{
 		ID:        "job2",
 		Namespace: "ns2",
-		Execute:   func(ctx context.Context) error { return nil },
+		Execute:   func(_ context.Context) error { return nil },
 	}
 
 	if err := scheduler.Enqueue(job1); err != nil {
@@ -223,7 +223,7 @@ func TestWFQSchedulerMultipleNamespaces(t *testing.T) {
 			job := &Job{
 				ID:        ns + "-job-" + string(rune(i)),
 				Namespace: ns,
-				Execute: func(ctx context.Context) error {
+				Execute: func(_ context.Context) error {
 					atomic.AddInt32(c, 1)
 					time.Sleep(5 * time.Millisecond)
 					return nil
@@ -261,13 +261,13 @@ func TestWFQSchedulerStats(t *testing.T) {
 	job1 := &Job{
 		ID:        "job1",
 		Namespace: "ns1",
-		Execute:   func(ctx context.Context) error { return nil },
+		Execute:   func(_ context.Context) error { return nil },
 	}
 
 	job2 := &Job{
 		ID:        "job2",
 		Namespace: "ns2",
-		Execute:   func(ctx context.Context) error { return nil },
+		Execute:   func(_ context.Context) error { return nil },
 	}
 
 	if err := scheduler.Enqueue(job1); err != nil {
@@ -321,7 +321,7 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 	job := &Job{
 		ID:        "job1",
 		Namespace: "ns1",
-		Execute: func(ctx context.Context) error {
+		Execute: func(_ context.Context) error {
 			atomic.AddInt32(&executed, 1)
 			return nil
 		},
@@ -343,7 +343,7 @@ func TestWFQSchedulerStopAndStart(t *testing.T) {
 	job2 := &Job{
 		ID:        "job2",
 		Namespace: "ns1",
-		Execute: func(ctx context.Context) error {
+		Execute: func(_ context.Context) error {
 			atomic.AddInt32(&executed, 1)
 			return nil
 		},

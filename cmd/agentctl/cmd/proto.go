@@ -29,7 +29,7 @@ func newProtoValidateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate an envelope against Protocol v1",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			start := time.Now()
 			opts := func() []protocol.Option {
 				duration := time.Since(start).Milliseconds()

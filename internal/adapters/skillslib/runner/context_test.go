@@ -15,13 +15,13 @@ import (
 
 func TestEmitSetsMetaCasDigestWhenArtifactPresent(t *testing.T) {
 	buf := &bytes.Buffer{}
-	rc := &RunnerContext{Stdout: buf}
+	c := &Context{Stdout: buf}
 
 	data := map[string]any{
 		"artifact": "sha256:abc123",
 		"foo":      "bar",
 	}
-	if err := rc.Emit("demo", data, "application/json", envelope.Meta{Source: "run"}); err != nil {
+	if err := c.Emit("demo", data, "application/json", envelope.Meta{Source: "run"}); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 
@@ -36,10 +36,10 @@ func TestEmitSetsMetaCasDigestWhenArtifactPresent(t *testing.T) {
 
 func TestEmitPreservesExistingCasDigest(t *testing.T) {
 	buf := &bytes.Buffer{}
-	rc := &RunnerContext{Stdout: buf}
+	c := &Context{Stdout: buf}
 
 	meta := envelope.Meta{Source: "run", CASDigest: "sha256:existing"}
-	if err := rc.Emit("demo", map[string]any{}, "application/json", meta); err != nil {
+	if err := c.Emit("demo", map[string]any{}, "application/json", meta); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 
@@ -54,9 +54,9 @@ func TestEmitPreservesExistingCasDigest(t *testing.T) {
 
 func TestEmitWithNilData(t *testing.T) {
 	buf := &bytes.Buffer{}
-	rc := &RunnerContext{Stdout: buf}
+	c := &Context{Stdout: buf}
 
-	if err := rc.Emit("cmd", nil, "application/json", envelope.Meta{}); err != nil {
+	if err := c.Emit("cmd", nil, "application/json", envelope.Meta{}); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 
@@ -70,8 +70,8 @@ func TestEmitWithNilData(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	rc := &RunnerContext{}
-	if err := rc.Close(); err != nil {
+	c := &Context{}
+	if err := c.Close(); err != nil {
 		t.Fatalf("Close() failed: %v", err)
 	}
 }
@@ -123,19 +123,19 @@ func TestExtractArtifact(t *testing.T) {
 	}
 }
 
-func TestNewRunnerContext(t *testing.T) {
+func TestNewContext(t *testing.T) {
 	temp := t.TempDir()
 	cfg := config.Config{Paths: config.Paths{CAS: filepath.Join(temp, "cas")}}
 	stdout := &bytes.Buffer{}
 
-	rc, err := NewRunnerContext(cfg, stdout)
+	c, err := NewContext(cfg, stdout)
 	if err != nil {
-		t.Fatalf("NewRunnerContext: %v", err)
+		t.Fatalf("NewContext: %v", err)
 	}
-	if rc.PathValidator == nil {
+	if c.PathValidator == nil {
 		t.Fatalf("expected path validator")
 	}
-	if rc.CASStore == nil {
+	if c.CASStore == nil {
 		t.Fatalf("expected cas store")
 	}
 }
@@ -146,10 +146,10 @@ func TestPersistBufferAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	rc := &RunnerContext{CASStore: store}
+	c := &Context{CASStore: store}
 
 	buf := bytes.NewBufferString("hello world")
-	art, err := PersistBuffer(context.Background(), rc, buf, "text/plain", "tag1")
+	art, err := PersistBuffer(context.Background(), c, buf, "text/plain", "tag1")
 	if err != nil {
 		t.Fatalf("PersistBuffer: %v", err)
 	}
@@ -157,13 +157,13 @@ func TestPersistBufferAndJSON(t *testing.T) {
 		t.Fatalf("expected populated artifact: %+v", art)
 	}
 
-	_, err = PersistJSON(context.Background(), rc, math.NaN())
+	_, err = PersistJSON(context.Background(), c, math.NaN())
 	if err == nil {
 		t.Fatalf("expected json marshal error")
 	}
 
 	value := map[string]string{"foo": "bar"}
-	art, err = PersistJSON(context.Background(), rc, value, "tag2")
+	art, err = PersistJSON(context.Background(), c, value, "tag2")
 	if err != nil {
 		t.Fatalf("PersistJSON: %v", err)
 	}
@@ -173,8 +173,8 @@ func TestPersistBufferAndJSON(t *testing.T) {
 }
 
 func TestPersistBufferNilBuffer(t *testing.T) {
-	rc := &RunnerContext{}
-	if _, err := PersistBuffer(context.Background(), rc, nil, "application/octet-stream"); err == nil {
+	c := &Context{}
+	if _, err := PersistBuffer(context.Background(), c, nil, "application/octet-stream"); err == nil {
 		t.Fatalf("expected error for nil buffer")
 	}
 }

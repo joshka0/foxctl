@@ -31,7 +31,7 @@ func main() {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf)
+	rc := newTestContext(t, buf, work)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
 			t.Fatalf("close runner context: %v", err)
@@ -55,7 +55,7 @@ func main() {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.Context {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
@@ -68,7 +68,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerCont
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}

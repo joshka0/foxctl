@@ -62,7 +62,7 @@ func main() {
 		fail("code/complexity", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewContext(cfg, os.Stdout)
 	if err != nil {
 		fail("code/complexity", "ERUNTIME", err)
 	}
@@ -79,7 +79,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.Context, in input) error {
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
 	if in.Path != "" {
@@ -800,7 +800,7 @@ func preparePreview(results []complexityResult, limit int) ([]complexityResult, 
 	return results[:limit], true
 }
 
-func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, results []complexityResult, truncated bool) (runner.Artifact, error) {
+func persistResultsArtifact(ctx context.Context, rc *runner.Context, results []complexityResult, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

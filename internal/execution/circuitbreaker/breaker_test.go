@@ -137,7 +137,7 @@ func TestCircuitBreakerExecuteSuccess(t *testing.T) {
 	ctx := context.Background()
 	executed := false
 
-	err := breaker.Execute(ctx, func(ctx context.Context) error {
+	err := breaker.Execute(ctx, func(_ context.Context) error {
 		executed = true
 		return nil
 	})
@@ -167,7 +167,7 @@ func TestCircuitBreakerExecuteFailure(t *testing.T) {
 
 	// Execute failures up to threshold
 	for i := 0; i < 3; i++ {
-		err := breaker.Execute(ctx, func(ctx context.Context) error {
+		err := breaker.Execute(ctx, func(_ context.Context) error {
 			return expectedErr
 		})
 
@@ -182,7 +182,7 @@ func TestCircuitBreakerExecuteFailure(t *testing.T) {
 	}
 
 	// Next execution should fail with circuit open error
-	err := breaker.Execute(ctx, func(ctx context.Context) error {
+	err := breaker.Execute(ctx, func(_ context.Context) error {
 		t.Error("function should not be executed when circuit is open")
 		return nil
 	})

@@ -70,7 +70,7 @@ func init() {
 	}
 }
 
-func runSchedulerStats(cmd *cobra.Command, args []string) error {
+func runSchedulerStats(_ *cobra.Command, _ []string) error {
 	stats := globalScheduler.Stats()
 
 	data := map[string]interface{}{
@@ -119,7 +119,7 @@ func runSchedulerSetWeight(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runSchedulerGetWeight(cmd *cobra.Command, args []string) error {
+func runSchedulerGetWeight(_ *cobra.Command, args []string) error {
 	namespace := args[0]
 
 	weight := globalScheduler.GetWeight(namespace)

@@ -40,7 +40,7 @@ type InstallOptions struct {
 // - Git repository (git:// or https://)
 // - URL (download archive)
 // - Registry (future)
-func (i *Installer) Install(ctx context.Context, opts InstallOptions) (Handle, error) {
+func (i *Installer) Install(_ context.Context, opts InstallOptions) (Handle, error) {
 	// Reject non-local sources for now
 	if strings.HasPrefix(opts.ManifestPath, "http://") ||
 		strings.HasPrefix(opts.ManifestPath, "https://") ||

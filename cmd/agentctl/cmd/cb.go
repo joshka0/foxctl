@@ -71,7 +71,7 @@ func init() {
 	cbCmd.AddCommand(cbResetAllCmd)
 }
 
-func runCBList(cmd *cobra.Command, args []string) error {
+func runCBList(_ *cobra.Command, _ []string) error {
 	stats := globalCBManager.ListAll()
 
 	data := map[string]interface{}{
@@ -149,7 +149,7 @@ func runCBReset(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runCBResetAll(cmd *cobra.Command, args []string) error {
+func runCBResetAll(_ *cobra.Command, _ []string) error {
 	count := globalCBManager.Count()
 	globalCBManager.ResetAll()
 

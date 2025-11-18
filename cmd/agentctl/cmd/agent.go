@@ -109,7 +109,7 @@ func init() {
 	agentListCmd.Flags().IntVar(&listLimit, "limit", 20, "Maximum number of agents to list")
 }
 
-func runAgentSpawn(cmd *cobra.Command, args []string) error {
+func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
@@ -199,7 +199,7 @@ func runAgentSpawn(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runAgentList(cmd *cobra.Command, args []string) error {
+func runAgentList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
@@ -501,7 +501,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func writeErrorEnvelope(cmd *cobra.Command, command, code, message string) error {
+func writeErrorEnvelope(_ *cobra.Command, command, code, message string) error {
 	env := envelope.Error(command, code, message, nil)
 	if err := envelope.Write(os.Stdout, env); err != nil {
 		return fmt.Errorf("write error envelope: %w", err)

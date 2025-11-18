@@ -1,3 +1,4 @@
+// Package memorycmd provides helpers for memory-related CLI commands.
 package memorycmd
 
 import (

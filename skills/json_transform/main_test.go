@@ -12,7 +12,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer) *runner.Context {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
@@ -25,7 +25,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerCont
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -35,7 +35,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerCont
 func TestRunJsonTransform(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout)
+	rc := newTestContext(t, stdout)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -51,7 +51,7 @@ func TestRunJsonTransform(t *testing.T) {
 func TestRunJsonFormat(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout)
+	rc := newTestContext(t, stdout)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -68,7 +68,7 @@ func TestRunJsonFormat(t *testing.T) {
 func TestRunJsonValidate(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout)
+	rc := newTestContext(t, stdout)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -84,7 +84,7 @@ func TestRunJsonValidate(t *testing.T) {
 func TestRunJsonMerge(t *testing.T) {
 	ctx := context.Background()
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout)
+	rc := newTestContext(t, stdout)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{

@@ -12,7 +12,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	// We use a separate temp dir for agentctl home (config/cache/cas)
@@ -27,7 +27,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 			Cache: state + "/cache",
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestRunFsWrite(t *testing.T) {
 	target := "output.txt"
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -172,10 +172,10 @@ func TestRunFsWriteAppend(t *testing.T) {
 	work := t.TempDir()
 
 	target := "output.txt"
-	os.WriteFile(work+"/"+target, []byte("hello"), 0o644)
+	_ = os.WriteFile(work+"/"+target, []byte("hello"), 0o644)
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{

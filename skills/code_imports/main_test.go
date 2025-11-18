@@ -15,7 +15,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	state := t.TempDir()
@@ -29,7 +29,7 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 			Cache: state + "/cache",
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -58,7 +58,7 @@ func main() {}`
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -105,10 +105,12 @@ func TestRunCodeImportsGraph(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "a.js"), []byte("import * as b from './b.js';"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(work, "b.js"), []byte("console.log('b');"), 0o644)
+	if err := os.WriteFile(filepath.Join(work, "b.js"), []byte("console.log('b');"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{

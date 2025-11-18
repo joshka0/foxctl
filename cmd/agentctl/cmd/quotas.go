@@ -223,7 +223,7 @@ func runQuotasDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runQuotasList(cmd *cobra.Command, args []string) error {
+func runQuotasList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 

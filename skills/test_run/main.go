@@ -42,7 +42,7 @@ func main() {
 	if err != nil {
 		fail("test/run", "ECONFIG", err)
 	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewContext(cfg, os.Stdout)
 	if err != nil {
 		fail("test/run", "ERUNTIME", err)
 	}
@@ -59,7 +59,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.Context, in input) error {
 	// Validate path
 	testPath, err := resolveTestPath(rc, in.Path)
 	if err != nil {
@@ -143,7 +143,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveTestPath(rc *runner.RunnerContext, path string) (string, error) {
+func resolveTestPath(rc *runner.Context, path string) (string, error) {
 	if path == "" || path == "./..." {
 		return path, nil
 	}

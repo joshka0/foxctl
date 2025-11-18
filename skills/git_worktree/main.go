@@ -39,7 +39,7 @@ func main() {
 	if err != nil {
 		fail("git/worktree", "ECONFIG", err)
 	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewContext(cfg, os.Stdout)
 	if err != nil {
 		fail("git/worktree", "ERUNTIME", err)
 	}
@@ -56,7 +56,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.Context, in input) error {
 	// Validate and resolve repository path
 	repoPath, err := resolveRepoPath(rc, in.RepoPath)
 	if err != nil {
@@ -107,7 +107,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveRepoPath(rc *runner.RunnerContext, path string) (string, error) {
+func resolveRepoPath(rc *runner.Context, path string) (string, error) {
 	if path == "" {
 		path = "."
 	}
@@ -171,7 +171,7 @@ func parseWorktreeList(output string) []worktree {
 	return worktrees
 }
 
-func addWorktree(ctx context.Context, rc *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
+func addWorktree(ctx context.Context, rc *runner.Context, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, fmt.Errorf("path is required for add operation")
 	}
@@ -210,7 +210,7 @@ func addWorktree(ctx context.Context, rc *runner.RunnerContext, repoPath string,
 	}, nil
 }
 
-func removeWorktree(ctx context.Context, rc *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
+func removeWorktree(ctx context.Context, rc *runner.Context, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, fmt.Errorf("path is required for remove operation")
 	}

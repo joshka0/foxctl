@@ -20,7 +20,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	h := newCASHarness(t)
 
 	t.Run("text-grep cache lifecycle", func(t *testing.T) {
-		env, stderr := withRunExecutor(t, h.ctx, []string{
+		env, stderr := withRunExecutor(h.ctx, t, []string{
 			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
 			"--remember", "grep-first",
 			"--workspace", h.workdir,
@@ -34,7 +34,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 		stdout := h.execMemoryCommand(t, newMemoryGetCommand(), "--workspace", h.workdir, "grep-job")
 		h.assertMemoryMetadata(t, stdout.Bytes(), "grep-job")
 
-		env2, _ := withRunExecutor(t, h.ctx, []string{
+		env2, _ := withRunExecutor(h.ctx, t, []string{
 			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
 			"--workspace", h.workdir,
 			"--cache", "auto",
@@ -44,7 +44,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	})
 
 	t.Run("openapi memory relevance", func(t *testing.T) {
-		env, stderr := withRunExecutor(t, h.ctx, []string{
+		env, stderr := withRunExecutor(h.ctx, t, []string{
 			"--input", h.openapiInput,
 			"--remember", "openapi-plan",
 			"--workspace", h.workdir,
@@ -130,7 +130,7 @@ func buildSampleFile(t *testing.T, path string) {
 	}
 }
 
-func withRunExecutor(t *testing.T, ctx context.Context, args []string) (envelope.Envelope, *bytes.Buffer) {
+func withRunExecutor(ctx context.Context, t *testing.T, args []string) (envelope.Envelope, *bytes.Buffer) {
 	t.Helper()
 	cmd := newRunCommand()
 	cmd.SetContext(ctx)

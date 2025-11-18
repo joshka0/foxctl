@@ -1,3 +1,4 @@
+// Package main demonstrates search functionality examples.
 package main
 
 import (

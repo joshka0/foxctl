@@ -15,20 +15,20 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, home string) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
 	t.Helper()
-	t.Setenv("AGENTCTL_WORKSPACE", home)
+	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	cfg := config.Config{
-		Home:           home,
+		Home:           workspace,
 		InlineOutputKB: 32,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   home + "/cas",
-			Jobs:  home + "/jobs",
-			Cache: home + "/cache",
+			CAS:   workspace + "/cas",
+			Jobs:  workspace + "/jobs",
+			Cache: workspace + "/cache",
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -58,7 +58,7 @@ func MyFunc() {}
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{

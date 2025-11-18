@@ -12,7 +12,7 @@ import (
 func TestRunHttpOpenApi(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	cfg := config.Config{}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatal(err)
 	}

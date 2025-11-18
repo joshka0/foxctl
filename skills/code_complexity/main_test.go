@@ -16,20 +16,20 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, home string) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
 	t.Helper()
-	t.Setenv("AGENTCTL_WORKSPACE", home)
+	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	cfg := config.Config{
-		Home:           home,
+		Home:           workspace,
 		InlineOutputKB: 32,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   home + "/cas",
-			Jobs:  home + "/jobs",
-			Cache: home + "/cache",
+			CAS:   workspace + "/cas",
+			Jobs:  workspace + "/jobs",
+			Cache: workspace + "/cache",
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -66,7 +66,7 @@ func complex(x int) int {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -117,11 +117,15 @@ func TestAnalyzeDirectory(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(cwd) }()
 
-	os.WriteFile(filepath.Join(work, "a.go"), []byte("package main\nfunc a(){}"), 0o644)
-	os.WriteFile(filepath.Join(work, "b.py"), []byte("def b():\n  pass"), 0o644)
+	if err := os.WriteFile(filepath.Join(work, "a.go"), []byte("package main\nfunc a(){}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "b.py"), []byte("def b():\n  pass"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{

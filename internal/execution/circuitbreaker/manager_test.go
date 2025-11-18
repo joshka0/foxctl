@@ -44,7 +44,7 @@ func TestManagerExecute(t *testing.T) {
 	executed := false
 
 	// Execute successful operation
-	err := manager.Execute(ctx, "test-service", func(ctx context.Context) error {
+	err := manager.Execute(ctx, "test-service", func(_ context.Context) error {
 		executed = true
 		return nil
 	})
@@ -79,7 +79,7 @@ func TestManagerExecuteFailures(t *testing.T) {
 
 	// Execute failures to open circuit
 	for i := 0; i < 2; i++ {
-		err := manager.Execute(ctx, "failing-service", func(ctx context.Context) error {
+		err := manager.Execute(ctx, "failing-service", func(_ context.Context) error {
 			return testErr
 		})
 		if !errors.Is(err, testErr) {
@@ -95,7 +95,7 @@ func TestManagerExecuteFailures(t *testing.T) {
 
 	// Next execution should fail with circuit open
 	executed := false
-	err := manager.Execute(ctx, "failing-service", func(ctx context.Context) error {
+	err := manager.Execute(ctx, "failing-service", func(_ context.Context) error {
 		executed = true
 		return nil
 	})
@@ -254,16 +254,15 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	config := DefaultConfig()
 	manager := NewManager(config)
 
-	ctx := context.Background()
 	done := make(chan bool)
 
 	// Run concurrent operations
 	for i := 0; i < 10; i++ {
-		go func(id int) {
+		go func(_ int) {
 			serviceName := "concurrent-service"
 			for j := 0; j < 100; j++ {
 				// Intentionally ignoring error for concurrency test
-				err := manager.Execute(ctx, serviceName, func(ctx context.Context) error {
+				err := manager.Execute(context.Background(), serviceName, func(_ context.Context) error {
 					return nil
 				})
 				_ = err

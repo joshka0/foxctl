@@ -57,7 +57,7 @@ func main() {
 		fail("code/imports", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewContext(cfg, os.Stdout)
 	if err != nil {
 		fail("code/imports", "ERUNTIME", err)
 	}
@@ -74,7 +74,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.Context, in input) error {
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -291,7 +291,7 @@ func extractGoImports(path, workspace string, in input) ([]importInfo, []string,
 	return imports, importPaths, nil
 }
 
-func extractPythonImports(path, workspace string, in input) ([]importInfo, []string, error) {
+func extractPythonImports(path, workspace string, _ input) ([]importInfo, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
@@ -356,7 +356,7 @@ func extractPythonImports(path, workspace string, in input) ([]importInfo, []str
 	return imports, importPaths, nil
 }
 
-func extractJSImports(path, workspace string, in input) ([]importInfo, []string, error) {
+func extractJSImports(path, workspace string, _ input) ([]importInfo, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, nil, err
@@ -672,7 +672,7 @@ func preparePreview(results any, limit int) (any, bool) {
 	}
 }
 
-func persistImportsArtifact(ctx context.Context, rc *runner.RunnerContext, results any, truncated bool) (runner.Artifact, error) {
+func persistImportsArtifact(ctx context.Context, rc *runner.Context, results any, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

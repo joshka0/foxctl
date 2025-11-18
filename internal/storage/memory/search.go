@@ -17,8 +17,8 @@ type SearchableStore struct {
 	corpusStats    dbdriver.CorpusStats
 }
 
-// MemorySearchResult represents a memory search result
-type MemorySearchResult struct {
+// SearchResult represents a memory search result
+type SearchResult struct {
 	Entry       storage.NamedEntry
 	Score       float64
 	BM25Score   float64
@@ -80,7 +80,7 @@ func (ss *SearchableStore) Search(
 	workspace string,
 	mode dbdriver.SearchMode,
 	limit int,
-) ([]MemorySearchResult, error) {
+) ([]SearchResult, error) {
 	switch mode {
 	case dbdriver.SearchModeBM25:
 		return ss.searchBM25(ctx, query, workspace, limit)
@@ -99,7 +99,7 @@ func (ss *SearchableStore) searchBM25(
 	query string,
 	workspace string,
 	limit int,
-) ([]MemorySearchResult, error) {
+) ([]SearchResult, error) {
 	// Get all documents in workspace
 	listQuery := `
 		SELECT id, name, type, workspace, summary, result, digests,
@@ -118,7 +118,7 @@ func (ss *SearchableStore) searchBM25(
 	queryTerms := dbdriver.Tokenize(query)
 	bm25Scorer := dbdriver.NewBM25Scorer(dbdriver.DefaultBM25Params(), ss.corpusStats)
 
-	results := make([]MemorySearchResult, 0)
+	results := make([]SearchResult, 0)
 
 	for rows.Next() {
 		var entry storage.NamedEntry
@@ -151,7 +151,7 @@ func (ss *SearchableStore) searchBM25(
 		score := bm25Scorer.Score(queryTerms, docStats)
 
 		if score > 0 {
-			results = append(results, MemorySearchResult{
+			results = append(results, SearchResult{
 				Entry:     entry,
 				Score:     score,
 				BM25Score: score,
@@ -173,7 +173,7 @@ func (ss *SearchableStore) searchVector(
 	queryVector dbdriver.Vector,
 	workspace string,
 	limit int,
-) ([]MemorySearchResult, error) {
+) ([]SearchResult, error) {
 	if !ss.db.IsVectorSearchEnabled() {
 		return nil, fmt.Errorf("vector search is not enabled")
 	}
@@ -207,7 +207,7 @@ func (ss *SearchableStore) searchVector(
 	}
 	defer rows.Close() //nolint:errcheck
 
-	results := make([]MemorySearchResult, 0)
+	results := make([]SearchResult, 0)
 
 	for rows.Next() {
 		var entry storage.NamedEntry
@@ -230,7 +230,7 @@ func (ss *SearchableStore) searchVector(
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 
-		results = append(results, MemorySearchResult{
+		results = append(results, SearchResult{
 			Entry:       entry,
 			Score:       similarity,
 			VectorScore: similarity,
@@ -251,7 +251,7 @@ func (ss *SearchableStore) searchHybrid(
 	queryVector dbdriver.Vector,
 	workspace string,
 	limit int,
-) ([]MemorySearchResult, error) {
+) ([]SearchResult, error) {
 	if ss.hybridSearcher == nil {
 		return nil, fmt.Errorf("hybrid search is not available (requires vector search)")
 	}
@@ -274,7 +274,7 @@ func (ss *SearchableStore) searchHybrid(
 	}
 
 	// Convert to memory search results
-	results := make([]MemorySearchResult, 0, len(rawResults))
+	results := make([]SearchResult, 0, len(rawResults))
 
 	for _, result := range rawResults {
 		// Fetch full entry
@@ -286,7 +286,7 @@ func (ss *SearchableStore) searchHybrid(
 			return nil, fmt.Errorf("failed to fetch entry %s: %w", result.DocumentID, err)
 		}
 
-		results = append(results, MemorySearchResult{
+		results = append(results, SearchResult{
 			Entry:       entry,
 			Score:       result.Score,
 			BM25Score:   result.BM25Score,
@@ -303,7 +303,7 @@ func (ss *SearchableStore) SearchBM25(
 	query string,
 	workspace string,
 	limit int,
-) ([]MemorySearchResult, error) {
+) ([]SearchResult, error) {
 	return ss.Search(ctx, query, nil, workspace, dbdriver.SearchModeBM25, limit)
 }
 
@@ -313,7 +313,7 @@ func (ss *SearchableStore) SearchVector(
 	queryVector dbdriver.Vector,
 	workspace string,
 	limit int,
-) ([]MemorySearchResult, error) {
+) ([]SearchResult, error) {
 	return ss.Search(ctx, "", queryVector, workspace, dbdriver.SearchModeVector, limit)
 }
 
@@ -324,12 +324,12 @@ func (ss *SearchableStore) SearchHybrid(
 	queryVector dbdriver.Vector,
 	workspace string,
 	limit int,
-) ([]MemorySearchResult, error) {
+) ([]SearchResult, error) {
 	return ss.Search(ctx, query, queryVector, workspace, dbdriver.SearchModeHybrid, limit)
 }
 
 // sortAndLimit sorts results by score and returns top k
-func sortAndLimit(results []MemorySearchResult, limit int) []MemorySearchResult {
+func sortAndLimit(results []SearchResult, limit int) []SearchResult {
 	// Sort by score descending
 	for i := 0; i < len(results); i++ {
 		for j := i + 1; j < len(results); j++ {

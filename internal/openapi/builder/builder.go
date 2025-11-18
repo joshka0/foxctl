@@ -158,7 +158,7 @@ func (b *Builder) resolvePath(pathTemplate string, pathParams map[string]any, op
 }
 
 // addQueryParams adds query parameters to the URL.
-func (b *Builder) addQueryParams(u *url.URL, queryParams map[string]any, opParams openapi3.Parameters) error {
+func (b *Builder) addQueryParams(u *url.URL, queryParams map[string]any, _ openapi3.Parameters) error {
 	if queryParams == nil {
 		return nil
 	}
@@ -175,7 +175,7 @@ func (b *Builder) addQueryParams(u *url.URL, queryParams map[string]any, opParam
 }
 
 // buildHeaders constructs the headers map.
-func (b *Builder) buildHeaders(headerParams map[string]any, opParams openapi3.Parameters) (map[string]string, error) {
+func (b *Builder) buildHeaders(headerParams map[string]any, _ openapi3.Parameters) (map[string]string, error) {
 	headers := make(map[string]string)
 
 	// Add user-provided headers
