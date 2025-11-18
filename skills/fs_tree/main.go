@@ -250,7 +250,7 @@ func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) st
 
 	// Build current line
 	if node.Level == 0 {
-		builder.WriteString(node.Name)
+		_, _ = builder.WriteString(node.Name)
 	} else {
 		var connector string
 		if isLast {
@@ -259,22 +259,22 @@ func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) st
 			connector = "├── "
 		}
 
-		builder.WriteString(prefix)
-		builder.WriteString(connector)
-		builder.WriteString(node.Name)
+		_, _ = builder.WriteString(prefix)
+		_, _ = builder.WriteString(connector)
+		_, _ = builder.WriteString(node.Name)
 	}
 
 	// Add size if requested and it's a file
 	if includeSize && !node.IsDir && node.Size > 0 {
-		builder.WriteString(fmt.Sprintf(" (%s)", formatSize(node.Size)))
+		_, _ = builder.WriteString(fmt.Sprintf(" (%s)", formatSize(node.Size)))
 	}
 
 	// Add directory indicator
 	if node.IsDir && len(node.Children) > 0 {
-		builder.WriteString("/")
+		_, _ = builder.WriteString("/")
 	}
 
-	builder.WriteString("\n")
+	_, _ = builder.WriteString("\n")
 
 	// Render children
 	if node.IsDir && len(node.Children) > 0 {
@@ -289,7 +289,7 @@ func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) st
 
 		for i, child := range node.Children {
 			isChildLast := i == len(node.Children)-1
-			builder.WriteString(renderTree(child, newPrefix, isChildLast, includeSize))
+			_, _ = builder.WriteString(renderTree(child, newPrefix, isChildLast, includeSize))
 		}
 	}
 

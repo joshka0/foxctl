@@ -55,16 +55,6 @@ type rgMatchData struct {
 	LineNumber int `json:"line_number"`
 }
 
-type rgEndData struct {
-	Path struct {
-		Text string `json:"text"`
-	} `json:"path"`
-	Stats struct {
-		MatchedLines int `json:"matched_lines"`
-		Matches      int `json:"matches"`
-	} `json:"stats"`
-}
-
 func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
