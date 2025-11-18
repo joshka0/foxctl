@@ -1,0 +1,67 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: text/replace
+  version: 0.1.0
+  description: "Search and replace text in files using regex or literal patterns"
+  tags: ["text", "replace", "search", "files", "regex"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/text_replace/text_replace
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: text/replace
+  parameters:
+    - name: pattern
+      type: string
+      required: true
+      description: "Text pattern to search for (regex or literal)"
+    - name: replacement
+      type: string
+      required: true
+      description: "Replacement text"
+    - name: paths
+      type: array
+      required: false
+      description: "File paths or glob patterns (default: [\"**/*\"])"
+    - name: literal
+      type: boolean
+      required: false
+      default: false
+      description: "Treat pattern as literal string, not regex"
+    - name: max_files
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum files to process"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Preview changes without modifying files"
+    - name: include_hidden
+      type: boolean
+      required: false
+      default: false
+      description: "Include hidden files"
+    - name: extensions
+      type: array
+      required: false
+      description: "File extensions to filter (e.g., [\".go\", \".yaml\"])"
+  returns:
+    - name: files_modified
+      type: integer
+    - name: replacements_made
+      type: integer
+    - name: changes
+      type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false
