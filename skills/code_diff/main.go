@@ -368,13 +368,13 @@ func computeStats(hunks []diffHunk, oldTotal, newTotal int) diffStats {
 func generateUnifiedDiff(oldFile, newFile string, hunks []diffHunk) string {
 	var builder strings.Builder
 
-	builder.WriteString(fmt.Sprintf("--- %s\n", oldFile))
-	builder.WriteString(fmt.Sprintf("+++ %s\n", newFile))
+	_, _ = builder.WriteString(fmt.Sprintf("--- %s\n", oldFile))
+	_, _ = builder.WriteString(fmt.Sprintf("+++ %s\n", newFile))
 
 	for _, hunk := range hunks {
-		builder.WriteString(hunk.Header + "\n")
+		_, _ = builder.WriteString(hunk.Header + "\n")
 		for _, line := range hunk.Lines {
-			builder.WriteString(line + "\n")
+			_, _ = builder.WriteString(line + "\n")
 		}
 	}
 
