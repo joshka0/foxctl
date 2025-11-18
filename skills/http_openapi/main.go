@@ -96,7 +96,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	var memStore storage.MemoryStore
 	if strings.HasPrefix(in.Spec, "memory:") {
 		var err error
-		memStore, err = memory.Open(ctx, rc.Config.Paths.Memory, rc.Config.Paths.CAS)
+		memStore, err = memory.Open(ctx, rc.Config.Paths.Cache, rc.Config.Paths.CAS)
 		if err != nil {
 			return &client.Error{
 				Code:    "ERUNTIME",
@@ -182,37 +182,24 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		return emitDryRun(rc, builtReq, in)
 	}
 
-	// Execute request with retry and optional pagination
+	// Execute request with optional pagination
 	httpClient := client.New(rc.Config, rc.CASStore)
-	retryer := createRetryer(in.Retry)
 
 	// Check if pagination is needed
 	if in.Paging != nil && in.Paging.Strategy != "none" {
-		return executeWithPagination(ctx, rc, req, httpClient, retryer, in.Paging)
+		return executeWithPagination(ctx, rc, req, httpClient, in.Paging)
 	}
 
-	// Single request execution
-	var response *client.Response
-	_, err = retryer.Execute(ctx, func() (*http.Response, error) {
-		resp, err := httpClient.Execute(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		response = resp
-		return nil, nil
-	})
+	// Single request execution (retry logic is handled internally by client)
+	response, err := httpClient.Execute(ctx, req)
 	if err != nil {
 		return err
 	}
 
-	if response != nil {
-		return emitResponse(rc, response, nil)
-	}
-
-	return fmt.Errorf("no response received")
+	return emitResponse(rc, response, nil)
 }
 
-func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *http.Request, httpClient *client.Client, retryer *retry.Retryer, pagingCfg *PagingConfig) error {
+func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *http.Request, httpClient *client.Client, pagingCfg *PagingConfig) error {
 	// Create paginator
 	paginator, err := pagination.New(pagination.Config{
 		Strategy:     pagination.Strategy(pagingCfg.Strategy),
@@ -238,16 +225,8 @@ func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *h
 	currentReq := req
 
 	for {
-		// Execute current page with retry
-		var pageResponse *client.Response
-		_, err := retryer.Execute(ctx, func() (*http.Response, error) {
-			resp, err := httpClient.Execute(ctx, currentReq)
-			if err != nil {
-				return nil, err
-			}
-			pageResponse = resp
-			return nil, nil
-		})
+		// Execute current page (retry logic handled internally by client)
+		pageResponse, err := httpClient.Execute(ctx, currentReq)
 		if err != nil {
 			// Return partial results if we have any
 			if len(allResponses) > 0 {
@@ -272,11 +251,32 @@ func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *h
 			allBodies = append(allBodies, pageResponse.Body)
 		}
 
-		// Create pagination response
+		// Create pagination response with defensive body conversion
+		var bodyBytes []byte
+		switch v := pageResponse.Body.(type) {
+		case []byte:
+			bodyBytes = v
+		case string:
+			bodyBytes = []byte(v)
+		case nil:
+			bodyBytes = nil
+		default:
+			// Best-effort JSON encoding for non-byte types
+			if b, err := json.Marshal(v); err == nil {
+				bodyBytes = b
+			} else {
+				return &client.Error{
+					Code:    "EPAGINATION",
+					Message: fmt.Sprintf("failed to convert response body to bytes for pagination: %v", err),
+					Err:     err,
+				}
+			}
+		}
+
 		pagResp := &pagination.Response{
 			Request: currentReq,
 			Headers: convertHeaders(pageResponse.Headers),
-			Body:    pageResponse.Body.([]byte), // This needs proper handling
+			Body:    bodyBytes,
 		}
 
 		// Check if we should continue

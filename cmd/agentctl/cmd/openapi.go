@@ -335,11 +335,16 @@ func newOpenAPIValidateCommand() *cobra.Command {
 
 					// Check for duplicate operationIds
 					seen := make(map[string]bool)
-					for id := range spec.Operations {
-						if seen[id] {
-							errors = append(errors, fmt.Sprintf("duplicate operationId: %s", id))
+					for path, pathItem := range spec.Doc.Paths.Map() {
+						for method, op := range pathItem.Operations() {
+							if op == nil || op.OperationID == "" {
+								continue
+							}
+							if seen[op.OperationID] {
+								errors = append(errors, fmt.Sprintf("duplicate operationId: %s (found in %s %s)", op.OperationID, strings.ToUpper(method), path))
+							}
+							seen[op.OperationID] = true
 						}
-						seen[id] = true
 					}
 
 					valid := len(errors) == 0
@@ -371,13 +376,6 @@ func newOpenAPIValidateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspaceArg, "workspace", "", "Workspace override for named memory lookup")
 	cmd.Flags().BoolVar(&strict, "strict", false, "Require strict validation (no schema skips)")
 	return cmd
-}
-
-func resolveWorkspace(cfg config.Config, override string) string {
-	if override != "" {
-		return workspace.Normalize(override)
-	}
-	return workspace.Normalize(cfg.Workspace)
 }
 
 const defaultHTTPTimeout = 30 * time.Second
