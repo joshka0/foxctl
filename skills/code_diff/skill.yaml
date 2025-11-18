@@ -1,0 +1,49 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/diff
+  version: 0.1.0
+  description: "File comparison and diff analysis: unified diff, side-by-side, statistics, change detection"
+  tags: ["code", "diff", "comparison", "changes"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_diff/code_diff
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/diff
+  parameters:
+    - name: old_path
+      type: string
+      required: true
+      description: "Path to old/original file"
+    - name: new_path
+      type: string
+      required: true
+      description: "Path to new/modified file"
+    - name: format
+      type: string
+      required: false
+      enum: ["unified", "stats", "summary"]
+      default: "unified"
+      description: "Output format"
+    - name: context_lines
+      type: integer
+      required: false
+      default: 3
+      description: "Number of context lines for unified diff"
+    - name: ignore_whitespace
+      type: boolean
+      required: false
+      default: false
+      description: "Ignore whitespace changes"
+returns:
+  - name: diff
+    type: object
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
