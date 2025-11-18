@@ -3,6 +3,7 @@ package dbdriver
 import (
 	"context"
 	"database/sql"
+	"fmt"
 )
 
 // ToSQLDB converts a DB interface to *sql.DB for backward compatibility
@@ -11,12 +12,12 @@ func ToSQLDB(db DB) (*sql.DB, error) {
 	if sqlDB, ok := db.GetUnderlyingDB(); ok {
 		return sqlDB, nil
 	}
-	return nil, nil // Should never happen with our implementations
+	return nil, fmt.Errorf("dbdriver: underlying *sql.DB not available for driver %T", db)
 }
 
 // WrapSQLDB wraps an existing *sql.DB to implement our DB interface
 // This is useful for gradually migrating existing code
-func WrapSQLDB(sqlDB *sql.DB, driverType DriverType) DB {
+func WrapSQLDB(sqlDB *sql.DB, _ DriverType) DB {
 	return &sqliteDB{db: sqlDB}
 }
 

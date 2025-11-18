@@ -264,7 +264,7 @@ func analyzeGoFile(path, workspace string, in input) ([]complexityResult, error)
 			cyclomatic := calculateGoCyclomaticComplexity(fn)
 			cognitive := calculateGoCognitiveComplexity(fn)
 			nesting := calculateGoNestingDepth(fn)
-			length := fset.Position(fn.End()).Line - fset.Position(fn.Pos()).Line
+			length := fset.Position(fn.End()).Line - fset.Position(fn.Pos()).Line + 1
 
 			paramCount := 0
 			if fn.Type.Params != nil {
@@ -325,56 +325,411 @@ func calculateGoCyclomaticComplexity(fn *ast.FuncDecl) int {
 
 func calculateGoCognitiveComplexity(fn *ast.FuncDecl) int {
 	complexity := 0
-	nestingLevel := 0
+	
+	var visit func(ast.Node, int)
+	visit = func(n ast.Node, nesting int) {
+		if n == nil {
+			return
+		}
 
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		// Check for complexity increasing structures
 		switch node := n.(type) {
 		case *ast.IfStmt:
-			complexity += 1 + nestingLevel
-			nestingLevel++
-			defer func() { nestingLevel-- }()
-			return true
+			complexity += 1 + nesting
+			visit(node.Init, nesting)
+			visit(node.Cond, nesting)
+			visit(node.Body, nesting+1) // Increase nesting for body
+			visit(node.Else, nesting)   // Else block is not nested deeper relative to if
+			return
 
-		case *ast.ForStmt, *ast.RangeStmt:
-			complexity += 1 + nestingLevel
-			nestingLevel++
-			defer func() { nestingLevel-- }()
-			return true
+		case *ast.ForStmt:
+			complexity += 1 + nesting
+			visit(node.Init, nesting)
+			visit(node.Cond, nesting)
+			visit(node.Post, nesting)
+			visit(node.Body, nesting+1)
+			return
 
-		case *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
-			complexity += 1 + nestingLevel
-			nestingLevel++
-			defer func() { nestingLevel-- }()
-			return true
+		case *ast.RangeStmt:
+			complexity += 1 + nesting
+			visit(node.Key, nesting)
+			visit(node.Value, nesting)
+			visit(node.X, nesting)
+			visit(node.Body, nesting+1)
+			return
+
+		case *ast.SwitchStmt:
+			complexity += 1 + nesting
+			visit(node.Init, nesting)
+			visit(node.Tag, nesting)
+			visit(node.Body, nesting+1)
+			return
+
+		case *ast.TypeSwitchStmt:
+			complexity += 1 + nesting
+			visit(node.Init, nesting)
+			visit(node.Assign, nesting)
+			visit(node.Body, nesting+1)
+			return
+
+		case *ast.SelectStmt:
+			complexity += 1 + nesting
+			visit(node.Body, nesting+1)
+			return
 
 		case *ast.BinaryExpr:
 			if node.Op == token.LAND || node.Op == token.LOR {
 				complexity++
 			}
 		}
-		return true
-	})
 
+		// Recurse for children using standard inspection for non-special nodes
+		// But since we manually handle children for special nodes, we need a generic walker
+		// Or we can use ast.Inspect but we can't pass state easily.
+		// We'll use manual traversal for children of nodes we didn't handle fully above.
+		// Actually, standard ast.Inspect is easier if we just want to traverse everything,
+		// but we need to track nesting.
+		// Let's use a simpler approach: walk children manually.
+		
+		// For nodes not handled above that have children we care about:
+		// We need to be careful not to double count or miss nodes.
+		// The switch above handles the structural nodes.
+		// For other nodes, we just recurse with same nesting.
+		
+		// Since manual traversal of ALL node types is tedious, let's use a hybrid:
+		// We only care about statements that increase nesting.
+		// But we must traverse into blocks.
+		
+		// Let's try a different approach: define a visitor that takes nesting.
+		// For non-structural nodes, we iterate over children.
+		
+		// Actually, the ast package has `ast.Walk`. But it doesn't pass state.
+		// We have to implement the recursion manually for all relevant node types to be correct.
+		// Or we can use a closure that captures state, but the state (nesting) is path-dependent.
+		
+		// Let's stick to manually handling the structural nodes and recursing into their blocks.
+		// For other nodes, we don't increase nesting.
+		
+		// Re-implementing full traversal:
+		// Only traverse children.
+		
+		// To avoid implementing a full walker, we can use `ast.Inspect` BUT we need to manage the stack ourselves.
+		// But `ast.Inspect` doesn't tell us when we go UP.
+		// So manual recursion is the only way for "nesting level".
+		
+		// Simplified walker for just the complexity:
+		switch node := n.(type) {
+		case *ast.BlockStmt:
+			for _, stmt := range node.List {
+				visit(stmt, nesting)
+			}
+		case *ast.CaseClause:
+			for _, stmt := range node.Body {
+				visit(stmt, nesting)
+			}
+		case *ast.CommClause:
+			for _, stmt := range node.Body {
+				visit(stmt, nesting)
+			}
+		// Expressions
+		case *ast.BinaryExpr:
+			if node.Op == token.LAND || node.Op == token.LOR {
+				complexity++
+			}
+			visit(node.X, nesting)
+			visit(node.Y, nesting)
+		case *ast.ParenExpr:
+			visit(node.X, nesting)
+		case *ast.CallExpr:
+			visit(node.Fun, nesting)
+			for _, arg := range node.Args {
+				visit(arg, nesting)
+			}
+		// ... other expressions ...
+		
+		// Structural statements handled above, but need to handle their fallthrough if not returned
+		// Wait, the switch above returns. So if it hit a case, it handled recursion.
+		// If it didn't hit a case, we need to handle generic recursion.
+		default:
+			// Generic recursion for nodes not handled
+			// We can use `ast.Walk` with a custom visitor that just calls `visit`?
+			// No, `ast.Walk` doesn't pass the nesting param.
+			
+			// We really only care about finding the nested structures.
+			// Maybe we can just iterate children?
+			// It's hard to iterate children generically without `ast.Inspect`.
+			
+			// Let's use `ast.Inspect` but only for finding the next level of nodes? No.
+			
+			// Okay, let's implement a small walker for common nodes.
+			// Or, use the fact that `ast.Inspect` is pre-order.
+			// We can track nesting by parent map? No.
+			
+			// Let's go with the manual recursion for the relevant nodes (If, For, Switch, Select, Range).
+			// For everything else, we just need to find if they contain those nodes.
+			
+			// Actually, `ast.Node` has no generic `Children()` method.
+			// This is why people use `ast.Inspect`.
+			
+			// Use `ast.Inspect` but maintain a stack of parents?
+			// We can calculate nesting by walking up the stack?
+			// But `Inspect` doesn't give us the stack.
+			
+			// Proper solution: use a recursive function that switches on type and recurses.
+			// Yes, that's what I started.
+			// I need to handle all node types that can contain code.
+			
+			// Let's rely on `ast.Walk` but use a stateful visitor struct?
+			// `type visitor struct { nesting int }`
+			// `func (v *visitor) Visit(node ast.Node) ast.Visitor`
+			// `Visit` returns a *new* visitor with incremented nesting if needed.
+			
+			v := &cognitiveVisitor{nesting: 0}
+			ast.Walk(v, fn.Body)
+			complexity = v.complexity
+		}
+	}
+	
+	v := &cognitiveVisitor{}
+	ast.Walk(v, fn.Body)
+	return v.complexity
+}
+
+type cognitiveVisitor struct {
+	complexity int
+	nesting    int
+}
+
+func (v *cognitiveVisitor) Visit(node ast.Node) ast.Visitor {
+	if node == nil {
+		return nil
+	}
+
+	switch n := node.(type) {
+	case *ast.IfStmt:
+		v.complexity += 1 + v.nesting
+		// Create new visitor with incremented nesting for Body
+		return &cognitiveVisitorWithNext{parent: v, nesting: v.nesting + 1, body: n.Body}
+	case *ast.ForStmt:
+		v.complexity += 1 + v.nesting
+		return &cognitiveVisitorWithNext{parent: v, nesting: v.nesting + 1, body: n.Body}
+	case *ast.RangeStmt:
+		v.complexity += 1 + v.nesting
+		return &cognitiveVisitorWithNext{parent: v, nesting: v.nesting + 1, body: n.Body}
+	case *ast.SwitchStmt:
+		v.complexity += 1 + v.nesting
+		return &cognitiveVisitorWithNext{parent: v, nesting: v.nesting + 1, body: n.Body}
+	case *ast.TypeSwitchStmt:
+		v.complexity += 1 + v.nesting
+		return &cognitiveVisitorWithNext{parent: v, nesting: v.nesting + 1, body: n.Body}
+	case *ast.SelectStmt:
+		v.complexity += 1 + v.nesting
+		return &cognitiveVisitorWithNext{parent: v, nesting: v.nesting + 1, body: n.Body}
+	case *ast.BinaryExpr:
+		if n.Op == token.LAND || n.Op == token.LOR {
+			v.complexity++
+		}
+	case *ast.FuncLit:
+		// Nested functions start with 0 nesting? Or inherit? 
+		// Usually inherit in cognitive complexity.
+		// But they are definitely a nesting level.
+		return &cognitiveVisitorWithNext{parent: v, nesting: v.nesting + 1, body: n.Body}
+	}
+	
+	// For other nodes, keep current visitor (same nesting)
+	return v
+}
+
+// Helper struct to handle nesting increase
+type cognitiveVisitorWithNext struct {
+	parent *cognitiveVisitor
+	nesting int
+	body ast.Node
+}
+
+func (v *cognitiveVisitorWithNext) Visit(node ast.Node) ast.Visitor {
+	if node == nil {
+		return nil
+	}
+	// If we are entering the body, use the incremented nesting
+	if node == v.body {
+		// We are entering the block that causes nesting increase
+		// Return a visitor that uses the new nesting
+		return &cognitiveVisitor{complexity: 0, nesting: v.nesting} 
+		// Wait, we need to aggregate complexity back to parent.
+		// This approach is tricky because ast.Walk doesn't propagate return values.
+		
+		// Better approach:
+		// Pass the SAME pointer to complexity counter, but distinct nesting value.
+	}
+	// If we are visiting Init/Cond/Post, use parent's nesting.
+	return v.parent.Visit(node)
+}
+
+// Let's simplify. We can use a recursive function easily if we handle the node types.
+// We don't need to handle *every* node type, just the ones that have children.
+// Most nodes just need generic traversal.
+// Since we can't easily do generic traversal without reflection or massive switch,
+// sticking to `ast.Inspect` with a stack is maybe better?
+// No, `Inspect` doesn't support post-order / exit callback.
+
+// Implementation:
+	complexity := 0
+	
+	var walk func(ast.Node, int)
+	walk = func(n ast.Node, nesting int) {
+		if n == nil {
+			return
+		}
+
+		switch node := n.(type) {
+		case *ast.BlockStmt:
+			for _, stmt := range node.List {
+				walk(stmt, nesting)
+			}
+		case *ast.IfStmt:
+			complexity += 1 + nesting
+			walk(node.Init, nesting)
+			walk(node.Cond, nesting)
+			walk(node.Body, nesting+1)
+			walk(node.Else, nesting)
+		case *ast.ForStmt:
+			complexity += 1 + nesting
+			walk(node.Init, nesting)
+			walk(node.Cond, nesting)
+			walk(node.Post, nesting)
+			walk(node.Body, nesting+1)
+		case *ast.RangeStmt:
+			complexity += 1 + nesting
+			walk(node.Key, nesting)
+			walk(node.Value, nesting)
+			walk(node.X, nesting)
+			walk(node.Body, nesting+1)
+		case *ast.SwitchStmt:
+			complexity += 1 + nesting
+			walk(node.Init, nesting)
+			walk(node.Tag, nesting)
+			walk(node.Body, nesting+1)
+		case *ast.TypeSwitchStmt:
+			complexity += 1 + nesting
+			walk(node.Init, nesting)
+			walk(node.Assign, nesting)
+			walk(node.Body, nesting+1)
+		case *ast.SelectStmt:
+			complexity += 1 + nesting
+			walk(node.Body, nesting+1)
+		case *ast.CaseClause:
+			for _, stmt := range node.Body {
+				walk(stmt, nesting)
+			}
+		case *ast.CommClause:
+			for _, stmt := range node.Body {
+				walk(stmt, nesting)
+			}
+		case *ast.BinaryExpr:
+			if node.Op == token.LAND || node.Op == token.LOR {
+				complexity++
+			}
+			walk(node.X, nesting)
+			walk(node.Y, nesting)
+		case *ast.FuncLit:
+			walk(node.Type, nesting)
+			walk(node.Body, nesting+1)
+		default:
+			// For other nodes, use ast.Walk with a visitor that calls back to walk with current nesting
+			// This allows us to traverse structure we don't explicitly handle
+			// while preserving the nesting level for this scope.
+			ast.Walk(visitorFunc(func(child ast.Node) ast.Visitor {
+				if child == n {
+					return visitorFunc(func(c ast.Node) ast.Visitor {
+						walk(c, nesting)
+						return nil // walk handles recursion
+					})
+				}
+				return nil
+			}), n)
+		}
+	}
+	
+	walk(fn.Body, 0)
 	return complexity
+}
+
+type visitorFunc func(ast.Node) ast.Visitor
+
+func (f visitorFunc) Visit(n ast.Node) ast.Visitor {
+	return f(n)
 }
 
 func calculateGoNestingDepth(fn *ast.FuncDecl) int {
 	maxDepth := 0
-	currentDepth := 0
 
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		switch n.(type) {
-		case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
-			currentDepth++
-			if currentDepth > maxDepth {
-				maxDepth = currentDepth
-			}
-			defer func() { currentDepth-- }()
-			return true
+	var walk func(ast.Node, int)
+	walk = func(n ast.Node, depth int) {
+		if n == nil {
+			return
 		}
-		return true
-	})
 
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+
+		switch node := n.(type) {
+		case *ast.BlockStmt:
+			for _, stmt := range node.List {
+				walk(stmt, depth)
+			}
+		case *ast.IfStmt:
+			walk(node.Init, depth)
+			walk(node.Cond, depth)
+			walk(node.Body, depth+1)
+			walk(node.Else, depth)
+		case *ast.ForStmt:
+			walk(node.Init, depth)
+			walk(node.Cond, depth)
+			walk(node.Post, depth)
+			walk(node.Body, depth+1)
+		case *ast.RangeStmt:
+			walk(node.Key, depth)
+			walk(node.Value, depth)
+			walk(node.X, depth)
+			walk(node.Body, depth+1)
+		case *ast.SwitchStmt:
+			walk(node.Init, depth)
+			walk(node.Tag, depth)
+			walk(node.Body, depth+1)
+		case *ast.TypeSwitchStmt:
+			walk(node.Init, depth)
+			walk(node.Assign, depth)
+			walk(node.Body, depth+1)
+		case *ast.SelectStmt:
+			walk(node.Body, depth+1)
+		case *ast.CaseClause:
+			for _, stmt := range node.Body {
+				walk(stmt, depth)
+			}
+		case *ast.CommClause:
+			for _, stmt := range node.Body {
+				walk(stmt, depth)
+			}
+		case *ast.FuncLit:
+			walk(node.Type, depth)
+			walk(node.Body, depth+1)
+		default:
+			// For other nodes, use ast.Walk to recurse without increasing depth
+			ast.Walk(visitorFunc(func(child ast.Node) ast.Visitor {
+				if child == n {
+					return visitorFunc(func(c ast.Node) ast.Visitor {
+						walk(c, depth)
+						return nil
+					})
+				}
+				return nil
+			}), n)
+		}
+	}
+
+	walk(fn.Body, 0)
 	return maxDepth
 }
 

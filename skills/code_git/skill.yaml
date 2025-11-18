@@ -23,7 +23,7 @@ signature:
     - name: path
       type: string
       required: false
-      description: "File or directory path (optional)"
+      description: "File or directory path (required for cochanged and blame queries)"
     - name: since
       type: string
       required: false
@@ -42,7 +42,7 @@ signature:
       type: integer
       required: false
       default: 0
-      description: "For blame queries, lines of context around matches"
+      description: "Lines of context around matches (currently unused)"
 returns:
   - name: results
     type: array

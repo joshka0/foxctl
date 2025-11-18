@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
@@ -117,6 +118,15 @@ func populateSampleData(ctx context.Context, store *memory.Store, db dbdriver.DB
 		},
 	}
 
+	var vectorStore *memory.VectorStore
+	if db.IsVectorSearchEnabled() {
+		var err error
+		vectorStore, err = store.EnableVectorSearch(db)
+		if err != nil {
+			panic(fmt.Errorf("enable vector search: %w", err))
+		}
+	}
+
 	for _, sample := range samples {
 		entry := memory.NamedEntry{
 			Name:      sample.name,
@@ -126,15 +136,18 @@ func populateSampleData(ctx context.Context, store *memory.Store, db dbdriver.DB
 		}
 
 		// Save with vector if supported
-		if db.IsVectorSearchEnabled() {
-			vectorStore, _ := store.EnableVectorSearch(db)
+		if vectorStore != nil {
 			vectorEntry := memory.VectorEntry{
 				NamedEntry: entry,
 				Embedding:  generateMockEmbedding(sample.summary, 384),
 			}
-			vectorStore.SaveWithEmbedding(ctx, vectorEntry)
+			if err := vectorStore.SaveWithEmbedding(ctx, vectorEntry); err != nil {
+				panic(fmt.Errorf("save with embedding: %w", err))
+			}
 		} else {
-			store.Save(ctx, entry)
+			if err := store.Save(ctx, entry); err != nil {
+				panic(fmt.Errorf("save entry: %w", err))
+			}
 		}
 	}
 }
@@ -328,14 +341,15 @@ func generateMockEmbedding(text string, dimensions int) dbdriver.Vector {
 	}
 
 	// L2 normalize
-	var norm float32
+	var sumSquares float64
 	for _, val := range embedding {
-		norm += val * val
+		sumSquares += float64(val * val)
 	}
-	norm = float32(1.0 / float64(norm))
-
-	for i := range embedding {
-		embedding[i] *= norm
+	if sumSquares > 0 {
+		scale := float32(1.0 / math.Sqrt(sumSquares))
+		for i := range embedding {
+			embedding[i] *= scale
+		}
 	}
 
 	return embedding

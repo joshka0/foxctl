@@ -378,6 +378,22 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 			// Check for agent updates
 			current, err := agentStore.Get(ctx, agentID)
 			if err != nil {
+				if errors.Is(err, agents.ErrNotFound) {
+					// Agent deleted, stop watching
+					finalBool := true
+					env := envelope.OK("agent/watch", map[string]interface{}{
+						"status": "terminated",
+					}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+						m.Source = "run"
+						m.Profiles = []string{"core/v1", "agent/v1"}
+						m.Seq = &seq
+						m.Final = &finalBool
+					}))
+					if err := writer.Write(env); err != nil {
+						return fmt.Errorf("write final envelope: %w", err)
+					}
+					return nil
+				}
 				return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to get agent: %v", err))
 			}
 
@@ -447,7 +463,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 			}
 
 			// Check for new mailbox messages
-			messages, err := mailboxStore.List(ctx, a.Namespace, 10)
+			messages, err := mailboxStore.List(ctx, current.Namespace, 10)
 			if err != nil {
 				return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to list messages: %v", err))
 			}

@@ -74,6 +74,9 @@ func (r SearchResults) Sort() {
 
 // TopK returns the top k results
 func (r SearchResults) TopK(k int) SearchResults {
+	if k < 0 {
+		k = 0
+	}
 	if k > len(r) {
 		k = len(r)
 	}
@@ -275,7 +278,7 @@ func (h *HybridSearcher) Search(
 	// This gives us a reasonable subset to score with BM25
 	candidateQuery := fmt.Sprintf(`
 		SELECT
-			t.rowid as id,
+			t.id as id,
 			t.%s as text,
 			%s as vector_sim
 		FROM %s vt

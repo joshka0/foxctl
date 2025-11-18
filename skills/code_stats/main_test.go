@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
@@ -49,16 +50,22 @@ func main() {
 		t.Fatalf("run: %v", err)
 	}
 
-	var env map[string]any
+	var env envelope.Envelope
 	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal envelope: %v", err)
 	}
-	if env["status"] != "ok" {
-		t.Fatalf("expected ok status, got %v", env["status"])
+	if env.Status != "ok" {
+		t.Fatalf("expected ok status, got %v", env.Status)
 	}
 
-	data := env["data"].(map[string]any)
-	statistics := data["statistics"].(map[string]any)
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data map")
+	}
+	statistics, ok := data["statistics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected statistics map")
+	}
 	if statistics["total_files"].(float64) != 1 {
 		t.Fatalf("expected 1 file, got %v", statistics["total_files"])
 	}
@@ -67,7 +74,10 @@ func main() {
 	}
 
 	// Check languages breakdown
-	languages := statistics["languages"].(map[string]any)
+	languages, ok := statistics["languages"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected languages map")
+	}
 	if languages["Go"] == nil {
 		t.Fatalf("expected Go language to be detected")
 	}
@@ -105,14 +115,23 @@ func TestCodeStatsMultipleLanguages(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	var env map[string]any
+	var env envelope.Envelope
 	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal envelope: %v", err)
 	}
 
-	data := env["data"].(map[string]any)
-	statistics := data["statistics"].(map[string]any)
-	languages := statistics["languages"].(map[string]any)
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data map")
+	}
+	statistics, ok := data["statistics"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected statistics map")
+	}
+	languages, ok := statistics["languages"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected languages map")
+	}
 
 	if languages["Go"] == nil {
 		t.Fatalf("expected Go to be detected")

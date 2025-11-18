@@ -277,7 +277,7 @@ func extractGoImports(path, workspace string, in input) ([]importInfo, []string,
 			Import:     importPath,
 			Line:       fset.Position(imp.Pos()).Line,
 			IsStdLib:   isStdLib,
-			IsExternal: !isStdLib && !strings.Contains(importPath, workspace),
+			IsExternal: !isStdLib, // Note: includes local module imports as we don't check go.mod
 		}
 
 		if imp.Name != nil {
@@ -309,18 +309,28 @@ func extractPythonImports(path, workspace string, in input) ([]importInfo, []str
 		if strings.HasPrefix(trimmed, "import ") {
 			parts := strings.Fields(trimmed)
 			if len(parts) >= 2 {
-				importPath := parts[1]
-				importPath = strings.Split(importPath, ",")[0] // Handle multi-import
+				// Handle comma-separated imports: import os, sys, re
+				importsList := strings.Join(parts[1:], " ")
+				for _, imp := range strings.Split(importsList, ",") {
+					importPath := strings.TrimSpace(imp)
+					if importPath == "" {
+						continue
+					}
+					// Remove "as alias" part if present
+					if idx := strings.Index(importPath, " as "); idx != -1 {
+						importPath = strings.TrimSpace(importPath[:idx])
+					}
 
-				info := importInfo{
-					File:       relPath,
-					Import:     importPath,
-					Line:       i + 1,
-					IsStdLib:   isPythonStdLib(importPath),
-					IsExternal: !isPythonStdLib(importPath),
+					info := importInfo{
+						File:       relPath,
+						Import:     importPath,
+						Line:       i + 1,
+						IsStdLib:   isPythonStdLib(importPath),
+						IsExternal: !isPythonStdLib(importPath),
+					}
+					imports = append(imports, info)
+					importPaths = append(importPaths, importPath)
 				}
-				imports = append(imports, info)
-				importPaths = append(importPaths, importPath)
 			}
 		}
 
@@ -510,14 +520,25 @@ func calculateStats(imports []importInfo) map[string]any {
 	total := len(imports)
 	stdLib := 0
 	external := 0
+	local := 0
 	uniqueImports := make(map[string]bool)
 
 	for _, imp := range imports {
 		if imp.IsStdLib {
 			stdLib++
-		}
-		if imp.IsExternal {
+		} else if imp.IsExternal {
+			// For now, IsExternal is true for anything not StdLib in Go/Python
+			// In JS, we check for relative paths.
+			// Since we modified Go IsExternal logic, we should treat !StdLib && !External as Local?
+			// Or logic: if !IsStdLib, and (imp.IsExternal might be true for local modules in Go).
+			// Wait, the logic in extractGoImports sets IsExternal = !isStdLib.
+			// So local is effectively 0 for Go unless we have better detection.
+			// However, in JS extractJSImports sets IsExternal = !strings.HasPrefix(importPath, ".")
+			// So for JS, IsExternal is accurate for external vs local.
+			// Let's just rely on the counts we have.
 			external++
+		} else {
+			local++
 		}
 		uniqueImports[imp.Import] = true
 	}
@@ -527,7 +548,7 @@ func calculateStats(imports []importInfo) map[string]any {
 		"unique_imports": len(uniqueImports),
 		"std_lib":        stdLib,
 		"external":       external,
-		"local":          total - stdLib - external,
+		"local":          local,
 	}
 }
 

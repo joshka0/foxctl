@@ -19,7 +19,8 @@ type VectorStore struct {
 // VectorEntry extends NamedEntry with vector embedding support
 type VectorEntry struct {
 	storage.NamedEntry
-	Embedding dbdriver.Vector `json:"embedding,omitempty"`
+	Embedding  dbdriver.Vector `json:"embedding,omitempty"`
+	Similarity float64         `json:"similarity,omitempty"`
 }
 
 // EnableVectorSearch enables vector search on an existing memory store
@@ -68,6 +69,7 @@ func (vs *VectorStore) SaveWithEmbedding(ctx context.Context, entry VectorEntry)
 	return VectorEntry{
 		NamedEntry: savedEntry,
 		Embedding:  entry.Embedding,
+		Similarity: 0,
 	}, nil
 }
 
@@ -78,6 +80,11 @@ func (vs *VectorStore) SearchSimilar(
 	workspace string,
 	limit int,
 ) ([]VectorEntry, error) {
+	// Validate limit parameter
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be > 0, got %d", limit)
+	}
+
 	// Validate query vector
 	if err := vs.vectorHelper.ValidateVector(queryEmbedding); err != nil {
 		return nil, fmt.Errorf("invalid query embedding: %w", err)
@@ -93,7 +100,7 @@ func (vs *VectorStore) SearchSimilar(
 		FROM vector_top_k('idx_memory_vector', '%s', ?) vt
 		JOIN named_memory t ON t.rowid = vt.id
 		WHERE t.workspace = ?
-		ORDER BY similarity ASC
+		ORDER BY similarity DESC
 	`, vs.vectorHelper.CosineSimilarity("t.embedding", queryEmbedding), queryEmbedding.String())
 
 	rows, err := vs.db.QueryContext(ctx, query, limit, workspace)
@@ -125,6 +132,7 @@ func (vs *VectorStore) SearchSimilar(
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
 
+		entry.Similarity = similarity
 		results = append(results, entry)
 	}
 

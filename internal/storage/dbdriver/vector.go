@@ -130,9 +130,9 @@ func (vh *VectorHelper) SearchSimilar(
 		// Use vector index for fast approximate search
 		query = fmt.Sprintf(`
 			SELECT t.*
-			FROM %s(%s, %d) vt
+			FROM %s vt
 			JOIN %s t ON t.rowid = vt.id
-		`, vh.VectorTopK(indexName, queryVector, limit), indexName, limit, tableName)
+		`, vh.VectorTopK(indexName, queryVector, limit), tableName)
 
 		if additionalWhere != "" {
 			query += " WHERE " + additionalWhere

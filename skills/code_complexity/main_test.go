@@ -1,76 +1,135 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"testing"
-
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
-func TestCodeComplexityBasic(t *testing.T) {
-	ctx := context.Background()
-	tmp := t.TempDir()
-	work := filepath.Join(tmp, "workspace")
-	if err := os.MkdirAll(work, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+func TestCalculateGoCognitiveComplexity(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want int
+	}{
+		{
+			name: "simple",
+			code: `package main
+func f() {
+	if true {
+		return
 	}
-
-	goCode := `package main
-
-func simple() {
-	println("hello")
-}
-`
-	if err := os.WriteFile(filepath.Join(work, "main.go"), []byte(goCode), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf)
-	t.Cleanup(func() {
-		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
+}`,
+			want: 1, // if +1
+		},
+		{
+			name: "nested",
+			code: `package main
+func f() {
+	if true {
+		if true {
+			return
 		}
-	})
-
-	in := input{
-		Path:      work,
-		Threshold: 1,
 	}
-	if err := run(ctx, rc, in); err != nil {
-		t.Fatalf("run: %v", err)
+}`,
+			want: 3, // if +1, nested if +2 (1 + 1)
+		},
+		{
+			name: "switch",
+			code: `package main
+func f() {
+	switch x {
+	case 1:
+		if true {
+			return
+		}
 	}
-
-	var env map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
-		t.Fatalf("unmarshal envelope: %v", err)
+}`,
+			want: 3, // switch +1, if +2 (1 + 1)
+		},
+		{
+			name: "for loop",
+			code: `package main
+func f() {
+	for i := 0; i < 10; i++ {
+		if true {
+			continue
+		}
 	}
-	if env["status"] != "ok" {
-		t.Fatalf("expected ok status, got %v", env["status"])
-	}
-}
-
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
-	t.Helper()
-	state := t.TempDir()
-	cfg := config.Config{
-		Home:           state,
-		InlineOutputKB: 32,
-		MaxCaptureKB:   10240,
-		Paths: config.Paths{
-			CAS:   filepath.Join(state, "cas"),
-			Jobs:  filepath.Join(state, "jobs"),
-			Cache: filepath.Join(state, "cache"),
+}`,
+			want: 3, // for +1, if +2
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
-	if err != nil {
-		t.Fatalf("runner context: %v", err)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "test.go", tt.code, 0)
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			
+			fn := file.Decls[0].(*ast.FuncDecl)
+			got := calculateGoCognitiveComplexity(fn)
+			if got != tt.want {
+				t.Errorf("got %d, want %d", got, tt.want)
+			}
+		})
 	}
-	return rc
+}
+
+func TestCalculateGoNestingDepth(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want int
+	}{
+		{
+			name: "flat",
+			code: `package main
+func f() {
+	x := 1
+}`,
+			want: 0,
+		},
+		{
+			name: "one level",
+			code: `package main
+func f() {
+	if true {
+		x := 1
+	}
+}`,
+			want: 1,
+		},
+		{
+			name: "two levels",
+			code: `package main
+func f() {
+	if true {
+		for {
+			break
+		}
+	}
+}`,
+			want: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "test.go", tt.code, 0)
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			
+			fn := file.Decls[0].(*ast.FuncDecl)
+			got := calculateGoNestingDepth(fn)
+			if got != tt.want {
+				t.Errorf("got %d, want %d", got, tt.want)
+			}
+		})
+	}
 }

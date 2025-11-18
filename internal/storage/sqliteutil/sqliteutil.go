@@ -76,5 +76,10 @@ func OpenDBWithAutoConfig(ctx context.Context, rootDir string, dbType string, de
 		return nil, fmt.Errorf("sqliteutil: unknown database type: %s", dbType)
 	}
 
+	// Apply default path if not configured and using SQLite
+	if (cfg.Driver == "" || cfg.Driver == dbdriver.DriverSQLite) && cfg.Path == "" {
+		cfg.Path = defaultPath
+	}
+
 	return OpenDBWithDriver(ctx, cfg, migrate)
 }

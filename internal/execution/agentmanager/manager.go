@@ -168,6 +168,35 @@ func validatePolicyNarrowing(parent, child agent.Policy) error {
 		return fmt.Errorf("child memory (%d MB) exceeds parent memory (%d MB)", child.MemoryMB, parent.MemoryMB)
 	}
 
+	// Timeout: child must not exceed parent
+	if parent.Timeout != "" {
+		parentDuration, err := time.ParseDuration(parent.Timeout)
+		if err == nil {
+			childDuration, err := time.ParseDuration(child.Timeout)
+			if err != nil || childDuration > parentDuration {
+				return fmt.Errorf("child timeout exceeds parent timeout")
+			}
+		}
+	}
+
+	// MaxOutputKB: child must not exceed parent
+	if parent.MaxOutputKB > 0 && (child.MaxOutputKB <= 0 || child.MaxOutputKB > parent.MaxOutputKB) {
+		return fmt.Errorf("child MaxOutputKB exceeds parent MaxOutputKB")
+	}
+
+	// Filesystem: child mounts must be subset of parent
+	if len(child.Filesystem) > 0 {
+		parentMounts := make(map[string]bool)
+		for _, fs := range parent.Filesystem {
+			parentMounts[fs.Path] = true // Simplified check: path match only for now
+		}
+		for _, fs := range child.Filesystem {
+			if !parentMounts[fs.Path] {
+				return fmt.Errorf("child filesystem mount %s not allowed by parent", fs.Path)
+			}
+		}
+	}
+
 	// Network: child must be more restrictive
 	if parent.Network == "none" && child.Network == "egress" {
 		return fmt.Errorf("child network (egress) is less restrictive than parent (none)")

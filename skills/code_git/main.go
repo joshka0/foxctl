@@ -431,7 +431,7 @@ func parseBlame(output []byte, file string, maxResults int) []gitResult {
 
 		if match := commitRe.FindStringSubmatch(line); match != nil {
 			currentCommit = match[1][:7]
-			if lineNum, err := strconv.Atoi(match[2]); err == nil {
+			if lineNum, err := strconv.Atoi(match[3]); err == nil {
 				currentLine = lineNum
 			}
 		} else if match := authorRe.FindStringSubmatch(line); match != nil {

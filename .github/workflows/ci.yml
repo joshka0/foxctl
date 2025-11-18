@@ -97,7 +97,7 @@ jobs:
         run: make skills-build
 
       - name: Check skill manifests (policy)
-        run: CGO_ENABLED=1 go run ./scripts/checkmanifests
+        run: go run ./scripts/checkmanifests
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

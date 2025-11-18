@@ -87,15 +87,12 @@ var (
 
 // Flags for bb claim
 var (
-	bbClaimNS       string
 	bbClaimAgentID  string
 	bbClaimDuration int
 )
 
 // Flags for bb release
-var (
-	bbReleaseNS string
-)
+var ()
 
 // Flags for bb list
 var (
@@ -137,21 +134,14 @@ func init() {
 	}
 
 	// Claim flags
-	bbClaimCmd.Flags().StringVar(&bbClaimNS, "ns", "", "Namespace (required)")
 	bbClaimCmd.Flags().StringVar(&bbClaimAgentID, "agent", "", "Agent ID claiming the item (required)")
 	bbClaimCmd.Flags().IntVar(&bbClaimDuration, "lease", 300, "Lease duration in seconds (default: 5m)")
-	if err := bbClaimCmd.MarkFlagRequired("ns"); err != nil {
-		panic(err)
-	}
 	if err := bbClaimCmd.MarkFlagRequired("agent"); err != nil {
 		panic(err)
 	}
 
 	// Release flags
-	bbReleaseCmd.Flags().StringVar(&bbReleaseNS, "ns", "", "Namespace (required)")
-	if err := bbReleaseCmd.MarkFlagRequired("ns"); err != nil {
-		panic(err)
-	}
+
 
 	// List flags
 	bbListCmd.Flags().StringVar(&bbListNS, "ns", "", "Namespace (required)")

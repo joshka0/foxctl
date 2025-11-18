@@ -49,64 +49,9 @@ func (s *Store) EnableSearch(db dbdriver.DB, workspace string) (*SearchableStore
 	}
 
 	// Build corpus stats
-	whereClause := "WHERE workspace = ?"
-	statsQuery := fmt.Sprintf(`
-		SELECT searchable_text FROM %s %s
-	`, searchView, whereClause)
-
-	rows, err := s.db.QueryContext(ctx, statsQuery, workspace)
+	corpusStats, err := buildCorpusStatsForWorkspace(ctx, db, workspace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query for corpus stats: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-
-	var totalDocs int
-	var totalTokens int
-	docFreqs := make(map[string]map[string]bool) // term -> set of doc IDs
-
-	docID := 0
-	for rows.Next() {
-		var text string
-		if err := rows.Scan(&text); err != nil {
-			return nil, fmt.Errorf("failed to scan text: %w", err)
-		}
-
-		terms := dbdriver.Tokenize(text)
-		totalTokens += len(terms)
-		totalDocs++
-
-		// Track unique terms per document
-		uniqueTerms := make(map[string]bool)
-		for _, term := range terms {
-			uniqueTerms[term] = true
-		}
-
-		for term := range uniqueTerms {
-			if docFreqs[term] == nil {
-				docFreqs[term] = make(map[string]bool)
-			}
-			docFreqs[term][fmt.Sprintf("%d", docID)] = true
-		}
-
-		docID++
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating corpus: %w", err)
-	}
-
-	// Build corpus statistics
-	corpusStats := dbdriver.CorpusStats{
-		TotalDocs: totalDocs,
-		DocFreqs:  make(map[string]int),
-	}
-
-	if totalDocs > 0 {
-		corpusStats.AvgDocLength = float64(totalTokens) / float64(totalDocs)
-	}
-
-	for term, docs := range docFreqs {
-		corpusStats.DocFreqs[term] = len(docs)
+		return nil, fmt.Errorf("failed to build corpus stats: %w", err)
 	}
 
 	// Create hybrid searcher if vector search is available
@@ -253,7 +198,7 @@ func (ss *SearchableStore) searchVector(
 		FROM vector_top_k('idx_memory_vector', '%s', ?) vt
 		JOIN named_memory t ON t.rowid = vt.id
 		WHERE t.workspace = ?
-		ORDER BY similarity ASC
+		ORDER BY similarity DESC
 	`, vectorHelper.CosineSimilarity("t.embedding", queryVector), queryVector.String())
 
 	rows, err := ss.db.QueryContext(ctx, searchQuery, limit, workspace)

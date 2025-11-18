@@ -177,7 +177,8 @@ func (s *WFQScheduler) Stop() {
 	s.mu.Unlock()
 
 	close(s.stopCh)
-	close(s.workCh)
+	// Do not close workCh here to avoid panic in dispatchNext if it tries to send
+	// Workers will exit on stopCh close
 }
 
 // schedulerLoop continuously dispatches jobs to workers.

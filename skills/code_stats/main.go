@@ -432,13 +432,14 @@ func relativeTo(base, target string) string {
 }
 
 func preparePreview(s *stats, max int) (*stats, bool) {
-	// For stats, we don't truncate the main object, just limit breakdown items
-	truncated := false
-	if len(s.Breakdown) > max {
-		s.Breakdown = s.Breakdown[:max]
-		truncated = true
+	// For stats, keep the full struct; return a truncated view for preview only.
+	if max <= 0 || len(s.Breakdown) <= max {
+		return s, false
 	}
-	return s, truncated
+	cp := *s
+	cp.Breakdown = make([]breakdownItem, max)
+	copy(cp.Breakdown, s.Breakdown[:max])
+	return &cp, true
 }
 
 func persistStatsArtifact(ctx context.Context, rc *runner.RunnerContext, s *stats, truncated bool) (runner.Artifact, error) {

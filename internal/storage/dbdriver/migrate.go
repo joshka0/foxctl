@@ -51,7 +51,7 @@ type Migrator struct {
 
 // NewMigrator creates a new database migrator
 func NewMigrator(source, target DB, options MigrationOptions) *Migrator {
-	if options.BatchSize == 0 {
+	if options.BatchSize <= 0 {
 		options.BatchSize = 100
 	}
 	return &Migrator{
@@ -349,6 +349,10 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 				_ = rows.Close() //nolint:errcheck
 				return err
 			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close() //nolint:errcheck
+			return err
 		}
 		_ = rows.Close() //nolint:errcheck
 

@@ -505,7 +505,14 @@ func scanFile(path, workspace string, in input) ([]vulnerability, error) {
 		for _, pattern := range patterns {
 			if pattern.Regex.MatchString(line) {
 				snippet := strings.TrimSpace(line)
-				if len(snippet) > 100 {
+				if pattern.Category == "sensitive_data" {
+					// Redact sensitive data
+					if len(snippet) > 20 {
+						snippet = snippet[:10] + "...[REDACTED]..." + snippet[len(snippet)-10:]
+					} else {
+						snippet = "[REDACTED]"
+					}
+				} else if len(snippet) > 100 {
 					snippet = snippet[:100] + "..."
 				}
 

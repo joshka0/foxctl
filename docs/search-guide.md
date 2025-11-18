@@ -585,9 +585,9 @@ func (ss *SearchableStore) Search(
 ) ([]MemorySearchResult, error)
 
 // Convenience methods
-func (ss *SearchableStore) SearchBM25(ctx, query, workspace string, limit int) ([]MemorySearchResult, error)
-func (ss *SearchableStore) SearchVector(ctx, queryVector Vector, workspace string, limit int) ([]MemorySearchResult, error)
-func (ss *SearchableStore) SearchHybrid(ctx, query, queryVector Vector, workspace, string limit int) ([]MemorySearchResult, error)
+func (ss *SearchableStore) SearchBM25(ctx context.Context, query, workspace string, limit int) ([]MemorySearchResult, error)
+func (ss *SearchableStore) SearchVector(ctx context.Context, queryVector Vector, workspace string, limit int) ([]MemorySearchResult, error)
+func (ss *SearchableStore) SearchHybrid(ctx context.Context, query string, queryVector Vector, workspace string, limit int) ([]MemorySearchResult, error)
 
 // Maintenance
 func (ss *SearchableStore) RefreshCorpusStats(ctx context.Context, workspace string) error
