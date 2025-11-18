@@ -14,7 +14,7 @@ import (
 // TestRunnerExecutor_Implements verifies RunnerExecutor implements SkillExecutor.
 func TestRunnerExecutor_Implements(t *testing.T) {
 	t.Helper()
-	var _ = execution.NewRunnerExecutor()
+	_ = execution.NewRunnerExecutor()
 }
 
 // TestNewRunnerExecutor verifies the constructor returns a non-nil executor.
