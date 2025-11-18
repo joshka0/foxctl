@@ -1,0 +1,57 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/security
+  version: 0.1.0
+  description: "Security vulnerability detection: injection, XSS, secrets, weak crypto, unsafe patterns"
+  tags: ["security", "vulnerability", "code", "scanning"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_security/code_security
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/security
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "File or directory to scan (default .)"
+    - name: scan_mode
+      type: string
+      required: false
+      enum: ["scan", "secrets", "injection", "crypto"]
+      default: "scan"
+      description: "Scan mode"
+    - name: severity_threshold
+      type: string
+      required: false
+      enum: ["low", "medium", "high", "critical"]
+      default: "low"
+      description: "Minimum severity to report"
+    - name: categories
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Vulnerability categories to check"
+    - name: exclude_tests
+      type: boolean
+      required: false
+      default: true
+      description: "Exclude test files"
+    - name: max_results
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum number of results"
+returns:
+  - name: vulnerabilities
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
