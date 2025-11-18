@@ -17,7 +17,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/openapi/client"
 	"github.com/jkatigb/agentctl/internal/openapi/loader"
 	"github.com/jkatigb/agentctl/internal/openapi/pagination"
-	"github.com/jkatigb/agentctl/internal/openapi/retry"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/secrets"
@@ -454,32 +453,6 @@ func emitResponse(rc *runner.RunnerContext, resp *client.Response, pagingSummary
 	return rc.Emit("http/openapi", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
 }
 
-func createRetryer(cfg *RetryConfig) *retry.Retryer {
-	retryConfig := retry.Config{
-		MaxAttempts:  5,
-		InitialDelay: 250 * time.Millisecond,
-		MaxDelay:     8 * time.Second,
-		Multiplier:   2.0,
-	}
-
-	if cfg != nil {
-		if cfg.MaxAttempts > 0 {
-			retryConfig.MaxAttempts = cfg.MaxAttempts
-		}
-		if cfg.BaseMS > 0 {
-			retryConfig.InitialDelay = time.Duration(cfg.BaseMS) * time.Millisecond
-		}
-		if cfg.MaxMS > 0 {
-			retryConfig.MaxDelay = time.Duration(cfg.MaxMS) * time.Millisecond
-		}
-		if cfg.Factor > 0 {
-			retryConfig.Multiplier = cfg.Factor
-		}
-	}
-
-	return retry.New(retryConfig)
-}
-
 func fail(command, code string, err error) {
 	env := envelope.Error(command, code, err.Error(), nil)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit http/openapi failure")
@@ -533,8 +506,8 @@ func generateBuildHint(err error, spec *loader.Spec, operationID string) string 
 
 	// Missing required parameter
 	if strings.Contains(errMsg, "missing required path parameter") {
-		op, _ := spec.GetOperation(operationID)
-		if op != nil {
+		op, err := spec.GetOperation(operationID)
+		if err == nil && op != nil {
 			var requiredParams []string
 			for _, param := range op.Parameters {
 				if param.Value != nil && param.Value.Required && param.Value.In == "path" {
