@@ -8,8 +8,8 @@ import (
 
 func TestBuildRipgrepArgs(t *testing.T) {
 	tests := []struct {
-		name string
-		in   input
+		name    string
+		in      input
 		wantLen int // approximate length check
 	}{
 		{
@@ -22,8 +22,8 @@ func TestBuildRipgrepArgs(t *testing.T) {
 		{
 			name: "case sensitive",
 			in: input{
-				Pattern:       "foo",
-				CaseSensitive: true,
+				Pattern:         "foo",
+				CaseInsensitive: false,
 			},
 			wantLen: 7, // rg --json -s -e foo .
 		},
@@ -44,23 +44,25 @@ func TestParseRipgrepOutput(t *testing.T) {
 	match := map[string]any{
 		"type": "match",
 		"data": map[string]any{
-			"path": map[string]any{"text": "file.txt"},
-			"lines": map[string]any{"text": "hello world\n"},
+			"path":        map[string]any{"text": "file.txt"},
+			"lines":       map[string]any{"text": "hello world\n"},
 			"line_number": 1,
 			"submatches": []any{
 				map[string]any{"match": map[string]any{"text": "hello"}},
 			},
 		},
 	}
-	
+
 	buf := &bytes.Buffer{}
-	json.NewEncoder(buf).Encode(match)
-	
-	results, err := parseRipgrepOutput(buf.Bytes(), "/tmp", 10)
+	if err := json.NewEncoder(buf).Encode(match); err != nil {
+		t.Fatalf("encode match: %v", err)
+	}
+
+	results, _, err := parseRipgrepOutput(buf.Bytes(), "/tmp", 10)
 	if err != nil {
 		t.Fatalf("parseRipgrepOutput: %v", err)
 	}
-	
+
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}

@@ -198,6 +198,7 @@ func buildTree(path, workspace string, in input, level int) (*treeNode, treeStat
 	})
 
 	for _, entry := range entries {
+		fmt.Printf("Debug: buildTree processing %s (dir=%v)\n", entry.Name(), entry.IsDir())
 		// Skip hidden files/directories
 		if !in.IncludeHidden && strings.HasPrefix(entry.Name(), ".") {
 			continue
