@@ -166,8 +166,14 @@ func TestManagerInvokePagination(t *testing.T) {
 }
 
 func expectedHMACHeader(req HTTPRequest, ctx AuthContext) string {
-	key, _ := ctx.Credentials["key"].(string)
-	secret, _ := ctx.Credentials["secret"].(string)
+	key, ok := ctx.Credentials["key"].(string)
+	if !ok {
+		panic("test setup error: key credential must be a string")
+	}
+	secret, ok := ctx.Credentials["secret"].(string)
+	if !ok {
+		panic("test setup error: secret credential must be a string")
+	}
 	base := req.Method + " " + req.URL
 	if len(req.Body) > 0 {
 		base += string(req.Body)

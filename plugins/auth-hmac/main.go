@@ -49,8 +49,16 @@ func main() {
 		time.Sleep(time.Duration(delayMS) * time.Millisecond)
 	}
 
-	key, _ := payload.Context.Credentials["key"].(string)
-	secret, _ := payload.Context.Credentials["secret"].(string)
+	key, ok := payload.Context.Credentials["key"].(string)
+	if !ok {
+		emitAuthError("key credential must be a string")
+		return
+	}
+	secret, ok := payload.Context.Credentials["secret"].(string)
+	if !ok {
+		emitAuthError("secret credential must be a string")
+		return
+	}
 	if key == "" || secret == "" {
 		emitAuthError("missing key or secret")
 		return

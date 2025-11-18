@@ -159,7 +159,10 @@ func taskFromData(t *testing.T, data map[string]any) map[string]any {
 func taskID(t *testing.T, data map[string]any) string {
 	t.Helper()
 	task := taskFromData(t, data)
-	id, _ := task["id"].(string)
+	id, ok := task["id"].(string)
+	if !ok {
+		t.Fatalf("task id is not a string: %#v", task)
+	}
 	if id == "" {
 		t.Fatalf("task missing id: %#v", task)
 	}
