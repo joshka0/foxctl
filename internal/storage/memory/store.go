@@ -330,6 +330,18 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("memory: migrate: %w", err)
 	}
+
+	// Add embedding column for vector search support (optional, requires CGO + vector build tag)
+	// This column will remain NULL unless vector functionality is enabled and used
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE named_memory ADD COLUMN embedding BLOB DEFAULT NULL;
+	`); err != nil {
+		// Ignore error if column already exists
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("memory: add embedding column: %w", err)
+		}
+	}
+
 	return nil
 }
 
