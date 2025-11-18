@@ -45,10 +45,10 @@ type treeStats struct {
 }
 
 type treeOutput struct {
-	Root      *treeNode `json:"root"`
-	Stats     treeStats `json:"stats"`
-	TreeText  string    `json:"tree_text,omitempty"`
-	ListText  []string  `json:"list_text,omitempty"`
+	Root     *treeNode `json:"root"`
+	Stats    treeStats `json:"stats"`
+	TreeText string    `json:"tree_text,omitempty"`
+	ListText []string  `json:"list_text,omitempty"`
 }
 
 func main() {

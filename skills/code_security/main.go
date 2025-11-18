@@ -21,26 +21,26 @@ import (
 )
 
 type input struct {
-	Path               string   `json:"path"`
-	ScanMode           string   `json:"scan_mode"`
-	SeverityThreshold  string   `json:"severity_threshold"`
-	Categories         []string `json:"categories"`
-	ExcludeTests       bool     `json:"exclude_tests"`
-	MaxResults         int      `json:"max_results"`
+	Path              string   `json:"path"`
+	ScanMode          string   `json:"scan_mode"`
+	SeverityThreshold string   `json:"severity_threshold"`
+	Categories        []string `json:"categories"`
+	ExcludeTests      bool     `json:"exclude_tests"`
+	MaxResults        int      `json:"max_results"`
 }
 
 type vulnerability struct {
-	ID           string `json:"id"`
-	Category     string `json:"category"`
-	Severity     string `json:"severity"`
-	CWE          string `json:"cwe,omitempty"`
-	File         string `json:"file"`
-	Line         int    `json:"line"`
-	Issue        string `json:"issue"`
-	CodeSnippet  string `json:"code_snippet"`
-	Description  string `json:"description"`
+	ID             string `json:"id"`
+	Category       string `json:"category"`
+	Severity       string `json:"severity"`
+	CWE            string `json:"cwe,omitempty"`
+	File           string `json:"file"`
+	Line           int    `json:"line"`
+	Issue          string `json:"issue"`
+	CodeSnippet    string `json:"code_snippet"`
+	Description    string `json:"description"`
 	Recommendation string `json:"recommendation"`
-	Confidence   string `json:"confidence"`
+	Confidence     string `json:"confidence"`
 }
 
 type securityPattern struct {
@@ -79,7 +79,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Use parameterized queries with $1, $2 placeholders",
 		Confidence:     "high",
 	},
-	
+
 	// Command Injection
 	{
 		ID:             "CMD-001",
@@ -103,7 +103,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Use subprocess with argument list, not shell=True",
 		Confidence:     "high",
 	},
-	
+
 	// Hardcoded Secrets
 	{
 		ID:             "SECRET-001",
@@ -171,7 +171,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Store keys securely, never commit to repository",
 		Confidence:     "high",
 	},
-	
+
 	// Weak Cryptography
 	{
 		ID:             "CRYPTO-001",
@@ -206,7 +206,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Use crypto/rand for security-sensitive operations",
 		Confidence:     "medium",
 	},
-	
+
 	// XSS
 	{
 		ID:             "XSS-001",
@@ -241,7 +241,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Sanitize content or use safe rendering",
 		Confidence:     "medium",
 	},
-	
+
 	// Path Traversal
 	{
 		ID:             "PATH-001",
@@ -265,7 +265,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Reject paths with ../, use path.Clean()",
 		Confidence:     "low",
 	},
-	
+
 	// Unsafe Deserialization
 	{
 		ID:             "DESER-001",
@@ -278,7 +278,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Use safe_load() or validate input structure",
 		Confidence:     "high",
 	},
-	
+
 	// SSRF
 	{
 		ID:             "SSRF-001",
@@ -291,7 +291,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Validate URLs against allowlist",
 		Confidence:     "medium",
 	},
-	
+
 	// Logging Sensitive Data
 	{
 		ID:             "LOG-001",
@@ -304,7 +304,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Never log sensitive data, redact if necessary",
 		Confidence:     "medium",
 	},
-	
+
 	// SQL Direct Query
 	{
 		ID:             "SQL-003",
@@ -317,7 +317,7 @@ var securityPatterns = []securityPattern{
 		Recommendation: "Use parameterized queries",
 		Confidence:     "high",
 	},
-	
+
 	// JavaScript eval
 	{
 		ID:             "EVAL-001",
@@ -613,8 +613,8 @@ func calculateStats(vulns []vulnerability) map[string]any {
 	stats["by_category"] = catCounts
 
 	// Calculate risk score (0-100)
-	riskScore := float64(sevCounts["critical"])*10 + float64(sevCounts["high"])*5 + 
-	             float64(sevCounts["medium"])*2 + float64(sevCounts["low"])*0.5
+	riskScore := float64(sevCounts["critical"])*10 + float64(sevCounts["high"])*5 +
+		float64(sevCounts["medium"])*2 + float64(sevCounts["low"])*0.5
 	if riskScore > 100 {
 		riskScore = 100
 	}

@@ -28,26 +28,26 @@ type input struct {
 }
 
 type stats struct {
-	TotalFiles      int                  `json:"total_files"`
-	TotalLines      int                  `json:"total_lines"`
-	TotalCodeLines  int                  `json:"total_code_lines"`
-	TotalBlankLines int                  `json:"total_blank_lines"`
-	TotalComments   int                  `json:"total_comments"`
-	TotalBytes      int64                `json:"total_bytes"`
-	Breakdown       []breakdownItem      `json:"breakdown"`
-	Languages       map[string]int       `json:"languages"`
-	TopFiles        []fileStats          `json:"top_files,omitempty"`
+	TotalFiles      int             `json:"total_files"`
+	TotalLines      int             `json:"total_lines"`
+	TotalCodeLines  int             `json:"total_code_lines"`
+	TotalBlankLines int             `json:"total_blank_lines"`
+	TotalComments   int             `json:"total_comments"`
+	TotalBytes      int64           `json:"total_bytes"`
+	Breakdown       []breakdownItem `json:"breakdown"`
+	Languages       map[string]int  `json:"languages"`
+	TopFiles        []fileStats     `json:"top_files,omitempty"`
 }
 
 type breakdownItem struct {
-	Name        string  `json:"name"`
-	FileCount   int     `json:"file_count"`
-	Lines       int     `json:"lines"`
-	CodeLines   int     `json:"code_lines"`
-	BlankLines  int     `json:"blank_lines"`
-	Comments    int     `json:"comments"`
-	Bytes       int64   `json:"bytes"`
-	Percentage  float64 `json:"percentage"`
+	Name       string  `json:"name"`
+	FileCount  int     `json:"file_count"`
+	Lines      int     `json:"lines"`
+	CodeLines  int     `json:"code_lines"`
+	BlankLines int     `json:"blank_lines"`
+	Comments   int     `json:"comments"`
+	Bytes      int64   `json:"bytes"`
+	Percentage float64 `json:"percentage"`
 }
 
 type fileStats struct {
@@ -207,7 +207,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 		return nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("directory walk failed: %w", err)
 	}
@@ -242,7 +241,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	data := map[string]any{
-		"statistics":  preview,
+		"statistics":   preview,
 		"breakdown_by": in.BreakdownBy,
 	}
 	if artifact.Digest != "" {

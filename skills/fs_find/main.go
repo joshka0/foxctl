@@ -36,13 +36,13 @@ type input struct {
 }
 
 type fileResult struct {
-	Path         string  `json:"path"`
-	Name         string  `json:"name"`
-	Type         string  `json:"type"`
-	Size         int64   `json:"size"`
-	Modified     string  `json:"modified"`
-	ModifiedUnix int64   `json:"modified_unix"`
-	Score        float64 `json:"score,omitempty"`
+	Path         string   `json:"path"`
+	Name         string   `json:"name"`
+	Type         string   `json:"type"`
+	Size         int64    `json:"size"`
+	Modified     string   `json:"modified"`
+	ModifiedUnix int64    `json:"modified_unix"`
+	Score        float64  `json:"score,omitempty"`
 	Matches      []string `json:"matches,omitempty"`
 }
 
@@ -183,7 +183,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 		return nil
 	})
-
 	if err != nil {
 		return fmt.Errorf("directory walk failed: %w", err)
 	}

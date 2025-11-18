@@ -180,10 +180,10 @@ func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, strin
 
 func buildRipgrepArgs(in input, searchPath string) []string {
 	args := []string{
-		"--json",            // JSON output
-		"--no-heading",      // Included in JSON output
-		"--line-number",     // Include line numbers
-		"--no-messages",     // Suppress error messages
+		"--json",                                        // JSON output
+		"--no-heading",                                  // Included in JSON output
+		"--line-number",                                 // Include line numbers
+		"--no-messages",                                 // Suppress error messages
 		"--max-count", fmt.Sprintf("%d", in.MaxMatches), // Limit matches per file
 	}
 

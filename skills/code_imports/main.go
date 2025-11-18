@@ -32,22 +32,22 @@ type input struct {
 }
 
 type importInfo struct {
-	File        string   `json:"file"`
-	Import      string   `json:"import"`
-	Alias       string   `json:"alias,omitempty"`
-	Line        int      `json:"line,omitempty"`
-	IsStdLib    bool     `json:"is_std_lib"`
-	IsExternal  bool     `json:"is_external"`
-	ImportedBy  []string `json:"imported_by,omitempty"`
-	Imports     []string `json:"imports,omitempty"`
-	UsageCount  int      `json:"usage_count,omitempty"`
+	File       string   `json:"file"`
+	Import     string   `json:"import"`
+	Alias      string   `json:"alias,omitempty"`
+	Line       int      `json:"line,omitempty"`
+	IsStdLib   bool     `json:"is_std_lib"`
+	IsExternal bool     `json:"is_external"`
+	ImportedBy []string `json:"imported_by,omitempty"`
+	Imports    []string `json:"imports,omitempty"`
+	UsageCount int      `json:"usage_count,omitempty"`
 }
 
 type graphNode struct {
-	File        string   `json:"file"`
-	Imports     []string `json:"imports"`
-	ImportedBy  []string `json:"imported_by"`
-	IsExternal  bool     `json:"is_external"`
+	File       string   `json:"file"`
+	Imports    []string `json:"imports"`
+	ImportedBy []string `json:"imported_by"`
+	IsExternal bool     `json:"is_external"`
 }
 
 func main() {
@@ -156,10 +156,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	// Build response
 	data := map[string]any{
-		"query_type": in.QueryType,
+		"query_type":  in.QueryType,
 		"result_type": resultType,
-		"preview":    preview,
-		"statistics": stats,
+		"preview":     preview,
+		"statistics":  stats,
 	}
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest

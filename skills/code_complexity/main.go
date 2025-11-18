@@ -34,16 +34,16 @@ type input struct {
 }
 
 type complexityResult struct {
-	File                  string   `json:"file"`
-	Function              string   `json:"function"`
-	Line                  int      `json:"line"`
-	CyclomaticComplexity  int      `json:"cyclomatic_complexity"`
-	CognitiveComplexity   int      `json:"cognitive_complexity,omitempty"`
-	NestingDepth          int      `json:"nesting_depth"`
-	FunctionLength        int      `json:"function_length"`
-	ParameterCount        int      `json:"parameter_count,omitempty"`
-	RiskLevel             string   `json:"risk_level"`
-	Recommendations       []string `json:"recommendations,omitempty"`
+	File                 string   `json:"file"`
+	Function             string   `json:"function"`
+	Line                 int      `json:"line"`
+	CyclomaticComplexity int      `json:"cyclomatic_complexity"`
+	CognitiveComplexity  int      `json:"cognitive_complexity,omitempty"`
+	NestingDepth         int      `json:"nesting_depth"`
+	FunctionLength       int      `json:"function_length"`
+	ParameterCount       int      `json:"parameter_count,omitempty"`
+	RiskLevel            string   `json:"risk_level"`
+	Recommendations      []string `json:"recommendations,omitempty"`
 }
 
 type aggregateStats struct {

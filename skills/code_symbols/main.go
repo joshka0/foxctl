@@ -463,11 +463,11 @@ func extractPythonSymbols(path, workspace string, in input) ([]symbol, error) {
 			if len(parts) == 2 {
 				name := strings.TrimSpace(strings.TrimPrefix(parts[0], "def"))
 				sym := symbol{
-					Name:     name,
-					Type:     "function",
-					File:     relPath,
-					Line:     i + 1,
-					Exported: !strings.HasPrefix(name, "_"),
+					Name:      name,
+					Type:      "function",
+					File:      relPath,
+					Line:      i + 1,
+					Exported:  !strings.HasPrefix(name, "_"),
 					Signature: trimmed,
 				}
 				symbols = append(symbols, sym)
@@ -482,11 +482,11 @@ func extractPythonSymbols(path, workspace string, in input) ([]symbol, error) {
 				name = strings.TrimSuffix(name, ":")
 			}
 			sym := symbol{
-				Name:     name,
-				Type:     "type",
-				File:     relPath,
-				Line:     i + 1,
-				Exported: !strings.HasPrefix(name, "_"),
+				Name:      name,
+				Type:      "type",
+				File:      relPath,
+				Line:      i + 1,
+				Exported:  !strings.HasPrefix(name, "_"),
 				Signature: trimmed,
 			}
 			symbols = append(symbols, sym)
@@ -573,10 +573,10 @@ func detectLanguage(requested, ext string) string {
 	}
 
 	langMap := map[string]string{
-		".go": "go",
-		".py": "python",
-		".js": "javascript",
-		".ts": "typescript",
+		".go":  "go",
+		".py":  "python",
+		".js":  "javascript",
+		".ts":  "typescript",
 		".jsx": "javascript",
 		".tsx": "typescript",
 	}
