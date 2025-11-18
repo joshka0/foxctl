@@ -1,11 +1,13 @@
 module github.com/jkatigb/agentctl
 
-go 1.22.5
+go 1.23
+
+toolchain go1.23.4
 
 require (
 	github.com/getkin/kin-openapi v0.133.0
 	github.com/gibson042/canonicaljson-go v1.0.3
-	github.com/golangci/golangci-lint v1.61.0
+	github.com/golangci/golangci-lint/v2 v2.1.5
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-colorable v0.1.14
 	github.com/oklog/ulid/v2 v2.1.0
@@ -14,6 +16,7 @@ require (
 	github.com/spf13/viper v1.17.0
 	github.com/stretchr/testify v1.9.0
 	github.com/tetratelabs/wazero v1.7.0
+	github.com/tursodatabase/go-libsql v0.0.0-20251025125656-00da49cd4a6e
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.27.0
 	mvdan.cc/gofumpt v0.7.0
@@ -37,6 +40,7 @@ require (
 	github.com/alexkohler/nakedret/v2 v2.0.4 // indirect
 	github.com/alexkohler/prealloc v1.0.0 // indirect
 	github.com/alingse/asasalint v0.0.11 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/ashanbrown/forbidigo v1.6.0 // indirect
 	github.com/ashanbrown/makezero v1.1.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -114,6 +118,7 @@ require (
 	github.com/ldez/gomoddirectives v0.2.4 // indirect
 	github.com/ldez/tagliatelle v0.5.0 // indirect
 	github.com/leonklingele/grouper v1.1.2 // indirect
+	github.com/libsql/sqlite-antlr4-parser v0.0.0-20240327125255-dbf53b6cbf06 // indirect
 	github.com/lufeee/execinquery v1.2.1 // indirect
 	github.com/macabu/inamedparam v0.1.3 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

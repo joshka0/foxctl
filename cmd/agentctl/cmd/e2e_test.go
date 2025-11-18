@@ -20,7 +20,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	h := newCASHarness(t)
 
 	t.Run("text-grep cache lifecycle", func(t *testing.T) {
-		env, stderr := withRunExecutor(t, h.ctx, []string{
+		env, stderr := withRunExecutor(h.ctx, t, []string{
 			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
 			"--remember", "grep-first",
 			"--workspace", h.workdir,
@@ -34,7 +34,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 		stdout := h.execMemoryCommand(t, newMemoryGetCommand(), "--workspace", h.workdir, "grep-job")
 		h.assertMemoryMetadata(t, stdout.Bytes(), "grep-job")
 
-		env2, _ := withRunExecutor(t, h.ctx, []string{
+		env2, _ := withRunExecutor(h.ctx, t, []string{
 			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
 			"--workspace", h.workdir,
 			"--cache", "auto",
@@ -44,7 +44,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	})
 
 	t.Run("openapi memory relevance", func(t *testing.T) {
-		env, stderr := withRunExecutor(t, h.ctx, []string{
+		env, stderr := withRunExecutor(h.ctx, t, []string{
 			"--input", h.openapiInput,
 			"--remember", "openapi-plan",
 			"--workspace", h.workdir,
@@ -75,13 +75,39 @@ func newCASHarness(t *testing.T) *casHarness {
 	workdir := t.TempDir()
 	samplePath := filepath.Join(workdir, "sample.txt")
 	buildSampleFile(t, samplePath)
+
+	// Create a minimal OpenAPI spec for testing
+	specPath := filepath.Join(workdir, "test-spec.yaml")
+	testSpec := `openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /todos:
+    get:
+      operationId: listTodos
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+`
+	if err := os.WriteFile(specPath, []byte(testSpec), 0o644); err != nil {
+		t.Fatalf("write test spec: %v", err)
+	}
+
 	ctx := config.WithContext(context.Background(), cfg)
 	return &casHarness{
 		cfg:          cfg,
 		ctx:          ctx,
 		workdir:      workdir,
 		samplePath:   samplePath,
-		openapiInput: `{"base_url":"https://api.example.com","path":"/todos","method":"GET","dry_run":true,"query":{"limit":"5"}}`,
+		openapiInput: fmt.Sprintf(`{"spec":%q,"operationId":"listTodos","params":{"query":{"limit":5}},"dry_run":true}`, specPath),
 	}
 }
 
@@ -104,7 +130,7 @@ func buildSampleFile(t *testing.T, path string) {
 	}
 }
 
-func withRunExecutor(t *testing.T, ctx context.Context, args []string) (envelope.Envelope, *bytes.Buffer) {
+func withRunExecutor(ctx context.Context, t *testing.T, args []string) (envelope.Envelope, *bytes.Buffer) {
 	t.Helper()
 	cmd := newRunCommand()
 	cmd.SetContext(ctx)

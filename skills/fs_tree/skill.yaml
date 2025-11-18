@@ -1,0 +1,59 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: fs/tree
+  version: 0.1.0
+  description: "Visual directory tree: hierarchical structure with file counts, sizes, and filtering"
+  tags: ["filesystem", "tree", "structure", "visualization"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/fs_tree/fs_tree
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: fs/tree
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "Directory to visualize (default .)"
+    - name: max_depth
+      type: integer
+      required: false
+      default: 3
+      description: "Maximum depth to traverse"
+    - name: include_hidden
+      type: boolean
+      required: false
+      default: false
+      description: "Include hidden files and directories"
+    - name: include_size
+      type: boolean
+      required: false
+      default: true
+      description: "Include file sizes"
+    - name: dirs_only
+      type: boolean
+      required: false
+      default: false
+      description: "Show only directories"
+    - name: pattern
+      type: string
+      required: false
+      description: "Filter files by glob pattern (e.g., '*.go')"
+    - name: format
+      type: string
+      required: false
+      enum: ["tree", "list", "json"]
+      default: "tree"
+      description: "Output format"
+returns:
+  - name: tree
+    type: object
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

@@ -1,0 +1,65 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: text/ripgrep
+  version: 0.1.0
+  description: "Fast recursive regex search using ripgrep with include/exclude globs"
+  tags: ["text", "search", "regex", "fast"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/text_ripgrep/text_ripgrep
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: text/ripgrep
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "Directory or file (default .)"
+    - name: pattern
+      type: string
+      required: true
+      description: "Regex pattern (Rust regex syntax)"
+    - name: case_insensitive
+      type: boolean
+      required: false
+      description: "Case insensitive search"
+      default: false
+    - name: glob
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Include glob patterns (e.g., ['*.go', '*.rs'])"
+    - name: glob_not
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Exclude glob patterns (e.g., ['vendor/*', 'node_modules/*'])"
+    - name: max_matches
+      type: integer
+      required: false
+      default: 10000
+      description: "Maximum number of matches to return"
+    - name: context_lines
+      type: integer
+      required: false
+      default: 0
+      description: "Number of context lines before and after each match"
+    - name: hidden
+      type: boolean
+      required: false
+      default: false
+      description: "Search hidden files and directories"
+returns:
+  - name: matches
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

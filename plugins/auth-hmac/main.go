@@ -1,3 +1,4 @@
+// Package main implements an HMAC authentication plugin.
 package main
 
 import (

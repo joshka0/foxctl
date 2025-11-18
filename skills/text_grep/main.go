@@ -45,7 +45,7 @@ func main() {
 		fail("text/grep", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewContext(cfg, os.Stdout)
 	if err != nil {
 		fail("text/grep", "ERUNTIME", err)
 	}
@@ -62,7 +62,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.Context, in input) error {
 	re, err := compileRegex(in.Pattern, in.CI)
 	if err != nil {
 		return err
@@ -142,7 +142,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, string, error) {
+func resolveWorkspace(rc *runner.Context, candidate string) (string, string, error) {
 	workspace := rc.PathValidator.Workspace()
 	if strings.TrimSpace(candidate) == "" {
 		return workspace, workspace, nil
@@ -154,8 +154,8 @@ func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, strin
 	return workspace, resolved, nil
 }
 
-func preparePreview(matches []match, max int) ([]match, bool) {
-	preview, truncated := skillslib.PreparePreview(matches, max)
+func preparePreview(matches []match, limit int) ([]match, bool) {
+	preview, truncated := skillslib.PreparePreview(matches, limit)
 	if truncated {
 		dup := make([]match, len(preview))
 		copy(dup, preview)
@@ -164,7 +164,7 @@ func preparePreview(matches []match, max int) ([]match, bool) {
 	return preview, truncated
 }
 
-func persistMatchesArtifact(ctx context.Context, rc *runner.RunnerContext, matches []match, truncated bool) (runner.Artifact, error) {
+func persistMatchesArtifact(ctx context.Context, rc *runner.Context, matches []match, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}
@@ -284,11 +284,11 @@ func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
 	return out
 }
 
-func trimLine(line string, max int) string {
-	if len(line) <= max {
+func trimLine(line string, limit int) string {
+	if len(line) <= limit {
 		return line
 	}
-	return line[:max] + "..."
+	return line[:limit] + "..."
 }
 
 func fail(command, code string, err error) {

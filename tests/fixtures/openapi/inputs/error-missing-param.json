@@ -1,0 +1,9 @@
+{
+  "spec": "./tests/fixtures/openapi/specs/petstore.yaml",
+  "operationId": "getPetById",
+  "params": {},
+  "auth": {
+    "type": "bearer",
+    "token": "test-token-123"
+  }
+}

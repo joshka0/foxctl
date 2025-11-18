@@ -23,7 +23,7 @@ func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newFsReadRunner(t, buf, tmp)
+	rc := newTestContext(t, buf, tmp)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
 			t.Fatalf("close runner context: %v", err)
@@ -75,7 +75,7 @@ func TestFsReadHonorsMaxBytesAndTruncates(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newFsReadRunner(t, buf, tmp)
+	rc := newTestContext(t, buf, tmp)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
 			t.Fatalf("close runner context: %v", err)
@@ -112,7 +112,7 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newFsReadRunner(t, buf, tmp)
+	rc := newTestContext(t, buf, tmp)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
 			t.Fatalf("close runner context: %v", err)
@@ -143,7 +143,7 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 	}
 }
 
-func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
 	t.Helper()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -168,7 +168,7 @@ func newFsReadRunner(t *testing.T, stdout *bytes.Buffer, workspace string) *runn
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
+	rc, err := runner.NewContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
