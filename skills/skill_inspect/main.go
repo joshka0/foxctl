@@ -57,7 +57,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(_ context.Context, rc *runner.RunnerContext, in input) error {
 	// Find skill directory
 	skillInfo, err := findSkill(in.SkillName)
 	if err != nil {
@@ -300,7 +300,7 @@ func showAll(info *skillInfo) (map[string]any, error) {
 	}, nil
 }
 
-func extractTypes(f *ast.File, fset *token.FileSet) []map[string]any {
+func extractTypes(f *ast.File, _ *token.FileSet) []map[string]any {
 	var types []map[string]any
 
 	ast.Inspect(f, func(n ast.Node) bool {

@@ -245,7 +245,7 @@ func analyzeFile(path, workspace string, in input) ([]complexityResult, error) {
 	}
 }
 
-func analyzeGoFile(path, workspace string, in input) ([]complexityResult, error) {
+func analyzeGoFile(path, workspace string, _ input) ([]complexityResult, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -481,7 +481,7 @@ func calculateGoNestingDepth(fn *ast.FuncDecl) int {
 	return maxDepth
 }
 
-func analyzePythonFile(path, workspace string, in input) ([]complexityResult, error) {
+func analyzePythonFile(path, workspace string, _ input) ([]complexityResult, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -577,7 +577,7 @@ func analyzePythonFile(path, workspace string, in input) ([]complexityResult, er
 	return results, nil
 }
 
-func analyzeJSFile(path, workspace string, in input) ([]complexityResult, error) {
+func analyzeJSFile(path, workspace string, _ input) ([]complexityResult, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -793,11 +793,11 @@ func relativeTo(base, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func preparePreview(results []complexityResult, max int) ([]complexityResult, bool) {
-	if len(results) <= max {
+func preparePreview(results []complexityResult, limit int) ([]complexityResult, bool) {
+	if len(results) <= limit {
 		return results, false
 	}
-	return results[:max], true
+	return results[:limit], true
 }
 
 func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, results []complexityResult, truncated bool) (runner.Artifact, error) {

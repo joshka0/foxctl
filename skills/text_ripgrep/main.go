@@ -278,8 +278,8 @@ func emitEmptyResult(rc *runner.RunnerContext, in input) error {
 	return rc.Emit("text/ripgrep", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
 }
 
-func preparePreview(matches []match, max int) ([]match, bool) {
-	preview, truncated := skillslib.PreparePreview(matches, max)
+func preparePreview(matches []match, limit int) ([]match, bool) {
+	preview, truncated := skillslib.PreparePreview(matches, limit)
 	if truncated {
 		dup := make([]match, len(preview))
 		copy(dup, preview)
@@ -344,11 +344,11 @@ func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
 	return out
 }
 
-func trimLine(line string, max int) string {
-	if len(line) <= max {
+func trimLine(line string, limit int) string {
+	if len(line) <= limit {
 		return line
 	}
-	return line[:max] + "..."
+	return line[:limit] + "..."
 }
 
 func fail(command, code string, err error) {

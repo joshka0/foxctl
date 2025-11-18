@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -34,16 +33,6 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerCont
 func TestRunDataJq(t *testing.T) {
 	ctx := context.Background()
 
-	// We need 'jq' installed to run this. If not, we skip.
-	if _, err := os.Stat("/usr/bin/jq"); os.IsNotExist(err) {
-		// Also check PATH
-		_, err := os.ReadFile("jq")
-		if err != nil {
-			// Try looking in path via exec.LookPath check which is done in run()
-			// But for unit test, we might just want to test argument building if jq isn't there.
-			// The actual run function calls exec.LookPath.
-		}
-	}
 	// Assuming the test environment might not have jq, we can focus on testing helper logic
 	// or mocking exec (which is hard in Go without interface).
 	// But we can test the error case if jq is missing.

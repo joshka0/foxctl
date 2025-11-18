@@ -1,13 +1,13 @@
 module github.com/jkatigb/agentctl
 
-go 1.23
+go 1.24
 
 toolchain go1.24.7
 
 require (
 	github.com/getkin/kin-openapi v0.133.0
 	github.com/gibson042/canonicaljson-go v1.0.3
-	github.com/golangci/golangci-lint v1.61.0
+	github.com/golangci/golangci-lint/v2 v2.1.5
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-colorable v0.1.14
 	github.com/oklog/ulid/v2 v2.1.0

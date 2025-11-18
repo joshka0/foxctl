@@ -313,11 +313,11 @@ func getExitCode(err error) int {
 	return 1
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
 		return s
 	}
-	return s[:max] + "... (truncated)"
+	return s[:limit] + "... (truncated)"
 }
 
 func fail(command, code string, err error) {

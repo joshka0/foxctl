@@ -154,8 +154,8 @@ func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, strin
 	return workspace, resolved, nil
 }
 
-func preparePreview(matches []match, max int) ([]match, bool) {
-	preview, truncated := skillslib.PreparePreview(matches, max)
+func preparePreview(matches []match, limit int) ([]match, bool) {
+	preview, truncated := skillslib.PreparePreview(matches, limit)
 	if truncated {
 		dup := make([]match, len(preview))
 		copy(dup, preview)
@@ -284,11 +284,11 @@ func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
 	return out
 }
 
-func trimLine(line string, max int) string {
-	if len(line) <= max {
+func trimLine(line string, limit int) string {
+	if len(line) <= limit {
 		return line
 	}
-	return line[:max] + "..."
+	return line[:limit] + "..."
 }
 
 func fail(command, code string, err error) {

@@ -193,19 +193,19 @@ func NewMinMaxScaler(values []float64) *MinMaxScaler {
 		return &MinMaxScaler{0, 1}
 	}
 
-	min := values[0]
-	max := values[0]
+	minVal := values[0]
+	maxVal := values[0]
 
 	for _, v := range values {
-		if v < min {
-			min = v
+		if v < minVal {
+			minVal = v
 		}
-		if v > max {
-			max = v
+		if v > maxVal {
+			maxVal = v
 		}
 	}
 
-	return &MinMaxScaler{min: min, max: max}
+	return &MinMaxScaler{min: minVal, max: maxVal}
 }
 
 // Scale rescales a value to [0, 1]

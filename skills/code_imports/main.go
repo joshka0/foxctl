@@ -411,7 +411,7 @@ func extractJSImports(path, workspace string, in input) ([]importInfo, []string,
 	return imports, importPaths, nil
 }
 
-func buildGraph(fileImports map[string][]string, workspace string) []graphNode {
+func buildGraph(fileImports map[string][]string, _ string) []graphNode {
 	graph := make(map[string]*graphNode)
 
 	// Initialize nodes
@@ -628,28 +628,28 @@ func relativeTo(base, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func limitResults(results any, max int) any {
+func limitResults(results any, limit int) any {
 	switch r := results.(type) {
 	case []importInfo:
-		if len(r) > max {
-			return r[:max]
+		if len(r) > limit {
+			return r[:limit]
 		}
 	case []graphNode:
-		if len(r) > max {
-			return r[:max]
+		if len(r) > limit {
+			return r[:limit]
 		}
 	case []string:
-		if len(r) > max {
-			return r[:max]
+		if len(r) > limit {
+			return r[:limit]
 		}
 	}
 	return results
 }
 
-func preparePreview(results any, max int) (any, bool) {
+func preparePreview(results any, limit int) (any, bool) {
 	switch r := results.(type) {
 	case []importInfo:
-		preview, truncated := skillslib.PreparePreview(r, max)
+		preview, truncated := skillslib.PreparePreview(r, limit)
 		if truncated {
 			dup := make([]importInfo, len(preview))
 			copy(dup, preview)
@@ -657,7 +657,7 @@ func preparePreview(results any, max int) (any, bool) {
 		}
 		return preview, false
 	case []graphNode:
-		preview, truncated := skillslib.PreparePreview(r, max)
+		preview, truncated := skillslib.PreparePreview(r, limit)
 		if truncated {
 			dup := make([]graphNode, len(preview))
 			copy(dup, preview)
@@ -665,7 +665,7 @@ func preparePreview(results any, max int) (any, bool) {
 		}
 		return preview, false
 	case []string:
-		preview, truncated := skillslib.PreparePreview(r, max)
+		preview, truncated := skillslib.PreparePreview(r, limit)
 		return preview, truncated
 	default:
 		return results, false

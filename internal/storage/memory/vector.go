@@ -115,17 +115,17 @@ func (vs *VectorStore) SearchSimilar(
 		var similarity float64
 
 		err := rows.Scan(
-			&entry.NamedEntry.ID,
-			&entry.NamedEntry.Name,
-			&entry.NamedEntry.Type,
-			&entry.NamedEntry.Workspace,
-			&entry.NamedEntry.Summary,
-			&entry.NamedEntry.Result,
-			&entry.NamedEntry.Digests,
-			&entry.NamedEntry.CreatedAt,
-			&entry.NamedEntry.UpdatedAt,
-			&entry.NamedEntry.LastAccess,
-			&entry.NamedEntry.AccessCount,
+			&entry.ID,
+			&entry.Name,
+			&entry.Type,
+			&entry.Workspace,
+			&entry.Summary,
+			&entry.Result,
+			&entry.Digests,
+			&entry.CreatedAt,
+			&entry.UpdatedAt,
+			&entry.LastAccess,
+			&entry.AccessCount,
 			&similarity,
 		)
 		if err != nil {
@@ -158,17 +158,17 @@ func (vs *VectorStore) GetWithEmbedding(ctx context.Context, name, workspace str
 	var embeddingStr sql.NullString
 
 	err := vs.db.QueryRowContext(ctx, query, name, workspace).Scan(
-		&entry.NamedEntry.ID,
-		&entry.NamedEntry.Name,
-		&entry.NamedEntry.Type,
-		&entry.NamedEntry.Workspace,
-		&entry.NamedEntry.Summary,
-		&entry.NamedEntry.Result,
-		&entry.NamedEntry.Digests,
-		&entry.NamedEntry.CreatedAt,
-		&entry.NamedEntry.UpdatedAt,
-		&entry.NamedEntry.LastAccess,
-		&entry.NamedEntry.AccessCount,
+		&entry.ID,
+		&entry.Name,
+		&entry.Type,
+		&entry.Workspace,
+		&entry.Summary,
+		&entry.Result,
+		&entry.Digests,
+		&entry.CreatedAt,
+		&entry.UpdatedAt,
+		&entry.LastAccess,
+		&entry.AccessCount,
 		&embeddingStr,
 	)
 	if err != nil {

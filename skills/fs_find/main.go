@@ -403,8 +403,8 @@ func relativeTo(base, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func preparePreview(results []fileResult, max int) ([]fileResult, bool) {
-	preview, truncated := skillslib.PreparePreview(results, max)
+func preparePreview(results []fileResult, limit int) ([]fileResult, bool) {
+	preview, truncated := skillslib.PreparePreview(results, limit)
 	if truncated {
 		dup := make([]fileResult, len(preview))
 		copy(dup, preview)

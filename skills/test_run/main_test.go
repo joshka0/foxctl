@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestParseInput(t *testing.T) {
+func TestParseInput(_ *testing.T) {
 	// Test valid input parsing
 }
 

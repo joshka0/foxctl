@@ -672,11 +672,11 @@ func relativeTo(base, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func preparePreview(vulns []vulnerability, max int) ([]vulnerability, bool) {
-	if len(vulns) <= max {
+func preparePreview(vulns []vulnerability, limit int) ([]vulnerability, bool) {
+	if len(vulns) <= limit {
 		return vulns, false
 	}
-	return vulns[:max], true
+	return vulns[:limit], true
 }
 
 func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, vulns []vulnerability, truncated bool) (runner.Artifact, error) {

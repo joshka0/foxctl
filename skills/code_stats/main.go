@@ -431,14 +431,14 @@ func relativeTo(base, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func preparePreview(s *stats, max int) (*stats, bool) {
+func preparePreview(s *stats, limit int) (*stats, bool) {
 	// For stats, keep the full struct; return a truncated view for preview only.
-	if max <= 0 || len(s.Breakdown) <= max {
+	if limit <= 0 || len(s.Breakdown) <= limit {
 		return s, false
 	}
 	cp := *s
-	cp.Breakdown = make([]breakdownItem, max)
-	copy(cp.Breakdown, s.Breakdown[:max])
+	cp.Breakdown = make([]breakdownItem, limit)
+	copy(cp.Breakdown, s.Breakdown[:limit])
 	return &cp, true
 }
 

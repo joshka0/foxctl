@@ -332,7 +332,7 @@ func queryAuthors(ctx context.Context, workspace, path string, in input) ([]gitR
 	return parseAuthors(output, in.MaxResults), nil
 }
 
-func parseRecentChanges(output []byte, workspace string, maxResults int) []gitResult {
+func parseRecentChanges(output []byte, _ string, maxResults int) []gitResult {
 	var results []gitResult
 	lines := strings.Split(string(output), "\n")
 
@@ -382,7 +382,7 @@ func parseRecentChanges(output []byte, workspace string, maxResults int) []gitRe
 	return results
 }
 
-func parseHotspots(output []byte, workspace string, maxResults int) []gitResult {
+func parseHotspots(output []byte, _ string, maxResults int) []gitResult {
 	lines := strings.Split(string(output), "\n")
 	fileCounts := make(map[string]int)
 
@@ -538,8 +538,8 @@ func parseSinceArg(since string) string {
 	return since
 }
 
-func preparePreview(results []gitResult, max int) ([]gitResult, bool) {
-	preview, truncated := skillslib.PreparePreview(results, max)
+func preparePreview(results []gitResult, limit int) ([]gitResult, bool) {
+	preview, truncated := skillslib.PreparePreview(results, limit)
 	if truncated {
 		dup := make([]gitResult, len(preview))
 		copy(dup, preview)

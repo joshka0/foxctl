@@ -425,11 +425,11 @@ func (p *Paginator) advanceOffset(resp *Response) (*http.Request, bool, error) {
 			return nil, false, nil
 		}
 		if items < p.pageSize {
-			if hasMore, ok := resp.HasMoreFlag(); ok && hasMore {
-				// continue despite shorter page
-			} else {
+			hasMore, ok := resp.HasMoreFlag()
+			if !ok || !hasMore {
 				return nil, false, nil
 			}
+			// continue despite shorter page
 		}
 		p.pageNumber++
 		q.Set(p.pageParam, strconv.Itoa(p.pageNumber))
@@ -470,11 +470,11 @@ func (p *Paginator) advanceOffset(resp *Response) (*http.Request, bool, error) {
 		if p.totalRecords > 0 && p.currentOffset >= p.totalRecords {
 			return nil, false, nil
 		}
-		if hasMore, ok := resp.HasMoreFlag(); ok && hasMore {
-			// continue
-		} else {
+		hasMore, ok := resp.HasMoreFlag()
+		if !ok || !hasMore {
 			return nil, false, nil
 		}
+		// continue
 	}
 
 	q.Set(p.offsetParam, strconv.Itoa(p.currentOffset))

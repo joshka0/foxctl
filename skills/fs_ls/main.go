@@ -138,8 +138,8 @@ func resolveWorkspace(rc *runner.RunnerContext, path string) (string, error) {
 	return valid, nil
 }
 
-func preparePreview(entries []entry, max int) ([]entry, bool) {
-	preview, truncated := skillslib.PreparePreview(entries, max)
+func preparePreview(entries []entry, limit int) ([]entry, bool) {
+	preview, truncated := skillslib.PreparePreview(entries, limit)
 	if truncated {
 		dup := make([]entry, len(preview))
 		copy(dup, preview)
@@ -159,12 +159,12 @@ func persistListingArtifact(ctx context.Context, rc *runner.RunnerContext, entri
 	return artifact, nil
 }
 
-func limitEntries(entries []entry, max int) ([]entry, bool) {
-	if max <= 0 || len(entries) <= max {
+func limitEntries(entries []entry, limit int) ([]entry, bool) {
+	if limit <= 0 || len(entries) <= limit {
 		return entries, false
 	}
-	clipped := make([]entry, max)
-	copy(clipped, entries[:max])
+	clipped := make([]entry, limit)
+	copy(clipped, entries[:limit])
 	return clipped, true
 }
 

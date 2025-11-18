@@ -17,7 +17,7 @@ import (
 func TestExecuteInlineJSON(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Api-Key", "secret")
 		if err := json.NewEncoder(w).Encode([]map[string]any{
@@ -72,7 +72,7 @@ func TestExecuteStoresLargeBodyInCAS(t *testing.T) {
 
 	payload := buildLargeJSONArray(t, 200)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write(payload); err != nil {
 			t.Fatalf("write payload: %v", err)
@@ -116,7 +116,7 @@ func TestExecuteStoresLargeBodyInCAS(t *testing.T) {
 func TestExecuteReturnsHTTPError(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		if err := json.NewEncoder(w).Encode(map[string]any{"error": "invalid"}); err != nil {
@@ -163,7 +163,7 @@ func TestExecuteReturnsHTTPError(t *testing.T) {
 func TestExecuteTimeout(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))

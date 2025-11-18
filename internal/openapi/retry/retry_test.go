@@ -232,7 +232,7 @@ type trackingBody struct {
 	closed *bool
 }
 
-func (tb *trackingBody) Read(p []byte) (int, error) {
+func (tb *trackingBody) Read(_ []byte) (int, error) {
 	return 0, io.EOF
 }
 

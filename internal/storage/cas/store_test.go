@@ -28,7 +28,7 @@ func TestPutHeadGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("head: %v", err)
 	}
-	if head.Metadata.Size != obj.Metadata.Size {
+	if head.Size != obj.Size {
 		t.Fatalf("size mismatch")
 	}
 

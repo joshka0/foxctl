@@ -289,10 +289,11 @@ func buildHunks(oldLines, newLines []string, lcs [][]int, context int) []diffHun
 			}
 
 			// Add the change
-			if change.op == -1 {
+			switch change.op {
+			case -1:
 				currentHunk.Lines = append(currentHunk.Lines, "-"+oldLines[change.oldPos])
 				currentHunk.OldLines++
-			} else if change.op == 1 {
+			case 1:
 				currentHunk.Lines = append(currentHunk.Lines, "+"+newLines[change.newPos])
 				currentHunk.NewLines++
 			}
@@ -389,20 +390,6 @@ func relativeTo(base, target string) string {
 		return rel
 	}
 	return target
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func fail(command, code string, err error) {

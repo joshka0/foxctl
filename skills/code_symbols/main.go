@@ -442,7 +442,7 @@ func exprToString(expr ast.Expr) string {
 	}
 }
 
-func extractPythonSymbols(path, workspace string, in input) ([]symbol, error) {
+func extractPythonSymbols(path, workspace string, _ input) ([]symbol, error) {
 	// Simple regex-based extraction for Python
 	// A full AST parser would be better but this provides basic functionality
 	content, err := os.ReadFile(path)
@@ -496,7 +496,7 @@ func extractPythonSymbols(path, workspace string, in input) ([]symbol, error) {
 	return symbols, nil
 }
 
-func extractJSSymbols(path, workspace string, in input) ([]symbol, error) {
+func extractJSSymbols(path, workspace string, _ input) ([]symbol, error) {
 	// Simple regex-based extraction for JavaScript/TypeScript
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -610,8 +610,8 @@ func relativeTo(base, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func preparePreview(symbols []symbol, max int) ([]symbol, bool) {
-	preview, truncated := skillslib.PreparePreview(symbols, max)
+func preparePreview(symbols []symbol, limit int) ([]symbol, bool) {
+	preview, truncated := skillslib.PreparePreview(symbols, limit)
 	if truncated {
 		dup := make([]symbol, len(preview))
 		copy(dup, preview)

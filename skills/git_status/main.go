@@ -127,7 +127,7 @@ func resolveRepoPath(rc *runner.RunnerContext, path string) (string, error) {
 	return valid, nil
 }
 
-func getStatus(ctx context.Context, rc *runner.RunnerContext, repoPath string) (map[string]any, error) {
+func getStatus(ctx context.Context, _ *runner.RunnerContext, repoPath string) (map[string]any, error) {
 	// Get porcelain status
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain=v1", "-b")
 	output, err := cmd.Output()
@@ -229,7 +229,7 @@ func getDiff(ctx context.Context, rc *runner.RunnerContext, repoPath string, in 
 	return data, nil
 }
 
-func getLog(ctx context.Context, rc *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
+func getLog(ctx context.Context, _ *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
 	format := "--pretty=format:%H%x00%h%x00%an%x00%ai%x00%s"
 	args := []string{"-C", repoPath, "log", format, fmt.Sprintf("-%d", in.Limit)}
 
