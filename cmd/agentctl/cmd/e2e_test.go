@@ -75,13 +75,39 @@ func newCASHarness(t *testing.T) *casHarness {
 	workdir := t.TempDir()
 	samplePath := filepath.Join(workdir, "sample.txt")
 	buildSampleFile(t, samplePath)
+
+	// Create a minimal OpenAPI spec for testing
+	specPath := filepath.Join(workdir, "test-spec.yaml")
+	testSpec := `openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0.0
+servers:
+  - url: https://api.example.com
+paths:
+  /todos:
+    get:
+      operationId: listTodos
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Success
+`
+	if err := os.WriteFile(specPath, []byte(testSpec), 0o644); err != nil {
+		t.Fatalf("write test spec: %v", err)
+	}
+
 	ctx := config.WithContext(context.Background(), cfg)
 	return &casHarness{
 		cfg:          cfg,
 		ctx:          ctx,
 		workdir:      workdir,
 		samplePath:   samplePath,
-		openapiInput: `{"base_url":"https://api.example.com","path":"/todos","method":"GET","dry_run":true,"query":{"limit":"5"}}`,
+		openapiInput: fmt.Sprintf(`{"spec":%q,"operationId":"listTodos","params":{"query":{"limit":5}},"dry_run":true}`, specPath),
 	}
 }
 

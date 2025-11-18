@@ -4,9 +4,10 @@ unexport GOBIN
 unexport GOTOOLDIR
 GO ?= go
 GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
+GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
 BINARY ?= agentctl
 GOFUMPT ?= $(GO_CMD) run mvdan.cc/gofumpt@v0.7.0
-GOLANGCI ?= $(GO_CMD) run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0
+GOLANGCI ?= $(GO_CMD_CGO) run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 
@@ -21,27 +22,27 @@ lint:
 	@$(GOLANGCI) run ./...
 
 vet:
-	@$(GO_CMD) vet ./...
+	@$(GO_CMD_CGO) vet ./...
 
 test:
-	@$(GO_CMD) test ./...
+	@$(GO_CMD_CGO) test ./...
 
 test-short:
-	@$(GO_CMD) test -short ./...
+	@$(GO_CMD_CGO) test -short ./...
 
 test-race:
 	@env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO) test -race ./...
 
 cover:
 	@mkdir -p coverage
-	@$(GO_CMD) test ./... -covermode=atomic -coverprofile=coverage/coverage.out
-	@$(GO_CMD) tool cover -func=coverage/coverage.out
+	@$(GO_CMD_CGO) test ./... -covermode=atomic -coverprofile=coverage/coverage.out
+	@$(GO_CMD_CGO) tool cover -func=coverage/coverage.out
 
 check-coverage:
 	@echo "Checking test coverage..."
 	@mkdir -p coverage
-	@$(GO_CMD) test ./... -coverprofile=coverage/coverage.out -covermode=atomic 2>&1 | grep -v "no test files" || true
-	@$(GO_CMD) tool cover -func=coverage/coverage.out | tee coverage/coverage.txt
+	@$(GO_CMD_CGO) test ./... -coverprofile=coverage/coverage.out -covermode=atomic 2>&1 | grep -v "no test files" || true
+	@$(GO_CMD_CGO) tool cover -func=coverage/coverage.out | tee coverage/coverage.txt
 	@awk '/^total:/ {gsub("%",""); if ($$3 < 85.0) { \
 		print "❌ Coverage " $$3 "% is below 85% threshold"; exit 1; } \
 		else { print "✅ Coverage " $$3 "% meets threshold"; exit 0; }}' \
@@ -52,7 +53,7 @@ build:
 	VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev); \
 	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
 	DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
-	$(GO_CMD) build -trimpath \
+	$(GO_CMD_CGO) build -trimpath \
 		-ldflags="-s -w \
 		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Version=$$VERSION \
 		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Commit=$$COMMIT \
@@ -66,7 +67,7 @@ skills-build:
 		outdir=dist/skills/$$name; \
 		mkdir -p $$outdir; \
 		if ls $$dir/*.go >/dev/null 2>&1; then \
-			$(GO_CMD) build -o $$outdir/bin ./$$dir; \
+			$(GO_CMD_CGO) build -o $$outdir/bin ./$$dir; \
 		fi; \
 		if [ -f $$dir/module.wasm ]; then \
 			cp $$dir/module.wasm $$outdir/module.wasm; \
@@ -79,7 +80,7 @@ skills-build:
 skills-test:
 	@for dir in $(SKILL_DIRS); do \
 		if ls $$dir/*.go >/dev/null 2>&1; then \
-			$(GO_CMD) test ./$$dir; \
+			$(GO_CMD_CGO) test ./$$dir; \
 		fi; \
 	done
 

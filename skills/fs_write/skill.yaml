@@ -1,0 +1,54 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: fs/write
+  version: 0.1.0
+  description: "Write or append content to files"
+  tags: ["fs", "write", "files"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/fs_write/fs_write
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: fs/write
+  parameters:
+    - name: path
+      type: string
+      required: true
+      description: "File path to write"
+    - name: content
+      type: string
+      required: false
+      description: "Content to write (use this OR digest)"
+    - name: digest
+      type: string
+      required: false
+      description: "CAS digest to read content from (use this OR content)"
+    - name: mode
+      type: string
+      required: false
+      description: "Write mode: create, overwrite, append"
+      enum: ["create", "overwrite", "append"]
+      default: "create"
+    - name: permissions
+      type: string
+      required: false
+      default: "0644"
+      description: "File permissions (octal, e.g., 0644)"
+    - name: create_dirs
+      type: boolean
+      required: false
+      default: false
+      description: "Create parent directories if they don't exist"
+returns:
+  - name: result
+    type: object
+    description: "Write operation result"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

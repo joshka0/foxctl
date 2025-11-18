@@ -86,8 +86,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p coverage
-          go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
-          go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
+          CGO_ENABLED=1 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
+          CGO_ENABLED=1 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
           awk '/total:/ { if ($3+0 < 50.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
 
       - name: Build CLI
@@ -97,7 +97,7 @@ jobs:
         run: make skills-build
 
       - name: Check skill manifests (policy)
-        run: go run ./scripts/checkmanifests
+        run: CGO_ENABLED=1 go run ./scripts/checkmanifests
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -127,7 +127,7 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: Run ${{ matrix.test }} (cmd/agentctl/cmd)
         run: |
-          CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
+          CGO_ENABLED=1 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
 
   all-checks:
     needs: [build-test, e2e-tests]

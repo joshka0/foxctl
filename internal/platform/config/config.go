@@ -26,6 +26,7 @@ type Config struct {
 	InlineOutputKB int             `mapstructure:"inline_output_kb" json:"inline_output_kb"`
 	MaxCaptureKB   int             `mapstructure:"max_capture_kb" json:"max_capture_kb"`
 	Paths          Paths           `mapstructure:"paths" json:"paths"`
+	Storage        StorageSettings `mapstructure:"storage" json:"storage"`
 	Memory         MemorySettings  `mapstructure:"memory" json:"memory"`
 	Cache          CacheSettings   `mapstructure:"cache" json:"cache"`
 	Logging        LoggingSettings `mapstructure:"logging" json:"logging"`
@@ -38,6 +39,11 @@ type Paths struct {
 	Jobs   string `mapstructure:"jobs" json:"jobs"`
 	Cache  string `mapstructure:"cache" json:"cache"`
 	Skills string `mapstructure:"skills" json:"skills"`
+}
+
+// StorageSettings configure persistent storage for agents, mailboxes, blackboard, and quotas.
+type StorageSettings struct {
+	Root string `mapstructure:"root" json:"root"`
 }
 
 // MemorySettings influence cache + named memory behavior.
@@ -131,6 +137,7 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("paths.jobs", filepath.Join(defaultHome, "jobs"))
 	v.SetDefault("paths.cache", filepath.Join(defaultHome, "cache"))
 	v.SetDefault("paths.skills", filepath.Join(defaultHome, "skills"))
+	v.SetDefault("storage.root", filepath.Join(defaultHome, "storage"))
 	v.SetDefault("memory.auto_cache_ttl", "24h")
 	v.SetDefault("memory.default_named_ttl", "720h") // 30d
 	v.SetDefault("memory.auto_load_workspace", true)
@@ -174,6 +181,7 @@ func finalizeConfig(cfg Config, home string) Config {
 	cfg.Paths.Jobs = resolvePath(cfg.Paths.Jobs, cfg.Home, home)
 	cfg.Paths.Cache = resolvePath(cfg.Paths.Cache, cfg.Home, home)
 	cfg.Paths.Skills = resolvePath(cfg.Paths.Skills, cfg.Home, home)
+	cfg.Storage.Root = resolvePath(cfg.Storage.Root, cfg.Home, home)
 	if len(cfg.OpenAPI.PluginPath) == 0 {
 		cfg.OpenAPI.PluginPath = []string{filepath.Join(cfg.Home, "plugins")}
 	}

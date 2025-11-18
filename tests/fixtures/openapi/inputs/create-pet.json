@@ -1,0 +1,14 @@
+{
+  "spec": "./tests/fixtures/openapi/specs/petstore.yaml",
+  "operationId": "createPet",
+  "params": {
+    "body": {
+      "name": "Fluffy",
+      "tag": "cat"
+    }
+  },
+  "auth": {
+    "type": "bearer",
+    "token": "test-token-123"
+  }
+}
