@@ -2,9 +2,9 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: text/replace
-  version: 0.1.0
-  description: "Search and replace text in files using regex or literal patterns"
-  tags: ["text", "replace", "search", "files", "regex"]
+  version: 0.2.0
+  description: "Advanced search and replace with backups, multi-line support, line ranges, and validation - more powerful than sed"
+  tags: ["text", "replace", "search", "files", "regex", "sed", "refactor"]
 distribution:
   type: exec
   exec:
@@ -51,6 +51,59 @@ signature:
       type: array
       required: false
       description: "File extensions to filter (e.g., [\".go\", \".yaml\"])"
+    - name: case_insensitive
+      type: boolean
+      required: false
+      default: false
+      description: "Case-insensitive matching"
+    - name: word_boundary
+      type: boolean
+      required: false
+      default: false
+      description: "Match whole words only (adds \\b boundaries)"
+    - name: multiline
+      type: boolean
+      required: false
+      default: false
+      description: "Enable multi-line pattern matching"
+    - name: line_range
+      type: object
+      required: false
+      description: "Line range to operate on: {\"start\": 10, \"end\": 20} or {\"start_pattern\": \"BEGIN\", \"end_pattern\": \"END\"}"
+    - name: operations
+      type: array
+      required: false
+      description: "Multiple replacement operations: [{\"pattern\": \"old\", \"replacement\": \"new\"}]"
+    - name: backup
+      type: boolean
+      required: false
+      default: false
+      description: "Create backups before modifying files"
+    - name: backup_suffix
+      type: string
+      required: false
+      default: ".bak"
+      description: "Suffix for backup files"
+    - name: validate_syntax
+      type: boolean
+      required: false
+      default: false
+      description: "Validate file syntax after changes (for known file types)"
+    - name: skip_binary
+      type: boolean
+      required: false
+      default: true
+      description: "Automatically skip binary files"
+    - name: preserve_line_endings
+      type: boolean
+      required: false
+      default: true
+      description: "Preserve original line endings (CRLF vs LF)"
+    - name: show_diff
+      type: boolean
+      required: false
+      default: false
+      description: "Show unified diff in preview"
   returns:
     - name: files_modified
       type: integer
