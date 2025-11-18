@@ -123,7 +123,7 @@ func TestWithTx_ErrorReturnsZeroValue(t *testing.T) {
 	db := openTestDB(t)
 	setupNumbersTable(t, db)
 
-	res, err := WithTx(context.Background(), db, func(tx *sql.Tx) (int, error) {
+	res, err := WithTx(context.Background(), db, func(_ *sql.Tx) (int, error) {
 		return 0, errors.New("fail")
 	})
 	if err == nil {

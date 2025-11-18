@@ -1,0 +1,56 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/imports
+  version: 0.1.0
+  description: "Analyze import/dependency relationships: build dependency graphs, find unused imports, detect cycles"
+  tags: ["code", "imports", "dependencies", "graph"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_imports/code_imports
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/imports
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "File or directory to analyze (default .)"
+    - name: query_type
+      type: string
+      required: false
+      enum: ["list", "graph", "deps", "dependents", "unused", "external"]
+      default: "list"
+      description: "Type of analysis to perform"
+    - name: language
+      type: string
+      required: false
+      enum: ["go", "python", "javascript", "typescript", "auto"]
+      default: "auto"
+      description: "Programming language (auto-detect from extension)"
+    - name: include_std
+      type: boolean
+      required: false
+      default: false
+      description: "Include standard library imports"
+    - name: max_depth
+      type: integer
+      required: false
+      default: 3
+      description: "Maximum depth for dependency traversal"
+    - name: max_results
+      type: integer
+      required: false
+      default: 500
+      description: "Maximum number of results"
+returns:
+  - name: imports
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

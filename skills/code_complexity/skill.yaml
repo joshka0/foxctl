@@ -1,0 +1,62 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/complexity
+  version: 0.1.0
+  description: "Code complexity analysis: cyclomatic, cognitive, nesting depth, function length"
+  tags: ["code", "complexity", "quality", "metrics"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_complexity/code_complexity
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/complexity
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "File or directory to analyze (default .)"
+    - name: analysis_mode
+      type: string
+      required: false
+      enum: ["file", "function", "aggregate", "hotspots"]
+      default: "hotspots"
+      description: "Analysis mode"
+    - name: metric
+      type: string
+      required: false
+      enum: ["cyclomatic", "cognitive", "all"]
+      default: "cyclomatic"
+      description: "Complexity metric to calculate"
+    - name: threshold
+      type: integer
+      required: false
+      default: 10
+      description: "Complexity threshold for hotspot detection"
+    - name: language
+      type: string
+      required: false
+      enum: ["go", "python", "javascript", "typescript", "auto"]
+      default: "auto"
+      description: "Programming language"
+    - name: include_tests
+      type: boolean
+      required: false
+      default: false
+      description: "Include test files in analysis"
+    - name: max_results
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum number of results"
+returns:
+  - name: complexity
+    type: object
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

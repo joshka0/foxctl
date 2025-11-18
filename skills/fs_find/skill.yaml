@@ -1,0 +1,76 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: fs/find
+  version: 0.1.0
+  description: "Advanced file discovery with multi-signal ranking: name, path, size, modified time"
+  tags: ["filesystem", "search", "discovery"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/fs_find/fs_find
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: fs/find
+  parameters:
+    - name: query
+      type: string
+      required: false
+      description: "Search query for fuzzy matching filenames and paths"
+    - name: path
+      type: string
+      required: false
+      description: "Starting directory (default .)"
+    - name: pattern
+      type: string
+      required: false
+      description: "Glob pattern for filenames (e.g., '*.go', '*.{js,ts}')"
+    - name: type
+      type: string
+      required: false
+      enum: ["file", "directory", "any"]
+      default: "file"
+      description: "Type of entries to find"
+    - name: min_size
+      type: integer
+      required: false
+      description: "Minimum file size in bytes"
+    - name: max_size
+      type: integer
+      required: false
+      description: "Maximum file size in bytes"
+    - name: modified_since
+      type: string
+      required: false
+      description: "Find files modified since (e.g., '7d', '1w', '1m')"
+    - name: max_depth
+      type: integer
+      required: false
+      default: 0
+      description: "Maximum directory depth (0 = unlimited)"
+    - name: hidden
+      type: boolean
+      required: false
+      default: false
+      description: "Include hidden files and directories"
+    - name: sort_by
+      type: string
+      required: false
+      enum: ["relevance", "name", "size", "modified"]
+      default: "relevance"
+      description: "Sort order for results"
+    - name: max_results
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum number of results"
+returns:
+  - name: files
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

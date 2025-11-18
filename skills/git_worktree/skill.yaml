@@ -1,0 +1,56 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: git/worktree
+  version: 0.1.0
+  description: "Manage git worktrees - list, add, remove, prune"
+  tags: ["git", "worktree", "vcs"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/git_worktree/git_worktree
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: git/worktree
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation to perform: list, add, remove, prune"
+      enum: ["list", "add", "remove", "prune"]
+    - name: path
+      type: string
+      required: false
+      description: "Path for add/remove operations"
+    - name: branch
+      type: string
+      required: false
+      description: "Branch name for add operation"
+    - name: repo_path
+      type: string
+      required: false
+      description: "Path to git repository (default: current directory)"
+    - name: force
+      type: boolean
+      required: false
+      default: false
+      description: "Force remove for remove operation"
+    - name: new_branch
+      type: boolean
+      required: false
+      default: false
+      description: "Create new branch for add operation"
+returns:
+  - name: worktrees
+    type: array
+    description: "List of worktrees (for list operation)"
+  - name: message
+    type: string
+    description: "Operation result message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

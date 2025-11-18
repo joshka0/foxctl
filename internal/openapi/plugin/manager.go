@@ -666,7 +666,7 @@ func exitCode(err error) (int, bool) {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		if exitErr.ProcessState != nil {
-			return exitErr.ProcessState.ExitCode(), true
+			return exitErr.ExitCode(), true
 		}
 	}
 	return 0, false

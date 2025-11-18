@@ -66,7 +66,7 @@ func TestRetryerExecute_NonRetryable(t *testing.T) {
 	retryer := New(Config{Jitter: boolPtr(false)})
 
 	sleepCalled := false
-	retryer.sleep = func(_ context.Context, d time.Duration) error {
+	retryer.sleep = func(_ context.Context, _ time.Duration) error {
 		sleepCalled = true
 		return nil
 	}
@@ -232,7 +232,7 @@ type trackingBody struct {
 	closed *bool
 }
 
-func (tb *trackingBody) Read(p []byte) (int, error) {
+func (tb *trackingBody) Read(_ []byte) (int, error) {
 	return 0, io.EOF
 }
 

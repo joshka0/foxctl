@@ -1,0 +1,59 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: data/jq
+  version: 0.1.0
+  description: "Process JSON/YAML using jq query language"
+  tags: ["jq", "json", "yaml", "query", "data"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/data_jq/data_jq
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: data/jq
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "JQ query expression (e.g., '.data.items[] | select(.active)')"
+    - name: input
+      type: string
+      required: true
+      description: "JSON/YAML input data"
+    - name: raw_output
+      type: boolean
+      required: false
+      default: false
+      description: "Output raw strings, not JSON"
+    - name: compact
+      type: boolean
+      required: false
+      default: false
+      description: "Compact instead of pretty-printed output"
+    - name: slurp
+      type: boolean
+      required: false
+      default: false
+      description: "Read entire input stream into array"
+    - name: sort_keys
+      type: boolean
+      required: false
+      default: false
+      description: "Sort object keys in output"
+    - name: yaml_input
+      type: boolean
+      required: false
+      default: false
+      description: "Parse input as YAML (requires gojq; standard jq does not support --yaml-input)"
+returns:
+  - name: result
+    type: object
+    description: "Query result"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

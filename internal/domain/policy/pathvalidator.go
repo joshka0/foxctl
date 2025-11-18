@@ -11,19 +11,26 @@ import (
 )
 
 var (
-	ErrPathEscape    = errors.New("path escapes workspace")
+	// ErrPathEscape indicates the path resolves outside the workspace.
+	ErrPathEscape = errors.New("path escapes workspace")
+	// ErrSymlinkEscape indicates a symlink resolves outside the workspace.
 	ErrSymlinkEscape = errors.New("symlink points outside workspace")
-	ErrInvalidPath   = errors.New("invalid path")
-	ErrNullByte      = errors.New("path contains null byte")
-	ErrNotAbsolute   = errors.New("path must resolve to an absolute location")
+	// ErrInvalidPath indicates the path is invalid or malformed.
+	ErrInvalidPath = errors.New("invalid path")
+	// ErrNullByte indicates the path contains a null byte.
+	ErrNullByte = errors.New("path contains null byte")
+	// ErrNotAbsolute indicates the path must resolve to an absolute location.
+	ErrNotAbsolute = errors.New("path must resolve to an absolute location")
 )
 
+// PathValidator ensures paths are safe and within the workspace or allowed roots.
 type PathValidator struct {
 	workspace      string
 	allowedRoots   []string
 	followSymlinks bool
 }
 
+// NewPathValidator creates a new validator anchored to the workspace.
 func NewPathValidator(workspace string, allowedRoots []string) (*PathValidator, error) {
 	if strings.TrimSpace(workspace) == "" {
 		return nil, fmt.Errorf("workspace cannot be empty")
@@ -72,6 +79,8 @@ func NewPathValidator(workspace string, allowedRoots []string) (*PathValidator, 
 	}, nil
 }
 
+// ValidatePath validates and resolves a user-provided path.
+// It returns the absolute canonical path if valid, or an error if it escapes the workspace.
 func (v *PathValidator) ValidatePath(userPath string) (string, error) {
 	if v == nil {
 		return "", fmt.Errorf("path validator not configured")
@@ -116,6 +125,7 @@ func (v *PathValidator) ValidatePath(userPath string) (string, error) {
 	return "", ErrPathEscape
 }
 
+// Workspace returns the configured workspace path.
 func (v *PathValidator) Workspace() string {
 	if v == nil {
 		return ""
@@ -123,6 +133,7 @@ func (v *PathValidator) Workspace() string {
 	return v.workspace
 }
 
+// AllowedRoots returns the list of additional allowed root directories.
 func (v *PathValidator) AllowedRoots() []string {
 	if v == nil {
 		return nil

@@ -1,0 +1,56 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/symbols
+  version: 0.1.0
+  description: "Extract code symbols: functions, types, interfaces, structs, methods (Go, Python, JS/TS)"
+  tags: ["code", "symbols", "ast", "functions", "types"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_symbols/code_symbols
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/symbols
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "File or directory to analyze (default .)"
+    - name: symbol_type
+      type: string
+      required: false
+      enum: ["all", "function", "method", "type", "struct", "interface", "const", "var"]
+      default: "all"
+      description: "Type of symbols to extract"
+    - name: language
+      type: string
+      required: false
+      enum: ["go", "python", "javascript", "typescript", "auto"]
+      default: "auto"
+      description: "Programming language (auto-detect from extension)"
+    - name: include_private
+      type: boolean
+      required: false
+      default: false
+      description: "Include private/unexported symbols"
+    - name: include_docs
+      type: boolean
+      required: false
+      default: true
+      description: "Include documentation comments"
+    - name: max_results
+      type: integer
+      required: false
+      default: 500
+      description: "Maximum number of symbols to return"
+returns:
+  - name: symbols
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

@@ -8,6 +8,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
 
+// HandleResult processes the execution result, pinning artifacts, persisting to cache/memory, and emitting the output.
 func (e *Executor) HandleResult(jobID string, result []byte) error {
 	// Downgrade artifact handling failures to warnings - we still pin in CAS,
 	// but if metadata write fails, log to stderr and continue with the result envelope

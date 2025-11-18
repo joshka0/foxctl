@@ -66,13 +66,13 @@ func TestStoreRunAndPrepareUseExecutor(t *testing.T) {
 	manifest := skill.Manifest{Metadata: skill.Metadata{Name: "test"}}
 	expectedJob := types.Job{ID: "job-1", State: types.StateOK}
 	fakePersist.jobs[expectedJob.ID] = expectedJob
-	fakeExec.runSkillFn = func(ctx context.Context, m skill.Manifest, artifactPath string, input []byte) (types.Job, []byte, error) {
+	fakeExec.runSkillFn = func(_ context.Context, m skill.Manifest, _ string, _ []byte) (types.Job, []byte, error) {
 		if m.Metadata.Name != manifest.Metadata.Name {
 			t.Fatalf("unexpected manifest: %+v", m)
 		}
 		return expectedJob, []byte("result"), nil
 	}
-	fakeExec.findOrPrepareFn = func(ctx context.Context, name string, input []byte, dedupe bool) (types.Job, bool, error) {
+	fakeExec.findOrPrepareFn = func(_ context.Context, name string, input []byte, _ bool) (types.Job, bool, error) {
 		return types.Job{ID: "prepared", Command: name, ArgsJSON: string(input)}, false, nil
 	}
 
@@ -168,7 +168,7 @@ func newFakePersistence() *fakePersistence {
 
 func (f *fakePersistence) Close() error { return nil }
 
-func (f *fakePersistence) List(ctx context.Context, limit int) ([]types.Job, error) {
+func (f *fakePersistence) List(_ context.Context, _ int) ([]types.Job, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	jobs := make([]types.Job, 0, len(f.jobs))
@@ -178,7 +178,7 @@ func (f *fakePersistence) List(ctx context.Context, limit int) ([]types.Job, err
 	return jobs, nil
 }
 
-func (f *fakePersistence) Get(ctx context.Context, id string) (types.Job, error) {
+func (f *fakePersistence) Get(_ context.Context, id string) (types.Job, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	job, ok := f.jobs[id]
@@ -188,7 +188,7 @@ func (f *fakePersistence) Get(ctx context.Context, id string) (types.Job, error)
 	return job, nil
 }
 
-func (f *fakePersistence) InsertJob(ctx context.Context, job types.Job) error {
+func (f *fakePersistence) InsertJob(_ context.Context, job types.Job) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.jobs[job.ID] = job
@@ -196,7 +196,7 @@ func (f *fakePersistence) InsertJob(ctx context.Context, job types.Job) error {
 	return nil
 }
 
-func (f *fakePersistence) UpdateState(ctx context.Context, id string, newState types.State, errMsg, resultPath string) error {
+func (f *fakePersistence) UpdateState(_ context.Context, id string, newState types.State, errMsg, resultPath string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	job, ok := f.jobs[id]
@@ -214,14 +214,14 @@ func (f *fakePersistence) UpdateState(ctx context.Context, id string, newState t
 	return nil
 }
 
-func (f *fakePersistence) Delete(ctx context.Context, id string) error {
+func (f *fakePersistence) Delete(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.jobs, id)
 	return nil
 }
 
-func (f *fakePersistence) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
+func (f *fakePersistence) RecoverOrphanedJobs(_ context.Context) (int64, error) {
 	return 0, nil
 }
 

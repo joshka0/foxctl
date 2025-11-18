@@ -172,7 +172,7 @@ func parseRetryAfter(header http.Header) (time.Duration, bool) {
 	return 0, false
 }
 
-func scaleDelay(current time.Duration, multiplier float64, max time.Duration) time.Duration {
+func scaleDelay(current time.Duration, multiplier float64, limit time.Duration) time.Duration {
 	if multiplier < 1 {
 		multiplier = defaultMultiplier
 	}
@@ -181,8 +181,8 @@ func scaleDelay(current time.Duration, multiplier float64, max time.Duration) ti
 	if next < 0 {
 		next = current
 	}
-	if next > max {
-		return max
+	if next > limit {
+		return limit
 	}
 	return next
 }

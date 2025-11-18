@@ -38,7 +38,7 @@ func TestWithConfigLoadsWhenMissing(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
-	if err := WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+	if err := WithConfig(cmd, func(_ context.Context, cfg config.Config) error {
 		if cfg.Home == "" {
 			t.Fatalf("expected home to be set")
 		}

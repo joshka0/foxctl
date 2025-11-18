@@ -1,0 +1,14 @@
+{
+  "spec": "./tests/fixtures/openapi/specs/petstore.yaml",
+  "operationId": "getPetById",
+  "params": {
+    "path": {
+      "petId": 456
+    }
+  },
+  "auth": {
+    "type": "bearer",
+    "token": "secret-token"
+  },
+  "dry_run": true
+}

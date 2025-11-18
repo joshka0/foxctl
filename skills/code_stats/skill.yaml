@@ -1,0 +1,45 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/stats
+  version: 0.1.0
+  description: "Codebase statistics: file counts, language detection, lines of code, directory analysis"
+  tags: ["code", "statistics", "analysis", "language"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_stats/code_stats
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/stats
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "Directory to analyze (default .)"
+    - name: breakdown_by
+      type: string
+      required: false
+      enum: ["language", "directory", "extension"]
+      default: "language"
+      description: "How to break down statistics"
+    - name: include_tests
+      type: boolean
+      required: false
+      default: true
+      description: "Include test files in statistics"
+    - name: max_depth
+      type: integer
+      required: false
+      default: 0
+      description: "Maximum directory depth (0 = unlimited)"
+returns:
+  - name: statistics
+    type: object
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

@@ -1,3 +1,4 @@
+// Package main implements a custom pagination plugin.
 package main
 
 import (
