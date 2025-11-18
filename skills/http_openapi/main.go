@@ -120,10 +120,28 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	ldr := loader.New(rc.CASStore, memStore, loader.WithWorkspace(workspace))
 	spec, err := ldr.Load(ctx, in.Spec)
 	if err != nil {
+		hint := "Verify the spec path exists and is a valid OpenAPI 3.0+ specification"
+		if strings.HasPrefix(in.Spec, "memory:") {
+			hint = fmt.Sprintf("Memory reference not found. Use 'agentctl openapi import <spec> --as %s' to import it first", strings.TrimPrefix(in.Spec, "memory:"))
+		} else if strings.HasPrefix(in.Spec, "http://") || strings.HasPrefix(in.Spec, "https://") {
+			hint = "Check the URL is accessible and returns a valid OpenAPI specification"
+		}
 		return &client.Error{
 			Code:    "EOPENAPI",
-			Message: fmt.Sprintf("failed to load spec %q: %v", in.Spec, err),
+			Message: fmt.Sprintf("failed to load spec %q: %v. %s", in.Spec, err, hint),
 			Err:     err,
+		}
+	}
+
+	// Check if operation exists and provide helpful error
+	if _, err := spec.GetOperation(in.OperationID); err != nil {
+		available := suggestOperations(spec, in.OperationID)
+		hint := fmt.Sprintf("Operation %q not found. Available operations: %s. Use 'agentctl openapi describe %s' to list all operations",
+			in.OperationID, available, in.Spec)
+		return &client.Error{
+			Code:    "EOPENAPI",
+			Message: hint,
+			Err:     fmt.Errorf("operation not found: %s", in.OperationID),
 		}
 	}
 
@@ -131,9 +149,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	bldr := builder.New(spec)
 	builtReq, err := bldr.Build(in.OperationID, in.Params)
 	if err != nil {
+		// Enhance error message with suggestions
+		hint := generateBuildHint(err, spec, in.OperationID)
 		return &client.Error{
 			Code:    "EARG",
-			Message: fmt.Sprintf("failed to build request: %v", err),
+			Message: fmt.Sprintf("failed to build request: %v. %s", err, hint),
 			Err:     err,
 		}
 	}
@@ -486,24 +506,93 @@ func generateHint(code string, statusCode int) string {
 	switch code {
 	case "EAUTH":
 		if statusCode == 401 {
-			return "Authentication failed. Check your credentials (token, API key, or username/password)."
+			return "Authentication failed. Check your credentials (token, API key, or username/password). Set environment variables like AGENTCTL_BEARER_TOKEN or pass credentials in the auth parameter."
 		}
 		if statusCode == 403 {
-			return "Authorization failed. You may not have permission to access this resource."
+			return "Authorization failed. You may not have permission to access this resource. Verify your API key has the required scopes."
 		}
 		return "Authentication error. Verify your credentials are correct and not expired."
 	case "EOPENAPI":
-		return "Failed to load or parse OpenAPI specification. Verify the spec path or memory reference is correct."
+		return "Failed to load or parse OpenAPI specification. Verify the spec path or memory reference is correct. Use 'agentctl openapi validate <spec>' to check for errors."
 	case "EARG":
-		return "Invalid parameters. Check that all required parameters are provided and have correct types."
+		return "Invalid parameters. Check that all required parameters are provided and have correct types. Use 'agentctl openapi describe <spec>' to see parameter requirements."
 	case "ERATELIMIT":
-		return "Rate limit exceeded. Wait before retrying, or reduce request frequency."
+		return "Rate limit exceeded. Wait before retrying, or reduce request frequency. Check the X-RateLimit-Reset header for when limits reset."
 	case "ERUNTIME":
 		if statusCode >= 500 {
-			return "Server error. The API may be experiencing issues. Try again later."
+			return "Server error. The API may be experiencing issues. Try again later or check the API status page."
 		}
-		return "Request failed. Check network connectivity and API availability."
+		return "Request failed. Check network connectivity and API availability. Use --dry_run to validate the request first."
+	case "EPAGINATION":
+		return "Pagination error. Try specifying the strategy manually with --paging.strategy or check the API documentation for pagination format."
 	default:
-		return "An error occurred. Check the error message for details."
+		return "An error occurred. Check the error message for details. Use --dry_run to preview the request."
 	}
+}
+
+func generateBuildHint(err error, spec *loader.Spec, operationID string) string {
+	errMsg := err.Error()
+
+	// Missing required parameter
+	if strings.Contains(errMsg, "missing required path parameter") {
+		op, _ := spec.GetOperation(operationID)
+		if op != nil {
+			var requiredParams []string
+			for _, param := range op.Parameters {
+				if param.Value != nil && param.Value.Required && param.Value.In == "path" {
+					requiredParams = append(requiredParams, param.Value.Name)
+				}
+			}
+			if len(requiredParams) > 0 {
+				return fmt.Sprintf("Required path parameters: %s. Example: {\"params\": {\"path\": {\"%s\": \"value\"}}}",
+					strings.Join(requiredParams, ", "), requiredParams[0])
+			}
+		}
+	}
+
+	// Parameter not found in template
+	if strings.Contains(errMsg, "not found in path template") {
+		return "The parameter name does not match the path template. Check the OpenAPI spec for correct parameter names."
+	}
+
+	// Unresolved parameters
+	if strings.Contains(errMsg, "unresolved path parameters") {
+		return "Some path parameters were not provided. Check that all {param} placeholders have corresponding values."
+	}
+
+	return "Review the operation parameters in the OpenAPI spec or use 'agentctl openapi describe <spec>' for details."
+}
+
+func suggestOperations(spec *loader.Spec, attempted string) string {
+	if spec == nil || len(spec.Operations) == 0 {
+		return "none"
+	}
+
+	// Get all operation IDs
+	var ids []string
+	for id := range spec.Operations {
+		ids = append(ids, id)
+	}
+
+	// If there are many operations, just show first few
+	if len(ids) > 5 {
+		// Try to find similar operations (fuzzy matching)
+		var similar []string
+		lower := strings.ToLower(attempted)
+		for _, id := range ids {
+			if strings.Contains(strings.ToLower(id), lower) || strings.Contains(lower, strings.ToLower(id)) {
+				similar = append(similar, id)
+				if len(similar) >= 5 {
+					break
+				}
+			}
+		}
+		if len(similar) > 0 {
+			return strings.Join(similar, ", ") + "..."
+		}
+		// Just show first 5
+		return strings.Join(ids[:5], ", ") + fmt.Sprintf(" (and %d more)", len(ids)-5)
+	}
+
+	return strings.Join(ids, ", ")
 }
