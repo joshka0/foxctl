@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: json/transform
+  version: 0.1.0
+  description: "Transform, merge, extract, and validate JSON data"
+  tags: ["json", "transform", "data"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/json_transform/json_transform
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: json/transform
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: extract, merge, validate, format, keys"
+      enum: ["extract", "merge", "validate", "format", "keys"]
+    - name: input
+      type: string
+      required: true
+      description: "JSON input (string or CAS digest)"
+    - name: path
+      type: string
+      required: false
+      description: "JSON path for extract operation (e.g., .data.items[0])"
+    - name: merge_with
+      type: string
+      required: false
+      description: "JSON to merge with (for merge operation)"
+    - name: indent
+      type: integer
+      required: false
+      default: 2
+      description: "Indentation spaces (for format operation)"
+    - name: compact
+      type: boolean
+      required: false
+      default: false
+      description: "Compact output (for format operation)"
+returns:
+  - name: result
+    type: object
+    description: "Transformation result"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

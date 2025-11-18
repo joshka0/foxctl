@@ -19,7 +19,7 @@ func (m *mockCloser) Close() error {
 }
 
 func TestMustClose(t *testing.T) {
-	t.Run("nil closer", func(t *testing.T) {
+	t.Run("nil closer", func(_ *testing.T) {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		MustClose(nil, logger) // Should not panic
 	})
@@ -44,7 +44,7 @@ func TestMustClose(t *testing.T) {
 }
 
 func TestCloseOnErr(t *testing.T) {
-	t.Run("nil closer", func(t *testing.T) {
+	t.Run("nil closer", func(_ *testing.T) {
 		var err error
 		CloseOnErr(nil, &err) // Should not panic
 	})
@@ -106,7 +106,7 @@ func TestMust(t *testing.T) {
 	})
 }
 
-func TestIgnore(t *testing.T) {
+func TestIgnore(_ *testing.T) {
 	// This function does nothing, just ensure it compiles and doesn't panic
 	Ignore(errors.New("test error"), "testing ignore")
 	Ignore(nil, "testing ignore with nil")

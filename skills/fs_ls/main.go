@@ -43,7 +43,7 @@ func main() {
 	if err != nil {
 		fail("fs/ls", "ECONFIG", err)
 	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := runner.NewContext(cfg, os.Stdout)
 	if err != nil {
 		fail("fs/ls", "ERUNTIME", err)
 	}
@@ -60,7 +60,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *runner.Context, in input) error {
 	validDir, err := resolveWorkspace(rc, in.Path)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveWorkspace(rc *runner.RunnerContext, path string) (string, error) {
+func resolveWorkspace(rc *runner.Context, path string) (string, error) {
 	valid, err := rc.PathValidator.ValidatePath(path)
 	if err != nil {
 		return "", fmt.Errorf("path validation failed: %w", err)
@@ -138,8 +138,8 @@ func resolveWorkspace(rc *runner.RunnerContext, path string) (string, error) {
 	return valid, nil
 }
 
-func preparePreview(entries []entry, max int) ([]entry, bool) {
-	preview, truncated := skillslib.PreparePreview(entries, max)
+func preparePreview(entries []entry, limit int) ([]entry, bool) {
+	preview, truncated := skillslib.PreparePreview(entries, limit)
 	if truncated {
 		dup := make([]entry, len(preview))
 		copy(dup, preview)
@@ -148,7 +148,7 @@ func preparePreview(entries []entry, max int) ([]entry, bool) {
 	return preview, truncated
 }
 
-func persistListingArtifact(ctx context.Context, rc *runner.RunnerContext, entries []entry, truncated bool) (runner.Artifact, error) {
+func persistListingArtifact(ctx context.Context, rc *runner.Context, entries []entry, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}
@@ -159,12 +159,12 @@ func persistListingArtifact(ctx context.Context, rc *runner.RunnerContext, entri
 	return artifact, nil
 }
 
-func limitEntries(entries []entry, max int) ([]entry, bool) {
-	if max <= 0 || len(entries) <= max {
+func limitEntries(entries []entry, limit int) ([]entry, bool) {
+	if limit <= 0 || len(entries) <= limit {
 		return entries, false
 	}
-	clipped := make([]entry, max)
-	copy(clipped, entries[:max])
+	clipped := make([]entry, limit)
+	copy(clipped, entries[:limit])
 	return clipped, true
 }
 

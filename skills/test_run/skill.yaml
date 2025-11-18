@@ -1,0 +1,55 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: test/run
+  version: 0.1.0
+  description: "Run tests with coverage, benchmarks, and race detection"
+  tags: ["test", "go", "coverage", "benchmark"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/test_run/test_run
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: test/run
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "Path to test (default: ./...)"
+    - name: mode
+      type: string
+      required: false
+      description: "Test mode: test, race, bench, coverage"
+      enum: ["test", "race", "bench", "coverage"]
+      default: "test"
+    - name: short
+      type: boolean
+      required: false
+      default: false
+      description: "Run tests in short mode"
+    - name: verbose
+      type: boolean
+      required: false
+      default: false
+      description: "Verbose test output"
+    - name: pattern
+      type: string
+      required: false
+      description: "Run only tests matching pattern (-run)"
+    - name: timeout
+      type: string
+      required: false
+      default: "10m"
+      description: "Test timeout (e.g., 10m, 1h)"
+returns:
+  - name: results
+    type: object
+    description: "Test results including pass/fail counts"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

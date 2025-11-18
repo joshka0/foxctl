@@ -11,3 +11,10 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.token
+*.key

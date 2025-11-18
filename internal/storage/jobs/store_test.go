@@ -48,7 +48,7 @@ func TestOpenCreatesNestedRoot(t *testing.T) {
 	ctx := context.Background()
 	base := t.TempDir()
 	root := filepath.Join(base, "nested", "jobs")
-	_ = openStoreForTest(t, ctx, root)
+	_ = openStoreForTest(ctx, t, root)
 
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("expected root directory to exist: %v", err)
@@ -390,11 +390,11 @@ func newStoreTestEnv(t *testing.T) storeTestEnv {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()
-	store := openStoreForTest(t, ctx, root)
+	store := openStoreForTest(ctx, t, root)
 	return storeTestEnv{ctx: ctx, root: root, store: store}
 }
 
-func openStoreForTest(t testing.TB, ctx context.Context, root string) *Store {
+func openStoreForTest(ctx context.Context, t testing.TB, root string) *Store {
 	t.Helper()
 	store, err := Open(ctx, root)
 	if err != nil {

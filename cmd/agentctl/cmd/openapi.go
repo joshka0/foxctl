@@ -31,6 +31,8 @@ func newOpenAPICommand() *cobra.Command {
 		Short: "Manage OpenAPI specifications",
 	}
 	cmd.AddCommand(newOpenAPIImportCommand())
+	cmd.AddCommand(newOpenAPIDescribeCommand())
+	cmd.AddCommand(newOpenAPIValidateCommand())
 	return cmd
 }
 
@@ -197,6 +199,183 @@ func detectSpecMediaType(data []byte) string {
 		return "application/openapi+json"
 	}
 	return "application/openapi+yaml"
+}
+
+func newOpenAPIDescribeCommand() *cobra.Command {
+	var (
+		workspaceArg string
+		tag          string
+	)
+	cmd := &cobra.Command{ //nolint:exhaustruct
+		Use:   "describe <path|url|sha256|memory:name>",
+		Short: "List all operations in an OpenAPI specification",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			specRef := args[0]
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceArg)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(mem storage.MemoryStore) error {
+					casStore, err := cas.NewStore(cfg.Paths.CAS)
+					if err != nil {
+						return err
+					}
+					defer errs.Ignore(casStore.Close(), "close openapi describe cas store")
+
+					httpClient := &http.Client{Timeout: defaultHTTPTimeout}
+					l := loader.New(casStore, mem, loader.WithWorkspace(ws), loader.WithHTTPClient(httpClient))
+					spec, err := l.Load(ctx, specRef)
+					if err != nil {
+						return err
+					}
+
+					title := "OpenAPI Specification"
+					version := spec.Version
+					if spec.Doc != nil && spec.Doc.Info != nil {
+						if spec.Doc.Info.Title != "" {
+							title = spec.Doc.Info.Title
+						}
+						if spec.Doc.Info.Version != "" {
+							version = spec.Doc.Info.Version
+						}
+					}
+
+					// Filter operations by tag if specified
+					operations := make([]map[string]any, 0)
+					for _, op := range spec.Operations {
+						if tag != "" {
+							hasTag := false
+							for _, t := range op.Tags {
+								if t == tag {
+									hasTag = true
+									break
+								}
+							}
+							if !hasTag {
+								continue
+							}
+						}
+						operations = append(operations, map[string]any{
+							"id":      op.ID,
+							"method":  strings.ToUpper(op.Method),
+							"path":    op.Path,
+							"summary": op.Summary,
+							"tags":    op.Tags,
+						})
+					}
+
+					// Sort by operationId
+					sort.Slice(operations, func(i, j int) bool {
+						return operations[i]["id"].(string) < operations[j]["id"].(string)
+					})
+
+					data := map[string]any{
+						"title":           title,
+						"version":         version,
+						"openapi_version": spec.Version,
+						"source":          spec.Source,
+						"operation_count": len(operations),
+						"operations":      operations,
+					}
+
+					return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.openapi.describe", data,
+						protocol.WithSource("run"),
+						protocol.WithWorkspace(ws),
+					)
+				})
+			})
+		},
+	}
+	cmd.Flags().StringVar(&workspaceArg, "workspace", "", "Workspace override for named memory lookup")
+	cmd.Flags().StringVar(&tag, "tag", "", "Filter operations by tag")
+	return cmd
+}
+
+func newOpenAPIValidateCommand() *cobra.Command {
+	var (
+		workspaceArg string
+		strict       bool
+	)
+	cmd := &cobra.Command{ //nolint:exhaustruct
+		Use:   "validate <path|url|sha256|memory:name>",
+		Short: "Validate an OpenAPI specification",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			specRef := args[0]
+			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				ws := resolveWorkspace(cfg, workspaceArg)
+				return memorycmd.WithMemoryStore(ctx, cfg, func(mem storage.MemoryStore) error {
+					casStore, err := cas.NewStore(cfg.Paths.CAS)
+					if err != nil {
+						return err
+					}
+					defer errs.Ignore(casStore.Close(), "close openapi validate cas store")
+
+					httpClient := &http.Client{Timeout: defaultHTTPTimeout}
+					l := loader.New(casStore, mem, loader.WithWorkspace(ws), loader.WithStrictValidation(strict), loader.WithHTTPClient(httpClient))
+					spec, err := l.Load(ctx, specRef)
+					if err != nil {
+						return fmt.Errorf("validation failed: %w", err)
+					}
+
+					// Check for common issues
+					warnings := make([]string, 0)
+					errors := make([]string, 0)
+
+					// Check for operations without operationId
+					for path, pathItem := range spec.Doc.Paths.Map() {
+						for method, op := range pathItem.Operations() {
+							if op == nil {
+								continue
+							}
+							if op.OperationID == "" {
+								warnings = append(warnings, fmt.Sprintf("%s %s: missing operationId", strings.ToUpper(method), path))
+							}
+						}
+					}
+
+					// Check for duplicate operationIds
+					seen := make(map[string]bool)
+					for path, pathItem := range spec.Doc.Paths.Map() {
+						for method, op := range pathItem.Operations() {
+							if op == nil || op.OperationID == "" {
+								continue
+							}
+							if seen[op.OperationID] {
+								errors = append(errors, fmt.Sprintf("duplicate operationId: %s (found in %s %s)", op.OperationID, strings.ToUpper(method), path))
+							}
+							seen[op.OperationID] = true
+						}
+					}
+
+					valid := len(errors) == 0
+					data := map[string]any{
+						"valid":   valid,
+						"source":  spec.Source,
+						"version": spec.Version,
+						"strict":  strict,
+					}
+
+					if len(warnings) > 0 {
+						data["warnings"] = warnings
+						data["warning_count"] = len(warnings)
+					}
+
+					if len(errors) > 0 {
+						data["errors"] = errors
+						data["error_count"] = len(errors)
+					}
+
+					return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.openapi.validate", data,
+						protocol.WithSource("run"),
+						protocol.WithWorkspace(ws),
+					)
+				})
+			})
+		},
+	}
+	cmd.Flags().StringVar(&workspaceArg, "workspace", "", "Workspace override for named memory lookup")
+	cmd.Flags().BoolVar(&strict, "strict", false, "Require strict validation (no schema skips)")
+	return cmd
 }
 
 const defaultHTTPTimeout = 30 * time.Second

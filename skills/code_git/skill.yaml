@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/git
+  version: 0.1.0
+  description: "Git-aware code analysis: recent changes, hotspots, co-changed files, and blame"
+  tags: ["git", "code", "analysis", "history"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_git/code_git
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/git
+  parameters:
+    - name: query_type
+      type: string
+      required: true
+      description: "Type of query"
+      enum: ["recent", "hotspots", "cochanged", "blame", "authors"]
+    - name: path
+      type: string
+      required: false
+      description: "File or directory path (required for cochanged and blame queries)"
+    - name: since
+      type: string
+      required: false
+      description: "Time window (e.g., '7d', '1w', '1m', '3m', '1y')"
+      default: "1m"
+    - name: author
+      type: string
+      required: false
+      description: "Filter by author email or name"
+    - name: max_results
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum number of results to return"
+    - name: context_lines
+      type: integer
+      required: false
+      default: 0
+      description: "Lines of context around matches (currently unused)"
+returns:
+  - name: results
+    type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
