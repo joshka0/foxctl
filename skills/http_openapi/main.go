@@ -201,7 +201,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		response = resp
 		return nil, nil
 	})
-
 	if err != nil {
 		return err
 	}
@@ -249,7 +248,6 @@ func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *h
 			pageResponse = resp
 			return nil, nil
 		})
-
 		if err != nil {
 			// Return partial results if we have any
 			if len(allResponses) > 0 {
