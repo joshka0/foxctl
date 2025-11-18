@@ -26,7 +26,6 @@ func TestBuilder_Build(t *testing.T) {
 							Name:     "id",
 							In:       "path",
 							Required: true,
-							Schema:   &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Type{Types: []string{"integer"}}}},
 						},
 					},
 				},
