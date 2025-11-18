@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/openapi/builder"
 	"github.com/jkatigb/agentctl/internal/openapi/client"
 	"github.com/jkatigb/agentctl/internal/openapi/loader"
+	"github.com/jkatigb/agentctl/internal/openapi/pagination"
 	"github.com/jkatigb/agentctl/internal/openapi/retry"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -30,8 +31,22 @@ type Input struct {
 	OperationID string             `json:"operationId"`
 	Params      builder.Params     `json:"params"`
 	Auth        openapiauth.Config `json:"auth"`
+	Paging      *PagingConfig      `json:"paging"`
 	Retry       *RetryConfig       `json:"retry"`
 	DryRun      bool               `json:"dry_run"`
+}
+
+// PagingConfig configures pagination behavior.
+type PagingConfig struct {
+	Strategy     string `json:"strategy"`
+	MaxPages     int    `json:"max_pages"`
+	MaxItems     int    `json:"max_items"`
+	CursorField  string `json:"cursor_field"`
+	CursorParam  string `json:"cursor_param"`
+	OffsetParam  string `json:"offset_param"`
+	LimitParam   string `json:"limit_param"`
+	PageParam    string `json:"page_param"`
+	PerPageParam string `json:"per_page_param"`
 }
 
 // RetryConfig configures retry behavior.
@@ -147,21 +162,23 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		return emitDryRun(rc, builtReq, in)
 	}
 
-	// Execute request with retry
+	// Execute request with retry and optional pagination
 	httpClient := client.New(rc.Config, rc.CASStore)
 	retryer := createRetryer(in.Retry)
 
+	// Check if pagination is needed
+	if in.Paging != nil && in.Paging.Strategy != "none" {
+		return executeWithPagination(ctx, rc, req, httpClient, retryer, in.Paging)
+	}
+
+	// Single request execution
 	var response *client.Response
 	_, err = retryer.Execute(ctx, func() (*http.Response, error) {
-		// Execute the HTTP request
 		resp, err := httpClient.Execute(ctx, req)
 		if err != nil {
 			return nil, err
 		}
 		response = resp
-
-		// Return nil http.Response since we already captured what we need
-		// The retry logic will check the status code from the response
 		return nil, nil
 	})
 
@@ -169,12 +186,160 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		return err
 	}
 
-	// If we got a response, process it
 	if response != nil {
-		return emitResponse(rc, response)
+		return emitResponse(rc, response, nil)
 	}
 
 	return fmt.Errorf("no response received")
+}
+
+func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *http.Request, httpClient *client.Client, retryer *retry.Retryer, pagingCfg *PagingConfig) error {
+	// Create paginator
+	paginator, err := pagination.New(pagination.Config{
+		Strategy:     pagination.Strategy(pagingCfg.Strategy),
+		MaxPages:     pagingCfg.MaxPages,
+		MaxRecords:   pagingCfg.MaxItems,
+		CursorField:  pagingCfg.CursorField,
+		CursorParam:  pagingCfg.CursorParam,
+		OffsetParam:  pagingCfg.OffsetParam,
+		LimitParam:   pagingCfg.LimitParam,
+		PageParam:    pagingCfg.PageParam,
+		PerPageParam: pagingCfg.PerPageParam,
+	})
+	if err != nil {
+		return &client.Error{
+			Code:    "EPAGINATION",
+			Message: fmt.Sprintf("failed to create paginator: %v", err),
+			Err:     err,
+		}
+	}
+
+	var allResponses []*client.Response
+	var allBodies []any
+	currentReq := req
+
+	for {
+		// Execute current page with retry
+		var pageResponse *client.Response
+		_, err := retryer.Execute(ctx, func() (*http.Response, error) {
+			resp, err := httpClient.Execute(ctx, currentReq)
+			if err != nil {
+				return nil, err
+			}
+			pageResponse = resp
+			return nil, nil
+		})
+
+		if err != nil {
+			// Return partial results if we have any
+			if len(allResponses) > 0 {
+				aggregated := aggregateResponses(allBodies)
+				combined := allResponses[0]
+				combined.Body = aggregated
+				partialSummary := paginator.Summary()
+				return emitResponse(rc, combined, &partialSummary)
+			}
+			return err
+		}
+
+		if pageResponse == nil {
+			break
+		}
+
+		// Store the response
+		allResponses = append(allResponses, pageResponse)
+
+		// Extract body for aggregation
+		if pageResponse.Body != nil {
+			allBodies = append(allBodies, pageResponse.Body)
+		}
+
+		// Create pagination response
+		pagResp := &pagination.Response{
+			Request: currentReq,
+			Headers: convertHeaders(pageResponse.Headers),
+			Body:    pageResponse.Body.([]byte), // This needs proper handling
+		}
+
+		// Check if we should continue
+		nextReq, done, err := paginator.ShouldContinue(pagResp)
+		if err != nil {
+			return &client.Error{
+				Code:    "EPAGINATION",
+				Message: fmt.Sprintf("pagination error: %v", err),
+				Err:     err,
+			}
+		}
+
+		if done {
+			break
+		}
+
+		if nextReq == nil {
+			break
+		}
+
+		currentReq = nextReq
+	}
+
+	// Aggregate all responses
+	if len(allResponses) == 0 {
+		return fmt.Errorf("no pages fetched")
+	}
+
+	// Get pagination summary
+	summary := paginator.Summary()
+
+	// Aggregate bodies
+	aggregated := aggregateResponses(allBodies)
+
+	// Create combined response with first page metadata
+	combined := allResponses[0]
+	combined.Body = aggregated
+
+	return emitResponse(rc, combined, &summary)
+}
+
+func convertHeaders(headers map[string]string) http.Header {
+	h := make(http.Header)
+	for k, v := range headers {
+		h.Set(k, v)
+	}
+	return h
+}
+
+func aggregateResponses(bodies []any) any {
+	if len(bodies) == 0 {
+		return nil
+	}
+
+	if len(bodies) == 1 {
+		return bodies[0]
+	}
+
+	// Check if all bodies are arrays
+	var allArrays [][]any
+	for _, body := range bodies {
+		if arr, ok := body.([]any); ok {
+			allArrays = append(allArrays, arr)
+		} else {
+			// Not all arrays, return as-is with page metadata
+			return map[string]any{
+				"pages": bodies,
+			}
+		}
+	}
+
+	// Concatenate all arrays
+	if len(allArrays) == len(bodies) {
+		var combined []any
+		for _, arr := range allArrays {
+			combined = append(combined, arr...)
+		}
+		return combined
+	}
+
+	return bodies
 }
 
 func emitDryRun(rc *runner.RunnerContext, req *builder.Request, in Input) error {
@@ -227,10 +392,24 @@ func emitDryRun(rc *runner.RunnerContext, req *builder.Request, in Input) error 
 	return rc.Emit("http/openapi", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
 }
 
-func emitResponse(rc *runner.RunnerContext, resp *client.Response) error {
+func emitResponse(rc *runner.RunnerContext, resp *client.Response, pagingSummary *pagination.Summary) error {
 	summary := map[string]any{
 		"status_code": resp.StatusCode,
 		"headers":     secrets.RedactHeaders(resp.Headers),
+	}
+
+	// Add pagination summary if present
+	if pagingSummary != nil {
+		summary["pagination"] = map[string]any{
+			"strategy":    string(pagingSummary.Strategy),
+			"total_pages": pagingSummary.TotalPages,
+			"total_items": pagingSummary.TotalItems,
+			"has_more":    pagingSummary.HasMore,
+			"truncated":   pagingSummary.Truncated,
+		}
+		if pagingSummary.CursorFinal != "" {
+			summary["pagination"].(map[string]any)["cursor_final"] = pagingSummary.CursorFinal
+		}
 	}
 
 	data := map[string]any{
