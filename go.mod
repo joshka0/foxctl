@@ -1,8 +1,8 @@
 module github.com/jkatigb/agentctl
 
-go 1.24
+go 1.23
 
-toolchain go1.24.7
+toolchain go1.23.4
 
 require (
 	github.com/getkin/kin-openapi v0.133.0
