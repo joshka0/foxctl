@@ -4,6 +4,8 @@
 
 agentctl includes optional vector search capabilities powered by [sqlite-vector](https://github.com/sqliteai/sqlite-vector), enabling semantic similarity search across stored memory entries.
 
+**Note**: This integration uses the native C extension via CGO. The WASM version (`@sqliteai/sqlite-wasm`) is designed for JavaScript/browser environments and is not compatible with Go. See [implementation notes](./vector-search-implementation-notes.md) for details on the evaluation.
+
 ## What is Vector Search?
 
 Vector search allows you to find semantically similar content by representing text, images, or other data as numerical vectors (embeddings) and computing distances between them. Unlike traditional keyword search, vector search understands meaning and context.
@@ -134,6 +136,16 @@ type NamedEntry struct {
 - **Commercial license required** for production/managed services
 
 Contact [SQLite Cloud, Inc](mailto:info@sqlitecloud.io) for commercial licensing.
+
+### Alternative: No-CGO Vector Search
+
+If CGO is not acceptable for your deployment, consider:
+
+1. **External Vector Database**: Use Qdrant, Chroma, Pinecone, or similar
+2. **Pure Go Implementation**: Implement basic similarity search in pure Go (slower but no CGO)
+3. **sqlite-vec Alternative**: Use [sqlite-vec](https://github.com/asg017/sqlite-vec) with `ncruces/go-sqlite3` (WASM-based, no CGO, MIT licensed)
+
+See [implementation notes](./vector-search-implementation-notes.md) for detailed comparison.
 
 ### Deployment
 
@@ -273,5 +285,8 @@ Potential future improvements:
 ## References
 
 - [sqlite-vector Documentation](https://github.com/sqliteai/sqlite-vector)
+- [sqlite-vector API Reference](https://github.com/sqliteai/sqlite-vector/blob/main/API.md)
+- [sqlite-wasm (JavaScript/Browser)](https://github.com/sqliteai/sqlite-wasm) - Not Go-compatible
+- [Implementation Evaluation Notes](./vector-search-implementation-notes.md)
 - [Vector Search Fundamentals](https://www.pinecone.io/learn/vector-search/)
 - [Build Tags in Go](https://pkg.go.dev/cmd/go#hdr-Build_constraints)
