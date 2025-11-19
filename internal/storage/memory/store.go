@@ -46,10 +46,10 @@ type Stats = storage.MemoryStats
 // Connection pool defaults for SQLite in-memory storage
 // These values are optimized for typical workloads with moderate concurrency
 const (
-	defaultMaxOpenConns     = 10                 // Max concurrent connections (SQLite limitation)
-	defaultMaxIdleConns     = 5                  // Idle connections kept ready
-	defaultConnMaxLifetime  = time.Hour          // Connection recycling interval
-	defaultConnMaxIdleTime  = 15 * time.Minute   // Idle connection timeout
+	defaultMaxOpenConns    = 10               // Max concurrent connections (SQLite limitation)
+	defaultMaxIdleConns    = 5                // Idle connections kept ready
+	defaultConnMaxLifetime = time.Hour        // Connection recycling interval
+	defaultConnMaxIdleTime = 15 * time.Minute // Idle connection timeout
 )
 
 // Open initializes the memory store rooted at the provided path.

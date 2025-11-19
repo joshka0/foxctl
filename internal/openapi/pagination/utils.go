@@ -100,7 +100,7 @@ func detectOffsetParams(req *http.Request, cfg Config) (offsetParam, limitParam,
 		return cfg.OffsetParam, cfg.LimitParam, cfg.PageParam, cfg.PerPageParam
 	}
 	q := req.URL.Query()
-	
+
 	// Use configured values if present
 	if cfg.OffsetParam != "" {
 		offsetParam = cfg.OffsetParam
@@ -124,7 +124,7 @@ func detectOffsetParams(req *http.Request, cfg Config) (offsetParam, limitParam,
 			}
 		}
 	}
-	
+
 	// Auto-detect limit parameter
 	if limitParam == "" {
 		for _, name := range []string{"limit", "per_page", "page_size", "pageSize", "max_results", "count", "top", "take"} {
@@ -134,7 +134,7 @@ func detectOffsetParams(req *http.Request, cfg Config) (offsetParam, limitParam,
 			}
 		}
 	}
-	
+
 	// Auto-detect page parameter
 	if pageParam == "" {
 		for _, name := range []string{"page", "p"} {
@@ -144,7 +144,7 @@ func detectOffsetParams(req *http.Request, cfg Config) (offsetParam, limitParam,
 			}
 		}
 	}
-	
+
 	// Auto-detect per_page parameter
 	if perPageParam == "" {
 		for _, name := range []string{"per_page", "page_size", "pageSize", "limit", "max_results", "count"} {

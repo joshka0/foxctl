@@ -22,10 +22,10 @@ const maxBufferPoolSize = 1 << 20 // 1MB
 
 // bufferPool reuses byte buffers for stdout/stderr capture to reduce allocations.
 // Usage pattern:
-//   1. Get buffer from pool with type assertion check
-//   2. Reset the buffer before use
-//   3. Use buffer for command output
-//   4. Check capacity before returning to pool (prevents memory bloat)
+//  1. Get buffer from pool with type assertion check
+//  2. Reset the buffer before use
+//  3. Use buffer for command output
+//  4. Check capacity before returning to pool (prevents memory bloat)
 var bufferPool = sync.Pool{
 	New: func() interface{} {
 		return new(bytes.Buffer)
