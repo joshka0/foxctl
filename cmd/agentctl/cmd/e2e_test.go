@@ -199,14 +199,20 @@ func (h *casHarness) assertRelevantContains(t *testing.T, payload []byte, name s
 	if err := json.Unmarshal(payload, &env); err != nil {
 		t.Fatalf("decode relevant envelope: %v", err)
 	}
-	data, _ := env.Data.(map[string]any)
-	entries, _ := data["entries"].([]any)
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("env.Data is not a map: %T", env.Data)
+	}
+	entries, ok := data["entries"].([]any)
+	if !ok {
+		t.Fatalf("entries is not a slice: %T", data["entries"])
+	}
 	if len(entries) == 0 {
 		t.Fatalf("expected at least one relevant entry")
 	}
 	for _, entry := range entries {
 		if m, ok := entry.(map[string]any); ok {
-			if entryName, _ := m["name"].(string); entryName == name {
+			if entryName, ok := m["name"].(string); ok && entryName == name {
 				return
 			}
 		}
