@@ -14,6 +14,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
+const maxBufferPoolSize = 1 << 20 // 1MB - prevent memory bloat from pooled buffers
+
 var bufferPool = sync.Pool{
 	New: func() interface{} {
 		return new(bytes.Buffer)
@@ -80,8 +82,17 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	defer bufferPool.Put(stdout)
-	defer bufferPool.Put(stderr)
+	defer func() {
+		// Only return to pool if buffer hasn't grown too large
+		if stdout.Cap() < maxBufferPoolSize {
+			bufferPool.Put(stdout)
+		}
+	}()
+	defer func() {
+		if stderr.Cap() < maxBufferPoolSize {
+			bufferPool.Put(stderr)
+		}
+	}()
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 

@@ -247,50 +247,73 @@ func (p *Paginator) ShouldContinue(resp *Response) (*http.Request, bool, error) 
 		p.strategy = strat
 	}
 
+	// Apply strategy-specific pagination logic
+	return p.applyStrategy(resp)
+}
+
+// applyStrategy applies the selected pagination strategy and returns the next request
+func (p *Paginator) applyStrategy(resp *Response) (*http.Request, bool, error) {
 	switch p.strategy {
-	case StrategyNone:
+	case StrategyNone, StrategyPlugin:
+		// No pagination or plugin-based pagination (handled externally)
 		p.hasMore = false
 		return nil, true, nil
-	case StrategyPlugin:
-		p.hasMore = false
-		return nil, true, nil
+
 	case StrategyLink:
-		req, cont, err := p.advanceLink(resp)
-		if err != nil {
-			return nil, true, err
-		}
-		if !cont {
-			p.hasMore = false
-			return nil, true, nil
-		}
-		p.hasMore = true
-		return req, false, nil
+		return p.applyLinkStrategy(resp)
+
 	case StrategyCursor:
-		req, cont, err := p.advanceCursor(resp)
-		if err != nil {
-			return nil, true, err
-		}
-		if !cont {
-			p.hasMore = false
-			return nil, true, nil
-		}
-		p.hasMore = true
-		return req, false, nil
+		return p.applyCursorStrategy(resp)
+
 	case StrategyOffset:
-		req, cont, err := p.advanceOffset(resp)
-		if err != nil {
-			return nil, true, err
-		}
-		if !cont {
-			p.hasMore = false
-			return nil, true, nil
-		}
-		p.hasMore = true
-		return req, false, nil
+		return p.applyOffsetStrategy(resp)
+
 	default:
 		p.hasMore = false
 		return nil, true, nil
 	}
+}
+
+// applyLinkStrategy handles link header-based pagination
+func (p *Paginator) applyLinkStrategy(resp *Response) (*http.Request, bool, error) {
+	req, cont, err := p.advanceLink(resp)
+	if err != nil {
+		return nil, true, err
+	}
+	if !cont {
+		p.hasMore = false
+		return nil, true, nil
+	}
+	p.hasMore = true
+	return req, false, nil
+}
+
+// applyCursorStrategy handles cursor-based pagination
+func (p *Paginator) applyCursorStrategy(resp *Response) (*http.Request, bool, error) {
+	req, cont, err := p.advanceCursor(resp)
+	if err != nil {
+		return nil, true, err
+	}
+	if !cont {
+		p.hasMore = false
+		return nil, true, nil
+	}
+	p.hasMore = true
+	return req, false, nil
+}
+
+// applyOffsetStrategy handles offset/limit-based pagination
+func (p *Paginator) applyOffsetStrategy(resp *Response) (*http.Request, bool, error) {
+	req, cont, err := p.advanceOffset(resp)
+	if err != nil {
+		return nil, true, err
+	}
+	if !cont {
+		p.hasMore = false
+		return nil, true, nil
+	}
+	p.hasMore = true
+	return req, false, nil
 }
 
 // Summary returns pagination statistics accumulated so far.

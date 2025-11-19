@@ -233,6 +233,13 @@ func (s *Store) WaitForCompletion(ctx context.Context, jobID string, pollInterva
 	const backoffMultiplier = 1.5
 
 	for {
+		// Check context cancellation before expensive database query
+		select {
+		case <-ctx.Done():
+			return Job{}, ctx.Err()
+		default:
+		}
+
 		job, err := s.persist.Get(ctx, jobID)
 		if err != nil {
 			return Job{}, err
