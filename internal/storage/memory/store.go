@@ -43,6 +43,15 @@ type Store struct {
 // Stats aliases the shared memory stats type.
 type Stats = storage.MemoryStats
 
+// Connection pool defaults for SQLite file-based storage
+// These values provide reasonable defaults for typical workloads with moderate concurrency
+const (
+	defaultMaxOpenConns    = 10               // Max concurrent connections (balances concurrency with SQLite write serialization)
+	defaultMaxIdleConns    = 5                // Idle connections kept ready
+	defaultConnMaxLifetime = 10 * time.Minute // Connection recycling interval (SQLite best practice: 5-15 minutes)
+	defaultConnMaxIdleTime = 15 * time.Minute // Idle connection timeout
+)
+
 // Open initializes the memory store rooted at the provided path.
 func Open(ctx context.Context, root string, casPath string) (store *Store, err error) {
 	dbPath := filepath.Join(root, "memory.db")
@@ -53,10 +62,12 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	defer errs.CloseOnErr(db, &err)
 
 	// Configure connection pool for optimal performance
-	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
-	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
-	db.SetConnMaxLifetime(time.Hour)        // Recycle connections after 1 hour
-	db.SetConnMaxIdleTime(15 * time.Minute) // Close idle connections after 15 min
+	// Note: For SQLite, too many concurrent connections can cause contention
+	// These defaults balance responsiveness with resource usage
+	db.SetMaxOpenConns(defaultMaxOpenConns)
+	db.SetMaxIdleConns(defaultMaxIdleConns)
+	db.SetConnMaxLifetime(defaultConnMaxLifetime)
+	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 
 	// sqliteutil.OpenDB handles directory creation, WAL configuration, and migration execution.
 

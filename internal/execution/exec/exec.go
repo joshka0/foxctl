@@ -14,6 +14,18 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
+// Buffer pool configuration
+// maxBufferPoolSize limits the size of buffers returned to the pool to prevent
+// memory bloat. Buffers larger than this limit are discarded rather than pooled.
+// This prevents a single large output from permanently consuming pool memory.
+const maxBufferPoolSize = 1 << 20 // 1MB
+
+// bufferPool reuses byte buffers for stdout/stderr capture to reduce allocations.
+// Usage pattern:
+//  1. Get buffer from pool with type assertion check
+//  2. Reset the buffer before use
+//  3. Use buffer for command output
+//  4. Check capacity before returning to pool (prevents memory bloat)
 var bufferPool = sync.Pool{
 	New: func() interface{} {
 		return new(bytes.Buffer)
@@ -69,12 +81,28 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, r.Binary)
 	cmd.Dir = workDir
 	cmd.Stdin = bytes.NewReader(input)
-	stdout := bufferPool.Get().(*bytes.Buffer)
-	stderr := bufferPool.Get().(*bytes.Buffer)
+	stdout, ok := bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		return nil, nil, fmt.Errorf("runner: failed to get stdout buffer from pool")
+	}
+	stderr, ok := bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		bufferPool.Put(stdout)
+		return nil, nil, fmt.Errorf("runner: failed to get stderr buffer from pool")
+	}
 	stdout.Reset()
 	stderr.Reset()
-	defer bufferPool.Put(stdout)
-	defer bufferPool.Put(stderr)
+	defer func() {
+		// Only return to pool if buffer hasn't grown too large
+		if stdout.Cap() < maxBufferPoolSize {
+			bufferPool.Put(stdout)
+		}
+	}()
+	defer func() {
+		if stderr.Cap() < maxBufferPoolSize {
+			bufferPool.Put(stderr)
+		}
+	}()
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
@@ -92,8 +120,13 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("runner: failed to set resource limits: %w", err)
 	}
 
-	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), stderr.Bytes(), err
+	err := cmd.Run()
+
+	// Clone output so returned slices don't alias pooled buffers.
+	stdoutBytes := append([]byte(nil), stdout.Bytes()...)
+	stderrBytes := append([]byte(nil), stderr.Bytes()...)
+	if err != nil {
+		return stdoutBytes, stderrBytes, err
 	}
-	return stdout.Bytes(), stderr.Bytes(), nil
+	return stdoutBytes, stderrBytes, nil
 }

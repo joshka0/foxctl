@@ -231,22 +231,41 @@ func (s *sqlStore) ListByTopic(ctx context.Context, ns, topic string, limit int)
 	return records, nil
 }
 
+// Watch watches for new records in a topic, starting from fromTS.
+// IMPORTANT: Callers MUST cancel the context when done to prevent goroutine leaks.
+// A safety timeout of 24 hours is applied to prevent indefinite goroutine leaks.
 func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<-chan agent.BlackboardRecord, <-chan error) {
 	recordCh := make(chan agent.BlackboardRecord, 10)
 	errCh := make(chan error, 1)
 
+	// Add a safety timeout to prevent indefinite goroutine leaks
+	// Callers should cancel sooner, but this is a backstop
+	ctx, cancel := context.WithTimeout(ctx, 24*time.Hour)
+
 	go func() {
 		defer close(recordCh)
 		defer close(errCh)
+		defer cancel() // Clean up the timeout context
 
 		lastTS := fromTS
-		lastID := "" // Track last ID for tie-breaking
+		lastID := "" // Track last ID for tie-breaking (handles records with same timestamp)
+
+		// Poll every 500ms for new records
+		// Note: This could be optimized with SQLite triggers or file watching,
+		// but polling is simple and works reliably across all platforms
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
+				// Send context error if it wasn't a normal cancellation
+				if err := ctx.Err(); err != nil && err != context.Canceled {
+					select {
+					case errCh <- err:
+					default:
+					}
+				}
 				return
 			case <-ticker.C:
 				// Query for new records since lastTS, using ID as tie-breaker

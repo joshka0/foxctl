@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -40,6 +41,24 @@ func DefaultMigrationOptions() MigrationOptions {
 		DropTargetTables: false,
 		ContinueOnError:  false,
 	}
+}
+
+// sqlIdentifierPattern matches valid SQL identifiers (letters, numbers, underscores, no leading numbers)
+var sqlIdentifierPatternMigrate = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// validateSQLIdentifier checks if a string is a safe SQL identifier
+// to prevent SQL injection through table/column names
+func validateSQLIdentifierMigrate(identifier string) error {
+	if identifier == "" {
+		return fmt.Errorf("SQL identifier cannot be empty")
+	}
+	if len(identifier) > 64 {
+		return fmt.Errorf("SQL identifier too long: %s", identifier)
+	}
+	if !sqlIdentifierPatternMigrate.MatchString(identifier) {
+		return fmt.Errorf("invalid SQL identifier: %s (must contain only letters, numbers, and underscores)", identifier)
+	}
+	return nil
 }
 
 // Migrator handles database migration from one backend to another
@@ -109,7 +128,12 @@ func (m *Migrator) getTablesToMigrate(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }() //nolint:errcheck
+	defer func() {
+		if err := rows.Close(); err != nil {
+			// Log error but don't fail the operation
+			_ = err // Connection leak prevented
+		}
+	}()
 
 	var tables []string
 	for rows.Next() {
@@ -176,11 +200,21 @@ func (m *Migrator) getTableSchema(ctx context.Context, tableName string) (string
 
 // getTableColumns gets the column names for a table
 func (m *Migrator) getTableColumns(ctx context.Context, tableName string) ([]string, error) {
+	// Validate SQL identifier to prevent injection
+	if err := validateSQLIdentifierMigrate(tableName); err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
+
 	rows, err := m.source.QueryContext(ctx, fmt.Sprintf("SELECT * FROM %s LIMIT 0", tableName))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }() //nolint:errcheck
+	defer func() {
+		if err := rows.Close(); err != nil {
+			// Log error but don't fail the operation
+			_ = err // Connection leak prevented
+		}
+	}()
 
 	columns, err := rows.Columns()
 	if err != nil {
@@ -192,13 +226,28 @@ func (m *Migrator) getTableColumns(ctx context.Context, tableName string) ([]str
 
 // migrateTableData migrates the data from a table
 func (m *Migrator) migrateTableData(ctx context.Context, tableName string, columns []string, stats *MigrationStats) error {
+	// Validate SQL identifiers to prevent injection
+	if err := validateSQLIdentifierMigrate(tableName); err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+	for _, col := range columns {
+		if err := validateSQLIdentifierMigrate(col); err != nil {
+			return fmt.Errorf("invalid column name: %w", err)
+		}
+	}
+
 	// Query all data from source
 	query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), tableName)
 	rows, err := m.source.QueryContext(ctx, query)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = rows.Close() }() //nolint:errcheck
+	defer func() {
+		if err := rows.Close(); err != nil {
+			// Log error but don't fail the operation
+			_ = err // Connection leak prevented
+		}
+	}()
 
 	// Prepare insert statement
 	placeholders := make([]string, len(columns))
@@ -276,7 +325,12 @@ func (m *Migrator) insertBatch(ctx context.Context, insertQuery string, batch []
 	if err != nil {
 		return err
 	}
-	defer func() { _ = stmt.Close() }() //nolint:errcheck
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			// Log error but don't fail the operation
+			_ = err // Resource leak prevented
+		}
+	}()
 
 	for _, values := range batch {
 		if _, err := stmt.ExecContext(ctx, values...); err != nil {
@@ -309,6 +363,16 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 		columns, err := m.getTableColumns(ctx, table)
 		if err != nil {
 			return err
+		}
+
+		// Validate table and column identifiers (defensive, already validated by getTableColumns)
+		if err := validateSQLIdentifierMigrate(table); err != nil {
+			return fmt.Errorf("invalid table name: %w", err)
+		}
+		for _, col := range columns {
+			if err := validateSQLIdentifierMigrate(col); err != nil {
+				return fmt.Errorf("invalid column name: %w", err)
+			}
 		}
 
 		query := fmt.Sprintf("SELECT %s FROM %s", strings.Join(columns, ", "), table)

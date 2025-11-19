@@ -233,19 +233,34 @@ func (m *Manager) prepare(ctx context.Context, ref, command string) (*pluginInfo
 }
 
 func (m *Manager) ensureHandshake(ctx context.Context, info *pluginInfo) (*Handshake, error) {
+	// First check: optimistic read to avoid lock contention in common case
 	m.handshakesMu.Lock()
 	cached, ok := m.handshakes[info.Path]
-	m.handshakesMu.Unlock()
 	if ok {
+		m.handshakesMu.Unlock()
 		return cached, nil
 	}
+	m.handshakesMu.Unlock()
+
+	// Execute handshake without holding lock (expensive operation)
 	hs, err := m.runHandshake(ctx, info)
 	if err != nil {
 		return nil, err
 	}
+
+	// Second check: prevent race condition when multiple goroutines
+	// run handshake concurrently for the same plugin
 	m.handshakesMu.Lock()
+	defer m.handshakesMu.Unlock()
+
+	// Check again - another goroutine may have completed while we were running handshake
+	if cached, ok := m.handshakes[info.Path]; ok {
+		// Use the cached version to ensure consistency
+		return cached, nil
+	}
+
+	// Store our result
 	m.handshakes[info.Path] = hs
-	m.handshakesMu.Unlock()
 	return hs, nil
 }
 

@@ -66,7 +66,10 @@ func init() {
 	// Set-weight flags
 	schedulerSetWeightCmd.Flags().IntVar(&schedulerWeight, "weight", 1, "Scheduling weight (higher = more capacity)")
 	if err := schedulerSetWeightCmd.MarkFlagRequired("weight"); err != nil {
-		panic(err)
+		// This should never happen unless there's a programmer error (flag doesn't exist)
+		// Log to stderr and exit gracefully rather than panicking
+		fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'weight' flag as required: %v\n", err)
+		os.Exit(1)
 	}
 }
 

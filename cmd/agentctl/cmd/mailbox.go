@@ -91,7 +91,10 @@ func init() {
 	mailboxSendCmd.Flags().IntVar(&mailboxSendTTL, "ttl", 300000, "TTL in milliseconds (default: 5m)")
 	mailboxSendCmd.Flags().StringVar(&mailboxSendCorrelation, "correlation", "", "Correlation ID (for ask/reply)")
 	if err := mailboxSendCmd.MarkFlagRequired("from"); err != nil {
-		panic(err)
+		// This should never happen unless there's a programmer error (flag doesn't exist)
+		// Log to stderr and exit gracefully rather than panicking
+		fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'from' flag as required: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Poll flags
