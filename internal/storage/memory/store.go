@@ -43,12 +43,12 @@ type Store struct {
 // Stats aliases the shared memory stats type.
 type Stats = storage.MemoryStats
 
-// Connection pool defaults for SQLite in-memory storage
-// These values are optimized for typical workloads with moderate concurrency
+// Connection pool defaults for SQLite file-based storage
+// These values provide reasonable defaults for typical workloads with moderate concurrency
 const (
-	defaultMaxOpenConns    = 10               // Max concurrent connections (SQLite limitation)
+	defaultMaxOpenConns    = 10               // Max concurrent connections (balances concurrency with SQLite write serialization)
 	defaultMaxIdleConns    = 5                // Idle connections kept ready
-	defaultConnMaxLifetime = time.Hour        // Connection recycling interval
+	defaultConnMaxLifetime = 10 * time.Minute // Connection recycling interval (SQLite best practice: 5-15 minutes)
 	defaultConnMaxIdleTime = 15 * time.Minute // Idle connection timeout
 )
 

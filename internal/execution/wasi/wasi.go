@@ -103,7 +103,11 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	modConfig := r.buildModuleConfig(input, workDir, stdout, stderr)
 
 	_, runErr := runtime.InstantiateModule(ctx, compiled, modConfig)
-	return stdout.Bytes(), stderr.Bytes(), runErr
+
+	// Clone output so returned slices don't alias pooled buffers.
+	stdoutBytes := append([]byte(nil), stdout.Bytes()...)
+	stderrBytes := append([]byte(nil), stderr.Bytes()...)
+	return stdoutBytes, stderrBytes, runErr
 }
 
 func (r Runner) envVars() map[string]string {

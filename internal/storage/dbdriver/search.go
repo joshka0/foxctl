@@ -281,6 +281,12 @@ func NewHybridSearcher(db DB, corpusStats CorpusStats, options HybridSearchOptio
 }
 
 // Search performs hybrid search combining BM25 and vector similarity
+//
+// SECURITY WARNING: The additionalWhere parameter is concatenated directly into the SQL query.
+// Callers MUST ensure additionalWhere uses only parameterized placeholders (?) and passes
+// corresponding values in args. Never interpolate user input directly into additionalWhere.
+// Example safe usage: additionalWhere = "status = ? AND created > ?", args = []any{"active", timestamp}
+// Example UNSAFE usage: additionalWhere = fmt.Sprintf("status = '%s'", userInput) // SQL injection!
 func (h *HybridSearcher) Search(
 	ctx context.Context,
 	queryText string,
@@ -516,11 +522,20 @@ func (f *FullTextSearchHelper) InsertIntoFTS5(
 	tableName string,
 	values map[string]string,
 ) error {
+	// Validate SQL identifiers to prevent injection
+	if err := validateSQLIdentifier(tableName); err != nil {
+		return fmt.Errorf("invalid table name: %w", err)
+	}
+
 	columns := make([]string, 0, len(values))
 	placeholders := make([]string, 0, len(values))
 	args := make([]interface{}, 0, len(values))
 
 	for col, val := range values {
+		// Validate each column name to prevent injection
+		if err := validateSQLIdentifier(col); err != nil {
+			return fmt.Errorf("invalid column name %q: %w", col, err)
+		}
 		columns = append(columns, col)
 		placeholders = append(placeholders, "?")
 		args = append(args, val)
@@ -544,6 +559,11 @@ func (f *FullTextSearchHelper) SearchFTS5(
 	query string,
 	limit int,
 ) (*sql.Rows, error) {
+	// Validate SQL identifier to prevent injection
+	if err := validateSQLIdentifier(tableName); err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
+
 	searchQuery := fmt.Sprintf(
 		"SELECT *, rank FROM %s WHERE %s MATCH ? ORDER BY rank LIMIT ?",
 		tableName, tableName,

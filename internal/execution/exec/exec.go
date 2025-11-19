@@ -120,8 +120,13 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("runner: failed to set resource limits: %w", err)
 	}
 
-	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), stderr.Bytes(), err
+	err := cmd.Run()
+
+	// Clone output so returned slices don't alias pooled buffers.
+	stdoutBytes := append([]byte(nil), stdout.Bytes()...)
+	stderrBytes := append([]byte(nil), stderr.Bytes()...)
+	if err != nil {
+		return stdoutBytes, stderrBytes, err
 	}
-	return stdout.Bytes(), stderr.Bytes(), nil
+	return stdoutBytes, stderrBytes, nil
 }
