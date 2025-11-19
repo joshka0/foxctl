@@ -19,6 +19,7 @@ import (
 )
 
 // RunnerContext bundles dependencies skill binaries need.
+//
 //nolint:revive
 type RunnerContext struct {
 	Config        config.Config
