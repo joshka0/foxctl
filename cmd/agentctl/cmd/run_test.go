@@ -277,6 +277,7 @@ func installSkillBinary(t *testing.T, dest, pkg string) {
 }
 
 func cachedSkillBinary(t *testing.T, pkg string) string {
+	t.Helper()
 	if bin, ok := skillBinaryCache.Load(pkg); ok {
 		return bin.(string)
 	}

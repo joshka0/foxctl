@@ -67,6 +67,7 @@ type casHarness struct {
 }
 
 func newCASHarness(t *testing.T) *casHarness {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("slow end-to-end cache/memory workflow")
 	}
