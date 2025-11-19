@@ -248,7 +248,11 @@ func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<
 		defer cancel() // Clean up the timeout context
 
 		lastTS := fromTS
-		lastID := "" // Track last ID for tie-breaking
+		lastID := "" // Track last ID for tie-breaking (handles records with same timestamp)
+
+		// Poll every 500ms for new records
+		// Note: This could be optimized with SQLite triggers or file watching,
+		// but polling is simple and works reliably across all platforms
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 

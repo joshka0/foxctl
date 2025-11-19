@@ -251,7 +251,9 @@ func (p *Paginator) ShouldContinue(resp *Response) (*http.Request, bool, error) 
 	return p.applyStrategy(resp)
 }
 
-// applyStrategy applies the selected pagination strategy and returns the next request
+// applyStrategy applies the selected pagination strategy and returns the next request.
+// This method delegates to strategy-specific handlers to reduce complexity.
+// Returns: (nextRequest, isDone, error)
 func (p *Paginator) applyStrategy(resp *Response) (*http.Request, bool, error) {
 	switch p.strategy {
 	case StrategyNone, StrategyPlugin:
@@ -274,7 +276,8 @@ func (p *Paginator) applyStrategy(resp *Response) (*http.Request, bool, error) {
 	}
 }
 
-// applyLinkStrategy handles link header-based pagination
+// applyLinkStrategy handles RFC 8288 Link header-based pagination (e.g., GitHub API).
+// Extracts "next" link from Link header: Link: <url>; rel="next"
 func (p *Paginator) applyLinkStrategy(resp *Response) (*http.Request, bool, error) {
 	req, cont, err := p.advanceLink(resp)
 	if err != nil {
@@ -288,7 +291,8 @@ func (p *Paginator) applyLinkStrategy(resp *Response) (*http.Request, bool, erro
 	return req, false, nil
 }
 
-// applyCursorStrategy handles cursor-based pagination
+// applyCursorStrategy handles cursor-based pagination (e.g., Stripe API).
+// Looks for cursor tokens like "next_cursor" or "pagination.nextToken" in response body.
 func (p *Paginator) applyCursorStrategy(resp *Response) (*http.Request, bool, error) {
 	req, cont, err := p.advanceCursor(resp)
 	if err != nil {
@@ -302,7 +306,8 @@ func (p *Paginator) applyCursorStrategy(resp *Response) (*http.Request, bool, er
 	return req, false, nil
 }
 
-// applyOffsetStrategy handles offset/limit-based pagination
+// applyOffsetStrategy handles offset/limit-based pagination (e.g., REST APIs).
+// Uses query parameters like "offset", "limit", "page", or "per_page".
 func (p *Paginator) applyOffsetStrategy(resp *Response) (*http.Request, bool, error) {
 	req, cont, err := p.advanceOffset(resp)
 	if err != nil {
