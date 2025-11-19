@@ -59,11 +59,17 @@ python3 -c 'import json,os; print(json.dumps({"path": os.environ["WORKDIR"]}))' 
 	if !ok {
 		t.Fatalf("expected map data, got %T", envOut.Data)
 	}
-	preview, _ := data["preview"].(string)
+	preview, ok := data["preview"].(string)
+	if !ok {
+		t.Fatalf("preview is not a string: %T", data["preview"])
+	}
 	if !strings.Contains(preview, "pipeline ready") {
 		t.Fatalf("preview missing content: %q", preview)
 	}
-	artifact, _ := data["artifact"].(string)
+	artifact, ok := data["artifact"].(string)
+	if !ok {
+		t.Fatalf("artifact is not a string: %T", data["artifact"])
+	}
 	if artifact == "" || envOut.Meta.CASDigest != artifact {
 		t.Fatalf("cas digest mismatch: meta=%s artifact=%s", envOut.Meta.CASDigest, artifact)
 	}

@@ -63,7 +63,10 @@ func TestRunCommandEmitsCompleteMeta(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected data to be a map got %T", env.Data)
 	}
-	artifact, _ := data["artifact"].(string)
+	artifact, ok := data["artifact"].(string)
+	if !ok {
+		t.Fatalf("artifact is not a string: %T", data["artifact"])
+	}
 	if artifact == "" {
 		t.Fatalf("expected artifact in data")
 	}
@@ -274,6 +277,7 @@ func installSkillBinary(t *testing.T, dest, pkg string) {
 }
 
 func cachedSkillBinary(t *testing.T, pkg string) string {
+	t.Helper()
 	if bin, ok := skillBinaryCache.Load(pkg); ok {
 		return bin.(string)
 	}
