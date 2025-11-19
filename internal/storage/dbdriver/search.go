@@ -112,6 +112,10 @@ func (b *BM25Scorer) ComputeIDF(term string) float64 {
 
 // Score computes BM25 score for a document given query terms
 func (b *BM25Scorer) Score(queryTerms []string, docStats DocumentStats) float64 {
+	if b.corpusStats.TotalDocs == 0 || b.corpusStats.AvgDocLength == 0 {
+		return 0.0
+	}
+
 	score := 0.0
 	k1 := b.params.K1
 	bParam := b.params.B

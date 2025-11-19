@@ -254,7 +254,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 }
 
 func parseInput(r io.Reader) (input, error) {
-	var in input
+	in := input{
+		IncludeTests: true,
+	}
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return input{}, fmt.Errorf("decode input: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -166,6 +167,11 @@ func (vh *VectorHelper) GetDimensions() int {
 func (vh *VectorHelper) ValidateVector(v Vector) error {
 	if len(v) != vh.dimensions {
 		return fmt.Errorf("vector has %d dimensions, expected %d", len(v), vh.dimensions)
+	}
+	for i, val := range v {
+		if math.IsNaN(float64(val)) || math.IsInf(float64(val), 0) {
+			return fmt.Errorf("vector contains NaN or Infinity at index %d", i)
+		}
 	}
 	return nil
 }
