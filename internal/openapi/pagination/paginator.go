@@ -595,9 +595,10 @@ func splitLinkHeader(header string) []string {
 }
 
 func appendRune(b *strings.Builder, r rune) {
-	if _, err := b.WriteRune(r); err != nil {
-		panic(fmt.Sprintf("write rune: %v", err))
-	}
+	// WriteRune on strings.Builder only fails in catastrophic memory scenarios
+	// In practice, this should never happen, so we ignore the error
+	// rather than panicking which would crash the entire application
+	_, _ = b.WriteRune(r)
 }
 
 func parseLinkPart(part string) (string, string) {

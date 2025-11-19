@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,50 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
+
+// Security: Regex patterns for input validation to prevent command injection
+var (
+	// gitAuthorPattern allows alphanumeric, spaces, dots, hyphens, underscores, and apostrophes
+	// Common in names but prevents special characters that could be used for injection
+	gitAuthorPattern = regexp.MustCompile(`^[a-zA-Z0-9\s.\-_']+$`)
+
+	// gitSincePattern matches valid time specifications like "7d", "2w", "3m", "1y"
+	gitSincePattern = regexp.MustCompile(`^(\d+)([dwmy])$`)
+)
+
+// validateGitAuthor validates the author input to prevent command injection
+func validateGitAuthor(author string) error {
+	if author == "" {
+		return nil // Empty is allowed, means no filter
+	}
+	if len(author) > 100 {
+		return errors.New("author name too long (max 100 characters)")
+	}
+	if strings.ContainsAny(author, "\n\r\t") {
+		return errors.New("author name contains invalid control characters")
+	}
+	if !gitAuthorPattern.MatchString(author) {
+		return errors.New("author name contains invalid characters (only letters, numbers, spaces, dots, hyphens, underscores, and apostrophes allowed)")
+	}
+	return nil
+}
+
+// validateGitSince validates the since input to prevent command injection
+func validateGitSince(since string) error {
+	if since == "" {
+		return errors.New("since parameter cannot be empty")
+	}
+	if len(since) > 20 {
+		return errors.New("since parameter too long")
+	}
+	// Check if it matches our shorthand pattern (e.g., "7d", "2w")
+	if gitSincePattern.MatchString(since) {
+		return nil
+	}
+	// If not shorthand, check if it's a safe ISO date or git-compatible format
+	// For now, we'll only allow the shorthand format to be safe
+	return errors.New("since parameter must be in format like '7d', '2w', '3m', or '1y'")
+}
 
 type input struct {
 	QueryType    string `json:"query_type"`
@@ -169,6 +214,15 @@ func checkGitRepo(ctx context.Context, workspace string) error {
 
 func queryRecent(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
 	// git log --since="..." --name-only --pretty=format:"%H|%an|%ae|%ad|%s"
+
+	// Validate inputs to prevent command injection
+	if err := validateGitSince(in.Since); err != nil {
+		return nil, fmt.Errorf("invalid since parameter: %w", err)
+	}
+	if err := validateGitAuthor(in.Author); err != nil {
+		return nil, fmt.Errorf("invalid author parameter: %w", err)
+	}
+
 	sinceArg := parseSinceArg(in.Since)
 
 	args := []string{
@@ -199,6 +253,15 @@ func queryRecent(ctx context.Context, workspace, path string, in input) ([]gitRe
 
 func queryHotspots(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
 	// git log --since="..." --pretty=format: --name-only | sort | uniq -c | sort -rn
+
+	// Validate inputs to prevent command injection
+	if err := validateGitSince(in.Since); err != nil {
+		return nil, fmt.Errorf("invalid since parameter: %w", err)
+	}
+	if err := validateGitAuthor(in.Author); err != nil {
+		return nil, fmt.Errorf("invalid author parameter: %w", err)
+	}
+
 	sinceArg := parseSinceArg(in.Since)
 
 	args := []string{
@@ -309,6 +372,11 @@ func queryBlame(ctx context.Context, workspace, path string, in input) ([]gitRes
 }
 
 func queryAuthors(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
+	// Validate inputs to prevent command injection
+	if err := validateGitSince(in.Since); err != nil {
+		return nil, fmt.Errorf("invalid since parameter: %w", err)
+	}
+
 	sinceArg := parseSinceArg(in.Since)
 
 	args := []string{
