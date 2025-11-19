@@ -13,7 +13,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	state := t.TempDir()
@@ -27,7 +27,7 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runne
 			Cache: state + "/cache",
 		},
 	}
-	rc, err := runner.NewContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestRunFsTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
+	rc := newTestRunnerContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -115,7 +115,7 @@ func TestRunFsTreeList(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
+	rc := newTestRunnerContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{

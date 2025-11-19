@@ -69,7 +69,7 @@ func main() {
 	if err != nil {
 		fail("todo/manage", "ECONFIG", err)
 	}
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("todo/manage", "ERUNTIME", err)
 	}
@@ -86,7 +86,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, cfg config.Config, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
 	_ = ctx
 	storePath := in.StorePath
 	if storePath == "" {

@@ -16,7 +16,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	cfg := config.Config{
@@ -29,7 +29,7 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runne
 			Cache: workspace + "/cache",
 		},
 	}
-	rc, err := runner.NewContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -66,7 +66,7 @@ func complex(x int) int {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
+	rc := newTestRunnerContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -125,7 +125,7 @@ func TestAnalyzeDirectory(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
+	rc := newTestRunnerContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{

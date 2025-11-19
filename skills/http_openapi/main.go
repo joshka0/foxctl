@@ -61,7 +61,7 @@ func main() {
 	if err != nil {
 		fail("http/openapi", "ECONFIG", err)
 	}
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("http/openapi", "ERUNTIME", err)
 	}
@@ -81,7 +81,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in Input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	// Validate input
 	if in.Spec == "" {
 		return fmt.Errorf("spec is required")
@@ -197,7 +197,7 @@ func run(ctx context.Context, rc *runner.Context, in Input) error {
 	return emitResponse(rc, response, nil)
 }
 
-func executeWithPagination(ctx context.Context, rc *runner.Context, req *http.Request, httpClient *client.Client, pagingCfg *PagingConfig) error {
+func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *http.Request, httpClient *client.Client, pagingCfg *PagingConfig) error {
 	// Create paginator
 	paginator, err := pagination.New(pagination.Config{
 		Strategy:     pagination.Strategy(pagingCfg.Strategy),
@@ -358,7 +358,7 @@ func aggregateResponses(bodies []any) any {
 	return bodies
 }
 
-func emitDryRun(rc *runner.Context, req *builder.Request, in Input) error {
+func emitDryRun(rc *runner.RunnerContext, req *builder.Request, in Input) error {
 	// Redact sensitive headers
 	headers := secrets.RedactHeaders(req.Headers)
 
@@ -408,7 +408,7 @@ func emitDryRun(rc *runner.Context, req *builder.Request, in Input) error {
 	return rc.Emit("http/openapi", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
 }
 
-func emitResponse(rc *runner.Context, resp *client.Response, pagingSummary *pagination.Summary) error {
+func emitResponse(rc *runner.RunnerContext, resp *client.Response, pagingSummary *pagination.Summary) error {
 	summary := map[string]any{
 		"status_code": resp.StatusCode,
 		"headers":     secrets.RedactHeaders(resp.Headers),

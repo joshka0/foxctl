@@ -35,7 +35,7 @@ func main() {
 	if err != nil {
 		fail("fs/write", "ECONFIG", err)
 	}
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("fs/write", "ERUNTIME", err)
 	}
@@ -52,7 +52,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Validate path
 	targetPath, err := resolveTargetPath(rc, in.Path)
 	if err != nil {
@@ -140,7 +140,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveTargetPath(rc *runner.Context, path string) (string, error) {
+func resolveTargetPath(rc *runner.RunnerContext, path string) (string, error) {
 	valid, err := rc.PathValidator.ValidatePath(path)
 	if err != nil {
 		return "", fmt.Errorf("path validation failed: %w", err)
@@ -148,7 +148,7 @@ func resolveTargetPath(rc *runner.Context, path string) (string, error) {
 	return valid, nil
 }
 
-func getContent(ctx context.Context, rc *runner.Context, in input) ([]byte, error) {
+func getContent(ctx context.Context, rc *runner.RunnerContext, in input) ([]byte, error) {
 	if in.Content != "" {
 		return []byte(in.Content), nil
 	}

@@ -53,7 +53,7 @@ func main() {
 		fail("code/symbols", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("code/symbols", "ERUNTIME", err)
 	}
@@ -70,7 +70,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -620,7 +620,7 @@ func preparePreview(symbols []symbol, limit int) ([]symbol, bool) {
 	return preview, truncated
 }
 
-func persistSymbolsArtifact(ctx context.Context, rc *runner.Context, symbols []symbol, truncated bool) (runner.Artifact, error) {
+func persistSymbolsArtifact(ctx context.Context, rc *runner.RunnerContext, symbols []symbol, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

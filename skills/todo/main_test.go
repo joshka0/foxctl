@@ -85,14 +85,14 @@ func TestTodoRejectsBackticks(t *testing.T) {
 type todoTestEnv struct {
 	ctx       context.Context
 	storePath string
-	rc        *runner.Context
+	rc        *runner.RunnerContext
 }
 
 func newTodoTestEnv(t *testing.T) *todoTestEnv {
 	t.Helper()
 	ctx := context.Background()
 	tmp := t.TempDir()
-	rc := newTestContext(t, tmp)
+	rc := newTestRunnerContext(t, tmp)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
 			t.Fatalf("close runner context: %v", err)
@@ -166,7 +166,7 @@ func taskID(t *testing.T, data map[string]any) string {
 	return id
 }
 
-func newTestContext(t *testing.T, tmp string) *runner.Context {
+func newTestRunnerContext(t *testing.T, tmp string) *runner.RunnerContext {
 	t.Helper()
 	cfg := config.Config{
 		Home:           tmp,
@@ -178,14 +178,14 @@ func newTestContext(t *testing.T, tmp string) *runner.Context {
 			Cache: filepath.Join(tmp, "cache"),
 		},
 	}
-	rc, err := runner.NewContext(cfg, &bytes.Buffer{})
+	rc, err := runner.NewRunnerContext(cfg, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
 	return rc
 }
 
-func runSkill(ctx context.Context, t *testing.T, rc *runner.Context, in input) *bytes.Buffer {
+func runSkill(ctx context.Context, t *testing.T, rc *runner.RunnerContext, in input) *bytes.Buffer {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	rc.Stdout = buf
@@ -195,7 +195,7 @@ func runSkill(ctx context.Context, t *testing.T, rc *runner.Context, in input) *
 	return buf
 }
 
-func runExpectError(ctx context.Context, rc *runner.Context, in input) error {
+func runExpectError(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	rc.Stdout = &bytes.Buffer{}
 	return run(ctx, rc, rc.Config, in)
 }

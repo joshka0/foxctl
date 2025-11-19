@@ -40,7 +40,7 @@ func main() {
 	if err != nil {
 		fail("skill/inspect", "ECONFIG", err)
 	}
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("skill/inspect", "ERUNTIME", err)
 	}
@@ -57,7 +57,7 @@ func main() {
 	}
 }
 
-func run(_ context.Context, rc *runner.Context, in input) error {
+func run(_ context.Context, rc *runner.RunnerContext, in input) error {
 	// Find skill directory
 	skillInfo, err := findSkill(in.SkillName)
 	if err != nil {
