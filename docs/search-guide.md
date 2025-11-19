@@ -572,22 +572,22 @@ export AGENTCTL_MEMORY_VECTOR_SEARCH=true
 
 ```go
 // Enable search on a store
-func (s *Store) EnableSearch(db DB, workspace string) (*SearchableStore, error)
+func (s *Store) EnableSearch(db dbdriver.DB, workspace string) (*SearchableStore, error)
 
 // Generic search
 func (ss *SearchableStore) Search(
     ctx context.Context,
     query string,
-    queryVector Vector,
+    queryVector dbdriver.Vector,
     workspace string,
-    mode SearchMode,
+    mode dbdriver.SearchMode,
     limit int,
 ) ([]MemorySearchResult, error)
 
 // Convenience methods
 func (ss *SearchableStore) SearchBM25(ctx context.Context, query, workspace string, limit int) ([]MemorySearchResult, error)
-func (ss *SearchableStore) SearchVector(ctx context.Context, queryVector Vector, workspace string, limit int) ([]MemorySearchResult, error)
-func (ss *SearchableStore) SearchHybrid(ctx context.Context, query string, queryVector Vector, workspace string, limit int) ([]MemorySearchResult, error)
+func (ss *SearchableStore) SearchVector(ctx context.Context, queryVector dbdriver.Vector, workspace string, limit int) ([]MemorySearchResult, error)
+func (ss *SearchableStore) SearchHybrid(ctx context.Context, query string, queryVector dbdriver.Vector, workspace string, limit int) ([]MemorySearchResult, error)
 
 // Maintenance
 func (ss *SearchableStore) RefreshCorpusStats(ctx context.Context, workspace string) error
