@@ -69,10 +69,10 @@ func TestGolden(t *testing.T) {
 
 			goldenFile := filepath.Join("testdata", tt.name+".json")
 			if _, err := os.Stat(goldenFile); os.IsNotExist(err) {
-				if err := os.MkdirAll("testdata", 0755); err != nil {
+				if err := os.MkdirAll("testdata", 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(goldenFile, got, 0644); err != nil {
+				if err := os.WriteFile(goldenFile, got, 0o644); err != nil {
 					t.Fatal(err)
 				}
 				t.Logf("Created golden file: %s", goldenFile)
