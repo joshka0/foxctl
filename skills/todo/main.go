@@ -86,7 +86,7 @@ func main() {
 	}
 }
 
-func run(_ context.Context, rc *runner.Context, cfg config.Config, in input) error {
+func run(_ context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
 	storePath := in.StorePath
 	if storePath == "" {
 		storePath = filepath.Join(cfg.Home, "todo", "tasks.json")

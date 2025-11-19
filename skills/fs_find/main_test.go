@@ -148,7 +148,7 @@ func TestFsFindWithExtensionFilter(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.RunnerContext {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
