@@ -60,7 +60,10 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	}
 	defer cleanup()
 
-	stdout, stderr := r.allocateBuffers()
+	stdout, stderr, err := r.allocateBuffers()
+	if err != nil {
+		return nil, nil, err
+	}
 	defer bufferPool.Put(stdout)
 	defer bufferPool.Put(stderr)
 
@@ -149,12 +152,19 @@ func (r Runner) loadModule(path string) ([]byte, error) {
 	return moduleBytes, nil
 }
 
-func (r Runner) allocateBuffers() (*bytes.Buffer, *bytes.Buffer) {
-	stdout := bufferPool.Get().(*bytes.Buffer)
-	stderr := bufferPool.Get().(*bytes.Buffer)
+func (r Runner) allocateBuffers() (*bytes.Buffer, *bytes.Buffer, error) {
+	stdout, ok := bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		return nil, nil, fmt.Errorf("wasi runner: failed to get stdout buffer from pool")
+	}
+	stderr, ok := bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		bufferPool.Put(stdout)
+		return nil, nil, fmt.Errorf("wasi runner: failed to get stderr buffer from pool")
+	}
 	stdout.Reset()
 	stderr.Reset()
-	return stdout, stderr
+	return stdout, stderr, nil
 }
 
 func (r Runner) prepareRuntime(ctx context.Context) (wazero.Runtime, func(), error) {

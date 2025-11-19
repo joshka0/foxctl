@@ -208,7 +208,12 @@ func (s *WFQScheduler) dispatchNext() {
 	}
 
 	// Pop job with smallest virtual finish time
-	job := heap.Pop(s.globalQueue).(*Job)
+	item := heap.Pop(s.globalQueue)
+	job, ok := item.(*Job)
+	if !ok {
+		// Should never happen, but handle gracefully
+		return
+	}
 
 	// Update global virtual time to job's finish time
 	s.virtualTime = job.virtualFinishTime
@@ -322,7 +327,12 @@ func (pq priorityQueue) Swap(i, j int) {
 }
 
 func (pq *priorityQueue) Push(x interface{}) {
-	*pq = append(*pq, x.(*Job))
+	job, ok := x.(*Job)
+	if !ok {
+		// Should never happen with correct usage, but handle gracefully
+		return
+	}
+	*pq = append(*pq, job)
 }
 
 func (pq *priorityQueue) Pop() interface{} {

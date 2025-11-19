@@ -69,8 +69,15 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	cmd := exec.CommandContext(ctx, r.Binary)
 	cmd.Dir = workDir
 	cmd.Stdin = bytes.NewReader(input)
-	stdout := bufferPool.Get().(*bytes.Buffer)
-	stderr := bufferPool.Get().(*bytes.Buffer)
+	stdout, ok := bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		return nil, nil, fmt.Errorf("runner: failed to get stdout buffer from pool")
+	}
+	stderr, ok := bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		bufferPool.Put(stdout)
+		return nil, nil, fmt.Errorf("runner: failed to get stderr buffer from pool")
+	}
 	stdout.Reset()
 	stderr.Reset()
 	defer bufferPool.Put(stdout)
