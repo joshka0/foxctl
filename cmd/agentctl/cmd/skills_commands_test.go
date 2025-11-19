@@ -129,7 +129,10 @@ func TestSkillsSearchCommandMatchesByName(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected map response, got %T", env.Data)
 	}
-	skills, _ := data["skills"].([]any)
+	skills, ok := data["skills"].([]any)
+	if !ok {
+		t.Fatalf("skills is not a slice: %T", data["skills"])
+	}
 	if len(skills) != 1 {
 		t.Fatalf("expected one match, got %d", len(skills))
 	}

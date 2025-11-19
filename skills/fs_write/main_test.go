@@ -172,7 +172,9 @@ func TestRunFsWriteAppend(t *testing.T) {
 	work := t.TempDir()
 
 	target := "output.txt"
-	_ = os.WriteFile(work+"/"+target, []byte("hello"), 0o644)
+	if err := os.WriteFile(work+"/"+target, []byte("hello"), 0o644); err != nil {
+		t.Fatalf("setup test file: %v", err)
+	}
 
 	stdout := &bytes.Buffer{}
 	rc := newTestContext(t, stdout, work)

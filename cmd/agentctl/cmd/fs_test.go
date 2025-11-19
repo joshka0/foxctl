@@ -52,7 +52,9 @@ func TestFSReadCommandOutputsPreview(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected map data, got %T", env.Data)
 	}
-	if preview, _ := data["preview"].(string); preview == "" {
+	if preview, ok := data["preview"].(string); !ok {
+		t.Fatalf("preview is not a string: %T", data["preview"])
+	} else if preview == "" {
 		t.Fatalf("expected preview text: %#v", data)
 	}
 }

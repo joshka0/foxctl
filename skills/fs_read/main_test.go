@@ -45,15 +45,23 @@ func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected map data, got %T", env.Data)
 	}
-	preview, _ := data["preview"].(string)
+	preview, ok := data["preview"].(string)
+	if !ok {
+		t.Fatalf("preview is not a string: %T", data["preview"])
+	}
 	if preview == "" || preview != content {
 		t.Fatalf("unexpected preview: %q", preview)
 	}
-	artifact, _ := data["artifact"].(string)
+	artifact, ok := data["artifact"].(string)
+	if !ok {
+		t.Fatalf("artifact is not a string: %T", data["artifact"])
+	}
 	if artifact == "" || env.Meta.CASDigest != artifact {
 		t.Fatalf("cas digest mismatch: meta=%s artifact=%s", env.Meta.CASDigest, artifact)
 	}
-	if binary, _ := data["binary"].(bool); binary {
+	if binary, ok := data["binary"].(bool); !ok {
+		t.Fatalf("binary is not a bool: %T", data["binary"])
+	} else if binary {
 		t.Fatalf("expected text file to be marked non-binary")
 	}
 }
@@ -120,13 +128,17 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 		t.Fatalf("decode envelope: %v", err)
 	}
 	dataMap := env["data"].(map[string]any)
-	if binary, _ := dataMap["binary"].(bool); !binary {
+	if binary, ok := dataMap["binary"].(bool); !ok {
+		t.Fatalf("binary is not a bool: %T", dataMap["binary"])
+	} else if !binary {
 		t.Fatalf("expected binary flag")
 	}
 	if _, ok := dataMap["preview"]; ok {
 		t.Fatalf("expected no preview for binary content")
 	}
-	if hint, _ := dataMap["hint"].(string); hint == "" {
+	if hint, ok := dataMap["hint"].(string); !ok {
+		t.Fatalf("hint is not a string: %T", dataMap["hint"])
+	} else if hint == "" {
 		t.Fatalf("expected hint for binary files")
 	}
 }
