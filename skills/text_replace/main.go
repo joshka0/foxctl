@@ -135,6 +135,16 @@ func main() {
 }
 
 func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+	// Apply defaults for pointer booleans if not set
+	if in.SkipBinary == nil {
+		defaultSkipBinary := true
+		in.SkipBinary = &defaultSkipBinary
+	}
+	if in.PreserveLineEndings == nil {
+		defaultPreserveLineEndings := true
+		in.PreserveLineEndings = &defaultPreserveLineEndings
+	}
+
 	// Build list of operations
 	ops := buildOperations(in)
 	if len(ops) == 0 {
