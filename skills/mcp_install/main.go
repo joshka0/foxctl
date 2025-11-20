@@ -1,3 +1,4 @@
+// Package main implements the mcp/install skill - installs MCP server configurations.
 package main
 
 import (
@@ -21,24 +22,21 @@ import (
 )
 
 type input struct {
+	ServerCmd string `json:"server_cmd"`
 
-	ServerCmd     string            `json:"server_cmd"`
+	ServerArgs []string `json:"server_args"`
 
-	ServerArgs    []string          `json:"server_args"`
+	ServerEnv map[string]string `json:"server_env"`
 
-	ServerEnv     map[string]string `json:"server_env"`
-
-	ServerURL     string            `json:"server_url"`
+	ServerURL string `json:"server_url"`
 
 	ServerHeaders map[string]string `json:"server_headers"`
 
-	OutputDir     string            `json:"output_dir"`
+	OutputDir string `json:"output_dir"`
 
-	BridgePath    string            `json:"bridge_path"` // Path to mcp_bridge binary. Defaults to "mcp_bridge" (in path)
+	BridgePath string `json:"bridge_path"` // Path to mcp_bridge binary. Defaults to "mcp_bridge" (in path)
 
 }
-
-
 
 func main() {
 
@@ -66,8 +64,6 @@ func main() {
 
 	}()
 
-
-
 	in, err := parseInput(os.Stdin)
 
 	if err != nil {
@@ -84,53 +80,31 @@ func main() {
 
 }
 
-
-
 func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	var mcpClient *client.Client
 
 	var err error
 
+	if in.ServerURL != "" {
 
+		// SSE/HTTP Transport
 
-		if in.ServerURL != "" {
+		mcpClient, err = client.NewStreamableHttpClient(in.ServerURL, transport.WithHTTPHeaders(in.ServerHeaders))
 
+		if err != nil {
 
+			return fmt.Errorf("failed to create HTTP client: %w", err)
 
-			// SSE/HTTP Transport
+		}
 
+		if err := mcpClient.Start(ctx); err != nil {
 
+			return fmt.Errorf("failed to start transport: %w", err)
 
-			mcpClient, err = client.NewStreamableHttpClient(in.ServerURL, transport.WithHTTPHeaders(in.ServerHeaders))
+		}
 
-
-
-			if err != nil {
-
-
-
-				return fmt.Errorf("failed to create HTTP client: %w", err)
-
-
-
-			}
-
-
-
-			if err := mcpClient.Start(ctx); err != nil {
-
-
-
-				return fmt.Errorf("failed to start transport: %w", err)
-
-
-
-			}
-
-
-
-		} else if in.ServerCmd != "" {
+	} else if in.ServerCmd != "" {
 
 		// Stdio Transport
 
@@ -156,9 +130,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	}
 
-	defer mcpClient.Close()
-
-
+	defer func() {
+		if err := mcpClient.Close(); err != nil {
+			// Log close error but don't fail the operation
+			fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err)
+		}
+	}()
 
 	// Initialize
 
@@ -170,19 +147,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 			ClientInfo: mcp.Implementation{
 
-				Name:    "agentctl-mcp-install",
+				Name: "agentctl-mcp-install",
 
 				Version: "1.0.0",
-
 			},
 
 			Capabilities: mcp.ClientCapabilities{},
-
 		},
-
 	}
-
-
 
 	_, err = mcpClient.Initialize(ctx, initReq)
 
@@ -191,8 +163,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		return fmt.Errorf("mcp initialization failed: %w", err)
 
 	}
-
-
 
 	// List Tools
 
@@ -204,11 +174,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	}
 
-
-
 	installed := []string{}
-
-
 
 	// Ensure output directory exists
 
@@ -218,9 +184,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	}
 
-	
-
-	// Validate output directory using PathValidator if possible, 
+	// Validate output directory using PathValidator if possible,
 
 	// but for "installing skills" we often write to a skills directory which might be outside workspace.
 
@@ -235,8 +199,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		return fmt.Errorf("output directory validation failed: %w", err)
 
 	}
-
-
 
 	for _, tool := range toolsResult.Tools {
 
@@ -254,29 +216,23 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	}
 
-
-
 	// Emit success
 
 	return rc.Emit("mcp/install", map[string]any{
 
 		"installed": installed,
 
-		"count":     len(installed),
+		"count": len(installed),
 
-		"path":      validDir,
-
+		"path": validDir,
 	}, "application/json", envelope.Meta{
 
 		Source: "run",
 
 		Runner: "exec",
-
 	})
 
 }
-
-
 
 func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
@@ -290,13 +246,9 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 	}
 
-
-
 	// Construct Command parts
 
 	cmdParts := []string{in.BridgePath}
-
-	
 
 	if in.ServerURL != "" {
 
@@ -330,11 +282,7 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 	}
 
-	
-
 	cmdParts = append(cmdParts, "-tool", tool.Name)
-
-
 
 	// Generate wrapper script 'bin'
 
@@ -352,8 +300,6 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 	scriptContent += "\"$@\"\n"
 
-
-
 	binPath := filepath.Join(skillDir, "bin")
 
 	if err := os.WriteFile(binPath, []byte(scriptContent), 0755); err != nil {
@@ -362,13 +308,9 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 	}
 
-
-
 	// Map MCP Schema to Agentctl Signature
 
 	signatureParameters := []map[string]any{}
-
-	
 
 	if tool.InputSchema.Properties != nil {
 
@@ -379,10 +321,7 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 				param := map[string]any{
 
 					"name": propName,
-
 				}
-
-				
 
 				if desc, ok := defMap["description"]; ok {
 
@@ -395,8 +334,6 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 					param["type"] = t
 
 				}
-
-				
 
 				// Check required
 
@@ -416,8 +353,6 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 				param["required"] = required
 
-				
-
 				signatureParameters = append(signatureParameters, param)
 
 			}
@@ -426,22 +361,19 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 	}
 
-
-
 	manifest := map[string]any{
 
 		"apiVersion": "agentctl/v1",
 
-		"kind":       "Skill",
+		"kind": "Skill",
 
 		"metadata": map[string]any{
 
-			"name":        "mcp_generated/" + tool.Name,
+			"name": "mcp_generated/" + tool.Name,
 
-			"version":     "1.0.0",
+			"version": "1.0.0",
 
 			"description": tool.Description,
-
 		},
 
 		"distribution": map[string]any{
@@ -451,34 +383,26 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 			"exec": map[string]string{
 
 				"entry": "bin",
-
 			},
-
 		},
 
 		"capabilities": map[string]any{
 
-			"network": "none", 
+			"network": "none",
 
 			"filesystem": []map[string]string{
 
 				{"type": "workdir"},
-
 			},
-
 		},
 
 		"signature": map[string]any{
 
-			"command":    tool.Name, // Or mcp_generated/tool.Name? Signature command usually matches usage
+			"command": tool.Name, // Or mcp_generated/tool.Name? Signature command usually matches usage
 
 			"parameters": signatureParameters,
-
 		},
-
 	}
-
-
 
 	// Marshal to YAML
 
@@ -490,15 +414,11 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 	}
 
-
-
 	// Write skill.yaml
 
 	return os.WriteFile(filepath.Join(skillDir, "skill.yaml"), data, 0644)
 
 }
-
-
 
 func parseInput(r io.Reader) (input, error) {
 

@@ -1,3 +1,4 @@
+// Package main implements the mcp/bridge skill - a bridge to MCP servers.
 package main
 
 import (
@@ -9,9 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
+	"github.com/mark3labs/mcp-go/mcp"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -44,11 +45,11 @@ func (i *arrayFlags) Set(value string) error {
 func main() {
 	// Parse flags
 	var (
-		serverCmd string
-		serverURL string
-		toolName  string
-		serverArgs arrayFlags
-		serverEnv  arrayFlags
+		serverCmd     string
+		serverURL     string
+		toolName      string
+		serverArgs    arrayFlags
+		serverEnv     arrayFlags
 		serverHeaders arrayFlags
 	)
 	flag.StringVar(&serverCmd, "server-cmd", "", "Command to start the MCP server")
@@ -92,14 +93,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		if err != nil {
 			return fmt.Errorf("failed to create HTTP client: %w", err)
 		}
-		// StreamableHTTP does not require explicit Start() for request-response, 
+		// StreamableHTTP does not require explicit Start() for request-response,
 		// but we can call it to be safe (it handles background listening if enabled).
 		// client.NewStreamableHttpClient does NOT enable continuous listening by default.
 		// If we want notifications, we might need it.
-		// But for now, let's just use it. 
+		// But for now, let's just use it.
 		// Start() in StreamableHTTP is strictly for "Continuous Listening" (GET).
 		// Exa rejected GET. So we probably shouldn't call Start() if it triggers GET.
-		// Checking StreamableHTTP.Start(): 
+		// Checking StreamableHTTP.Start():
 		// if c.getListeningEnabled { ... createGETConnectionToServer ... }
 		// By default getListeningEnabled is false. So Start() does nothing.
 		// So we can call it or not.
@@ -121,7 +122,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	} else {
 		return fmt.Errorf("either server_cmd or server_url is required")
 	}
-	defer mcpClient.Close()
+	defer func() {
+		if err := mcpClient.Close(); err != nil {
+			// Log close error but don't fail the operation
+			fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err)
+		}
+	}()
 
 	// Initialize the MCP session
 	initReq := mcp.InitializeRequest{
