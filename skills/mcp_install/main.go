@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -83,51 +84,29 @@ func main() {
 func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	var mcpClient *client.Client
-
 	var err error
 
 	if in.ServerURL != "" {
-
 		// SSE/HTTP Transport
-
 		mcpClient, err = client.NewStreamableHttpClient(in.ServerURL, transport.WithHTTPHeaders(in.ServerHeaders))
-
 		if err != nil {
-
 			return fmt.Errorf("failed to create HTTP client: %w", err)
-
 		}
-
 		if err := mcpClient.Start(ctx); err != nil {
-
 			return fmt.Errorf("failed to start transport: %w", err)
-
 		}
-
 	} else if in.ServerCmd != "" {
-
 		// Stdio Transport
-
 		env := os.Environ()
-
 		for k, v := range in.ServerEnv {
-
 			env = append(env, fmt.Sprintf("%s=%s", k, v))
-
 		}
-
 		mcpClient, err = client.NewStdioMCPClient(in.ServerCmd, env, in.ServerArgs...)
-
 		if err != nil {
-
 			return fmt.Errorf("failed to create stdio client: %w", err)
-
 		}
-
 	} else {
-
 		return fmt.Errorf("either server_cmd or server_url is required")
-
 	}
 
 	defer func() {
@@ -184,14 +163,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	}
 
-	// Validate output directory using PathValidator if possible,
-
-	// but for "installing skills" we often write to a skills directory which might be outside workspace.
-
-	// However, agentctl policy enforces strict workspace.
-
-	// So we assume in.OutputDir is within the workspace.
-
+	// Validate output directory (must be within workspace per agentctl policy)
 	validDir, err := rc.PathValidator.ValidatePath(in.OutputDir)
 
 	if err != nil {
@@ -235,10 +207,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 }
 
 func generateSkill(baseDir string, tool mcp.Tool, in input) error {
+	// Sanitize tool name to prevent path traversal
+	sanitized := filepath.Base(tool.Name)
+	if sanitized != tool.Name || sanitized == "." || sanitized == ".." {
+		return fmt.Errorf("invalid tool name: %s", tool.Name)
+	}
 
 	// Create directory for the skill
-
-	skillDir := filepath.Join(baseDir, tool.Name)
+	skillDir := filepath.Join(baseDir, sanitized)
 
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 
@@ -388,7 +364,9 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 
 		"capabilities": map[string]any{
 
-			"network": "none",
+			"network": "egress",
+
+			"egressAllow": []string{"*"}, // MCP bridge needs network access to communicate with MCP servers
 
 			"filesystem": []map[string]string{
 
@@ -437,9 +415,12 @@ func parseInput(r io.Reader) (input, error) {
 	}
 
 	if in.BridgePath == "" {
-
 		in.BridgePath = "mcp_bridge" // Default assuming it's in PATH or aliased
+	}
 
+	// Validate bridge exists
+	if _, err := exec.LookPath(in.BridgePath); err != nil {
+		return input{}, fmt.Errorf("bridge binary not found: %s (use -bridge-path or ensure mcp_bridge is in PATH)", in.BridgePath)
 	}
 
 	return in, nil
