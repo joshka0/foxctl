@@ -11,6 +11,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -85,27 +86,25 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	var err error
 
 	if in.ServerURL != "" {
-		// SSE Transport
-		mcpClient, err = client.NewSSEMCPClient(in.ServerURL, client.WithHeaders(in.ServerHeaders))
+		// SSE/HTTP Transport
+		// We use StreamableHTTP transport which supports both single-response and streaming responses via POST
+		mcpClient, err = client.NewStreamableHttpClient(in.ServerURL, transport.WithHTTPHeaders(in.ServerHeaders))
 		if err != nil {
-			return fmt.Errorf("failed to create SSE client: %w", err)
+			return fmt.Errorf("failed to create HTTP client: %w", err)
 		}
-		// SSE client doesn't auto-start transport?
-		// client.NewSSEMCPClient calls transport.NewSSE which initializes it.
-		// mcpClient.Start(ctx) is usually needed for SSE?
-		// Looking at mcp-go source: NewSSEMCPClient returns a client with transport.
-		// We must call Start() on the client to start the transport loop?
-		// Actually client.NewClient() just wraps transport.
-		// Stdio client starts transport automatically in NewStdioMCPClient.
-		// SSE might need explicit start.
-		// Let's call mcpClient.Start(ctx) to be safe, or just Initialize which should trigger it?
-		// Actually Initialize sends a request. If transport isn't started (loop reading messages), Initialize will hang or fail.
-		// Checking mcp-go/client/client.go: NewClient just sets up struct.
-		// Stdio transport.Start() starts the read loop.
-		// SSE transport.Start() connects and starts read loop.
-		// So we must call Start().
+		// StreamableHTTP does not require explicit Start() for request-response, 
+		// but we can call it to be safe (it handles background listening if enabled).
+		// client.NewStreamableHttpClient does NOT enable continuous listening by default.
+		// If we want notifications, we might need it.
+		// But for now, let's just use it. 
+		// Start() in StreamableHTTP is strictly for "Continuous Listening" (GET).
+		// Exa rejected GET. So we probably shouldn't call Start() if it triggers GET.
+		// Checking StreamableHTTP.Start(): 
+		// if c.getListeningEnabled { ... createGETConnectionToServer ... }
+		// By default getListeningEnabled is false. So Start() does nothing.
+		// So we can call it or not.
 		if err := mcpClient.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start SSE transport: %w", err)
+			return fmt.Errorf("failed to start transport: %w", err)
 		}
 
 	} else if in.ServerCmd != "" {

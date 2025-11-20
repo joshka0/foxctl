@@ -1,29 +1,47 @@
-name: mcp/install
-version: 1.0.0
-description: Introspects an MCP server and installs skills for each tool
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: mcp/install
+  version: 1.0.0
+  description: Introspects an MCP server and installs skills for each tool
 distribution:
   type: exec
-  entry: ["{{.Bin}}"]
+  exec:
+    entry: bin
 capabilities:
-  network: true
-  filesystem: true
+  network: "none"
+  filesystem:
+    - type: workdir
 signature:
-  cmd: mcp/install
-  args:
-    server_cmd:
+  command: mcp/install
+  parameters:
+    - name: server_cmd
       type: string
+      required: false
       description: The executable command to start the MCP server
-    server_args:
+    - name: server_args
       type: array
+      required: false
+      description: Arguments for the server command
       items:
         type: string
-      description: Arguments for the server command
-    server_env:
+    - name: server_env
       type: object
+      required: false
       description: Environment variables for the server
-    output_dir:
+    - name: output_dir
       type: string
+      required: false
       description: Directory where generated skills will be placed (defaults to current directory)
-    bridge_path:
+    - name: bridge_path
       type: string
+      required: false
       description: Path to the mcp_bridge binary to use in generated skills (defaults to "mcp_bridge")
+    - name: server_url
+      type: string
+      required: false
+      description: URL of the MCP server (SSE)
+    - name: server_headers
+      type: object
+      required: false
+      description: HTTP headers for SSE connection

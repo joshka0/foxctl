@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
@@ -93,25 +94,43 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 
 
-	if in.ServerURL != "" {
+		if in.ServerURL != "" {
 
-		// SSE Transport
 
-		mcpClient, err = client.NewSSEMCPClient(in.ServerURL, client.WithHeaders(in.ServerHeaders))
 
-		if err != nil {
+			// SSE/HTTP Transport
 
-			return fmt.Errorf("failed to create SSE client: %w", err)
 
-		}
 
-		if err := mcpClient.Start(ctx); err != nil {
+			mcpClient, err = client.NewStreamableHttpClient(in.ServerURL, transport.WithHTTPHeaders(in.ServerHeaders))
 
-			return fmt.Errorf("failed to start SSE transport: %w", err)
 
-		}
 
-	} else if in.ServerCmd != "" {
+			if err != nil {
+
+
+
+				return fmt.Errorf("failed to create HTTP client: %w", err)
+
+
+
+			}
+
+
+
+			if err := mcpClient.Start(ctx); err != nil {
+
+
+
+				return fmt.Errorf("failed to start transport: %w", err)
+
+
+
+			}
+
+
+
+		} else if in.ServerCmd != "" {
 
 		// Stdio Transport
 
