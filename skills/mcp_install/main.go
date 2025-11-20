@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/client"
@@ -239,11 +240,18 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 	}
 
 	// Map MCP Schema to Agentctl Signature
-
 	signatureParameters := []map[string]any{}
 
+	// Collect property names and sort for deterministic output
 	if tool.InputSchema.Properties != nil {
-		for propName, propDef := range tool.InputSchema.Properties {
+		propNames := make([]string, 0, len(tool.InputSchema.Properties))
+		for propName := range tool.InputSchema.Properties {
+			propNames = append(propNames, propName)
+		}
+		sort.Strings(propNames)
+
+		for _, propName := range propNames {
+			propDef := tool.InputSchema.Properties[propName]
 			if defMap, ok := propDef.(map[string]any); ok {
 
 				param := map[string]any{
@@ -312,7 +320,9 @@ func generateSkill(baseDir string, tool mcp.Tool, in input) error {
 		},
 
 		"signature": map[string]any{
-			"command": tool.Name, // Or mcp_generated/tool.Name? Signature command usually matches usage
+			// Command uses bare tool name for CLI invocation (e.g., "list_files")
+			// while metadata.name includes namespace prefix (e.g., "mcp_generated/list_files")
+			"command": tool.Name,
 
 			"parameters": signatureParameters,
 		},
