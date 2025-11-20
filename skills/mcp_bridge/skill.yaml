@@ -1,0 +1,49 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: mcp/bridge
+  version: 1.0.0
+  description: Bridge to execute tools on generic MCP servers
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+signature:
+  command: mcp/bridge
+  parameters:
+    - name: server_cmd
+      type: string
+      required: false
+      description: The executable command to start the MCP server
+    - name: server_args
+      type: array
+      required: false
+      description: Arguments for the server command
+      items:
+        type: string
+    - name: server_env
+      type: object
+      required: false
+      description: Environment variables for the server
+    - name: server_url
+      type: string
+      required: false
+      description: URL of the MCP server (SSE)
+    - name: server_headers
+      type: object
+      required: false
+      description: HTTP headers for SSE connection
+    - name: tool_name
+      type: string
+      required: true
+      description: The name of the tool to call
+    - name: tool_args
+      type: object
+      required: false
+      description: Arguments to pass to the tool

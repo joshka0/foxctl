@@ -18,3 +18,7 @@
 .env.*.local
 *.token
 *.key
+
+# Dev binaries
+mcp_bridge
+mcp_install
