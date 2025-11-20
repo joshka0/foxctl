@@ -8,6 +8,8 @@ distribution:
   type: exec
   exec:
     entry: bin
+io:
+  format: JSON
 capabilities:
   network: "none"
   filesystem:
