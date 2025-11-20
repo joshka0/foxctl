@@ -68,11 +68,12 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
     "bridge_path": "/absolute/path/to/mcp_bridge"
   }'
   
-  # Install skills from a remote MCP server (SSE)
+  # Install skills from a remote MCP server (HTTP/SSE)
+  # Example: Exa (requires Accept header for Streamable HTTP)
   ./bin/agentctl run mcp/install --input '{
-    "server_url": "http://localhost:8000/sse",
-    "server_headers": {"Authorization": "Bearer token"},
-    "output_dir": "./my_remote_skills",
+    "server_url": "https://mcp.exa.ai/mcp",
+    "server_headers": {"Accept": "application/json, text/event-stream"},
+    "output_dir": "./exa_skills",
     "bridge_path": "/absolute/path/to/mcp_bridge"
   }'
   ```
