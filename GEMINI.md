@@ -67,6 +67,14 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
     "output_dir": "./my_skills",
     "bridge_path": "/absolute/path/to/mcp_bridge"
   }'
+  
+  # Install skills from a remote MCP server (SSE)
+  ./bin/agentctl run mcp/install --input '{
+    "server_url": "http://localhost:8000/sse",
+    "server_headers": {"Authorization": "Bearer token"},
+    "output_dir": "./my_remote_skills",
+    "bridge_path": "/absolute/path/to/mcp_bridge"
+  }'
   ```
 
 ### 3. Usage Example

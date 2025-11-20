@@ -19,11 +19,13 @@ import (
 )
 
 type input struct {
-	ServerCmd  string            `json:"server_cmd"`
-	ServerArgs []string          `json:"server_args"`
-	ServerEnv  map[string]string `json:"server_env"`
-	ToolName   string            `json:"tool_name"`
-	ToolArgs   map[string]any    `json:"tool_args"`
+	ServerCmd     string            `json:"server_cmd"`
+	ServerArgs    []string          `json:"server_args"`
+	ServerEnv     map[string]string `json:"server_env"`
+	ServerURL     string            `json:"server_url"`
+	ServerHeaders map[string]string `json:"server_headers"`
+	ToolName      string            `json:"tool_name"`
+	ToolArgs      map[string]any    `json:"tool_args"`
 }
 
 // arrayFlags allows parsing repeated flags like -arg "foo" -arg "bar"
@@ -42,14 +44,18 @@ func main() {
 	// Parse flags
 	var (
 		serverCmd string
+		serverURL string
 		toolName  string
 		serverArgs arrayFlags
 		serverEnv  arrayFlags
+		serverHeaders arrayFlags
 	)
 	flag.StringVar(&serverCmd, "server-cmd", "", "Command to start the MCP server")
+	flag.StringVar(&serverURL, "server-url", "", "URL of the MCP server (SSE)")
 	flag.StringVar(&toolName, "tool", "", "Name of the tool to call")
 	flag.Var(&serverArgs, "server-arg", "Argument for the server command (can be repeated)")
 	flag.Var(&serverEnv, "env", "Environment variable for the server in KEY=VALUE format (can be repeated)")
+	flag.Var(&serverHeaders, "header", "HTTP header for SSE connection in KEY=VALUE format (can be repeated)")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -65,7 +71,7 @@ func main() {
 		errs.Ignore(rc.Close(), "runner context close")
 	}()
 
-	in, err := parseInput(os.Stdin, serverCmd, toolName, serverArgs, serverEnv)
+	in, err := parseInput(os.Stdin, serverCmd, serverURL, toolName, serverArgs, serverEnv, serverHeaders)
 	if err != nil {
 		fail("mcp/bridge", "EARG", err)
 	}
@@ -75,17 +81,46 @@ func main() {
 }
 
 func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
-	// Construct Env
-	env := os.Environ()
-	for k, v := range in.ServerEnv {
-		env = append(env, fmt.Sprintf("%s=%s", k, v))
-	}
+	var mcpClient *client.Client
+	var err error
 
-	// Initialize Client
-	// NewStdioMCPClient launches the process and starts the transport
-	mcpClient, err := client.NewStdioMCPClient(in.ServerCmd, env, in.ServerArgs...)
-	if err != nil {
-		return fmt.Errorf("failed to create mcp client: %w", err)
+	if in.ServerURL != "" {
+		// SSE Transport
+		mcpClient, err = client.NewSSEMCPClient(in.ServerURL, client.WithHeaders(in.ServerHeaders))
+		if err != nil {
+			return fmt.Errorf("failed to create SSE client: %w", err)
+		}
+		// SSE client doesn't auto-start transport?
+		// client.NewSSEMCPClient calls transport.NewSSE which initializes it.
+		// mcpClient.Start(ctx) is usually needed for SSE?
+		// Looking at mcp-go source: NewSSEMCPClient returns a client with transport.
+		// We must call Start() on the client to start the transport loop?
+		// Actually client.NewClient() just wraps transport.
+		// Stdio client starts transport automatically in NewStdioMCPClient.
+		// SSE might need explicit start.
+		// Let's call mcpClient.Start(ctx) to be safe, or just Initialize which should trigger it?
+		// Actually Initialize sends a request. If transport isn't started (loop reading messages), Initialize will hang or fail.
+		// Checking mcp-go/client/client.go: NewClient just sets up struct.
+		// Stdio transport.Start() starts the read loop.
+		// SSE transport.Start() connects and starts read loop.
+		// So we must call Start().
+		if err := mcpClient.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start SSE transport: %w", err)
+		}
+
+	} else if in.ServerCmd != "" {
+		// Stdio Transport
+		env := os.Environ()
+		for k, v := range in.ServerEnv {
+			env = append(env, fmt.Sprintf("%s=%s", k, v))
+		}
+		// NewStdioMCPClient starts the transport automatically
+		mcpClient, err = client.NewStdioMCPClient(in.ServerCmd, env, in.ServerArgs...)
+		if err != nil {
+			return fmt.Errorf("failed to create stdio client: %w", err)
+		}
+	} else {
+		return fmt.Errorf("either server_cmd or server_url is required")
 	}
 	defer mcpClient.Close()
 
@@ -129,13 +164,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	})
 }
 
-func parseInput(r io.Reader, cmdFlag, toolFlag string, argsFlag, envFlag []string) (input, error) {
-	// If flags are provided, we are in "Tool Mode"
-	if cmdFlag != "" && toolFlag != "" {
+func parseInput(r io.Reader, cmdFlag, urlFlag, toolFlag string, argsFlag, envFlag, headersFlag []string) (input, error) {
+	// If flags are provided (at least tool and one of cmd/url), we are in "Tool Mode"
+	if toolFlag != "" && (cmdFlag != "" || urlFlag != "") {
 		// Parse Stdin as simple arguments map
 		var toolArgs map[string]any
-		// Check if stdin has data before trying to read, or just try decoding
-		// If stdin is empty, toolArgs remains empty map (valid for 0-arg tools)
 		if err := json.NewDecoder(r).Decode(&toolArgs); err != nil && err != io.EOF {
 			return input{}, fmt.Errorf("decode tool args: %w", err)
 		}
@@ -149,12 +182,23 @@ func parseInput(r io.Reader, cmdFlag, toolFlag string, argsFlag, envFlag []strin
 			}
 		}
 
+		// Parse Header flags
+		headerMap := make(map[string]string)
+		for _, h := range headersFlag {
+			parts := strings.SplitN(h, "=", 2)
+			if len(parts) == 2 {
+				headerMap[parts[0]] = parts[1]
+			}
+		}
+
 		return input{
-			ServerCmd:  cmdFlag,
-			ServerArgs: argsFlag,
-			ServerEnv:  envMap,
-			ToolName:   toolFlag,
-			ToolArgs:   toolArgs,
+			ServerCmd:     cmdFlag,
+			ServerArgs:    argsFlag,
+			ServerEnv:     envMap,
+			ServerURL:     urlFlag,
+			ServerHeaders: headerMap,
+			ToolName:      toolFlag,
+			ToolArgs:      toolArgs,
 		}, nil
 	}
 
@@ -163,8 +207,8 @@ func parseInput(r io.Reader, cmdFlag, toolFlag string, argsFlag, envFlag []strin
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return input{}, fmt.Errorf("decode input: %w", err)
 	}
-	if in.ServerCmd == "" {
-		return input{}, fmt.Errorf("server_cmd is required")
+	if in.ServerCmd == "" && in.ServerURL == "" {
+		return input{}, fmt.Errorf("server_cmd or server_url is required")
 	}
 	if in.ToolName == "" {
 		return input{}, fmt.Errorf("tool_name is required")
