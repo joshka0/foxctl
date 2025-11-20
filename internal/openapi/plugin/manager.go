@@ -354,8 +354,8 @@ func (m *Manager) invoke(ctx context.Context, info *pluginInfo, command string, 
 	}
 
 	details := m.errorDetails(info, stderrBuf, stdoutBuf)
-	if resp.Error.Data != nil {
-		details["plugin_data"] = resp.Error.Data
+	if resp.Data != nil {
+		details["plugin_data"] = resp.Data
 	}
 	code := protocol.ErrorCode(resp.Error.Code)
 	if code == "" {
