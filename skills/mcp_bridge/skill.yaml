@@ -1,0 +1,29 @@
+name: mcp/bridge
+version: 1.0.0
+description: Bridge to execute tools on generic MCP servers
+distribution:
+  type: exec
+  entry: ["{{.Bin}}"]
+capabilities:
+  network: true # Needs network if the MCP server uses it, or to talk to local processes
+  filesystem: true # To execute the server binary
+signature:
+  cmd: mcp/bridge
+  args:
+    server_cmd:
+      type: string
+      description: The executable command to start the MCP server
+    server_args:
+      type: array
+      items:
+        type: string
+      description: Arguments for the server command
+    server_env:
+      type: object
+      description: Environment variables for the server
+    tool_name:
+      type: string
+      description: The name of the tool to call
+    tool_args:
+      type: object
+      description: Arguments to pass to the tool
