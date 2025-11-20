@@ -1,4 +1,5 @@
 version: "2"
+
 run:
   timeout: 5m
   tests: true
@@ -28,6 +29,8 @@ linters-settings:
         disabled: true
       - name: exported
         disabled: true
+      - name: var-naming
+        disabled: true # Allow package names like "types"
       - name: unhandled-error
         severity: warning
         disabled: false
