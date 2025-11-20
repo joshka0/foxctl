@@ -54,6 +54,21 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
 - **Manifest**: `skills/mcp_bridge/skill.yaml`
 - **Usage**: Accepts `server_cmd`, `server_args`, `tool_name`, `tool_args`.
 
+#### B. The Installer Skill (`skills/mcp_install`)
+- **Source**: `skills/mcp_install/main.go`
+- **Manifest**: `skills/mcp_install/skill.yaml`
+- **Purpose**: Introspects an MCP server and generates persistent `agentctl` skills for all available tools.
+- **Usage**:
+  ```bash
+  # Install skills from a local python MCP server
+  ./bin/agentctl run mcp/install --input '{
+    "server_cmd": "python3",
+    "server_args": ["/absolute/path/to/server.py"],
+    "output_dir": "./my_skills",
+    "bridge_path": "/absolute/path/to/mcp_bridge"
+  }'
+  ```
+
 ### 3. Usage Example
 
 To use an MCP tool (e.g., a Python script `server.py` with tool `weather`):

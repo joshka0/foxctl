@@ -1,0 +1,29 @@
+name: mcp/install
+version: 1.0.0
+description: Introspects an MCP server and installs skills for each tool
+distribution:
+  type: exec
+  entry: ["{{.Bin}}"]
+capabilities:
+  network: true
+  filesystem: true
+signature:
+  cmd: mcp/install
+  args:
+    server_cmd:
+      type: string
+      description: The executable command to start the MCP server
+    server_args:
+      type: array
+      items:
+        type: string
+      description: Arguments for the server command
+    server_env:
+      type: object
+      description: Environment variables for the server
+    output_dir:
+      type: string
+      description: Directory where generated skills will be placed (defaults to current directory)
+    bridge_path:
+      type: string
+      description: Path to the mcp_bridge binary to use in generated skills (defaults to "mcp_bridge")

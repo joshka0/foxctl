@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/client"
@@ -24,7 +26,32 @@ type input struct {
 	ToolArgs   map[string]any    `json:"tool_args"`
 }
 
+// arrayFlags allows parsing repeated flags like -arg "foo" -arg "bar"
+type arrayFlags []string
+
+func (i *arrayFlags) String() string {
+	return strings.Join(*i, " ")
+}
+
+func (i *arrayFlags) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
+
 func main() {
+	// Parse flags
+	var (
+		serverCmd string
+		toolName  string
+		serverArgs arrayFlags
+		serverEnv  arrayFlags
+	)
+	flag.StringVar(&serverCmd, "server-cmd", "", "Command to start the MCP server")
+	flag.StringVar(&toolName, "tool", "", "Name of the tool to call")
+	flag.Var(&serverArgs, "server-arg", "Argument for the server command (can be repeated)")
+	flag.Var(&serverEnv, "env", "Environment variable for the server in KEY=VALUE format (can be repeated)")
+	flag.Parse()
+
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
@@ -38,7 +65,7 @@ func main() {
 		errs.Ignore(rc.Close(), "runner context close")
 	}()
 
-	in, err := parseInput(os.Stdin)
+	in, err := parseInput(os.Stdin, serverCmd, toolName, serverArgs, serverEnv)
 	if err != nil {
 		fail("mcp/bridge", "EARG", err)
 	}
@@ -102,7 +129,36 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	})
 }
 
-func parseInput(r io.Reader) (input, error) {
+func parseInput(r io.Reader, cmdFlag, toolFlag string, argsFlag, envFlag []string) (input, error) {
+	// If flags are provided, we are in "Tool Mode"
+	if cmdFlag != "" && toolFlag != "" {
+		// Parse Stdin as simple arguments map
+		var toolArgs map[string]any
+		// Check if stdin has data before trying to read, or just try decoding
+		// If stdin is empty, toolArgs remains empty map (valid for 0-arg tools)
+		if err := json.NewDecoder(r).Decode(&toolArgs); err != nil && err != io.EOF {
+			return input{}, fmt.Errorf("decode tool args: %w", err)
+		}
+
+		// Parse Env flags
+		envMap := make(map[string]string)
+		for _, e := range envFlag {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+
+		return input{
+			ServerCmd:  cmdFlag,
+			ServerArgs: argsFlag,
+			ServerEnv:  envMap,
+			ToolName:   toolFlag,
+			ToolArgs:   toolArgs,
+		}, nil
+	}
+
+	// Legacy Mode: Parse everything from Stdin
 	var in input
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return input{}, fmt.Errorf("decode input: %w", err)
