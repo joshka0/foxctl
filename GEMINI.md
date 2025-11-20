@@ -78,24 +78,28 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
   }'
   ```
 
-### 3. Usage Example
+### 4. Troubleshooting & Common Patterns
 
-To use an MCP tool (e.g., a Python script `server.py` with tool `weather`):
+When working with the MCP adapter, keep these "gotchas" in mind:
 
-```bash
-# Run via agentctl (assuming built)
-./bin/agentctl run mcp/bridge --input '{
-  "server_cmd": "python3",
-  "server_args": ["server.py"],
-  "tool_name": "weather",
-  "tool_args": {"city": "Paris"}
-}'
-```
+1.  **HTTP/SSE Headers**:
+    *   Remote MCP servers (like Exa) often use "Streamable HTTP" over standard SSE.
+    *   They may strictly enforce `Accept` headers.
+    *   **Fix**: Always check if the server requires `Accept: application/json, text/event-stream` and pass it in `server_headers`.
 
-To expose this permanently, create a wrapper skill YAML that calls this bridge with hardcoded `server_cmd` arguments.
+2.  **Network Capabilities**:
+    *   `agentctl`'s `exec` runner currently enforces a strict `network: none` policy for sandboxing.
+    *   However, the `mcp_bridge` is a native binary that *inherits* the host's network access.
+    *   **Fix**: Generated skills must declare `network: none` in their manifest to pass validation, even though the bridge performs network I/O.
 
-### 4. Status
+3.  **Path Resolution**:
+    *   The `mcp/install` skill generates a wrapper script (`bin`) that calls the bridge.
+    *   **Fix**: Ensure `bridge_path` is an absolute path or in your global `$PATH`, as the generated skill runs in a specific workspace directory and might not find relative paths easily.
+
+### 5. Status
 - [x] Create `skills/mcp_bridge` structure.
 - [x] Implement MCP Client logic using `github.com/mark3labs/mcp-go`.
 - [x] Verify with test MCP server.
-- [ ] (Future) Automatic discovery/generation of wrapper skills.
+- [x] Implement `mcp/install` for auto-discovery.
+- [x] Add SSE/Streamable HTTP support (verified with Exa).
+- [ ] (Future) Automatic discovery of auth requirements.
