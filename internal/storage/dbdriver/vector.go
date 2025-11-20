@@ -73,7 +73,17 @@ func ParseVector(data string) (Vector, error) {
 func (vh *VectorHelper) CreateVectorColumn(ctx context.Context, tableName, columnName string) error {
 	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s F32_BLOB(%d)", tableName, columnName, vh.dimensions)
 	_, err := vh.db.ExecContext(ctx, query)
-	return err
+	if err != nil {
+		// Ignore error if column already exists
+		// Check for duplicate column error message (works across SQLite versions)
+		errMsg := strings.ToLower(err.Error())
+		if strings.Contains(errMsg, "duplicate column") || strings.Contains(errMsg, "already exists") {
+			// Duplicate column error, safe to ignore
+			return nil
+		}
+		return fmt.Errorf("create vector column: %w", err)
+	}
+	return nil
 }
 
 // CreateVectorIndex creates a vector search index

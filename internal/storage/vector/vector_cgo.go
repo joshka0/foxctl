@@ -171,6 +171,10 @@ func (s *Store) Search(ctx context.Context, opts SearchOptions) ([]Entry, error)
 		results = append(results, entry)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration failed: %w", err)
+	}
+
 	return results, nil
 }
 

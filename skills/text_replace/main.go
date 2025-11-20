@@ -51,8 +51,8 @@ type input struct {
 	Backup              bool        `json:"backup"`
 	BackupSuffix        string      `json:"backup_suffix"`
 	ValidateSyntax      bool        `json:"validate_syntax"`
-	SkipBinary          bool        `json:"skip_binary"`
-	PreserveLineEndings bool        `json:"preserve_line_endings"`
+	SkipBinary          *bool       `json:"skip_binary"`
+	PreserveLineEndings *bool       `json:"preserve_line_endings"`
 	ShowDiff            bool        `json:"show_diff"`
 }
 
@@ -78,7 +78,7 @@ type fileChange struct {
 
 type replacer interface {
 	Match(content string) bool
-	Replace(content string) string
+	Replace(content string) (string, int)
 }
 
 type literalReplacer struct {
@@ -90,8 +90,9 @@ func (r *literalReplacer) Match(content string) bool {
 	return strings.Contains(content, r.pattern)
 }
 
-func (r *literalReplacer) Replace(content string) string {
-	return strings.ReplaceAll(content, r.pattern, r.replacement)
+func (r *literalReplacer) Replace(content string) (string, int) {
+	count := strings.Count(content, r.pattern)
+	return strings.ReplaceAll(content, r.pattern, r.replacement), count
 }
 
 type regexReplacer struct {
@@ -103,8 +104,10 @@ func (r *regexReplacer) Match(content string) bool {
 	return r.pattern.MatchString(content)
 }
 
-func (r *regexReplacer) Replace(content string) string {
-	return r.pattern.ReplaceAllString(content, r.replacement)
+func (r *regexReplacer) Replace(content string) (string, int) {
+	matches := r.pattern.FindAllStringIndex(content, -1)
+	count := len(matches)
+	return r.pattern.ReplaceAllString(content, r.replacement), count
 }
 
 func main() {
@@ -198,7 +201,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		}
 
 		// Check if binary file
-		if in.SkipBinary {
+		if *in.SkipBinary {
 			isBinary, err := isBinaryFile(entry.Path)
 			if err != nil {
 				return err
@@ -224,7 +227,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 			in.DryRun,
 			in.Backup,
 			in.BackupSuffix,
-			in.PreserveLineEndings,
+			*in.PreserveLineEndings,
 			in.ShowDiff,
 		)
 		if err != nil {
@@ -306,12 +309,14 @@ func parseInput(r io.Reader) (input, error) {
 	if in.BackupSuffix == "" {
 		in.BackupSuffix = ".bak"
 	}
-	// Default to true for skip_binary and preserve_line_endings per manifest
-	if !in.SkipBinary {
-		in.SkipBinary = true
+	// Default to true for skip_binary and preserve_line_endings per manifest (only if unset)
+	if in.SkipBinary == nil {
+		defaultSkipBinary := true
+		in.SkipBinary = &defaultSkipBinary
 	}
-	if !in.PreserveLineEndings {
-		in.PreserveLineEndings = true
+	if in.PreserveLineEndings == nil {
+		defaultPreserveLineEndings := true
+		in.PreserveLineEndings = &defaultPreserveLineEndings
 	}
 
 	// Validate: either pattern/replacement OR operations, not both
@@ -529,19 +534,17 @@ func processFile(
 
 		// Apply all replacers to this line
 		newLine := line
-		madeChanges := false
+		lineReplacements := 0
 
 		for _, r := range replacers {
 			if r.Match(newLine) {
-				beforeReplace := newLine
-				newLine = r.Replace(newLine)
-				if newLine != beforeReplace {
-					madeChanges = true
-				}
+				var count int
+				newLine, count = r.Replace(newLine)
+				lineReplacements += count
 			}
 		}
 
-		if madeChanges {
+		if lineReplacements > 0 {
 			modified = true
 			diff := ""
 			if showDiff {
@@ -552,7 +555,7 @@ func processFile(
 				LineNumber:       lineNum,
 				OriginalLine:     truncateLine(line, 200),
 				ModifiedLine:     truncateLine(newLine, 200),
-				ReplacementsMade: 1,
+				ReplacementsMade: lineReplacements,
 				Diff:             diff,
 			})
 		}
@@ -560,8 +563,14 @@ func processFile(
 		modifiedLines = append(modifiedLines, newLine)
 	}
 
+	// Calculate total replacements across all changes
+	totalReplacements := 0
+	for _, c := range changes {
+		totalReplacements += c.ReplacementsMade
+	}
+
 	result := fileChange{
-		Replacements: len(changes),
+		Replacements: totalReplacements,
 		Changes:      changes,
 	}
 

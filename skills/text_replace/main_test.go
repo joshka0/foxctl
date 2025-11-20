@@ -370,12 +370,13 @@ func TestReplaceBinarySkip(t *testing.T) {
 		}
 	})
 
+	skipBinary := true
 	in := input{
 		Pattern:     "test",
 		Replacement: "exam",
 		Paths:       []string{testFile},
 		Literal:     true,
-		SkipBinary:  true,
+		SkipBinary:  &skipBinary,
 		DryRun:      false,
 		MaxFiles:    100,
 	}
@@ -424,12 +425,13 @@ func TestReplacePreserveLineEndings(t *testing.T) {
 		}
 	})
 
+	preserveLineEndings := true
 	in := input{
 		Pattern:             "old",
 		Replacement:         "new",
 		Paths:               []string{testFile},
 		Literal:             true,
-		PreserveLineEndings: true,
+		PreserveLineEndings: &preserveLineEndings,
 		DryRun:              false,
 		MaxFiles:            100,
 	}

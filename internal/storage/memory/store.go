@@ -337,7 +337,9 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 		ALTER TABLE named_memory ADD COLUMN embedding BLOB DEFAULT NULL;
 	`); err != nil {
 		// Ignore error if column already exists
-		if !strings.Contains(err.Error(), "duplicate column name") {
+		// Check for duplicate column error message (works across SQLite versions)
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
 			return fmt.Errorf("memory: add embedding column: %w", err)
 		}
 	}
