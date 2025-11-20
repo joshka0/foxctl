@@ -64,7 +64,7 @@ func main() {
 		fail("code/stats", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("code/stats", "ERUNTIME", err)
 	}
@@ -81,7 +81,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -254,7 +254,9 @@ func run(ctx context.Context, rc *runner.Context, in input) error {
 }
 
 func parseInput(r io.Reader) (input, error) {
-	var in input
+	in := input{
+		IncludeTests: true,
+	}
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return input{}, fmt.Errorf("decode input: %w", err)
 	}
@@ -442,7 +444,7 @@ func preparePreview(s *stats, limit int) (*stats, bool) {
 	return &cp, true
 }
 
-func persistStatsArtifact(ctx context.Context, rc *runner.Context, s *stats, truncated bool) (runner.Artifact, error) {
+func persistStatsArtifact(ctx context.Context, rc *runner.RunnerContext, s *stats, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

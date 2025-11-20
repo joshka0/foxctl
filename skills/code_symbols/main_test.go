@@ -15,7 +15,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	cfg := config.Config{
@@ -28,7 +28,7 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runne
 			Cache: workspace + "/cache",
 		},
 	}
-	rc, err := runner.NewContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -45,7 +45,9 @@ func TestRunCodeSymbols(t *testing.T) {
 	if err := os.Chdir(work); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	code := `package main
 type MyStruct struct {
@@ -58,7 +60,7 @@ func MyFunc() {}
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
+	rc := newTestRunnerContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -115,7 +117,9 @@ func TestParserDirect(t *testing.T) {
 	if err := os.Chdir(work); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	code := `package main
 type MyStruct struct {

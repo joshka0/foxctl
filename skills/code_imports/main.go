@@ -57,7 +57,7 @@ func main() {
 		fail("code/imports", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("code/imports", "ERUNTIME", err)
 	}
@@ -74,7 +74,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -672,7 +672,7 @@ func preparePreview(results any, limit int) (any, bool) {
 	}
 }
 
-func persistImportsArtifact(ctx context.Context, rc *runner.Context, results any, truncated bool) (runner.Artifact, error) {
+func persistImportsArtifact(ctx context.Context, rc *runner.RunnerContext, results any, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

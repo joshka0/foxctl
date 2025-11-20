@@ -15,7 +15,7 @@ import (
 
 func TestEmitSetsMetaCasDigestWhenArtifactPresent(t *testing.T) {
 	buf := &bytes.Buffer{}
-	c := &Context{Stdout: buf}
+	c := &RunnerContext{Stdout: buf}
 
 	data := map[string]any{
 		"artifact": "sha256:abc123",
@@ -36,7 +36,7 @@ func TestEmitSetsMetaCasDigestWhenArtifactPresent(t *testing.T) {
 
 func TestEmitPreservesExistingCasDigest(t *testing.T) {
 	buf := &bytes.Buffer{}
-	c := &Context{Stdout: buf}
+	c := &RunnerContext{Stdout: buf}
 
 	meta := envelope.Meta{Source: "run", CASDigest: "sha256:existing"}
 	if err := c.Emit("demo", map[string]any{}, "application/json", meta); err != nil {
@@ -54,7 +54,7 @@ func TestEmitPreservesExistingCasDigest(t *testing.T) {
 
 func TestEmitWithNilData(t *testing.T) {
 	buf := &bytes.Buffer{}
-	c := &Context{Stdout: buf}
+	c := &RunnerContext{Stdout: buf}
 
 	if err := c.Emit("cmd", nil, "application/json", envelope.Meta{}); err != nil {
 		t.Fatalf("emit: %v", err)
@@ -70,7 +70,7 @@ func TestEmitWithNilData(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	c := &Context{}
+	c := &RunnerContext{}
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close() failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestNewContext(t *testing.T) {
 	cfg := config.Config{Paths: config.Paths{CAS: filepath.Join(temp, "cas")}}
 	stdout := &bytes.Buffer{}
 
-	c, err := NewContext(cfg, stdout)
+	c, err := NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("NewContext: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestPersistBufferAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	c := &Context{CASStore: store}
+	c := &RunnerContext{CASStore: store}
 
 	buf := bytes.NewBufferString("hello world")
 	art, err := PersistBuffer(context.Background(), c, buf, "text/plain", "tag1")
@@ -173,7 +173,7 @@ func TestPersistBufferAndJSON(t *testing.T) {
 }
 
 func TestPersistBufferNilBuffer(t *testing.T) {
-	c := &Context{}
+	c := &RunnerContext{}
 	if _, err := PersistBuffer(context.Background(), c, nil, "application/octet-stream"); err == nil {
 		t.Fatalf("expected error for nil buffer")
 	}

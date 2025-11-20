@@ -98,7 +98,7 @@ func main() {
 		fail("code/git", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("code/git", "ERUNTIME", err)
 	}
@@ -115,7 +115,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Check if git is available
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found in PATH: %w", err)
@@ -616,7 +616,7 @@ func preparePreview(results []gitResult, limit int) ([]gitResult, bool) {
 	return preview, truncated
 }
 
-func persistResultsArtifact(ctx context.Context, rc *runner.Context, results []gitResult, truncated bool) (runner.Artifact, error) {
+func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, results []gitResult, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

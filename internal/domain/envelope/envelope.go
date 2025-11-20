@@ -91,9 +91,8 @@ type MemoryRef struct {
 
 // ErrorFields captures error metadata when status != ok.
 type ErrorFields struct {
-	Code    string      `json:"code,omitempty"`
-	Message string      `json:"message,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // Option mutates an envelope during construction.

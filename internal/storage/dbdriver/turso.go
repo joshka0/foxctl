@@ -6,6 +6,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/tursodatabase/go-libsql"
@@ -15,6 +17,7 @@ import (
 type tursoDB struct {
 	db                 *sql.DB
 	connector          *libsql.Connector
+	tempDir            string
 	enableVectorSearch bool
 	vectorDimensions   int
 	driverType         DriverType
@@ -29,27 +32,41 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 	}
 
 	// Create libSQL connector for remote Turso database
-	// Use empty string for local path to indicate remote-only mode
-	connector, err := libsql.NewEmbeddedReplicaConnector("", cfg.URL,
+	// Use a temporary file for the embedded replica since TursoConfig doesn't specify a local path
+	tmpDir, err := os.MkdirTemp("", "turso-replica-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp dir for turso replica: %w", err)
+	}
+	dbPath := filepath.Join(tmpDir, "replica.db")
+
+	connector, err := libsql.NewEmbeddedReplicaConnector(dbPath, cfg.URL,
 		libsql.WithAuthToken(cfg.AuthToken),
 	)
 	if err != nil {
+		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("failed to create turso connector: %w", err)
 	}
 
 	// Open database connection
 	db := sql.OpenDB(connector)
 
+	// Helper to cleanup resources on error
+	cleanup := func() {
+		_ = db.Close()
+		_ = connector.Close()
+		_ = os.RemoveAll(tmpDir)
+	}
+
 	// Test the connection
 	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close() //nolint:errcheck
+		cleanup()
 		return nil, fmt.Errorf("failed to connect to turso database: %w", err)
 	}
 
 	// Run migrations if provided
 	if migrate != nil {
 		if err := migrate(ctx, db); err != nil {
-			_ = db.Close() //nolint:errcheck
+			cleanup()
 			return nil, fmt.Errorf("failed to run migrations: %w", err)
 		}
 	}
@@ -57,7 +74,7 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 	// If vector search is enabled for memory database, ensure vector columns exist
 	if cfg.EnableVectorSearch {
 		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
-			_ = db.Close() //nolint:errcheck
+			cleanup()
 			return nil, fmt.Errorf("failed to enable vector search: %w", err)
 		}
 	}
@@ -65,6 +82,7 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 	return &tursoDB{
 		db:                 db,
 		connector:          connector,
+		tempDir:            tmpDir,
 		enableVectorSearch: cfg.EnableVectorSearch,
 		vectorDimensions:   vectorDims,
 		driverType:         DriverTurso,
@@ -101,6 +119,11 @@ func (t *tursoDB) Close() error {
 	if t.connector != nil {
 		if closeErr := t.connector.Close(); closeErr != nil && err == nil {
 			err = closeErr
+		}
+	}
+	if t.tempDir != "" {
+		if removeErr := os.RemoveAll(t.tempDir); removeErr != nil && err == nil {
+			err = removeErr
 		}
 	}
 	return err

@@ -62,7 +62,7 @@ func main() {
 		fail("text/ripgrep", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("text/ripgrep", "ERUNTIME", err)
 	}
@@ -79,7 +79,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Check if ripgrep is available
 	if _, err := exec.LookPath("rg"); err != nil {
 		return fmt.Errorf("ripgrep (rg) not found in PATH: %w", err)
@@ -156,7 +156,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveWorkspace(rc *runner.Context, candidate string) (string, string, error) {
+func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, string, error) {
 	workspace := rc.PathValidator.Workspace()
 	if strings.TrimSpace(candidate) == "" {
 		return workspace, workspace, nil
@@ -265,7 +265,7 @@ func parseRipgrepOutput(output []byte, workspace string, maxMatches int) ([]matc
 	return matches, fileHits, nil
 }
 
-func emitEmptyResult(rc *runner.Context, in input) error {
+func emitEmptyResult(rc *runner.RunnerContext, in input) error {
 	data := map[string]any{
 		"pattern":          in.Pattern,
 		"case_insensitive": in.CaseInsensitive,
@@ -288,7 +288,7 @@ func preparePreview(matches []match, limit int) ([]match, bool) {
 	return preview, truncated
 }
 
-func persistMatchesArtifact(ctx context.Context, rc *runner.Context, matches []match, truncated bool) (runner.Artifact, error) {
+func persistMatchesArtifact(ctx context.Context, rc *runner.RunnerContext, matches []match, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

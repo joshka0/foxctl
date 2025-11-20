@@ -45,7 +45,7 @@ func main() {
 		fail("text/grep", "ECONFIG", err)
 	}
 
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("text/grep", "ERUNTIME", err)
 	}
@@ -62,7 +62,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	re, err := compileRegex(in.Pattern, in.CI)
 	if err != nil {
 		return err
@@ -142,7 +142,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveWorkspace(rc *runner.Context, candidate string) (string, string, error) {
+func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, string, error) {
 	workspace := rc.PathValidator.Workspace()
 	if strings.TrimSpace(candidate) == "" {
 		return workspace, workspace, nil
@@ -164,7 +164,7 @@ func preparePreview(matches []match, limit int) ([]match, bool) {
 	return preview, truncated
 }
 
-func persistMatchesArtifact(ctx context.Context, rc *runner.Context, matches []match, truncated bool) (runner.Artifact, error) {
+func persistMatchesArtifact(ctx context.Context, rc *runner.RunnerContext, matches []match, truncated bool) (runner.Artifact, error) {
 	if !truncated {
 		return runner.Artifact{}, nil
 	}

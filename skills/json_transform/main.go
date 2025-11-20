@@ -33,7 +33,7 @@ func main() {
 	if err != nil {
 		fail("json/transform", "ECONFIG", err)
 	}
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("json/transform", "ERUNTIME", err)
 	}
@@ -50,7 +50,7 @@ func main() {
 	}
 }
 
-func run(_ context.Context, rc *runner.Context, in input) error {
+func run(_ context.Context, rc *runner.RunnerContext, in input) error {
 	// Parse input JSON
 	var data any
 	if err := json.Unmarshal([]byte(in.Input), &data); err != nil {

@@ -33,7 +33,7 @@ func main() {
 	if err != nil {
 		fail("data/jq", "ECONFIG", err)
 	}
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("data/jq", "ERUNTIME", err)
 	}
@@ -50,7 +50,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Check if jq is available
 	jqPath, err := exec.LookPath("jq")
 	if err != nil {

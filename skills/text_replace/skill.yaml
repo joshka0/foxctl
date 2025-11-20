@@ -1,0 +1,120 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: text/replace
+  version: 0.2.0
+  description: "Advanced search and replace with backups, multi-line support, line ranges, and validation - more powerful than sed"
+  tags: ["text", "replace", "search", "files", "regex", "sed", "refactor"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/text_replace/text_replace
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: text/replace
+  parameters:
+    - name: pattern
+      type: string
+      required: true
+      description: "Text pattern to search for (regex or literal)"
+    - name: replacement
+      type: string
+      required: true
+      description: "Replacement text"
+    - name: paths
+      type: array
+      required: false
+      description: "File paths or glob patterns (default: [\"**/*\"])"
+    - name: literal
+      type: boolean
+      required: false
+      default: false
+      description: "Treat pattern as literal string, not regex"
+    - name: max_files
+      type: integer
+      required: false
+      default: 100
+      description: "Maximum files to process"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Preview changes without modifying files"
+    - name: include_hidden
+      type: boolean
+      required: false
+      default: false
+      description: "Include hidden files"
+    - name: extensions
+      type: array
+      required: false
+      description: "File extensions to filter (e.g., [\".go\", \".yaml\"])"
+    - name: case_insensitive
+      type: boolean
+      required: false
+      default: false
+      description: "Case-insensitive matching"
+    - name: word_boundary
+      type: boolean
+      required: false
+      default: false
+      description: "Match whole words only (adds \\b boundaries)"
+    - name: multiline
+      type: boolean
+      required: false
+      default: false
+      description: "Enable multi-line pattern matching"
+    - name: line_range
+      type: object
+      required: false
+      description: "Line range to operate on: {\"start\": 10, \"end\": 20} or {\"start_pattern\": \"BEGIN\", \"end_pattern\": \"END\"}"
+    - name: operations
+      type: array
+      required: false
+      description: "Multiple replacement operations: [{\"pattern\": \"old\", \"replacement\": \"new\"}]"
+    - name: backup
+      type: boolean
+      required: false
+      default: false
+      description: "Create backups before modifying files"
+    - name: backup_suffix
+      type: string
+      required: false
+      default: ".bak"
+      description: "Suffix for backup files"
+    - name: validate_syntax
+      type: boolean
+      required: false
+      default: false
+      description: "Validate file syntax after changes (for known file types)"
+    - name: skip_binary
+      type: boolean
+      required: false
+      default: true
+      description: "Automatically skip binary files"
+    - name: preserve_line_endings
+      type: boolean
+      required: false
+      default: true
+      description: "Preserve original line endings (CRLF vs LF)"
+    - name: show_diff
+      type: boolean
+      required: false
+      default: false
+      description: "Show unified diff in preview"
+  returns:
+    - name: files_modified
+      type: integer
+    - name: replacements_made
+      type: integer
+    - name: changes
+      type: array
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

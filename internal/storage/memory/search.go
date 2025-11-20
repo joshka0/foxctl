@@ -29,26 +29,9 @@ type SearchResult struct {
 // EnableSearch enables advanced search on an existing memory store
 func (s *Store) EnableSearch(db dbdriver.DB, workspace string) (*SearchableStore, error) {
 	// Build corpus statistics for the workspace
-	// We use summary and name fields for BM25 search
 	ctx := context.Background()
 
-	// Create a view that combines searchable text
-	searchView := "memory_search_view"
-	createViewQuery := fmt.Sprintf(`
-		CREATE TEMP VIEW IF NOT EXISTS %s AS
-		SELECT
-			id,
-			name || ' ' || COALESCE(summary, '') as searchable_text,
-			workspace,
-			embedding
-		FROM named_memory
-	`, searchView)
-
-	if _, err := s.db.ExecContext(ctx, createViewQuery); err != nil {
-		return nil, fmt.Errorf("failed to create search view: %w", err)
-	}
-
-	// Build corpus stats
+	// Build corpus stats directly using the provided DB connection
 	corpusStats, err := buildCorpusStatsForWorkspace(ctx, db, workspace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build corpus stats: %w", err)

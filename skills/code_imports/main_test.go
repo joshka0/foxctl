@@ -15,7 +15,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	state := t.TempDir()
@@ -29,7 +29,7 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runne
 			Cache: state + "/cache",
 		},
 	}
-	rc, err := runner.NewContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -39,11 +39,16 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runne
 func TestRunCodeImports(t *testing.T) {
 	ctx := context.Background()
 	work := t.TempDir()
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(work); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	code := `package main
 import (
@@ -58,7 +63,7 @@ func main() {}`
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
+	rc := newTestRunnerContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -95,11 +100,16 @@ func main() {}`
 func TestRunCodeImportsGraph(t *testing.T) {
 	ctx := context.Background()
 	work := t.TempDir()
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(work); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	// File A imports B
 	if err := os.WriteFile(filepath.Join(work, "a.js"), []byte("import * as b from './b.js';"), 0o644); err != nil {
@@ -110,7 +120,7 @@ func TestRunCodeImportsGraph(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
+	rc := newTestRunnerContext(t, stdout, work)
 	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
@@ -139,11 +149,16 @@ func TestRunCodeImportsGraph(t *testing.T) {
 
 func TestParserDirect(t *testing.T) {
 	work := t.TempDir()
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Chdir(work); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	code := `package main
 import (

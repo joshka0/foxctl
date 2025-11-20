@@ -10,7 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer) *runner.Context {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer) *runner.RunnerContext {
 	t.Helper()
 	state := t.TempDir()
 	cfg := config.Config{
@@ -23,7 +23,7 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer) *runner.Context {
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -38,8 +38,10 @@ func TestRunDataJq(t *testing.T) {
 	// But we can test the error case if jq is missing.
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout)
-	defer func() { _ = rc.Close() }()
+	rc := newTestRunnerContext(t, stdout)
+	defer func() {
+		_ = rc.Close() //nolint:errcheck
+	}()
 
 	in := input{
 		Input: `{"a": 1}`,
@@ -49,7 +51,7 @@ func TestRunDataJq(t *testing.T) {
 	// This might fail if jq is missing, which covers the error path.
 	// If jq is present, it covers the success path.
 	// We accept either for coverage purposes.
-	_ = run(ctx, rc, in)
+	_ = run(ctx, rc, in) //nolint:errcheck
 
 	// If we wanted to verify success specifically:
 	// if err == nil { check output }

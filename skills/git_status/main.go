@@ -49,7 +49,7 @@ func main() {
 	if err != nil {
 		fail("git/status", "ECONFIG", err)
 	}
-	rc, err := runner.NewContext(cfg, os.Stdout)
+	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("git/status", "ERUNTIME", err)
 	}
@@ -66,7 +66,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, rc *runner.Context, in input) error {
+func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	repoPath, err := resolveRepoPath(rc, in.RepoPath)
 	if err != nil {
 		return fmt.Errorf("resolve repo path: %w", err)
@@ -116,7 +116,7 @@ func parseInput(r io.Reader) (input, error) {
 	return in, nil
 }
 
-func resolveRepoPath(rc *runner.Context, path string) (string, error) {
+func resolveRepoPath(rc *runner.RunnerContext, path string) (string, error) {
 	if path == "" {
 		path = "."
 	}
@@ -127,7 +127,7 @@ func resolveRepoPath(rc *runner.Context, path string) (string, error) {
 	return valid, nil
 }
 
-func getStatus(ctx context.Context, _ *runner.Context, repoPath string) (map[string]any, error) {
+func getStatus(ctx context.Context, _ *runner.RunnerContext, repoPath string) (map[string]any, error) {
 	// Get porcelain status
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain=v1", "-b")
 	output, err := cmd.Output()
@@ -171,7 +171,7 @@ func getStatus(ctx context.Context, _ *runner.Context, repoPath string) (map[str
 	return data, nil
 }
 
-func getDiff(ctx context.Context, rc *runner.Context, repoPath string, in input) (map[string]any, error) {
+func getDiff(ctx context.Context, rc *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
 	args := []string{"-C", repoPath, "diff"}
 
 	if in.Staged {
@@ -229,7 +229,7 @@ func getDiff(ctx context.Context, rc *runner.Context, repoPath string, in input)
 	return data, nil
 }
 
-func getLog(ctx context.Context, _ *runner.Context, repoPath string, in input) (map[string]any, error) {
+func getLog(ctx context.Context, _ *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
 	format := "--pretty=format:%H%x00%h%x00%an%x00%ai%x00%s"
 	args := []string{"-C", repoPath, "log", format, fmt.Sprintf("-%d", in.Limit)}
 

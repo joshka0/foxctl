@@ -367,16 +367,6 @@ func TestErrorWithData(t *testing.T) {
 	if data["detail"] != "additional context" {
 		t.Fatalf("unexpected data value: %v", data)
 	}
-
-	// Error.Data can also be set
-	env2 := Error("cmd", "ERR", "msg", nil, WithMetaMutator(func(m *Meta) {
-		m.Source = "test"
-	}))
-	env2.Error.Data = map[string]int{"code": 500}
-
-	if env2.Error.Data == nil {
-		t.Fatalf("expected error data to be set")
-	}
 }
 
 func TestMultipleOptions(t *testing.T) {

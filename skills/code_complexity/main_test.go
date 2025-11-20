@@ -13,10 +13,9 @@ import (
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.Context {
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	cfg := config.Config{
@@ -29,7 +28,7 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runne
 			Cache: workspace + "/cache",
 		},
 	}
-	rc, err := runner.NewContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -39,11 +38,16 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runne
 func TestAnalyzeGoFile(t *testing.T) {
 	ctx := context.Background()
 	work := t.TempDir()
-	cwd, _ := os.Getwd()
-	if err := os.Chdir(work); err != nil {
+	cwd, err := os.Getwd()
+	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	if err = os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	code := `package main
 func complex(x int) int {
@@ -66,8 +70,10 @@ func complex(x int) int {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunnerContext(t, stdout, work)
+	defer func() {
+		_ = rc.Close() //nolint:errcheck
+	}()
 
 	in := input{
 		Path:         "main.go",
@@ -78,7 +84,7 @@ func complex(x int) int {
 		MaxResults:   100,
 	}
 
-	err := run(ctx, rc, in)
+	err = run(ctx, rc, in)
 	if err != nil {
 		t.Errorf("run failed: %v", err)
 	}
@@ -111,11 +117,16 @@ func complex(x int) int {
 func TestAnalyzeDirectory(t *testing.T) {
 	ctx := context.Background()
 	work := t.TempDir()
-	cwd, _ := os.Getwd()
-	if err := os.Chdir(work); err != nil {
+	cwd, err := os.Getwd()
+	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	if err = os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	if err := os.WriteFile(filepath.Join(work, "a.go"), []byte("package main\nfunc a(){}"), 0o644); err != nil {
 		t.Fatal(err)
@@ -125,8 +136,10 @@ func TestAnalyzeDirectory(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunnerContext(t, stdout, work)
+	defer func() {
+		_ = rc.Close() //nolint:errcheck
+	}()
 
 	in := input{
 		Path:         ".",
@@ -137,7 +150,7 @@ func TestAnalyzeDirectory(t *testing.T) {
 		MaxResults:   100,
 	}
 
-	err := run(ctx, rc, in)
+	err = run(ctx, rc, in)
 	if err != nil {
 		t.Errorf("run failed: %v", err)
 	}

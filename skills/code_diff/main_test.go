@@ -10,6 +10,7 @@ import (
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 func TestCodeDiffBasic(t *testing.T) {
@@ -34,12 +35,8 @@ func TestCodeDiffBasic(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestContext(t, buf, work)
-	t.Cleanup(func() {
-		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
-		}
-	})
+	rc := newTestRunnerContext(t, buf, work)
+	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
 		OldPath:      oldFile,
@@ -84,12 +81,8 @@ func TestCodeDiffIdentical(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestContext(t, buf, work)
-	t.Cleanup(func() {
-		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
-		}
-	})
+	rc := newTestRunnerContext(t, buf, work)
+	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
 
 	in := input{
 		OldPath: file1,
@@ -113,8 +106,7 @@ func TestCodeDiffIdentical(t *testing.T) {
 	}
 }
 
-func newTestContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.Context {
-	t.Helper()
+func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.RunnerContext {
 	state := t.TempDir()
 	cfg := config.Config{
 		Home:           state,
@@ -126,7 +118,7 @@ func newTestContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.Contex
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewContext(cfg, stdout)
+	rc, err := runner.NewRunnerContext(cfg, stdout)
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
