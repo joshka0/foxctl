@@ -7,7 +7,7 @@ GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
 GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
 BINARY ?= agentctl
 GOFUMPT ?= $(GO_CMD) run mvdan.cc/gofumpt@v0.7.0
-GOLANGCI ?= $(GO_CMD_CGO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.5
+GOLANGCI ?= $(GO_CMD) run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 

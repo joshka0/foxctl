@@ -45,7 +45,9 @@ func TestRunCodeSymbols(t *testing.T) {
 	if err := os.Chdir(work); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	code := `package main
 type MyStruct struct {
@@ -115,7 +117,9 @@ func TestParserDirect(t *testing.T) {
 	if err := os.Chdir(work); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(cwd) }()
+	defer func() {
+		_ = os.Chdir(cwd) //nolint:errcheck
+	}()
 
 	code := `package main
 type MyStruct struct {

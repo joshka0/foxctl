@@ -39,7 +39,9 @@ func TestRunDataJq(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout)
-	defer func() { _ = rc.Close() }()
+	defer func() {
+		_ = rc.Close() //nolint:errcheck
+	}()
 
 	in := input{
 		Input: `{"a": 1}`,
@@ -49,7 +51,7 @@ func TestRunDataJq(t *testing.T) {
 	// This might fail if jq is missing, which covers the error path.
 	// If jq is present, it covers the success path.
 	// We accept either for coverage purposes.
-	_ = run(ctx, rc, in)
+	_ = run(ctx, rc, in) //nolint:errcheck
 
 	// If we wanted to verify success specifically:
 	// if err == nil { check output }

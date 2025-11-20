@@ -24,7 +24,7 @@ func TestRunHttpOpenApi(t *testing.T) {
 
 	ctx := context.Background()
 	// This is expected to fail due to missing spec, but covers the initial logic
-	_ = run(ctx, rc, in)
+	_ = run(ctx, rc, in) //nolint:errcheck
 }
 
 func TestGenerateHint(t *testing.T) {

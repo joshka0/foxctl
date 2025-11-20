@@ -16,6 +16,8 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 
 // ensureVectorSupport is a stub used when building without cgo.
 // Vector search is not available without a cgo-enabled libsql build.
+//
+//nolint:unused
 func ensureVectorSupport(ctx context.Context, db *sql.DB, dimensions int) error {
 	return fmt.Errorf("vector search requires cgo-enabled libsql/turso build")
 }
