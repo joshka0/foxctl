@@ -3,9 +3,11 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/spf13/cobra"
 )
 
 func TestNewCICommand(t *testing.T) {
@@ -90,5 +92,101 @@ func TestCIPRCommentsHelpJSON(t *testing.T) {
 	}
 	if _, ok := data["flags"]; !ok {
 		t.Fatalf("expected flags field in help data")
+	}
+}
+
+func TestCreateTodoFromCITask_BuildsPayloadAndCallsTodoSkill(t *testing.T) {
+	prev := runTodoSkillFunc
+	t.Cleanup(func() { runTodoSkillFunc = prev })
+
+	var gotCmd *cobra.Command
+	var gotPayload map[string]any
+	runTodoSkillFunc = func(c *cobra.Command, payload map[string]any) error {
+		gotCmd = c
+		gotPayload = payload
+		return nil
+	}
+
+	cmd := &cobra.Command{Use: "test"}
+	tm := map[string]any{
+		"summary":        "Fix `thing` formatting",
+		"kind":           "review_comment",
+		"source":         "coderabbit",
+		"severity":       "minor",
+		"file":           "cmd/agentctl/cmd/ci.go",
+		"line":           float64(42),
+		"comment_author": "coderabbitai[bot]",
+		"comment_body":   "Original body with `backticks` inside.",
+	}
+
+	storePath := "/tmp/todo-store.json"
+	if err := createTodoFromCITask(cmd, tm, storePath); err != nil {
+		t.Fatalf("createTodoFromCITask returned error: %v", err)
+	}
+	if gotCmd == nil {
+		t.Fatalf("expected runTodoSkillFunc to be called with command")
+	}
+	if gotPayload == nil {
+		t.Fatalf("expected payload to be captured")
+	}
+
+	op, ok := gotPayload["operation"].(string)
+	if !ok || op != "add" {
+		t.Fatalf("expected operation add, got %v", gotPayload["operation"])
+	}
+	add, ok := gotPayload["add"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected add map, got %T", gotPayload["add"])
+	}
+
+	title, _ := add["title"].(string)
+	if title != "[review_comment] Fix 'thing' formatting" {
+		t.Fatalf("unexpected title: %q", title)
+	}
+	desc, _ := add["description"].(string)
+	if desc == "" {
+		t.Fatalf("expected non-empty description")
+	}
+	if strings.Contains(desc, "`") {
+		t.Fatalf("description should not contain backticks: %q", desc)
+	}
+	if !strings.Contains(desc, "Source: coderabbit") {
+		t.Fatalf("description missing source: %q", desc)
+	}
+	if !strings.Contains(desc, "Severity: minor") {
+		t.Fatalf("description missing severity: %q", desc)
+	}
+	if !strings.Contains(desc, "Location: cmd/agentctl/cmd/ci.go:42") {
+		t.Fatalf("description missing location: %q", desc)
+	}
+	if !strings.Contains(desc, "Reviewer: coderabbitai[bot]") {
+		t.Fatalf("description missing reviewer: %q", desc)
+	}
+	if !strings.Contains(desc, "Original body with 'backticks' inside.") {
+		t.Fatalf("description missing sanitized comment body: %q", desc)
+	}
+
+	if sp, ok := gotPayload["store_path"].(string); !ok || sp != storePath {
+		t.Fatalf("expected store_path %q, got %v", storePath, gotPayload["store_path"])
+	}
+}
+
+func TestCreateTodoFromCITask_SkipsEmptySummary(t *testing.T) {
+	prev := runTodoSkillFunc
+	t.Cleanup(func() { runTodoSkillFunc = prev })
+
+	called := 0
+	runTodoSkillFunc = func(_ *cobra.Command, _ map[string]any) error {
+		called++
+		return nil
+	}
+
+	cmd := &cobra.Command{Use: "test"}
+	tm := map[string]any{"summary": "   "}
+	if err := createTodoFromCITask(cmd, tm, ""); err != nil {
+		t.Fatalf("expected no error for empty summary, got %v", err)
+	}
+	if called != 0 {
+		t.Fatalf("expected runTodoSkillFunc not to be called for empty summary, called %d times", called)
 	}
 }

@@ -44,7 +44,7 @@ func newSkillsDescribeCommand() *cobra.Command {
 }
 
 func newSkillsHelpCommand() *cobra.Command {
-	var jsonFlag bool = true
+	var jsonFlag bool
 	cmd := &cobra.Command{
 		Use:   "help <skill-name>",
 		Short: "Show AI-friendly JSON help for a skill",

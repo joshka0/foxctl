@@ -288,6 +288,8 @@ func runCISkillForEnvelope(cmd *cobra.Command, skillName string, payload map[str
 	return env, nil
 }
 
+var runTodoSkillFunc = runTodoSkill
+
 func createTodoFromCITask(cmd *cobra.Command, tm map[string]any, storePath string) error {
 	// Extract key fields from the CI task
 	rawSummary, _ := tm["summary"].(string)
@@ -352,7 +354,7 @@ func createTodoFromCITask(cmd *cobra.Command, tm map[string]any, storePath strin
 	if storePath != "" {
 		payload["store_path"] = storePath
 	}
-	return runTodoSkill(cmd, payload)
+	return runTodoSkillFunc(cmd, payload)
 }
 
 func runCISkill(cmd *cobra.Command, skillName string, payload map[string]any, skipCache, dataOnly, noComments bool) error {
