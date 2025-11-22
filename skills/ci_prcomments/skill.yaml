@@ -1,0 +1,57 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: ci/prcomments
+  version: 0.1.0
+  description: "Summarize GitHub PR merge conflicts, CI failures, and review comments"
+  tags: ["github", "ci", "pr", "comments"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/ci_prcomments/ci_prcomments
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: ci/prcomments
+  parameters:
+    - name: pr
+      type: string
+      required: true
+      description: "Pull request number or branch name"
+    - name: owner
+      type: string
+      required: false
+      description: "GitHub repository owner (default auto-detected or from env)"
+    - name: repo
+      type: string
+      required: false
+      description: "GitHub repository name (or owner/repo shorthand; default auto-detected or from env)"
+    - name: with_context
+      type: boolean
+      required: false
+      default: false
+      description: "Include PR description and timestamps"
+    - name: format
+      type: string
+      required: false
+      enum: ["markdown", "json"]
+      default: "markdown"
+      description: "Primary output emphasis: task-focused markdown or raw JSON comments"
+    - name: output_path
+      type: string
+      required: false
+      description: "Workspace-relative path to write markdown report (e.g. docs/prcomments/pr66.md)"
+    - name: errors_only
+      type: boolean
+      required: false
+      default: false
+      description: "Only include failing CI checks and actionable review items"
+returns:
+  - name: report
+    type: object
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

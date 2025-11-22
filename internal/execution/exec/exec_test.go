@@ -164,7 +164,7 @@ func main() {
 	}
 }
 
-func TestRunnerNetworkPolicyRejection(t *testing.T) {
+func TestRunnerNetworkPolicyRejectionUnknownCapability(t *testing.T) {
 	bin := buildHelper(t, `package main
 func main() {}`)
 
@@ -172,7 +172,7 @@ func main() {}`)
 		Manifest: skill.Manifest{
 			Distribution: skill.Distribution{Type: "exec"},
 			Metadata:     skill.Metadata{Name: "test/network", Version: "0.1.0"},
-			Capabilities: skill.Capabilities{Network: "egress"}, // Not supported by exec runner
+			Capabilities: skill.Capabilities{Network: "ingress"}, // Unknown capability should be rejected
 		},
 		Binary: bin,
 	}
@@ -182,5 +182,31 @@ func main() {}`)
 	}
 	if !strings.Contains(err.Error(), "network capability") {
 		t.Fatalf("expected network capability error, got: %v", err)
+	}
+}
+
+func TestRunnerAllowsEgressNetworkCapability(t *testing.T) {
+	bin := buildHelper(t, `package main
+import (
+	"io"
+	"os"
+)
+func main() {
+	io.Copy(os.Stdout, os.Stdin)
+}`)
+	runner := Runner{
+		Manifest: skill.Manifest{
+			Distribution: skill.Distribution{Type: "exec"},
+			Metadata:     skill.Metadata{Name: "test/network-egress", Version: "0.1.0"},
+			Capabilities: skill.Capabilities{Network: "egress"},
+		},
+		Binary: bin,
+	}
+	stdout, stderr, err := runner.Run(context.Background(), []byte("hello"))
+	if err != nil {
+		t.Fatalf("run with egress capability failed: %v (stderr=%s)", err, stderr)
+	}
+	if string(stdout) != "hello" {
+		t.Fatalf("expected echo with egress capability, got %s", stdout)
 	}
 }

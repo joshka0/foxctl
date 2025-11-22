@@ -53,8 +53,11 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	if r.Manifest.Distribution.Type != "exec" {
 		return nil, nil, fmt.Errorf("runner: manifest distribution %s not exec", r.Manifest.Distribution.Type)
 	}
-	if r.Manifest.Capabilities.Network != "" && r.Manifest.Capabilities.Network != "none" {
-		return nil, nil, fmt.Errorf("exec runner only supports network capability \"none\" (got %q)", r.Manifest.Capabilities.Network)
+	switch r.Manifest.Capabilities.Network {
+	case "", "none", "egress":
+		// allowed for exec runner; egress is enforced at the policy layer and by the skill itself
+	default:
+		return nil, nil, fmt.Errorf("exec runner only supports network capability \"none\" or \"egress\" (got %q)", r.Manifest.Capabilities.Network)
 	}
 
 	// Apply timeout only if explicitly set
