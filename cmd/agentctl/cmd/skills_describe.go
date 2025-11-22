@@ -68,6 +68,9 @@ func newSkillsHelpCommand() *cobra.Command {
 				"parameters":  m.Signature.Parameters,
 				"returns":     m.Signature.Returns,
 			}
+			if m.Signature.Help != nil {
+				help["help"] = m.Signature.Help
+			}
 			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.help", help, protocol.WithSource("cli"))
 		},
 	}

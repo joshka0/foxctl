@@ -58,6 +58,7 @@ type Signature struct {
 	Command    string      `yaml:"command" json:"command"`
 	Parameters []Parameter `yaml:"parameters" json:"parameters"`
 	Returns    []Parameter `yaml:"returns" json:"returns"`
+	Help       *Help       `yaml:"help,omitempty" json:"help,omitempty"`
 }
 
 // Parameter defines a single input or output field.
@@ -67,6 +68,20 @@ type Parameter struct {
 	Required    bool        `yaml:"required" json:"required"`
 	Description string      `yaml:"description" json:"description"`
 	Default     interface{} `yaml:"default" json:"default"`
+}
+
+// Help describes skill-level help and example workflows.
+type Help struct {
+	Short     string         `yaml:"short,omitempty" json:"short,omitempty"`
+	Long      string         `yaml:"long,omitempty" json:"long,omitempty"`
+	Workflows []HelpWorkflow `yaml:"workflows,omitempty" json:"workflows,omitempty"`
+}
+
+// HelpWorkflow defines a named workflow and example input payload.
+type HelpWorkflow struct {
+	ID           string         `yaml:"id,omitempty" json:"id,omitempty"`
+	Description  string         `yaml:"description,omitempty" json:"description,omitempty"`
+	ExampleInput map[string]any `yaml:"example_input,omitempty" json:"example_input,omitempty"`
 }
 
 // Capabilities describe network/fs policies.

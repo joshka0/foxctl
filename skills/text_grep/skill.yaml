@@ -42,9 +42,21 @@ signature:
       type: integer
       required: false
       default: 100000
-returns:
-  - name: matches
-    type: array
+  returns:
+    - name: matches
+      type: array
+  help:
+    short: "Recursive regex search with include/exclude globs."
+    long: |
+      Use this skill to search text files in a workspace using Go's RE2 regex engine.
+      Provide a required pattern and optional path, include/exclude globs, and max_matches
+      to control the output size.
+    workflows:
+      - id: basic-search
+        description: "Search recursively for a pattern in the current workspace."
+        example_input:
+          pattern: "TODO"
+          path: "."
 capabilities:
   network: "none"
   filesystem:
