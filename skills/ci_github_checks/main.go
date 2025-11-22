@@ -360,7 +360,7 @@ func getJobDetails(client *http.Client, token, owner, repo, jobURL string) (*Job
 func findFailedStep(job *JobDetails) *JobStep {
 	for i := len(job.Steps) - 1; i >= 0; i-- {
 		step := &job.Steps[i]
-		if step.Conclusion == "failure" || step.Conclusion == "error" {
+		if step.Conclusion == "failure" {
 			return step
 		}
 	}

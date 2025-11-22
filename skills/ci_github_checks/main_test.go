@@ -7,7 +7,7 @@ func TestFindFailedStep_LastFailureWins(t *testing.T) {
 		Steps: []JobStep{
 			{Name: "setup", Conclusion: "success"},
 			{Name: "lint", Conclusion: "failure"},
-			{Name: "test", Conclusion: "error"},
+			{Name: "test", Conclusion: "failure"},
 		},
 	}
 
