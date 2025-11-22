@@ -1,6 +1,12 @@
 package cmd
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"testing"
+
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+)
 
 func TestNewCICommand(t *testing.T) {
 	cmd := newCICommand()
@@ -56,5 +62,33 @@ func TestCIChecksFlags(t *testing.T) {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("expected flag --%s", flag)
 		}
+	}
+}
+
+func TestCIPRCommentsHelpJSON(t *testing.T) {
+	cmd := newCIPRCommentsCommand()
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--help-json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("help-json execution failed: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode help envelope: %v", err)
+	}
+	if env.Status != envelope.StatusOK {
+		t.Fatalf("expected ok status, got %s", env.Status)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got %T", env.Data)
+	}
+	if _, ok := data["flags"]; !ok {
+		t.Fatalf("expected flags field in help data")
 	}
 }

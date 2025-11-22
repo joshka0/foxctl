@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/spf13/cobra"
 )
@@ -33,14 +36,18 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 	if err != nil {
 		return err
 	}
-	handle, err := findSkill(cfg, args[0])
+
+	skillName := args[0]
+	handle, err := findSkill(cfg, skillName)
 	if err != nil {
 		return err
 	}
-	opts, err := buildRunOptions(cfg, args[0], flags, data)
+
+	opts, err := buildRunOptions(cfg, skillName, flags, data)
 	if err != nil {
-		return err
+		return writeRunValidationError(cmd, skillName, err)
 	}
+
 	executor := runservice.NewExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 	executor.SetAsyncRunner(defaultAsyncRunner)
 	defer executor.Close()
@@ -62,4 +69,28 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 		return executor.SubmitAsync(job)
 	}
 	return executor.ExecuteSync(job)
+}
+
+func writeRunValidationError(cmd *cobra.Command, skill string, cause error) error {
+	msg := cause.Error()
+
+	data := protocol.ValidationErrorData{
+		Reason: msg,
+		Hint: fmt.Sprintf(
+			"Check your run flags and skill parameters. For full input schema and workflows, run: agentctl skills help %s --json",
+			skill,
+		),
+		Context: map[string]any{
+			"command": cmd.CommandPath(),
+			"skill":   skill,
+		},
+	}
+
+	env := protocol.ValidationError("agentctl.run", msg, data, protocol.WithSource("cli"))
+	if err := protocol.Write(cmd.OutOrStdout(), env); err != nil {
+		return fmt.Errorf("write run validation error envelope: %w", err)
+	}
+
+	// Keep non-zero exit behavior.
+	return cause
 }
