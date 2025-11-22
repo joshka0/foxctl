@@ -8,7 +8,7 @@ func TestNewCICommand(t *testing.T) {
 		t.Fatalf("expected use ci, got %s", cmd.Use)
 	}
 	subs := cmd.Commands()
-	expected := []string{"prcomments", "checks"}
+	expected := []string{"prcomments", "checks", "todos"}
 	if len(subs) != len(expected) {
 		t.Fatalf("expected %d subcommands, got %d", len(expected), len(subs))
 	}
@@ -19,6 +19,18 @@ func TestNewCICommand(t *testing.T) {
 	for _, name := range expected {
 		if !got[name] {
 			t.Fatalf("expected subcommand %s to exist", name)
+		}
+	}
+}
+
+func TestCITodosFlags(t *testing.T) {
+	cmd := newCITodosCommand()
+	if cmd.Use != "todos" {
+		t.Fatalf("expected todos command, got %s", cmd.Use)
+	}
+	for _, flag := range []string{"pr", "owner", "repo", "store", "skip-cache"} {
+		if cmd.Flags().Lookup(flag) == nil {
+			t.Fatalf("expected flag --%s", flag)
 		}
 	}
 }
