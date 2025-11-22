@@ -229,7 +229,8 @@ func runCISkillForEnvelope(cmd *cobra.Command, skillName string, payload map[str
 
 func createTodoFromCITask(cmd *cobra.Command, tm map[string]any, storePath string) error {
 	// Extract key fields from the CI task
-	summary, _ := tm["summary"].(string)
+	rawSummary, _ := tm["summary"].(string)
+	summary := strings.ReplaceAll(rawSummary, "`", "'")
 	if strings.TrimSpace(summary) == "" {
 		return nil
 	}

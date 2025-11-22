@@ -112,9 +112,7 @@ agentctl ci todos \
 
 This helper:
 
-- Runs `ci/prcomments` in `--format json --errors-only --data-only --no-comments` mode.
-- Reads `data.tasks_list` from the envelope.
-- Creates a `todo/manage` task for each CI/PR task, including:
+- Runs the `ci/prcomments` skill with `format=json`, `errors_only=true`, and `with_context=false`, then reads `data.tasks_list` from the returned envelope and creates a `todo/manage` task for each CI/PR task, including:
   - Title derived from the `summary` and `kind` (e.g. `[review_comment] Fix undocumented conclusion handling`).
   - Description with `source`, `severity`, location (`file:line`), reviewer, and the cleaned comment body.
 
