@@ -61,3 +61,35 @@ func TestClassifyCIStatus_MixedWithNeutral(t *testing.T) {
 		t.Fatalf("unexpected classification for mixed neutrals: overall=%s hasBlocking=%v allSuccess=%v hasNeutral=%v", overall, hasBlocking, allSuccess, hasNeutral)
 	}
 }
+
+func TestCountConclusionsAndFilterBlocking(t *testing.T) {
+	checks := []CheckRun{
+		{Name: "success", Conclusion: "success"},
+		{Name: "failure", Conclusion: "failure"},
+		{Name: "timed", Conclusion: "timed_out"},
+		{Name: "cancel", Conclusion: "cancelled"},
+		{Name: "neutral", Conclusion: "neutral"},
+		{Name: "skip", Conclusion: "skipped"},
+		{Name: "action", Conclusion: "action_required"},
+		{Name: "stale", Conclusion: "stale"},
+	}
+
+	total, failed, cancelled, neutral, success := countConclusions(checks)
+	if total != 8 || failed != 4 || cancelled != 1 || neutral != 2 || success != 1 {
+		t.Fatalf("unexpected counts: total=%d failed=%d cancelled=%d neutral=%d success=%d", total, failed, cancelled, neutral, success)
+	}
+
+	filtered := filterBlockingChecks(checks)
+	if len(filtered) != 5 {
+		t.Fatalf("expected 5 blocking checks, got %d: %#v", len(filtered), filtered)
+	}
+	seen := map[string]bool{}
+	for _, c := range filtered {
+		seen[c.Conclusion] = true
+	}
+	for _, conc := range []string{"failure", "timed_out", "cancelled", "action_required", "stale"} {
+		if !seen[conc] {
+			t.Fatalf("expected conclusion %q to be treated as blocking, got %#v", conc, seen)
+		}
+	}
+}

@@ -98,7 +98,43 @@ func TestBuildTasksList_IncludesMergeCiAndComments(t *testing.T) {
 	}
 }
 
-func TestExtractCodeRabbitComment_DropsAddressedComments(t *testing.T) {
+func TestBuildTasksList_ClassifiesCodeRabbitComments(t *testing.T) {
+	line := 10
+	comments := []Comment{
+		{
+			User: User{Login: "coderabbitai[bot]"},
+			Body: "coderabbitai[bot] commented:\n\n_⚠️ Potential issue_ | _🔴 Critical_\n\n**Fix undocumented \"error\" conclusion and add missing \"action_required\"/\"stale\" handling**\nMore details here...\n",
+			Path: "skills/ci_github_checks/main.go",
+			Line: &line,
+		},
+	}
+
+	tasks := buildTasksList(nil, comments, nil)
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task for CodeRabbit comment, got %d: %#v", len(tasks), tasks)
+	}
+	task := tasks[0]
+	if task.Kind != "review_comment" {
+		t.Fatalf("expected kind review_comment, got %s", task.Kind)
+	}
+	if task.Source != "coderabbit" {
+		t.Fatalf("expected source coderabbit, got %s", task.Source)
+	}
+	if task.Severity != "critical" {
+		t.Fatalf("expected severity critical, got %s", task.Severity)
+	}
+	if !strings.Contains(task.Summary, "Fix undocumented \"error\" conclusion") {
+		t.Fatalf("expected summary to reflect core fix, got %q", task.Summary)
+	}
+	if task.File != "skills/ci_github_checks/main.go" {
+		t.Fatalf("expected file path to be propagated, got %s", task.File)
+	}
+	if task.Line == nil || *task.Line != line {
+		t.Fatalf("expected line to be %d, got %#v", line, task.Line)
+	}
+}
+
+func TestExtractCodeRabbitComment_StripsMetaKeepsTasksEvenIfAddressed(t *testing.T) {
 	body := "coderabbitai[bot] commented:\n" +
 		"\n" +
 		"Reminders\n" +
@@ -119,7 +155,10 @@ func TestExtractCodeRabbitComment_DropsAddressedComments(t *testing.T) {
 		"<!-- This is an auto-generated comment by CodeRabbit -->"
 
 	got := extractCodeRabbitComment(body)
-	if got != "" {
-		t.Fatalf("expected addressed CodeRabbit comment to be dropped, got:\n%s", got)
+	if strings.Contains(got, "Reminders") || strings.Contains(got, "Prompt for AI Agents") || strings.Contains(got, "This is a long prompt") || strings.Contains(got, "Addressed in commit") {
+		t.Fatalf("expected CodeRabbit meta to be stripped, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Task 1") || !strings.Contains(got, "Actionable content here.") {
+		t.Fatalf("expected task text to be preserved, got:\n%s", got)
 	}
 }

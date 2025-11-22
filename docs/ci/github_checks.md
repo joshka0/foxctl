@@ -28,7 +28,7 @@ Same as `ci/prcomments`:
   - `detailed`: also resolves job details for GitHub Actions runs and surfaces failed steps.
 - `--errors-only` (bool, default: false)
   - When true, only include checks whose conclusion is one of:
-    - `failure`, `error`, `cancelled`, `timed_out`.
+    - `failure`, `timed_out`, `action_required`, `stale`, `cancelled`.
 - `--skip-cache` (bool, default: false)
   - When true, bypass the result cache and always execute the skill.
 - `--data-only` (bool, default: false)
@@ -52,7 +52,7 @@ Envelope `data` will include:
 - `repository`, `pr_number`, `head_sha`.
 - `overall_status`: e.g. `failed`, `success`, `mixed`, `cancelled`.
 - `totals`: `{ checks, failed, cancelled, neutral, success }`.
-- `has_blocking_ci`: `true` when any check is `failed`/`error`/`cancelled`.
+- `has_blocking_ci`: `true` when any check has a blocking conclusion (`failure`, `timed_out`, `action_required`, `stale`, or `cancelled`).
 - `all_checks_successful`: `true` when all checks succeeded.
 - `has_neutral_or_skipped`: `true` when there are neutral/skipped checks.
 - `checks`: array of objects with:

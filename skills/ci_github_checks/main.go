@@ -173,33 +173,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		return fmt.Errorf("get check runs: %w", err)
 	}
 
-	var total, failed, cancelled, neutral, success int
-	for _, c := range checkRuns {
-		total++
-		switch c.Conclusion {
-		case "failure", "error":
-			failed++
-		case "cancelled", "timed_out":
-			cancelled++
-		case "neutral", "skipped":
-			neutral++
-		case "success":
-			success++
-		}
-	}
+	total, failed, cancelled, neutral, success := countConclusions(checkRuns)
 
 	filtered := checkRuns
 	if in.ErrorsOnly {
-		var tmp []CheckRun
-		for _, c := range checkRuns {
-			if c.Conclusion == "failure" || c.Conclusion == "error" || c.Conclusion == "cancelled" || c.Conclusion == "timed_out" {
-				tmp = append(tmp, c)
-			}
-		}
-		filtered = tmp
+		filtered = filterBlockingChecks(checkRuns)
 	}
 
-	// stable sort by name then status for readability
+	// sort by conclusion then name for readability
 	sort.Slice(filtered, func(i, j int) bool {
 		if filtered[i].Conclusion == filtered[j].Conclusion {
 			return filtered[i].Name < filtered[j].Name
@@ -384,6 +365,42 @@ func findFailedStep(job *JobDetails) *JobStep {
 		}
 	}
 	return nil
+}
+
+func countConclusions(checkRuns []CheckRun) (total, failed, cancelled, neutral, success int) {
+	for _, c := range checkRuns {
+		total++
+		switch c.Conclusion {
+		case "failure", "timed_out", "action_required", "stale":
+			failed++
+		case "cancelled":
+			cancelled++
+		case "neutral", "skipped":
+			neutral++
+		case "success":
+			success++
+		}
+	}
+	return total, failed, cancelled, neutral, success
+}
+
+func isBlockingConclusion(conclusion string) bool {
+	switch conclusion {
+	case "failure", "timed_out", "action_required", "stale", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func filterBlockingChecks(checkRuns []CheckRun) []CheckRun {
+	var out []CheckRun
+	for _, c := range checkRuns {
+		if isBlockingConclusion(c.Conclusion) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func classifyCIStatus(total, failed, cancelled, neutral, success int) (string, bool, bool, bool) {

@@ -93,7 +93,10 @@ Useful when another tool wants to reason over the comments and CI data:
 - `data.tasks_list`: structured list of task items, each with:
   - `kind`: `merge_conflict` | `ci_failure` | `review_comment`.
   - `summary`: short natural-language summary.
-  - Optional fields like `check_name`, `check_url`, `file`, `line`, `comment_author`, `comment_body`.
+  - Optional fields like:
+    - `source`: origin of the task, e.g. `github_review`, `coderabbit`.
+    - `severity`: optional severity label for bot-originated tasks, e.g. `critical`, `major`, `minor`.
+    - `check_name`, `check_url`, `file`, `line`, `comment_author`, `comment_body`.
 
 ## Skill contract
 

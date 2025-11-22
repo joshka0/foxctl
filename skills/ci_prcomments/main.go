@@ -102,6 +102,8 @@ type TaskSummary struct {
 type TaskItem struct {
 	Kind          string `json:"kind"`
 	Summary       string `json:"summary"`
+	Source        string `json:"source,omitempty"`
+	Severity      string `json:"severity,omitempty"`
 	CheckName     string `json:"check_name,omitempty"`
 	CheckURL      string `json:"check_url,omitempty"`
 	File          string `json:"file,omitempty"`
@@ -201,7 +203,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	var conflictingFiles []string
 	if prInfo.Mergeable != nil && !*prInfo.Mergeable {
-		conflictingFiles = getConflictingFiles(client, token, owner, repo, prNum)
+		conflictingFiles = getChangedFilesForPR(client, token, owner, repo, prNum)
 	}
 
 	issueComments, err := getIssueComments(client, token, owner, repo, prNum)
@@ -693,10 +695,10 @@ func buildMarkdownReport(prInfo *PRInfo, owner, repo string, prNum int, comments
 
 	if prInfo.Mergeable != nil && !*prInfo.Mergeable && len(conflictingFiles) > 0 {
 		summary.MergeConflicts = 1
-		fmt.Fprintf(&buf, "## ⚠️ Merge Conflicts to Resolve (%d files)\n\n", len(conflictingFiles))
+		fmt.Fprintf(&buf, "## ⚠️ PR has merge conflicts\n\n")
 		fmt.Fprintf(&buf, "### Task %d: Resolve merge conflicts\n\n", taskNum)
 		fmt.Fprintf(&buf, "**⚠️ IMPORTANT:** When resolving conflicts, make sure to understand fully how to properly synthesize any changes coming in and the current ones when comparing. Don't just accept one or the other without getting context!\n\n")
-		fmt.Fprintf(&buf, "**Conflicting files:**\n")
+		fmt.Fprintf(&buf, "**Files changed in this PR:**\n")
 		for _, file := range conflictingFiles {
 			fmt.Fprintf(&buf, "- `%s`\n", file)
 		}
@@ -767,7 +769,7 @@ func buildMarkdownReport(prInfo *PRInfo, owner, repo string, prNum int, comments
 		fmt.Fprintf(&buf, "## Summary\n\n")
 		fmt.Fprintf(&buf, "**Total tasks:** %d\n", summary.Total)
 		if summary.MergeConflicts > 0 {
-			fmt.Fprintf(&buf, "- ⚠️ Merge conflicts: 1 (%d files)\n", len(conflictingFiles))
+			fmt.Fprintf(&buf, "- ⚠️ Merge conflicts: PR is not mergeable (changed files: %d)\n", len(conflictingFiles))
 		}
 		if summary.CIFailures > 0 {
 			fmt.Fprintf(&buf, "- 🔴 CI failures: %d\n", summary.CIFailures)
@@ -780,7 +782,7 @@ func buildMarkdownReport(prInfo *PRInfo, owner, repo string, prNum int, comments
 	return buf.String(), summary
 }
 
-func getConflictingFiles(client *http.Client, token, owner, repo string, prNum int) []string {
+func getChangedFilesForPR(client *http.Client, token, owner, repo string, prNum int) []string {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/files", owner, repo, prNum)
 	var files []struct {
 		Filename string `json:"filename"`
@@ -802,7 +804,7 @@ func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []C
 	if len(conflictingFiles) > 0 {
 		tasks = append(tasks, TaskItem{
 			Kind:    "merge_conflict",
-			Summary: fmt.Sprintf("Resolve merge conflicts in %d file(s)", len(conflictingFiles)),
+			Summary: fmt.Sprintf("Resolve merge conflicts in this PR (changed files: %d)", len(conflictingFiles)),
 		})
 	}
 	for _, check := range checkRuns {
@@ -826,6 +828,16 @@ func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []C
 			Summary:       fmt.Sprintf("Address review comment from %s", comment.User.Login),
 			CommentAuthor: comment.User.Login,
 			CommentBody:   cleanBody,
+		}
+		if comment.User.Login == "coderabbitai[bot]" {
+			item.Source = "coderabbit"
+			sev, summary := classifyCodeRabbitTask(cleanBody)
+			if sev != "" {
+				item.Severity = sev
+			}
+			if summary != "" {
+				item.Summary = summary
+			}
 		}
 		if comment.Path != "" {
 			item.File = comment.Path
@@ -942,12 +954,53 @@ func extractCodexComment(body string) string {
 	return ""
 }
 
-func extractCodeRabbitComment(body string) string {
-	// If CodeRabbit explicitly marks the comment as addressed in a commit,
-	// treat the entire comment as non-actionable and drop it.
-	if strings.Contains(strings.ToLower(body), "addressed in commit") {
-		return ""
+func classifyCodeRabbitTask(cleanBody string) (severity, summary string) {
+	lines := strings.Split(cleanBody, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "critical") || strings.Contains(trimmed, "🔴") {
+			severity = "critical"
+			break
+		}
+		if strings.Contains(lower, "major") || strings.Contains(trimmed, "🟠") {
+			severity = "major"
+			break
+		}
+		if strings.Contains(lower, "minor") || strings.Contains(trimmed, "🟡") {
+			severity = "minor"
+			break
+		}
 	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "potential issue") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "<") && strings.HasSuffix(trimmed, ">") {
+			continue
+		}
+		clean := strings.Trim(trimmed, "*` ")
+		clean = strings.TrimLeft(clean, "# ")
+		if clean == "" {
+			continue
+		}
+		summary = clean
+		break
+	}
+
+	return severity, summary
+}
+
+func extractCodeRabbitComment(body string) string {
 	body = regexp.MustCompile(`(?s)<!-- internal state.*?<!-- internal state end -->`).ReplaceAllString(body, "")
 	body = regexp.MustCompile(`(?s)<!-- tips_.*?-->`).ReplaceAllString(body, "")
 	body = regexp.MustCompile(`(?s)<!-- DwQgtGAEAqAWCWBnSTIEMB26CuAXA9mAOYCmGJATmriQCaQDG\+Ats2bgFyQAOFk\+.*?-->`).ReplaceAllString(body, "")
