@@ -28,10 +28,7 @@ func init() {
 }
 
 func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags) error {
-	cfg, err := config.Load(cmd.Context())
-	if err != nil {
-		return err
-	}
+	cfg := config.MustFromContext(cmd.Context())
 	data, err := loadSkillInput(cmd, cfg, flags.Input, flags.InputFile)
 	if err != nil {
 		return err

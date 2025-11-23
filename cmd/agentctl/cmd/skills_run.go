@@ -15,10 +15,7 @@ func newSkillsRunCommand() *cobra.Command {
 		Short: "Run a local skill binary with JSON input",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 			data, err := loadSkillInput(cmd, cfg, input, inputFile)
 			if err != nil {
 				return err

@@ -15,10 +15,7 @@ func newSkillsUpgradeCommand() *cobra.Command {
 		Short: "Upgrade an installed skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 			if _, err := findSkill(cfg, args[0]); err != nil {
 				return err
 			}

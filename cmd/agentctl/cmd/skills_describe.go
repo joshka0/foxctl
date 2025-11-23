@@ -12,10 +12,7 @@ func newSkillsDescribeCommand() *cobra.Command {
 		Short: "Show detailed information about a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 			handle, err := findSkill(cfg, args[0])
 			if err != nil {
 				return err

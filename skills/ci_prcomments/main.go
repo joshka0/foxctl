@@ -509,7 +509,7 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 	if strings.Contains(contentType, "zip") || strings.Contains(contentDisposition, ".zip") || bytes.HasPrefix(data, []byte("PK\x03\x04")) {
 		zipReader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 		if err != nil {
-			return "", fmt.Errorf("failed to parse ZIP: %v", err)
+			return "", fmt.Errorf("failed to parse ZIP: %w", err)
 		}
 
 		var bestMatch string

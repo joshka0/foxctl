@@ -15,10 +15,7 @@ func newSkillsUninstallCommand() *cobra.Command {
 		Short: "Uninstall a skill",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 			// Resolve skill directory path without requiring a valid manifest
 			// This allows uninstalling corrupted or partially installed skills
 			skillPath, err := skillDirPath(cfg.Paths.Skills, args[0])

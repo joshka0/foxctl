@@ -15,10 +15,7 @@ func newSkillsSearchCommand() *cobra.Command {
 		Short: "Search for skills by name, description, or tags",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 			query := args[0]
 			manifests, err := skill.Discover(cfg.Paths.Skills)
 			if err != nil && !os.IsNotExist(err) {

@@ -19,10 +19,7 @@ func newSkillsInstallCommand() *cobra.Command {
 		Use:   "install",
 		Short: "Install a skill manifest and binary",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 
 			installer := skill.NewInstaller(cfg.Paths.Skills)
 			handle, err := installer.Install(cmd.Context(), skill.InstallOptions{
