@@ -14,10 +14,7 @@ func newSkillsListCommand() *cobra.Command {
 		Use:   "list",
 		Short: "List installed skills",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 			manifests, err := skill.Discover(cfg.Paths.Skills)
 			if err != nil && !os.IsNotExist(err) {
 				return err

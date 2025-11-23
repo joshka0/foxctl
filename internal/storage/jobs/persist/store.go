@@ -127,6 +127,11 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, newState types.St
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Build dynamic query with state transition validation.
+	// SQL injection safety: validSourceStates returns a hardcoded []State based on
+	// the newState parameter. All values are typed State constants, not user input.
+	// The dynamic portion only controls the number of '?' placeholders, not the
+	// SQL structure. All actual values are passed as parameterized arguments.
 	allowedStates := validSourceStates(newState)
 	placeholders := make([]string, len(allowedStates))
 	stateArgs := make([]any, len(allowedStates))

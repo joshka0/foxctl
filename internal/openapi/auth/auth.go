@@ -127,7 +127,7 @@ func (o *OAuth2) Apply(req *http.Request, cfg Config) error {
 	o.mu.RUnlock()
 
 	// Exchange credentials for token
-	token, expiresIn, err := o.exchangeCredentials(cfg)
+	token, expiresIn, err := o.exchangeCredentials(req.Context(), cfg)
 	if err != nil {
 		return fmt.Errorf("oauth2: token exchange failed: %w", err)
 	}
@@ -146,7 +146,7 @@ func (o *OAuth2) Apply(req *http.Request, cfg Config) error {
 	return nil
 }
 
-func (o *OAuth2) exchangeCredentials(cfg Config) (string, int, error) {
+func (o *OAuth2) exchangeCredentials(parentCtx context.Context, cfg Config) (string, int, error) {
 	// Prepare token request
 	data := url.Values{}
 	data.Set("grant_type", "client_credentials")
@@ -156,8 +156,9 @@ func (o *OAuth2) exchangeCredentials(cfg Config) (string, int, error) {
 		data.Set("scope", cfg.Scopes)
 	}
 
-	// Create HTTP request
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Create HTTP request with timeout derived from parent context
+	// This ensures the token exchange respects upstream cancellation
+	ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 	defer cancel()
 
 	tokenReq, err := http.NewRequestWithContext(ctx, "POST", cfg.TokenURL, bytes.NewBufferString(data.Encode()))

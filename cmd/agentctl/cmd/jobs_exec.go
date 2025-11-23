@@ -13,10 +13,7 @@ func newJobsExecSkillCommand() *cobra.Command {
 		Use:    "exec-skill",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load(cmd.Context())
-			if err != nil {
-				return err
-			}
+			cfg := config.MustFromContext(cmd.Context())
 			store, cleanup, err := openJobStore(cmd.Context())
 			if err != nil {
 				return err
