@@ -105,6 +105,49 @@ func TestSkillsDescribeCommandProvidesDetails(t *testing.T) {
 	}
 }
 
+func TestSkillsHelpCommandProvidesHelp(t *testing.T) {
+	cfg := installTextGrepSkill(t)
+
+	cmd := newSkillsHelpCommand()
+	cmd.SetContext(config.WithContext(context.Background(), cfg))
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"text/grep", "--json"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("skills help: %v (stderr=%s)", err, stderr.String())
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode help envelope: %v", err)
+	}
+	if env.Status != envelope.StatusOK {
+		t.Fatalf("expected ok status, got %s", env.Status)
+	}
+
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map response, got %T", env.Data)
+	}
+	if got := data["skill"]; got != "text/grep" {
+		t.Fatalf("expected skill text/grep, got %v", got)
+	}
+	if _, ok := data["parameters"]; !ok {
+		t.Fatalf("expected parameters in help data")
+	}
+
+	helpVal, ok := data["help"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected help object in help data, got %T", data["help"])
+	}
+	if got := helpVal["short"]; got != "Recursive regex search with include/exclude globs." {
+		t.Fatalf("unexpected help.short: %v", got)
+	}
+}
+
 func TestSkillsSearchCommandMatchesByName(t *testing.T) {
 	cfg := installTextGrepSkill(t)
 	installHTTPOpenAPISkill(t, cfg)

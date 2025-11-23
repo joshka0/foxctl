@@ -12,6 +12,7 @@ func newSkillsCommand() *cobra.Command {
 		newSkillsInstallCommand(),
 		newSkillsListCommand(),
 		newSkillsDescribeCommand(),
+		newSkillsHelpCommand(),
 		newSkillsSearchCommand(),
 		newSkillsUninstallCommand(),
 		newSkillsUpgradeCommand(),

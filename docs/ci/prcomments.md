@@ -98,6 +98,24 @@ Useful when another tool wants to reason over the comments and CI data:
     - `severity`: optional severity label for bot-originated tasks, e.g. `critical`, `major`, `minor`.
     - `check_name`, `check_url`, `file`, `line`, `comment_author`, `comment_body`.
 
+### Importing PR tasks into `todo/manage`
+
+To turn the current CI/review tasks for a PR into persistent TODOs, use:
+
+```bash
+agentctl ci todos \
+  --pr 78 \
+  --owner jkatigb \
+  --repo agentctl \
+  --store ~/.agentctl/todo/tasks.json
+```
+
+This helper:
+
+- Runs the `ci/prcomments` skill with `format=json`, `errors_only=true`, and `with_context=false`, then reads `data.tasks_list` from the returned envelope and creates a `todo/manage` task for each CI/PR task, including:
+  - Title derived from the `summary` and `kind` (e.g. `[review_comment] Fix undocumented conclusion handling`).
+  - Description with `source`, `severity`, location (`file:line`), reviewer, and the cleaned comment body.
+
 ## Skill contract
 
 Underlying skill: `ci/prcomments` (exec distribution).

@@ -42,3 +42,38 @@ func newSkillsDescribeCommand() *cobra.Command {
 	}
 	return cmd
 }
+
+func newSkillsHelpCommand() *cobra.Command {
+	var jsonFlag bool
+	cmd := &cobra.Command{
+		Use:   "help <skill-name>",
+		Short: "Show AI-friendly JSON help for a skill",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_ = jsonFlag
+			cfg, err := config.Load(cmd.Context())
+			if err != nil {
+				return err
+			}
+			handle, err := findSkill(cfg, args[0])
+			if err != nil {
+				return err
+			}
+			m := handle.Manifest
+			help := map[string]any{
+				"skill":       m.Metadata.Name,
+				"version":     m.Metadata.Version,
+				"description": m.Metadata.Description,
+				"command":     m.Signature.Command,
+				"parameters":  m.Signature.Parameters,
+				"returns":     m.Signature.Returns,
+			}
+			if m.Signature.Help != nil {
+				help["help"] = m.Signature.Help
+			}
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.help", help, protocol.WithSource("cli"))
+		},
+	}
+	cmd.Flags().BoolVar(&jsonFlag, "json", true, "Output AI-friendly JSON help")
+	return cmd
+}
