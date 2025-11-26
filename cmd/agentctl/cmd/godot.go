@@ -67,6 +67,7 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotSelectionCommand(),
 		newGodotScriptCreateCommand(),
 		newGodotResourcesCommand(),
+		newGodotSearchResourcesCommand(),
 		newGodotRunCommand(),
 		newGodotRunSceneCommand(),
 		newGodotStopCommand(),
@@ -847,13 +848,67 @@ func newGodotResourcesCommand() *cobra.Command {
 	return cmd
 }
 
+func newGodotSearchResourcesCommand() *cobra.Command {
+	var f godotFlags
+	var resourceType string
+	var path string
+	var name string
+	var maxResults int
+
+	cmd := &cobra.Command{
+		Use:   "search-resources",
+		Short: "Search for resources by type",
+		Long: `Search the project for resources of a specific type.
+
+Supported type shortcuts:
+  - scene, packedscene: .tscn/.scn files
+  - script, gdscript: .gd files
+  - texture, texture2d: .png/.jpg/.webp/.svg files
+  - audio, audiostream: .mp3/.ogg/.wav files
+  - shader: .gdshader/.shader files
+  - material: .material/.tres files
+  - resource, tres: .tres files`,
+		Example: `  # Find all scenes
+  agentctl godot search-resources --type scene
+
+  # Find all scripts with "Player" in the name
+  agentctl godot search-resources --type script --name "*Player*"
+
+  # Find textures in a specific directory
+  agentctl godot search-resources --type texture --path res://Assets/Sprites`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if resourceType == "" {
+				return fmt.Errorf("--type is required")
+			}
+			payload := map[string]any{
+				"action":        "search_resources",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"resource_type": resourceType,
+				"resource_path": path,
+				"search_name":   name,
+				"max_results":   maxResults,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&resourceType, "type", "", "Resource type to search for (required)")
+	cmd.Flags().StringVar(&path, "path", "res://", "Directory to search in")
+	cmd.Flags().StringVar(&name, "name", "", "Name pattern to filter (supports wildcards)")
+	cmd.Flags().IntVar(&maxResults, "max-results", 50, "Maximum results to return")
+	return cmd
+}
+
 func newGodotRunCommand() *cobra.Command {
 	var f godotFlags
 
 	cmd := &cobra.Command{
 		Use:     "run",
-		Short:   "Start the game",
-		Long:    "Launch the game from the Godot Editor (equivalent to pressing F5).",
+		Short:   "Run the game",
+		Long:    "Start the game from the main scene in the Godot Editor.",
 		Example: `  agentctl godot run`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := map[string]any{

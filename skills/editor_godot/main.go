@@ -41,6 +41,7 @@ const (
 	ActionSelectionState   = "selection_state"
 	ActionScriptCreate     = "script_create"
 	ActionResourceList     = "resource_list"
+	ActionSearchResources  = "search_resources"
 	ActionRunGame          = "run_game"
 	ActionRunScene         = "run_scene"
 	ActionStopGame         = "stop_game"
@@ -85,6 +86,7 @@ type Input struct {
 	Methods       []any             `json:"methods"`
 	Signals       []string          `json:"signals"`
 	Overwrite     bool              `json:"overwrite"`
+	ResourceType  string            `json:"resource_type"`
 }
 
 // PluginRequest is sent to the GodotAIBridge plugin.
@@ -308,12 +310,16 @@ func validateInput(in Input) error {
 		}
 	case ActionResourceList:
 		// Optional path, pattern, max_results
+	case ActionSearchResources:
+		if strings.TrimSpace(in.ResourceType) == "" {
+			return fmt.Errorf("resource_type is required for action %q", in.Action)
+		}
 	case ActionRunScene:
 		if strings.TrimSpace(in.ScenePath) == "" {
 			return fmt.Errorf("scene_path is required for action %q", in.Action)
 		}
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, run_game, run_scene, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -418,6 +424,17 @@ func buildParams(in Input) map[string]any {
 		}
 		if in.Pattern != "" {
 			params["pattern"] = in.Pattern
+		}
+		if in.MaxResults > 0 {
+			params["max_results"] = in.MaxResults
+		}
+	case ActionSearchResources:
+		params["type"] = in.ResourceType
+		if in.ResourcePath != "" {
+			params["path"] = in.ResourcePath
+		}
+		if in.SearchName != "" {
+			params["name"] = in.SearchName
 		}
 		if in.MaxResults > 0 {
 			params["max_results"] = in.MaxResults
@@ -716,6 +733,13 @@ func generateSummary(action string, data any) string {
 			return fmt.Sprintf("Found %d files, %d directories", len(files), len(dirs))
 		}
 		return "Listed resources"
+
+	case ActionSearchResources:
+		if m, ok := data.(map[string]any); ok {
+			count, _ := m["count"].(float64)
+			return fmt.Sprintf("Found %d resource(s)", int(count))
+		}
+		return "Searched resources"
 
 	case ActionRunGame:
 		return "Game started"

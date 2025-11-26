@@ -181,6 +181,8 @@ func _handle_request(json_str: String) -> String:
 			return _handle_script_create(params)
 		"resource_list":
 			return _handle_resource_list(params)
+		"search_resources":
+			return _handle_search_resources(params)
 		"run_game":
 			return _handle_run_game()
 		"run_scene":
@@ -191,7 +193,7 @@ func _handle_request(json_str: String) -> String:
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, run_game, run_scene, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -1302,6 +1304,95 @@ func _handle_resource_list(params: Dictionary) -> String:
 		"files": files,
 		"truncated": files.size() + dirs.size() >= max_results,
 	})
+
+
+func _handle_search_resources(params: Dictionary) -> String:
+	## Search for resources by type (e.g., PackedScene, Texture2D, Script).
+	var resource_type: String = params.get("type", "")
+	var search_path: String = params.get("path", "res://")
+	var name_pattern: String = params.get("name", "")
+	var max_results: int = params.get("max_results", 50)
+	
+	if resource_type.is_empty():
+		return _error_response("EARG", "type is required (e.g., PackedScene, Texture2D, Script)", "")
+	
+	if not search_path.begins_with("res://"):
+		search_path = "res://" + search_path.lstrip("/")
+	
+	var results: Array[Dictionary] = []
+	_search_resources_recursive(search_path, resource_type, name_pattern, results, max_results)
+	
+	return _success_response({
+		"results": results,
+		"count": results.size(),
+		"truncated": results.size() >= max_results,
+		"filters": {
+			"type": resource_type,
+			"path": search_path,
+			"name": name_pattern,
+		},
+	})
+
+
+func _search_resources_recursive(path: String, resource_type: String, name_pattern: String, results: Array[Dictionary], max_results: int) -> void:
+	## Recursively search for resources of a specific type.
+	if results.size() >= max_results:
+		return
+	
+	var dir := DirAccess.open(path)
+	if not dir:
+		return
+	
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "" and results.size() < max_results:
+		if file_name.begins_with("."):
+			file_name = dir.get_next()
+			continue
+		
+		var full_path := path.path_join(file_name)
+		
+		if dir.current_is_dir():
+			_search_resources_recursive(full_path, resource_type, name_pattern, results, max_results)
+		else:
+			# Check if name matches pattern
+			if not name_pattern.is_empty() and not file_name.matchn(name_pattern):
+				file_name = dir.get_next()
+				continue
+			
+			# Try to determine resource type without fully loading
+			var matches := false
+			match resource_type.to_lower():
+				"packedscene", "scene":
+					matches = file_name.ends_with(".tscn") or file_name.ends_with(".scn")
+				"script", "gdscript":
+					matches = file_name.ends_with(".gd")
+				"texture2d", "texture":
+					matches = file_name.ends_with(".png") or file_name.ends_with(".jpg") or file_name.ends_with(".webp") or file_name.ends_with(".svg")
+				"audiostreammp3", "audiostream", "audio":
+					matches = file_name.ends_with(".mp3") or file_name.ends_with(".ogg") or file_name.ends_with(".wav")
+				"shader":
+					matches = file_name.ends_with(".gdshader") or file_name.ends_with(".shader")
+				"material":
+					matches = file_name.ends_with(".material") or file_name.ends_with(".tres")
+				"resource", "tres":
+					matches = file_name.ends_with(".tres")
+				_:
+					# For other types, try to load and check
+					if ResourceLoader.exists(full_path):
+						var res := load(full_path)
+						if res and res.get_class() == resource_type:
+							matches = true
+			
+			if matches:
+				results.append({
+					"path": full_path,
+					"name": file_name,
+					"type": resource_type,
+				})
+		
+		file_name = dir.get_next()
+	dir.list_dir_end()
 
 
 func _handle_run_game() -> String:
