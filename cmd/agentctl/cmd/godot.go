@@ -45,14 +45,22 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 	}
 
 	cmd.AddCommand(
+		newGodotPluginInstallCommand(),
 		newGodotPingCommand(),
 		newGodotSceneTreeCommand(),
 		newGodotInspectCommand(),
 		newGodotCreateCommand(),
+		newGodotDeleteCommand(),
+		newGodotRenameCommand(),
+		newGodotReparentCommand(),
 		newGodotSetCommand(),
 		newGodotAttachScriptCommand(),
 		newGodotConnectSignalCommand(),
+		newGodotClassInfoCommand(),
+		newGodotSaveCommand(),
+		newGodotResourcesCommand(),
 		newGodotRunCommand(),
+		newGodotStopCommand(),
 		newGodotErrorsCommand(),
 	)
 
@@ -295,6 +303,177 @@ func newGodotConnectSignalCommand() *cobra.Command {
 	return cmd
 }
 
+func newGodotDeleteCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "delete <node-path>",
+		Short: "Delete a node from the scene",
+		Long:  "Delete the specified node. The operation is registered with Godot's Undo/Redo system.",
+		Example: `  # Delete a node
+  agentctl godot delete /root/GameRoot/TestNode`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "node_delete",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"node_path":  args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotRenameCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "rename <node-path> <new-name>",
+		Short: "Rename a node",
+		Long:  "Rename the specified node. The operation is registered with Godot's Undo/Redo system.",
+		Example: `  # Rename a node
+  agentctl godot rename /root/GameRoot/OldName NewName`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "node_rename",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"node_path":  args[0],
+				"new_name":   args[1],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotReparentCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "reparent <node-path> <new-parent-path>",
+		Short: "Move a node to a different parent",
+		Long:  "Reparent the specified node to a new parent. The operation is registered with Godot's Undo/Redo system.",
+		Example: `  # Move a node to a different parent
+  agentctl godot reparent /root/GameRoot/Player /root/GameRoot/Entities`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":          "node_reparent",
+				"host":            f.host,
+				"port":            f.port,
+				"timeout_ms":      f.timeoutMS,
+				"node_path":       args[0],
+				"new_parent_path": args[1],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotClassInfoCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "class-info <class-name>",
+		Short: "Get information about a Godot class",
+		Long:  "Query the ClassDB for methods, properties, and signals of a Godot class.",
+		Example: `  # Get info about CharacterBody2D
+  agentctl godot class-info CharacterBody2D
+
+  # Get info about Node2D
+  agentctl godot class-info Node2D`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "class_info",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"class_name": args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotSaveCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:     "save",
+		Short:   "Save the current scene",
+		Long:    "Save the currently open scene to disk.",
+		Example: `  agentctl godot save`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":     "scene_save",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotResourcesCommand() *cobra.Command {
+	var f godotFlags
+	var path string
+	var pattern string
+	var maxResults int
+
+	cmd := &cobra.Command{
+		Use:   "resources",
+		Short: "List files in the project",
+		Long:  "List files and directories in the Godot project's res:// filesystem.",
+		Example: `  # List root directory
+  agentctl godot resources
+
+  # List Scripts directory
+  agentctl godot resources --path res://Scripts
+
+  # List only .gd files
+  agentctl godot resources --pattern "*.gd"`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":        "resource_list",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"resource_path": path,
+				"pattern":       pattern,
+				"max_results":   maxResults,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&path, "path", "res://", "Directory path to list")
+	cmd.Flags().StringVar(&pattern, "pattern", "", "Glob pattern to filter files (e.g., *.gd)")
+	cmd.Flags().IntVar(&maxResults, "max-results", 100, "Maximum results to return")
+	return cmd
+}
+
 func newGodotRunCommand() *cobra.Command {
 	var f godotFlags
 
@@ -306,6 +485,29 @@ func newGodotRunCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := map[string]any{
 				"action":     "run_game",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotStopCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:     "stop",
+		Short:   "Stop the running game",
+		Long:    "Stop the currently running game in the Godot Editor.",
+		Example: `  agentctl godot stop`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":     "stop_game",
 				"host":       f.host,
 				"port":       f.port,
 				"timeout_ms": f.timeoutMS,
