@@ -21,6 +21,7 @@ type godotFlags struct {
 	timeoutMS int
 	dataOnly  bool
 	skipCache bool
+	dryRun    bool
 }
 
 func newGodotCommand() *cobra.Command {
@@ -87,6 +88,11 @@ func addGodotFlags(cmd *cobra.Command, f *godotFlags) {
 	cmd.Flags().IntVar(&f.timeoutMS, "timeout", 10000, "Request timeout in milliseconds")
 	cmd.Flags().BoolVar(&f.dataOnly, "data-only", false, "Print only {status,data} from envelope")
 	cmd.Flags().BoolVar(&f.skipCache, "skip-cache", false, "Bypass result cache")
+}
+
+func addGodotMutatingFlags(cmd *cobra.Command, f *godotFlags) {
+	addGodotFlags(cmd, f)
+	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "Preview changes without applying them")
 }
 
 func newGodotPingCommand() *cobra.Command {
@@ -203,12 +209,13 @@ The operation is registered with Godot's Undo/Redo system.`,
 				"parent_path": args[0],
 				"node_type":   args[1],
 				"node_name":   args[2],
+				"dry_run":     f.dryRun,
 			}
 			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
 		},
 	}
 
-	addGodotFlags(cmd, &f)
+	addGodotMutatingFlags(cmd, &f)
 	return cmd
 }
 

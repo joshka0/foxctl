@@ -92,6 +92,7 @@ type Input struct {
 	Overwrite     bool              `json:"overwrite"`
 	ResourceType  string            `json:"resource_type"`
 	BookmarkName  string            `json:"bookmark_name"`
+	DryRun        bool              `json:"dry_run"`
 }
 
 // PluginRequest is sent to the GodotAIBridge plugin.
@@ -350,23 +351,41 @@ func buildParams(in Input) map[string]any {
 		params["node_path"] = in.NodePath
 	case ActionNodeCreate:
 		params["parent_path"] = in.ParentPath
-		params["type"] = in.NodeType
-		params["name"] = in.NodeName
+		params["node_type"] = in.NodeType
+		params["node_name"] = in.NodeName
+		if in.DryRun {
+			params["dry_run"] = true
+		}
 	case ActionNodeDelete:
 		params["node_path"] = in.NodePath
+		if in.DryRun {
+			params["dry_run"] = true
+		}
 	case ActionNodeRename:
 		params["node_path"] = in.NodePath
 		params["new_name"] = in.NewName
+		if in.DryRun {
+			params["dry_run"] = true
+		}
 	case ActionNodeReparent:
 		params["node_path"] = in.NodePath
 		params["new_parent_path"] = in.NewParentPath
+		if in.DryRun {
+			params["dry_run"] = true
+		}
 	case ActionNodeSetProp:
 		params["node_path"] = in.NodePath
 		params["property"] = in.Property
 		params["value"] = in.Value
+		if in.DryRun {
+			params["dry_run"] = true
+		}
 	case ActionNodeAttachScript:
 		params["node_path"] = in.NodePath
 		params["script_path"] = in.ScriptPath
+		if in.DryRun {
+			params["dry_run"] = true
+		}
 	case ActionSignalConnect:
 		params["source_path"] = in.NodePath
 		params["signal_name"] = in.SignalName
@@ -383,6 +402,9 @@ func buildParams(in Input) map[string]any {
 		if in.IfExists != "" {
 			params["if_exists"] = in.IfExists
 		}
+		if in.DryRun {
+			params["dry_run"] = true
+		}
 	case ActionSceneList:
 		if in.ResourcePath != "" {
 			params["path"] = in.ResourcePath
@@ -398,6 +420,9 @@ func buildParams(in Input) map[string]any {
 		params["parent_path"] = in.ParentPath
 		if in.InstanceName != "" {
 			params["name"] = in.InstanceName
+		}
+		if in.DryRun {
+			params["dry_run"] = true
 		}
 	case ActionSearchNodes:
 		if in.SearchName != "" {

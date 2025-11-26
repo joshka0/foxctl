@@ -371,6 +371,7 @@ func _handle_node_create(params: Dictionary) -> String:
 	var parent_path: String = params.get("parent_path", "")
 	var node_type: String = params.get("type", "")
 	var node_name: String = params.get("name", "")
+	var dry_run: bool = params.get("dry_run", false)
 	
 	if parent_path.is_empty() or node_type.is_empty() or node_name.is_empty():
 		return _error_response("EARG", "parent_path, type, and name are required", "")
@@ -388,6 +389,18 @@ func _handle_node_create(params: Dictionary) -> String:
 	if not ClassDB.class_exists(node_type):
 		return _error_response("ETYPE_INVALID", "Invalid Godot class: " + node_type,
 			"Use a valid Godot class name like Node2D, Sprite2D, CharacterBody2D, etc.")
+	
+	# Dry run - return what would happen without doing it
+	if dry_run:
+		return _success_response({
+			"dry_run": true,
+			"would_create": {
+				"parent_path": _get_scene_path(parent, root),
+				"type": node_type,
+				"name": node_name,
+				"expected_path": _get_scene_path(parent, root) + "/" + node_name,
+			},
+		})
 	
 	# Create node with undo/redo support
 	var new_node: Node = ClassDB.instantiate(node_type)
@@ -560,6 +573,7 @@ func _handle_signal_connect(params: Dictionary) -> String:
 
 func _handle_node_delete(params: Dictionary) -> String:
 	var node_path: String = params.get("node_path", "")
+	var dry_run: bool = params.get("dry_run", false)
 	
 	if node_path.is_empty():
 		return _error_response("EARG", "node_path is required", "")
@@ -577,8 +591,22 @@ func _handle_node_delete(params: Dictionary) -> String:
 	if node == root:
 		return _error_response("EARG", "Cannot delete scene root node", "")
 	
-	var parent := node.get_parent()
 	var node_name := node.name
+	var child_count := node.get_child_count()
+	
+	# Dry run - return what would happen
+	if dry_run:
+		return _success_response({
+			"dry_run": true,
+			"would_delete": {
+				"path": _get_scene_path(node, root),
+				"name": node_name,
+				"type": node.get_class(),
+				"child_count": child_count,
+			},
+		})
+	
+	var parent := node.get_parent()
 	var node_index := node.get_index()
 	
 	_undo_redo.create_action("AI: Delete Node " + node_name)
