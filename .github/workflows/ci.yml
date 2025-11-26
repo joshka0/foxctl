@@ -67,6 +67,7 @@ jobs:
 
       - name: Format (gofumpt)
         run: |
+          cd "$GITHUB_WORKSPACE"
           make fmt
           git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
 
