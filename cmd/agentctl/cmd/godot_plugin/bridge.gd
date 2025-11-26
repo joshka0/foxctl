@@ -21,6 +21,7 @@ var _clients: Array[StreamPeerTCP] = []
 var _undo_redo: EditorUndoRedoManager
 var _error_buffer: Array[Dictionary] = []
 const MAX_ERROR_BUFFER: int = 200
+var _camera_bookmarks: Dictionary = {}  # name -> {position, rotation, zoom}
 
 
 func _enter_tree() -> void:
@@ -177,6 +178,12 @@ func _handle_request(json_str: String) -> String:
 			return _handle_focus_node(params)
 		"selection_state":
 			return _handle_selection_state()
+		"camera_save":
+			return _handle_camera_save(params)
+		"camera_restore":
+			return _handle_camera_restore(params)
+		"camera_list":
+			return _handle_camera_list()
 		"script_create":
 			return _handle_script_create(params)
 		"resource_list":
@@ -193,7 +200,7 @@ func _handle_request(json_str: String) -> String:
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, camera_save, camera_restore, camera_list, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -1147,6 +1154,112 @@ func _handle_selection_state() -> String:
 		"scene_root": root.name,
 		"selected_count": selected_nodes.size(),
 		"selected_nodes": nodes_info,
+	})
+
+
+func _handle_camera_save(params: Dictionary) -> String:
+	## Save the current editor camera position as a named bookmark.
+	var bookmark_name: String = params.get("name", "")
+	
+	if bookmark_name.is_empty():
+		return _error_response("EARG", "name is required", "")
+	
+	# Get the 2D editor viewport camera
+	var viewport := EditorInterface.get_editor_viewport_2d()
+	if viewport:
+		var transform := viewport.global_canvas_transform
+		_camera_bookmarks[bookmark_name] = {
+			"type": "2d",
+			"offset_x": -transform.origin.x / transform.get_scale().x,
+			"offset_y": -transform.origin.y / transform.get_scale().y,
+			"zoom": transform.get_scale().x,
+		}
+		return _success_response({
+			"ok": true,
+			"name": bookmark_name,
+			"type": "2d",
+			"bookmark": _camera_bookmarks[bookmark_name],
+		})
+	
+	# Try 3D viewport
+	var viewport_3d := EditorInterface.get_editor_viewport_3d()
+	if viewport_3d:
+		var camera := viewport_3d.get_camera_3d()
+		if camera:
+			_camera_bookmarks[bookmark_name] = {
+				"type": "3d",
+				"position_x": camera.global_position.x,
+				"position_y": camera.global_position.y,
+				"position_z": camera.global_position.z,
+				"rotation_x": camera.rotation.x,
+				"rotation_y": camera.rotation.y,
+				"rotation_z": camera.rotation.z,
+			}
+			return _success_response({
+				"ok": true,
+				"name": bookmark_name,
+				"type": "3d",
+				"bookmark": _camera_bookmarks[bookmark_name],
+			})
+	
+	return _error_response("EEDITOR_STATE", "Could not access editor camera", "")
+
+
+func _handle_camera_restore(params: Dictionary) -> String:
+	## Restore a saved camera bookmark.
+	var bookmark_name: String = params.get("name", "")
+	
+	if bookmark_name.is_empty():
+		return _error_response("EARG", "name is required", "")
+	
+	if not _camera_bookmarks.has(bookmark_name):
+		var available := ", ".join(_camera_bookmarks.keys())
+		return _error_response("EBOOKMARK_NOT_FOUND", 
+			"Bookmark not found: " + bookmark_name,
+			"Available bookmarks: " + (available if available else "(none)"))
+	
+	var bookmark: Dictionary = _camera_bookmarks[bookmark_name]
+	
+	if bookmark.get("type") == "2d":
+		var viewport := EditorInterface.get_editor_viewport_2d()
+		if viewport:
+			var zoom: float = bookmark.get("zoom", 1.0)
+			var offset_x: float = bookmark.get("offset_x", 0.0)
+			var offset_y: float = bookmark.get("offset_y", 0.0)
+			
+			# Set the canvas transform
+			var transform := Transform2D()
+			transform = transform.scaled(Vector2(zoom, zoom))
+			transform.origin = Vector2(-offset_x * zoom, -offset_y * zoom)
+			viewport.global_canvas_transform = transform
+			
+			return _success_response({
+				"ok": true,
+				"name": bookmark_name,
+				"restored": bookmark,
+			})
+	
+	# 3D camera restoration is more complex and may not be directly supported
+	# via EditorInterface in Godot 4
+	if bookmark.get("type") == "3d":
+		return _error_response("EUNSUPPORTED", 
+			"3D camera restoration not yet implemented",
+			"Use the 2D viewport for now.")
+	
+	return _error_response("EEDITOR_STATE", "Could not restore camera position", "")
+
+
+func _handle_camera_list() -> String:
+	## List all saved camera bookmarks.
+	var bookmarks: Array[Dictionary] = []
+	for name in _camera_bookmarks:
+		var bookmark: Dictionary = _camera_bookmarks[name].duplicate()
+		bookmark["name"] = name
+		bookmarks.append(bookmark)
+	
+	return _success_response({
+		"bookmarks": bookmarks,
+		"count": bookmarks.size(),
 	})
 
 

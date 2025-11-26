@@ -39,6 +39,9 @@ const (
 	ActionSearchNodes      = "search_nodes"
 	ActionFocusNode        = "focus_node"
 	ActionSelectionState   = "selection_state"
+	ActionCameraSave       = "camera_save"
+	ActionCameraRestore    = "camera_restore"
+	ActionCameraList       = "camera_list"
 	ActionScriptCreate     = "script_create"
 	ActionResourceList     = "resource_list"
 	ActionSearchResources  = "search_resources"
@@ -87,6 +90,7 @@ type Input struct {
 	Signals       []string          `json:"signals"`
 	Overwrite     bool              `json:"overwrite"`
 	ResourceType  string            `json:"resource_type"`
+	BookmarkName  string            `json:"bookmark_name"`
 }
 
 // PluginRequest is sent to the GodotAIBridge plugin.
@@ -300,6 +304,12 @@ func validateInput(in Input) error {
 		// All filters are optional
 	case ActionSelectionState:
 		// No required fields
+	case ActionCameraSave, ActionCameraRestore:
+		if strings.TrimSpace(in.BookmarkName) == "" {
+			return fmt.Errorf("bookmark_name is required for action %q", in.Action)
+		}
+	case ActionCameraList:
+		// No required fields
 	case ActionFocusNode:
 		if strings.TrimSpace(in.NodePath) == "" {
 			return fmt.Errorf("node_path is required for action %q", in.Action)
@@ -319,7 +329,7 @@ func validateInput(in Input) error {
 			return fmt.Errorf("scene_path is required for action %q", in.Action)
 		}
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, camera_save, camera_restore, camera_list, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -403,6 +413,8 @@ func buildParams(in Input) map[string]any {
 	case ActionFocusNode:
 		params["node_path"] = in.NodePath
 		params["frame"] = in.Frame
+	case ActionCameraSave, ActionCameraRestore:
+		params["name"] = in.BookmarkName
 	case ActionScriptCreate:
 		params["path"] = in.ScriptPath
 		if in.ExtendsClass != "" {
@@ -718,6 +730,27 @@ func generateSummary(action string, data any) string {
 			return fmt.Sprintf("%d node(s) selected", int(count))
 		}
 		return "Retrieved selection state"
+
+	case ActionCameraSave:
+		if m, ok := data.(map[string]any); ok {
+			name, _ := m["name"].(string)
+			return fmt.Sprintf("Saved camera bookmark '%s'", name)
+		}
+		return "Saved camera bookmark"
+
+	case ActionCameraRestore:
+		if m, ok := data.(map[string]any); ok {
+			name, _ := m["name"].(string)
+			return fmt.Sprintf("Restored camera bookmark '%s'", name)
+		}
+		return "Restored camera bookmark"
+
+	case ActionCameraList:
+		if m, ok := data.(map[string]any); ok {
+			count, _ := m["count"].(float64)
+			return fmt.Sprintf("%d camera bookmark(s)", int(count))
+		}
+		return "Listed camera bookmarks"
 
 	case ActionScriptCreate:
 		if m, ok := data.(map[string]any); ok {

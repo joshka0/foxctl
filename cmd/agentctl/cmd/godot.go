@@ -65,6 +65,9 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotSearchNodesCommand(),
 		newGodotFocusCommand(),
 		newGodotSelectionCommand(),
+		newGodotCameraSaveCommand(),
+		newGodotCameraRestoreCommand(),
+		newGodotCameraListCommand(),
 		newGodotScriptCreateCommand(),
 		newGodotResourcesCommand(),
 		newGodotSearchResourcesCommand(),
@@ -709,6 +712,84 @@ func newGodotSelectionCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := map[string]any{
 				"action":     "selection_state",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotCameraSaveCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "camera-save <name>",
+		Short: "Save the current editor camera position",
+		Long:  "Save the current 2D/3D editor camera position as a named bookmark.",
+		Example: `  # Save current camera position
+  agentctl godot camera-save spawn_area
+
+  # Save another position
+  agentctl godot camera-save boss_arena`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":        "camera_save",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"bookmark_name": args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotCameraRestoreCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "camera-restore <name>",
+		Short: "Restore a saved camera position",
+		Long:  "Restore the editor camera to a previously saved bookmark position.",
+		Example: `  # Restore a saved camera position
+  agentctl godot camera-restore spawn_area`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":        "camera_restore",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"bookmark_name": args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotCameraListCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:     "camera-list",
+		Short:   "List saved camera bookmarks",
+		Long:    "List all saved camera position bookmarks.",
+		Example: `  agentctl godot camera-list`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":     "camera_list",
 				"host":       f.host,
 				"port":       f.port,
 				"timeout_ms": f.timeoutMS,
