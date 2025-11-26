@@ -38,6 +38,7 @@ const (
 	ActionSceneInstance    = "scene_instance"
 	ActionSearchNodes      = "search_nodes"
 	ActionFocusNode        = "focus_node"
+	ActionSelectionState   = "selection_state"
 	ActionScriptCreate     = "script_create"
 	ActionResourceList     = "resource_list"
 	ActionRunGame          = "run_game"
@@ -295,6 +296,8 @@ func validateInput(in Input) error {
 		}
 	case ActionSearchNodes:
 		// All filters are optional
+	case ActionSelectionState:
+		// No required fields
 	case ActionFocusNode:
 		if strings.TrimSpace(in.NodePath) == "" {
 			return fmt.Errorf("node_path is required for action %q", in.Action)
@@ -310,7 +313,7 @@ func validateInput(in Input) error {
 			return fmt.Errorf("scene_path is required for action %q", in.Action)
 		}
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, run_scene, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, run_game, run_scene, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -691,6 +694,13 @@ func generateSummary(action string, data any) string {
 			return fmt.Sprintf("Focused on %s", selectedPath)
 		}
 		return "Focused node"
+
+	case ActionSelectionState:
+		if m, ok := data.(map[string]any); ok {
+			count, _ := m["selected_count"].(float64)
+			return fmt.Sprintf("%d node(s) selected", int(count))
+		}
+		return "Retrieved selection state"
 
 	case ActionScriptCreate:
 		if m, ok := data.(map[string]any); ok {

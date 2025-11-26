@@ -64,6 +64,7 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotSceneInstanceCommand(),
 		newGodotSearchNodesCommand(),
 		newGodotFocusCommand(),
+		newGodotSelectionCommand(),
 		newGodotScriptCreateCommand(),
 		newGodotResourcesCommand(),
 		newGodotRunCommand(),
@@ -693,6 +694,29 @@ func newGodotFocusCommand() *cobra.Command {
 
 	addGodotFlags(cmd, &f)
 	cmd.Flags().BoolVar(&frame, "frame", true, "Frame the node in the viewport")
+	return cmd
+}
+
+func newGodotSelectionCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:     "selection",
+		Short:   "Get the current editor selection",
+		Long:    "Report what nodes are currently selected in the Godot Editor's scene tree.",
+		Example: `  agentctl godot selection`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":     "selection_state",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
 	return cmd
 }
 

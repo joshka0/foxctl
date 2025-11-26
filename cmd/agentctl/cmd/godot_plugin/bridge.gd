@@ -175,6 +175,8 @@ func _handle_request(json_str: String) -> String:
 			return _handle_search_nodes(params)
 		"focus_node":
 			return _handle_focus_node(params)
+		"selection_state":
+			return _handle_selection_state()
 		"script_create":
 			return _handle_script_create(params)
 		"resource_list":
@@ -189,7 +191,7 @@ func _handle_request(json_str: String) -> String:
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, run_scene, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, script_create, resource_list, run_game, run_scene, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -1118,6 +1120,31 @@ func _handle_focus_node(params: Dictionary) -> String:
 		"selected_path": _get_scene_path(node, root),
 		"selected_name": node.name,
 		"selected_type": node.get_class(),
+	})
+
+
+func _handle_selection_state() -> String:
+	## Get the current editor selection state.
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var selection := EditorInterface.get_selection()
+	var selected_nodes := selection.get_selected_nodes()
+	
+	var nodes_info: Array[Dictionary] = []
+	for node in selected_nodes:
+		nodes_info.append({
+			"path": _get_scene_path(node, root),
+			"name": node.name,
+			"type": node.get_class(),
+		})
+	
+	return _success_response({
+		"scene_path": root.scene_file_path,
+		"scene_root": root.name,
+		"selected_count": selected_nodes.size(),
+		"selected_nodes": nodes_info,
 	})
 
 
