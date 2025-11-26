@@ -1,0 +1,58 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: context/filter
+  version: 0.1.0
+  description: "LLM-backed context selection: prompt + sources -> relevant chunks"
+  tags: ["context", "filter", "llm"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/context_filter/context_filter
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: context/filter
+  parameters:
+    - name: prompt
+      type: string
+      required: true
+      description: "User or agent question/instruction describing what context is needed"
+    - name: scope
+      type: string
+      required: false
+      description: "Hint for the kind of content: auto | code | web | docs | ..."
+      default: "auto"
+    - name: source
+      type: object
+      required: true
+      description: "Context sources: may include cas_digest, text, and/or chunks"
+    - name: budget
+      type: object
+      required: false
+      description: "Approximate token/size limits for selection"
+    - name: llm
+      type: object
+      required: false
+      description: "LLM provider/model configuration for selection"
+  returns:
+    - name: chunks
+      type: array
+    - name: summary
+      type: string
+    - name: approx_tokens
+      type: integer
+    - name: llm_usage
+      type: object
+capabilities:
+  network: "egress"
+  egressAllow:
+    - api.openai.com
+    - api.anthropic.com
+    - generativelanguage.googleapis.com
+    - api.groq.com
+    - api.openrouter.ai
+  filesystem:
+    - type: workdir
+  pure: false

@@ -1,124 +1,132 @@
-# Tasks for PR #69: mega-pr
+# Tasks for PR #81: godot plugin skill
 
 **Repository:** jkatigb/agentctl
-**URL:** https://github.com/jkatigb/agentctl/pull/69
+**URL:** https://github.com/jkatigb/agentctl/pull/81
 
-## 📝 Review Comments to Address (31)
+## 📝 Review Comments to Address (9)
 
 ### Task 1: coderabbitai[bot]'s feedback
 
-> [!NOTE]
-> Currently processing new changes in this PR. This may take a few minutes, please wait...
->
-> <details>
-> <summary>📥 Commits</summary>
->
-> Reviewing files that changed from the base of the PR and between d77ae75cbdf9084b8971098cffe7ea989e952fd9 and 268430c4ca1b1d16c016693fe048ec2169370892.
->
-> </details>
->
-> <details>
-> <summary>📒 Files selected for processing (3)</summary>
->
-> * `.golangci.yml` (4 hunks)
-> * `go.mod` (4 hunks)
-> * `internal/execution/runner_adapter_test.go` (1 hunks)
->
-> </details>
->
-> ```ascii
->  ___________________________________________
-> < Code reviewer with an internal monologue. >
->  -------------------------------------------
->   \
->    \   \
->         \ /\
->         ( )
->       .( o ).
-> ```
 ## Walkthrough
-Adds a large feature set: DB driver abstraction (SQLite/LibSQL/Turso) with vector/search support, multiple SQLite-backed stores and in-memory search/vector features, agent domain and manager, many CLI commands, execution primitives (circuit breaker, WFQ scheduler, quotas enforcer), OpenAPI builder/OAuth2, numerous skills, CI/Makefile CGO changes, docs and env templates.
+Introduces a complete Godot Editor integration skill for agentctl with a plugin bridge (bridge.gd) exposing editor APIs via HTTP/JSON, CLI commands (godot, godot plugin-install) for scene and node operations, a context/filter skill for LLM-driven content selection, comprehensive test coverage, and design specifications with workflow documentation.
 ## Changes
 | Cohort / File(s) | Summary |
 |---|---|
-| **DB driver & vector/search core** <br> `internal/storage/dbdriver/*`, `internal/storage/dbdriver/...` | Adds DB interface, driver configs/loader, OpenDB factory, SQLite/LibSQL/Turso drivers (with no-cgo stubs), VectorHelper, BM25/vector/hybrid search, migrator, compat helpers, README and tests. |
-| **Storage backends & tests** <br> `internal/storage/agents/*`, `internal/storage/blackboard/*`, `internal/storage/mailbox/*`, `internal/storage/quotas/*` | New SQLite-backed stores (agents, blackboard, mailbox, quotas) with migrations, full CRUD/coordination (lease/claim, poll/ack/nack), consumption tracking and comprehensive tests. |
-| **In-memory search & vector extensions** <br> `internal/storage/memory/*.go`, `examples/search_example.go` | Adds SearchableStore and VectorStore for BM25/vector/hybrid search, corpus stats, embedding persistence and an example program. |
-| **Agent domain & lifecycle** <br> `internal/domain/agent/*.go`, `internal/execution/agentmanager/*` | New Agent domain models (Agent/Policy/Quotas/Blackboard/Mailbox) and Manager with Spawn/Kill/Heartbeat/Get/List plus validation and tests. |
-| **CLI commands & OpenAPI** <br> `cmd/agentctl/cmd/*.go` (`agent.go`, `bb.go`, `cb.go`, `mailbox.go`, `openapi.go`, `quotas.go`, `scheduler.go`, `e2e_test.go`, `run_test.go`) | Adds many Cobra commands (agent lifecycle, blackboard, circuit-breaker, mailbox, quotas, scheduler), OpenAPI describe/validate subcommands, and e2e test/spec adjustments. |
-| **Execution primitives** <br> `internal/execution/circuitbreaker/*`, `internal/execution/scheduler/wfq.go`, `internal/execution/quotas/enforcer.go` | New circuit breaker + manager and tests; WFQ scheduler with per-namespace weights and tests; quotas Enforcer with checks/recorders and tests. |
-| **OpenAPI builder & auth** <br> `internal/openapi/builder/*`, `internal/openapi/auth/auth.go` | Adds request builder (Params/Request) with ToHTTPRequest and OAuth2 client‑credentials strategy with token caching; tests and docs. |
-| **Skills: code analysis & tools** <br> `skills/*` (code_complexity, code_diff, code_git, code_imports, code_security, code_stats) | New skills, manifests and tests for complexity, diff, git queries, imports, security scanning, and code stats. |
-| **Tooling, CI, build & deps** <br> `Makefile`, `.github/workflows/ci.yml`, `.gitignore`, `go.mod`, `CGO_STATUS.md`, `.tool-versions` | Adds GO_CMD_CGO and switches CI/Makefile to CGO_ENABLED=1, lowers coverage threshold, updates go.mod (Go 1.24, libsql), .gitignore env patterns, CGO status doc and tool versions. |
-| **Config, sqlite helpers & context** <br> `internal/platform/config/*`, `internal/storage/sqliteutil/sqliteutil.go` | Adds Storage settings to config, MustFromContext, OpenDBWithDriver/OpenDBWithAutoConfig wrappers integrating dbdriver configs. |
-| **Docs, examples & env templates** <br> `docs/*.md`, `docs/examples/*`, `.env.libsql.test.example`, `.env.turso.example` | New documentation: local-testing, Turso migration, OpenAPI plugin guide, search guide, git worktree workflow; env templates for libSQL/Turso and examples. |
-| **Misc, lint & test tweaks** <br> `internal/*`, `.golangci.yml`, various tests | Multiple test adjustments, small refactors, linter config bumped to golangci v2, doc/comments added across packages and minor signature/parameter renames. |
+| **Godot Editor Integration Skill** <br> `skills/editor_godot/main.go`, `skills/editor_godot/main_test.go`, `skills/editor_godot/skill.yaml` | New Go-based skill orchestrating Godot editor operations through the bridge plugin; handles action routing, parameter building, HTTP communication, error handling, and optional CAS storage for large responses. |
+| **Godot EditorPlugin** <br> `skills/editor_godot/godot_plugin/bridge.gd`, `skills/editor_godot/godot_plugin/plugin.cfg`, `skills/editor_godot/godot_plugin/README.md` | New GDScript EditorPlugin implementing a TCP/HTTP server (port 7777) that routes requests to scene/node manipulation handlers (inspect, create, delete, rename, reparent, set property, attach script, connect signal, class info, scene save, resource list, run/stop game, errors) with undo/redo support and workspace validation. |
+| **CLI Godot Commands** <br> `cmd/agentctl/cmd/godot.go`, `cmd/agentctl/cmd/godot_plugin.go`, `cmd/agentctl/cmd/godot_test.go` | New CLI command group with godot subcommands (install, ping, scene-tree, inspect, create, delete, rename, reparent, set, attach-script, connect-signal, class-info, save, resources, run, stop, errors) and plugin-install installer; includes comprehensive test coverage for command structure, flags, and argument validation. |
+| **Context Filter Skill** <br> `skills/context_filter/main.go`, `skills/context_filter/skill.yaml` | New skill implementing LLM-backed context/filtering with support for multiple LLM providers, CAS integration, budget-aware chunk selection, and structured JSON request/response handling. |
+| **Documentation** <br> `docs/godot/editor_integration.md`, `docs/spec/context_filter.md`, `docs/workflows/exa_mcp_context_filter.md` | New design specifications and workflow documentation covering Godot integration architecture, context filter behavior, error codes, security considerations, and end-to-end examples. |
+| **Build/Test Updates** <br> `cmd/agentctl/cmd/run_test.go` | Removed forced CGO_ENABLED=1 override; allows CGO settings to inherit from parent process or CI environment. |
+| **Cleanup** <br> `pr77_comments.md` | Deleted PR review notes file. |
 ## Sequence Diagram(s)
 ```mermaid
 sequenceDiagram
-    autonumber
-    actor User
-    participant CLI as agentctl (CLI)
-    participant Enforcer as quotas.Enforcer
-    participant AM as agentmanager.Manager
-    participant AgentsDB as agents.Store
-    Note over User,CLI: Spawn agent flow
-    User->>CLI: agent spawn --role R --skills S
-    CLI->>Enforcer: CheckJobSubmission(ns,cpu,mem)
-    Enforcer-->>CLI: OK / QuotaExceeded
-    CLI->>AM: Spawn(SpawnRequest)
-    AM->>AgentsDB: Create(agent record)
-    AgentsDB-->>AM: created
-    AM-->>CLI: SpawnResponse(agent_id,ns,role)
-    CLI-->>User: envelope OK
+    participant CLI as agentctl CLI
+    participant Skill as editor/godot Skill
+    participant Bridge as GodotAIBridge Plugin
+    participant Godot as Godot Editor
+    CLI->>Skill: action + params (host, port, node_path, ...)
+    activate Skill
+    Skill->>Skill: parseInput, validateInput, buildParams
+    Skill->>Bridge: HTTP POST: {action, params, workspace_root}
+    activate Bridge
+    Bridge->>Bridge: _handle_request (route to handler)
+    Bridge->>Bridge: _validate_workspace (check mismatch)
+    Bridge->>Godot: editor/node manipulation (via Godot API)
+    Godot->>Bridge: result
+    Bridge->>Bridge: undo/redo if applicable
+    Bridge->>Skill: JSON response {status, data, error?}
+    deactivate Bridge
+    Skill->>Skill: emitSuccess or fail (CAS storage if large)
+    Skill->>CLI: envelope {data, summary, artifact?}
+    deactivate Skill
 ```
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant App as App startup
-    participant Loader as dbdriver.ConfigLoader
-    participant DB as dbdriver.DB
-    participant Store as Store Open
-    App->>Loader: NewConfigLoader(root).Load<Cache|Jobs|Memory>()
-    Loader-->>App: Config (sqlite/libsql/turso)
-    App->>DB: OpenDB(ctx,cfg,migrate)
-    alt libsql/turso & cgo enabled
-        DB->>DB: init connector, ping, migrations, enable vectors
-    else missing cgo or unsupported
-        DB-->>App: error (driver requires cgo)
+    participant User as User/LLM
+    participant Skill as context/filter Skill
+    participant LLM as LLM Provider
+    participant CAS as Content Storage
+    User->>Skill: {prompt, scope, source, budget, llm}
+    activate Skill
+    Skill->>Skill: normalize defaults, validate fields
+    Skill->>Skill: build candidate chunks from source/CAS
+    Skill->>Skill: craft LLM prompt with constraints
+    Skill->>LLM: POST: {prompt, candidates, budget}
+    activate LLM
+    LLM->>LLM: select & score chunks
+    LLM->>Skill: {chunks, summary, approx_tokens}
+    deactivate LLM
+    Skill->>Skill: align & filter by budget
+    alt oversized output
+        Skill->>CAS: store full result
+        Skill->>User: {summary, cas_digest, hint}
+    else normal output
+        Skill->>User: {chunks, summary, approx_tokens}
     end
-    App->>Store: Open(ctx, root) using DB/sql compat
-    Store-->>App: ready
+    deactivate Skill
 ```
 ## Estimated code review effort
-🎯 5 (Critical) | ⏱️ ~120+ minutes
-Areas needing focused review:
-- DB driver abstraction, libsql/turso initialization, vector SQL and no-cgo stubs (`internal/storage/dbdriver/*`, `vector.go`, `turso*.go`, `libsql*.go`).
-- Storage migrations, schemas, claim/lease correctness and concurrency (`internal/storage/*/store.go`).
-- Concurrency, timing and correctness in circuit breaker, WFQ scheduler, quotas enforcer (locks, windows, state transitions).
-- AgentManager policy narrowing, skills allowlist logic, and integration with agent storage and mailbox.
-- OpenAPI builder request construction, OAuth2 token exchange/caching, and pagination/retry behavior.
-## Possibly related PRs
-- jkatigb/agentctl#55 — Overlaps OpenAPI CLI/builder changes (describe/validate subcommands and builder usage).
-- jkatigb/agentctl#18 — Overlaps storage and DB driver abstraction, migration and driver changes.
-- jkatigb/agentctl#62 — Related OpenAPI/plugin/pagination/retry and CLI enhancements.
+🎯 4 (Complex) | ⏱️ ~50–70 minutes
+**Key areas requiring careful review:**
+- **skills/editor_godot/godot_plugin/bridge.gd** (~1000+ lines) — Extensive GDScript plugin with 25+ handler methods, request routing, undo/redo integration, workspace validation, path resolution, and type conversion logic; requires verification of scene manipulation correctness and error edge cases.
+- **skills/editor_godot/main.go** (~400+ lines) — HTTP client communication, action routing, parameter building, error handling, and CAS storage logic; needs validation of timeout handling, envelope emission, and bridge error classification.
+- **skills/context_filter/main.go** (~500+ lines) — LLM provider abstraction, prompt construction, budget semantics, CAS integration, and chunk selection logic; requires scrutiny of token counting, budget enforcement, and error propagation.
+- **CLI command wiring** (godot.go, godot_plugin.go) — Ensure proper flag initialization, payload construction, and error envelope formatting align with plugin expectations.
+- **Test coverage** — Validate that test assertions properly cover action-specific validation and error scenarios.
 ## Suggested labels
-`codex`, `ai-generated`
+`ai-generated`
 ## Poem
-> 🐰 I hopped through schemas, queues, and code,
-> > Spawned tiny agents down a byte-sized road,
-> > I tracked each quota, claim, and mailbox note,
-> > Built vectors, docs, and tests in one small tote,
-> > Then munched a carrot and signed the commit — behold!
+> 🐰 *A bridge of code, from Go to GDScript so fine,*
+> *Scene trees dance and signals align,*
+> *Filter context, chunk by gleaming chunk,*
+> *With undo/redo, no feature skipped or flunk!*
+> *CLI meets Plugin, a harmonious dance,*
+> *Godot's editor yields to our command's advance.* 🎮✨
 ## Pre-merge checks and finishing touches
 <details>
 <summary>❌ Failed checks (2 warnings, 1 inconclusive)</summary>
-|     Check name     | Status         | Explanation                                                                                                                                      | Resolution                                                                                                                                               |
-| :----------------: | :------------- | :----------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|  Description check | ⚠️ Warning     | PR description lists 50+ commits but lacks a coherent summary section explaining primary objectives, architecture decisions, or expected impact. | Add a comprehensive Summary section explaining core features (Agent Profile, Turso integration, quotas, scheduler) and their architectural significance. |
-| Docstring Coverage | ⚠️ Warning     | Docstring coverage is 17.70% which is insufficient. The required threshold is 80.00%.                                                            | You can run `@coderabbitai generate docstrings` to improve docstring coverage.                                                                           |
-|     Title check    | ❓ Inconclusive | Title 'mega-pr' is vague and generic, failing to convey the scope or primary change of this comprehensive feature and refactoring PR.            | Consider a more descriptive title summarizing key features (e.g., 'feat: Agent Profile, vector search, quotas, and scheduler implementation').           |
+|     Check name     | Status         | Explanation                                                                                                                                                                | Resolution                                                                                                                                |
+| :----------------: | :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
+|  Description check | ⚠️ Warning     | The description is incomplete, with multiple commit message lines but missing the summary section content and testing checklist items are unchecked rather than completed. | Fill in the 'Summary' section with a concise overview of changes, and update testing checkboxes to indicate completion status.            |
+| Docstring Coverage | ⚠️ Warning     | Docstring coverage is 0.00% which is insufficient. The required threshold is 80.00%.                                                                                       | You can run `@coderabbitai generate docstrings` to improve docstring coverage.                                                            |
+|     Title check    | ❓ Inconclusive | The title 'godot plugin skill' is vague and generic, using non-descriptive terms that don't clearly convey the main purpose of the changeset.                              | Use a more specific title that highlights the primary change, such as 'Add Godot Editor integration skill with plugin bridge' or similar. |
 </details>
+<details>
+<summary>✨ Finishing touches</summary>
+- [ ]  📝 Generate docstrings
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+- [ ]    Create PR with unit tests
+- [ ]    Post copyable unit tests in a comment
+- [ ]    Commit unit tests in branch `feature/godot-plugin`
+</details>
+</details>
+> [!TIP]
+> <details>
+> <summary>📝 Customizable high-level summaries are now available in beta!</summary>
+>
+> You can now customize how CodeRabbit generates the **high-level summary** in your pull requests — including its content, structure, tone, and formatting.
+>
+> - Provide your own instructions using the `high_level_summary_instructions` setting.
+> - Format the summary however you like (bullet lists, tables, multi-section layouts, contributor stats, etc.).
+> - Use `high_level_summary_in_walkthrough` to move the summary from the description to the walkthrough section.
+>
+> **Example instruction:**
+>
+> > "Divide the high-level summary into five sections:
+> >  1. **📝 Description** — Summarize the main change in 50–60 words, explaining what was done.
+> >  2. **📓 References** — List relevant issues, discussions, documentation, or related PRs.
+> >  3. **📦 Dependencies & Requirements** — Mention any new/updated dependencies, environment variable changes, or configuration updates.
+> >  4. **📊 Contributor Summary** — Include a Markdown table showing contributions:
+> >     `| Contributor | Lines Added | Lines Removed | Files Changed |`
+> >  5. **✔️ Additional Notes** — Add any extra reviewer context.
+> >  Keep each section concise (under 200 words) and use bullet or numbered lists for clarity."
+>
+> Note: This feature is currently in beta for Pro-tier users, and pricing will be announced later.
+>
+> </details>
 ---
 <sub>Comment `@coderabbitai help` to get the list of available commands and usage tips.</sub>
 
@@ -126,2383 +134,432 @@ Areas needing focused review:
 
 ### Task 2: coderabbitai[bot]'s feedback
 
-**File:** `.github/workflows/ci.yml`
+**File:** `cmd/agentctl/cmd/godot_plugin/bridge.gd:13`
 
 <details>
 <summary>🧩 Analysis chain</summary>
-**Verify CGO requirement for manifest policy check.**
-The manifest policy check now runs with `CGO_ENABLED=1`. Please verify if this check actually requires CGO or if it's enabled for consistency with other build steps.
----
-🏁 Script executed:
+Script executed:
 ```shell
 #!/bin/bash
-# Description: Check if the checkmanifests script requires CGO
-# Look at the checkmanifests script to understand its dependencies
-cat scripts/checkmanifests
+# First, verify both files exist and check their sizes
+echo "=== Checking file existence and sizes ==="
+ls -lh cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd 2>&1
+echo -e "\n=== Comparing file line counts ==="
+wc -l cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd 2>&1
+echo -e "\n=== Running diff comparison ==="
+diff -q cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd && echo "✓ Files are identical" || echo "✗ Files differ"
+echo -e "\n=== Detailed diff output (first 50 lines of differences if any) ==="
+diff cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd | head -50
 ```
-Length of output: 43
+Repository: jkatigb/agentctl
 ---
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find the actual checkmanifests script/executable
-fd . scripts/checkmanifests -type f
+<shell_result>
+Repository: jkatigb/agentctl
+Exit code: 0
+stdout:
 ```
-Length of output: 170
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look for the main entry point and check for CGO dependencies
-find scripts/checkmanifests -type f -name "*.go" | head -20
+=== Checking file existence and sizes ===
+-rw-r--r-- 1 jailuser jailuser 29K Nov 26 17:44 cmd/agentctl/cmd/godot_plugin/bridge.gd
+-rw-r--r-- 1 jailuser jailuser 29K Nov 26 17:44 skills/editor_godot/godot_plugin/bridge.gd
+=== Comparing file line counts ===
+  947 cmd/agentctl/cmd/godot_plugin/bridge.gd
+  947 skills/editor_godot/godot_plugin/bridge.gd
+ 1894 total
+=== Running diff comparison ===
+✓ Files are identical
+=== Detailed diff output (first 50 lines of differences if any) ===
 ```
-Length of output: 30
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for cgo directives or C imports in Go files under scripts/checkmanifests
-rg -n "//go:cgo|import \"C\"|cgo" scripts/checkmanifests --type=go
-```
-Length of output: 0
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Examine the main.go file to understand what checkmanifests does
-cat scripts/checkmanifests/main.go
-```
-Length of output: 2386
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check the CI workflow file for context and other CGO_ENABLED=1 usages
-cat .github/workflows/ci.yml
-```
-Length of output: 4212
+</shell_result>
 ---
 </details>
-**Remove unnecessary `CGO_ENABLED=1` from manifest policy check step.**
-The `checkmanifests` script contains only pure Go code (standard library and internal packages) with no CGO dependencies. It performs file walking, JSON encoding/decoding, and string operations—none requiring CGO. The flag appears copied for consistency with other steps but is unnecessary here and should be removed:
-```shell
-run: go run ./scripts/checkmanifests
-```
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-.github/workflows/ci.yml around line 100: the CI step sets CGO_ENABLED=1 before
-running the Go manifest checker even though the script uses only pure Go
-standard/internal packages and has no cgo dependencies; remove the unnecessary
-environment variable and change the step to run the script without CGO_ENABLED
-(i.e., update the run line to invoke the script directly: go run
-./scripts/checkmanifests).
-```
-</details>
-✅ Addressed in commit c576f4a
+**Duplicate file confirmed: identical to `skills/editor_godot/godot_plugin/bridge.gd`.**
+This entire file is a verified duplicate of `skills/editor_godot/godot_plugin/bridge.gd` (947 lines, 29K). Having two identical copies creates maintenance burden and divergence risk.
+Consider one of:
+1. **Remove this copy** and use the skills version as the source of truth
+2. **Generate this copy at build time** from the skills version (e.g., via `go:embed` or a Makefile target)
+3. **Symlink** if the filesystem supports it
+4. **Document** which copy is authoritative if both must exist
 
 ---
 
 ### Task 3: coderabbitai[bot]'s feedback
 
-**File:** `cmd/agentctl/cmd/agent.go:502`
+**File:** `docs/workflows/exa_mcp_context_filter.md:133`
 
-**Watch loop behavior on agent deletion and mailbox namespace**
-The watch implementation is generally well-structured (NDJSON writer, seq tracking, final envelope on context cancel). Two corner cases to consider:
-1. Inside the ticker branch, a later `agentStore.Get` error (e.g., agent deleted while watching) currently emits an `ERUNTIME` error envelope and terminates. For a smoother UX, you might instead:
-   - Treat a not-found condition as a terminal state and emit a final `status: "terminated"` (or similar) envelope, or
-   - At least map not-found to `ErrorCodeENotFound` like `runAgentInfo`.
-2. Mailbox listing uses `mailboxStore.List(ctx, a.Namespace, 10)` with the initial agent `Namespace`. If agent namespaces are mutable, you may want to use `current.Namespace` instead to stay in sync with the latest state.
-Neither is a blocker, but tightening these behaviors would make `agent watch` more robust.
-✅ Addressed in commit c576f4a
+**Make the `exa_text.txt` → `context/filter` example JSON-safe**
+In the §4 example, this line:
+```bash
+"source": {
+  "text": "'"$(tr '\n' ' ' < exa_text.txt)"'"
+}
+```
+injects the file contents directly into a JSON string. If `exa_text.txt` contains quotes or backslashes, the resulting JSON will be invalid.
+You already use a safer pattern later with `jq -Rs`. Consider rewriting this example to mirror that style, for example:
+```bash
+jq -Rs '{
+    prompt: "Explain how agentctl handles CAS integrity failures.",
+    scope: "code",
+    source: { text: . },
+    budget: { target_tokens: 2000, max_chunks: 16 },
+    llm: { provider: "groq", model: "llama-3.3-70b-versatile" }
+  }' exa_text.txt \
+  | ./bin/agentctl run context/filter --input-file -
+```
+This keeps the docs robust for arbitrary Exa output.
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 LanguageTool</summary>
+[style] ~105-~105: As an alternative to the over-used intensifier ‘very’, consider replacing this phrase.
+Context: ...er`.  1. Flatten Exa content into text (very simple example):     ```bash    jq -r '.data.c...
+(EN_WEAK_ADJECTIVE)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/workflows/exa_mcp_context_filter.md around lines 105-133, the example
+injects exa_text.txt contents directly into a JSON string which breaks when the
+file contains quotes/backslashes; replace that unsafe inline substitution with
+the jq -Rs pattern that reads the file as raw text, constructs the JSON object
+(prompt, scope, source.text, budget, llm) safely, and pipes the resulting JSON
+to agentctl using the CLI's input-file/- option so arbitrary Exa output is
+JSON-safe.
+```
+</details>
 
 ---
 
 ### Task 4: coderabbitai[bot]'s feedback
 
-**File:** `cmd/agentctl/cmd/bb.go`
+**File:** `skills/context_filter/main.go:164`
 
-**`--ns` flags for `bb claim`/`bb release` are required but never used**
-For `bb claim` and `bb release`:
-- `bbClaimCmd` and `bbReleaseCmd` both declare `--ns` as required.
-- `runBBClaim` and `runBBRelease` ignore `bbClaimNS` / `bbReleaseNS` entirely and operate only on `itemID`.
-This mismatch is confusing for users (they must provide a namespace that has no effect), and if the store implementation expects namespace scoping for Claim/Release, it’s a functional bug.
-Consider either:
-- Plumb the namespace through to the store APIs, e.g.:
-```diff
-- record, err := bbStore.Claim(ctx, itemID, bbClaimAgentID, leaseDuration)
-+ record, err := bbStore.Claim(ctx, bbClaimNS, itemID, bbClaimAgentID, leaseDuration)
-```
-and
-```diff
-- if err := bbStore.Release(ctx, itemID); err != nil {
-+ if err := bbStore.Release(ctx, bbReleaseNS, itemID); err != nil {
-```
-(adjusting store signatures as needed),
-**or**
-- If Claim/Release are intentionally global by ID, drop the `--ns` flag from these commands and update the help text to avoid implying per‑namespace scoping.
-Also applies to: 273-341
 <details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In cmd/agentctl/cmd/bb.go around lines 140-152 (and also apply the same change
-to the region noted at 273-341), the --ns flag is marked required for bb
-claim/bb release but the handlers ignore bbClaimNS/bbReleaseNS; either propagate
-the namespace into the command handlers and store calls or remove the flag. If
-you choose to propagate: add a namespace parameter to runBBClaim/runBBRelease
-and to the underlying store Claim/Release APIs (or use existing store methods
-that accept a namespace), pass bbClaimNS/bbReleaseNS from the cobra command into
-those calls, and update help text and tests; if you choose to remove the flag:
-delete the --ns flag registration and MarkFlagRequired calls for these commands,
-update the usage/help strings to indicate global behavior, and remove any unused
-variables. Ensure consistency across both claim and release code paths and
-update related callers/tests accordingly.
-```
+<summary>🧩 Analysis chain</summary>
+OpenAI gpt-4.1-mini current model 2025
+---
+<web_search_result>
+Yes — OpenAI’s GPT‑4.1‑mini is an official model (launched April 14, 2025). Key facts:
+- Launched as part of the GPT‑4.1 family (models: gpt‑4.1, gpt‑4.1‑mini, gpt‑4.1‑nano). [1]
+- Context window: ~1,047,576 tokens (1M). [2]
+- Suited for instruction following, tool-calling, low-latency uses; OpenAI positions it as a smaller, faster alternative to GPT‑4.1. [1][2]
+- Pricing (per 1M tokens, example): input $0.40 / cached input $0.10 / output $1.60. [1][2]
+- Available in the OpenAI API (chat, responses, realtime, batch) and rolled into ChatGPT for paid users per OpenAI release notes. [1][2][3]
+Sources: OpenAI announcement (Introducing GPT‑4.1) and OpenAI model docs. [1][2]
+</web_search_result>
+---
+Anthropic claude-3-5-sonnet-latest current model
+---
+<web_search_result>
+- The alias claude-3-5-sonnet-latest points to the snapshot model ID claude-3-5-sonnet-20241022 (upgrade of the original 20240620 snapshot). [1][2]
+- Anthropic announced deprecation of the Claude Sonnet 3.5 models on August 13, 2025 and scheduled retirement in October 2025 (docs list retirement dates of Oct 22, 2025 and Oct 28, 2025 in different release-note pages). They recommend migrating to Claude Sonnet 4 (e.g., claude-sonnet-4-20250514 / sonnet 4.5 aliases). [3][4]
+Sources:
+[1] Anthropic models overview (models list showing claude-3-5-sonnet-latest → claude-3-5-sonnet-20241022).
+[2] Anthropic models table (model snapshots and IDs).
+[3] Anthropic release notes — deprecation announcement (Aug 13, 2025).
+[4] Anthropic release notes / developer docs (deprecation + retirement scheduling).
+</web_search_result>
+---
+Google Gemini gemini-1.5-pro-latest current model
+---
+<web_search_result>
+Short answer: gemini-1.5-pro-latest was the auto-updating alias that pointed to the Gemini 1.5 Pro stable build (most recently gemini-1.5-pro-002), but the Gemini 1.5 family was deprecated/retired in September 2025 and should no longer be used for new projects. [1][2]
+Sources:
+- Gemini models docs (shows alias, token limits and that latest = gemini-1.5-pro-latest / stable = gemini-1.5-pro-002). [1]
+- Gemini changelog / Vertex AI docs (deprecation/retirement notices in Sept–Oct 2025 and migration guidance). [2]
+</web_search_result>
+---
+Groq llama-3.1-70b-versatile current model
+---
+<web_search_result>
+Short answer: groq's llama-3.1-70b-versatile has been decommissioned/ deprecated — Groq replaced it with llama-3.3-70b-versatile (requests to the 3.1 70B model were shut down on Jan 24, 2025). See Groq's deprecations page and blog for details. [1][2]
+Sources
+- Groq model deprecations (decommission schedule, recommended replacement). [1]
+- Groq blog/announcements about Llama 3.3 70B availability and performance on GroqCloud. [2]
+</web_search_result>
+---
+OpenRouter openrouter/auto model identifier
+---
+<web_search_result>
+The OpenRouter auto router model identifier is: openrouter/auto. [1][2]
+Sources:
+[1] OpenRouter docs — Model routing / Auto Router.
+[2] OpenRouter (openrouter.ai) — Auto Model Selection.
+</web_search_result>
+---
 </details>
+**Three of five default LLM models are deprecated or decommissioned and must be updated.**
+The default models have the following issues:
+- **`gpt-4.1-mini`** (OpenAI): Valid — launched April 14, 2025.
+- **`claude-3-5-sonnet-latest`** (Anthropic): **Deprecated** — Anthropic deprecated Claude 3.5 Sonnet on August 13, 2025 with retirement scheduled for October 22–28, 2025. Migrate to `claude-sonnet-4-20250514` (Claude Sonnet 4.5).
+- **`gemini-1.5-pro-latest`** (Google): **Deprecated** — The Gemini 1.5 family was deprecated and retired in September–October 2025. Use `gemini-2.0-flash-latest` or an appropriate Gemini 2.0 model instead.
+- **`llama-3.1-70b-versatile`** (Groq): **Decommissioned** — Groq shut down the Llama 3.1 70B model on January 24, 2025. Replace with `llama-3.3-70b-versatile`.
+- **`openrouter/auto`** (OpenRouter): Valid — confirmed as a legitimate auto-routing identifier.
+Update lines 149–164 to use current model identifiers or the fallback logic will fail at runtime.
 
 ---
 
 ### Task 5: coderabbitai[bot]'s feedback
 
-**File:** `docs/search-guide.md:616`
+**File:** `skills/context_filter/main.go:510`
 
-**Fix SearchableStore method signatures in the API reference**
-The API reference at the bottom has a few signature issues that will confuse readers or fail to compile if copy‑pasted:
-- `SearchBM25` and `SearchVector` currently type `ctx` as a `string` by grouping `ctx, query, workspace string`.
-- `SearchHybrid` has both the same `ctx` typing issue and an extra `, string` before `limit`.
-Given the usage examples above (`searchStore.SearchBM25(ctx, query, workspace, limit)`, etc.), the snippet should look more like:
-```go
-// Convenience methods
-func (ss *SearchableStore) SearchBM25(
-    ctx context.Context,
-    query string,
-    workspace string,
-    limit int,
-) ([]MemorySearchResult, error)
-func (ss *SearchableStore) SearchVector(
-    ctx context.Context,
-    queryVector Vector,
-    workspace string,
-    limit int,
-) ([]MemorySearchResult, error)
-func (ss *SearchableStore) SearchHybrid(
-    ctx context.Context,
-    query string,
-    queryVector Vector,
-    workspace string,
-    limit int,
-) ([]MemorySearchResult, error)
+**Add HTTP client timeout to prevent indefinite hangs.**
+The code uses `http.DefaultClient` which has no default timeout. If a provider becomes unresponsive, the skill could hang indefinitely. Consider using a client with a configured timeout.
+```diff
++var httpClient = &http.Client{
++	Timeout: 60 * time.Second,
++}
++
+ func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
+ 	// ... existing code ...
+-	resp, err := http.DefaultClient.Do(req)
++	resp, err := httpClient.Do(req)
 ```
-Optionally, you can also apply the LanguageTool suggestion and hyphenate compound adjectives like “full-length normalization” for style consistency.
+Apply the same change to `callAnthropic` (line 587) and `callGemini` (line 667).
+> Committable suggestion skipped: line range outside the PR's diff.
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In docs/search-guide.md around lines 571 to 616, the API reference has incorrect
-function signatures: ctx is mistakenly typed as string for
-SearchBM25/SearchVector/SearchHybrid and SearchHybrid contains an extra ",
-string" before limit. Update those convenience method signatures so ctx is
-context.Context, each parameter has its correct type (query string or
-queryVector Vector), workspace string, and limit int, matching the documented
-usage and the generic Search signature; also remove the stray ", string" from
-SearchHybrid.
+In skills/context_filter/main.go around lines 502 to 510 (and similarly update
+callAnthropic at ~587 and callGemini at ~667), the code uses http.DefaultClient
+(no timeout) which can hang indefinitely; replace usages with a local
+http.Client that has a reasonable Timeout set (e.g., configurable or a fixed
+value like 30s), and use that client to perform Do(req). Ensure you import time
+if needed and keep the same defer close logic; apply the identical change to the
+callAnthropic and callGemini functions so all external HTTP calls use a
+timeout-bound client.
 ```
 </details>
-✅ Addressed in commit c576f4a
 
 ---
 
 ### Task 6: coderabbitai[bot]'s feedback
 
-**File:** `examples/search_example.go:154`
+**File:** `skills/editor_godot/godot_plugin/bridge.gd:23`
 
-**Handle errors from `EnableVectorSearch` / saves and avoid repeated initialization**
-In `populateSampleData`:
-- `store.EnableVectorSearch(db)` is called inside the loop for every sample.
-- Errors from `EnableVectorSearch`, `SaveWithEmbedding`, and `Save` are ignored.
-This can hide failures and may panic if `EnableVectorSearch` returns a nil store with a non-nil error.
-Refactor to initialize once and handle errors:
+**Error buffer is declared but never populated.**
+The `_error_buffer` array is initialized and read in `_handle_errors`, but no code ever appends errors to it. The comment at lines 36-38 acknowledges this limitation but doesn't implement any solution.
+Consider either:
+1. Remove the error buffer feature if it's not implemented
+2. Add a mechanism to capture errors (e.g., override `_print_error` or use a custom logger)
 ```diff
- func populateSampleData(ctx context.Context, store *memory.Store, db dbdriver.DB) {
-@@
--	for _, sample := range samples {
-+	var vectorStore *memory.VectorStore
-+	if db.IsVectorSearchEnabled() {
-+		var err error
-+		vectorStore, err = store.EnableVectorSearch(db)
-+		if err != nil {
-+			panic(fmt.Errorf("enable vector search: %w", err))
-+		}
-+	}
+ var _error_buffer: Array[Dictionary] = []
+ const MAX_ERROR_BUFFER: int = 200
 +
-+	for _, sample := range samples {
-@@
--		// Save with vector if supported
--		if db.IsVectorSearchEnabled() {
--			vectorStore, _ := store.EnableVectorSearch(db)
--			vectorEntry := memory.VectorEntry{
--				NamedEntry: entry,
--				Embedding:  generateMockEmbedding(sample.summary, 384),
--			}
--			vectorStore.SaveWithEmbedding(ctx, vectorEntry)
--		} else {
--			store.Save(ctx, entry)
--		}
-+		// Save with vector if supported
-+		if vectorStore != nil {
-+			vectorEntry := memory.VectorEntry{
-+				NamedEntry: entry,
-+				Embedding:  generateMockEmbedding(sample.summary, 384),
-+			}
-+			if err := vectorStore.SaveWithEmbedding(ctx, vectorEntry); err != nil {
-+				panic(fmt.Errorf("save with embedding: %w", err))
-+			}
-+		} else {
-+			if err := store.Save(ctx, entry); err != nil {
-+				panic(fmt.Errorf("save entry: %w", err))
-+			}
-+		}
++
++func _add_error(message: String, source: String = "") -> void:
++	_error_buffer.append({
++		"message": message,
++		"source": source,
++		"timestamp": Time.get_unix_time_from_system(),
++	})
++	if _error_buffer.size() > MAX_ERROR_BUFFER:
++		_error_buffer.pop_front()
 ```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+var _error_buffer: Array[Dictionary] = []
+const MAX_ERROR_BUFFER: int = 200
+func _add_error(message: String, source: String = "") -> void:
+	_error_buffer.append({
+		"message": message,
+		"source": source,
+		"timestamp": Time.get_unix_time_from_system(),
+	})
+	if _error_buffer.size() > MAX_ERROR_BUFFER:
+		_error_buffer.pop_front()
+```
+</details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In examples/search_example.go around lines 72–140, the code calls
-store.EnableVectorSearch(db) inside the loop and ignores errors from
-EnableVectorSearch, SaveWithEmbedding, and Save; change to initialize vector
-search once before the loop (call EnableVectorSearch only once, check and handle
-its error and nil store), then inside the loop call SaveWithEmbedding or Save
-and handle their returned errors (log and return or propagate an error up by
-changing populateSampleData to return error), and avoid dereferencing a nil
-vector store by only using it when enable succeeded.
+In skills/editor_godot/godot_plugin/bridge.gd around lines 22-23, the
+_error_buffer is allocated but never written to; update the file to either
+remove the unused buffer and any code that reads it, or implement error capture
+by overriding _print_error (or hooking the engine's error signal) to append a
+Dictionary (message, stack, timestamp, severity) to _error_buffer and enforce
+the MAX_ERROR_BUFFER cap by trimming older entries when pushing new ones so
+_handle_errors actually has populated data to process.
 ```
 </details>
-✅ Addressed in commit c576f4a
 
 ---
 
 ### Task 7: coderabbitai[bot]'s feedback
 
-**File:** `examples/search_example.go:356`
+**File:** `skills/editor_godot/godot_plugin/bridge.gd:529`
 
-**Fix L2 normalization and protect against zero norm in `generateMockEmbedding`**
-The mock embedding currently computes:
-```go
-norm += val * val
-norm = float32(1.0 / float64(norm))
-for i := range embedding {
-    embedding[i] *= norm
-}
-```
-This scales by `1 / ||v||²` instead of `1 / ||v||`, and will divide by zero if the vector ever happens to be all zeros.
-Normalize using the Euclidean norm:
+**Signal connections are runtime-only and won't persist when scene is saved.**
+Connections made via `source.connect()` exist only at runtime. When the scene is saved and reloaded, these connections will be lost. For persistent signal connections, you need to modify the scene's connection data.
+Consider adding a warning in the response or documenting this limitation clearly:
 ```diff
--import (
--	"context"
--	"fmt"
--	"math/rand"
-+import (
-+	"context"
-+	"fmt"
-+	"math"
-+	"math/rand"
-@@
- func generateMockEmbedding(text string, dimensions int) dbdriver.Vector {
-@@
--	// L2 normalize
--	var norm float32
--	for _, val := range embedding {
--		norm += val * val
--	}
--	norm = float32(1.0 / float64(norm))
--
--	for i := range embedding {
--		embedding[i] *= norm
--	}
-+	// L2 normalize
-+	var sumSquares float64
-+	for _, val := range embedding {
-+		sumSquares += float64(val * val)
-+	}
-+	if sumSquares > 0 {
-+		scale := float32(1.0 / math.Sqrt(sumSquares))
-+		for i := range embedding {
-+			embedding[i] *= scale
-+		}
-+	}
+ return _success_response({
+ 	"ok": true,
+ 	"source_path": source_path,
+ 	"signal_name": signal_name,
+ 	"target_path": target_path,
+ 	"method_name": method_name,
++	"warning": "Connection is runtime-only and will not persist after scene reload. For persistent connections, edit the scene file directly.",
+ })
 ```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+	# Connect signal (note: undo/redo for signals is complex, doing simple connect for now)
+	if source.is_connected(signal_name, Callable(target, method_name)):
+		return _success_response({
+			"ok": true,
+			"already_connected": true,
+		})
+	var err := source.connect(signal_name, Callable(target, method_name))
+	if err != OK:
+		return _error_response("ESIGNAL_CONNECT", "Failed to connect signal: error %d" % err, "")
+	return _success_response({
+		"ok": true,
+		"source_path": source_path,
+		"signal_name": signal_name,
+		"target_path": target_path,
+		"method_name": method_name,
+		"warning": "Connection is runtime-only and will not persist after scene reload. For persistent connections, edit the scene file directly.",
+	})
+```
+</details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In examples/search_example.go around lines 310 to 341, the L2 normalization is
-implemented incorrectly (it multiplies by 1/||v||^2) and doesn't guard against a
-zero norm; fix by computing sumSquares := sum(val*val) as float64, if sumSquares
-== 0 return the embedding unchanged (or leave as zeros) to avoid division by
-zero, otherwise compute norm := float64(math.Sqrt(sumSquares)) and scale each
-embedding element by 1/float32(norm) so the vector is properly normalized to
-unit length.
+In skills/editor_godot/godot_plugin/bridge.gd around lines 512 to 529, the code
+performs a runtime-only source.connect() which will not persist when the scene
+is saved; change the response to explicitly warn about this limitation and/or
+persist the connection in the scene data: update the success response to include
+a warning field (e.g., "runtime_only": true or "warning": "Signal connection is
+runtime-only and won’t persist when scene is saved") and/or implement
+persistence by editing the source scene’s connection data (add the connection
+entry to the scene/resource so it is serialized) before returning success so
+callers know the connection won’t survive a reload unless stored.
 ```
 </details>
-✅ Addressed in commit c576f4a
 
 ---
 
 ### Task 8: coderabbitai[bot]'s feedback
 
-**File:** `internal/execution/scheduler/wfq.go:182`
+**File:** `skills/editor_godot/godot_plugin/bridge.gd:561`
 
-**Stop can race with dispatchNext and panic by sending on a closed channel**
-`Stop` closes `workCh`:
-```go
-func (s *WFQScheduler) Stop() {
-    ...
-    close(s.stopCh)
-    close(s.workCh)
-}
-```
-But `schedulerLoop` can still wake on the ticker *after* `Stop` has closed `workCh` and call `dispatchNext`, which does:
-```go
-select {
-case s.workCh <- job:
-default:
-    heap.Push(s.globalQueue, job)
-}
-```
-A send on a closed channel panics (`send on closed channel`), so there’s a real race between `Stop` and `dispatchNext`.
-A simple, safe fix is to only close `stopCh` and let workers exit via the stop signal (and `ctx.Done()`), leaving `workCh` open:
+**Missing `add_do_reference` may cause undo to fail after node deletion.**
+When deleting a node, you call `add_undo_reference` but not `add_do_reference`. After the do action removes the child, the node may be freed. When undo tries to re-add it, the reference could be invalid.
 ```diff
- func (s *WFQScheduler) Stop() {
- 	s.mu.Lock()
- 	if !s.running {
- 		s.mu.Unlock()
- 		return
- 	}
- 	s.running = false
- 	s.mu.Unlock()
--	close(s.stopCh)
--	close(s.workCh)
-+	close(s.stopCh)
- }
+ _undo_redo.create_action("AI: Delete Node " + node_name)
++_undo_redo.add_do_reference(node)
+ _undo_redo.add_do_method(parent, "remove_child", node)
+ _undo_redo.add_undo_method(parent, "add_child", node)
+ _undo_redo.add_undo_method(parent, "move_child", node, node_index)
+ _undo_redo.add_undo_method(node, "set_owner", root)
+ _undo_redo.add_undo_reference(node)
+ _undo_redo.commit_action()
 ```
-Because workers’ `select` includes `<-s.stopCh`, closing `stopCh` is sufficient to cause them to exit without needing to close `workCh`, and it removes the possibility of writing to a closed channel.
-Also applies to: 200-222
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+	_undo_redo.create_action("AI: Delete Node " + node_name)
+	_undo_redo.add_do_reference(node)
+	_undo_redo.add_do_method(parent, "remove_child", node)
+	_undo_redo.add_undo_method(parent, "add_child", node)
+	_undo_redo.add_undo_method(parent, "move_child", node, node_index)
+	_undo_redo.add_undo_method(node, "set_owner", root)
+	_undo_redo.add_undo_reference(node)
+	_undo_redo.commit_action()
+```
+</details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-internal/execution/scheduler/wfq.go lines 169-181 (and similarly 200-222): Stop
-currently closes both stopCh and workCh which races with dispatchNext and can
-cause a panic when sending to a closed workCh; change Stop to only
-close(s.stopCh) (leave workCh open) so workers exit via the stop
-signal/ctx.Done(), remove the close(s.workCh) call(s), keep the running guard
-and locking as-is to remain idempotent, and ensure no other callers expect
-workCh to be closed.
+In skills/editor_godot/godot_plugin/bridge.gd around lines 555 to 561, the undo
+action adds an undo reference but never a do reference, so the node can be freed
+after the remove_child do and the undo will hold a dangling reference; fix by
+calling _undo_redo.add_do_reference(node) before adding the do method that
+removes the child (i.e., add the do-reference prior to
+_undo_redo.add_do_method(parent, "remove_child", node)), keep the existing
+add_undo_reference call, and then commit the action so the engine retains the
+node for the do step and still restores it on undo.
 ```
 </details>
-✅ Addressed in commit c576f4a
 
 ---
 
 ### Task 9: coderabbitai[bot]'s feedback
 
-**File:** `internal/storage/dbdriver/compat.go:17`
+**File:** `skills/editor_godot/godot_plugin/bridge.gd:853`
 
-<details>
-<summary>🧩 Analysis chain</summary>
-**Avoid returning `(nil, nil)` from `ToSQLDB` when no underlying `*sql.DB` exists**
-If `db.GetUnderlyingDB()` returns `ok == false`, `ToSQLDB` returns `(nil, nil)`. Through `OpenDBCompat` this means callers can get a `nil` `*sql.DB` with no error and only discover the problem later via a panic or unexpected `nil` dereference.
-Consider returning a concrete error in this case so failures are explicit, e.g.:
+**Type conversion falls through silently on validation failure.**
+When `value_str.is_valid_int()` returns false for `TYPE_INT`, the code falls through to the `str_to_var` fallback and eventually returns the string. This could cause type mismatches where a property expects an int but receives a string.
+Consider returning `null` explicitly when type-specific validation fails:
 ```diff
- func ToSQLDB(db DB) (*sql.DB, error) {
- 	if sqlDB, ok := db.GetUnderlyingDB(); ok {
- 		return sqlDB, nil
- 	}
--	return nil, nil // Should never happen with our implementations
-+	return nil, fmt.Errorf("dbdriver: underlying *sql.DB not available for driver %T", db)
- }
-```
-(You’d need to import `fmt`.)
----
-```
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Explore the compat.go file to see all functions and verify the issue
-find . -name "compat.go" -path "*dbdriver*" | head -5
-```
-Length of output: 37
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Display the full content of the compat.go file
-cat internal/storage/dbdriver/compat.go
-```
-Length of output: 961
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for DB interface definition and GetUnderlyingDB method
-rg -n "type DB interface|func.*GetUnderlyingDB" --type go -C 3
-```
-Length of output: 1655
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for usages of ToSQLDB to see how callers handle nil returns
-rg -n "ToSQLDB" --type go -C 3
-```
-Length of output: 880
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for WrapSQLDB to verify if driverType parameter is unused
-rg -n "func.*WrapSQLDB" --type go -A 10
-```
-Length of output: 860
----
-</details>
-**Fix return-nil-on-error issue in `ToSQLDB` and unused `driverType` parameter in `WrapSQLDB`**
-Two issues confirmed:
-1. **ToSQLDB returning `(nil, nil)`**: Although current implementations always return `true` from `GetUnderlyingDB()`, returning `(nil, nil)` masks failures. Callers via `OpenDBCompat` receive a `nil` `*sql.DB` with no error signal, causing panic later. Return an explicit error instead.
-2. **WrapSQLDB unused parameter**: The `driverType` parameter is never used; the function always returns `&sqliteDB` regardless. Either use `driverType` to select the appropriate implementation, or remove the unused parameter.
-```diff
- func ToSQLDB(db DB) (*sql.DB, error) {
- 	if sqlDB, ok := db.GetUnderlyingDB(); ok {
- 		return sqlDB, nil
- 	}
--	return nil, nil // Should never happen with our implementations
-+	return nil, fmt.Errorf("dbdriver: underlying *sql.DB not available for driver %T", db)
- }
- func WrapSQLDB(sqlDB *sql.DB, driverType DriverType) DB {
--	return &sqliteDB{db: sqlDB}
-+	return &sqliteDB{db: sqlDB}  // TODO: use driverType to select correct implementation
- }
-```
-> Committable suggestion skipped: line range outside the PR's diff.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In internal/storage/dbdriver/compat.go around lines 10 to 15, ToSQLDB currently
-returns (nil, nil) when GetUnderlyingDB() is false which hides failures; change
-it to return a descriptive non-nil error (e.g., fmt.Errorf("unable to extract
-*sql.DB from DB implementation")) so callers get an error instead of a nil DB,
-and ensure the function imports/uses errors or fmt as needed. Also address the
-unused driverType parameter in WrapSQLDB: either remove the driverType parameter
-from the function signature if only sqlite is supported, or use driverType in a
-switch/if to return the appropriate DB wrapper implementation instead of always
-returning &sqliteDB; update call sites accordingly.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 10: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/dbdriver/compat.go`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-**Fix unused `driverType` parameter in `WrapSQLDB` (compile error) and clarify intent**
-`driverType` is never used in `WrapSQLDB`, which is a compile-time error in Go. Today you’re always wrapping as `sqliteDB` regardless of the provided driver type.
-If the intention is just to keep the parameter for future branching, a minimal, compile-safe fix is:
-```diff
--func WrapSQLDB(sqlDB *sql.DB, driverType DriverType) DB {
--	return &sqliteDB{db: sqlDB}
--}
-+func WrapSQLDB(sqlDB *sql.DB, _ DriverType) DB {
-+	return &sqliteDB{db: sqlDB}
-+}
-```
-If you intend to support other drivers here later, you can switch on `driverType` when those implementations exist.
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Inspect the actual file content at the specified lines
-cat internal/storage/dbdriver/compat.go | head -30
-```
-Length of output: 959
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for all references to driverType in the codebase to see if it's used elsewhere
-rg -n "driverType" --type=go -C 3
-```
-Length of output: 3757
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if there are any build files that might indicate compilation status
-find . -name "*.go" -type f | grep -E "(test|spec)" | head -5
-fd -e go -e mod -e sum | head -20
-```
-Length of output: 765
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for calls to WrapSQLDB to understand how it's used
-rg -n "WrapSQLDB" --type=go -C 5
-```
-Length of output: 962
----
-</details>
-**Remove unused `driverType` parameter in `WrapSQLDB`**
-The `driverType` parameter is indeed unused and the recommended fix is correct. However, note that unused parameters are **not** a compile-time error in Go—they're allowed and simply may trigger linter warnings. The suggested change to replace it with `_` is the appropriate style convention.
-```diff
--func WrapSQLDB(sqlDB *sql.DB, driverType DriverType) DB {
--	return &sqliteDB{db: sqlDB}
--}
-+func WrapSQLDB(sqlDB *sql.DB, _ DriverType) DB {
-+	return &sqliteDB{db: sqlDB}
-+}
+ match target_type:
+ 	TYPE_INT:
+ 		if value_str.is_valid_int():
+ 			return value_str.to_int()
++		return null
+ 	TYPE_FLOAT:
+ 		if value_str.is_valid_float():
+ 			return value_str.to_float()
++		return null
+ 	TYPE_BOOL:
+ 		var lower := value_str.to_lower()
+ 		if lower == "true":
+ 			return true
+ 		if lower == "false":
+ 			return false
++		return null
 ```
 <details>
 <summary>📝 Committable suggestion</summary>
 > ‼️ **IMPORTANT**
 > Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
 ```suggestion
-func WrapSQLDB(sqlDB *sql.DB, _ DriverType) DB {
-	return &sqliteDB{db: sqlDB}
-}
+	match target_type:
+		TYPE_INT:
+			if value_str.is_valid_int():
+				return value_str.to_int()
+			return null
+		TYPE_FLOAT:
+			if value_str.is_valid_float():
+				return value_str.to_float()
+			return null
+		TYPE_BOOL:
+			var lower := value_str.to_lower()
+			if lower == "true":
+				return true
+			if lower == "false":
+				return false
+			return null
+		TYPE_STRING:
+			return value_str
+		TYPE_VECTOR2:
+			return _parse_vector2(value_str)
+		TYPE_VECTOR3:
+			return _parse_vector3(value_str)
+		TYPE_COLOR:
+			return _parse_color(value_str)
 ```
 </details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In internal/storage/dbdriver/compat.go around lines 19 to 21, the function
-WrapSQLDB currently declares an unused parameter driverType; change the
-parameter name to the blank identifier (_) so the signature becomes
-WrapSQLDB(sqlDB *sql.DB, _ DriverType) DB to silence linter warnings while
-preserving the API, and ensure any callers remain compatible (no code changes to
-callers required).
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 11: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/dbdriver/libsql.go:82`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-**Close the libsql connector on all error paths to avoid leaks**
-Once `libsql.NewEmbeddedReplicaConnector` succeeds, any subsequent failure (ping, migrations, `ensureVectorSupport`) currently only closes `db`, not the `connector`. That can leak underlying resources owned by the connector.
-A minimal fix is to close both `db` and `connector` in each early-return:
-```diff
--	connector, err := libsql.NewEmbeddedReplicaConnector(cfg.Path, "")
-+	connector, err := libsql.NewEmbeddedReplicaConnector(cfg.Path, "")
- 	if err != nil {
- 		return nil, fmt.Errorf("failed to create libsql connector: %w", err)
- 	}
-@@
--	if err := db.PingContext(ctx); err != nil {
--		_ = db.Close() //nolint:errcheck
-+	if err := db.PingContext(ctx); err != nil {
-+		_ = db.Close()      //nolint:errcheck
-+		_ = connector.Close() //nolint:errcheck
- 		return nil, fmt.Errorf("failed to connect to libsql database: %w", err)
- 	}
-@@
--		if err := migrate(ctx, db); err != nil {
--			_ = db.Close() //nolint:errcheck
-+		if err := migrate(ctx, db); err != nil {
-+			_ = db.Close()      //nolint:errcheck
-+			_ = connector.Close() //nolint:errcheck
- 			return nil, fmt.Errorf("failed to run migrations: %w", err)
- 		}
-@@
--	if cfg.EnableVectorSearch {
--		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
--			_ = db.Close() //nolint:errcheck
--			return nil, fmt.Errorf("failed to enable vector search: %w", err)
--		}
--	}
-+	if cfg.EnableVectorSearch {
-+		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
-+			_ = db.Close()      //nolint:errcheck
-+			_ = connector.Close() //nolint:errcheck
-+			return nil, fmt.Errorf("failed to enable vector search: %w", err)
-+		}
-+	}
-```
-This keeps resource management symmetric with the `Close()` method.
----
-```
-```
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Examine the openLibSQL function and libsqlDB struct definition and Close method
-cd /tmp/repo || exit 1
-find . -name "libsql.go" -type f 2>/dev/null | head -5
-```
-Length of output: 59
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Retrieve the full openLibSQL function and surrounding code
-cd /tmp/repo || exit 1
-cat internal/storage/dbdriver/libsql.go 2>/dev/null | head -150
-```
-Length of output: 59
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for libsqlDB struct definition and Close method
-cd /tmp/repo || exit 1
-rg -n "type libsqlDB struct|func.*Close" internal/storage/dbdriver/libsql.go -A 5
-```
-Length of output: 59
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if libsql package is imported and search for its usage patterns
-cd /tmp/repo || exit 1
-rg -n "libsql\." internal/storage/dbdriver/libsql.go | head -20
-```
-Length of output: 59
----
-🌐 Web query:
-```web
-libsql Go EmbeddedReplicaConnector Close method resource cleanup
-```
-💡 Result:
-Call connector.Close() when you no longer need the embedded replica — it stops the connector (including any auto-sync background activity) and releases connector-managed resources. Also close the sql.DB you opened from that connector (db.Close()). Example and guidance are in the Turso/go-libsql docs (they show defer connector.Close() and defer db.Close()). [1][2]
-References:
-- Quickstart example showing defer connector.Close() and defer db.Close(). [1]
-- Go reference docs for embedded replicas (notes about Sync and WithSyncInterval/autosync). [2]
----
-```
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Locate and examine the libsql.go file
-fd -t f "libsql\.go" internal/storage/dbdriver/ 2>/dev/null
-```
-Length of output: 35
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Retrieve openLibSQL function from the file
-cat internal/storage/dbdriver/libsql.go 2>/dev/null | sed -n '1,100p'
-```
-Length of output: 2755
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for libsqlDB struct and Close method in libsql.go
-rg -n "type libsqlDB" internal/storage/dbdriver/libsql.go -A 10
-```
-Length of output: 395
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for Close() method implementation in libsql.go
-rg -n "func.*Close\(\)" internal/storage/dbdriver/libsql.go -A 15
-```
-Length of output: 433
----
-</details>
-**Close the libsql connector on all error paths to avoid leaks**
-Verified: The code creates a `libsql.EmbeddedReplicaConnector` at line 40, but all three error paths after that point (PingContext at line 45, migrate at line 52, ensureVectorSupport at line 59) only close the database connection, not the connector itself. The connector must be explicitly closed to release connector-managed resources, otherwise they leak.
-Even though `libsqlDB.Close()` (lines 80–91) properly closes both, it is only called on successful return. Early error returns bypass it entirely.
-Add `_ = connector.Close() //nolint:errcheck` to each error path:
-```diff
--	if err := db.PingContext(ctx); err != nil {
--		_ = db.Close() //nolint:errcheck
-+	if err := db.PingContext(ctx); err != nil {
-+		_ = db.Close()      //nolint:errcheck
-+		_ = connector.Close() //nolint:errcheck
- 		return nil, fmt.Errorf("failed to connect to libsql database: %w", err)
- 	}
-```
-```diff
--	if migrate != nil {
--		if err := migrate(ctx, db); err != nil {
--			_ = db.Close() //nolint:errcheck
-+	if migrate != nil {
-+		if err := migrate(ctx, db); err != nil {
-+			_ = db.Close()      //nolint:errcheck
-+			_ = connector.Close() //nolint:errcheck
- 			return nil, fmt.Errorf("failed to run migrations: %w", err)
- 		}
- 	}
-```
-```diff
--	if cfg.EnableVectorSearch {
--		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
--			_ = db.Close() //nolint:errcheck
-+	if cfg.EnableVectorSearch {
-+		if err := ensureVectorSupport(ctx, db, vectorDims); err != nil {
-+			_ = db.Close()      //nolint:errcheck
-+			_ = connector.Close() //nolint:errcheck
- 			return nil, fmt.Errorf("failed to enable vector search: %w", err)
- 		}
- 	}
-```
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In internal/storage/dbdriver/libsql.go around lines 23 to 77, the libsql
-EmbeddedReplicaConnector created at connector :=
-libsql.NewEmbeddedReplicaConnector(...) is not closed on early error paths
-(PingContext, migrate, ensureVectorSupport), causing a resource leak; update
-each error path to call _ = connector.Close() //nolint:errcheck immediately
-before closing the DB (if present) and returning the error so the connector is
-always released on failure.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 12: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/dbdriver/migrate.go:56`
-
-**Guard against negative BatchSize values to avoid panics**
-`BatchSize` is only defaulted when it equals zero. A negative `BatchSize` will reach `make([][]interface{}, 0, m.options.BatchSize)` in `migrateTableData` and panic at runtime.
-Consider treating non-positive values uniformly:
-```diff
- func NewMigrator(source, target DB, options MigrationOptions) *Migrator {
--	if options.BatchSize == 0 {
-+	if options.BatchSize <= 0 {
- 		options.BatchSize = 100
- 	}
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-func NewMigrator(source, target DB, options MigrationOptions) *Migrator {
-	if options.BatchSize <= 0 {
-		options.BatchSize = 100
-	}
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In internal/storage/dbdriver/migrate.go around lines 53 to 56, NewMigrator
-currently only defaults BatchSize when it equals zero which allows negative
-values to propagate and cause a runtime panic; update the guard to treat
-non-positive values uniformly by setting options.BatchSize to the default (e.g.,
-100) when options.BatchSize <= 0 so negative values are clamped before being
-used by migrateTableData.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 13: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/dbdriver/migrate.go:358`
-
-**Check `rows.Err()` in `ExportToSQL` to surface iteration errors**
-`ExportToSQL` closes `rows` but never checks `rows.Err()`, so errors that occur during iteration (e.g., context cancellation, driver-level issues) are silently dropped.
-After the scan loop, check the error:
-```diff
--		for rows.Next() {
-+		for rows.Next() {
- 			// ...
- 		}
--		_ = rows.Close() //nolint:errcheck
-+		if err := rows.Err(); err != nil {
-+			_ = rows.Close() //nolint:errcheck
-+			return err
-+		}
-+		_ = rows.Close() //nolint:errcheck
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-		for rows.Next() {
-			values := make([]interface{}, len(columns))
-			valuePtrs := make([]interface{}, len(columns))
-			for i := range values {
-				valuePtrs[i] = &values[i]
-			}
-			if err := rows.Scan(valuePtrs...); err != nil {
-				_ = rows.Close() //nolint:errcheck
-				return err
-			}
-			// Format values
-			valueStrs := make([]string, len(values))
-			for i, v := range values {
-				switch val := v.(type) {
-				case nil:
-					valueStrs[i] = "NULL"
-				case string:
-					valueStrs[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(val, "'", "''"))
-				case []byte:
-					valueStrs[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(string(val), "'", "''"))
-				default:
-					valueStrs[i] = fmt.Sprintf("%v", val)
-				}
-			}
-			if _, err := fmt.Fprintf(writer, "INSERT INTO %s (%s) VALUES (%s);\n",
-				table, strings.Join(columns, ", "), strings.Join(valueStrs, ", ")); err != nil {
-				_ = rows.Close() //nolint:errcheck
-				return err
-			}
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close() //nolint:errcheck
-			return err
-		}
-		_ = rows.Close() //nolint:errcheck
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In internal/storage/dbdriver/migrate.go around lines 320 to 354, the code closes
-rows after the iteration but never checks rows.Err(), so iteration errors are
-silently ignored; after the for rows.Next() loop and before/after closing rows,
-call if err := rows.Err(); err != nil { _ = rows.Close() //nolint:errcheck;
-return err } (or capture rows.Err() into a variable and return it if non-nil) so
-any iteration/driver errors are surfaced to the caller.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 14: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/dbdriver/search.go:84`
-
-**Guard against negative `k` in `TopK` to avoid slice panics**
-`TopK` currently assumes `k >= 0`; a negative `k` will panic at `r[:k]`. Even if callers are well‑behaved today, it’s cheap to harden this:
-```diff
- func (r SearchResults) TopK(k int) SearchResults {
--	if k > len(r) {
--		k = len(r)
--	}
--	return r[:k]
-+	if k < 0 {
-+		k = 0
-+	}
-+	if k > len(r) {
-+		k = len(r)
-+	}
-+	return r[:k]
- }
-```
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In internal/storage/dbdriver/search.go around lines 75 to 81, TopK currently
-slices r[:k] without validating k; if k is negative this will panic. Fix by
-clamping k into the valid range: if k <= 0 return an empty SearchResults (or
-r[:0]), if k > len(r) set k = len(r), then return r[:k]; ensure no panic and
-preserve original behavior for valid k.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 15: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/dbdriver/search.go:290`
-
-**Hybrid search uses `rowid` as `DocumentID`, which breaks downstream lookups**
-`Search` currently selects `t.rowid as id` and stores it in `SearchResult.DocumentID`. In `memory/search.go`, `SearchableStore.searchHybrid` passes that `DocumentID` into `Get`, which queries `WHERE id = ?` on `named_memory`, not `rowid`. This will cause hybrid search to fail to resolve entries (likely returning `ErrNotFound` for all hits).
-For the `named_memory` use‑case, you probably want the logical `id` column:
-```diff
--	candidateQuery := fmt.Sprintf(`
--		SELECT
--			t.rowid as id,
--			t.%s as text,
-+	candidateQuery := fmt.Sprintf(`
-+		SELECT
-+			t.id as id,
-+			t.%s as text,
- 			%s as vector_sim
- 		FROM %s vt
- 		JOIN %s t ON t.rowid = vt.id
- 	`, textColumn,
-```
-If you need this to remain generic across tables, consider parameterizing the ID column name instead of hard‑coding `rowid` or `id`.
-Also applies to: 321-325
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In internal/storage/dbdriver/search.go around lines 276-287 (and similarly at
-321-325), the query selects t.rowid as id which stores a rowid into
-SearchResult.DocumentID causing downstream lookups (which query WHERE id = ?) to
-fail; modify the query to select the logical ID column (e.g. t.id) instead of
-rowid, and make the ID column name configurable if this function must work
-across different tables (add or accept an idColumn parameter and use that in the
-SELECT and JOIN), ensuring downstream Get calls receive the correct logical
-document id.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 16: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/dbdriver/vector.go:158`
-
-**Bug in index-based `SearchSimilar` SQL: double application of `VectorTopK` arguments**
-The index-backed branch builds:
-```go
-query = fmt.Sprintf(`
-    SELECT t.*
-    FROM %s(%s, %d) vt
-    JOIN %s t ON t.rowid = vt.id
-`, vh.VectorTopK(indexName, queryVector, limit), indexName, limit, tableName)
-```
-but `VectorTopK` already returns the full function call, e.g.:
-```sql
-vector_top_k('idx', '[...]', 10)
-```
-So the formatted SQL becomes something like:
-```sql
-FROM vector_top_k('idx','[...],10)(idx, 10) vt
-```
-which is invalid. You only need the function call once.
-A minimal fix is to let `VectorTopK` provide the full call and drop the extra `%s, %d` arguments:
-```diff
--    query = fmt.Sprintf(`
--            SELECT t.*
--            FROM %s(%s, %d) vt
--            JOIN %s t ON t.rowid = vt.id
--        `, vh.VectorTopK(indexName, queryVector, limit), indexName, limit, tableName)
-+    query = fmt.Sprintf(`
-+            SELECT t.*
-+            FROM %s vt
-+            JOIN %s t ON t.rowid = vt.id
-+        `, vh.VectorTopK(indexName, queryVector, limit), tableName)
-```
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-internal/storage/dbdriver/vector.go around lines 117-158: the index-backed SQL
-incorrectly embeds vh.VectorTopK(...) into a format string that also supplies
-indexName and limit, causing the function call to appear twice and producing
-invalid SQL; to fix, build the query using the string returned by
-vh.VectorTopK(indexName, queryVector, limit) directly in the FROM clause (no
-extra "%s, %d" parameters), e.g. use fmt.Sprintf to insert vh.VectorTopK(...)
-and tableName only, preserve the WHERE append for additionalWhere, and keep
-returning vh.db.QueryContext(ctx, query, args...) unchanged.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 17: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/memory/search.go:73`
-
-**Clarify DB usage in `EnableSearch` and reuse corpus‑stats helper**
-`EnableSearch` currently:
-- Creates the `memory_search_view` and builds corpus stats using `s.db`.
-- Constructs `SearchableStore` with `db dbdriver.DB` and uses that for all subsequent queries (`searchBM25`, `searchVector`, `Get`, etc.).
-If `s.db` and the `db` argument are not guaranteed to be the same underlying connection, the corpus stats and temp view may diverge from what the searcher actually queries. Even if they are the same today, the split makes future refactors easy to break.
-Consider:
-- Using the same `dbdriver.DB` consistently for both the stats build and search queries (or clearly asserting they wrap the same underlying DB).
-- Replacing the inline corpus‑stats build with the shared `buildCorpusStatsForWorkspace` helper defined later in this file so both initial EnableSearch and `RefreshCorpusStats` follow identical logic.
-This reduces duplication and avoids subtle “two DBs” bugs.
-✅ Addressed in commit c576f4a
-
----
-
-### Task 18: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/memory/search.go:245`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-**Vector similarity ordering likely inverted relative to cosine similarity**
-`searchVector` computes:
-- `similarity` via `vectorHelper.CosineSimilarity("t.embedding", queryVector)`.
-- Orders results with `ORDER BY similarity ASC`.
-- Exposes `Score` and `VectorScore` equal to `similarity`.
-If `CosineSimilarity` is a standard cosine similarity in `[-1, 1]` with higher being more similar (its name strongly suggests that), `ORDER BY similarity ASC` will return the *least* similar items first. This also conflicts with hybrid scoring in `dbdriver.HybridSearcher.Search`, which scales `VectorScore` as if larger is better.
-I’d recommend:
-```diff
--		WHERE t.workspace = ?
--		ORDER BY similarity ASC
-+		WHERE t.workspace = ?
-+		ORDER BY similarity DESC
-```
-and keeping `Score`/`VectorScore` as the raw similarity so that “bigger is better” is consistent across modes.
-Please double‑check this against the actual `CosineSimilarity` implementation and a quick manual test.
----
-I'll verify the vector similarity ordering concern by examining the `CosineSimilarity` implementation and how `VectorScore` is used elsewhere in the codebase.
-```
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find CosineSimilarity implementation
-rg -n "CosineSimilarity" --type=go -B2 -A5
-```
-Length of output: 3120
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find HybridSearcher.Search implementation
-rg -n "HybridSearcher" --type=go -B2 -A10
-```
-Length of output: 6012
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find VectorScore usage patterns
-rg -n "VectorScore" --type=go -B2 -A2
-```
-Length of output: 2320
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look for tests related to vector search ordering
-fd -e "test.go" -e "_test.go" --type=f | xargs rg -l "vector.*search\|searchVector" --type=go
-```
-Length of output: 0
----
-I need to verify what `vector_distance_cos` actually returns. Let me search for more context on the database backend and how this function is used.
-```
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find database initialization to understand backend
-rg -n "vector_distance_cos|CreateVectorIndex|vector.*extension" --type=go -B3 -A3
-```
-Length of output: 1324
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look for HybridSearcher.Search implementation to see how vectorSim is extracted
-rg -n "func.*HybridSearcher.*Search" --type=go -A50 | head -100
-```
-Length of output: 4788
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for database setup, initialization, or schema comments
-rg -n "DuckDB|pgvector|vector.*index|CREATE.*vector" --type=go -B2 -A2
-```
-Length of output: 3207
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if there are any comments or docs about cosine distance/similarity semantics
-rg -n "cosine|distance.*similarity|similarity.*distance" --type=go -i -B1 -A1
-```
-Length of output: 1700
----
-</details>
-**Change `ORDER BY similarity ASC` to `ORDER BY similarity DESC`**
-The `CosineSimilarity` function calls `vector_distance_cos`, which returns cosine similarity in the [-1, 1] range. The `HybridSearcher` scales this value as `(results[i].VectorScore + 1.0) / 2.0`, treating higher values as better. With `ORDER BY similarity ASC`, the current code returns the least similar items first, which is inverted.
-Fix in `internal/storage/memory/search.go` line 256:
-```diff
--		ORDER BY similarity ASC
-+		ORDER BY similarity DESC
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-// searchVector performs vector similarity search
-func (ss *SearchableStore) searchVector(
-	ctx context.Context,
-	queryVector dbdriver.Vector,
-	workspace string,
-	limit int,
-) ([]MemorySearchResult, error) {
-	if !ss.db.IsVectorSearchEnabled() {
-		return nil, fmt.Errorf("vector search is not enabled")
-	}
-	vectorHelper, err := dbdriver.NewVectorHelper(ss.db)
-	if err != nil {
-		return nil, err
-	}
-	// Validate query vector
-	if err := vectorHelper.ValidateVector(queryVector); err != nil {
-		return nil, fmt.Errorf("invalid query vector: %w", err)
-	}
-	// Search using vector index
-	searchQuery := fmt.Sprintf(`
-		SELECT
-			t.id, t.name, t.type, t.workspace, t.summary,
-			t.result, t.digests, t.created_at, t.updated_at,
-			t.last_accessed, t.access_count,
-			%s as similarity
-		FROM vector_top_k('idx_memory_vector', '%s', ?) vt
-		JOIN named_memory t ON t.rowid = vt.id
-		WHERE t.workspace = ?
-		ORDER BY similarity DESC
-	`, vectorHelper.CosineSimilarity("t.embedding", queryVector), queryVector.String())
-	rows, err := ss.db.QueryContext(ctx, searchQuery, limit, workspace)
-	if err != nil {
-		return nil, fmt.Errorf("vector search failed: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-	results := make([]MemorySearchResult, 0)
-	for rows.Next() {
-		var entry storage.NamedEntry
-		var similarity float64
-		if err := rows.Scan(
-			&entry.ID,
-			&entry.Name,
-			&entry.Type,
-			&entry.Workspace,
-			&entry.Summary,
-			&entry.Result,
-			&entry.Digests,
-			&entry.CreatedAt,
-			&entry.UpdatedAt,
-			&entry.LastAccess,
-			&entry.AccessCount,
-			&similarity,
-		); err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
-		}
-		results = append(results, MemorySearchResult{
-			Entry:       entry,
-			Score:       similarity,
-			VectorScore: similarity,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration failed: %w", err)
-	}
-	return results, nil
-}
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In internal/storage/memory/search.go around lines 225-300, the SQL ordering uses
-"ORDER BY similarity ASC" which returns least similar items first; change this
-to "ORDER BY similarity DESC" so higher cosine similarity scores are returned
-first, and run tests to confirm search ranking behavior remains correct.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 19: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/memory/vector.go:144`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-**Similarity is computed but not exposed, and ordering/limit handling may need tightening**
-Two points here:
-1. **Similarity not surfaced to callers (functional gap)**
-   You select `similarity`, scan it into a local `similarity` variable, but never store it on `VectorEntry`. Callers lose access to the score that the query is explicitly computing.
-   A minimal fix:
-   ```diff
-   type VectorEntry struct {
-   	storage.NamedEntry
--	Embedding dbdriver.Vector `json:"embedding,omitempty"`
-+	Embedding  dbdriver.Vector `json:"embedding,omitempty"`
-+	Similarity float64         `json:"similarity,omitempty"`
-   }
-   ```
-   And after the `rows.Scan(...)` call:
-   ```diff
--		results = append(results, entry)
-+		entry.Similarity = similarity
-+		results = append(results, entry)
-   ```
-   This aligns the API with the query and makes the scores observable.
-2. **Ordering and limit robustness**
-   - `ORDER BY similarity ASC` assumes that lower values are “better”. If `vectorHelper.CosineSimilarity` returns larger values for closer matches, this should be `DESC`. Please confirm that the helper’s semantics match the ordering.
-   - `limit` is passed straight into `vector_top_k` with no validation. Guarding `limit <= 0` and returning a clear error will avoid surprising DB errors.
-   ```diff
-   func (vs *VectorStore) SearchSimilar(..., limit int, ...) ([]VectorEntry, error) {
-+	if limit <= 0 {
-+		return nil, fmt.Errorf("limit must be > 0, got %d", limit)
-+	}
-   ```
----
-I'll verify the review comment by examining the codebase structure and the specific concerns raised.
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find VectorEntry struct definition
-fd --type f -e go . | head -20 | xargs grep -l "type VectorEntry"
-```
-Length of output: 0
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Locate and inspect VectorEntry struct
-ast-grep --pattern 'type VectorEntry struct {
-  $$$
-}'
-```
-Length of output: 251
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find vectorHelper and CosineSimilarity implementation
-rg -n "CosineSimilarity" --type go -B 3 -A 5
-```
-Length of output: 3487
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check current SearchSimilar implementation for limit validation
-rg -n "func.*SearchSimilar" --type go -A 20
-```
-Length of output: 2782
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look for vector_top_k SQL usage to understand limit semantics
-rg -n "vector_top_k" --type go -B 2 -A 2
-```
-Length of output: 1162
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if Similarity field exists anywhere in the codebase
-rg -n "Similarity.*float64" --type go
-```
-Length of output: 174
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Examine the query ORDER BY and vector similarity patterns
-rg -n "ORDER BY similarity" --type go -B 5 -A 2
-```
-Length of output: 1183
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check for any validation of limit parameter in SearchSimilar or related functions
-rg -n "limit.*<=.*0|limit.*<.*1" --type go -B 2 -A 2
-```
-Length of output: 4632
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find all VectorEntry usages to understand if Similarity is expected
-rg -n "\.Similarity" --type go
-```
-Length of output: 96
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Locate the memory package structure
-fd --type f -e go internal/storage/memory/ | head -20
-```
-Length of output: 401
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check imports and dependencies in vector.go
-head -30 internal/storage/memory/vector.go
-```
-Length of output: 849
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look at the entire VectorEntry struct and NamedEntry definition
-ast-grep --pattern 'type NamedEntry struct {
-  $$$
-}'
-```
-Length of output: 709
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for test files that might clarify similarity semantics
-fd --type f -e go internal/storage/memory/ | xargs grep -l "SearchSimilar"
-```
-Length of output: 401
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check dbdriver Vector and helper implementations
-fd --type f -e go . | xargs grep -l "vectorHelper\|VectorHelper" | head -5
-```
-Length of output: 139
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Confirm the file exists and show full content around SearchSimilar
-cat internal/storage/memory/vector.go | grep -A 80 "func.*SearchSimilar"
-```
-Length of output: 2310
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for similarity in type definitions
-rg -n "type.*Similarity|Similarity.*:" --type go
-```
-Length of output: 77
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look at imports to understand dbdriver package
-rg -n "dbdriver\|storage" internal/storage/memory/vector.go | head -20
-```
-Length of output: 0
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find where VectorStore is initialized to understand vectorHelper
-rg -n "type VectorStore struct" --type go -A 10
-```
-Length of output: 674
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Get vectorHelper interface/type
-rg -n "vectorHelper.*:|type.*VectorHelper" --type go -B 2 -A 5
-```
-Length of output: 2735
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Comprehensive search for CosineSimilarity to understand return semantics
-rg -n "func.*CosineSimilarity|CosineSimilarity" --type go -B 2 -A 8
-```
-Length of output: 4225
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if there's documentation on similarity scoring
-rg -n "similarity|cosine" --type go -i internal/storage/memory/vector.go
-```
-Length of output: 197
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# See the actual full vector.go file to analyze the context
-wc -l internal/storage/memory/vector.go && echo "---" && cat internal/storage/memory/vector.go
-```
-Length of output: 5270
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look for any constants or documentation about limit constraints
-rg -n "limit|maxLimit|minLimit" --type go internal/storage/memory/ -B 1 -A 1
-```
-Length of output: 5993
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for other SearchSimilar calls or implementations
-rg -n "SearchSimilar" --type go
-```
-Length of output: 355
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Find storage package structure for context
-find internal/storage -type f -name "*.go" | head -15
-```
-Length of output: 549
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look for interfaces that might define SearchSimilar contract
-rg -n "SearchSimilar" --type go -B 5 -A 1 | grep -E "interface|func"
-```
-Length of output: 259
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check the dbdriver package for Vector type
-find . -path "*/dbdriver*" -name "*.go" | head -10
-```
-Length of output: 386
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Summary: Find the actual struct definitions we need
-rg -n "type (VectorEntry|NamedEntry)" --type go -A 12
-```
-Length of output: 2482
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Verify storage package import to find where NamedEntry comes from
-head -50 internal/storage/memory/vector.go
-```
-Length of output: 1433
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check what storage.NamedEntry contains
-find . -name "*.go" -type f -exec grep -l "type NamedEntry" {} \;
-```
-Length of output: 67
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Direct check for the structures
-rg -n "^type.*Entry.*struct" --type go -A 15
-```
-Length of output: 4907
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look for package structure
-ls -la internal/storage/
-```
-Length of output: 866
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Get all Go files in storage
-find internal/storage -name "*.go" -type f
-```
-Length of output: 2148
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check the entry.go or similar files
-ls internal/storage/memory/
-```
-Length of output: 42
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Examine each Go file in the memory package
-for f in internal/storage/memory/*.go; do echo "=== $f ==="; head -5 "$f"; done
-```
-Length of output: 448
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Look at types.go or entry definitions
-cat internal/storage/memory/types.go 2>/dev/null || echo "Not found" && ls -la internal/storage/memory/ | grep -E ".go$"
-```
-Length of output: 256
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Get the full vector.go file content
-cat internal/storage/memory/vector.go
-```
-Length of output: 5228
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Verify directory structure
-find internal -type d | head -20
-```
-Length of output: 487
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Broader search for VectorEntry
-grep -r "type VectorEntry" internal/ 2>/dev/null || echo "Searching in all Go files..." && find . -name "*.go" -type f | xargs grep "type VectorEntry" 2>/dev/null
-```
-Length of output: 121
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# List all files in repo root area
-ls -la
-```
-Length of output: 1812
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if there are any Go files at all
-find . -name "*.go" -type f | head -30
-```
-Length of output: 1009
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Get repository structure
-find . -maxdepth 3 -type f -name "*.go" 2>/dev/null | head -40
-```
-Length of output: 1273
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Basic structure check
-pwd && ls -la
-```
-Length of output: 1831
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Search for Go files anywhere
-find . -name "vector.go" 2>/dev/null
-```
-Length of output: 73
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check for existence of target file
-test -f internal/storage/memory/vector.go && echo "File exists" || echo "File not found"
-```
-Length of output: 11
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# List current directory
-ls -la && echo "---" && pwd
-```
-Length of output: 1835
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Try to find any Go source files
-find . -type f \( -name "*.go" -o -name "*.mod" \) 2>/dev/null | head -20
-```
-Length of output: 659
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check git or repo info
-ls -la .git 2>/dev/null || echo "No .git directory" && ls -la | head -20
-```
-Length of output: 1806
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Extreme basic check
-echo "Checking repository structure:" && ls / 2>/dev/null | head
-```
-Length of output: 69
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Try to locate the code mentioned
-find / -path "*internal/storage/memory/vector.go" 2>/dev/null | head -5
-```
-Length of output: 52
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if cloning is needed or if code is available
-git status 2>/dev/null || echo "Not a git repo or git not available"
-```
-Length of output: 253
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Simple verification - check test patterns
-ls -la *.go 2>/dev/null || echo "No .go files in root"
-```
-Length of output: 56
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check mod file for package info
-cat go.mod 2>/dev/null | head -20 || echo "No go.mod found"
-```
-Length of output: 570
----
-🌐 Web query:
-```web
-vector_distance_cos SQL function semantics distance vs similarity
-```
-💡 Result:
-Short answer: vector_distance_cos (and similarly named cosine-distance functions) returns the cosine distance = 1 − cosine_similarity, not the raw cosine similarity. That means:
-- cosine_similarity ∈ [−1, 1]; cosine_distance = 1 − cosine_similarity ∈ [0, 2].
-- Smaller distance = more similar (0 = identical direction; ~1 = orthogonal; 2 = opposite).
-Many vector libraries expose both forms (some functions/operators return distance, others return similarity), so always check the engine's docs for the exact name/semantics.
-Examples / docs:
-- Azion / libSQL docs: “vector_distance_cos calculates the cosine distance = 1 — Cosine Similarity; range 0 to 2.” [1]
-- pgvector (Postgres): exposes cosine_distance (and <=> operator) and notes cosine similarity = 1 − cosine_distance. [2]
-- Milvus docs: explain cosine similarity ∈ [−1,1] and that cosine distance = 1 − cosine_similarity (smaller = more similar). [3]
-If you tell me which SQL engine (pgvector, ClickHouse, Milvus, libSQL, etc.) you’re using, I’ll quote the exact function/operator and an example query for that engine.
----
-🌐 Web query:
-```web
-Turso vector_distance_cos what does it return
-```
-💡 Result:
-vector_distance_cos returns the cosine distance between two vectors (defined as 1 − cosine similarity). It expects vectors of the same type and dimensionality and returns a numeric distance in the range 0 (identical) to 2 (opposite); values very near zero may be tiny negative due to floating‑point precision. [1][2]
----
-🌐 Web query:
-```web
-cosine distance vs cosine similarity lower higher better match
-```
-💡 Result:
-Short answer:
-- Cosine similarity: higher = better match (range usually −1 to 1; in non‑negative data 0..1). [1][2]
-- Cosine distance (common definition = 1 − cosine_similarity): lower = better match (range 0..1 for non‑negative data; can be up to 2 if similarity is −1). [1][2][3]
-Notes:
-- Some libraries use angular/Euler variants (e.g., sqrt(2(1−cos))) — check the implementation you use. [1][3]
-Sources: [1] Wikipedia — Cosine similarity; [2] DataCamp — Cosine distance; [3] IBM — What is cosine similarity?
----
-</details>
-**Add Similarity field to VectorEntry struct and populate it in SearchSimilar**
-The similarity score is computed and scanned at line 122 but never assigned to the returned `VectorEntry`. Add a `Similarity` field to `VectorEntry`:
-```diff
-type VectorEntry struct {
-	storage.NamedEntry
-	Embedding  dbdriver.Vector `json:"embedding,omitempty"`
-+	Similarity float64         `json:"similarity,omitempty"`
-}
-```
-Then after `rows.Scan(...)`:
-```diff
--		results = append(results, entry)
-+		entry.Similarity = similarity
-+		results = append(results, entry)
-```
-This exposes the search score to callers and aligns the API with the query.
-**Validate limit parameter**
-Add limit validation to match the pattern used in other memory store methods (List, Search, Relevant):
-```diff
-func (vs *VectorStore) SearchSimilar(..., limit int, ...) ([]VectorEntry, error) {
-+	if limit <= 0 {
-+		return nil, fmt.Errorf("limit must be > 0, got %d", limit)
-+	}
-```
-Note: The `ORDER BY similarity ASC` is correct. The query uses `vector_distance_cos`, which returns a distance metric (1 − cosine similarity) where lower values indicate closer matches.
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-// SearchSimilar finds memories similar to the given embedding
-func (vs *VectorStore) SearchSimilar(
-	ctx context.Context,
-	queryEmbedding dbdriver.Vector,
-	workspace string,
-	limit int,
-) ([]VectorEntry, error) {
-	// Validate limit parameter
-	if limit <= 0 {
-		return nil, fmt.Errorf("limit must be > 0, got %d", limit)
-	}
-	// Validate query vector
-	if err := vs.vectorHelper.ValidateVector(queryEmbedding); err != nil {
-		return nil, fmt.Errorf("invalid query embedding: %w", err)
-	}
-	// Use vector index for search
-	query := fmt.Sprintf(`
-		SELECT
-			t.id, t.name, t.type, t.workspace, t.summary,
-			t.result, t.digests, t.created_at, t.updated_at,
-			t.last_accessed, t.access_count,
-			%s as similarity
-		FROM vector_top_k('idx_memory_vector', '%s', ?) vt
-		JOIN named_memory t ON t.rowid = vt.id
-		WHERE t.workspace = ?
-		ORDER BY similarity ASC
-	`, vs.vectorHelper.CosineSimilarity("t.embedding", queryEmbedding), queryEmbedding.String())
-	rows, err := vs.db.QueryContext(ctx, query, limit, workspace)
-	if err != nil {
-		return nil, fmt.Errorf("vector search failed: %w", err)
-	}
-	defer rows.Close() //nolint:errcheck
-	var results []VectorEntry
-	for rows.Next() {
-		var entry VectorEntry
-		var similarity float64
-		err := rows.Scan(
-			&entry.NamedEntry.ID,
-			&entry.NamedEntry.Name,
-			&entry.NamedEntry.Type,
-			&entry.NamedEntry.Workspace,
-			&entry.NamedEntry.Summary,
-			&entry.NamedEntry.Result,
-			&entry.NamedEntry.Digests,
-			&entry.NamedEntry.CreatedAt,
-			&entry.NamedEntry.UpdatedAt,
-			&entry.NamedEntry.LastAccess,
-			&entry.NamedEntry.AccessCount,
-			&similarity,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan result: %w", err)
-		}
-		entry.Similarity = similarity
-		results = append(results, entry)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating results: %w", err)
-	}
-	return results, nil
-}
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-internal/storage/memory/vector.go around lines 74-136: the code computes and
-scans a similarity score but never stores it in the returned VectorEntry and
-also lacks validation for the limit parameter; add a Similarity float64 field to
-the VectorEntry struct and after rows.Scan(...) assign entry.Similarity =
-similarity, and add limit validation at the start of SearchSimilar (e.g. if
-limit <= 0 { return nil, fmt.Errorf("invalid limit: %d", limit) } or follow the
-same behavior as other memory store methods) so callers receive the search score
-and the function enforces a valid limit.
-```
-</details>
-
----
-
-### Task 20: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/sqliteutil/sqliteutil.go:85`
-
-**`defaultPath` parameter in OpenDBWithAutoConfig is unused**
-The new helpers are a good fit for the dbdriver abstraction, but there’s a small mismatch here:
-- `OpenDBWithAutoConfig` takes a `defaultPath string` and the comment explains it as “the default SQLite path (e.g., `cache.db`)”.
-- The implementation ignores `defaultPath` entirely and just calls `loader.LoadCacheConfig()`, `loader.LoadJobsConfig()`, or `loader.LoadMemoryConfig()` without any path override.
-This can be confusing to callers and suggests either a missing hook into `ConfigLoader` or a leftover parameter from an earlier design.
-Consider one of:
-- **Use** `defaultPath` when constructing the config (e.g., by extending `ConfigLoader` or choosing a default SQLite path when env vars are unset), or
-- **Remove** the parameter and its mention from the comment if configuration should be driven solely by environment/rootDir.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-internal/storage/sqliteutil/sqliteutil.go lines 53-80: the defaultPath parameter
-is never used; update OpenDBWithAutoConfig to apply defaultPath for SQLite when
-the loaded config doesn't specify a path: call the appropriate loader
-(LoadCacheConfig/LoadJobsConfig/LoadMemoryConfig) into cfg, then if cfg.Driver
-indicates SQLite and cfg.Path is empty, set cfg.Path = defaultPath; keep the
-function signature and return OpenDBWithDriver(ctx, cfg, migrate). Also update
-the function comment to state that defaultPath is used as the SQLite path when
-no env/rootDir override is present.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 21: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_complexity/main.go`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-**Go cognitive complexity and nesting depth are effectively ignoring nesting**
-The Go metrics are close, but the way `nestingLevel` / `currentDepth` are managed inside `ast.Inspect` prevents them from capturing actual nesting:
-- In both `calculateGoCognitiveComplexity` and `calculateGoNestingDepth`, you increment the nesting counter and then use `defer` to decrement it.
-- Because `ast.Inspect` calls the visitor, returns from it (triggering the `defer`), and only then decides whether to recurse into children, the decrement happens *before* any child nodes are visited.
-- Result: `nestingLevel`/`currentDepth` are always back to their previous value when children are inspected. Cognitive complexity never includes depth and `maxDepth` will never exceed 1, regardless of real nesting.
-Additionally, `FunctionLength` is computed as `EndLine - StartLine`, which is off by one (a single-line function reports length 0).
-I’d recommend:
-- Rewriting cognitive/nesting computations to track depth explicitly in a custom recursive walker (passing depth as a parameter), rather than relying on `ast.Inspect` to manage entry/exit.
-- Adjusting `FunctionLength` to be inclusive, e.g.:
-```go
-length := fset.Position(fn.End()).Line - fset.Position(fn.Pos()).Line + 1
-```
-This is important for the correctness of the reported metrics.
-Also applies to: 298-359, 361-379
----
-🌐 Web query:
-```web
-In Go's standard library, how does `ast.Inspect` traverse nodes relative to when the visitor callback returns? Specifically, does the traversal recurse into children before or after the visitor function returns (and thus after its defers run)?
-```
-💡 Result:
-ast.Inspect calls your visitor first (pre-order). If the visitor returns true, Inspect then recursively visits the node's non-nil children — i.e. the recursion happens after the visitor function returns (so any defers in the visitor have already run). It also calls f(nil) after visiting the children. [1][2]
-Sources: Go std pkg docs for go/ast Inspect and the inspector description. [1] [2]
----
-</details>
----
-**Go cognitive complexity and nesting depth calculations are broken due to incorrect ast.Inspect usage**
-The nesting depth metrics are fundamentally broken. When `ast.Inspect` calls your visitor and the visitor returns true, `Inspect` then recursively visits the node's children after the visitor function returns—meaning any defers in the visitor have already run. In both `calculateGoCognitiveComplexity` and `calculateGoNestingDepth`, the defer decrement happens before any child nodes are visited, so `nestingLevel`/`currentDepth` reset to their previous value before children are inspected. This means cognitive complexity never includes depth contribution and `maxDepth` never exceeds 1.
-Additionally, `FunctionLength` calculation (`EndLine - StartLine`) is off by one—a single-line function reports length 0 instead of 1.
-**Required fixes:**
-- Rewrite cognitive/nesting computations using a custom recursive walker (passing depth as a parameter) instead of `ast.Inspect`
-- Adjust `FunctionLength` to be inclusive: `length := fset.Position(fn.End()).Line - fset.Position(fn.Pos()).Line + 1`
-Also applies to: 298-359, 361-379
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_complexity/main.go around lines 248-296 (and also apply same
-changes to the related functions in 298-359 and 361-379), the cognitive
-complexity and nesting depth logic must be rewritten because using ast.Inspect
-with deferred decrements resets depth before children are visited; replace
-ast.Inspect usage with explicit recursive AST walkers that pass the current
-depth as a parameter (increment depth when entering nesting constructs and
-propagate that depth into recursive calls, updating maxDepth/cognitive counts
-accordingly) so child nodes see the incremented depth, and change the function
-length calculation to be inclusive by adding 1: length :=
-fset.Position(fn.End()).Line - fset.Position(fn.Pos()).Line + 1.
-```
-</details>
-✅ Addressed in commit 0f025e8
-
----
-
-### Task 22: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_git/main.go:32`
-
-**`ContextLines` is unused and not wired into blame behavior.**
-The `input` struct exposes `ContextLines` / `context_lines`, and the manifest describes semantics for blame, but the implementation never reads or uses this field—`queryBlame` and `parseBlame` ignore it and always return per-line results with no extra context.
-This leads to:
-- Callers sending `context_lines` and seeing no effect.
-- A divergence from the documented behavior in `skill.yaml`.
-Consider:
-- Either wiring `ContextLines` through to `queryBlame`/`parseBlame` (and designing what “context” means in this API), or
-- Dropping the field from `input` and manifest for now, or explicitly documenting it as reserved/no-op until implemented.
-Also applies to: 144-159, 292-309
-
----
-
-### Task 23: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_git/main.go:466`
-
-**Blame line numbers use the original, not current, line index from porcelain output.**
-In `parseBlame`, the commit header regex is:
-```go
-commitRe := regexp.MustCompile(`^([0-9a-f]{40}) (\d+) (\d+)`)
-```
-and you currently derive the line number from `match[2]`:
-```go
-if match := commitRe.FindStringSubmatch(line); match != nil {
-    currentCommit = match[1][:7]
-    if lineNum, err := strconv.Atoi(match[2]); err == nil {
-        currentLine = lineNum
-    }
-}
-```
-For `git blame --line-porcelain`, the first numeric field is the *original* line number, while the second numeric field is the line number in the blamed file. Using `match[2]` therefore reports original-source line numbers, which won’t match the line positions in the current working tree that callers expect.
-Switching to the second numeric field would align the reported `Line` with current file line numbers:
-```diff
-- if match := commitRe.FindStringSubmatch(line); match != nil {
--     currentCommit = match[1][:7]
--     if lineNum, err := strconv.Atoi(match[2]); err == nil {
--         currentLine = lineNum
--     }
-- }
-+ if match := commitRe.FindStringSubmatch(line); match != nil {
-+     currentCommit = match[1][:7]
-+     // match[3] is the line number in the blamed file
-+     if lineNum, err := strconv.Atoi(match[3]); err == nil {
-+         currentLine = lineNum
-+     }
-+ }
-```
-(You may also want to consider converting `author-time` into a human-readable timestamp instead of returning raw epoch seconds in `Data["timestamp"]`, but that’s optional.)
-Also applies to: 292-309
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_git/main.go around lines 417 to 466 (also apply same fix at
-~292-309), the parseBlame function is using the first numeric field (match[2])
-from the porcelain commit header which is the original-source line number;
-change it to use the second numeric field (match[3]) so currentLine reflects the
-blamed file’s current line number. Update the strconv.Atoi call to parse
-match[3], keep currentCommit as match[1][:7], and ensure any tests or callers
-expecting current-file line indices are unchanged; optionally convert
-author-time before storing in Data["timestamp"] if desired.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 24: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_git/skill.yaml`
-
-**Manifest/API does not match implementation (unused `context_lines`, missing path requirements).**
-The manifest documents `context_lines` as “For blame queries, lines of context around matches”, but the current implementation never reads or uses `ContextLines`. Similarly, `path` is documented as optional, yet `cochanged` and `blame` require a specific file path and return an error if `path` resolves to the workspace.
-This creates an API/behavior mismatch for callers of the `code/git` skill.
-Consider either:
-- Implementing `context_lines` and enforcing/using it in `queryBlame`, and tightening validation for `cochanged`/`blame`, or
-- Marking `context_lines` as reserved/unused for now and updating the description, and documenting that `path` is required for `cochanged` and `blame` queries.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_git/skill.yaml around lines 17 to 45, the manifest documents
-context_lines and marks path optional but the implementation never reads
-ContextLines and requires path for cochanged/blame; fix by either (A)
-implementing ContextLines usage and enforcing path validation: add context_lines
-handling in the skill implementation so queryBlame reads the parameter and
-returns surrounding lines, and tighten validation so cochanged and blame return
-a clear 400 error if path is missing or resolves to workspace root, or (B)
-explicitly mark context_lines as reserved/unused in the description and change
-the path description to state that path is required for cochanged and blame
-queries (and update validation/messages accordingly) — choose one approach and
-make the manifest and runtime behavior consistent.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 25: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_imports/main.go:281`
-
-**Fix: IsExternal logic incorrectly compares filesystem path with module path.**
-Line 280 checks `!strings.Contains(importPath, workspace)`, but `importPath` is a Go module path (e.g., `github.com/jkatigb/agentctl/...`) while `workspace` is a filesystem path (e.g., `/home/user/projects/...`). These will never match, causing all non-stdlib imports to be marked as external, even local ones.
-To determine if an import is local to the current module, you need to compare against the module path from `go.mod`, not the filesystem workspace. Consider one of these approaches:
-**Option 1**: Parse `go.mod` to get the module path and check if the import starts with it:
-```go
-// Extract module path from go.mod at repo root
-moduleRoot := findModuleRoot(workspace)
-modulePathFromGoMod := parseGoModForModulePath(moduleRoot)
-isExternal := !isStdLib && !strings.HasPrefix(importPath, modulePathFromGoMod)
-```
-**Option 2**: Since detecting local vs. external for Go requires module path knowledge, document that `IsExternal` for Go includes both external and local third-party imports, and add a separate `IsLocal` field that checks the module path.
-**Option 3**: For the MVP, consider removing the workspace check entirely and documenting the limitation:
-```diff
--		IsExternal: !isStdLib && !strings.Contains(importPath, workspace),
-+		IsExternal: !isStdLib, // Note: includes local module imports
-```
-✅ Addressed in commit c576f4a
-
----
-
-### Task 26: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_imports/main.go:334`
-
-**Multi-import statements are only partially parsed.**
-Line 313 uses `strings.Split(importPath, ",")[0]` which only captures the first module in statements like `import os, sys, re`. The remaining modules are silently ignored.
-Consider handling all imports in the statement:
-```diff
- 		if strings.HasPrefix(trimmed, "import ") {
- 			parts := strings.Fields(trimmed)
- 			if len(parts) >= 2 {
--				importPath := parts[1]
--				importPath = strings.Split(importPath, ",")[0] // Handle multi-import
--
--				info := importInfo{
--					File:       relPath,
--					Import:     importPath,
--					Line:       i + 1,
--					IsStdLib:   isPythonStdLib(importPath),
--					IsExternal: !isPythonStdLib(importPath),
-+				// Handle comma-separated imports: import os, sys, re
-+				importsList := strings.Join(parts[1:], " ")
-+				for _, imp := range strings.Split(importsList, ",") {
-+					importPath := strings.TrimSpace(imp)
-+					if importPath == "" {
-+						continue
-+					}
-+					info := importInfo{
-+						File:       relPath,
-+						Import:     importPath,
-+						Line:       i + 1,
-+						IsStdLib:   isPythonStdLib(importPath),
-+						IsExternal: !isPythonStdLib(importPath),
-+					}
-+					imports = append(imports, info)
-+					importPaths = append(importPaths, importPath)
- 				}
--				imports = append(imports, info)
--				importPaths = append(importPaths, importPath)
- 			}
- 		}
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-		if strings.HasPrefix(trimmed, "import ") {
-			parts := strings.Fields(trimmed)
-			if len(parts) >= 2 {
-				// Handle comma-separated imports: import os, sys, re
-				importsList := strings.Join(parts[1:], " ")
-				for _, imp := range strings.Split(importsList, ",") {
-					importPath := strings.TrimSpace(imp)
-					if importPath == "" {
-						continue
-					}
-					info := importInfo{
-						File:       relPath,
-						Import:     importPath,
-						Line:       i + 1,
-						IsStdLib:   isPythonStdLib(importPath),
-						IsExternal: !isPythonStdLib(importPath),
-					}
-					imports = append(imports, info)
-					importPaths = append(importPaths, importPath)
-				}
-			}
-		}
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_imports/main.go around lines 309 to 324, the code only captures
-the first module in multi-import statements (e.g., "import os, sys, re") by
-using strings.Split(...)[0]; change the logic to split the import list by
-commas, iterate over each module token, trim whitespace and any surrounding
-quotes, strip optional "as <alias>" parts, and for each resulting import name
-create and append an importInfo and append to importPaths; ensure
-IsStdLib/IsExternal are evaluated per module.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 27: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_imports/main.go:553`
-
-**Statistics calculation depends on correct IsExternal determination.**
-The local import count (Line 530) is calculated as `total - stdLib - external`, which assumes that std, external, and local are mutually exclusive categories. This will be incorrect for Go imports due to the IsExternal bug flagged in lines 275-281.
-This issue will resolve itself when the IsExternal logic for Go is corrected.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_imports/main.go around lines 509 to 532, the local import count
-is computed as total - stdLib - external which assumes exclusivity and will be
-wrong if IsExternal is miscomputed; change the routine to compute local
-explicitly during the loop (e.g., add a local counter and increment when
-imp.IsLocal is true or when neither imp.IsStdLib nor imp.IsExternal is true) and
-return that local counter instead of deriving it from total so the stats remain
-correct even if external detection was buggy.
-```
-</details>
-
----
-
-### Task 28: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_security/main.go:539`
-
-**Secret findings are stored verbatim in `CodeSnippet` and artifacts**
-`scanFile` trims each matching line into `CodeSnippet` and `persistResultsArtifact` writes all vulnerabilities (including secrets) into an NDJSON artifact. For sensitive patterns (`Category == "sensitive_data"`), this means exposed credentials/keys can be persisted outside the original repo.
-If artifacts may leave the local machine or be retained long term, consider redacting or partially masking snippets for sensitive categories (e.g., keep a few prefix/suffix chars, mask the middle) while still giving enough context to locate the issue.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_security/main.go around lines 487-532, the scanner currently
-stores matching lines verbatim into vulnerability.CodeSnippet (and later
-artifacts), which risks persisting full secrets for patterns with Category ==
-"sensitive_data"; change the snippet generation to redact/mask sensitive
-snippets: when pattern.Category == "sensitive_data" build a masked snippet that
-preserves only a small prefix and suffix (e.g., up to 4 chars each or trim to
-available length) and replace the middle with a fixed marker like "…[REDACTED]…"
-(still limit to ~100 chars), otherwise keep the existing trimming logic; set
-vulnerability.CodeSnippet to the masked value for sensitive_data entries (and
-consider adding a boolean field or label MarkedSensitive if your schema supports
-it) so artifacts never contain full secret values.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 29: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_stats/main_test.go`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-**Harden JSON envelope decoding to avoid panic-prone type assertions**
-The test currently assumes the envelope shape and uses direct type assertions:
-```go
-data := env["data"].(map[string]any)
-statistics := data["statistics"].(map[string]any)
-languages := statistics["languages"].(map[string]any)
-```
-If the envelope format changes or an error envelope is emitted, these will panic instead of producing a clear test failure.
-Consider guarding these with `ok` checks or decoding into small typed structs so failures surface via `t.Fatalf` with clearer messages rather than panics. This will make the tests more robust against upstream envelope changes.
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Optional: inspect other skill tests to mirror their envelope decoding pattern.
-rg -n 'json.Unmarshal\(buf.Bytes\(\), &env\)' --type go
-```
-Length of output: 2282
----
-I need to gather more context before finalizing the verification. Let me check if any tests use defensive patterns with `ok` checks and examine the envelope structure.
-I need to check if any tests in the codebase use the safer defensive pattern with `ok` checks, and examine the envelope structure to understand if format changes are expected.
-[/run_scripts]
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if ANY test uses defensive ok checks for type assertions
-rg -n '\..*\(map\[string\]any\)\s+(ok|_)' --type go
-```
-Length of output: 0
----
-Let me verify the actual pattern in a few representative test files to confirm they all use direct assertions, and search for envelope structure definitions.
-[/run_scripts]
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Inspect first few lines after json.Unmarshal in representative files
-echo "=== code_stats/main_test.go ==="
-sed -n '53,65p' skills/code_stats/main_test.go
-echo -e "\n=== fs_tree/main_test.go ==="
-sed -n '46,58p' skills/fs_tree/main_test.go
-echo -e "\n=== code_diff/main_test.go ==="
-sed -n '54,66p' skills/code_diff/main_test.go
-# Search for envelope structure definition or types
-echo -e "\n=== Searching for envelope struct definition ==="
-rg -n 'type.*Envelope|envelope.*struct' --type go -A 3
-```
-Length of output: 2822
----
-Good finding - I can see that some tests (fs_tree, code_diff) are more defensive and only check for nil, while code_stats is more aggressive. Let me examine the full Envelope struct definition to understand the data field type contract.
-[/run_scripts]
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Get full Envelope struct definition
-sed -n '46,70p' internal/domain/envelope/envelope.go
-```
-Length of output: 1110
----
-Now let me check if any tests unmarshal directly into the typed Envelope struct instead of map[string]any, which would be the type-safe approach.
-[/run_scripts]
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Check if any tests unmarshal into typed Envelope struct
-rg -n 'json.Unmarshal.*&env\)' --type go -B 2 | grep -A 2 'var env.*Envelope'
-echo "---"
-# Also check what other test files do after Unmarshal
-echo "Checking pattern in other files:"
-rg -n 'json.Unmarshal' --type go -A 5 | grep -E '(var env|data :=|\..*\(map)' | head -20
-```
-Length of output: 6744
----
-Excellent finding. Let me verify that code_stats indeed uses the `map[string]any` declaration which is the root issue:
-[/run_scripts]
----
-🏁 Script executed:
-```shell
-#!/bin/bash
-# Verify the variable declaration in code_stats at line 52
-sed -n '50,60p' skills/code_stats/main_test.go
-```
-Length of output: 257
----
-</details>
-**Use typed `envelope.Envelope` instead of `map[string]any` to align with codebase pattern**
-The test currently uses `var env map[string]any` with cascading unsafe type assertions that will panic if the envelope format changes. However, most tests in the codebase (fs_read, todo, cmd tests, etc.) use the proper typed `var env envelope.Envelope` declaration.
-Switch to the typed approach:
-```go
-var env envelope.Envelope
-if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
-    t.Fatalf("unmarshal envelope: %v", err)
-}
-data, ok := env.Data.(map[string]any)
-if !ok {
-    t.Fatalf("expected data in response")
-}
-statistics, ok := data["statistics"].(map[string]any)
-if !ok {
-    t.Fatalf("expected statistics in data")
-}
-```
-This eliminates cascading assertions, gains compile-time type safety, and aligns with the established test pattern across skills/ and cmd/ tests.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_stats/main_test.go around lines 52 to 73, replace the untyped map
-usage with the typed envelope.Envelope to match project pattern: declare var env
-envelope.Envelope and unmarshal into it, then safely type-assert env.Data to
-map[string]any with an ok check (fail the test if not ok), similarly assert
-data["statistics"] to map[string]any with an ok check, and then read statistics
-fields (total_files, total_lines) with checked type assertions (fail the test on
-type mismatch) and verify languages exists via a checked assertion; this removes
-cascading panics and aligns the test with existing fs_read/todo/cmd tests.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 30: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_stats/main.go:252`
-
-**Preserve full statistics for artifacts; avoid truncating the canonical struct**
-`preparePreview` truncates `s.Breakdown` in place:
-```go
-func preparePreview(s *stats, max int) (*stats, bool) {
-	truncated := false
-	if len(s.Breakdown) > max {
-		s.Breakdown = s.Breakdown[:max]
-		truncated = true
-	}
-	return s, truncated
-}
-```
-Later you pass the same `*stats` to `persistStatsArtifact`:
-```go
-preview, truncated := preparePreview(totalStats, rc.MaxPreview)
-artifact, err := persistStatsArtifact(ctx, rc, totalStats, truncated)
-```
-When `truncated` is true, both the preview and the persisted artifact contain only the top `max` breakdown items, so the artifact no longer provides the “full” data. This contradicts the intent implied by the comment in `preparePreview` and limits downstream analysis.
-A simple fix is to have `preparePreview` work on a shallow copy:
-```diff
-func preparePreview(s *stats, max int) (*stats, bool) {
--	// For stats, we don't truncate the main object, just limit breakdown items
--	truncated := false
--	if len(s.Breakdown) > max {
--		s.Breakdown = s.Breakdown[:max]
--		truncated = true
--	}
--	return s, truncated
-+	// For stats, keep the full struct; return a truncated view for preview only.
-+	if max <= 0 || len(s.Breakdown) <= max {
-+		return s, false
-+	}
-+	cp := *s
-+	cp.Breakdown = append([]breakdownItem(nil), s.Breakdown[:max]...)
-+	return &cp, true
-}
-```
-This way `totalStats` (and the artifact) stay complete, while only the inline preview is truncated.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_stats/main.go around lines 214-252, preparePreview currently
-truncates s.Breakdown in place which mutates totalStats before persisting;
-change preparePreview to operate on a shallow copy of the stats struct and a
-copied Breakdown slice (so the preview can be shortened without altering the
-original Breakdown backing array), return the copied/truncated preview and the
-truncated flag, and continue passing the untouched totalStats to
-persistStatsArtifact.
-```
-</details>
-✅ Addressed in commit c576f4a
-
----
-
-### Task 31: coderabbitai[bot]'s feedback
-
-**File:** `skills/code_stats/main.go:264`
-
-**Default `IncludeTests` to `true` to match the manifest**
-`parseInput` only sets a default for `BreakdownBy`, leaving `IncludeTests` at the Go zero value (`false`) when omitted:
-```go
-var in input
-if err := json.NewDecoder(r).Decode(&in); err != nil { ... }
-if in.BreakdownBy == "" {
-	in.BreakdownBy = "language"
-}
-```
-Given the manifest declares `include_tests` default `true`, this causes unexpected test exclusion by default.
-You can fix this by seeding the struct with the desired defaults before decoding:
-```diff
--func parseInput(r io.Reader) (input, error) {
--	var in input
-+func parseInput(r io.Reader) (input, error) {
-+	in := input{
-+		IncludeTests: true,
-+	}
- 	if err := json.NewDecoder(r).Decode(&in); err != nil {
- 		return input{}, fmt.Errorf("decode input: %w", err)
- 	}
- 	if in.BreakdownBy == "" {
- 		in.BreakdownBy = "language"
- 	}
- 	return in, nil
-}
-```
-This preserves explicit `include_tests: false` from callers while honoring the declared default.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/code_stats/main.go around lines 256 to 264, parseInput currently
-decodes into an empty input struct so IncludeTests defaults to false (Go zero
-value) which contradicts the manifest default of true; to fix, seed the input
-variable with the desired defaults (e.g. IncludeTests: true and optionally
-BreakdownBy: "language") before calling json.NewDecoder(r).Decode(&in) so
-omitted fields keep manifest defaults while explicit false values from callers
-are preserved, and then keep the existing post-decode fallback for BreakdownBy
-if still empty.
+In skills/editor_godot/godot_plugin/bridge.gd around lines 832 to 853, the match
+arms for TYPE_INT, TYPE_FLOAT, and TYPE_BOOL silently fall through when
+validation fails, causing str_to_var fallback to return a string; change each
+type-specific branch to return null explicitly when validation fails (e.g., if
+is_valid_int/is_valid_float checks fail, return null; for BOOL convert/lower
+check, return null if not "true" or "false"); ensure
+TYPE_VECTOR2/TYPE_VECTOR3/TYPE_COLOR parsing routines also propagate null on
+parse failure rather than falling through.
 ```
 </details>
 
@@ -2510,5 +567,5 @@ if still empty.
 
 ## Summary
 
-**Total tasks:** 31
-- 📝 Review comments: 31
+**Total tasks:** 9
+- 📝 Review comments: 9

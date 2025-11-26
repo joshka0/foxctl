@@ -228,8 +228,10 @@ func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
 	t.Helper()
 	cmd := exec.Command("go", "build", "-o", dest, pkg)
 	cmd.Dir = repoRoot(t)
+	// Inherit CGO settings from the parent process. CI explicitly sets
+	// CGO_ENABLED=1 for these tests; local runs can stay CGO-free.
 	env := append([]string{}, os.Environ()...)
-	env = append(env, "CGO_ENABLED=1", "GOFLAGS=-modcacherw")
+	env = append(env, "GOFLAGS=-modcacherw -buildvcs=false")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -246,8 +248,9 @@ func buildAgentctlBinary(t *testing.T) string {
 	}
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/agentctl")
 	cmd.Dir = repoRoot(t)
+	// Same as above: respect CGO settings from the test environment.
 	env := append([]string{}, os.Environ()...)
-	env = append(env, "CGO_ENABLED=1", "GOFLAGS=-modcacherw")
+	env = append(env, "GOFLAGS=-modcacherw -buildvcs=false")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {
