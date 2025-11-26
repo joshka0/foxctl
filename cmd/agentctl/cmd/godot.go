@@ -21,6 +21,7 @@ type godotFlags struct {
 	timeoutMS int
 	dataOnly  bool
 	skipCache bool
+	dryRun    bool
 }
 
 func newGodotCommand() *cobra.Command {
@@ -57,9 +58,23 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotAttachScriptCommand(),
 		newGodotConnectSignalCommand(),
 		newGodotClassInfoCommand(),
+		newGodotEnsureNodeCommand(),
 		newGodotSaveCommand(),
+		newGodotSceneListCommand(),
+		newGodotSceneOpenCommand(),
+		newGodotSceneInstanceCommand(),
+		newGodotSearchNodesCommand(),
+		newGodotFocusCommand(),
+		newGodotSelectionCommand(),
+		newGodotCameraSaveCommand(),
+		newGodotCameraRestoreCommand(),
+		newGodotCameraListCommand(),
+		newGodotScriptCreateCommand(),
 		newGodotResourcesCommand(),
+		newGodotSearchResourcesCommand(),
+		newGodotResourceReferencesCommand(),
 		newGodotRunCommand(),
+		newGodotRunSceneCommand(),
 		newGodotStopCommand(),
 		newGodotErrorsCommand(),
 	)
@@ -73,6 +88,11 @@ func addGodotFlags(cmd *cobra.Command, f *godotFlags) {
 	cmd.Flags().IntVar(&f.timeoutMS, "timeout", 10000, "Request timeout in milliseconds")
 	cmd.Flags().BoolVar(&f.dataOnly, "data-only", false, "Print only {status,data} from envelope")
 	cmd.Flags().BoolVar(&f.skipCache, "skip-cache", false, "Bypass result cache")
+}
+
+func addGodotMutatingFlags(cmd *cobra.Command, f *godotFlags) {
+	addGodotFlags(cmd, f)
+	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "Preview changes without applying them")
 }
 
 func newGodotPingCommand() *cobra.Command {
@@ -189,12 +209,13 @@ The operation is registered with Godot's Undo/Redo system.`,
 				"parent_path": args[0],
 				"node_type":   args[1],
 				"node_name":   args[2],
+				"dry_run":     f.dryRun,
 			}
 			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
 		},
 	}
 
-	addGodotFlags(cmd, &f)
+	addGodotMutatingFlags(cmd, &f)
 	return cmd
 }
 
@@ -412,6 +433,70 @@ func newGodotClassInfoCommand() *cobra.Command {
 	return cmd
 }
 
+func newGodotEnsureNodeCommand() *cobra.Command {
+	var f godotFlags
+	var props []string
+	var ifExists string
+
+	cmd := &cobra.Command{
+		Use:   "ensure-node <path> <type>",
+		Short: "Idempotently ensure a node exists",
+		Long: `Ensure a node exists at the given path with the given type.
+
+If the node already exists and the type matches:
+  - With --if-exists=update (default): update properties if --prop flags are provided
+  - With --if-exists=ignore: return info without modifying
+  - With --if-exists=error: fail with ENODE_EXISTS
+
+If the node doesn't exist, create it with the specified type and properties.
+All operations are registered with Godot's Undo/Redo system.`,
+		Example: `  # Ensure a Node2D exists (create if missing)
+  agentctl godot ensure-node /root/GameRoot/Player Node2D
+
+  # Ensure with properties
+  agentctl godot ensure-node /root/GameRoot/Player CharacterBody2D \
+    --prop position="Vector2(100, 200)" \
+    --prop visible=true
+
+  # Fail if node already exists
+  agentctl godot ensure-node /root/GameRoot/NewNode Sprite2D --if-exists error`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse --prop flags into a map
+			propsMap := make(map[string]string)
+			for _, p := range props {
+				parts := strings.SplitN(p, "=", 2)
+				if len(parts) == 2 {
+					propsMap[parts[0]] = parts[1]
+				} else {
+					return fmt.Errorf("invalid --prop format %q, expected key=value", p)
+				}
+			}
+
+			payload := map[string]any{
+				"action":     "ensure_node",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"node_path":  args[0],
+				"node_type":  args[1],
+			}
+			if len(propsMap) > 0 {
+				payload["props"] = propsMap
+			}
+			if ifExists != "" {
+				payload["if_exists"] = ifExists
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringArrayVar(&props, "prop", nil, "Property to set (format: key=value, repeatable)")
+	cmd.Flags().StringVar(&ifExists, "if-exists", "update", "Behavior if node exists: update, ignore, or error")
+	return cmd
+}
+
 func newGodotSaveCommand() *cobra.Command {
 	var f godotFlags
 
@@ -432,6 +517,384 @@ func newGodotSaveCommand() *cobra.Command {
 	}
 
 	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotSceneListCommand() *cobra.Command {
+	var f godotFlags
+	var path string
+	var maxResults int
+	var recursive bool
+
+	cmd := &cobra.Command{
+		Use:   "scene-list",
+		Short: "List scenes in the project",
+		Long:  "List all .tscn scene files in the Godot project.",
+		Example: `  # List all scenes
+  agentctl godot scene-list
+
+  # List scenes in a specific directory
+  agentctl godot scene-list --path res://Scenes
+
+  # Non-recursive listing
+  agentctl godot scene-list --path res://Scenes --no-recursive`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":        "scene_list",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"resource_path": path,
+				"max_results":   maxResults,
+				"recursive":     recursive,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&path, "path", "res://", "Directory to search for scenes")
+	cmd.Flags().IntVar(&maxResults, "max-results", 100, "Maximum scenes to return")
+	cmd.Flags().BoolVar(&recursive, "recursive", true, "Search subdirectories recursively")
+	return cmd
+}
+
+func newGodotSceneOpenCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "scene-open <scene-path>",
+		Short: "Open a scene in the editor",
+		Long:  "Open the specified scene file in the Godot Editor.",
+		Example: `  # Open main scene
+  agentctl godot scene-open res://Scenes/Main.tscn
+
+  # Open a specific scene
+  agentctl godot scene-open res://Scenes/Maps/Level1.tscn`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "scene_open",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"scene_path": args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotSceneInstanceCommand() *cobra.Command {
+	var f godotFlags
+	var instanceName string
+
+	cmd := &cobra.Command{
+		Use:   "scene-instance <scene-path> <parent-path>",
+		Short: "Instance a scene as a child node",
+		Long: `Instance a PackedScene as a child of the specified parent node.
+
+This is useful for adding prefabs/templates to your scene.
+The operation is registered with Godot's Undo/Redo system.`,
+		Example: `  # Instance an enemy prefab
+  agentctl godot scene-instance res://Scenes/Entities/Enemy.tscn /root/GameRoot
+
+  # Instance with a custom name
+  agentctl godot scene-instance res://Scenes/Entities/Enemy.tscn /root/GameRoot --name Boss`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":      "scene_instance",
+				"host":        f.host,
+				"port":        f.port,
+				"timeout_ms":  f.timeoutMS,
+				"scene_path":  args[0],
+				"parent_path": args[1],
+			}
+			if instanceName != "" {
+				payload["instance_name"] = instanceName
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&instanceName, "name", "", "Name for the instanced node (default: scene root name)")
+	return cmd
+}
+
+func newGodotSearchNodesCommand() *cobra.Command {
+	var f godotFlags
+	var name string
+	var nodeType string
+	var property string
+	var value string
+	var maxResults int
+
+	cmd := &cobra.Command{
+		Use:   "search-nodes",
+		Short: "Search for nodes by name, type, or property",
+		Long: `Search the current scene for nodes matching the given criteria.
+
+All filters are optional and combined with AND logic.
+Name supports * wildcard patterns.`,
+		Example: `  # Find all nodes with "Player" in the name
+  agentctl godot search-nodes --name "*Player*"
+
+  # Find all Area2D nodes
+  agentctl godot search-nodes --type Area2D
+
+  # Find nodes with a specific property value
+  agentctl godot search-nodes --property visible --value false
+
+  # Combine filters
+  agentctl godot search-nodes --type Sprite2D --property modulate --value "Color(1, 0, 0, 1)"`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":      "search_nodes",
+				"host":        f.host,
+				"port":        f.port,
+				"timeout_ms":  f.timeoutMS,
+				"search_name": name,
+				"search_type": nodeType,
+				"property":    property,
+				"value":       value,
+				"max_results": maxResults,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&name, "name", "", "Node name pattern (supports * wildcard)")
+	cmd.Flags().StringVar(&nodeType, "type", "", "Node type/class to filter by")
+	cmd.Flags().StringVar(&property, "property", "", "Property name to check")
+	cmd.Flags().StringVar(&value, "value", "", "Property value to match")
+	cmd.Flags().IntVar(&maxResults, "max-results", 50, "Maximum results to return")
+	return cmd
+}
+
+func newGodotFocusCommand() *cobra.Command {
+	var f godotFlags
+	var frame bool
+
+	cmd := &cobra.Command{
+		Use:   "focus <node-path>",
+		Short: "Select and focus a node in the editor",
+		Long:  "Select the specified node in the editor's scene tree, making it the active selection.",
+		Example: `  # Focus on a specific node
+  agentctl godot focus /root/GameRoot/Player
+
+  # Focus without framing
+  agentctl godot focus /root/GameRoot/Player --no-frame`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "focus_node",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"node_path":  args[0],
+				"frame":      frame,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().BoolVar(&frame, "frame", true, "Frame the node in the viewport")
+	return cmd
+}
+
+func newGodotSelectionCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:     "selection",
+		Short:   "Get the current editor selection",
+		Long:    "Report what nodes are currently selected in the Godot Editor's scene tree.",
+		Example: `  agentctl godot selection`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":     "selection_state",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotCameraSaveCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "camera-save <name>",
+		Short: "Save the current editor camera position",
+		Long:  "Save the current 2D/3D editor camera position as a named bookmark.",
+		Example: `  # Save current camera position
+  agentctl godot camera-save spawn_area
+
+  # Save another position
+  agentctl godot camera-save boss_arena`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":        "camera_save",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"bookmark_name": args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotCameraRestoreCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "camera-restore <name>",
+		Short: "Restore a saved camera position",
+		Long:  "Restore the editor camera to a previously saved bookmark position.",
+		Example: `  # Restore a saved camera position
+  agentctl godot camera-restore spawn_area`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":        "camera_restore",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"bookmark_name": args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotCameraListCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:     "camera-list",
+		Short:   "List saved camera bookmarks",
+		Long:    "List all saved camera position bookmarks.",
+		Example: `  agentctl godot camera-list`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":     "camera_list",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotScriptCreateCommand() *cobra.Command {
+	var f godotFlags
+	var extendsClass string
+	var exports []string
+	var methods []string
+	var signals []string
+	var overwrite bool
+
+	cmd := &cobra.Command{
+		Use:   "script-create <path>",
+		Short: "Create a new GDScript file",
+		Long: `Create a new GDScript file with a safe template.
+
+The script will include:
+- extends declaration
+- Optional exported variables
+- Optional method stubs
+- Optional signal declarations
+
+The path should be relative to res:// (e.g., Scripts/Player.gd).`,
+		Example: `  # Create a simple script
+  agentctl godot script-create res://Scripts/Player.gd --extends CharacterBody2D
+
+  # Create with exports and methods
+  agentctl godot script-create res://Scripts/Enemy.gd \
+    --extends CharacterBody2D \
+    --export speed:float=100.0 \
+    --export health:int=100 \
+    --method _physics_process \
+    --method take_damage
+
+  # Create with signals
+  agentctl godot script-create res://Scripts/GameManager.gd \
+    --extends Node \
+    --signal game_started \
+    --signal game_over`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse exports into structured format
+			var exportsList []any
+			for _, e := range exports {
+				parts := strings.SplitN(e, ":", 2)
+				if len(parts) == 2 {
+					typeParts := strings.SplitN(parts[1], "=", 2)
+					export := map[string]string{
+						"name": parts[0],
+						"type": typeParts[0],
+					}
+					if len(typeParts) == 2 {
+						export["default"] = typeParts[1]
+					}
+					exportsList = append(exportsList, export)
+				} else {
+					exportsList = append(exportsList, e)
+				}
+			}
+
+			payload := map[string]any{
+				"action":      "script_create",
+				"host":        f.host,
+				"port":        f.port,
+				"timeout_ms":  f.timeoutMS,
+				"script_path": args[0],
+				"extends":     extendsClass,
+				"overwrite":   overwrite,
+			}
+			if len(exportsList) > 0 {
+				payload["exports"] = exportsList
+			}
+			if len(methods) > 0 {
+				payload["methods"] = methods
+			}
+			if len(signals) > 0 {
+				payload["signals"] = signals
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&extendsClass, "extends", "Node", "Base class to extend")
+	cmd.Flags().StringArrayVar(&exports, "export", nil, "Exported variable (format: name:type=default)")
+	cmd.Flags().StringArrayVar(&methods, "method", nil, "Method stub to create")
+	cmd.Flags().StringArrayVar(&signals, "signal", nil, "Signal to declare")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing script")
 	return cmd
 }
 
@@ -474,13 +937,101 @@ func newGodotResourcesCommand() *cobra.Command {
 	return cmd
 }
 
+func newGodotSearchResourcesCommand() *cobra.Command {
+	var f godotFlags
+	var resourceType string
+	var path string
+	var name string
+	var maxResults int
+
+	cmd := &cobra.Command{
+		Use:   "search-resources",
+		Short: "Search for resources by type",
+		Long: `Search the project for resources of a specific type.
+
+Supported type shortcuts:
+  - scene, packedscene: .tscn/.scn files
+  - script, gdscript: .gd files
+  - texture, texture2d: .png/.jpg/.webp/.svg files
+  - audio, audiostream: .mp3/.ogg/.wav files
+  - shader: .gdshader/.shader files
+  - material: .material/.tres files
+  - resource, tres: .tres files`,
+		Example: `  # Find all scenes
+  agentctl godot search-resources --type scene
+
+  # Find all scripts with "Player" in the name
+  agentctl godot search-resources --type script --name "*Player*"
+
+  # Find textures in a specific directory
+  agentctl godot search-resources --type texture --path res://Assets/Sprites`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if resourceType == "" {
+				return fmt.Errorf("--type is required")
+			}
+			payload := map[string]any{
+				"action":        "search_resources",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"resource_type": resourceType,
+				"resource_path": path,
+				"search_name":   name,
+				"max_results":   maxResults,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&resourceType, "type", "", "Resource type to search for (required)")
+	cmd.Flags().StringVar(&path, "path", "res://", "Directory to search in")
+	cmd.Flags().StringVar(&name, "name", "", "Name pattern to filter (supports wildcards)")
+	cmd.Flags().IntVar(&maxResults, "max-results", 50, "Maximum results to return")
+	return cmd
+}
+
+func newGodotResourceReferencesCommand() *cobra.Command {
+	var f godotFlags
+	var maxResults int
+
+	cmd := &cobra.Command{
+		Use:   "resource-references <resource-path>",
+		Short: "Find scenes that reference a resource",
+		Long: `Find all scenes and resources that reference the specified resource.
+
+Useful for understanding dependencies before refactoring or deleting resources.`,
+		Example: `  # Find what uses a script
+  agentctl godot resource-references res://Scripts/Player.gd
+
+  # Find what uses a texture
+  agentctl godot resource-references res://Assets/player.png`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":        "resource_references",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"resource_path": args[0],
+				"max_results":   maxResults,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().IntVar(&maxResults, "max-results", 50, "Maximum results to return")
+	return cmd
+}
+
 func newGodotRunCommand() *cobra.Command {
 	var f godotFlags
 
 	cmd := &cobra.Command{
 		Use:     "run",
-		Short:   "Start the game",
-		Long:    "Launch the game from the Godot Editor (equivalent to pressing F5).",
+		Short:   "Run the game",
+		Long:    "Start the game from the main scene in the Godot Editor.",
 		Example: `  agentctl godot run`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := map[string]any{
@@ -488,6 +1039,35 @@ func newGodotRunCommand() *cobra.Command {
 				"host":       f.host,
 				"port":       f.port,
 				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotRunSceneCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "run-scene <scene-path>",
+		Short: "Run a specific scene",
+		Long:  "Run a specific scene instead of the main scene. Useful for testing individual scenes.",
+		Example: `  # Run a specific scene
+  agentctl godot run-scene res://Scenes/TestLevel.tscn
+
+  # Run the main menu
+  agentctl godot run-scene res://Scenes/MainMenu.tscn`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "run_scene",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"scene_path": args[0],
 			}
 			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
 		},

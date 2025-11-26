@@ -21,6 +21,7 @@ var _clients: Array[StreamPeerTCP] = []
 var _undo_redo: EditorUndoRedoManager
 var _error_buffer: Array[Dictionary] = []
 const MAX_ERROR_BUFFER: int = 200
+var _camera_bookmarks: Dictionary = {}  # name -> {position, rotation, zoom}
 
 
 func _enter_tree() -> void:
@@ -32,10 +33,18 @@ func _enter_tree() -> void:
 	
 	print("[GodotAIBridge] Listening on 127.0.0.1:%d" % PORT)
 	_undo_redo = get_undo_redo()
-	
-	# Connect to error output for capturing errors
-	# Note: In Godot 4, we'd ideally hook into the output panel, but that's complex.
-	# For now, errors are captured via push_error calls we can intercept.
+
+
+func _add_error(message: String, source: String = "", severity: String = "error") -> void:
+	## Add an error to the buffer for later retrieval.
+	_error_buffer.append({
+		"message": message,
+		"source": source,
+		"severity": severity,
+		"timestamp": Time.get_unix_time_from_system(),
+	})
+	if _error_buffer.size() > MAX_ERROR_BUFFER:
+		_error_buffer.pop_front()
 
 
 func _exit_tree() -> void:
@@ -161,19 +170,47 @@ func _handle_request(json_str: String) -> String:
 			return _handle_signal_connect(params)
 		"class_info":
 			return _handle_class_info(params)
+		"ensure_node":
+			return _handle_ensure_node(params)
 		"scene_save":
 			return _handle_scene_save()
+		"scene_list":
+			return _handle_scene_list(params)
+		"scene_open":
+			return _handle_scene_open(params)
+		"scene_instance":
+			return _handle_scene_instance(params)
+		"search_nodes":
+			return _handle_search_nodes(params)
+		"focus_node":
+			return _handle_focus_node(params)
+		"selection_state":
+			return _handle_selection_state()
+		"camera_save":
+			return _handle_camera_save(params)
+		"camera_restore":
+			return _handle_camera_restore(params)
+		"camera_list":
+			return _handle_camera_list()
+		"script_create":
+			return _handle_script_create(params)
 		"resource_list":
 			return _handle_resource_list(params)
+		"search_resources":
+			return _handle_search_resources(params)
+		"resource_references":
+			return _handle_resource_references(params)
 		"run_game":
 			return _handle_run_game()
+		"run_scene":
+			return _handle_run_scene(params)
 		"stop_game":
 			return _handle_stop_game()
 		"errors":
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, scene_save, resource_list, run_game, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, camera_save, camera_restore, camera_list, script_create, resource_list, search_resources, resource_references, run_game, run_scene, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -342,6 +379,7 @@ func _handle_node_create(params: Dictionary) -> String:
 	var parent_path: String = params.get("parent_path", "")
 	var node_type: String = params.get("type", "")
 	var node_name: String = params.get("name", "")
+	var dry_run: bool = params.get("dry_run", false)
 	
 	if parent_path.is_empty() or node_type.is_empty() or node_name.is_empty():
 		return _error_response("EARG", "parent_path, type, and name are required", "")
@@ -359,6 +397,18 @@ func _handle_node_create(params: Dictionary) -> String:
 	if not ClassDB.class_exists(node_type):
 		return _error_response("ETYPE_INVALID", "Invalid Godot class: " + node_type,
 			"Use a valid Godot class name like Node2D, Sprite2D, CharacterBody2D, etc.")
+	
+	# Dry run - return what would happen without doing it
+	if dry_run:
+		return _success_response({
+			"dry_run": true,
+			"would_create": {
+				"parent_path": _get_scene_path(parent, root),
+				"type": node_type,
+				"name": node_name,
+				"expected_path": _get_scene_path(parent, root) + "/" + node_name,
+			},
+		})
 	
 	# Create node with undo/redo support
 	var new_node: Node = ClassDB.instantiate(node_type)
@@ -526,11 +576,13 @@ func _handle_signal_connect(params: Dictionary) -> String:
 		"signal_name": signal_name,
 		"target_path": target_path,
 		"method_name": method_name,
+		"warning": "Connection is runtime-only and will not persist after scene reload. For persistent connections, edit the scene file directly.",
 	})
 
 
 func _handle_node_delete(params: Dictionary) -> String:
 	var node_path: String = params.get("node_path", "")
+	var dry_run: bool = params.get("dry_run", false)
 	
 	if node_path.is_empty():
 		return _error_response("EARG", "node_path is required", "")
@@ -548,11 +600,26 @@ func _handle_node_delete(params: Dictionary) -> String:
 	if node == root:
 		return _error_response("EARG", "Cannot delete scene root node", "")
 	
-	var parent := node.get_parent()
 	var node_name := node.name
+	var child_count := node.get_child_count()
+	
+	# Dry run - return what would happen
+	if dry_run:
+		return _success_response({
+			"dry_run": true,
+			"would_delete": {
+				"path": _get_scene_path(node, root),
+				"name": node_name,
+				"type": node.get_class(),
+				"child_count": child_count,
+			},
+		})
+	
+	var parent := node.get_parent()
 	var node_index := node.get_index()
 	
 	_undo_redo.create_action("AI: Delete Node " + node_name)
+	_undo_redo.add_do_reference(node)  # Keep reference during do action
 	_undo_redo.add_do_method(parent, "remove_child", node)
 	_undo_redo.add_undo_method(parent, "add_child", node)
 	_undo_redo.add_undo_method(parent, "move_child", node, node_index)
@@ -683,6 +750,168 @@ func _handle_class_info(params: Dictionary) -> String:
 	})
 
 
+func _handle_ensure_node(params: Dictionary) -> String:
+	## Idempotently ensure a node exists at the given path with the given type.
+	## If the node exists and type matches, optionally update properties.
+	## If the node doesn't exist, create it.
+	var target_path: String = params.get("path", "")
+	var node_type: String = params.get("type", "")
+	var props: Dictionary = params.get("props", {})
+	var if_exists: String = params.get("if_exists", "update")
+	
+	if target_path.is_empty() or node_type.is_empty():
+		return _error_response("EARG", "path and type are required", "")
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	# Try to find existing node
+	var existing := _resolve_node_path(target_path, root)
+	
+	if existing:
+		# Node exists - check type
+		if existing.get_class() != node_type:
+			# Check if it's a subclass (e.g., CharacterBody2D is a Node2D)
+			if not ClassDB.is_parent_class(existing.get_class(), node_type):
+				return _error_response("ETYPE_MISMATCH",
+					"Node exists but type mismatch: expected '%s', found '%s'" % [node_type, existing.get_class()],
+					"Use node_delete first if you want to replace the node with a different type.")
+		
+		# Handle based on if_exists policy
+		match if_exists:
+			"error":
+				return _error_response("ENODE_EXISTS",
+					"Node already exists at: " + target_path,
+					"Use if_exists='update' or 'ignore' to handle existing nodes.")
+			"ignore":
+				return _success_response({
+					"status": "exists",
+					"path": _get_scene_path(existing, root),
+					"type": existing.get_class(),
+					"created": false,
+					"updated_props": [],
+				})
+			"update", _:
+				# Update properties if provided
+				var updated_props: Array[String] = []
+				if not props.is_empty():
+					_undo_redo.create_action("AI: Ensure Node %s props" % existing.name)
+					for prop_name in props:
+						var value_str: String = str(props[prop_name])
+						var current_value = existing.get(prop_name)
+						
+						# Check property exists
+						var prop_exists := false
+						for prop in existing.get_property_list():
+							if prop.name == prop_name:
+								prop_exists = true
+								break
+						
+						if not prop_exists:
+							_undo_redo.commit_action()  # Commit empty action to avoid issues
+							var valid_props := _get_valid_properties(existing)
+							return _error_response("EPROP_NOT_FOUND",
+								"Property '%s' not found on node type '%s'" % [prop_name, existing.get_class()],
+								"Valid properties include: " + ", ".join(valid_props.slice(0, 10)))
+						
+						var typed_value = _convert_value(value_str, typeof(current_value))
+						if typed_value == null and not value_str.is_empty():
+							_undo_redo.commit_action()
+							return _error_response("ETYPE_CONVERSION",
+								"Cannot convert '%s' to type %s" % [value_str, type_string(typeof(current_value))],
+								"Expected format: " + _get_type_format_hint(typeof(current_value)))
+						
+						_undo_redo.add_do_property(existing, prop_name, typed_value)
+						_undo_redo.add_undo_property(existing, prop_name, current_value)
+						updated_props.append(prop_name)
+					
+					_undo_redo.commit_action()
+				
+				return _success_response({
+					"status": "exists",
+					"path": _get_scene_path(existing, root),
+					"type": existing.get_class(),
+					"created": false,
+					"updated_props": updated_props,
+				})
+	
+	# Node doesn't exist - create it
+	# Parse path to get parent and name
+	var path_parts := target_path.split("/")
+	if path_parts.size() < 3:  # Need at least /root/SceneName/NodeName
+		return _error_response("EARG", "Invalid path format: " + target_path,
+			"Path must be like /root/SceneName/NodeName")
+	
+	var node_name := path_parts[-1]
+	var parent_path := "/".join(path_parts.slice(0, -1))
+	
+	var parent := _resolve_node_path(parent_path, root)
+	if not parent:
+		return _error_response("ENODE_NOT_FOUND", "Parent node not found: " + parent_path,
+			"Create parent nodes first or check the path.")
+	
+	# Validate class exists
+	if not ClassDB.class_exists(node_type):
+		return _error_response("ETYPE_INVALID", "Invalid Godot class: " + node_type,
+			"Use a valid Godot class name like Node2D, Sprite2D, CharacterBody2D, etc.")
+	
+	# Create node
+	var new_node: Node = ClassDB.instantiate(node_type)
+	if not new_node:
+		return _error_response("ETYPE_INVALID", "Cannot instantiate class: " + node_type, "")
+	
+	new_node.name = node_name
+	
+	# Build undo/redo action for creation + property setting
+	_undo_redo.create_action("AI: Ensure Node " + node_name)
+	_undo_redo.add_do_method(parent, "add_child", new_node)
+	_undo_redo.add_do_method(new_node, "set_owner", root)
+	_undo_redo.add_do_reference(new_node)
+	_undo_redo.add_undo_method(parent, "remove_child", new_node)
+	
+	# Apply properties during creation
+	var props_applied: Array[String] = []
+	for prop_name in props:
+		var value_str: String = str(props[prop_name])
+		
+		# We need to check if property exists on the class
+		var prop_info: Dictionary = {}
+		for prop in ClassDB.class_get_property_list(node_type, true):
+			if prop.name == prop_name:
+				prop_info = prop
+				break
+		
+		if prop_info.is_empty():
+			# Property might be inherited or dynamic, try to get default
+			var default_value = new_node.get(prop_name)
+			if default_value == null:
+				_undo_redo.commit_action()
+				new_node.queue_free()
+				return _error_response("EPROP_NOT_FOUND",
+					"Property '%s' not found on class '%s'" % [prop_name, node_type], "")
+			
+			var typed_value = _convert_value(value_str, typeof(default_value))
+			if typed_value != null or value_str.is_empty():
+				_undo_redo.add_do_property(new_node, prop_name, typed_value)
+				props_applied.append(prop_name)
+		else:
+			var typed_value = _convert_value(value_str, prop_info.type)
+			if typed_value != null or value_str.is_empty():
+				_undo_redo.add_do_property(new_node, prop_name, typed_value)
+				props_applied.append(prop_name)
+	
+	_undo_redo.commit_action()
+	
+	return _success_response({
+		"status": "created",
+		"path": _get_scene_path(new_node, root),
+		"type": node_type,
+		"created": true,
+		"props_applied": props_applied,
+	})
+
+
 func _handle_scene_save() -> String:
 	var root := EditorInterface.get_edited_scene_root()
 	if not root:
@@ -694,6 +923,494 @@ func _handle_scene_save() -> String:
 	return _success_response({
 		"ok": true,
 		"scene_path": scene_path,
+	})
+
+
+func _handle_scene_list(params: Dictionary) -> String:
+	## List all scenes in the project, optionally filtered by path.
+	var search_path: String = params.get("path", "res://")
+	var max_results: int = params.get("max_results", 100)
+	var recursive: bool = params.get("recursive", true)
+	
+	if not search_path.begins_with("res://"):
+		search_path = "res://" + search_path.lstrip("/")
+	
+	var scenes: Array[Dictionary] = []
+	_find_scenes_recursive(search_path, scenes, max_results, recursive)
+	
+	return _success_response({
+		"scenes": scenes,
+		"search_path": search_path,
+		"count": scenes.size(),
+		"truncated": scenes.size() >= max_results,
+	})
+
+
+func _find_scenes_recursive(path: String, scenes: Array[Dictionary], max_results: int, recursive: bool) -> void:
+	## Recursively find .tscn files.
+	var dir := DirAccess.open(path)
+	if not dir:
+		return
+	
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "" and scenes.size() < max_results:
+		if file_name.begins_with("."):
+			file_name = dir.get_next()
+			continue
+		
+		var full_path := path.path_join(file_name)
+		
+		if dir.current_is_dir():
+			if recursive:
+				_find_scenes_recursive(full_path, scenes, max_results, recursive)
+		elif file_name.ends_with(".tscn"):
+			scenes.append({
+				"path": full_path,
+				"name": file_name.get_basename(),
+			})
+		
+		file_name = dir.get_next()
+	dir.list_dir_end()
+
+
+func _handle_scene_open(params: Dictionary) -> String:
+	## Open a scene in the editor.
+	var scene_path: String = params.get("path", "")
+	
+	if scene_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not scene_path.begins_with("res://"):
+		scene_path = "res://" + scene_path.lstrip("/")
+	
+	if not ResourceLoader.exists(scene_path):
+		return _error_response("ESCENE_NOT_FOUND", "Scene not found: " + scene_path,
+			"Ensure the scene file exists at the specified res:// path.")
+	
+	# Check if scene is a valid PackedScene
+	var resource := load(scene_path)
+	if not resource or not resource is PackedScene:
+		return _error_response("ESCENE_INVALID", "Not a valid scene file: " + scene_path, "")
+	
+	# Open the scene
+	EditorInterface.open_scene_from_path(scene_path)
+	
+	# Get the new root after opening
+	var new_root := EditorInterface.get_edited_scene_root()
+	
+	return _success_response({
+		"ok": true,
+		"scene_path": scene_path,
+		"root_name": new_root.name if new_root else "",
+		"root_type": new_root.get_class() if new_root else "",
+	})
+
+
+func _handle_scene_instance(params: Dictionary) -> String:
+	## Instance a scene as a child of a node.
+	var scene_path: String = params.get("scene_path", "")
+	var parent_path: String = params.get("parent_path", "")
+	var instance_name: String = params.get("name", "")
+	
+	if scene_path.is_empty() or parent_path.is_empty():
+		return _error_response("EARG", "scene_path and parent_path are required", "")
+	
+	if not scene_path.begins_with("res://"):
+		scene_path = "res://" + scene_path.lstrip("/")
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var parent := _resolve_node_path(parent_path, root)
+	if not parent:
+		return _error_response("ENODE_NOT_FOUND", "Parent node not found: " + parent_path, "")
+	
+	# Load the scene
+	if not ResourceLoader.exists(scene_path):
+		return _error_response("ESCENE_NOT_FOUND", "Scene not found: " + scene_path, "")
+	
+	var packed_scene: PackedScene = load(scene_path)
+	if not packed_scene:
+		return _error_response("ESCENE_INVALID", "Failed to load scene: " + scene_path, "")
+	
+	# Instance the scene
+	var instance := packed_scene.instantiate()
+	if not instance:
+		return _error_response("ESCENE_INVALID", "Failed to instantiate scene: " + scene_path, "")
+	
+	# Set name if provided
+	if not instance_name.is_empty():
+		instance.name = instance_name
+	
+	# Add with undo/redo
+	_undo_redo.create_action("AI: Instance Scene " + instance.name)
+	_undo_redo.add_do_method(parent, "add_child", instance)
+	_undo_redo.add_do_method(instance, "set_owner", root)
+	_undo_redo.add_do_reference(instance)
+	_undo_redo.add_undo_method(parent, "remove_child", instance)
+	_undo_redo.commit_action()
+	
+	return _success_response({
+		"ok": true,
+		"instance_path": _get_scene_path(instance, root),
+		"instance_name": instance.name,
+		"scene_path": scene_path,
+	})
+
+
+func _handle_search_nodes(params: Dictionary) -> String:
+	## Search for nodes by name, type, or property value.
+	var name_pattern: String = params.get("name", "")
+	var type_filter: String = params.get("type", "")
+	var prop_name: String = params.get("property", "")
+	var prop_value: String = params.get("value", "")
+	var max_results: int = params.get("max_results", 50)
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var results: Array[Dictionary] = []
+	_search_nodes_recursive(root, root, name_pattern, type_filter, prop_name, prop_value, results, max_results)
+	
+	return _success_response({
+		"results": results,
+		"count": results.size(),
+		"truncated": results.size() >= max_results,
+		"filters": {
+			"name": name_pattern,
+			"type": type_filter,
+			"property": prop_name,
+			"value": prop_value,
+		},
+	})
+
+
+func _search_nodes_recursive(node: Node, scene_root: Node, name_pattern: String, type_filter: String, prop_name: String, prop_value: String, results: Array[Dictionary], max_results: int) -> void:
+	## Recursively search nodes matching criteria.
+	if results.size() >= max_results:
+		return
+	
+	var matches := true
+	
+	# Check name pattern (supports * wildcard)
+	if not name_pattern.is_empty():
+		if not node.name.match(name_pattern) and not node.name.matchn(name_pattern):
+			matches = false
+	
+	# Check type filter
+	if matches and not type_filter.is_empty():
+		if node.get_class() != type_filter and not node.is_class(type_filter):
+			matches = false
+	
+	# Check property value
+	if matches and not prop_name.is_empty():
+		var has_prop := false
+		for prop in node.get_property_list():
+			if prop.name == prop_name:
+				has_prop = true
+				break
+		
+		if not has_prop:
+			matches = false
+		elif not prop_value.is_empty():
+			var actual_value := _value_to_string(node.get(prop_name))
+			if actual_value != prop_value and not actual_value.matchn(prop_value):
+				matches = false
+	
+	if matches:
+		results.append({
+			"path": _get_scene_path(node, scene_root),
+			"name": node.name,
+			"type": node.get_class(),
+		})
+	
+	# Recurse into children
+	for child in node.get_children():
+		if results.size() >= max_results:
+			break
+		_search_nodes_recursive(child, scene_root, name_pattern, type_filter, prop_name, prop_value, results, max_results)
+
+
+func _handle_focus_node(params: Dictionary) -> String:
+	## Select and frame a node in the editor.
+	var node_path: String = params.get("node_path", "")
+	var frame: bool = params.get("frame", true)
+	
+	if node_path.is_empty():
+		return _error_response("EARG", "node_path is required", "")
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var node := _resolve_node_path(node_path, root)
+	if not node:
+		return _error_response("ENODE_NOT_FOUND", "Node not found: " + node_path, "")
+	
+	# Select the node in the editor
+	var selection := EditorInterface.get_selection()
+	selection.clear()
+	selection.add_node(node)
+	
+	# Frame the node in the viewport (if it's a CanvasItem or Node3D)
+	if frame:
+		if node is CanvasItem:
+			# For 2D nodes, we can't directly frame, but selection is enough
+			pass
+		elif node is Node3D:
+			# For 3D nodes, we could use EditorInterface methods if available
+			pass
+	
+	return _success_response({
+		"ok": true,
+		"selected_path": _get_scene_path(node, root),
+		"selected_name": node.name,
+		"selected_type": node.get_class(),
+	})
+
+
+func _handle_selection_state() -> String:
+	## Get the current editor selection state.
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var selection := EditorInterface.get_selection()
+	var selected_nodes := selection.get_selected_nodes()
+	
+	var nodes_info: Array[Dictionary] = []
+	for node in selected_nodes:
+		nodes_info.append({
+			"path": _get_scene_path(node, root),
+			"name": node.name,
+			"type": node.get_class(),
+		})
+	
+	return _success_response({
+		"scene_path": root.scene_file_path,
+		"scene_root": root.name,
+		"selected_count": selected_nodes.size(),
+		"selected_nodes": nodes_info,
+	})
+
+
+func _handle_camera_save(params: Dictionary) -> String:
+	## Save the current editor camera position as a named bookmark.
+	var bookmark_name: String = params.get("name", "")
+	
+	if bookmark_name.is_empty():
+		return _error_response("EARG", "name is required", "")
+	
+	# Get the 2D editor viewport camera
+	var viewport := EditorInterface.get_editor_viewport_2d()
+	if viewport:
+		var transform := viewport.global_canvas_transform
+		_camera_bookmarks[bookmark_name] = {
+			"type": "2d",
+			"offset_x": -transform.origin.x / transform.get_scale().x,
+			"offset_y": -transform.origin.y / transform.get_scale().y,
+			"zoom": transform.get_scale().x,
+		}
+		return _success_response({
+			"ok": true,
+			"name": bookmark_name,
+			"type": "2d",
+			"bookmark": _camera_bookmarks[bookmark_name],
+		})
+	
+	# Try 3D viewport
+	var viewport_3d := EditorInterface.get_editor_viewport_3d()
+	if viewport_3d:
+		var camera := viewport_3d.get_camera_3d()
+		if camera:
+			_camera_bookmarks[bookmark_name] = {
+				"type": "3d",
+				"position_x": camera.global_position.x,
+				"position_y": camera.global_position.y,
+				"position_z": camera.global_position.z,
+				"rotation_x": camera.rotation.x,
+				"rotation_y": camera.rotation.y,
+				"rotation_z": camera.rotation.z,
+			}
+			return _success_response({
+				"ok": true,
+				"name": bookmark_name,
+				"type": "3d",
+				"bookmark": _camera_bookmarks[bookmark_name],
+			})
+	
+	return _error_response("EEDITOR_STATE", "Could not access editor camera", "")
+
+
+func _handle_camera_restore(params: Dictionary) -> String:
+	## Restore a saved camera bookmark.
+	var bookmark_name: String = params.get("name", "")
+	
+	if bookmark_name.is_empty():
+		return _error_response("EARG", "name is required", "")
+	
+	if not _camera_bookmarks.has(bookmark_name):
+		var available := ", ".join(_camera_bookmarks.keys())
+		return _error_response("EBOOKMARK_NOT_FOUND", 
+			"Bookmark not found: " + bookmark_name,
+			"Available bookmarks: " + (available if available else "(none)"))
+	
+	var bookmark: Dictionary = _camera_bookmarks[bookmark_name]
+	
+	if bookmark.get("type") == "2d":
+		var viewport := EditorInterface.get_editor_viewport_2d()
+		if viewport:
+			var zoom: float = bookmark.get("zoom", 1.0)
+			var offset_x: float = bookmark.get("offset_x", 0.0)
+			var offset_y: float = bookmark.get("offset_y", 0.0)
+			
+			# Set the canvas transform
+			var transform := Transform2D()
+			transform = transform.scaled(Vector2(zoom, zoom))
+			transform.origin = Vector2(-offset_x * zoom, -offset_y * zoom)
+			viewport.global_canvas_transform = transform
+			
+			return _success_response({
+				"ok": true,
+				"name": bookmark_name,
+				"restored": bookmark,
+			})
+	
+	# 3D camera restoration is more complex and may not be directly supported
+	# via EditorInterface in Godot 4
+	if bookmark.get("type") == "3d":
+		return _error_response("EUNSUPPORTED", 
+			"3D camera restoration not yet implemented",
+			"Use the 2D viewport for now.")
+	
+	return _error_response("EEDITOR_STATE", "Could not restore camera position", "")
+
+
+func _handle_camera_list() -> String:
+	## List all saved camera bookmarks.
+	var bookmarks: Array[Dictionary] = []
+	for name in _camera_bookmarks:
+		var bookmark: Dictionary = _camera_bookmarks[name].duplicate()
+		bookmark["name"] = name
+		bookmarks.append(bookmark)
+	
+	return _success_response({
+		"bookmarks": bookmarks,
+		"count": bookmarks.size(),
+	})
+
+
+func _handle_script_create(params: Dictionary) -> String:
+	## Create a new GDScript file with a safe template.
+	var script_path: String = params.get("path", "")
+	var extends_class: String = params.get("extends", "Node")
+	var exports: Array = params.get("exports", [])
+	var methods: Array = params.get("methods", [])
+	var signals_list: Array = params.get("signals", [])
+	var overwrite: bool = params.get("overwrite", false)
+	
+	if script_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not script_path.begins_with("res://"):
+		script_path = "res://" + script_path.lstrip("/")
+	
+	if not script_path.ends_with(".gd"):
+		script_path += ".gd"
+	
+	# Check if file already exists
+	if FileAccess.file_exists(script_path) and not overwrite:
+		return _error_response("ESCRIPT_EXISTS", "Script already exists: " + script_path,
+			"Use overwrite=true to replace the existing script.")
+	
+	# Validate extends class
+	if not ClassDB.class_exists(extends_class):
+		return _error_response("ETYPE_INVALID", "Invalid base class: " + extends_class,
+			"Use a valid Godot class name like Node, Node2D, CharacterBody2D, etc.")
+	
+	# Build script content
+	var content := "extends %s\n" % extends_class
+	content += "## Auto-generated script by agentctl\n\n"
+	
+	# Add signals
+	for sig in signals_list:
+		var sig_name: String = sig if sig is String else sig.get("name", "")
+		if not sig_name.is_empty():
+			content += "signal %s\n" % sig_name
+	
+	if not signals_list.is_empty():
+		content += "\n"
+	
+	# Add exports
+	for exp in exports:
+		var exp_name: String = ""
+		var exp_type: String = "Variant"
+		var exp_default: String = ""
+		
+		if exp is String:
+			exp_name = exp
+		elif exp is Dictionary:
+			exp_name = exp.get("name", "")
+			exp_type = exp.get("type", "Variant")
+			exp_default = exp.get("default", "")
+		
+		if not exp_name.is_empty():
+			if exp_default.is_empty():
+				content += "@export var %s: %s\n" % [exp_name, exp_type]
+			else:
+				content += "@export var %s: %s = %s\n" % [exp_name, exp_type, exp_default]
+	
+	if not exports.is_empty():
+		content += "\n"
+	
+	# Add _ready if no methods specified
+	if methods.is_empty():
+		content += "\nfunc _ready() -> void:\n\tpass\n"
+	else:
+		for method in methods:
+			var method_name: String = ""
+			var method_args: String = ""
+			var method_return: String = "void"
+			
+			if method is String:
+				method_name = method
+			elif method is Dictionary:
+				method_name = method.get("name", "")
+				method_args = method.get("args", "")
+				method_return = method.get("return", "void")
+			
+			if not method_name.is_empty():
+				content += "\nfunc %s(%s) -> %s:\n\tpass\n" % [method_name, method_args, method_return]
+	
+	# Create directory if needed
+	var dir_path := script_path.get_base_dir()
+	if not DirAccess.dir_exists_absolute(dir_path):
+		var err := DirAccess.make_dir_recursive_absolute(dir_path)
+		if err != OK:
+			return _error_response("EIO", "Failed to create directory: " + dir_path, "")
+	
+	# Write the file
+	var file := FileAccess.open(script_path, FileAccess.WRITE)
+	if not file:
+		return _error_response("EIO", "Failed to create script file: " + script_path,
+			"Error: " + str(FileAccess.get_open_error()))
+	
+	file.store_string(content)
+	file.close()
+	
+	# Refresh the filesystem so Godot sees the new file
+	EditorInterface.get_resource_filesystem().scan()
+	
+	return _success_response({
+		"ok": true,
+		"path": script_path,
+		"extends": extends_class,
+		"exports_count": exports.size(),
+		"methods_count": methods.size(),
+		"signals_count": signals_list.size(),
 	})
 
 
@@ -742,10 +1459,191 @@ func _handle_resource_list(params: Dictionary) -> String:
 	})
 
 
+func _handle_search_resources(params: Dictionary) -> String:
+	## Search for resources by type (e.g., PackedScene, Texture2D, Script).
+	var resource_type: String = params.get("type", "")
+	var search_path: String = params.get("path", "res://")
+	var name_pattern: String = params.get("name", "")
+	var max_results: int = params.get("max_results", 50)
+	
+	if resource_type.is_empty():
+		return _error_response("EARG", "type is required (e.g., PackedScene, Texture2D, Script)", "")
+	
+	if not search_path.begins_with("res://"):
+		search_path = "res://" + search_path.lstrip("/")
+	
+	var results: Array[Dictionary] = []
+	_search_resources_recursive(search_path, resource_type, name_pattern, results, max_results)
+	
+	return _success_response({
+		"results": results,
+		"count": results.size(),
+		"truncated": results.size() >= max_results,
+		"filters": {
+			"type": resource_type,
+			"path": search_path,
+			"name": name_pattern,
+		},
+	})
+
+
+func _search_resources_recursive(path: String, resource_type: String, name_pattern: String, results: Array[Dictionary], max_results: int) -> void:
+	## Recursively search for resources of a specific type.
+	if results.size() >= max_results:
+		return
+	
+	var dir := DirAccess.open(path)
+	if not dir:
+		return
+	
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "" and results.size() < max_results:
+		if file_name.begins_with("."):
+			file_name = dir.get_next()
+			continue
+		
+		var full_path := path.path_join(file_name)
+		
+		if dir.current_is_dir():
+			_search_resources_recursive(full_path, resource_type, name_pattern, results, max_results)
+		else:
+			# Check if name matches pattern
+			if not name_pattern.is_empty() and not file_name.matchn(name_pattern):
+				file_name = dir.get_next()
+				continue
+			
+			# Try to determine resource type without fully loading
+			var matches := false
+			match resource_type.to_lower():
+				"packedscene", "scene":
+					matches = file_name.ends_with(".tscn") or file_name.ends_with(".scn")
+				"script", "gdscript":
+					matches = file_name.ends_with(".gd")
+				"texture2d", "texture":
+					matches = file_name.ends_with(".png") or file_name.ends_with(".jpg") or file_name.ends_with(".webp") or file_name.ends_with(".svg")
+				"audiostreammp3", "audiostream", "audio":
+					matches = file_name.ends_with(".mp3") or file_name.ends_with(".ogg") or file_name.ends_with(".wav")
+				"shader":
+					matches = file_name.ends_with(".gdshader") or file_name.ends_with(".shader")
+				"material":
+					matches = file_name.ends_with(".material") or file_name.ends_with(".tres")
+				"resource", "tres":
+					matches = file_name.ends_with(".tres")
+				_:
+					# For other types, try to load and check
+					if ResourceLoader.exists(full_path):
+						var res := load(full_path)
+						if res and res.get_class() == resource_type:
+							matches = true
+			
+			if matches:
+				results.append({
+					"path": full_path,
+					"name": file_name,
+					"type": resource_type,
+				})
+		
+		file_name = dir.get_next()
+	dir.list_dir_end()
+
+
+func _handle_resource_references(params: Dictionary) -> String:
+	## Find scenes that reference a given resource.
+	var resource_path: String = params.get("path", "")
+	var max_results: int = params.get("max_results", 50)
+	
+	if resource_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not resource_path.begins_with("res://"):
+		resource_path = "res://" + resource_path.lstrip("/")
+	
+	if not ResourceLoader.exists(resource_path):
+		return _error_response("ERESOURCE_NOT_FOUND", "Resource not found: " + resource_path, "")
+	
+	var references: Array[Dictionary] = []
+	_find_resource_references_recursive("res://", resource_path, references, max_results)
+	
+	return _success_response({
+		"resource_path": resource_path,
+		"references": references,
+		"count": references.size(),
+		"truncated": references.size() >= max_results,
+	})
+
+
+func _find_resource_references_recursive(search_path: String, target_resource: String, references: Array[Dictionary], max_results: int) -> void:
+	## Recursively search for scenes/resources that reference the target.
+	if references.size() >= max_results:
+		return
+	
+	var dir := DirAccess.open(search_path)
+	if not dir:
+		return
+	
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "" and references.size() < max_results:
+		if file_name.begins_with("."):
+			file_name = dir.get_next()
+			continue
+		
+		var full_path := search_path.path_join(file_name)
+		
+		if dir.current_is_dir():
+			_find_resource_references_recursive(full_path, target_resource, references, max_results)
+		elif file_name.ends_with(".tscn") or file_name.ends_with(".tres"):
+			# Read file content and search for the resource path
+			var file := FileAccess.open(full_path, FileAccess.READ)
+			if file:
+				var content := file.get_as_text()
+				file.close()
+				
+				# Check if the target resource is referenced
+				# Resources are referenced like: [ext_resource type="..." path="res://..." id="..."]
+				# Or: load("res://...")
+				if target_resource in content:
+					references.append({
+						"path": full_path,
+						"name": file_name,
+						"type": "scene" if file_name.ends_with(".tscn") else "resource",
+					})
+		
+		file_name = dir.get_next()
+	dir.list_dir_end()
+
+
 func _handle_run_game() -> String:
 	EditorInterface.play_main_scene()
 	return _success_response({
 		"started": true,
+	})
+
+
+func _handle_run_scene(params: Dictionary) -> String:
+	## Run a specific scene instead of the main scene.
+	var scene_path: String = params.get("path", "")
+	
+	if scene_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not scene_path.begins_with("res://"):
+		scene_path = "res://" + scene_path.lstrip("/")
+	
+	if not ResourceLoader.exists(scene_path):
+		return _error_response("ESCENE_NOT_FOUND", "Scene not found: " + scene_path, "")
+	
+	# Verify it's a valid scene
+	var resource := load(scene_path)
+	if not resource or not resource is PackedScene:
+		return _error_response("ESCENE_INVALID", "Not a valid scene file: " + scene_path, "")
+	
+	EditorInterface.play_custom_scene(scene_path)
+	
+	return _success_response({
+		"started": true,
+		"scene_path": scene_path,
 	})
 
 
@@ -833,15 +1731,18 @@ func _convert_value(value_str: String, target_type: int) -> Variant:
 		TYPE_INT:
 			if value_str.is_valid_int():
 				return value_str.to_int()
+			return null  # Explicit failure for invalid int
 		TYPE_FLOAT:
 			if value_str.is_valid_float():
 				return value_str.to_float()
+			return null  # Explicit failure for invalid float
 		TYPE_BOOL:
 			var lower := value_str.to_lower()
 			if lower == "true":
 				return true
 			if lower == "false":
 				return false
+			return null  # Explicit failure for invalid bool
 		TYPE_STRING:
 			return value_str
 		TYPE_VECTOR2:
@@ -856,7 +1757,7 @@ func _convert_value(value_str: String, target_type: int) -> Variant:
 	if result != null:
 		return result
 	
-	return value_str  # Return as string if all else fails
+	return null  # Return null if conversion fails
 
 
 func _parse_vector2(s: String) -> Variant:
@@ -936,6 +1837,8 @@ func _success_response(data: Dictionary) -> String:
 
 
 func _error_response(code: String, message: String, hint: String) -> String:
+	# Add to error buffer for later retrieval via errors action
+	_add_error(message, code, "error")
 	return JSON.stringify({
 		"status": "error",
 		"data": null,

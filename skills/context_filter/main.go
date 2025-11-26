@@ -20,6 +20,11 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
+// httpClient is a shared HTTP client with timeout for LLM provider calls.
+var httpClient = &http.Client{
+	Timeout: 120 * time.Second, // LLM calls can be slow
+}
+
 type input struct {
 	Prompt string      `json:"prompt"`
 	Scope  string      `json:"scope"`
@@ -151,11 +156,11 @@ func parseInput(r io.Reader) (input, error) {
 		case "openai":
 			in.LLM.Model = "gpt-4.1-mini"
 		case "anthropic":
-			in.LLM.Model = "claude-3-5-sonnet-latest"
+			in.LLM.Model = "claude-sonnet-4-20250514" // Claude Sonnet 4.5
 		case "gemini":
-			in.LLM.Model = "gemini-1.5-pro-latest"
+			in.LLM.Model = "gemini-2.0-flash" // Gemini 2.0
 		case "groq":
-			in.LLM.Model = "llama-3.1-70b-versatile"
+			in.LLM.Model = "llama-3.3-70b-versatile" // Llama 3.3
 		case "openrouter":
 			in.LLM.Model = "openrouter/auto"
 		default:
@@ -499,7 +504,7 @@ func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (str
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", nil, fmt.Errorf("http request: %w", err)
 	}
@@ -584,7 +589,7 @@ func callAnthropic(ctx context.Context, llm llmInput, prompt string) (string, ma
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", nil, fmt.Errorf("http request: %w", err)
 	}
@@ -664,7 +669,7 @@ func callGemini(ctx context.Context, llm llmInput, prompt string) (string, map[s
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", nil, fmt.Errorf("http request: %w", err)
 	}
