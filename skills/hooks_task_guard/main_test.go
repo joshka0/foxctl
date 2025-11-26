@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -99,8 +98,7 @@ func TestTaskGuard_StrictMode_BlocksWithoutTask(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Set strict mode
-	os.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
-	defer os.Unsetenv("AGENTCTL_TASK_GUARD_MODE")
+	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
 
 	// Write operation with no active task should block
 	in := hook.Input{
@@ -122,8 +120,7 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Set strict mode
-	os.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
-	defer os.Unsetenv("AGENTCTL_TASK_GUARD_MODE")
+	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
 
 	// Create an active task first
 	ctx := context.Background()
@@ -187,7 +184,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
-	t.Cleanup(func() { rc.Close() })
+	t.Cleanup(func() { _ = rc.Close() })
 
 	return &testEnv{
 		ctx:           ctx,

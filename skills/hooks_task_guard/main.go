@@ -76,7 +76,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Generate default title from tool + file path
 	defaultTitle := deriveTaskTitle(in)

@@ -208,7 +208,7 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []Task
 	for rows.Next() {

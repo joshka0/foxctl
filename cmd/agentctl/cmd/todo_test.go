@@ -31,7 +31,7 @@ func TestNewTodoCommand(t *testing.T) {
 		t.Fatalf("expected use todo, got %s", cmd.Use)
 	}
 	subs := cmd.Commands()
-	expected := []string{"add", "complete", "list"}
+	expected := []string{"add", "complete", "list", "active"}
 	if len(subs) != len(expected) {
 		t.Fatalf("expected %d subcommands, got %d", len(expected), len(subs))
 	}
@@ -51,7 +51,7 @@ func TestTodoAddFlags(t *testing.T) {
 	if cmd.Use != "add" {
 		t.Fatalf("expected add command, got %s", cmd.Use)
 	}
-	for _, flag := range []string{"title", "description", "parent", "depends-on", "store"} {
+	for _, flag := range []string{"title", "description", "parent", "depends-on", "scope", "workspace"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("expected flag --%s", flag)
 		}
@@ -63,7 +63,7 @@ func TestTodoCompleteFlags(t *testing.T) {
 	if cmd.Use != "complete" {
 		t.Fatalf("expected complete command, got %s", cmd.Use)
 	}
-	for _, flag := range []string{"id", "notes", "gotchas", "store"} {
+	for _, flag := range []string{"id", "notes", "gotchas", "workspace"} {
 		if cmd.Flags().Lookup(flag) == nil {
 			t.Fatalf("expected flag --%s", flag)
 		}
@@ -75,7 +75,7 @@ func TestTodoListFlags(t *testing.T) {
 	if cmd.Use != "list" {
 		t.Fatalf("expected list command, got %s", cmd.Use)
 	}
-	if cmd.Flags().Lookup("store") == nil {
-		t.Fatalf("expected --store flag")
+	if cmd.Flags().Lookup("workspace") == nil {
+		t.Fatalf("expected --workspace flag")
 	}
 }

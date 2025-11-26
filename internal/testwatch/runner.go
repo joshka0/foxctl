@@ -295,12 +295,13 @@ func parseTestOutput(watcherID, output string, status testwatch.Status) ([]testw
 		strings.Contains(output, "FAIL") && strings.Contains(output, "✕"):
 		failures, summary = parseJestOutput(lines)
 	default:
-		// Generic fallback
-		if status == testwatch.StatusFail {
+		// Generic fallback based on overall status
+		switch status {
+		case testwatch.StatusFail:
 			summary = "tests failed"
-		} else if status == testwatch.StatusPass {
+		case testwatch.StatusPass:
 			summary = "tests passed"
-		} else {
+		default:
 			summary = "test run completed with errors"
 		}
 	}

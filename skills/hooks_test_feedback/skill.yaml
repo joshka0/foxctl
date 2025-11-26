@@ -1,71 +1,54 @@
-# Skill manifest for hooks/test_feedback
-# This skill is triggered on PostToolUse to surface test failures after code edits.
-
-name: hooks/test_feedback
-version: 0.1.0
-description: |
-  PostToolUse hook that surfaces test failures to Claude after code edits.
-  
-  This skill reads the test watch status store and emits advisory context
-  about failing tests. It never blocks operations.
-
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/test_feedback
+  version: 0.1.0
+  description: "Claude Code hook that surfaces failing test results after code edits"
+  tags: ["hook", "tests", "feedback", "post-tool-use"]
 distribution:
   type: exec
-  bin: ./bin/hooks_test_feedback
-
+  exec:
+    entry: skills/hooks_test_feedback/hooks_test_feedback
 io:
-  format: json_envelope
-  stdin: hook.Input
-  stdout: envelope.Envelope
-
+  format: JSON
+  inline_output_kb: 8
 signature:
-  inputs:
-    event:
+  command: hooks/test_feedback
+  parameters:
+    - name: event
       type: string
       required: true
-      description: Hook event type (PostToolUse)
-    workspace_root:
+      description: "Hook event type (PostToolUse)"
+    - name: workspace_root
       type: string
       required: true
-      description: Absolute path to workspace root
-    session_id:
+      description: "Absolute path to workspace root"
+    - name: session_id
       type: string
       required: false
-      description: Claude session ID
-    tool_name:
+      description: "Claude session ID"
+    - name: tool_name
       type: string
       required: false
-      description: Name of the tool that was just executed
-    tool_input:
+      description: "Name of the tool that was just executed"
+    - name: tool_input
       type: object
       required: false
-      description: Input that was passed to the tool
-    tool_response:
+      description: "Input that was passed to the tool"
+    - name: tool_response
       type: object
       required: false
-      description: Response from the tool
-
+      description: "Response from the tool"
 returns:
-  hook_output:
+  - name: hook_output
     type: object
-    description: Hook output with decision, reason, and context
-    properties:
-      decision:
-        type: string
-        enum: [approve, block, none]
-        description: Always "none" for this advisory hook
-      reason:
-        type: string
-        description: Short explanation of the hook result
-      context:
-        type: string
-        description: Detailed test failure context for Claude
-
+    description: "Hook output with decision (always 'none'), reason, and context"
 capabilities:
-  network: none
-  filesystem: read
-
-environment:
-  AGENTCTL_TEST_FEEDBACK_MAX_FAILURES:
-    description: Maximum number of failures to show per watcher
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+env:
+  - name: AGENTCTL_TEST_FEEDBACK_MAX_FAILURES
+    description: "Maximum number of failures to show per watcher"
     default: "3"
