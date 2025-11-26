@@ -73,7 +73,7 @@ func TestTaskGuard_AutoMode_UsesExistingTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.Close()
+	_ = store.Close()
 
 	// Write operation should use existing task
 	in := hook.Input{
@@ -139,7 +139,7 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.Close()
+	_ = store.Close()
 
 	// Write operation should approve
 	in := hook.Input{

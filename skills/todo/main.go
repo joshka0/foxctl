@@ -99,7 +99,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	op := strings.ToLower(strings.TrimSpace(in.Operation))
 	if op == "" {
