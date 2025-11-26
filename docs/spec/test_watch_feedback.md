@@ -516,8 +516,8 @@ To avoid saturating CPU from frequent test runs, implementations MUST:
 4. **`hooks/test_feedback` Skill**
    - Implement as an exec skill similar to `hooks/task_guard` and
      `hooks/knowledge_router`.
-   - Add bash wrapper under `.agentctl/hooks/` and wire into
-     `.agentctl/settings.json` for `PostToolUse`.
+   - Add bash wrapper under `.claude/hooks/` and wire into
+     `.claude/settings.json` for `PostToolUse`.
 
 5. **Harness Integration**
    - Provide an example `.agentctl/test-watch.yaml` in the harness repo.

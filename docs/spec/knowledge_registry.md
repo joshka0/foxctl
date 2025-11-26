@@ -167,11 +167,11 @@ agentctl knowledge search --query "frontend component patterns" [--threshold 0.7
 
 ```json
 {
-	"event": "UserPromptSubmit",
-	"workspace_root": "/path/to/project",
-	"session_id": "...",
-	"prompt": "Create a new React component with MUI Grid",
-	"file_path": "src/components/MyComponent.tsx"
+    "event": "UserPromptSubmit",
+    "workspace_root": "/path/to/project",
+    "session_id": "...",
+    "prompt": "Create a new React component with MUI Grid",
+    "file_path": "src/components/MyComponent.tsx"
 }
 ```
 
@@ -192,26 +192,26 @@ agentctl knowledge search --query "frontend component patterns" [--threshold 0.7
    - Rank candidates.
 
 4. **Threshold check:**
-   - If `max(score) < threshold` → emit `DecisionNone`, no context.
-   - If `≥ threshold` → emit `DecisionNone` with context hint.
+   - If `max(score) < threshold` → emit `decision: "none"`, no context.
+   - If `≥ threshold` → emit `decision: "none"` with context hint.
 
 ### 5.4 Output
 
 ```json
 {
-	"decision": "none",
-	"context": "Recommended: frontend-dev-guidelines (high confidence).",
-	"meta": {
-		"recommended": [
-			{
-				"name": "frontend-dev-guidelines",
-				"kind": "pack",
-				"score": 0.87
-			},
-			{ "name": "error-tracking", "kind": "pack", "score": 0.62 }
-		],
-		"threshold": 0.7
-	}
+    "decision": "none",
+    "context": "Recommended: frontend-dev-guidelines (high confidence).",
+    "meta": {
+        "recommended": [
+            {
+                "name": "frontend-dev-guidelines",
+                "kind": "pack",
+                "score": 0.87
+            },
+            { "name": "error-tracking", "kind": "pack", "score": 0.62 }
+        ],
+        "threshold": 0.7
+    }
 }
 ```
 
@@ -221,11 +221,11 @@ Via `.claude/knobs/knowledge.json` (optional):
 
 ```json
 {
-	"threshold": 0.7,
-	"max_recommendations": 3,
-	"use_embeddings": true,
-	"embedding_weight": 0.6,
-	"rule_weight": 0.4
+    "threshold": 0.7,
+    "max_recommendations": 3,
+    "use_embeddings": true,
+    "embedding_weight": 0.6,
+    "rule_weight": 0.4
 }
 ```
 
@@ -279,14 +279,20 @@ knowledge:
 For small N (< 10K documents), cosine similarity is computed in Go:
 
 ```go
+import "math"
+
 func cosineSimilarity(a, b []float32) float32 {
-    var dot, normA, normB float32
+    var dot, normA, normB float64
     for i := range a {
-        dot += a[i] * b[i]
-        normA += a[i] * a[i]
-        normB += b[i] * b[i]
+        av, bv := float64(a[i]), float64(b[i])
+        dot += av * bv
+        normA += av * av
+        normB += bv * bv
     }
-    return dot / (sqrt(normA) * sqrt(normB))
+    if normA == 0 || normB == 0 {
+        return 0
+    }
+    return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB)))
 }
 ```
 

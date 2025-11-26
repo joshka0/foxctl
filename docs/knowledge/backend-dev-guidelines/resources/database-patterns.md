@@ -1,6 +1,7 @@
 # Database Patterns - Prisma Best Practices
 
-Complete guide to database access patterns using Prisma in backend microservices.
+Complete guide to database access patterns using Prisma in backend
+microservices.
 
 ## Table of Contents
 
@@ -18,7 +19,7 @@ Complete guide to database access patterns using Prisma in backend microservices
 ### Basic Pattern
 
 ```typescript
-import { PrismaService } from '@project-lifecycle-portal/database';
+import { PrismaService } from "@project-lifecycle-portal/database";
 
 // Always use PrismaService.main
 const users = await PrismaService.main.user.findMany();
@@ -28,7 +29,7 @@ const users = await PrismaService.main.user.findMany();
 
 ```typescript
 if (!PrismaService.isAvailable) {
-    throw new Error('Prisma client not initialized');
+    throw new Error("Prisma client not initialized");
 }
 
 const user = await PrismaService.main.user.findUnique({ where: { id } });
@@ -41,12 +42,14 @@ const user = await PrismaService.main.user.findUnique({ where: { id } });
 ### Why Use Repositories
 
 ✅ **Use repositories when:**
+
 - Complex queries with joins/includes
 - Query used in multiple places
 - Need caching layer
 - Want to mock for testing
 
 ❌ **Skip repositories for:**
+
 - Simple one-off queries
 - Prototyping (can refactor later)
 
@@ -64,7 +67,7 @@ export class UserRepository {
     async findActive(): Promise<User[]> {
         return PrismaService.main.user.findMany({
             where: { isActive: true },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { createdAt: "desc" },
         });
     }
 
@@ -94,7 +97,7 @@ const result = await PrismaService.main.$transaction(async (tx) => {
 const result = await PrismaService.main.$transaction(
     async (tx) => {
         const user = await tx.user.findUnique({ where: { id } });
-        if (!user) throw new Error('User not found');
+        if (!user) throw new Error("User not found");
 
         return await tx.user.update({
             where: { id },
@@ -104,7 +107,7 @@ const result = await PrismaService.main.$transaction(
     {
         maxWait: 5000,
         timeout: 10000,
-    }
+    },
 );
 ```
 
@@ -175,7 +178,7 @@ const users = await PrismaService.main.user.findMany({
 });
 
 // ✅ Or batch query
-const userIds = users.map(u => u.id);
+const userIds = users.map((u) => u.id);
 const profiles = await PrismaService.main.userProfile.findMany({
     where: { userId: { in: userIds } },
 });
@@ -188,25 +191,25 @@ const profiles = await PrismaService.main.userProfile.findMany({
 ### Prisma Error Types
 
 ```typescript
-import { Prisma } from '@prisma/client';
+import { Prisma } from "@prisma/client";
 
 try {
     await PrismaService.main.user.create({ data });
 } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
         // Unique constraint violation
-        if (error.code === 'P2002') {
-            throw new ConflictError('Email already exists');
+        if (error.code === "P2002") {
+            throw new ConflictError("Email already exists");
         }
 
         // Foreign key constraint
-        if (error.code === 'P2003') {
-            throw new ValidationError('Invalid reference');
+        if (error.code === "P2003") {
+            throw new ValidationError("Invalid reference");
         }
 
         // Record not found
-        if (error.code === 'P2025') {
-            throw new NotFoundError('Record not found');
+        if (error.code === "P2025") {
+            throw new NotFoundError("Record not found");
         }
     }
 
@@ -219,6 +222,7 @@ try {
 ---
 
 **Related Files:**
-- [SKILL.md](SKILL.md)
+
+- [SKILL.md](../SKILL.md)
 - [services-and-repositories.md](services-and-repositories.md)
 - [async-and-errors.md](async-and-errors.md)

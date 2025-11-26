@@ -206,9 +206,9 @@ Examples:
 			}
 
 			if filePath != "" {
-				pathItems, err := store.MatchByPath(ctx, filePath)
-				if err != nil {
-					return fmt.Errorf("search by path: %w", err)
+				pathItems, pathErr := store.MatchByPath(ctx, filePath)
+				if pathErr != nil {
+					return fmt.Errorf("search by path: %w", pathErr)
 				}
 				// Merge results (dedupe by ID)
 				seen := make(map[string]bool)

@@ -1,6 +1,6 @@
 # Knowledge Registry Implementation
 
-**Date:** 2024-11-27\
+**Date:** 2025-11-27\
 **Feature:** Knowledge Registry (rule-based matching, no embeddings yet)
 
 ## Summary

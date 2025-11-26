@@ -1,132 +1,152 @@
-# Tasks for PR #81: godot plugin skill
+# Tasks for PR #82: claude harness
 
 **Repository:** jkatigb/agentctl
-**URL:** https://github.com/jkatigb/agentctl/pull/81
+**URL:** https://github.com/jkatigb/agentctl/pull/82
 
-## 📝 Review Comments to Address (9)
+## 📝 Review Comments to Address (20)
 
 ### Task 1: coderabbitai[bot]'s feedback
 
+> [!NOTE]
+> Currently processing new changes in this PR. This may take a few minutes, please wait...
+>
+> <details>
+> <summary>📥 Commits</summary>
+>
+> Reviewing files that changed from the base of the PR and between cb3301f3b45a1fefe36d2da0fb8c9db8a4ee4fcc and 38132872b050b8e55a9adceeedad345124193c36.
+>
+> </details>
+>
+> <details>
+> <summary>📒 Files selected for processing (2)</summary>
+>
+> * `.claude/CLAUDE.md` (1 hunks)
+> * `.claude/hooks/task-guard.sh` (1 hunks)
+>
+> </details>
+>
+> ```ascii
+>  ________________________________________________________________________
+> < OpenAI said I could be anything I wanted, so I became a code reviewer. >
+>  ------------------------------------------------------------------------
+>   \
+>    \   \
+>         \ /\
+>         ( )
+>       .( o ).
+> ```
 ## Walkthrough
-Introduces a complete Godot Editor integration skill for agentctl with a plugin bridge (bridge.gd) exposing editor APIs via HTTP/JSON, CLI commands (godot, godot plugin-install) for scene and node operations, a context/filter skill for LLM-driven content selection, comprehensive test coverage, and design specifications with workflow documentation.
+Introduces Claude Code integration framework with agents, hooks, knowledge registry, and task management. Adds comprehensive developer documentation for backend and frontend patterns. Implements SQLite-backed storage for knowledge items and test watcher configuration. Extends agentctl CLI with knowledge management and test watch commands.
 ## Changes
 | Cohort / File(s) | Summary |
 |---|---|
-| **Godot Editor Integration Skill** <br> `skills/editor_godot/main.go`, `skills/editor_godot/main_test.go`, `skills/editor_godot/skill.yaml` | New Go-based skill orchestrating Godot editor operations through the bridge plugin; handles action routing, parameter building, HTTP communication, error handling, and optional CAS storage for large responses. |
-| **Godot EditorPlugin** <br> `skills/editor_godot/godot_plugin/bridge.gd`, `skills/editor_godot/godot_plugin/plugin.cfg`, `skills/editor_godot/godot_plugin/README.md` | New GDScript EditorPlugin implementing a TCP/HTTP server (port 7777) that routes requests to scene/node manipulation handlers (inspect, create, delete, rename, reparent, set property, attach script, connect signal, class info, scene save, resource list, run/stop game, errors) with undo/redo support and workspace validation. |
-| **CLI Godot Commands** <br> `cmd/agentctl/cmd/godot.go`, `cmd/agentctl/cmd/godot_plugin.go`, `cmd/agentctl/cmd/godot_test.go` | New CLI command group with godot subcommands (install, ping, scene-tree, inspect, create, delete, rename, reparent, set, attach-script, connect-signal, class-info, save, resources, run, stop, errors) and plugin-install installer; includes comprehensive test coverage for command structure, flags, and argument validation. |
-| **Context Filter Skill** <br> `skills/context_filter/main.go`, `skills/context_filter/skill.yaml` | New skill implementing LLM-backed context/filtering with support for multiple LLM providers, CAS integration, budget-aware chunk selection, and structured JSON request/response handling. |
-| **Documentation** <br> `docs/godot/editor_integration.md`, `docs/spec/context_filter.md`, `docs/workflows/exa_mcp_context_filter.md` | New design specifications and workflow documentation covering Godot integration architecture, context filter behavior, error codes, security considerations, and end-to-end examples. |
-| **Build/Test Updates** <br> `cmd/agentctl/cmd/run_test.go` | Removed forced CGO_ENABLED=1 override; allows CGO settings to inherit from parent process or CI environment. |
-| **Cleanup** <br> `pr77_comments.md` | Deleted PR review notes file. |
+| **Claude Code Framework** <br> `.claude/CLAUDE.md`, `.claude/settings.json`, `.claude/settings.local.json.example`, `.claude/hooks/{task-guard,knowledge-router,test-feedback}.sh` | New integration setup, hook configuration, and shell wrapper scripts for PreToolUse/PostToolUse event handling |
+| **Agent Definitions** <br> `.claude/agents/{auth-route-debugger,auth-route-tester,auto-error-resolver,code-architecture-reviewer,code-refactor-master,documentation-architect,frontend-error-fixer,plan-reviewer,refactor-planner,web-research-specialist}.md`, `.claude/agents/README.md` | New agent specifications for specialized tasks (debugging, testing, refactoring, planning, research) with workflows and responsibilities |
+| **Command Documentation** <br> `.claude/commands/{dev-docs,dev-docs-update,route-research-for-testing}.md` | New procedural guides for development tasks and strategic planning |
+| **Backend Dev Knowledge** <br> `docs/knowledge/backend-dev-guidelines/{SKILL.md,resources/*}.md` | Comprehensive backend patterns including architecture, async/error handling, database, middleware, routing, services, Sentry monitoring, validation |
+| **Frontend Dev Knowledge** <br> `docs/knowledge/frontend-dev-guidelines/{SKILL.md,resources/*}.md` | Comprehensive frontend patterns including component design, data fetching, file organization, performance, routing, styling, TypeScript standards |
+| **Knowledge Skill System** <br> `docs/knowledge/{README.md,skill-rules.json}`, `docs/knowledge/skill-developer/{SKILL.md,ADVANCED.md,HOOK_MECHANISMS.md,PATTERNS_LIBRARY.md,SKILL_RULES_REFERENCE.md,TRIGGER_TYPES.md,TROUBLESHOOTING.md}` | Skill framework documentation covering concepts, rules, triggers, hooks, patterns, and troubleshooting |
+| **Error Tracking Skill** <br> `docs/knowledge/error-tracking/SKILL.md` | Sentry v8 integration patterns for error tracking and performance monitoring |
+| **Route Testing Skill** <br> `docs/knowledge/route-tester/SKILL.md` | Authentication route testing methodology and tooling documentation |
+| **Specification Documents** <br> `docs/spec/{knowledge_registry.md,task_hooks_memory.md,test_watch_feedback.md}`, `docs/changelogs/{2024-11-27_knowledge-registry.md,2024-11-27_test-watcher-impl.md,2025-11-26_sqlite_task_store_and_hooks.md}` | Formal specs and changelogs for knowledge registry, task/hook/memory integration, test watcher system |
+| **Go CLI Commands** <br> `cmd/agentctl/cmd/{knowledge.go,testwatch.go,todo.go,watch.go}` | New CLI subcommands for knowledge management (sync/list/search), test watcher configuration (list/add/remove), todo workspace scoping, and watch runtime |
+| **Knowledge Storage Layer** <br> `internal/storage/knowledge/{store.go,store_test.go}` | SQLite-backed knowledge store with CRUD operations, triggers, documents, keyword/path search; comprehensive test suite |
+| **Hook Domain Types** <br> `internal/domain/hook/types.go` | Standardized hook input/output types and decision constants for Claude Code integration |
+| **Configuration & Dependencies** <br> `.gitignore`, `go.mod` | Git ignore update for local settings; new indirect dependencies (fsnotify, doublestar) |
 ## Sequence Diagram(s)
 ```mermaid
 sequenceDiagram
-    participant CLI as agentctl CLI
-    participant Skill as editor/godot Skill
-    participant Bridge as GodotAIBridge Plugin
-    participant Godot as Godot Editor
-    CLI->>Skill: action + params (host, port, node_path, ...)
-    activate Skill
-    Skill->>Skill: parseInput, validateInput, buildParams
-    Skill->>Bridge: HTTP POST: {action, params, workspace_root}
-    activate Bridge
-    Bridge->>Bridge: _handle_request (route to handler)
-    Bridge->>Bridge: _validate_workspace (check mismatch)
-    Bridge->>Godot: editor/node manipulation (via Godot API)
-    Godot->>Bridge: result
-    Bridge->>Bridge: undo/redo if applicable
-    Bridge->>Skill: JSON response {status, data, error?}
-    deactivate Bridge
-    Skill->>Skill: emitSuccess or fail (CAS storage if large)
-    Skill->>CLI: envelope {data, summary, artifact?}
-    deactivate Skill
+    participant Claude as Claude Code
+    participant Hook as Hook Wrapper<br/>(task-guard.sh)
+    participant Agentctl as agentctl CLI
+    participant Store as SQLite Store
+    Claude->>Hook: PreToolUse Event<br/>(tool_name, tool_input)
+    Hook->>Hook: Parse event, build JSON
+    Hook->>Agentctl: agentctl run hooks/task_guard
+    Agentctl->>Store: Load active task
+    Agentctl->>Store: Check workspace context
+    alt Task Guard Decision
+        Agentctl-->>Hook: {"decision":"block", "reason":"..."}
+        Hook-->>Claude: {"decision":"block", "reason":"..."}
+        Claude->>Claude: Block tool execution
+    else
+        Agentctl-->>Hook: {"decision":"approve", "context":"..."}
+        Hook-->>Claude: {"decision":"approve", "context":"..."}
+        Claude->>Claude: Proceed with tool
+    end
 ```
 ```mermaid
 sequenceDiagram
-    participant User as User/LLM
-    participant Skill as context/filter Skill
-    participant LLM as LLM Provider
-    participant CAS as Content Storage
-    User->>Skill: {prompt, scope, source, budget, llm}
-    activate Skill
-    Skill->>Skill: normalize defaults, validate fields
-    Skill->>Skill: build candidate chunks from source/CAS
-    Skill->>Skill: craft LLM prompt with constraints
-    Skill->>LLM: POST: {prompt, candidates, budget}
-    activate LLM
-    LLM->>LLM: select & score chunks
-    LLM->>Skill: {chunks, summary, approx_tokens}
-    deactivate LLM
-    Skill->>Skill: align & filter by budget
-    alt oversized output
-        Skill->>CAS: store full result
-        Skill->>User: {summary, cas_digest, hint}
-    else normal output
-        Skill->>User: {chunks, summary, approx_tokens}
+    participant User as User
+    participant CLI as agentctl
+    participant Config as YAML Config
+    participant Runner as Test Runner
+    participant Store as SQLite Store
+    User->>CLI: agentctl watch tests
+    CLI->>Config: Load test-watch.yaml
+    CLI->>Store: Initialize status store
+    CLI->>Runner: Setup file watcher
+    loop Watch Loop
+        Runner->>Runner: File change event
+        Runner->>Runner: Debounce/throttle
+        Runner->>Runner: Execute watcher command
+        Runner->>Store: Save test results
+        Runner-->>User: Display summary
     end
-    deactivate Skill
+    User->>CLI: SIGINT
+    CLI->>Runner: Graceful shutdown
+```
+```mermaid
+sequenceDiagram
+    participant Agentctl as agentctl CLI
+    participant FS as Filesystem
+    participant Store as SQLite Knowledge<br/>Store
+    participant Search as Search Engine
+    Agentctl->>Agentctl: agentctl knowledge sync
+    Agentctl->>FS: Discover knowledge-packs/
+    FS-->>Agentctl: Pack directories
+    loop For each pack
+        Agentctl->>FS: Read YAML/JSON metadata
+        Agentctl->>Store: UpsertItem(pack)
+        Agentctl->>FS: Extract triggers, docs
+        Agentctl->>Store: AddTrigger, UpsertDocument
+    end
+    Agentctl-->>Agentctl: Return sync results
+    Agentctl->>Agentctl: agentctl knowledge search --query "auth"
+    Agentctl->>Search: Extract keywords
+    Agentctl->>Store: MatchByKeyword
+    Store-->>Agentctl: Matching items
+    Agentctl-->>Agentctl: Format & return results
 ```
 ## Estimated code review effort
-🎯 4 (Complex) | ⏱️ ~50–70 minutes
-**Key areas requiring careful review:**
-- **skills/editor_godot/godot_plugin/bridge.gd** (~1000+ lines) — Extensive GDScript plugin with 25+ handler methods, request routing, undo/redo integration, workspace validation, path resolution, and type conversion logic; requires verification of scene manipulation correctness and error edge cases.
-- **skills/editor_godot/main.go** (~400+ lines) — HTTP client communication, action routing, parameter building, error handling, and CAS storage logic; needs validation of timeout handling, envelope emission, and bridge error classification.
-- **skills/context_filter/main.go** (~500+ lines) — LLM provider abstraction, prompt construction, budget semantics, CAS integration, and chunk selection logic; requires scrutiny of token counting, budget enforcement, and error propagation.
-- **CLI command wiring** (godot.go, godot_plugin.go) — Ensure proper flag initialization, payload construction, and error envelope formatting align with plugin expectations.
-- **Test coverage** — Validate that test assertions properly cover action-specific validation and error scenarios.
+🎯 4 (Complex) | ⏱️ ~60–75 minutes
+**Areas requiring extra attention:**
+- `internal/storage/knowledge/store.go` — SQLite schema, CRUD operations, transaction handling, search logic (MatchByKeyword, MatchByPath)
+- `cmd/agentctl/cmd/watch.go` — File watcher implementation, fsnotify event handling, graceful shutdown, debouncing/throttling coordination
+- `cmd/agentctl/cmd/knowledge.go` — CLI command structure, keyword extraction, knowledge item filtering, envelope response formatting
+- `.claude/hooks/*.sh` — Hook wrapper integration; ensure stdin/stdout handling, JSON parsing robustness, fail-open semantics, and proper error propagation
+- `cmd/agentctl/cmd/todo.go` — Migration from store_path to workspace_id; verify backward compatibility and scope_path introduction don't break existing workflows
+- Hook domain types vs wrapper script contract — Verify that Input/Output types in `internal/domain/hook/types.go` align with shell script JSON construction and parsing
+## Possibly related PRs
+- jkatigb/agentctl#18: Overlaps on storage/hook/CLI surfaces; introduces complementary storage-interface and policy/refactor patterns
+- jkatigb/agentctl#69: Mega-PR touching similar internal/storage, search/vector, and CLI integration points for knowledge and vector-search capabilities
 ## Suggested labels
-`ai-generated`
+`codex`, `ai-generated`
 ## Poem
-> 🐰 *A bridge of code, from Go to GDScript so fine,*
-> *Scene trees dance and signals align,*
-> *Filter context, chunk by gleaming chunk,*
-> *With undo/redo, no feature skipped or flunk!*
-> *CLI meets Plugin, a harmonious dance,*
-> *Godot's editor yields to our command's advance.* 🎮✨
+> 🐰 *Hops with glee through docs so bright,*
+> *Agents dance, hooks ignite!*
+> *Knowledge packs in SQLite rest,*
+> *Tasks and tests, developers blessed—*
+> *Claude now guides with wisdom's might!* ✨
 ## Pre-merge checks and finishing touches
 <details>
-<summary>❌ Failed checks (2 warnings, 1 inconclusive)</summary>
-|     Check name     | Status         | Explanation                                                                                                                                                                | Resolution                                                                                                                                |
-| :----------------: | :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------- |
-|  Description check | ⚠️ Warning     | The description is incomplete, with multiple commit message lines but missing the summary section content and testing checklist items are unchecked rather than completed. | Fill in the 'Summary' section with a concise overview of changes, and update testing checkboxes to indicate completion status.            |
-| Docstring Coverage | ⚠️ Warning     | Docstring coverage is 0.00% which is insufficient. The required threshold is 80.00%.                                                                                       | You can run `@coderabbitai generate docstrings` to improve docstring coverage.                                                            |
-|     Title check    | ❓ Inconclusive | The title 'godot plugin skill' is vague and generic, using non-descriptive terms that don't clearly convey the main purpose of the changeset.                              | Use a more specific title that highlights the primary change, such as 'Add Godot Editor integration skill with plugin bridge' or similar. |
+<summary>❌ Failed checks (1 warning, 2 inconclusive)</summary>
+|     Check name     | Status         | Explanation                                                                                                                                                        | Resolution                                                                                                                                                                                                     |
+| :----------------: | :------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docstring Coverage | ⚠️ Warning     | Docstring coverage is 15.38% which is insufficient. The required threshold is 80.00%.                                                                              | You can run `@coderabbitai generate docstrings` to improve docstring coverage.                                                                                                                                 |
+|     Title check    | ❓ Inconclusive | The title 'claude harness' is vague and generic, using non-descriptive terms that do not clearly convey the substantial changes in this large, multi-component PR. | Provide a more specific title that captures the primary objective, such as 'Add Claude Code integration with task store, knowledge registry, and test watcher' or focus on the main feature if one is primary. |
+|  Description check | ❓ Inconclusive | The PR description lists six checkpoints but lacks substantive detail in the Summary and Notes sections; the Testing checklist is present but unchecked.           | Add a clear Summary explaining the overall goal and impact, fill in the Notes section with migration notes or breaking changes, and mark completed testing items to indicate which checks passed.              |
 </details>
-<details>
-<summary>✨ Finishing touches</summary>
-- [ ]  📝 Generate docstrings
-<details>
-<summary>🧪 Generate unit tests (beta)</summary>
-- [ ]    Create PR with unit tests
-- [ ]    Post copyable unit tests in a comment
-- [ ]    Commit unit tests in branch `feature/godot-plugin`
-</details>
-</details>
-> [!TIP]
-> <details>
-> <summary>📝 Customizable high-level summaries are now available in beta!</summary>
->
-> You can now customize how CodeRabbit generates the **high-level summary** in your pull requests — including its content, structure, tone, and formatting.
->
-> - Provide your own instructions using the `high_level_summary_instructions` setting.
-> - Format the summary however you like (bullet lists, tables, multi-section layouts, contributor stats, etc.).
-> - Use `high_level_summary_in_walkthrough` to move the summary from the description to the walkthrough section.
->
-> **Example instruction:**
->
-> > "Divide the high-level summary into five sections:
-> >  1. **📝 Description** — Summarize the main change in 50–60 words, explaining what was done.
-> >  2. **📓 References** — List relevant issues, discussions, documentation, or related PRs.
-> >  3. **📦 Dependencies & Requirements** — Mention any new/updated dependencies, environment variable changes, or configuration updates.
-> >  4. **📊 Contributor Summary** — Include a Markdown table showing contributions:
-> >     `| Contributor | Lines Added | Lines Removed | Files Changed |`
-> >  5. **✔️ Additional Notes** — Add any extra reviewer context.
-> >  Keep each section concise (under 200 words) and use bullet or numbered lists for clarity."
->
-> Note: This feature is currently in beta for Pro-tier users, and pricing will be announced later.
->
-> </details>
 ---
 <sub>Comment `@coderabbitai help` to get the list of available commands and usage tips.</sub>
 
@@ -134,22 +154,361 @@ sequenceDiagram
 
 ### Task 2: coderabbitai[bot]'s feedback
 
-**File:** `cmd/agentctl/cmd/godot_plugin/bridge.gd:13`
+**File:** `.claude/CLAUDE.md`
+
+**Add language identifier to fenced code block.**
+Markdown linting (MD040) requires code fences to specify a language for syntax highlighting and clarity.
+Apply this diff:
+```diff
+-```
++```text
+ Claude Code → Hooks (bash wrappers) → agentctl skills → SQLite/CAS
+                                            ↓
+                                     JSON envelope output
+-```
++```
+```
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+14-14: Fenced code blocks should have a language specified
+(MD040, fenced-code-language)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+````
+In .claude/CLAUDE.md around lines 14 to 18, the fenced code block is missing a
+language identifier which violates MD040; update the opening fence from ``` to
+```text so the block starts with ```text and keep the existing closing ``` fence
+unchanged.
+````
+</details>
+✅ Addressed in commit 3813287
+
+---
+
+### Task 3: coderabbitai[bot]'s feedback
+
+**File:** `.claude/CLAUDE.md:236`
+
+**Replace hard tabs with spaces in JSON code block.**
+Markdown linting (MD010) flags hard tabs in code blocks. Replace all tabs with spaces (use 2 spaces per indentation level) for consistency and copy-paste usability.
+Apply this diff (replace tabs with 2 spaces):
+```diff
+ **Output** (stdout JSON envelope):
+ \`\`\`json
+ {
+-	"version": 1,
+-	"status": "ok",
+-	"command": "hooks/task_guard",
+-	"data": {
+-		"hook_output": {
+-			"decision": "approve",
+-			"reason": "task ensured",
+-			"meta": { "task_id": "...", "created": true }
+-		}
+-	}
++  "version": 1,
++  "status": "ok",
++  "command": "hooks/task_guard",
++  "data": {
++    "hook_output": {
++      "decision": "approve",
++      "reason": "task ensured",
++      "meta": { "task_id": "...", "created": true }
++    }
++  }
+ }
+ \`\`\`
+```
+> Committable suggestion skipped: line range outside the PR's diff.
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+213-213: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+214-214: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+215-215: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+216-216: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+217-217: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+225-225: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+226-226: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+227-227: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+228-228: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+229-229: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+230-230: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+231-231: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+232-232: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+233-233: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+234-234: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+.claude/CLAUDE.md around lines 209 to 236: the JSON code blocks contain hard tab
+characters which trigger MD010; replace all hard tabs inside those code blocks
+with two spaces per indentation level (convert each tab to two spaces),
+preserving the existing indentation structure and line breaks for both the
+"Input" and "Output" JSON blocks so they remain valid JSON and copy-paste
+friendly.
+```
+</details>
+
+---
+
+### Task 4: coderabbitai[bot]'s feedback
+
+**File:** `.claude/hooks/task-guard.sh:70`
+
+**Fix unsafe JSON construction for `reason` / `context` strings**
+`reason` and `context` are injected into JSON with `printf`:
+```bash
+reason="$(printf '%s' "$hook_output" | jq -r '.reason // "Operation blocked by task guard"')"
+printf '{"decision": "block", "reason": "%s"}\n' "$reason"
+...
+context="$(printf '%s' "$hook_output" | jq -r '.context // empty')"
+printf '{"decision": "approve", "context": "%s"}\n' "$context"
+```
+If either value contains quotes, backslashes, or newlines, the output is not valid JSON. Since hook_output is already JSON, it’s safer to let `jq` handle encoding:
+```diff
+-# Check decision
+-decision="$(printf '%s' "$hook_output" | jq -r '.decision // "approve"')"
+-
+-if [[ "$decision" == "block" ]]; then
+-  # Return the block reason to Claude
+-  reason="$(printf '%s' "$hook_output" | jq -r '.reason // "Operation blocked by task guard"')"
+-  printf '{"decision": "block", "reason": "%s"}\n' "$reason"
+-else
+-  # Approve - optionally include context
+-  context="$(printf '%s' "$hook_output" | jq -r '.context // empty')"
+-  if [[ -n "$context" ]]; then
+-    printf '{"decision": "approve", "context": "%s"}\n' "$context"
+-  else
+-    printf '{}\n'
+-  fi
+-fi
++# Check decision and render JSON via jq to ensure proper escaping
++decision="$(printf '%s' "$hook_output" | jq -r '.decision // "approve"')"
++
++if [[ "$decision" == "block" ]]; then
++  printf '%s\n' "$hook_output" | jq -c '{
++    decision: "block",
++    reason: (.reason // "Operation blocked by task guard")
++  }'
++else
++  printf '%s\n' "$hook_output" | jq -c '
++    if (.context // "") != "" then
++      { decision: "approve", context: .context }
++    else
++      {}
++    end
++  '
++fi
+```
+This preserves behavior while guaranteeing valid JSON.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In .claude/hooks/task-guard.sh around lines 51-69 the script injects raw
+reason/context strings into JSON using printf which breaks JSON when those
+strings contain quotes, backslashes, or newlines; replace the printf-based
+construction with jq-built JSON (use jq -n and --arg or construct objects from
+the existing hook_output) so jq performs proper string escaping: when decision
+is "block" emit {"decision":"block","reason":<reason>} with reason provided by
+jq (using a default if missing), when "approve" emit
+{"decision":"approve","context":<context>} only if context exists (otherwise
+emit {}), preserving current behavior but guaranteeing valid JSON output.
+```
+</details>
+✅ Addressed in commit 3813287
+
+---
+
+### Task 5: coderabbitai[bot]'s feedback
+
+**File:** `cmd/agentctl/cmd/knowledge.go:224`
+
+**Variable shadowing: `err` is redeclared.**
+The `err` on line 209 shadows the outer `err` from line 187. While this works correctly here, it can lead to subtle bugs if the logic changes. Use a different name or reuse the outer variable.
+```diff
+ 		if filePath != "" {
+-			pathItems, err := store.MatchByPath(ctx, filePath)
++			pathItems, pathErr := store.MatchByPath(ctx, filePath)
+-			if err != nil {
++			if pathErr != nil {
+-				return fmt.Errorf("search by path: %w", err)
++				return fmt.Errorf("search by path: %w", pathErr)
+ 			}
+```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+			if filePath != "" {
+				pathItems, pathErr := store.MatchByPath(ctx, filePath)
+				if pathErr != nil {
+					return fmt.Errorf("search by path: %w", pathErr)
+				}
+				// Merge results (dedupe by ID)
+				seen := make(map[string]bool)
+				for _, item := range items {
+					seen[item.ID] = true
+				}
+				for _, item := range pathItems {
+					if !seen[item.ID] {
+						items = append(items, item)
+						seen[item.ID] = true
+					}
+				}
+			}
+```
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In cmd/agentctl/cmd/knowledge.go around lines 208 to 224, the local declaration
+"pathItems, err := store.MatchByPath(ctx, filePath)" re-declares and shadows the
+outer "err" variable; change it to reuse the existing err (e.g., "pathItems, err
+= store.MatchByPath(...)" if err is already declared) or rename the variable
+(e.g., "pathItems, err2 := ...") to avoid shadowing, adjust subsequent error
+handling to reference the chosen variable, and run `go vet`/`golangci-lint` to
+verify no shadowing remains.
+```
+</details>
+
+---
+
+### Task 6: coderabbitai[bot]'s feedback
+
+**File:** `docs/changelogs/2024-11-27_knowledge-registry.md:4`
+
+**Incorrect date in changelog.**
+The date `2024-11-27` appears to be a typo. Based on the PR context, this should likely be `2025-11-27`.
+```diff
+-**Date:** 2024-11-27\
++**Date:** 2025-11-27\
+```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+**Date:** 2025-11-27\
+**Feature:** Knowledge Registry (rule-based matching, no embeddings yet)
+```
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/changelogs/2024-11-27_knowledge-registry.md around lines 3 to 4, the
+changelog date is incorrect (2024-11-27); update the date to 2025-11-27 to match
+the PR context and ensure filename and front-matter (if any) reflect the
+corrected year.
+```
+</details>
+
+---
+
+### Task 7: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/backend-dev-guidelines/resources/architecture-overview.md:61`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Add language specifications to fenced code blocks.**
+Markdownlint requires language specification for fenced code blocks (MD040). Lines with unlabeled code fences should specify a language:
+- Lines 20–60: ASCII diagram → use ` ```text ` or ` ```plain `
+- Lines 155–171, 189–206, 326–334, 345–350: Directory structure → use ` ```plaintext ` or ` ```text `
+Example:
+```diff
+-```
++```text
+ email/src/
+ ├── controllers/
+```
+Per the PR testing checklist ("Formatting: make fmt (no diffs)"), these should be corrected to pass linting.
+Also applies to: 155-171, 189-206, 326-334, 345-350
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+20-20: Fenced code blocks should have a language specified
+(MD040, fenced-code-language)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+````
+docs/knowledge/backend-dev-guidelines/resources/architecture-overview.md lines
+20-61 (and also apply same fix to blocks at 155-171, 189-206, 326-334, 345-350):
+several fenced code blocks contain ASCII diagrams or directory listings without
+a language tag which triggers MD040; update each opening triple-backtick to
+include a plain text language identifier (e.g., ```text or ```plaintext) so the
+blocks are labeled and linting passes.
+````
+</details>
+
+---
+
+### Task 8: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/backend-dev-guidelines/resources/database-patterns.md:224`
 
 <details>
 <summary>🧩 Analysis chain</summary>
 Script executed:
 ```shell
 #!/bin/bash
-# First, verify both files exist and check their sizes
-echo "=== Checking file existence and sizes ==="
-ls -lh cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd 2>&1
-echo -e "\n=== Comparing file line counts ==="
-wc -l cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd 2>&1
-echo -e "\n=== Running diff comparison ==="
-diff -q cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd && echo "✓ Files are identical" || echo "✗ Files differ"
-echo -e "\n=== Detailed diff output (first 50 lines of differences if any) ==="
-diff cmd/agentctl/cmd/godot_plugin/bridge.gd skills/editor_godot/godot_plugin/bridge.gd | head -50
+# Search for the referenced markdown files in the docs directory
+echo "=== Searching for referenced files in docs directory ==="
+fd -type f -name "*.md" docs/ | grep -E "(SKILL|services-and-repositories|async-and-errors)" | head -20
 ```
 Repository: jkatigb/agentctl
 ---
@@ -158,336 +517,170 @@ Repository: jkatigb/agentctl
 Exit code: 0
 stdout:
 ```
-=== Checking file existence and sizes ===
--rw-r--r-- 1 jailuser jailuser 29K Nov 26 17:44 cmd/agentctl/cmd/godot_plugin/bridge.gd
--rw-r--r-- 1 jailuser jailuser 29K Nov 26 17:44 skills/editor_godot/godot_plugin/bridge.gd
-=== Comparing file line counts ===
-  947 cmd/agentctl/cmd/godot_plugin/bridge.gd
-  947 skills/editor_godot/godot_plugin/bridge.gd
- 1894 total
-=== Running diff comparison ===
-✓ Files are identical
-=== Detailed diff output (first 50 lines of differences if any) ===
+=== Searching for referenced files in docs directory ===
+```
+stderr:
+```
+error: 'ype' isn't a valid value for '--type <filetype>'
+  [possible values: file, directory, symlink, executable, empty, socket, pipe]
+For more information try '--help'
+```
+</shell_result>
+---
+Script executed:
+```shell
+#!/bin/bash
+# Search for the referenced markdown files
+echo "=== Searching for SKILL.md ==="
+fd "SKILL\.md" docs/
+echo -e "\n=== Searching for services-and-repositories.md ==="
+fd "services-and-repositories\.md" docs/
+echo -e "\n=== Searching for async-and-errors.md ==="
+fd "async-and-errors\.md" docs/
+echo -e "\n=== Listing docs directory structure ==="
+find docs -type f -name "*.md" | head -30
+```
+Repository: jkatigb/agentctl
+---
+<shell_result>
+Repository: jkatigb/agentctl
+Exit code: 0
+stdout:
+```
+=== Searching for SKILL.md ===
+docs/knowledge/backend-dev-guidelines/SKILL.md
+docs/knowledge/error-tracking/SKILL.md
+docs/knowledge/frontend-dev-guidelines/SKILL.md
+docs/knowledge/route-tester/SKILL.md
+docs/knowledge/skill-developer/SKILL.md
+=== Searching for services-and-repositories.md ===
+docs/knowledge/backend-dev-guidelines/resources/services-and-repositories.md
+=== Searching for async-and-errors.md ===
+docs/knowledge/backend-dev-guidelines/resources/async-and-errors.md
+=== Listing docs directory structure ===
+docs/SECURITY.md
+docs/TROUBLESHOOTING.md
+docs/agent_profile.md
+docs/changelogs/2025-11-22_ci-prcomments-ci-github-checks.md
+docs/changelogs/2024-11-27_knowledge-registry.md
+docs/changelogs/2024-11-27_test-watcher-impl.md
+docs/changelogs/2025-11-26_sqlite_task_store_and_hooks.md
+docs/ci/github_checks.md
+docs/ci/prcomments.md
+docs/error-handling.md
+docs/examples/git_worktree_workflow.md
+docs/examples/minimum_workflow_skills.md
+docs/examples/skills_chain.md
+docs/godot/editor_integration.md
+docs/godot/roadmap.md
+docs/guides/agent_loop.md
+docs/guides/protocol_v1_implementation.md
+docs/local-testing.md
+docs/openapi_implementation_summary.md
+docs/openapi_plugin_guide.md
+docs/prcomments/pr66.md
+docs/prcomments/pr77.md
+docs/refactoring/README.md
+docs/refactoring/SPEC-008-reorganize-packages.md
+docs/refactoring/SPEC-009-extract-skill-discovery.md
+docs/refactoring/SPEC-011-pathvalidator-hardening.md
+docs/refactoring/SPEC-012-openapi-spec-loader.md
+docs/refactoring/SPEC-013-openapi-request-builder.md
+docs/refactoring/SPEC-014-openapi-http-client.md
+docs/refactoring/SPEC-015-openapi-pagination.md
+```
+</shell_result>
+---
+Script executed:
+```shell
+#!/bin/bash
+# First, check the actual link format in the database-patterns.md file
+echo "=== Viewing lines 220-224 of database-patterns.md ==="
+sed -n '220,224p' docs/knowledge/backend-dev-guidelines/resources/database-patterns.md
+echo -e "\n=== Checking file structure around database-patterns.md ==="
+ls -la docs/knowledge/backend-dev-guidelines/resources/
+echo -e "\n=== Reading SKILL.md from backend-dev-guidelines ==="
+head -50 docs/knowledge/backend-dev-guidelines/SKILL.md
+```
+Repository: jkatigb/agentctl
+---
+<shell_result>
+Repository: jkatigb/agentctl
+Exit code: 0
+stdout:
+```
+=== Viewing lines 220-224 of database-patterns.md ===
+**Related Files:**
+- [SKILL.md](SKILL.md)
+- [services-and-repositories.md](services-and-repositories.md)
+- [async-and-errors.md](async-and-errors.md)
+=== Checking file structure around database-patterns.md ===
+total 148
+drwxr-xr-x 2 jailuser jailuser   260 Nov 26 22:31 .
+drwxr-xr-x 3 jailuser jailuser    80 Nov 26 22:31 ..
+-rw-r--r-- 1 jailuser jailuser 12866 Nov 26 22:31 architecture-overview.md
+-rw-r--r-- 1 jailuser jailuser  6862 Nov 26 22:31 async-and-errors.md
+-rw-r--r-- 1 jailuser jailuser 16478 Nov 26 22:31 complete-examples.md
+-rw-r--r-- 1 jailuser jailuser  5816 Nov 26 22:31 configuration.md
+-rw-r--r-- 1 jailuser jailuser  4937 Nov 26 22:31 database-patterns.md
+-rw-r--r-- 1 jailuser jailuser  5169 Nov 26 22:31 middleware-guide.md
+-rw-r--r-- 1 jailuser jailuser 19930 Nov 26 22:31 routing-and-controllers.md
+-rw-r--r-- 1 jailuser jailuser  7753 Nov 26 22:31 sentry-and-monitoring.md
+-rw-r--r-- 1 jailuser jailuser 22299 Nov 26 22:31 services-and-repositories.md
+-rw-r--r-- 1 jailuser jailuser  5420 Nov 26 22:31 testing-guide.md
+-rw-r--r-- 1 jailuser jailuser 18038 Nov 26 22:31 validation-patterns.md
+=== Reading SKILL.md from backend-dev-guidelines ===
+---
+name: backend-dev-guidelines
+description: Comprehensive backend development guide for Node.js/Express/TypeScript microservices. Use when creating routes, controllers, services, repositories, middleware, or working with Express APIs, Prisma database access, Sentry error tracking, Zod validation, unifiedConfig, dependency injection, or async patterns. Covers layered architecture (routes → controllers → services → repositories), BaseController pattern, error handling, performance monitoring, testing strategies, and migration from legacy patterns.
+---
+# Backend Development Guidelines
+## Purpose
+Establish consistency and best practices across backend microservices (blog-api, auth-service, notifications-service) using modern Node.js/Express/TypeScript patterns.
+## When to Use This Skill
+Automatically activates when working on:
+- Creating or modifying routes, endpoints, APIs
+- Building controllers, services, repositories
+- Implementing middleware (auth, validation, error handling)
+- Database operations with Prisma
+- Error tracking with Sentry
+- Input validation with Zod
+- Configuration management
+- Backend testing and refactoring
+---
+## Quick Start
+### New Backend Feature Checklist
+- [ ] **Route**: Clean definition, delegate to controller
+- [ ] **Controller**: Extend BaseController
+- [ ] **Service**: Business logic with DI
+- [ ] **Repository**: Database access (if complex)
+- [ ] **Validation**: Zod schema
+- [ ] **Sentry**: Error tracking
+- [ ] **Tests**: Unit + integration tests
+- [ ] **Config**: Use unifiedConfig
+### New Microservice Checklist
+- [ ] Directory structure (see [architecture-overview.md](architecture-overview.md))
+- [ ] instrument.ts for Sentry
+- [ ] unifiedConfig setup
+- [ ] BaseController class
+- [ ] Middleware stack
+- [ ] Error boundary
+- [ ] Testing framework
+---
 ```
 </shell_result>
 ---
 </details>
-**Duplicate file confirmed: identical to `skills/editor_godot/godot_plugin/bridge.gd`.**
-This entire file is a verified duplicate of `skills/editor_godot/godot_plugin/bridge.gd` (947 lines, 29K). Having two identical copies creates maintenance burden and divergence risk.
-Consider one of:
-1. **Remove this copy** and use the skills version as the source of truth
-2. **Generate this copy at build time** from the skills version (e.g., via `go:embed` or a Makefile target)
-3. **Symlink** if the filesystem supports it
-4. **Document** which copy is authoritative if both must exist
-
----
-
-### Task 3: coderabbitai[bot]'s feedback
-
-**File:** `docs/workflows/exa_mcp_context_filter.md:133`
-
-**Make the `exa_text.txt` → `context/filter` example JSON-safe**
-In the §4 example, this line:
-```bash
-"source": {
-  "text": "'"$(tr '\n' ' ' < exa_text.txt)"'"
-}
-```
-injects the file contents directly into a JSON string. If `exa_text.txt` contains quotes or backslashes, the resulting JSON will be invalid.
-You already use a safer pattern later with `jq -Rs`. Consider rewriting this example to mirror that style, for example:
-```bash
-jq -Rs '{
-    prompt: "Explain how agentctl handles CAS integrity failures.",
-    scope: "code",
-    source: { text: . },
-    budget: { target_tokens: 2000, max_chunks: 16 },
-    llm: { provider: "groq", model: "llama-3.3-70b-versatile" }
-  }' exa_text.txt \
-  | ./bin/agentctl run context/filter --input-file -
-```
-This keeps the docs robust for arbitrary Exa output.
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 LanguageTool</summary>
-[style] ~105-~105: As an alternative to the over-used intensifier ‘very’, consider replacing this phrase.
-Context: ...er`.  1. Flatten Exa content into text (very simple example):     ```bash    jq -r '.data.c...
-(EN_WEAK_ADJECTIVE)
-</details>
-</details>
+**Fix broken relative path for SKILL.md link.**
+The reference to `[SKILL.md](SKILL.md)` will be broken—the file exists at `../SKILL.md` (in the parent `backend-dev-guidelines/` directory), not in the `resources/` directory. Update the link to `[SKILL.md](../SKILL.md)`. The other two files (`services-and-repositories.md` and `async-and-errors.md`) exist in the same directory and are appropriately scoped for database/service-layer guidance. SKILL.md itself is also relevant (it documents repository patterns, database operations with Prisma, and is the core backend development guide).
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In docs/workflows/exa_mcp_context_filter.md around lines 105-133, the example
-injects exa_text.txt contents directly into a JSON string which breaks when the
-file contains quotes/backslashes; replace that unsafe inline substitution with
-the jq -Rs pattern that reads the file as raw text, constructs the JSON object
-(prompt, scope, source.text, budget, llm) safely, and pipes the resulting JSON
-to agentctl using the CLI's input-file/- option so arbitrary Exa output is
-JSON-safe.
-```
-</details>
-
----
-
-### Task 4: coderabbitai[bot]'s feedback
-
-**File:** `skills/context_filter/main.go:164`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-OpenAI gpt-4.1-mini current model 2025
----
-<web_search_result>
-Yes — OpenAI’s GPT‑4.1‑mini is an official model (launched April 14, 2025). Key facts:
-- Launched as part of the GPT‑4.1 family (models: gpt‑4.1, gpt‑4.1‑mini, gpt‑4.1‑nano). [1]
-- Context window: ~1,047,576 tokens (1M). [2]
-- Suited for instruction following, tool-calling, low-latency uses; OpenAI positions it as a smaller, faster alternative to GPT‑4.1. [1][2]
-- Pricing (per 1M tokens, example): input $0.40 / cached input $0.10 / output $1.60. [1][2]
-- Available in the OpenAI API (chat, responses, realtime, batch) and rolled into ChatGPT for paid users per OpenAI release notes. [1][2][3]
-Sources: OpenAI announcement (Introducing GPT‑4.1) and OpenAI model docs. [1][2]
-</web_search_result>
----
-Anthropic claude-3-5-sonnet-latest current model
----
-<web_search_result>
-- The alias claude-3-5-sonnet-latest points to the snapshot model ID claude-3-5-sonnet-20241022 (upgrade of the original 20240620 snapshot). [1][2]
-- Anthropic announced deprecation of the Claude Sonnet 3.5 models on August 13, 2025 and scheduled retirement in October 2025 (docs list retirement dates of Oct 22, 2025 and Oct 28, 2025 in different release-note pages). They recommend migrating to Claude Sonnet 4 (e.g., claude-sonnet-4-20250514 / sonnet 4.5 aliases). [3][4]
-Sources:
-[1] Anthropic models overview (models list showing claude-3-5-sonnet-latest → claude-3-5-sonnet-20241022).
-[2] Anthropic models table (model snapshots and IDs).
-[3] Anthropic release notes — deprecation announcement (Aug 13, 2025).
-[4] Anthropic release notes / developer docs (deprecation + retirement scheduling).
-</web_search_result>
----
-Google Gemini gemini-1.5-pro-latest current model
----
-<web_search_result>
-Short answer: gemini-1.5-pro-latest was the auto-updating alias that pointed to the Gemini 1.5 Pro stable build (most recently gemini-1.5-pro-002), but the Gemini 1.5 family was deprecated/retired in September 2025 and should no longer be used for new projects. [1][2]
-Sources:
-- Gemini models docs (shows alias, token limits and that latest = gemini-1.5-pro-latest / stable = gemini-1.5-pro-002). [1]
-- Gemini changelog / Vertex AI docs (deprecation/retirement notices in Sept–Oct 2025 and migration guidance). [2]
-</web_search_result>
----
-Groq llama-3.1-70b-versatile current model
----
-<web_search_result>
-Short answer: groq's llama-3.1-70b-versatile has been decommissioned/ deprecated — Groq replaced it with llama-3.3-70b-versatile (requests to the 3.1 70B model were shut down on Jan 24, 2025). See Groq's deprecations page and blog for details. [1][2]
-Sources
-- Groq model deprecations (decommission schedule, recommended replacement). [1]
-- Groq blog/announcements about Llama 3.3 70B availability and performance on GroqCloud. [2]
-</web_search_result>
----
-OpenRouter openrouter/auto model identifier
----
-<web_search_result>
-The OpenRouter auto router model identifier is: openrouter/auto. [1][2]
-Sources:
-[1] OpenRouter docs — Model routing / Auto Router.
-[2] OpenRouter (openrouter.ai) — Auto Model Selection.
-</web_search_result>
----
-</details>
-**Three of five default LLM models are deprecated or decommissioned and must be updated.**
-The default models have the following issues:
-- **`gpt-4.1-mini`** (OpenAI): Valid — launched April 14, 2025.
-- **`claude-3-5-sonnet-latest`** (Anthropic): **Deprecated** — Anthropic deprecated Claude 3.5 Sonnet on August 13, 2025 with retirement scheduled for October 22–28, 2025. Migrate to `claude-sonnet-4-20250514` (Claude Sonnet 4.5).
-- **`gemini-1.5-pro-latest`** (Google): **Deprecated** — The Gemini 1.5 family was deprecated and retired in September–October 2025. Use `gemini-2.0-flash-latest` or an appropriate Gemini 2.0 model instead.
-- **`llama-3.1-70b-versatile`** (Groq): **Decommissioned** — Groq shut down the Llama 3.1 70B model on January 24, 2025. Replace with `llama-3.3-70b-versatile`.
-- **`openrouter/auto`** (OpenRouter): Valid — confirmed as a legitimate auto-routing identifier.
-Update lines 149–164 to use current model identifiers or the fallback logic will fail at runtime.
-
----
-
-### Task 5: coderabbitai[bot]'s feedback
-
-**File:** `skills/context_filter/main.go:510`
-
-**Add HTTP client timeout to prevent indefinite hangs.**
-The code uses `http.DefaultClient` which has no default timeout. If a provider becomes unresponsive, the skill could hang indefinitely. Consider using a client with a configured timeout.
-```diff
-+var httpClient = &http.Client{
-+	Timeout: 60 * time.Second,
-+}
-+
- func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
- 	// ... existing code ...
--	resp, err := http.DefaultClient.Do(req)
-+	resp, err := httpClient.Do(req)
-```
-Apply the same change to `callAnthropic` (line 587) and `callGemini` (line 667).
-> Committable suggestion skipped: line range outside the PR's diff.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/context_filter/main.go around lines 502 to 510 (and similarly update
-callAnthropic at ~587 and callGemini at ~667), the code uses http.DefaultClient
-(no timeout) which can hang indefinitely; replace usages with a local
-http.Client that has a reasonable Timeout set (e.g., configurable or a fixed
-value like 30s), and use that client to perform Do(req). Ensure you import time
-if needed and keep the same defer close logic; apply the identical change to the
-callAnthropic and callGemini functions so all external HTTP calls use a
-timeout-bound client.
-```
-</details>
-
----
-
-### Task 6: coderabbitai[bot]'s feedback
-
-**File:** `skills/editor_godot/godot_plugin/bridge.gd:23`
-
-**Error buffer is declared but never populated.**
-The `_error_buffer` array is initialized and read in `_handle_errors`, but no code ever appends errors to it. The comment at lines 36-38 acknowledges this limitation but doesn't implement any solution.
-Consider either:
-1. Remove the error buffer feature if it's not implemented
-2. Add a mechanism to capture errors (e.g., override `_print_error` or use a custom logger)
-```diff
- var _error_buffer: Array[Dictionary] = []
- const MAX_ERROR_BUFFER: int = 200
-+
-+
-+func _add_error(message: String, source: String = "") -> void:
-+	_error_buffer.append({
-+		"message": message,
-+		"source": source,
-+		"timestamp": Time.get_unix_time_from_system(),
-+	})
-+	if _error_buffer.size() > MAX_ERROR_BUFFER:
-+		_error_buffer.pop_front()
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-var _error_buffer: Array[Dictionary] = []
-const MAX_ERROR_BUFFER: int = 200
-func _add_error(message: String, source: String = "") -> void:
-	_error_buffer.append({
-		"message": message,
-		"source": source,
-		"timestamp": Time.get_unix_time_from_system(),
-	})
-	if _error_buffer.size() > MAX_ERROR_BUFFER:
-		_error_buffer.pop_front()
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/editor_godot/godot_plugin/bridge.gd around lines 22-23, the
-_error_buffer is allocated but never written to; update the file to either
-remove the unused buffer and any code that reads it, or implement error capture
-by overriding _print_error (or hooking the engine's error signal) to append a
-Dictionary (message, stack, timestamp, severity) to _error_buffer and enforce
-the MAX_ERROR_BUFFER cap by trimming older entries when pushing new ones so
-_handle_errors actually has populated data to process.
-```
-</details>
-
----
-
-### Task 7: coderabbitai[bot]'s feedback
-
-**File:** `skills/editor_godot/godot_plugin/bridge.gd:529`
-
-**Signal connections are runtime-only and won't persist when scene is saved.**
-Connections made via `source.connect()` exist only at runtime. When the scene is saved and reloaded, these connections will be lost. For persistent signal connections, you need to modify the scene's connection data.
-Consider adding a warning in the response or documenting this limitation clearly:
-```diff
- return _success_response({
- 	"ok": true,
- 	"source_path": source_path,
- 	"signal_name": signal_name,
- 	"target_path": target_path,
- 	"method_name": method_name,
-+	"warning": "Connection is runtime-only and will not persist after scene reload. For persistent connections, edit the scene file directly.",
- })
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-	# Connect signal (note: undo/redo for signals is complex, doing simple connect for now)
-	if source.is_connected(signal_name, Callable(target, method_name)):
-		return _success_response({
-			"ok": true,
-			"already_connected": true,
-		})
-	var err := source.connect(signal_name, Callable(target, method_name))
-	if err != OK:
-		return _error_response("ESIGNAL_CONNECT", "Failed to connect signal: error %d" % err, "")
-	return _success_response({
-		"ok": true,
-		"source_path": source_path,
-		"signal_name": signal_name,
-		"target_path": target_path,
-		"method_name": method_name,
-		"warning": "Connection is runtime-only and will not persist after scene reload. For persistent connections, edit the scene file directly.",
-	})
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/editor_godot/godot_plugin/bridge.gd around lines 512 to 529, the code
-performs a runtime-only source.connect() which will not persist when the scene
-is saved; change the response to explicitly warn about this limitation and/or
-persist the connection in the scene data: update the success response to include
-a warning field (e.g., "runtime_only": true or "warning": "Signal connection is
-runtime-only and won’t persist when scene is saved") and/or implement
-persistence by editing the source scene’s connection data (add the connection
-entry to the scene/resource so it is serialized) before returning success so
-callers know the connection won’t survive a reload unless stored.
-```
-</details>
-
----
-
-### Task 8: coderabbitai[bot]'s feedback
-
-**File:** `skills/editor_godot/godot_plugin/bridge.gd:561`
-
-**Missing `add_do_reference` may cause undo to fail after node deletion.**
-When deleting a node, you call `add_undo_reference` but not `add_do_reference`. After the do action removes the child, the node may be freed. When undo tries to re-add it, the reference could be invalid.
-```diff
- _undo_redo.create_action("AI: Delete Node " + node_name)
-+_undo_redo.add_do_reference(node)
- _undo_redo.add_do_method(parent, "remove_child", node)
- _undo_redo.add_undo_method(parent, "add_child", node)
- _undo_redo.add_undo_method(parent, "move_child", node, node_index)
- _undo_redo.add_undo_method(node, "set_owner", root)
- _undo_redo.add_undo_reference(node)
- _undo_redo.commit_action()
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-	_undo_redo.create_action("AI: Delete Node " + node_name)
-	_undo_redo.add_do_reference(node)
-	_undo_redo.add_do_method(parent, "remove_child", node)
-	_undo_redo.add_undo_method(parent, "add_child", node)
-	_undo_redo.add_undo_method(parent, "move_child", node, node_index)
-	_undo_redo.add_undo_method(node, "set_owner", root)
-	_undo_redo.add_undo_reference(node)
-	_undo_redo.commit_action()
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In skills/editor_godot/godot_plugin/bridge.gd around lines 555 to 561, the undo
-action adds an undo reference but never a do reference, so the node can be freed
-after the remove_child do and the undo will hold a dangling reference; fix by
-calling _undo_redo.add_do_reference(node) before adding the do method that
-removes the child (i.e., add the do-reference prior to
-_undo_redo.add_do_method(parent, "remove_child", node)), keep the existing
-add_undo_reference call, and then commit the action so the engine retains the
-node for the do step and still restores it on undo.
+In docs/knowledge/backend-dev-guidelines/resources/database-patterns.md around
+lines 220 to 224, the relative link to SKILL.md is incorrect; update the
+markdown link target from SKILL.md to ../SKILL.md so it points to the SKILL.md
+file in the parent backend-dev-guidelines directory (leave the other two links
+unchanged).
 ```
 </details>
 
@@ -495,71 +688,656 @@ node for the do step and still restores it on undo.
 
 ### Task 9: coderabbitai[bot]'s feedback
 
-**File:** `skills/editor_godot/godot_plugin/bridge.gd:853`
+**File:** `docs/knowledge/backend-dev-guidelines/resources/middleware-guide.md:13`
 
-**Type conversion falls through silently on validation failure.**
-When `value_str.is_valid_int()` returns false for `TYPE_INT`, the code falls through to the `str_to_var` fallback and eventually returns the string. This could cause type mismatches where a property expects an int but receives a string.
-Consider returning `null` explicitly when type-specific validation fails:
+**Broken link: Validation Middleware section is missing.**
+The Table of Contents references `#validation-middleware`, but there's no corresponding `## Validation Middleware` section in the document. Either add the section or remove it from the TOC.
 ```diff
- match target_type:
- 	TYPE_INT:
- 		if value_str.is_valid_int():
- 			return value_str.to_int()
-+		return null
- 	TYPE_FLOAT:
- 		if value_str.is_valid_float():
- 			return value_str.to_float()
-+		return null
- 	TYPE_BOOL:
- 		var lower := value_str.to_lower()
- 		if lower == "true":
- 			return true
- 		if lower == "false":
- 			return false
-+		return null
+ ## Table of Contents
+ - [Authentication Middleware](#authentication-middleware)
+ - [Audit Middleware with AsyncLocalStorage](#audit-middleware-with-asynclocalstorage)
+ - [Error Boundary Middleware](#error-boundary-middleware)
+-- [Validation Middleware](#validation-middleware)
+ - [Composable Middleware](#composable-middleware)
+ - [Middleware Ordering](#middleware-ordering)
 ```
 <details>
 <summary>📝 Committable suggestion</summary>
 > ‼️ **IMPORTANT**
 > Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
 ```suggestion
-	match target_type:
-		TYPE_INT:
-			if value_str.is_valid_int():
-				return value_str.to_int()
-			return null
-		TYPE_FLOAT:
-			if value_str.is_valid_float():
-				return value_str.to_float()
-			return null
-		TYPE_BOOL:
-			var lower := value_str.to_lower()
-			if lower == "true":
-				return true
-			if lower == "false":
-				return false
-			return null
-		TYPE_STRING:
-			return value_str
-		TYPE_VECTOR2:
-			return _parse_vector2(value_str)
-		TYPE_VECTOR3:
-			return _parse_vector3(value_str)
-		TYPE_COLOR:
-			return _parse_color(value_str)
+## Table of Contents
+- [Authentication Middleware](#authentication-middleware)
+- [Audit Middleware with AsyncLocalStorage](#audit-middleware-with-asynclocalstorage)
+- [Error Boundary Middleware](#error-boundary-middleware)
+- [Composable Middleware](#composable-middleware)
+- [Middleware Ordering](#middleware-ordering)
+```
+</details>
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+10-10: Link fragments should be valid
+(MD051, link-fragments)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/backend-dev-guidelines/resources/middleware-guide.md around
+lines 5 to 13, the Table of Contents contains a "Validation Middleware" entry
+linking to #validation-middleware but the document lacks a corresponding
+section; either add a "## Validation Middleware" section (with a brief
+explanation of purpose, common patterns, and an example or link to shared
+validators) placed appropriately in the document and update any anchors, or
+remove the "Validation Middleware" line from the TOC to keep the TOC accurate.
+```
+</details>
+
+---
+
+### Task 10: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/backend-dev-guidelines/resources/routing-and-controllers.md:548`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Fix markdown heading structure in refactoring guide.**
+Lines 452, 483, and 527 use bold emphasis (**Step N:**) where markdown headings (### Step N:) are more appropriate. This affects document structure and navigation. Additionally, proper heading levels improve parsing by documentation generators and screen readers.
+Apply this pattern for better structure:
+```diff
+-**Step 1: Create Controller**
++### Step 1: Create Controller
+```
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+452-452: Emphasis used instead of a heading
+(MD036, no-emphasis-as-heading)
+---
+483-483: Emphasis used instead of a heading
+(MD036, no-emphasis-as-heading)
+---
+527-527: Emphasis used instead of a heading
+(MD036, no-emphasis-as-heading)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/backend-dev-guidelines/resources/routing-and-controllers.md
+around lines 450 to 548, replace the inline bold step labels (lines ~452, ~483,
+~527) with proper markdown heading lines (e.g., "### Step 1: Create Controller",
+"### Step 2: Create Service", "### Step 3: Update Route") so the document
+structure and navigation are correct; ensure each step uses the same heading
+level and update any adjacent paragraph breaks so headings render correctly for
+doc generators and screen readers.
+```
+</details>
+
+---
+
+### Task 11: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:161`
+
+**Minor: Add language specifier to fenced code block.**
+The code block at line 161 should specify a language for proper syntax highlighting.
+Based on learnings from static analysis, apply this diff:
+```diff
+-```
++```text
+ features/
+   users/
+```
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+161-161: Fenced code blocks should have a language specified
+(MD040, fenced-code-language)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
+line 161, the fenced code block lacks a language specifier; update the block to
+use a text language tag and include the two lines shown in the diff so the block
+reads as a text snippet containing the directory lines "features/" and "users/".
+Replace the existing triple-backtick fence with one that specifies "text" and
+ensure the two content lines are inside the fenced block.
+```
+</details>
+
+---
+
+### Task 12: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:486`
+
+**Critical: Fix incorrect "blog" references - should be "form".**
+Example 5 contains multiple instances where "form" has been incorrectly replaced with "blog". This appears to be a find-replace error that breaks the code:
+- Line 388: `useBlog` should be `useForm` (from `react-hook-form`)
+- Line 389: `@hookblog/resolvers/zod` should be `@hookform/resolvers/zod`
+- Line 412: `blogState` should be `formState`
+- Lines 443, 486: `<blog>` and `</blog>` should be `<form>` and `</form>`
+Apply this diff to fix the form-related errors in Example 5:
+```diff
+-import { useBlog } from 'react-hook-blog';
+-import { zodResolver } from '@hookblog/resolvers/zod';
++import { useForm } from 'react-hook-form';
++import { zodResolver } from '@hookform/resolvers/zod';
+ import { z } from 'zod';
+ import { useMutation, useQueryClient } from '@tanstack/react-query';
+ import { userApi } from '../api/userApi';
+@@ -409,7 +409,7 @@
+ export const CreateUserBlog: React.FC<CreateUserBlogProps> = ({ onSuccess }) => {
+     const queryClient = useQueryClient();
+     const { showSuccess, showError } = useMuiSnackbar();
+-    const { register, handleSubmit, blogState: { errors }, reset } = useBlog<UserBlogData>({
++    const { register, handleSubmit, formState: { errors }, reset } = useForm<UserBlogData>({
+         resolver: zodResolver(userSchema),
+         defaultValues: {
+             username: '',
+@@ -440,7 +440,7 @@
+     return (
+         <Paper sx={{ p: 3, maxWidth: 500 }}>
+-            <blog onSubmit={handleSubmit(onSubmit)}>
++            <form onSubmit={handleSubmit(onSubmit)}>
+                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                     <TextField
+                         {...register('username')}
+@@ -483,7 +483,7 @@
+                         {createMutation.isPending ? 'Creating...' : 'Create User'}
+                     </Button>
+                 </Box>
+-            </blog>
++            </form>
+         </Paper>
+     );
+ };
+```
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
+lines 388 to 486, several accidental "blog" replacements broke the form usage:
+change useBlog to useForm (import from react-hook-form), change
+@hookblog/resolvers/zod to @hookform/resolvers/zod, rename blogState to
+formState, and replace the <blog>...</blog> elements with <form>...</form>;
+ensure imports/usage match react-hook-form API and keep the rest of the
+component logic identical.
+```
+</details>
+
+---
+
+### Task 13: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:538`
+
+**Critical: Fix typo "perblogance" → "performance" and "Blogs" → "Forms".**
+Additional find-replace errors in the text:
+- Line 538: "perblogance" should be "performance"
+- Line 867: "Blogs: React Hook Blog" should be "Forms: React Hook Form"
+- Line 869: "Perblogance" should be "Performance"
+Apply this diff:
+```diff
+ **Benefits:**
+ - Each section loads independently
+ - User sees partial content sooner
+-- Better perceived perblogance
++- Better perceived performance
+ ---
+@@ -864,9 +864,9 @@
+ 2. **Feature Structure**: Organized subdirectories (api/, components/, hooks/, etc.)
+ 3. **Routing**: Folder-based with lazy loading
+ 4. **Data Fetching**: useSuspenseQuery with cache-first strategy
+-5. **Blogs**: React Hook Blog + Zod validation
++5. **Forms**: React Hook Form + Zod validation
+ 6. **Error Handling**: useMuiSnackbar + onError callbacks
+-7. **Perblogance**: useMemo, useCallback, React.memo, debouncing
++7. **Performance**: useMemo, useCallback, React.memo, debouncing
+ 8. **Styling**: Inline <100 lines, sx prop, MUI v7 syntax
+```
+Also applies to: 867-869
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
+line 538 and also lines 867–869, fix typos caused by bad find/replace: on line
+538 change "perblogance" to "performance"; on line 867 change "Blogs: React Hook
+Blog" to "Forms: React Hook Form"; on line 869 change "Perblogance" to
+"Performance". Update the text in-place preserving surrounding punctuation and
+capitalization.
+```
+</details>
+
+---
+
+### Task 14: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:743`
+
+**Critical: Fix incorrect "blog" references in Dialog example.**
+The dialog example (lines 645-743) also contains the same find-replace error:
+- Line 660: `useBlog` should be `useForm`
+- Line 661: `@hookblog` should be `@hookform`
+- Line 682: `blogState` should be `formState`
+- Line 691: `handleBlogSubmit` should be `handleFormSubmit`
+- Lines 710, 739: `<blog>` and `</blog>` should be `<form>` and `</form>`
+Apply this diff to fix the form-related errors:
+```diff
+-import { useBlog } from 'react-hook-blog';
+-import { zodResolver } from '@hookblog/resolvers/zod';
++import { useForm } from 'react-hook-form';
++import { zodResolver } from '@hookform/resolvers/zod';
+ import { z } from 'zod';
+ const blogSchema = z.object({
+@@ -679,7 +679,7 @@
+     onClose,
+     onSubmit,
+ }) => {
+-    const { register, handleSubmit, blogState: { errors }, reset } = useBlog<BlogData>({
++    const { register, handleSubmit, formState: { errors }, reset } = useForm<BlogData>({
+         resolver: zodResolver(blogSchema),
+     });
+@@ -688,7 +688,7 @@
+         onClose();
+     };
+-    const handleBlogSubmit = async (data: BlogData) => {
++    const handleFormSubmit = async (data: BlogData) => {
+         await onSubmit(data);
+         handleClose();
+     };
+@@ -707,7 +707,7 @@
+                 </Box>
+             </DialogTitle>
+-            <blog onSubmit={handleSubmit(handleBlogSubmit)}>
++            <form onSubmit={handleSubmit(handleFormSubmit)}>
+                 <DialogContent>
+                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                         <TextField
+@@ -736,7 +736,7 @@
+                         Add User
+                     </Button>
+                 </DialogActions>
+-            </blog>
++            </form>
+         </Dialog>
+     );
+ };
+```
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
+lines 645-743, the dialog example contains incorrect find-replace artifacts:
+change useBlog to useForm on line 660, change @hookblog to @hookform on line
+661, change blogState to formState on line 682, rename handleBlogSubmit to
+handleFormSubmit on line 691 (and update its usages), and replace the <blog> and
+</blog> tags on lines ~710 and ~739 with standard <form> and </form> so the
+component uses React Hook Form correctly.
+```
+</details>
+
+---
+
+### Task 15: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/skill-developer/ADVANCED.md:101`
+
+**Minor: Fix typo "Dashbord" → "Dashboard".**
+Simple typo in the heading.
+Apply this diff:
+```diff
+-- Time to skill usage after suggestion
+-- User override rate (skip markers, env vars)
+-- Performance metrics (execution time)
+-**Dashbord Ideas:**
++**Dashboard Ideas:**
+ - Most/least used skills
+```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+**Dashboard Ideas:**
+```
+</details>
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 LanguageTool</summary>
+[grammar] ~101-~101: Ensure spelling is correct
+Context: ...Performance metrics (execution time)  **Dashbord Ideas:** - Most/least used skills - Ski...
+(QB_NEW_EN_ORTHOGRAPHY_ERROR_IDS_1)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/skill-developer/ADVANCED.md around line 101, the heading
+contains a typo "Dashbord Ideas:"; update it to "Dashboard Ideas:" by correcting
+the spelling of "Dashbord" to "Dashboard" so the heading reads "Dashboard
+Ideas:".
+```
+</details>
+
+---
+
+### Task 16: coderabbitai[bot]'s feedback
+
+**File:** `docs/knowledge/skill-developer/SKILL.md:220`
+
+**Minor grammar issue: hyphenate "Low-priority".**
+Per static analysis, "Low priority" should be hyphenated when used as a compound adjective.
+```diff
+ ### WARN (Optional)
+-- Low priority suggestions
++- Low-priority suggestions
+ - Advisory only, minimal enforcement
+```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+### WARN (Optional)
+- Low-priority suggestions
+- Advisory only, minimal enforcement
+- **Use For**: Nice-to-have suggestions, informational reminders
+**Rarely used** - most skills are either BLOCK or SUGGEST.
+```
+</details>
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 LanguageTool</summary>
+[grammar] ~216-~216: Use a hyphen to join words.
+Context: ...t guidelines  ### WARN (Optional)  - Low priority suggestions - Advisory only, mi...
+(QB_NEW_EN_HYPHEN)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/knowledge/skill-developer/SKILL.md around lines 214 to 220, change the
+compound adjective "Low priority" to the hyphenated form "Low-priority" (e.g.,
+"Low-priority suggestions") to fix the grammar; update any other occurrences in
+that block to use "Low-priority" consistently.
+```
+</details>
+
+---
+
+### Task 17: coderabbitai[bot]'s feedback
+
+**File:** `docs/spec/knowledge_registry.md:215`
+
+**Align decision naming between algorithm text and JSON example**
+Section “4. Threshold check” talks about emitting `DecisionNone`, but the JSON example below uses `"decision": "none"`. To avoid confusion about the actual wire value vs internal enum name, please standardize on a single canonical value (likely `"none"` to match Core Profile decisions) and update the text to say that the hook always returns `decision: "none"` with/without `meta.recommended` depending on the threshold.
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+202-202: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+203-203: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+204-204: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+205-205: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+206-206: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+207-207: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+208-208: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+209-209: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+210-210: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+211-211: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+212-212: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+213-213: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+214-214: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/spec/knowledge_registry.md around lines 194 to 215, the prose uses the
+enum-style name `DecisionNone` while the JSON example uses the wire value
+`"none"`; standardize to the canonical wire value and update the text and
+example so they match: change the algorithm description to state the hook always
+returns decision: "none" (not DecisionNone) and explain that meta.recommended is
+present only when the top score ≥ threshold, then adjust the JSON example
+text/metadata to reflect the same canonical `"none"` decision and consistency in
+wording.
+```
+</details>
+
+---
+
+### Task 18: coderabbitai[bot]'s feedback
+
+**File:** `docs/spec/knowledge_registry.md:291`
+
+**Make `cosineSimilarity` example valid Go or mark it as pseudo-code**
+The `cosineSimilarity` snippet uses `sqrt(normA)` but Go only provides `math.Sqrt` (float64) and would require imports and casts to compile, plus a guard for zero norms:
+```go
+import "math"
+func cosineSimilarity(a, b []float32) float32 {
+    var dot, normA, normB float64
+    for i := range a {
+        av, bv := float64(a[i]), float64(b[i])
+        dot += av * bv
+        normA += av * av
+        normB += bv * bv
+    }
+    if normA == 0 || normB == 0 {
+        return 0
+    }
+    return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB)))
+}
+```
+Either adjust the example toward something like this or call out that it’s pseudo‑code, so readers don’t copy a non‑compiling version.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/spec/knowledge_registry.md around lines 281 to 291, the cosineSimilarity
+snippet is not valid Go (uses sqrt without math import/casts and lacks a
+zero-norm guard); either convert it to compile-ready Go by using math.Sqrt with
+float64 accumulation and casts and add a check returning 0 for zero norms, or
+explicitly mark the block as pseudo-code and add a short note warning readers it
+won’t compile as-is.
+```
+</details>
+
+---
+
+### Task 19: coderabbitai[bot]'s feedback
+
+**File:** `docs/spec/test_watch_feedback.md:520`
+
+<details>
+<summary>🧩 Analysis chain</summary>
+Script executed:
+```shell
+#!/bin/bash
+# Check file size and structure
+wc -l docs/spec/test_watch_feedback.md
+# Read section 8.1 around line 359 to understand hook directory specifications
+echo "=== Section 8.1 (around line 359) ==="
+sed -n '350,370p' docs/spec/test_watch_feedback.md
+# Read the section around lines 519-520 to understand the current documentation
+echo -e "\n=== Section around lines 519-520 ==="
+sed -n '510,530p' docs/spec/test_watch_feedback.md
+# Search for all references to .agentctl/hooks/ and settings.json
+echo -e "\n=== All references to .agentctl/hooks/ ==="
+rg -n "\.agentctl/hooks/" docs/spec/test_watch_feedback.md
+echo -e "\n=== All references to settings.json ==="
+rg -n "settings\.json" docs/spec/test_watch_feedback.md
+echo -e "\n=== All references to PostToolUse ==="
+rg -n "PostToolUse" docs/spec/test_watch_feedback.md
+```
+Repository: jkatigb/agentctl
+---
+<shell_result>
+Repository: jkatigb/agentctl
+Exit code: 0
+stdout:
+```
+546 docs/spec/test_watch_feedback.md
+=== Section 8.1 (around line 359) ===
+## 8. Hook: `hooks/test_feedback`
+### 8.1 Event & Wiring
+- **Event:** `PostToolUse`\
+  Triggered after tools that can mutate the workspace (e.g.
+  edit/write/multi-edit/git apply).
+- **Wrapper:** A standard Claude hook wrapper under `.claude/hooks/`, similar to
+  `task-guard.sh` and `knowledge-router.sh`, that:
+  - Reads hook payload JSON from stdin.
+  - Invokes `agentctl run hooks/test_feedback --input -`.
+  - Emits `data.hook_output` as the hook’s JSON output.
+- **Settings:** The harness example SHOULD wire this hook for `PostToolUse`
+  events on write-like tools once implemented.
+### 8.2 Input
+`hooks/test_feedback` receives the standard `hook.Input` structure (see
+=== Section around lines 519-520 ===
+3. **`agentctl watch tests` CLI**
+   - Implement watch and `--once` / `--status-only` modes.
+   - Add basic parsers for Go, Pytest, and Jest/Vitest where cheap; otherwise
+     default to `summary` + `raw_tail`.
+4. **`hooks/test_feedback` Skill**
+   - Implement as an exec skill similar to `hooks/task_guard` and
+     `hooks/knowledge_router`.
+   - Add bash wrapper under `.agentctl/hooks/` and wire into
+     `.agentctl/settings.json` for `PostToolUse`.
+5. **Harness Integration**
+   - Provide an example `.agentctl/test-watch.yaml` in the harness repo.
+   - Document the workflow in `AGENTCTL.md`.
+6. **Future Enhancements**
+   - Optional history of runs (`test_runs` table).
+   - Deeper framework-specific parsing for richer failure reporting.
+   - Task-aware tagging of test runs.
+=== All references to .agentctl/hooks/ ===
+519:   - Add bash wrapper under `.agentctl/hooks/` and wire into
+=== All references to settings.json ===
+520:     `.agentctl/settings.json` for `PostToolUse`.
+=== All references to PostToolUse ===
+17:  `PostToolUse` hook after code edits, without having to explicitly run tests.
+46:  `PostToolUse`, keeping Claude’s integration surface consistent with other
+71:| **Feedback hook** | The `hooks/test_feedback` skill, wired on `PostToolUse`, that surfaces test failures to Claude. |
+355:- **Event:** `PostToolUse`\
+365:- **Settings:** The harness example SHOULD wire this hook for `PostToolUse`
+375:  "event": "PostToolUse",
+520:     `.agentctl/settings.json` for `PostToolUse`.
+```
+</shell_result>
+---
+</details>
+Based on my verification, I found the actual inconsistency in the specification. The original review comment was partially correct but identifies the wrong issue. Here's what I found:
+**Section 8.1 (line 359)** specifies the wrapper should be under `.claude/hooks/` (not `.agentctl/hooks/`):
+- "A standard Claude hook wrapper under `.claude/hooks/`, similar to `task-guard.sh` and `knowledge-router.sh`"
+**Lines 519-520** (implementation tasks) specify `.agentctl/hooks/`:
+- "Add bash wrapper under `.agentctl/hooks/` and wire into `.agentctl/settings.json` for `PostToolUse`"
+This is a **path mismatch between specification and implementation task**, not just a settings file clarification issue.
+---
+**Specification and implementation task paths diverge: section 8.1 specifies `.claude/hooks/` but line 519 specifies `.agentctl/hooks/`. Align both to use the same directory path.**
+The wrapper location should be consistent between the hook specification (section 8.1, line 354-363) and the implementation task (line 519). Currently, section 8.1 documents the wrapper under `.claude/hooks/`, while the implementation checklist on line 519 directs adding it under `.agentctl/hooks/`. Clarify which path is correct and update accordingly.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In docs/spec/test_watch_feedback.md around lines 519-520 (and referencing
+section 8.1 at line 359), there is a path mismatch: the specification calls for
+a wrapper under `.claude/hooks/` but the implementation task directs
+`.agentctl/hooks/`; reconcile by choosing a single canonical path and updating
+both places to match (either change section 8.1 to `.agentctl/hooks/` or change
+the task at 519-520 to `.claude/hooks/`), and ensure any related references
+(e.g., wiring into settings.json) are updated to reference the chosen directory
+consistently.
+```
+</details>
+
+---
+
+### Task 20: coderabbitai[bot]'s feedback
+
+**File:** `internal/storage/knowledge/store.go:368`
+
+**Case mismatch in keyword search.**
+`LOWER(t.pattern)` lowercases the stored pattern, but the input keywords (line 366) are not lowercased. A search for `["API"]` won't match a trigger pattern `"api"`.
+```diff
+ 	for i, kw := range keywords {
+ 		if i > 0 {
+ 			query += ", "
+ 		}
+ 		query += "?"
+-		args[i] = kw
++		args[i] = strings.ToLower(kw)
+ 	}
+```
+Add `"strings"` to the imports.
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+WHERE t.trigger_kind = 'keyword' AND LOWER(t.pattern) IN (`
+	args := make([]any, len(keywords))
+	for i, kw := range keywords {
+		if i > 0 {
+			query += ", "
+		}
+		query += "?"
+		args[i] = strings.ToLower(kw)
+	}
+	query += `) ORDER BY i.priority DESC, i.name`
 ```
 </details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In skills/editor_godot/godot_plugin/bridge.gd around lines 832 to 853, the match
-arms for TYPE_INT, TYPE_FLOAT, and TYPE_BOOL silently fall through when
-validation fails, causing str_to_var fallback to return a string; change each
-type-specific branch to return null explicitly when validation fails (e.g., if
-is_valid_int/is_valid_float checks fail, return null; for BOOL convert/lower
-check, return null if not "true" or "false"); ensure
-TYPE_VECTOR2/TYPE_VECTOR3/TYPE_COLOR parsing routines also propagate null on
-parse failure rather than falling through.
+In internal/storage/knowledge/store.go around lines 359 to 368, the SQL compares
+LOWER(t.pattern) to the provided keywords but the keywords in args are not
+lowercased; change the loop that builds args so each kw is converted with
+strings.ToLower(kw) before assigning to args[i], and add "strings" to the file
+imports.
 ```
 </details>
 
@@ -567,5 +1345,5 @@ parse failure rather than falling through.
 
 ## Summary
 
-**Total tasks:** 9
-- 📝 Review comments: 9
+**Total tasks:** 20
+- 📝 Review comments: 20

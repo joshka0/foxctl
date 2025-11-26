@@ -1,6 +1,6 @@
 # Test Watcher Implementation
 
-**Date:** 2024-11-27\
+**Date:** 2025-11-27\
 **Spec:** `docs/spec/test_watch_feedback.md`
 
 ## Summary
@@ -49,12 +49,12 @@ Per-workspace config lives in `.agentctl/test-watch.yaml`:
 ```yaml
 debounce: 2s
 watchers:
-    - id: go
-      command: go test ./...
-      include:
-          - "**/*.go"
-      debounce: 2s
-      min_interval: 20s
+  - id: go
+    command: go test ./...
+    include:
+      - "**/*.go"
+    debounce: 2s
+    min_interval: 20s
 ```
 
 ## Usage

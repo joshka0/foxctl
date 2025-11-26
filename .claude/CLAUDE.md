@@ -210,11 +210,11 @@ These commands currently describe filesystem-oriented workflows (e.g.
 
 ```json
 {
-	"event": "PreToolUse",
-	"workspace_root": "/path/to/project",
-	"session_id": "...",
-	"tool_name": "Edit",
-	"tool_input": { "file_path": "..." }
+  "event": "PreToolUse",
+  "workspace_root": "/path/to/project",
+  "session_id": "...",
+  "tool_name": "Edit",
+  "tool_input": { "file_path": "..." }
 }
 ```
 
@@ -222,16 +222,16 @@ These commands currently describe filesystem-oriented workflows (e.g.
 
 ```json
 {
-	"version": 1,
-	"status": "ok",
-	"command": "hooks/task_guard",
-	"data": {
-		"hook_output": {
-			"decision": "approve",
-			"reason": "task ensured",
-			"meta": { "task_id": "...", "created": true }
-		}
-	}
+  "version": 1,
+  "status": "ok",
+  "command": "hooks/task_guard",
+  "data": {
+    "hook_output": {
+      "decision": "approve",
+      "reason": "task ensured",
+      "meta": { "task_id": "...", "created": true }
+    }
+  }
 }
 ```
 

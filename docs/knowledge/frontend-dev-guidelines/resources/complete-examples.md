@@ -1,46 +1,52 @@
 # Complete Examples
 
-Full working examples combining all modern patterns: React.FC, lazy loading, Suspense, useSuspenseQuery, styling, routing, and error handling.
+Full working examples combining all modern patterns: React.FC, lazy loading,
+Suspense, useSuspenseQuery, styling, routing, and error handling.
 
 ---
 
 ## Example 1: Complete Modern Component
 
-Combines: React.FC, useSuspenseQuery, cache-first, useCallback, styling, error handling
+Combines: React.FC, useSuspenseQuery, cache-first, useCallback, styling, error
+handling
 
 ```typescript
 /**
  * User profile display component
  * Demonstrates modern patterns with Suspense and TanStack Query
  */
-import React, { useState, useCallback, useMemo } from 'react';
-import { Box, Paper, Typography, Button, Avatar } from '@mui/material';
-import type { SxProps, Theme } from '@mui/material';
-import { useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { userApi } from '../api/userApi';
-import { useMuiSnackbar } from '@/hooks/useMuiSnackbar';
-import type { User } from '~types/user';
+import React, { useCallback, useMemo, useState } from "react";
+import { Avatar, Box, Button, Paper, Typography } from "@mui/material";
+import type { SxProps, Theme } from "@mui/material";
+import {
+    useMutation,
+    useQueryClient,
+    useSuspenseQuery,
+} from "@tanstack/react-query";
+import { userApi } from "../api/userApi";
+import { useMuiSnackbar } from "@/hooks/useMuiSnackbar";
+import type { User } from "~types/user";
 
 // Styles object
 const componentStyles: Record<string, SxProps<Theme>> = {
     container: {
         p: 3,
         maxWidth: 600,
-        margin: '0 auto',
+        margin: "0 auto",
     },
     header: {
-        display: 'flex',
-        alignItems: 'center',
+        display: "flex",
+        alignItems: "center",
         gap: 2,
         mb: 3,
     },
     content: {
-        display: 'flex',
-        flexDirection: 'column',
+        display: "flex",
+        flexDirection: "column",
         gap: 2,
     },
     actions: {
-        display: 'flex',
+        display: "flex",
         gap: 1,
         mt: 2,
     },
@@ -51,14 +57,16 @@ interface UserProfileProps {
     onUpdate?: () => void;
 }
 
-export const UserProfile: React.FC<UserProfileProps> = ({ userId, onUpdate }) => {
+export const UserProfile: React.FC<UserProfileProps> = (
+    { userId, onUpdate },
+) => {
     const queryClient = useQueryClient();
     const { showSuccess, showError } = useMuiSnackbar();
     const [isEditing, setIsEditing] = useState(false);
 
     // Suspense query - no isLoading needed!
     const { data: user } = useSuspenseQuery({
-        queryKey: ['user', userId],
+        queryKey: ["user", userId],
         queryFn: () => userApi.getUser(userId),
         staleTime: 5 * 60 * 1000,
     });
@@ -69,14 +77,14 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, onUpdate }) =>
             userApi.updateUser(userId, updates),
 
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['user', userId] });
-            showSuccess('Profile updated');
+            queryClient.invalidateQueries({ queryKey: ["user", userId] });
+            showSuccess("Profile updated");
             setIsEditing(false);
             onUpdate?.();
         },
 
         onError: () => {
-            showError('Failed to update profile');
+            showError("Failed to update profile");
         },
     });
 
@@ -105,38 +113,43 @@ export const UserProfile: React.FC<UserProfileProps> = ({ userId, onUpdate }) =>
         <Paper sx={componentStyles.container}>
             <Box sx={componentStyles.header}>
                 <Avatar sx={{ width: 64, height: 64 }}>
-                    {user.firstName[0]}{user.lastName[0]}
+                    {user.firstName[0]}
+                    {user.lastName[0]}
                 </Avatar>
                 <Box>
-                    <Typography variant='h5'>{fullName}</Typography>
-                    <Typography color='text.secondary'>{user.email}</Typography>
+                    <Typography variant="h5">{fullName}</Typography>
+                    <Typography color="text.secondary">{user.email}</Typography>
                 </Box>
             </Box>
 
             <Box sx={componentStyles.content}>
                 <Typography>Username: {user.username}</Typography>
-                <Typography>Roles: {user.roles.join(', ')}</Typography>
+                <Typography>Roles: {user.roles.join(", ")}</Typography>
             </Box>
 
             <Box sx={componentStyles.actions}>
-                {!isEditing ? (
-                    <Button variant='contained' onClick={handleEdit}>
-                        Edit Profile
-                    </Button>
-                ) : (
-                    <>
-                        <Button
-                            variant='contained'
-                            onClick={handleSave}
-                            disabled={updateMutation.isPending}
-                        >
-                            {updateMutation.isPending ? 'Saving...' : 'Save'}
+                {!isEditing
+                    ? (
+                        <Button variant="contained" onClick={handleEdit}>
+                            Edit Profile
                         </Button>
-                        <Button onClick={handleCancel}>
-                            Cancel
-                        </Button>
-                    </>
-                )}
+                    )
+                    : (
+                        <>
+                            <Button
+                                variant="contained"
+                                onClick={handleSave}
+                                disabled={updateMutation.isPending}
+                            >
+                                {updateMutation.isPending
+                                    ? "Saving..."
+                                    : "Save"}
+                            </Button>
+                            <Button onClick={handleCancel}>
+                                Cancel
+                            </Button>
+                        </>
+                    )}
             </Box>
         </Paper>
     );
@@ -146,10 +159,11 @@ export default UserProfile;
 ```
 
 **Usage:**
+
 ```typescript
 <SuspenseLoader>
-    <UserProfile userId='123' onUpdate={() => console.log('Updated')} />
-</SuspenseLoader>
+    <UserProfile userId="123" onUpdate={() => console.log("Updated")} />
+</SuspenseLoader>;
 ```
 
 ---
@@ -158,7 +172,7 @@ export default UserProfile;
 
 Real example based on `features/posts/`:
 
-```
+```text
 features/
   users/
     api/
@@ -184,8 +198,8 @@ features/
 ### API Service (userApi.ts)
 
 ```typescript
-import apiClient from '@/lib/apiClient';
-import type { User, CreateUserPayload, UpdateUserPayload } from '../types';
+import apiClient from "@/lib/apiClient";
+import type { CreateUserPayload, UpdateUserPayload, User } from "../types";
 
 export const userApi = {
     getUser: async (userId: string): Promise<User> => {
@@ -194,16 +208,19 @@ export const userApi = {
     },
 
     getUsers: async (): Promise<User[]> => {
-        const { data } = await apiClient.get('/users');
+        const { data } = await apiClient.get("/users");
         return data;
     },
 
     createUser: async (payload: CreateUserPayload): Promise<User> => {
-        const { data } = await apiClient.post('/users', payload);
+        const { data } = await apiClient.post("/users", payload);
         return data;
     },
 
-    updateUser: async (userId: string, payload: UpdateUserPayload): Promise<User> => {
+    updateUser: async (
+        userId: string,
+        payload: UpdateUserPayload,
+    ): Promise<User> => {
         const { data } = await apiClient.put(`/users/${userId}`, payload);
         return data;
     },
@@ -217,13 +234,13 @@ export const userApi = {
 ### Suspense Hook (useSuspenseUser.ts)
 
 ```typescript
-import { useSuspenseQuery } from '@tanstack/react-query';
-import { userApi } from '../api/userApi';
-import type { User } from '../types';
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { userApi } from "../api/userApi";
+import type { User } from "../types";
 
 export function useSuspenseUser(userId: string) {
     return useSuspenseQuery<User, Error>({
-        queryKey: ['user', userId],
+        queryKey: ["user", userId],
         queryFn: () => userApi.getUser(userId),
         staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,
@@ -232,9 +249,9 @@ export function useSuspenseUser(userId: string) {
 
 export function useSuspenseUsers() {
     return useSuspenseQuery<User[], Error>({
-        queryKey: ['users'],
+        queryKey: ["users"],
         queryFn: () => userApi.getUsers(),
-        staleTime: 1 * 60 * 1000,  // Shorter for list
+        staleTime: 1 * 60 * 1000, // Shorter for list
     });
 }
 ```
@@ -261,25 +278,27 @@ export interface CreateUserPayload {
     password: string;
 }
 
-export type UpdateUserPayload = Partial<Omit<User, 'id' | 'createdAt' | 'updatedAt'>>;
+export type UpdateUserPayload = Partial<
+    Omit<User, "id" | "createdAt" | "updatedAt">
+>;
 ```
 
 ### Public Exports (index.ts)
 
 ```typescript
 // Export components
-export { UserProfile } from './components/UserProfile';
-export { UserList } from './components/UserList';
+export { UserProfile } from "./components/UserProfile";
+export { UserList } from "./components/UserList";
 
 // Export hooks
-export { useSuspenseUser, useSuspenseUsers } from './hooks/useSuspenseUser';
-export { useUserMutations } from './hooks/useUserMutations';
+export { useSuspenseUser, useSuspenseUsers } from "./hooks/useSuspenseUser";
+export { useUserMutations } from "./hooks/useUserMutations";
 
 // Export API
-export { userApi } from './api/userApi';
+export { userApi } from "./api/userApi";
 
 // Export types
-export type { User, CreateUserPayload, UpdateUserPayload } from './types';
+export type { CreateUserPayload, UpdateUserPayload, User } from "./types";
 ```
 
 ---
@@ -292,18 +311,18 @@ export type { User, CreateUserPayload, UpdateUserPayload } from './types';
  * Path: /users/:userId
  */
 
-import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
-import { SuspenseLoader } from '~components/SuspenseLoader';
+import { createFileRoute } from "@tanstack/react-router";
+import { lazy } from "react";
+import { SuspenseLoader } from "~components/SuspenseLoader";
 
 // Lazy load the UserProfile component
 const UserProfile = lazy(() =>
-    import('@/features/users/components/UserProfile').then(
-        (module) => ({ default: module.UserProfile })
+    import("@/features/users/components/UserProfile").then(
+        (module) => ({ default: module.UserProfile }),
     )
 );
 
-export const Route = createFileRoute('/users/$userId')({
+export const Route = createFileRoute("/users/$userId")({
     component: UserProfilePage,
     loader: ({ params }) => ({
         crumb: `User ${params.userId}`,
@@ -317,7 +336,7 @@ function UserProfilePage() {
         <SuspenseLoader>
             <UserProfile
                 userId={userId}
-                onUpdate={() => console.log('Profile updated')}
+                onUpdate={() => console.log("Profile updated")}
             />
         </SuspenseLoader>
     );
@@ -331,18 +350,18 @@ export default UserProfilePage;
 ## Example 4: List with Search and Filtering
 
 ```typescript
-import React, { useState, useMemo } from 'react';
-import { Box, TextField, List, ListItem } from '@mui/material';
-import { useDebounce } from 'use-debounce';
-import { useSuspenseQuery } from '@tanstack/react-query';
-import { userApi } from '../api/userApi';
+import React, { useMemo, useState } from "react";
+import { Box, List, ListItem, TextField } from "@mui/material";
+import { useDebounce } from "use-debounce";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { userApi } from "../api/userApi";
 
 export const UserList: React.FC = () => {
-    const [searchTerm, setSearchTerm] = useState('');
+    const [searchTerm, setSearchTerm] = useState("");
     const [debouncedSearch] = useDebounce(searchTerm, 300);
 
     const { data: users } = useSuspenseQuery({
-        queryKey: ['users'],
+        queryKey: ["users"],
         queryFn: () => userApi.getUsers(),
     });
 
@@ -350,7 +369,7 @@ export const UserList: React.FC = () => {
     const filteredUsers = useMemo(() => {
         if (!debouncedSearch) return users;
 
-        return users.filter(user =>
+        return users.filter((user) =>
             user.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
             user.email.toLowerCase().includes(debouncedSearch.toLowerCase())
         );
@@ -361,13 +380,13 @@ export const UserList: React.FC = () => {
             <TextField
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder='Search users...'
+                placeholder="Search users..."
                 fullWidth
                 sx={{ mb: 2 }}
             />
 
             <List>
-                {filteredUsers.map(user => (
+                {filteredUsers.map((user) => (
                     <ListItem key={user.id}>
                         {user.name} - {user.email}
                     </ListItem>
@@ -383,14 +402,14 @@ export const UserList: React.FC = () => {
 ## Example 5: Blog with Validation
 
 ```typescript
-import React from 'react';
-import { Box, TextField, Button, Paper } from '@mui/material';
-import { useBlog } from 'react-hook-blog';
-import { zodResolver } from '@hookblog/resolvers/zod';
-import { z } from 'zod';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { userApi } from '../api/userApi';
-import { useMuiSnackbar } from '@/hooks/useMuiSnackbar';
+import React from "react";
+import { Box, Button, Paper, TextField } from "@mui/material";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { userApi } from "../api/userApi";
+import { useMuiSnackbar } from "@/hooks/useMuiSnackbar";
 
 const userSchema = z.object({
     username: z.string().min(3).max(50),
@@ -405,17 +424,21 @@ interface CreateUserBlogProps {
     onSuccess?: () => void;
 }
 
-export const CreateUserBlog: React.FC<CreateUserBlogProps> = ({ onSuccess }) => {
+export const CreateUserBlog: React.FC<CreateUserBlogProps> = (
+    { onSuccess },
+) => {
     const queryClient = useQueryClient();
     const { showSuccess, showError } = useMuiSnackbar();
 
-    const { register, handleSubmit, blogState: { errors }, reset } = useBlog<UserBlogData>({
+    const { register, handleSubmit, formState: { errors }, reset } = useForm<
+        UserBlogData
+    >({
         resolver: zodResolver(userSchema),
         defaultValues: {
-            username: '',
-            email: '',
-            firstName: '',
-            lastName: '',
+            username: "",
+            email: "",
+            firstName: "",
+            lastName: "",
         },
     });
 
@@ -423,14 +446,14 @@ export const CreateUserBlog: React.FC<CreateUserBlogProps> = ({ onSuccess }) => 
         mutationFn: (data: UserBlogData) => userApi.createUser(data),
 
         onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['users'] });
-            showSuccess('User created successfully');
+            queryClient.invalidateQueries({ queryKey: ["users"] });
+            showSuccess("User created successfully");
             reset();
             onSuccess?.();
         },
 
         onError: () => {
-            showError('Failed to create user');
+            showError("Failed to create user");
         },
     });
 
@@ -440,50 +463,52 @@ export const CreateUserBlog: React.FC<CreateUserBlogProps> = ({ onSuccess }) => 
 
     return (
         <Paper sx={{ p: 3, maxWidth: 500 }}>
-            <blog onSubmit={handleSubmit(onSubmit)}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <form onSubmit={handleSubmit(onSubmit)}>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
                     <TextField
-                        {...register('username')}
-                        label='Username'
+                        {...register("username")}
+                        label="Username"
                         error={!!errors.username}
                         helperText={errors.username?.message}
                         fullWidth
                     />
 
                     <TextField
-                        {...register('email')}
-                        label='Email'
-                        type='email'
+                        {...register("email")}
+                        label="Email"
+                        type="email"
                         error={!!errors.email}
                         helperText={errors.email?.message}
                         fullWidth
                     />
 
                     <TextField
-                        {...register('firstName')}
-                        label='First Name'
+                        {...register("firstName")}
+                        label="First Name"
                         error={!!errors.firstName}
                         helperText={errors.firstName?.message}
                         fullWidth
                     />
 
                     <TextField
-                        {...register('lastName')}
-                        label='Last Name'
+                        {...register("lastName")}
+                        label="Last Name"
                         error={!!errors.lastName}
                         helperText={errors.lastName?.message}
                         fullWidth
                     />
 
                     <Button
-                        type='submit'
-                        variant='contained'
+                        type="submit"
+                        variant="contained"
                         disabled={createMutation.isPending}
                     >
-                        {createMutation.isPending ? 'Creating...' : 'Create User'}
+                        {createMutation.isPending
+                            ? "Creating..."
+                            : "Create User"}
                     </Button>
                 </Box>
-            </blog>
+            </form>
         </Paper>
     );
 };
@@ -496,14 +521,14 @@ export default CreateUserBlog;
 ## Example 2: Parent Container with Lazy Loading
 
 ```typescript
-import React from 'react';
-import { Box } from '@mui/material';
-import { SuspenseLoader } from '~components/SuspenseLoader';
+import React from "react";
+import { Box } from "@mui/material";
+import { SuspenseLoader } from "~components/SuspenseLoader";
 
 // Lazy load heavy components
-const UserList = React.lazy(() => import('./UserList'));
-const UserStats = React.lazy(() => import('./UserStats'));
-const ActivityFeed = React.lazy(() => import('./ActivityFeed'));
+const UserList = React.lazy(() => import("./UserList"));
+const UserStats = React.lazy(() => import("./UserStats"));
+const ActivityFeed = React.lazy(() => import("./ActivityFeed"));
 
 export const UserDashboard: React.FC = () => {
     return (
@@ -512,7 +537,7 @@ export const UserDashboard: React.FC = () => {
                 <UserStats />
             </SuspenseLoader>
 
-            <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+            <Box sx={{ display: "flex", gap: 2, mt: 2 }}>
                 <Box sx={{ flex: 2 }}>
                     <SuspenseLoader>
                         <UserList />
@@ -532,11 +557,6 @@ export const UserDashboard: React.FC = () => {
 export default UserDashboard;
 ```
 
-**Benefits:**
-- Each section loads independently
-- User sees partial content sooner
-- Better perceived perblogance
-
 ---
 
 ## Example 3: Cache-First Strategy Implementation
@@ -544,9 +564,9 @@ export default UserDashboard;
 Complete example based on useSuspensePost.ts:
 
 ```typescript
-import { useSuspenseQuery, useQueryClient } from '@tanstack/react-query';
-import { postApi } from '../api/postApi';
-import type { Post } from '../types';
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { postApi } from "../api/postApi";
+import type { Post } from "../types";
 
 /**
  * Smart post hook with cache-first strategy
@@ -556,40 +576,41 @@ export function useSuspensePost(blogId: number, postId: number) {
     const queryClient = useQueryClient();
 
     return useSuspenseQuery<Post, Error>({
-        queryKey: ['post', blogId, postId],
+        queryKey: ["post", blogId, postId],
         queryFn: async () => {
             // Strategy 1: Check grid cache first (avoids API call)
             const gridCache = queryClient.getQueryData<{ rows: Post[] }>([
-                'posts-v2',
+                "posts-v2",
                 blogId,
-                'summary'
+                "summary",
             ]) || queryClient.getQueryData<{ rows: Post[] }>([
-                'posts-v2',
+                "posts-v2",
                 blogId,
-                'flat'
+                "flat",
             ]);
 
             if (gridCache?.rows) {
                 const cached = gridCache.rows.find(
-                    (row) => row.S_ID === postId
+                    (row) => row.S_ID === postId,
                 );
 
                 if (cached) {
-                    return cached;  // Return from cache - no API call!
+                    return cached; // Return from cache - no API call!
                 }
             }
 
             // Strategy 2: Not in cache, fetch from API
             return postApi.getPost(blogId, postId);
         },
-        staleTime: 5 * 60 * 1000,       // Fresh for 5 minutes
-        gcTime: 10 * 60 * 1000,          // Cache for 10 minutes
-        refetchOnWindowFocus: false,     // Don't refetch on focus
+        staleTime: 5 * 60 * 1000, // Fresh for 5 minutes
+        gcTime: 10 * 60 * 1000, // Cache for 10 minutes
+        refetchOnWindowFocus: false, // Don't refetch on focus
     });
 }
 ```
 
 **Why this pattern:**
+
 - Checks grid cache before API
 - Instant data if user came from grid
 - Falls back to API if not cached
@@ -605,13 +626,13 @@ export function useSuspensePost(blogId: number, postId: number) {
  * Path: /project-catalog
  */
 
-import { createFileRoute } from '@tanstack/react-router';
-import { lazy } from 'react';
+import { createFileRoute } from "@tanstack/react-router";
+import { lazy } from "react";
 
 // Lazy load the PostTable component
 const PostTable = lazy(() =>
-    import('@/features/posts/components/PostTable').then(
-        (module) => ({ default: module.PostTable })
+    import("@/features/posts/components/PostTable").then(
+        (module) => ({ default: module.PostTable }),
     )
 );
 
@@ -619,10 +640,10 @@ const PostTable = lazy(() =>
 const PROJECT_CATALOG_FORM_ID = 744;
 const PROJECT_CATALOG_PROJECT_ID = 225;
 
-export const Route = createFileRoute('/project-catalog/')({
+export const Route = createFileRoute("/project-catalog/")({
     component: ProjectCatalogPage,
     loader: () => ({
-        crumb: 'Projects',  // Breadcrumb title
+        crumb: "Projects", // Breadcrumb title
     }),
 });
 
@@ -631,8 +652,8 @@ function ProjectCatalogPage() {
         <PostTable
             blogId={PROJECT_CATALOG_FORM_ID}
             projectId={PROJECT_CATALOG_PROJECT_ID}
-            tableType='active_projects'
-            title='Blog Dashboard'
+            tableType="active_projects"
+            title="Blog Dashboard"
         />
     );
 }
@@ -642,24 +663,24 @@ export default ProjectCatalogPage;
 
 ---
 
-## Example 5: Dialog with Blog
+## Example 5: Dialog with Form
 
 ```typescript
-import React from 'react';
+import React from "react";
 import {
-    Dialog,
-    DialogTitle,
-    DialogContent,
-    DialogActions,
-    Button,
-    TextField,
     Box,
+    Button,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
     IconButton,
-} from '@mui/material';
-import { Close, PersonAdd } from '@mui/icons-material';
-import { useBlog } from 'react-hook-blog';
-import { zodResolver } from '@hookblog/resolvers/zod';
-import { z } from 'zod';
+    TextField,
+} from "@mui/material";
+import { Close, PersonAdd } from "@mui/icons-material";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 
 const blogSchema = z.object({
     name: z.string().min(1),
@@ -679,7 +700,9 @@ export const AddUserDialog: React.FC<AddUserDialogProps> = ({
     onClose,
     onSubmit,
 }) => {
-    const { register, handleSubmit, blogState: { errors }, reset } = useBlog<BlogData>({
+    const { register, handleSubmit, formState: { errors }, reset } = useForm<
+        BlogData
+    >({
         resolver: zodResolver(blogSchema),
     });
 
@@ -688,31 +711,43 @@ export const AddUserDialog: React.FC<AddUserDialogProps> = ({
         onClose();
     };
 
-    const handleBlogSubmit = async (data: BlogData) => {
+    const handleFormSubmit = async (data: BlogData) => {
         await onSubmit(data);
         handleClose();
     };
 
     return (
-        <Dialog open={open} onClose={handleClose} maxWidth='sm' fullWidth>
+        <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
             <DialogTitle>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <PersonAdd color='primary' />
+                <Box
+                    sx={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                    }}
+                >
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <PersonAdd color="primary" />
                         Add User
                     </Box>
-                    <IconButton onClick={handleClose} size='small'>
+                    <IconButton onClick={handleClose} size="small">
                         <Close />
                     </IconButton>
                 </Box>
             </DialogTitle>
 
-            <blog onSubmit={handleSubmit(handleBlogSubmit)}>
+            <form onSubmit={handleSubmit(handleFormSubmit)}>
                 <DialogContent>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <Box
+                        sx={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 2,
+                        }}
+                    >
                         <TextField
-                            {...register('name')}
-                            label='Name'
+                            {...register("name")}
+                            label="Name"
                             error={!!errors.name}
                             helperText={errors.name?.message}
                             fullWidth
@@ -720,9 +755,9 @@ export const AddUserDialog: React.FC<AddUserDialogProps> = ({
                         />
 
                         <TextField
-                            {...register('email')}
-                            label='Email'
-                            type='email'
+                            {...register("email")}
+                            label="Email"
+                            type="email"
                             error={!!errors.email}
                             helperText={errors.email?.message}
                             fullWidth
@@ -732,11 +767,11 @@ export const AddUserDialog: React.FC<AddUserDialogProps> = ({
 
                 <DialogActions>
                     <Button onClick={handleClose}>Cancel</Button>
-                    <Button type='submit' variant='contained'>
+                    <Button type="submit" variant="contained">
                         Add User
                     </Button>
                 </DialogActions>
-            </blog>
+            </form>
         </Dialog>
     );
 };
@@ -747,27 +782,27 @@ export const AddUserDialog: React.FC<AddUserDialogProps> = ({
 ## Example 6: Parallel Data Fetching
 
 ```typescript
-import React from 'react';
-import { Box, Grid, Paper } from '@mui/material';
-import { useSuspenseQueries } from '@tanstack/react-query';
-import { userApi } from '../api/userApi';
-import { statsApi } from '../api/statsApi';
-import { activityApi } from '../api/activityApi';
+import React from "react";
+import { Box, Grid, Paper } from "@mui/material";
+import { useSuspenseQueries } from "@tanstack/react-query";
+import { userApi } from "../api/userApi";
+import { statsApi } from "../api/statsApi";
+import { activityApi } from "../api/activityApi";
 
 export const Dashboard: React.FC = () => {
     // Fetch all data in parallel with Suspense
     const [statsQuery, usersQuery, activityQuery] = useSuspenseQueries({
         queries: [
             {
-                queryKey: ['stats'],
+                queryKey: ["stats"],
                 queryFn: () => statsApi.getStats(),
             },
             {
-                queryKey: ['users', 'active'],
+                queryKey: ["users", "active"],
                 queryFn: () => userApi.getActiveUsers(),
             },
             {
-                queryKey: ['activity', 'recent'],
+                queryKey: ["activity", "recent"],
                 queryFn: () => activityApi.getRecent(),
             },
         ],
@@ -804,7 +839,7 @@ export const Dashboard: React.FC = () => {
 // Usage with Suspense
 <SuspenseLoader>
     <Dashboard />
-</SuspenseLoader>
+</SuspenseLoader>;
 ```
 
 ---
@@ -812,8 +847,8 @@ export const Dashboard: React.FC = () => {
 ## Example 7: Optimistic Update
 
 ```typescript
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User } from '../types';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { User } from "../types";
 
 export const useToggleUserStatus = () => {
     const queryClient = useQueryClient();
@@ -824,14 +859,14 @@ export const useToggleUserStatus = () => {
         // Optimistic update
         onMutate: async (userId) => {
             // Cancel outgoing refetches
-            await queryClient.cancelQueries({ queryKey: ['users'] });
+            await queryClient.cancelQueries({ queryKey: ["users"] });
 
             // Snapshot previous value
-            const previousUsers = queryClient.getQueryData<User[]>(['users']);
+            const previousUsers = queryClient.getQueryData<User[]>(["users"]);
 
             // Optimistically update UI
-            queryClient.setQueryData<User[]>(['users'], (old) => {
-                return old?.map(user =>
+            queryClient.setQueryData<User[]>(["users"], (old) => {
+                return old?.map((user) =>
                     user.id === userId
                         ? { ...user, active: !user.active }
                         : user
@@ -843,12 +878,12 @@ export const useToggleUserStatus = () => {
 
         // Rollback on error
         onError: (err, userId, context) => {
-            queryClient.setQueryData(['users'], context?.previousUsers);
+            queryClient.setQueryData(["users"], context?.previousUsers);
         },
 
         // Refetch after mutation
         onSettled: () => {
-            queryClient.invalidateQueries({ queryKey: ['users'] });
+            queryClient.invalidateQueries({ queryKey: ["users"] });
         },
     });
 };
@@ -861,12 +896,13 @@ export const useToggleUserStatus = () => {
 **Key Takeaways:**
 
 1. **Component Pattern**: React.FC + lazy + Suspense + useSuspenseQuery
-2. **Feature Structure**: Organized subdirectories (api/, components/, hooks/, etc.)
+2. **Feature Structure**: Organized subdirectories (api/, components/, hooks/,
+   etc.)
 3. **Routing**: Folder-based with lazy loading
 4. **Data Fetching**: useSuspenseQuery with cache-first strategy
-5. **Blogs**: React Hook Blog + Zod validation
+5. **Forms**: React Hook Form + Zod validation
 6. **Error Handling**: useMuiSnackbar + onError callbacks
-7. **Perblogance**: useMemo, useCallback, React.memo, debouncing
+7. **Performance**: useMemo, useCallback, React.memo, debouncing
 8. **Styling**: Inline <100 lines, sx prop, MUI v7 syntax
 
 **See other resources for detailed explanations of each pattern.**

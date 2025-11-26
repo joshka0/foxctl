@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
@@ -363,7 +364,7 @@ WHERE t.trigger_kind = 'keyword' AND LOWER(t.pattern) IN (`
 			query += ", "
 		}
 		query += "?"
-		args[i] = kw
+		args[i] = strings.ToLower(kw)
 	}
 	query += `) ORDER BY i.priority DESC, i.name`
 
