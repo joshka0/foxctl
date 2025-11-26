@@ -16,6 +16,9 @@ permissions:
   pull-requests: write
   packages: read
 
+env:
+  GOFLAGS: -buildvcs=false
+
 jobs:
   label-ai:
     runs-on: arc-runner-agentctl
@@ -27,19 +30,29 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           labels: ai-generated
 
-  build-test:
-    name: Go ${{ matrix.go }} • ${{ matrix.os }}
+  fmt:
     runs-on: arc-runner-agentctl
     container:
       image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
-    env:
-      GOFLAGS: -buildvcs=false
-    strategy:
-      fail-fast: false
-      matrix:
-        go: ["1.24.x"]
-        os: [ubuntu-latest]
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Format (gofumpt)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          make fmt
+          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+          else
+            echo 'No git repository metadata; skipping formatting diff check.'
+          fi
+
+  lint:
+    runs-on: arc-runner-agentctl
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,7 +60,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go }}
+          go-version: 1.24.x
 
       - name: Capture Go cache paths
         id: go-env
@@ -62,43 +75,152 @@ jobs:
           path: |
             ${{ steps.go-env.outputs.gomodcache }}
             ${{ steps.go-env.outputs.gocache }}
-          key: ${{ runner.os }}-go-${{ matrix.go }}-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-${{ matrix.go }}-
+            ${{ runner.os }}-go-1.24.x-
             ${{ runner.os }}-go-
-
-      - name: Format (gofumpt)
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          make fmt
-          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-            git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
-          else
-            echo 'No git repository metadata; skipping formatting diff check.'
-          fi
 
       - name: Lint (golangci-lint)
         env:
           GOTOOLCHAIN: go1.24.3
         run: make lint
 
-      - name: Vet
-        run: make vet
+  unit-tests:
+    runs-on: arc-runner-agentctl
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Capture Go cache paths
+        id: go-env
+        run: |
+          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Go modules and build cache
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.go-env.outputs.gomodcache }}
+            ${{ steps.go-env.outputs.gocache }}
+          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-1.24.x-
+            ${{ runner.os }}-go-
 
       - name: Unit tests (no race)
         run: make test-short
 
-      - name: Race tests (Linux only)
-        if: runner.os == 'Linux'
+  race-tests:
+    runs-on: arc-runner-agentctl
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Capture Go cache paths
+        id: go-env
+        run: |
+          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Go modules and build cache
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.go-env.outputs.gomodcache }}
+            ${{ steps.go-env.outputs.gocache }}
+          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-1.24.x-
+            ${{ runner.os }}-go-
+
+      - name: Race tests
         run: make test-race
 
-      - name: Coverage (Linux only)
-        if: runner.os == 'Linux'
+  coverage:
+    runs-on: arc-runner-agentctl
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Capture Go cache paths
+        id: go-env
+        run: |
+          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Go modules and build cache
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.go-env.outputs.gomodcache }}
+            ${{ steps.go-env.outputs.gocache }}
+          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-1.24.x-
+            ${{ runner.os }}-go-
+
+      - name: Coverage
         run: |
           mkdir -p coverage
           CGO_ENABLED=1 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
           CGO_ENABLED=1 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
           awk '/total:/ { if ($3+0 < 40.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
+
+  build:
+    runs-on: arc-runner-agentctl
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.24.x
+
+      - name: Capture Go cache paths
+        id: go-env
+        run: |
+          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Go modules and build cache
+        continue-on-error: true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ steps.go-env.outputs.gomodcache }}
+            ${{ steps.go-env.outputs.gocache }}
+          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-1.24.x-
+            ${{ runner.os }}-go-
 
       - name: Build CLI
         run: make build
@@ -112,7 +234,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: agentctl-${{ runner.os }}-${{ matrix.go }}
+          name: agentctl-${{ runner.os }}-go1.24
           path: |
             bin/agentctl
             dist/skills/**
@@ -139,7 +261,7 @@ jobs:
           CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
 
   all-checks:
-    needs: [build-test, e2e-tests]
+    needs: [fmt, lint, unit-tests, race-tests, coverage, build, e2e-tests]
     runs-on: arc-runner-agentctl
     steps:
       - run: echo "✅ All checks passed"
@@ -147,7 +269,7 @@ jobs:
   release:
     name: Release (tags only)
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-test]
+    needs: [fmt, lint, unit-tests, race-tests, coverage, build]
     runs-on: arc-runner-agentctl
     steps:
       - uses: actions/checkout@v4
