@@ -18,16 +18,18 @@ func newTodoCommand() *cobra.Command {
 		newTodoAddCommand(),
 		newTodoCompleteCommand(),
 		newTodoListCommand(),
+		newTodoActiveCommand(),
 	)
 	return cmd
 }
 
 func newTodoAddCommand() *cobra.Command {
-	var storePath string
+	var workspaceID string
 	var title string
 	var desc string
 	var parentID string
 	var depends []string
+	var scopePath string
 
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -46,10 +48,11 @@ func newTodoAddCommand() *cobra.Command {
 					"description": desc,
 					"parent_id":   parentID,
 					"depends_on":  depends,
+					"scope_path":  scopePath,
 				},
 			}
-			if storePath != "" {
-				payload["store_path"] = storePath
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
 			}
 			return runTodoSkill(cmd, payload)
 		},
@@ -59,7 +62,8 @@ func newTodoAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&desc, "description", "", "Task description")
 	cmd.Flags().StringVar(&parentID, "parent", "", "Parent task ID")
 	cmd.Flags().StringSliceVar(&depends, "depends-on", nil, "Dependency task IDs")
-	cmd.Flags().StringVar(&storePath, "store", "", "Path to task store (default: ~/.agentctl/todo/tasks.json)")
+	cmd.Flags().StringVar(&scopePath, "scope", "", "Scope path for the task")
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
 	if err := cmd.MarkFlagRequired("title"); err != nil {
 		panic(err)
 	}
@@ -67,7 +71,7 @@ func newTodoAddCommand() *cobra.Command {
 }
 
 func newTodoCompleteCommand() *cobra.Command {
-	var storePath string
+	var workspaceID string
 	var taskID string
 	var notes string
 	var gotchas string
@@ -90,8 +94,8 @@ func newTodoCompleteCommand() *cobra.Command {
 					"gotchas": gotchas,
 				},
 			}
-			if storePath != "" {
-				payload["store_path"] = storePath
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
 			}
 			return runTodoSkill(cmd, payload)
 		},
@@ -100,7 +104,7 @@ func newTodoCompleteCommand() *cobra.Command {
 	cmd.Flags().StringVar(&taskID, "id", "", "Task ID to complete (required)")
 	cmd.Flags().StringVar(&notes, "notes", "", "Completion notes")
 	cmd.Flags().StringVar(&gotchas, "gotchas", "", "Gotchas to remember")
-	cmd.Flags().StringVar(&storePath, "store", "", "Path to task store (default: ~/.agentctl/todo/tasks.json)")
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
 	if err := cmd.MarkFlagRequired("id"); err != nil {
 		panic(err)
 	}
@@ -108,7 +112,7 @@ func newTodoCompleteCommand() *cobra.Command {
 }
 
 func newTodoListCommand() *cobra.Command {
-	var storePath string
+	var workspaceID string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List tasks from the store",
@@ -116,13 +120,32 @@ func newTodoListCommand() *cobra.Command {
 			payload := map[string]any{
 				"operation": "list",
 			}
-			if storePath != "" {
-				payload["store_path"] = storePath
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
 			}
 			return runTodoSkill(cmd, payload)
 		},
 	}
-	cmd.Flags().StringVar(&storePath, "store", "", "Path to task store (default: ~/.agentctl/todo/tasks.json)")
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
+	return cmd
+}
+
+func newTodoActiveCommand() *cobra.Command {
+	var workspaceID string
+	cmd := &cobra.Command{
+		Use:   "active",
+		Short: "Show the active task for the current workspace",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"operation": "get_active",
+			}
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
+			}
+			return runTodoSkill(cmd, payload)
+		},
+	}
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
 	return cmd
 }
 

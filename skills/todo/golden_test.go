@@ -46,7 +46,7 @@ func TestGolden(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(env)
 			}
-			tt.input.StorePath = env.storePath
+			tt.input.WorkspaceID = env.workspaceID
 
 			buf := &bytes.Buffer{}
 			env.rc.Stdout = buf

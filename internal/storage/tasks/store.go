@@ -1,0 +1,368 @@
+// Package tasks implements SQLite-backed persistence for task management.
+package tasks
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"time"
+
+	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/jkatigb/agentctl/internal/storage/dbutil"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/oklog/ulid/v2"
+)
+
+// Store defines the persistence interface for tasks and active-task state.
+type Store interface {
+	Close() error
+
+	// Add inserts a new task.
+	Add(ctx context.Context, t Task) (Task, error)
+	// Update replaces mutable fields of an existing task.
+	Update(ctx context.Context, t Task) (Task, error)
+	// Get returns a task by ID.
+	Get(ctx context.Context, id string) (Task, error)
+	// ListByWorkspace returns tasks scoped to a workspace.
+	ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error)
+
+	// GetActive returns the active task for a workspace, if any.
+	GetActive(ctx context.Context, workspaceID string) (Task, bool, error)
+	// SetActive marks the given task as active for the workspace.
+	SetActive(ctx context.Context, workspaceID, taskID string) (Task, error)
+	// ClearActive removes the active task for a workspace.
+	ClearActive(ctx context.Context, workspaceID string) error
+	// EnsureActive returns the active task or creates one with the given defaults.
+	EnsureActive(ctx context.Context, workspaceID, defaultTitle, scopePath string) (Task, bool, error)
+}
+
+// Task represents a persisted task record.
+type Task struct {
+	ID          string
+	WorkspaceID string
+	Title       string
+	Description string
+	ScopePath   string
+	ParentID    string
+	Children    []string
+	DependsOn   []string
+	Status      string
+	CreatedAt   time.Time
+	CompletedAt *time.Time
+	Notes       string
+	Gotchas     string
+}
+
+// StatusPending is the default status for new tasks.
+const StatusPending = "pending"
+
+// StatusCompleted marks a task as done.
+const StatusCompleted = "completed"
+
+type sqlStore struct {
+	db *sql.DB
+}
+
+// Open initializes the task store rooted at the provided path.
+func Open(ctx context.Context, root string) (Store, error) {
+	dbPath := filepath.Join(root, "tasks.db")
+	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: open db: %w", err)
+	}
+	return &sqlStore{db: db}, nil
+}
+
+// Close releases database resources.
+func (s *sqlStore) Close() error {
+	return s.db.Close()
+}
+
+func migrate(ctx context.Context, db *sql.DB) error {
+	ddl := `
+CREATE TABLE IF NOT EXISTS tasks (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL DEFAULT '',
+	title TEXT NOT NULL,
+	description TEXT,
+	scope_path TEXT,
+	parent_id TEXT,
+	children TEXT NOT NULL DEFAULT '[]',
+	depends_on TEXT NOT NULL DEFAULT '[]',
+	status TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	completed_at TEXT,
+	notes TEXT,
+	gotchas TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_workspace_created ON tasks(workspace_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS active_tasks (
+	workspace_id TEXT PRIMARY KEY,
+	task_id TEXT NOT NULL,
+	FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+`
+	if _, err := db.ExecContext(ctx, ddl); err != nil {
+		return fmt.Errorf("tasks: migrate: %w", err)
+	}
+	return nil
+}
+
+// Add inserts a new task into the store.
+func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
+	if t.ID == "" {
+		t.ID = ulid.Make().String()
+	}
+	if t.Status == "" {
+		t.Status = StatusPending
+	}
+	if t.CreatedAt.IsZero() {
+		t.CreatedAt = timeutil.NowUTC()
+	}
+	if t.Children == nil {
+		t.Children = []string{}
+	}
+	if t.DependsOn == nil {
+		t.DependsOn = []string{}
+	}
+
+	childrenJSON, err := json.Marshal(t.Children)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: marshal children: %w", err)
+	}
+	dependsOnJSON, err := json.Marshal(t.DependsOn)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: marshal depends_on: %w", err)
+	}
+
+	var completedAt *string
+	if t.CompletedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.CompletedAt)
+		completedAt = &s
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.WorkspaceID, t.Title, t.Description, t.ScopePath, t.ParentID,
+		string(childrenJSON), string(dependsOnJSON), t.Status,
+		timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.Notes, t.Gotchas)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: insert: %w", err)
+	}
+	return t, nil
+}
+
+// Update replaces mutable fields of an existing task.
+func (s *sqlStore) Update(ctx context.Context, t Task) (Task, error) {
+	childrenJSON, err := json.Marshal(t.Children)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: marshal children: %w", err)
+	}
+	dependsOnJSON, err := json.Marshal(t.DependsOn)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: marshal depends_on: %w", err)
+	}
+
+	var completedAt *string
+	if t.CompletedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.CompletedAt)
+		completedAt = &s
+	}
+
+	res, err := s.db.ExecContext(ctx, `
+UPDATE tasks SET
+	title = ?, description = ?, scope_path = ?, parent_id = ?,
+	children = ?, depends_on = ?, status = ?, completed_at = ?,
+	notes = ?, gotchas = ?
+WHERE id = ?`,
+		t.Title, t.Description, t.ScopePath, t.ParentID,
+		string(childrenJSON), string(dependsOnJSON), t.Status, completedAt,
+		t.Notes, t.Gotchas, t.ID)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: update: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return Task{}, fmt.Errorf("tasks: task %q not found", t.ID)
+	}
+	return s.Get(ctx, t.ID)
+}
+
+// Get returns a task by ID.
+func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas
+FROM tasks WHERE id = ?`, id)
+	return scanTask(row)
+}
+
+// ListByWorkspace returns tasks scoped to a workspace.
+func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas
+FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// GetActive returns the active task for a workspace, if any.
+func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas
+FROM tasks t
+JOIN active_tasks a ON t.id = a.task_id
+WHERE a.workspace_id = ?`, workspaceID)
+
+	t, err := scanTask(row)
+	if dbutil.IsNoRows(err) {
+		return Task{}, false, nil
+	}
+	if err != nil {
+		return Task{}, false, err
+	}
+	return t, true, nil
+}
+
+// SetActive marks the given task as active for the workspace.
+func (s *sqlStore) SetActive(ctx context.Context, workspaceID, taskID string) (Task, error) {
+	// Verify task exists
+	t, err := s.Get(ctx, taskID)
+	if err != nil {
+		return Task{}, err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO active_tasks (workspace_id, task_id) VALUES (?, ?)
+ON CONFLICT(workspace_id) DO UPDATE SET task_id = excluded.task_id`, workspaceID, taskID)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: set active: %w", err)
+	}
+	return t, nil
+}
+
+// ClearActive removes the active task for a workspace.
+func (s *sqlStore) ClearActive(ctx context.Context, workspaceID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM active_tasks WHERE workspace_id = ?`, workspaceID)
+	if err != nil {
+		return fmt.Errorf("tasks: clear active: %w", err)
+	}
+	return nil
+}
+
+// EnsureActive returns the active task or creates one with the given defaults.
+// Returns (task, created, error) where created is true if a new task was created.
+func (s *sqlStore) EnsureActive(ctx context.Context, workspaceID, defaultTitle, scopePath string) (Task, bool, error) {
+	// Check for existing active task
+	t, found, err := s.GetActive(ctx, workspaceID)
+	if err != nil {
+		return Task{}, false, err
+	}
+	if found {
+		return t, false, nil
+	}
+
+	// Create new task and set as active
+	newTask := Task{
+		WorkspaceID: workspaceID,
+		Title:       defaultTitle,
+		ScopePath:   scopePath,
+		Status:      StatusPending,
+	}
+	t, err = s.Add(ctx, newTask)
+	if err != nil {
+		return Task{}, false, err
+	}
+
+	_, err = s.SetActive(ctx, workspaceID, t.ID)
+	if err != nil {
+		return Task{}, false, err
+	}
+	return t, true, nil
+}
+
+// scanTask scans a single task from a row.
+func scanTask(row *sql.Row) (Task, error) {
+	var t Task
+	var childrenJSON, dependsOnJSON string
+	var createdAtStr string
+	var completedAtStr sql.NullString
+	var description, scopePath, parentID, notes, gotchas sql.NullString
+
+	err := row.Scan(
+		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
+		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
+		&notes, &gotchas)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return Task{}, err
+		}
+		return Task{}, fmt.Errorf("tasks: scan: %w", err)
+	}
+
+	t.Description = description.String
+	t.ScopePath = scopePath.String
+	t.ParentID = parentID.String
+	t.Notes = notes.String
+	t.Gotchas = gotchas.String
+
+	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
+	if completedAtStr.Valid {
+		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
+		t.CompletedAt = &ct
+	}
+
+	t.Children = dbutil.ScanJSONArrayMust(childrenJSON)
+	t.DependsOn = dbutil.ScanJSONArrayMust(dependsOnJSON)
+
+	return t, nil
+}
+
+// scanTaskRow scans a task from rows (for iteration).
+func scanTaskRow(rows *sql.Rows) (Task, error) {
+	var t Task
+	var childrenJSON, dependsOnJSON string
+	var createdAtStr string
+	var completedAtStr sql.NullString
+	var description, scopePath, parentID, notes, gotchas sql.NullString
+
+	err := rows.Scan(
+		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
+		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
+		&notes, &gotchas)
+	if err != nil {
+		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
+	}
+
+	t.Description = description.String
+	t.ScopePath = scopePath.String
+	t.ParentID = parentID.String
+	t.Notes = notes.String
+	t.Gotchas = gotchas.String
+
+	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
+	if completedAtStr.Valid {
+		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
+		t.CompletedAt = &ct
+	}
+
+	t.Children = dbutil.ScanJSONArrayMust(childrenJSON)
+	t.DependsOn = dbutil.ScanJSONArrayMust(dependsOnJSON)
+
+	return t, nil
+}

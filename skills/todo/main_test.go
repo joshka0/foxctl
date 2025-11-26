@@ -83,9 +83,9 @@ func TestTodoRejectsBackticks(t *testing.T) {
 }
 
 type todoTestEnv struct {
-	ctx       context.Context
-	storePath string
-	rc        *runner.RunnerContext
+	ctx         context.Context
+	workspaceID string
+	rc          *runner.RunnerContext
 }
 
 func newTodoTestEnv(t *testing.T) *todoTestEnv {
@@ -100,26 +100,26 @@ func newTodoTestEnv(t *testing.T) *todoTestEnv {
 	})
 
 	return &todoTestEnv{
-		ctx:       ctx,
-		storePath: filepath.Join(tmp, "tasks.json"),
-		rc:        rc,
+		ctx:         ctx,
+		workspaceID: "test-workspace",
+		rc:          rc,
 	}
 }
 
 func (env *todoTestEnv) addTask(t *testing.T, req addRequest) map[string]any {
 	t.Helper()
-	data := env.run(t, input{Operation: "add", StorePath: env.storePath, Add: &req})
+	data := env.run(t, input{Operation: "add", WorkspaceID: env.workspaceID, Add: &req})
 	return data
 }
 
 func (env *todoTestEnv) completeTask(t *testing.T, req completeRequest) map[string]any {
 	t.Helper()
-	return env.run(t, input{Operation: "complete", StorePath: env.storePath, Complete: &req})
+	return env.run(t, input{Operation: "complete", WorkspaceID: env.workspaceID, Complete: &req})
 }
 
 func (env *todoTestEnv) listTasks(t *testing.T) []map[string]any {
 	t.Helper()
-	data := env.run(t, input{Operation: "list", StorePath: env.storePath})
+	data := env.run(t, input{Operation: "list", WorkspaceID: env.workspaceID})
 	items, ok := data["tasks"].([]any)
 	if !ok {
 		t.Fatalf("expected tasks slice, got %T", data["tasks"])
@@ -137,7 +137,7 @@ func (env *todoTestEnv) listTasks(t *testing.T) []map[string]any {
 
 func (env *todoTestEnv) expectError(t *testing.T, in input) error {
 	t.Helper()
-	in.StorePath = env.storePath
+	in.WorkspaceID = env.workspaceID
 	return runExpectError(env.ctx, env.rc, in)
 }
 
@@ -179,6 +179,9 @@ func newTestRunnerContext(t *testing.T, tmp string) *runner.RunnerContext {
 			CAS:   filepath.Join(tmp, "cas"),
 			Jobs:  filepath.Join(tmp, "jobs"),
 			Cache: filepath.Join(tmp, "cache"),
+		},
+		Storage: config.StorageSettings{
+			Root: filepath.Join(tmp, "storage"),
 		},
 	}
 	rc, err := runner.NewRunnerContext(cfg, &bytes.Buffer{})
