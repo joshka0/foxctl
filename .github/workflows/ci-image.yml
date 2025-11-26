@@ -1,0 +1,37 @@
+name: CI Image
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - Dockerfile.ci
+            - .github/workflows/ci-image.yml
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    packages: write
+
+jobs:
+    build-and-push:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Log in to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ghcr.io
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Build and push CI image
+              uses: docker/build-push-action@v5
+              with:
+                  context: .
+                  file: ./Dockerfile.ci
+                  push: true
+                  tags: |
+                      ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+                      ghcr.io/${{ github.repository_owner }}/agentctl-ci:latest

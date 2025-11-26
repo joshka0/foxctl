@@ -351,8 +351,8 @@ func buildParams(in Input) map[string]any {
 		params["node_path"] = in.NodePath
 	case ActionNodeCreate:
 		params["parent_path"] = in.ParentPath
-		params["node_type"] = in.NodeType
-		params["node_name"] = in.NodeName
+		params["type"] = in.NodeType
+		params["name"] = in.NodeName
 		if in.DryRun {
 			params["dry_run"] = true
 		}

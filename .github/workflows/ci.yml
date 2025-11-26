@@ -29,6 +29,8 @@ jobs:
   build-test:
     name: Go ${{ matrix.go }} • ${{ matrix.os }}
     runs-on: arc-runner-agentctl
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
     strategy:
       fail-fast: false
       matrix:
@@ -61,24 +63,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-${{ matrix.go }}-
             ${{ runner.os }}-go-
-      - name: Install build tools (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          if command -v apk >/dev/null 2>&1; then
-            apk update
-            apk add --no-cache make build-base
-          elif command -v apt-get >/dev/null 2>&1; then
-            if command -v sudo >/dev/null 2>&1; then
-              sudo apt-get update
-              sudo apt-get install -y make build-essential
-            else
-              apt-get update
-              apt-get install -y make build-essential
-            fi
-          else
-            echo "No supported package manager found; please preinstall make/build tools on the runner." >&2
-            exit 1
-          fi
 
       - name: Format (gofumpt)
         run: |
@@ -127,7 +111,6 @@ jobs:
 
   e2e-tests:
     runs-on: arc-runner-agentctl
-    needs: build-test
     strategy:
       fail-fast: false
       matrix:
