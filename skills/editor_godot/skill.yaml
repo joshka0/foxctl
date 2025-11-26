@@ -1,0 +1,139 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: editor/godot
+  version: 0.1.0
+  description: "Interact with a running Godot Editor via the GodotAIBridge plugin"
+  tags: ["editor", "godot", "game", "scene"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/editor_godot/editor_godot
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: editor/godot
+  parameters:
+    - name: action
+      type: string
+      required: true
+      description: "Operation: ping|scene_tree|node_inspect|node_create|node_set_prop|node_attach_script|signal_connect|run_game|errors"
+    - name: host
+      type: string
+      required: false
+      default: "127.0.0.1"
+      description: "GodotAIBridge host"
+    - name: port
+      type: integer
+      required: false
+      default: 7777
+      description: "GodotAIBridge port"
+    - name: timeout_ms
+      type: integer
+      required: false
+      default: 10000
+      description: "Request timeout in milliseconds"
+    - name: node_path
+      type: string
+      required: false
+      description: "Target node path (e.g., /root/Main/Player)"
+    - name: parent_path
+      type: string
+      required: false
+      description: "Parent node path for node_create"
+    - name: node_type
+      type: string
+      required: false
+      description: "Godot class name for node_create (e.g., Node2D, CharacterBody2D)"
+    - name: node_name
+      type: string
+      required: false
+      description: "Name for new node"
+    - name: property
+      type: string
+      required: false
+      description: "Property name for node_set_prop"
+    - name: value
+      type: string
+      required: false
+      description: "Property value (string, will be converted to appropriate type)"
+    - name: script_path
+      type: string
+      required: false
+      description: "Script path for node_attach_script (e.g., res://player.gd)"
+    - name: signal_name
+      type: string
+      required: false
+      description: "Signal name for signal_connect"
+    - name: target_path
+      type: string
+      required: false
+      description: "Target node path for signal_connect"
+    - name: method_name
+      type: string
+      required: false
+      description: "Method name for signal_connect"
+    - name: max_depth
+      type: integer
+      required: false
+      default: 10
+      description: "Max depth for scene_tree traversal"
+    - name: max_nodes
+      type: integer
+      required: false
+      default: 500
+      description: "Max nodes to return in scene_tree"
+    - name: error_limit
+      type: integer
+      required: false
+      default: 50
+      description: "Max errors to return"
+  returns:
+    - name: result
+      type: object
+      description: "Action-specific result data"
+    - name: summary
+      type: string
+      description: "Human-readable summary"
+  help:
+    short: "Control the Godot Editor from agentctl"
+    long: |
+      This skill communicates with a running Godot Editor that has the GodotAIBridge
+      plugin enabled. It allows inspection and manipulation of the current scene.
+      
+      Prerequisites:
+      1. Godot Editor must be running with your project open
+      2. GodotAIBridge plugin must be installed and enabled
+      3. Plugin listens on localhost:7777 by default
+    workflows:
+      - id: inspect-scene
+        description: "Get the current scene tree structure"
+        example_input:
+          action: "scene_tree"
+      - id: inspect-node
+        description: "Get details about a specific node"
+        example_input:
+          action: "node_inspect"
+          node_path: "/root/Main/Player"
+      - id: create-node
+        description: "Create a new node in the scene"
+        example_input:
+          action: "node_create"
+          parent_path: "/root/Main"
+          node_type: "Node2D"
+          node_name: "Enemy"
+      - id: set-property
+        description: "Set a property on a node"
+        example_input:
+          action: "node_set_prop"
+          node_path: "/root/Main/Player"
+          property: "position"
+          value: "Vector2(100, 200)"
+capabilities:
+  network: "egress"
+  egressAllow:
+    - "127.0.0.1:7777"
+  filesystem:
+    - type: workdir
+  pure: false
