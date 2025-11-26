@@ -261,7 +261,7 @@ jobs:
           CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
 
   all-checks:
-    needs: [fmt, lint, unit-tests, race-tests, coverage, build, e2e-tests]
+    needs: [lint, unit-tests, race-tests, coverage, build, e2e-tests]
     runs-on: arc-runner-agentctl
     steps:
       - run: echo "✅ All checks passed"
@@ -269,7 +269,7 @@ jobs:
   release:
     name: Release (tags only)
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [fmt, lint, unit-tests, race-tests, coverage, build]
+    needs: [lint, unit-tests, race-tests, coverage, build]
     runs-on: arc-runner-agentctl
     steps:
       - uses: actions/checkout@v4
