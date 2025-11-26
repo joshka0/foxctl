@@ -33,10 +33,18 @@ func _enter_tree() -> void:
 	
 	print("[GodotAIBridge] Listening on 127.0.0.1:%d" % PORT)
 	_undo_redo = get_undo_redo()
-	
-	# Connect to error output for capturing errors
-	# Note: In Godot 4, we'd ideally hook into the output panel, but that's complex.
-	# For now, errors are captured via push_error calls we can intercept.
+
+
+func _add_error(message: String, source: String = "", severity: String = "error") -> void:
+	## Add an error to the buffer for later retrieval.
+	_error_buffer.append({
+		"message": message,
+		"source": source,
+		"severity": severity,
+		"timestamp": Time.get_unix_time_from_system(),
+	})
+	if _error_buffer.size() > MAX_ERROR_BUFFER:
+		_error_buffer.pop_front()
 
 
 func _exit_tree() -> void:
@@ -568,6 +576,7 @@ func _handle_signal_connect(params: Dictionary) -> String:
 		"signal_name": signal_name,
 		"target_path": target_path,
 		"method_name": method_name,
+		"warning": "Connection is runtime-only and will not persist after scene reload. For persistent connections, edit the scene file directly.",
 	})
 
 
@@ -610,6 +619,7 @@ func _handle_node_delete(params: Dictionary) -> String:
 	var node_index := node.get_index()
 	
 	_undo_redo.create_action("AI: Delete Node " + node_name)
+	_undo_redo.add_do_reference(node)  # Keep reference during do action
 	_undo_redo.add_do_method(parent, "remove_child", node)
 	_undo_redo.add_undo_method(parent, "add_child", node)
 	_undo_redo.add_undo_method(parent, "move_child", node, node_index)
@@ -1721,15 +1731,18 @@ func _convert_value(value_str: String, target_type: int) -> Variant:
 		TYPE_INT:
 			if value_str.is_valid_int():
 				return value_str.to_int()
+			return null  # Explicit failure for invalid int
 		TYPE_FLOAT:
 			if value_str.is_valid_float():
 				return value_str.to_float()
+			return null  # Explicit failure for invalid float
 		TYPE_BOOL:
 			var lower := value_str.to_lower()
 			if lower == "true":
 				return true
 			if lower == "false":
 				return false
+			return null  # Explicit failure for invalid bool
 		TYPE_STRING:
 			return value_str
 		TYPE_VECTOR2:
@@ -1744,7 +1757,7 @@ func _convert_value(value_str: String, target_type: int) -> Variant:
 	if result != null:
 		return result
 	
-	return value_str  # Return as string if all else fails
+	return null  # Return null if conversion fails
 
 
 func _parse_vector2(s: String) -> Variant:
@@ -1824,6 +1837,8 @@ func _success_response(data: Dictionary) -> String:
 
 
 func _error_response(code: String, message: String, hint: String) -> String:
+	# Add to error buffer for later retrieval via errors action
+	_add_error(message, code, "error")
 	return JSON.stringify({
 		"status": "error",
 		"data": null,

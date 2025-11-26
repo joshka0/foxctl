@@ -1,12 +1,15 @@
 # Exa MCP + context/filter Workflow
 
-This doc shows how to wire the Exa MCP server into `agentctl` and feed its results into the `context/filter` skill.
+This doc shows how to wire the Exa MCP server into `agentctl` and feed its
+results into the `context/filter` skill.
 
 It assumes you:
+
 - Have `agentctl` checked out and built.
 - Have valid API keys:
   - `EXA_API_KEY` for Exa MCP.
-  - An LLM key for `context/filter` (e.g., `GROQ_API_KEY`, `OPENAI_API_KEY`, etc.).
+  - An LLM key for `context/filter` (e.g., `GROQ_API_KEY`, `OPENAI_API_KEY`,
+    etc.).
 
 ---
 
@@ -70,7 +73,8 @@ The Exa MCP server is hosted at `https://mcp.exa.ai/mcp`.
 
 ## 3. Run an Exa skill
 
-Pick one of the generated tools (for example, `search`; replace with the real name you see under `exa_skills/`).
+Pick one of the generated tools (for example, `search`; replace with the real
+name you see under `exa_skills/`).
 
 Example call:
 
@@ -83,6 +87,7 @@ AGENTCTL_SKILL_PATH="$(pwd)/exa_skills" \
 ```
 
 Notes:
+
 - The exact input schema comes from the generated `skill.yaml`.
 - The result will be an `agentctl` envelope; the payload will be under `.data`.
 
@@ -93,14 +98,17 @@ jq '.data' exa_raw.json
 ```
 
 You can choose either to:
+
 - Treat the entire Exa result as one big `source.text`, or
-- Map individual Exa hits into `source.chunks` (recommended once you know the schema).
+- Map individual Exa hits into `source.chunks` (recommended once you know the
+  schema).
 
 ---
 
 ## 4. Simple pipeline: Exa -> `context/filter` via `source.text`
 
-For a minimal working pipeline, convert the Exa response into plain text and feed it into `context/filter`.
+For a minimal working pipeline, convert the Exa response into plain text and
+feed it into `context/filter`.
 
 1. Flatten Exa content into text (very simple example):
 
@@ -115,21 +123,14 @@ For a minimal working pipeline, convert the Exa response into plain text and fee
    ```bash
    export GROQ_API_KEY=...
 
-   ./bin/agentctl run context/filter --input '{
-     "prompt": "Explain how agentctl handles CAS integrity failures.",
-     "scope": "code",
-     "source": {
-       "text": "'"$(tr '\n' ' ' < exa_text.txt)"'"
-     },
-     "budget": {
-       "target_tokens": 2000,
-       "max_chunks": 16
-     },
-     "llm": {
-       "provider": "groq",
-       "model": "llama-3.3-70b-versatile"
-     }
-   }'
+   # Use jq -Rs to safely embed file contents as a JSON string
+   jq -Rs '{
+     prompt: "Explain how agentctl handles CAS integrity failures.",
+     scope: "code",
+     source: { text: . },
+     budget: { target_tokens: 2000, max_chunks: 16 },
+     llm: { provider: "groq", model: "llama-3.3-70b-versatile" }
+   }' exa_text.txt | ./bin/agentctl run context/filter --input-file -
    ```
 
 3. The `context/filter` envelope will contain:
@@ -146,13 +147,15 @@ Use `data.chunks` as the retrieval context for downstream agents or tools.
 `agentctl run` already supports stdin-friendly patterns:
 
 - `--input-file -` — read **raw stdin** as the JSON input to a skill.
-- `--input stdin` — read an **envelope** from stdin and pass its `.data` field as input.
+- `--input stdin` — read an **envelope** from stdin and pass its `.data` field
+  as input.
 
 This makes it easy to build Unix-style pipelines around `context/filter`.
 
 ### 5.1 Pipe arbitrary text into `context/filter`
 
-If you have a command that produces raw text, you can wrap it into the `context/filter` input JSON with `jq` and feed it via stdin:
+If you have a command that produces raw text, you can wrap it into the
+`context/filter` input JSON with `jq` and feed it via stdin:
 
 ```bash
 some-command-producing-text \
@@ -167,12 +170,15 @@ some-command-producing-text \
 ```
 
 Notes:
+
 - `jq -Rs` reads stdin as a single raw string and escapes it for JSON.
 - You can parameterize `prompt`, `scope`, and `llm` as needed.
 
 ### 5.2 Pipe one skill's envelope into `context/filter`
 
-If an upstream skill already emits an envelope, and its `.data` is *itself* a valid `context/filter` input object, you can chain runs directly using `--input stdin`:
+If an upstream skill already emits an envelope, and its `.data` is _itself_ a
+valid `context/filter` input object, you can chain runs directly using
+`--input stdin`:
 
 ```bash
 ./bin/agentctl run some/producer --input '{ ... }' \
@@ -180,10 +186,13 @@ If an upstream skill already emits an envelope, and its `.data` is *itself* a va
 ```
 
 In this pattern:
+
 - The first command prints an envelope to stdout.
-- `--input stdin` on the second command extracts `.data` from that envelope and passes it to `context/filter`.
+- `--input stdin` on the second command extracts `.data` from that envelope and
+  passes it to `context/filter`.
 
 You can use this once you have a dedicated glue skill that:
+
 - Calls Exa MCP.
 - Transforms the Exa result into the `context/filter` input schema.
 - Emits that object as its own `data` payload for chaining.
@@ -192,7 +201,8 @@ You can use this once you have a dedicated glue skill that:
 
 ## 6. Refinement: Exa results as `source.chunks`
 
-Once you understand the Exa tool output structure, you can map it directly into the `source.chunks` schema expected by `context/filter`:
+Once you understand the Exa tool output structure, you can map it directly into
+the `source.chunks` schema expected by `context/filter`:
 
 ```jsonc
 {
@@ -213,10 +223,13 @@ Once you understand the Exa tool output structure, you can map it directly into 
 ```
 
 In this mode, `context/filter` will:
+
 - Skip its own text chunking.
 - Only perform LLM-based selection + summarization over the provided chunks.
 
-You can build those chunks either in a small glue script or a dedicated skill that:
+You can build those chunks either in a small glue script or a dedicated skill
+that:
+
 1. Calls the Exa MCP-generated skill.
 2. Transforms the response into `source.chunks`.
 3. Calls `context/filter` and returns its envelope.
@@ -244,6 +257,10 @@ See `docs/spec/context_filter.md` §10.1 for the high-level contract.
 
 ## 8. Troubleshooting
 
-- **Network issues / 4xx from Exa**: Check `server_headers` (especially `Accept` and `Authorization`) and `EXA_API_KEY`.
-- **`context/filter` LLM errors**: Ensure the appropriate LLM API key is exported (`GROQ_API_KEY`, `OPENAI_API_KEY`, etc.) and that `llm.model` is valid.
-- **Debugging `context/filter`**: Set `CONTEXT_FILTER_DEBUG=1` to log LLM HTTP calls (to stderr) without leaking secrets.
+- **Network issues / 4xx from Exa**: Check `server_headers` (especially `Accept`
+  and `Authorization`) and `EXA_API_KEY`.
+- **`context/filter` LLM errors**: Ensure the appropriate LLM API key is
+  exported (`GROQ_API_KEY`, `OPENAI_API_KEY`, etc.) and that `llm.model` is
+  valid.
+- **Debugging `context/filter`**: Set `CONTEXT_FILTER_DEBUG=1` to log LLM HTTP
+  calls (to stderr) without leaking secrets.
