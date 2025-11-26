@@ -60,7 +60,7 @@ After installation, enable the plugin in Godot via Project > Project Settings > 
 			}
 
 			// Create addon directory
-			if err := os.MkdirAll(addonDir, 0755); err != nil {
+			if err := os.MkdirAll(addonDir, 0o755); err != nil {
 				return fmt.Errorf("create addon directory: %w", err)
 			}
 
@@ -73,7 +73,7 @@ After installation, enable the plugin in Godot via Project > Project Settings > 
 				}
 
 				destPath := filepath.Join(addonDir, name)
-				if err := os.WriteFile(destPath, content, 0644); err != nil {
+				if err := os.WriteFile(destPath, content, 0o644); err != nil {
 					return fmt.Errorf("write %s: %w", name, err)
 				}
 			}
