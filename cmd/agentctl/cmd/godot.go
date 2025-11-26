@@ -71,6 +71,7 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotScriptCreateCommand(),
 		newGodotResourcesCommand(),
 		newGodotSearchResourcesCommand(),
+		newGodotResourceReferencesCommand(),
 		newGodotRunCommand(),
 		newGodotRunSceneCommand(),
 		newGodotStopCommand(),
@@ -979,6 +980,40 @@ Supported type shortcuts:
 	cmd.Flags().StringVar(&resourceType, "type", "", "Resource type to search for (required)")
 	cmd.Flags().StringVar(&path, "path", "res://", "Directory to search in")
 	cmd.Flags().StringVar(&name, "name", "", "Name pattern to filter (supports wildcards)")
+	cmd.Flags().IntVar(&maxResults, "max-results", 50, "Maximum results to return")
+	return cmd
+}
+
+func newGodotResourceReferencesCommand() *cobra.Command {
+	var f godotFlags
+	var maxResults int
+
+	cmd := &cobra.Command{
+		Use:   "resource-references <resource-path>",
+		Short: "Find scenes that reference a resource",
+		Long: `Find all scenes and resources that reference the specified resource.
+
+Useful for understanding dependencies before refactoring or deleting resources.`,
+		Example: `  # Find what uses a script
+  agentctl godot resource-references res://Scripts/Player.gd
+
+  # Find what uses a texture
+  agentctl godot resource-references res://Assets/player.png`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":        "resource_references",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"resource_path": args[0],
+				"max_results":   maxResults,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
 	cmd.Flags().IntVar(&maxResults, "max-results", 50, "Maximum results to return")
 	return cmd
 }

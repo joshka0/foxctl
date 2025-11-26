@@ -20,35 +20,36 @@ import (
 
 // Supported actions.
 const (
-	ActionPing             = "ping"
-	ActionSceneTree        = "scene_tree"
-	ActionNodeInspect      = "node_inspect"
-	ActionNodeCreate       = "node_create"
-	ActionNodeDelete       = "node_delete"
-	ActionNodeRename       = "node_rename"
-	ActionNodeReparent     = "node_reparent"
-	ActionNodeSetProp      = "node_set_prop"
-	ActionNodeAttachScript = "node_attach_script"
-	ActionSignalConnect    = "signal_connect"
-	ActionClassInfo        = "class_info"
-	ActionEnsureNode       = "ensure_node"
-	ActionSceneSave        = "scene_save"
-	ActionSceneList        = "scene_list"
-	ActionSceneOpen        = "scene_open"
-	ActionSceneInstance    = "scene_instance"
-	ActionSearchNodes      = "search_nodes"
-	ActionFocusNode        = "focus_node"
-	ActionSelectionState   = "selection_state"
-	ActionCameraSave       = "camera_save"
-	ActionCameraRestore    = "camera_restore"
-	ActionCameraList       = "camera_list"
-	ActionScriptCreate     = "script_create"
-	ActionResourceList     = "resource_list"
-	ActionSearchResources  = "search_resources"
-	ActionRunGame          = "run_game"
-	ActionRunScene         = "run_scene"
-	ActionStopGame         = "stop_game"
-	ActionErrors           = "errors"
+	ActionPing               = "ping"
+	ActionSceneTree          = "scene_tree"
+	ActionNodeInspect        = "node_inspect"
+	ActionNodeCreate         = "node_create"
+	ActionNodeDelete         = "node_delete"
+	ActionNodeRename         = "node_rename"
+	ActionNodeReparent       = "node_reparent"
+	ActionNodeSetProp        = "node_set_prop"
+	ActionNodeAttachScript   = "node_attach_script"
+	ActionSignalConnect      = "signal_connect"
+	ActionClassInfo          = "class_info"
+	ActionEnsureNode         = "ensure_node"
+	ActionSceneSave          = "scene_save"
+	ActionSceneList          = "scene_list"
+	ActionSceneOpen          = "scene_open"
+	ActionSceneInstance      = "scene_instance"
+	ActionSearchNodes        = "search_nodes"
+	ActionFocusNode          = "focus_node"
+	ActionSelectionState     = "selection_state"
+	ActionCameraSave         = "camera_save"
+	ActionCameraRestore      = "camera_restore"
+	ActionCameraList         = "camera_list"
+	ActionScriptCreate       = "script_create"
+	ActionResourceList       = "resource_list"
+	ActionSearchResources    = "search_resources"
+	ActionResourceReferences = "resource_references"
+	ActionRunGame            = "run_game"
+	ActionRunScene           = "run_scene"
+	ActionStopGame           = "stop_game"
+	ActionErrors             = "errors"
 )
 
 // Input represents the skill input parameters.
@@ -324,12 +325,16 @@ func validateInput(in Input) error {
 		if strings.TrimSpace(in.ResourceType) == "" {
 			return fmt.Errorf("resource_type is required for action %q", in.Action)
 		}
+	case ActionResourceReferences:
+		if strings.TrimSpace(in.ResourcePath) == "" {
+			return fmt.Errorf("resource_path is required for action %q", in.Action)
+		}
 	case ActionRunScene:
 		if strings.TrimSpace(in.ScenePath) == "" {
 			return fmt.Errorf("scene_path is required for action %q", in.Action)
 		}
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, camera_save, camera_restore, camera_list, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, camera_save, camera_restore, camera_list, script_create, resource_list, search_resources, resource_references, run_game, run_scene, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -448,6 +453,11 @@ func buildParams(in Input) map[string]any {
 		if in.SearchName != "" {
 			params["name"] = in.SearchName
 		}
+		if in.MaxResults > 0 {
+			params["max_results"] = in.MaxResults
+		}
+	case ActionResourceReferences:
+		params["path"] = in.ResourcePath
 		if in.MaxResults > 0 {
 			params["max_results"] = in.MaxResults
 		}
@@ -773,6 +783,13 @@ func generateSummary(action string, data any) string {
 			return fmt.Sprintf("Found %d resource(s)", int(count))
 		}
 		return "Searched resources"
+
+	case ActionResourceReferences:
+		if m, ok := data.(map[string]any); ok {
+			count, _ := m["count"].(float64)
+			return fmt.Sprintf("Found %d reference(s)", int(count))
+		}
+		return "Found references"
 
 	case ActionRunGame:
 		return "Game started"

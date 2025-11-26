@@ -190,6 +190,8 @@ func _handle_request(json_str: String) -> String:
 			return _handle_resource_list(params)
 		"search_resources":
 			return _handle_search_resources(params)
+		"resource_references":
+			return _handle_resource_references(params)
 		"run_game":
 			return _handle_run_game()
 		"run_scene":
@@ -200,7 +202,7 @@ func _handle_request(json_str: String) -> String:
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, camera_save, camera_restore, camera_list, script_create, resource_list, search_resources, run_game, run_scene, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, selection_state, camera_save, camera_restore, camera_list, script_create, resource_list, search_resources, resource_references, run_game, run_scene, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -1503,6 +1505,72 @@ func _search_resources_recursive(path: String, resource_type: String, name_patte
 					"name": file_name,
 					"type": resource_type,
 				})
+		
+		file_name = dir.get_next()
+	dir.list_dir_end()
+
+
+func _handle_resource_references(params: Dictionary) -> String:
+	## Find scenes that reference a given resource.
+	var resource_path: String = params.get("path", "")
+	var max_results: int = params.get("max_results", 50)
+	
+	if resource_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not resource_path.begins_with("res://"):
+		resource_path = "res://" + resource_path.lstrip("/")
+	
+	if not ResourceLoader.exists(resource_path):
+		return _error_response("ERESOURCE_NOT_FOUND", "Resource not found: " + resource_path, "")
+	
+	var references: Array[Dictionary] = []
+	_find_resource_references_recursive("res://", resource_path, references, max_results)
+	
+	return _success_response({
+		"resource_path": resource_path,
+		"references": references,
+		"count": references.size(),
+		"truncated": references.size() >= max_results,
+	})
+
+
+func _find_resource_references_recursive(search_path: String, target_resource: String, references: Array[Dictionary], max_results: int) -> void:
+	## Recursively search for scenes/resources that reference the target.
+	if references.size() >= max_results:
+		return
+	
+	var dir := DirAccess.open(search_path)
+	if not dir:
+		return
+	
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "" and references.size() < max_results:
+		if file_name.begins_with("."):
+			file_name = dir.get_next()
+			continue
+		
+		var full_path := search_path.path_join(file_name)
+		
+		if dir.current_is_dir():
+			_find_resource_references_recursive(full_path, target_resource, references, max_results)
+		elif file_name.ends_with(".tscn") or file_name.ends_with(".tres"):
+			# Read file content and search for the resource path
+			var file := FileAccess.open(full_path, FileAccess.READ)
+			if file:
+				var content := file.get_as_text()
+				file.close()
+				
+				# Check if the target resource is referenced
+				# Resources are referenced like: [ext_resource type="..." path="res://..." id="..."]
+				# Or: load("res://...")
+				if target_resource in content:
+					references.append({
+						"path": full_path,
+						"name": file_name,
+						"type": "scene" if file_name.ends_with(".tscn") else "resource",
+					})
 		
 		file_name = dir.get_next()
 	dir.list_dir_end()
