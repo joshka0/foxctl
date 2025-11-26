@@ -171,6 +171,10 @@ func _handle_request(json_str: String) -> String:
 			return _handle_scene_open(params)
 		"scene_instance":
 			return _handle_scene_instance(params)
+		"search_nodes":
+			return _handle_search_nodes(params)
+		"focus_node":
+			return _handle_focus_node(params)
 		"resource_list":
 			return _handle_resource_list(params)
 		"run_game":
@@ -181,7 +185,7 @@ func _handle_request(json_str: String) -> String:
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, resource_list, run_game, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, resource_list, run_game, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -998,6 +1002,118 @@ func _handle_scene_instance(params: Dictionary) -> String:
 		"instance_path": _get_scene_path(instance, root),
 		"instance_name": instance.name,
 		"scene_path": scene_path,
+	})
+
+
+func _handle_search_nodes(params: Dictionary) -> String:
+	## Search for nodes by name, type, or property value.
+	var name_pattern: String = params.get("name", "")
+	var type_filter: String = params.get("type", "")
+	var prop_name: String = params.get("property", "")
+	var prop_value: String = params.get("value", "")
+	var max_results: int = params.get("max_results", 50)
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var results: Array[Dictionary] = []
+	_search_nodes_recursive(root, root, name_pattern, type_filter, prop_name, prop_value, results, max_results)
+	
+	return _success_response({
+		"results": results,
+		"count": results.size(),
+		"truncated": results.size() >= max_results,
+		"filters": {
+			"name": name_pattern,
+			"type": type_filter,
+			"property": prop_name,
+			"value": prop_value,
+		},
+	})
+
+
+func _search_nodes_recursive(node: Node, scene_root: Node, name_pattern: String, type_filter: String, prop_name: String, prop_value: String, results: Array[Dictionary], max_results: int) -> void:
+	## Recursively search nodes matching criteria.
+	if results.size() >= max_results:
+		return
+	
+	var matches := true
+	
+	# Check name pattern (supports * wildcard)
+	if not name_pattern.is_empty():
+		if not node.name.match(name_pattern) and not node.name.matchn(name_pattern):
+			matches = false
+	
+	# Check type filter
+	if matches and not type_filter.is_empty():
+		if node.get_class() != type_filter and not node.is_class(type_filter):
+			matches = false
+	
+	# Check property value
+	if matches and not prop_name.is_empty():
+		var has_prop := false
+		for prop in node.get_property_list():
+			if prop.name == prop_name:
+				has_prop = true
+				break
+		
+		if not has_prop:
+			matches = false
+		elif not prop_value.is_empty():
+			var actual_value := _value_to_string(node.get(prop_name))
+			if actual_value != prop_value and not actual_value.matchn(prop_value):
+				matches = false
+	
+	if matches:
+		results.append({
+			"path": _get_scene_path(node, scene_root),
+			"name": node.name,
+			"type": node.get_class(),
+		})
+	
+	# Recurse into children
+	for child in node.get_children():
+		if results.size() >= max_results:
+			break
+		_search_nodes_recursive(child, scene_root, name_pattern, type_filter, prop_name, prop_value, results, max_results)
+
+
+func _handle_focus_node(params: Dictionary) -> String:
+	## Select and frame a node in the editor.
+	var node_path: String = params.get("node_path", "")
+	var frame: bool = params.get("frame", true)
+	
+	if node_path.is_empty():
+		return _error_response("EARG", "node_path is required", "")
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var node := _resolve_node_path(node_path, root)
+	if not node:
+		return _error_response("ENODE_NOT_FOUND", "Node not found: " + node_path, "")
+	
+	# Select the node in the editor
+	var selection := EditorInterface.get_selection()
+	selection.clear()
+	selection.add_node(node)
+	
+	# Frame the node in the viewport (if it's a CanvasItem or Node3D)
+	if frame:
+		if node is CanvasItem:
+			# For 2D nodes, we can't directly frame, but selection is enough
+			pass
+		elif node is Node3D:
+			# For 3D nodes, we could use EditorInterface methods if available
+			pass
+	
+	return _success_response({
+		"ok": true,
+		"selected_path": _get_scene_path(node, root),
+		"selected_name": node.name,
+		"selected_type": node.get_class(),
 	})
 
 

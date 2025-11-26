@@ -36,6 +36,8 @@ const (
 	ActionSceneList        = "scene_list"
 	ActionSceneOpen        = "scene_open"
 	ActionSceneInstance    = "scene_instance"
+	ActionSearchNodes      = "search_nodes"
+	ActionFocusNode        = "focus_node"
 	ActionResourceList     = "resource_list"
 	ActionRunGame          = "run_game"
 	ActionStopGame         = "stop_game"
@@ -72,6 +74,9 @@ type Input struct {
 	ScenePath     string            `json:"scene_path"`
 	Recursive     bool              `json:"recursive"`
 	InstanceName  string            `json:"instance_name"`
+	SearchName    string            `json:"search_name"`
+	SearchType    string            `json:"search_type"`
+	Frame         bool              `json:"frame"`
 }
 
 // PluginRequest is sent to the GodotAIBridge plugin.
@@ -281,10 +286,16 @@ func validateInput(in Input) error {
 		if strings.TrimSpace(in.ParentPath) == "" {
 			return fmt.Errorf("parent_path is required for action %q", in.Action)
 		}
+	case ActionSearchNodes:
+		// All filters are optional
+	case ActionFocusNode:
+		if strings.TrimSpace(in.NodePath) == "" {
+			return fmt.Errorf("node_path is required for action %q", in.Action)
+		}
 	case ActionResourceList:
 		// Optional path, pattern, max_results
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, resource_list, run_game, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, resource_list, run_game, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -349,6 +360,25 @@ func buildParams(in Input) map[string]any {
 		if in.InstanceName != "" {
 			params["name"] = in.InstanceName
 		}
+	case ActionSearchNodes:
+		if in.SearchName != "" {
+			params["name"] = in.SearchName
+		}
+		if in.SearchType != "" {
+			params["type"] = in.SearchType
+		}
+		if in.Property != "" {
+			params["property"] = in.Property
+		}
+		if in.Value != "" {
+			params["value"] = in.Value
+		}
+		if in.MaxResults > 0 {
+			params["max_results"] = in.MaxResults
+		}
+	case ActionFocusNode:
+		params["node_path"] = in.NodePath
+		params["frame"] = in.Frame
 	case ActionResourceList:
 		if in.ResourcePath != "" {
 			params["path"] = in.ResourcePath
@@ -615,6 +645,20 @@ func generateSummary(action string, data any) string {
 			return fmt.Sprintf("Instanced scene at %s", instancePath)
 		}
 		return "Instanced scene"
+
+	case ActionSearchNodes:
+		if m, ok := data.(map[string]any); ok {
+			count, _ := m["count"].(float64)
+			return fmt.Sprintf("Found %d matching node(s)", int(count))
+		}
+		return "Searched nodes"
+
+	case ActionFocusNode:
+		if m, ok := data.(map[string]any); ok {
+			selectedPath, _ := m["selected_path"].(string)
+			return fmt.Sprintf("Focused on %s", selectedPath)
+		}
+		return "Focused node"
 
 	case ActionResourceList:
 		if m, ok := data.(map[string]any); ok {

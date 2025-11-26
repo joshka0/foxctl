@@ -62,6 +62,8 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotSceneListCommand(),
 		newGodotSceneOpenCommand(),
 		newGodotSceneInstanceCommand(),
+		newGodotSearchNodesCommand(),
+		newGodotFocusCommand(),
 		newGodotResourcesCommand(),
 		newGodotRunCommand(),
 		newGodotStopCommand(),
@@ -606,6 +608,89 @@ The operation is registered with Godot's Undo/Redo system.`,
 
 	addGodotFlags(cmd, &f)
 	cmd.Flags().StringVar(&instanceName, "name", "", "Name for the instanced node (default: scene root name)")
+	return cmd
+}
+
+func newGodotSearchNodesCommand() *cobra.Command {
+	var f godotFlags
+	var name string
+	var nodeType string
+	var property string
+	var value string
+	var maxResults int
+
+	cmd := &cobra.Command{
+		Use:   "search-nodes",
+		Short: "Search for nodes by name, type, or property",
+		Long: `Search the current scene for nodes matching the given criteria.
+
+All filters are optional and combined with AND logic.
+Name supports * wildcard patterns.`,
+		Example: `  # Find all nodes with "Player" in the name
+  agentctl godot search-nodes --name "*Player*"
+
+  # Find all Area2D nodes
+  agentctl godot search-nodes --type Area2D
+
+  # Find nodes with a specific property value
+  agentctl godot search-nodes --property visible --value false
+
+  # Combine filters
+  agentctl godot search-nodes --type Sprite2D --property modulate --value "Color(1, 0, 0, 1)"`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":      "search_nodes",
+				"host":        f.host,
+				"port":        f.port,
+				"timeout_ms":  f.timeoutMS,
+				"search_name": name,
+				"search_type": nodeType,
+				"property":    property,
+				"value":       value,
+				"max_results": maxResults,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&name, "name", "", "Node name pattern (supports * wildcard)")
+	cmd.Flags().StringVar(&nodeType, "type", "", "Node type/class to filter by")
+	cmd.Flags().StringVar(&property, "property", "", "Property name to check")
+	cmd.Flags().StringVar(&value, "value", "", "Property value to match")
+	cmd.Flags().IntVar(&maxResults, "max-results", 50, "Maximum results to return")
+	return cmd
+}
+
+func newGodotFocusCommand() *cobra.Command {
+	var f godotFlags
+	var frame bool
+
+	cmd := &cobra.Command{
+		Use:   "focus <node-path>",
+		Short: "Select and focus a node in the editor",
+		Long:  "Select the specified node in the editor's scene tree, making it the active selection.",
+		Example: `  # Focus on a specific node
+  agentctl godot focus /root/GameRoot/Player
+
+  # Focus without framing
+  agentctl godot focus /root/GameRoot/Player --no-frame`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "focus_node",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"node_path":  args[0],
+				"frame":      frame,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().BoolVar(&frame, "frame", true, "Frame the node in the viewport")
 	return cmd
 }
 
