@@ -32,6 +32,8 @@ jobs:
     runs-on: arc-runner-agentctl
     container:
       image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+    env:
+      GOFLAGS: -buildvcs=false
     strategy:
       fail-fast: false
       matrix:
