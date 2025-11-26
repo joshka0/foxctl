@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   label-ai:
-    runs-on: self-hosted
+    runs-on: arc-runners-agentctl
     if: github.event_name == 'pull_request'
     steps:
       - uses: actions-ecosystem/action-add-labels@v1
@@ -28,7 +28,7 @@ jobs:
 
   build-test:
     name: Go ${{ matrix.go }} • ${{ matrix.os }}
-    runs-on: self-hosted
+    runs-on: arc-runners-agentctl
     strategy:
       fail-fast: false
       matrix:
@@ -108,7 +108,7 @@ jobs:
             dist/skills/**
 
   e2e-tests:
-    runs-on: self-hosted
+    runs-on: arc-runners-agentctl
     needs: build-test
     strategy:
       fail-fast: false
@@ -131,7 +131,7 @@ jobs:
 
   all-checks:
     needs: [build-test, e2e-tests]
-    runs-on: self-hosted
+    runs-on: arc-runners-agentctl
     steps:
       - run: echo "✅ All checks passed"
 
@@ -139,7 +139,7 @@ jobs:
     name: Release (tags only)
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build-test]
-    runs-on: self-hosted
+    runs-on: arc-runners-agentctl
     steps:
       - uses: actions/checkout@v4
         with:
