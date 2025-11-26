@@ -41,6 +41,7 @@ const (
 	ActionScriptCreate     = "script_create"
 	ActionResourceList     = "resource_list"
 	ActionRunGame          = "run_game"
+	ActionRunScene         = "run_scene"
 	ActionStopGame         = "stop_game"
 	ActionErrors           = "errors"
 )
@@ -304,8 +305,12 @@ func validateInput(in Input) error {
 		}
 	case ActionResourceList:
 		// Optional path, pattern, max_results
+	case ActionRunScene:
+		if strings.TrimSpace(in.ScenePath) == "" {
+			return fmt.Errorf("scene_path is required for action %q", in.Action)
+		}
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, run_scene, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -414,6 +419,8 @@ func buildParams(in Input) map[string]any {
 		if in.MaxResults > 0 {
 			params["max_results"] = in.MaxResults
 		}
+	case ActionRunScene:
+		params["path"] = in.ScenePath
 	case ActionErrors:
 		params["limit"] = in.ErrorLimit
 	}
@@ -702,6 +709,13 @@ func generateSummary(action string, data any) string {
 
 	case ActionRunGame:
 		return "Game started"
+
+	case ActionRunScene:
+		if m, ok := data.(map[string]any); ok {
+			scenePath, _ := m["scene_path"].(string)
+			return fmt.Sprintf("Running scene %s", scenePath)
+		}
+		return "Scene started"
 
 	case ActionStopGame:
 		return "Game stopped"

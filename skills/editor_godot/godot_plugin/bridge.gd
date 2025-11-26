@@ -181,13 +181,15 @@ func _handle_request(json_str: String) -> String:
 			return _handle_resource_list(params)
 		"run_game":
 			return _handle_run_game()
+		"run_scene":
+			return _handle_run_scene(params)
 		"stop_game":
 			return _handle_stop_game()
 		"errors":
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, run_scene, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -1279,6 +1281,32 @@ func _handle_run_game() -> String:
 	EditorInterface.play_main_scene()
 	return _success_response({
 		"started": true,
+	})
+
+
+func _handle_run_scene(params: Dictionary) -> String:
+	## Run a specific scene instead of the main scene.
+	var scene_path: String = params.get("path", "")
+	
+	if scene_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not scene_path.begins_with("res://"):
+		scene_path = "res://" + scene_path.lstrip("/")
+	
+	if not ResourceLoader.exists(scene_path):
+		return _error_response("ESCENE_NOT_FOUND", "Scene not found: " + scene_path, "")
+	
+	# Verify it's a valid scene
+	var resource := load(scene_path)
+	if not resource or not resource is PackedScene:
+		return _error_response("ESCENE_INVALID", "Not a valid scene file: " + scene_path, "")
+	
+	EditorInterface.play_custom_scene(scene_path)
+	
+	return _success_response({
+		"started": true,
+		"scene_path": scene_path,
 	})
 
 

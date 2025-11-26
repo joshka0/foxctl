@@ -67,6 +67,7 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotScriptCreateCommand(),
 		newGodotResourcesCommand(),
 		newGodotRunCommand(),
+		newGodotRunSceneCommand(),
 		newGodotStopCommand(),
 		newGodotErrorsCommand(),
 	)
@@ -836,6 +837,35 @@ func newGodotRunCommand() *cobra.Command {
 				"host":       f.host,
 				"port":       f.port,
 				"timeout_ms": f.timeoutMS,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotRunSceneCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "run-scene <scene-path>",
+		Short: "Run a specific scene",
+		Long:  "Run a specific scene instead of the main scene. Useful for testing individual scenes.",
+		Example: `  # Run a specific scene
+  agentctl godot run-scene res://Scenes/TestLevel.tscn
+
+  # Run the main menu
+  agentctl godot run-scene res://Scenes/MainMenu.tscn`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "run_scene",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"scene_path": args[0],
 			}
 			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
 		},
