@@ -69,7 +69,11 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           make fmt
-          git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+          if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+          else
+            echo 'No git repository metadata; skipping formatting diff check.'
+          fi
 
       - name: Lint (golangci-lint)
         env:
@@ -130,7 +134,7 @@ jobs:
           go-version: ${{ matrix.go }}
       - name: Run ${{ matrix.test }} (cmd/agentctl/cmd)
         run: |
-          CGO_ENABLED=1 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
+          CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
 
   all-checks:
     needs: [build-test, e2e-tests]
