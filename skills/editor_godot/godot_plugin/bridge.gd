@@ -204,7 +204,7 @@ func _handle_scene_tree(params: Dictionary) -> String:
 	var max_nodes: int = params.get("max_nodes", 500)
 	
 	var node_count := [0]  # Use array to pass by reference
-	var tree_data := _dump_node(root, 0, max_depth, max_nodes, node_count)
+	var tree_data := _dump_node(root, root, 0, max_depth, max_nodes, node_count)
 	
 	return _success_response({
 		"root": tree_data,
@@ -213,12 +213,12 @@ func _handle_scene_tree(params: Dictionary) -> String:
 	})
 
 
-func _dump_node(node: Node, depth: int, max_depth: int, max_nodes: int, count: Array) -> Dictionary:
+func _dump_node(node: Node, scene_root: Node, depth: int, max_depth: int, max_nodes: int, count: Array) -> Dictionary:
 	## Recursively dump node tree to dictionary.
 	count[0] += 1
 	
 	var data := {
-		"path": str(node.get_path()),
+		"path": _get_scene_path(node, scene_root),
 		"name": node.name,
 		"type": node.get_class(),
 	}
@@ -228,11 +228,48 @@ func _dump_node(node: Node, depth: int, max_depth: int, max_nodes: int, count: A
 		for child in node.get_children():
 			if count[0] >= max_nodes:
 				break
-			children.append(_dump_node(child, depth + 1, max_depth, max_nodes, count))
+			children.append(_dump_node(child, scene_root, depth + 1, max_depth, max_nodes, count))
 		if not children.is_empty():
 			data["children"] = children
 	
 	return data
+
+
+func _get_scene_path(node: Node, scene_root: Node) -> String:
+	## Get a clean path relative to the scene root, prefixed with the root name.
+	if node == scene_root:
+		return "/root/" + node.name
+	
+	var path_from_root := scene_root.get_path_to(node)
+	return "/root/" + scene_root.name + "/" + str(path_from_root)
+
+
+func _resolve_node_path(path: String, scene_root: Node) -> Node:
+	## Resolve a path like /root/GameRoot/Player to the actual node.
+	## Handles both /root/SceneName/... format and relative paths.
+	if path.is_empty():
+		return null
+	
+	# Handle /root/SceneName/... format
+	if path.begins_with("/root/"):
+		var rest := path.substr(6)  # Remove "/root/"
+		var parts := rest.split("/")
+		if parts.size() == 0:
+			return null
+		
+		# First part should be the scene root name
+		if parts[0] == scene_root.name:
+			if parts.size() == 1:
+				return scene_root
+			# Join remaining parts as relative path
+			var relative_path := "/".join(parts.slice(1))
+			return scene_root.get_node_or_null(relative_path)
+		else:
+			# Maybe it's a direct child name without scene root prefix
+			return scene_root.get_node_or_null(rest)
+	
+	# Try as relative path from scene root
+	return scene_root.get_node_or_null(path)
 
 
 func _handle_node_inspect(params: Dictionary) -> String:
@@ -244,13 +281,13 @@ func _handle_node_inspect(params: Dictionary) -> String:
 	if not root:
 		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
 	
-	var node := root.get_node_or_null(node_path)
+	var node := _resolve_node_path(node_path, root)
 	if not node:
 		var hint := _get_valid_children_hint(root, node_path)
 		return _error_response("ENODE_NOT_FOUND", "Node not found: " + node_path, hint)
 	
 	var data := {
-		"path": str(node.get_path()),
+		"path": _get_scene_path(node, root),
 		"name": node.name,
 		"type": node.get_class(),
 		"script": "",
@@ -299,7 +336,7 @@ func _handle_node_create(params: Dictionary) -> String:
 	if not root:
 		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
 	
-	var parent := root.get_node_or_null(parent_path)
+	var parent := _resolve_node_path(parent_path, root)
 	if not parent:
 		var hint := _get_valid_children_hint(root, parent_path)
 		return _error_response("ENODE_NOT_FOUND", "Parent node not found: " + parent_path, hint)
@@ -324,7 +361,7 @@ func _handle_node_create(params: Dictionary) -> String:
 	_undo_redo.commit_action()
 	
 	return _success_response({
-		"created_path": str(new_node.get_path()),
+		"created_path": _get_scene_path(new_node, root),
 		"type": node_type,
 		"name": node_name,
 	})
@@ -342,7 +379,7 @@ func _handle_node_set_prop(params: Dictionary) -> String:
 	if not root:
 		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
 	
-	var node := root.get_node_or_null(node_path)
+	var node := _resolve_node_path(node_path, root)
 	if not node:
 		var hint := _get_valid_children_hint(root, node_path)
 		return _error_response("ENODE_NOT_FOUND", "Node not found: " + node_path, hint)
@@ -394,7 +431,7 @@ func _handle_node_attach_script(params: Dictionary) -> String:
 	if not root:
 		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
 	
-	var node := root.get_node_or_null(node_path)
+	var node := _resolve_node_path(node_path, root)
 	if not node:
 		var hint := _get_valid_children_hint(root, node_path)
 		return _error_response("ENODE_NOT_FOUND", "Node not found: " + node_path, hint)
@@ -435,11 +472,11 @@ func _handle_signal_connect(params: Dictionary) -> String:
 	if not root:
 		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
 	
-	var source := root.get_node_or_null(source_path)
+	var source := _resolve_node_path(source_path, root)
 	if not source:
 		return _error_response("ENODE_NOT_FOUND", "Source node not found: " + source_path, "")
 	
-	var target := root.get_node_or_null(target_path)
+	var target := _resolve_node_path(target_path, root)
 	if not target:
 		return _error_response("ENODE_NOT_FOUND", "Target node not found: " + target_path, "")
 	
