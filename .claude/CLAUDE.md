@@ -11,7 +11,7 @@ providing:
 
 ## Architecture
 
-```
+```text
 Claude Code → Hooks (bash wrappers) → agentctl skills → SQLite/CAS
                                            ↓
                                     JSON envelope output

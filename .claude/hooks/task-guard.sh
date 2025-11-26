@@ -51,19 +51,20 @@ result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run hooks/task_guard --inp
 # Extract hook_output from envelope data
 hook_output="$(printf '%s' "$result" | jq -c '.data.hook_output // {}')"
 
-# Check decision
+# Check decision and render JSON via jq to ensure proper escaping
 decision="$(printf '%s' "$hook_output" | jq -r '.decision // "approve"')"
 
 if [[ "$decision" == "block" ]]; then
-  # Return the block reason to Claude
-  reason="$(printf '%s' "$hook_output" | jq -r '.reason // "Operation blocked by task guard"')"
-  printf '{"decision": "block", "reason": "%s"}\n' "$reason"
+	printf '%s\n' "$hook_output" | jq -c '{
+	  decision: "block",
+	  reason: (.reason // "Operation blocked by task guard")
+	}'
 else
-  # Approve - optionally include context
-  context="$(printf '%s' "$hook_output" | jq -r '.context // empty')"
-  if [[ -n "$context" ]]; then
-    printf '{"decision": "approve", "context": "%s"}\n' "$context"
-  else
-    printf '{}\n'
-  fi
+	printf '%s\n' "$hook_output" | jq -c '
+	  if (.context // "") != "" then
+	    { decision: "approve", context: .context }
+	  else
+	    {}
+	  end
+	'
 fi
