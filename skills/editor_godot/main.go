@@ -38,6 +38,7 @@ const (
 	ActionSceneInstance    = "scene_instance"
 	ActionSearchNodes      = "search_nodes"
 	ActionFocusNode        = "focus_node"
+	ActionScriptCreate     = "script_create"
 	ActionResourceList     = "resource_list"
 	ActionRunGame          = "run_game"
 	ActionStopGame         = "stop_game"
@@ -77,6 +78,11 @@ type Input struct {
 	SearchName    string            `json:"search_name"`
 	SearchType    string            `json:"search_type"`
 	Frame         bool              `json:"frame"`
+	ExtendsClass  string            `json:"extends"`
+	Exports       []any             `json:"exports"`
+	Methods       []any             `json:"methods"`
+	Signals       []string          `json:"signals"`
+	Overwrite     bool              `json:"overwrite"`
 }
 
 // PluginRequest is sent to the GodotAIBridge plugin.
@@ -292,10 +298,14 @@ func validateInput(in Input) error {
 		if strings.TrimSpace(in.NodePath) == "" {
 			return fmt.Errorf("node_path is required for action %q", in.Action)
 		}
+	case ActionScriptCreate:
+		if strings.TrimSpace(in.ScriptPath) == "" {
+			return fmt.Errorf("script_path is required for action %q", in.Action)
+		}
 	case ActionResourceList:
 		// Optional path, pattern, max_results
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, resource_list, run_game, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -379,6 +389,21 @@ func buildParams(in Input) map[string]any {
 	case ActionFocusNode:
 		params["node_path"] = in.NodePath
 		params["frame"] = in.Frame
+	case ActionScriptCreate:
+		params["path"] = in.ScriptPath
+		if in.ExtendsClass != "" {
+			params["extends"] = in.ExtendsClass
+		}
+		if len(in.Exports) > 0 {
+			params["exports"] = in.Exports
+		}
+		if len(in.Methods) > 0 {
+			params["methods"] = in.Methods
+		}
+		if len(in.Signals) > 0 {
+			params["signals"] = in.Signals
+		}
+		params["overwrite"] = in.Overwrite
 	case ActionResourceList:
 		if in.ResourcePath != "" {
 			params["path"] = in.ResourcePath
@@ -659,6 +684,13 @@ func generateSummary(action string, data any) string {
 			return fmt.Sprintf("Focused on %s", selectedPath)
 		}
 		return "Focused node"
+
+	case ActionScriptCreate:
+		if m, ok := data.(map[string]any); ok {
+			path, _ := m["path"].(string)
+			return fmt.Sprintf("Created script %s", path)
+		}
+		return "Created script"
 
 	case ActionResourceList:
 		if m, ok := data.(map[string]any); ok {

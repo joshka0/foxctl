@@ -175,6 +175,8 @@ func _handle_request(json_str: String) -> String:
 			return _handle_search_nodes(params)
 		"focus_node":
 			return _handle_focus_node(params)
+		"script_create":
+			return _handle_script_create(params)
 		"resource_list":
 			return _handle_resource_list(params)
 		"run_game":
@@ -185,7 +187,7 @@ func _handle_request(json_str: String) -> String:
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, resource_list, run_game, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, search_nodes, focus_node, script_create, resource_list, run_game, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -1114,6 +1116,117 @@ func _handle_focus_node(params: Dictionary) -> String:
 		"selected_path": _get_scene_path(node, root),
 		"selected_name": node.name,
 		"selected_type": node.get_class(),
+	})
+
+
+func _handle_script_create(params: Dictionary) -> String:
+	## Create a new GDScript file with a safe template.
+	var script_path: String = params.get("path", "")
+	var extends_class: String = params.get("extends", "Node")
+	var exports: Array = params.get("exports", [])
+	var methods: Array = params.get("methods", [])
+	var signals_list: Array = params.get("signals", [])
+	var overwrite: bool = params.get("overwrite", false)
+	
+	if script_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not script_path.begins_with("res://"):
+		script_path = "res://" + script_path.lstrip("/")
+	
+	if not script_path.ends_with(".gd"):
+		script_path += ".gd"
+	
+	# Check if file already exists
+	if FileAccess.file_exists(script_path) and not overwrite:
+		return _error_response("ESCRIPT_EXISTS", "Script already exists: " + script_path,
+			"Use overwrite=true to replace the existing script.")
+	
+	# Validate extends class
+	if not ClassDB.class_exists(extends_class):
+		return _error_response("ETYPE_INVALID", "Invalid base class: " + extends_class,
+			"Use a valid Godot class name like Node, Node2D, CharacterBody2D, etc.")
+	
+	# Build script content
+	var content := "extends %s\n" % extends_class
+	content += "## Auto-generated script by agentctl\n\n"
+	
+	# Add signals
+	for sig in signals_list:
+		var sig_name: String = sig if sig is String else sig.get("name", "")
+		if not sig_name.is_empty():
+			content += "signal %s\n" % sig_name
+	
+	if not signals_list.is_empty():
+		content += "\n"
+	
+	# Add exports
+	for exp in exports:
+		var exp_name: String = ""
+		var exp_type: String = "Variant"
+		var exp_default: String = ""
+		
+		if exp is String:
+			exp_name = exp
+		elif exp is Dictionary:
+			exp_name = exp.get("name", "")
+			exp_type = exp.get("type", "Variant")
+			exp_default = exp.get("default", "")
+		
+		if not exp_name.is_empty():
+			if exp_default.is_empty():
+				content += "@export var %s: %s\n" % [exp_name, exp_type]
+			else:
+				content += "@export var %s: %s = %s\n" % [exp_name, exp_type, exp_default]
+	
+	if not exports.is_empty():
+		content += "\n"
+	
+	# Add _ready if no methods specified
+	if methods.is_empty():
+		content += "\nfunc _ready() -> void:\n\tpass\n"
+	else:
+		for method in methods:
+			var method_name: String = ""
+			var method_args: String = ""
+			var method_return: String = "void"
+			
+			if method is String:
+				method_name = method
+			elif method is Dictionary:
+				method_name = method.get("name", "")
+				method_args = method.get("args", "")
+				method_return = method.get("return", "void")
+			
+			if not method_name.is_empty():
+				content += "\nfunc %s(%s) -> %s:\n\tpass\n" % [method_name, method_args, method_return]
+	
+	# Create directory if needed
+	var dir_path := script_path.get_base_dir()
+	if not DirAccess.dir_exists_absolute(dir_path):
+		var err := DirAccess.make_dir_recursive_absolute(dir_path)
+		if err != OK:
+			return _error_response("EIO", "Failed to create directory: " + dir_path, "")
+	
+	# Write the file
+	var file := FileAccess.open(script_path, FileAccess.WRITE)
+	if not file:
+		return _error_response("EIO", "Failed to create script file: " + script_path,
+			"Error: " + str(FileAccess.get_open_error()))
+	
+	file.store_string(content)
+	file.close()
+	
+	# Refresh the filesystem so Godot sees the new file
+	EditorInterface.get_resource_filesystem().scan()
+	
+	return _success_response({
+		"ok": true,
+		"path": script_path,
+		"extends": extends_class,
+		"exports_count": exports.size(),
+		"methods_count": methods.size(),
+		"signals_count": signals_list.size(),
 	})
 
 

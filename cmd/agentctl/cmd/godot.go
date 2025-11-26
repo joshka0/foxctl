@@ -64,6 +64,7 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotSceneInstanceCommand(),
 		newGodotSearchNodesCommand(),
 		newGodotFocusCommand(),
+		newGodotScriptCreateCommand(),
 		newGodotResourcesCommand(),
 		newGodotRunCommand(),
 		newGodotStopCommand(),
@@ -691,6 +692,94 @@ func newGodotFocusCommand() *cobra.Command {
 
 	addGodotFlags(cmd, &f)
 	cmd.Flags().BoolVar(&frame, "frame", true, "Frame the node in the viewport")
+	return cmd
+}
+
+func newGodotScriptCreateCommand() *cobra.Command {
+	var f godotFlags
+	var extendsClass string
+	var exports []string
+	var methods []string
+	var signals []string
+	var overwrite bool
+
+	cmd := &cobra.Command{
+		Use:   "script-create <path>",
+		Short: "Create a new GDScript file",
+		Long: `Create a new GDScript file with a safe template.
+
+The script will include:
+- extends declaration
+- Optional exported variables
+- Optional method stubs
+- Optional signal declarations
+
+The path should be relative to res:// (e.g., Scripts/Player.gd).`,
+		Example: `  # Create a simple script
+  agentctl godot script-create res://Scripts/Player.gd --extends CharacterBody2D
+
+  # Create with exports and methods
+  agentctl godot script-create res://Scripts/Enemy.gd \
+    --extends CharacterBody2D \
+    --export speed:float=100.0 \
+    --export health:int=100 \
+    --method _physics_process \
+    --method take_damage
+
+  # Create with signals
+  agentctl godot script-create res://Scripts/GameManager.gd \
+    --extends Node \
+    --signal game_started \
+    --signal game_over`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse exports into structured format
+			var exportsList []any
+			for _, e := range exports {
+				parts := strings.SplitN(e, ":", 2)
+				if len(parts) == 2 {
+					typeParts := strings.SplitN(parts[1], "=", 2)
+					export := map[string]string{
+						"name": parts[0],
+						"type": typeParts[0],
+					}
+					if len(typeParts) == 2 {
+						export["default"] = typeParts[1]
+					}
+					exportsList = append(exportsList, export)
+				} else {
+					exportsList = append(exportsList, e)
+				}
+			}
+
+			payload := map[string]any{
+				"action":      "script_create",
+				"host":        f.host,
+				"port":        f.port,
+				"timeout_ms":  f.timeoutMS,
+				"script_path": args[0],
+				"extends":     extendsClass,
+				"overwrite":   overwrite,
+			}
+			if len(exportsList) > 0 {
+				payload["exports"] = exportsList
+			}
+			if len(methods) > 0 {
+				payload["methods"] = methods
+			}
+			if len(signals) > 0 {
+				payload["signals"] = signals
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&extendsClass, "extends", "Node", "Base class to extend")
+	cmd.Flags().StringArrayVar(&exports, "export", nil, "Exported variable (format: name:type=default)")
+	cmd.Flags().StringArrayVar(&methods, "method", nil, "Method stub to create")
+	cmd.Flags().StringArrayVar(&signals, "signal", nil, "Signal to declare")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing script")
 	return cmd
 }
 
