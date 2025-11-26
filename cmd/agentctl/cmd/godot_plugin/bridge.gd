@@ -161,8 +161,16 @@ func _handle_request(json_str: String) -> String:
 			return _handle_signal_connect(params)
 		"class_info":
 			return _handle_class_info(params)
+		"ensure_node":
+			return _handle_ensure_node(params)
 		"scene_save":
 			return _handle_scene_save()
+		"scene_list":
+			return _handle_scene_list(params)
+		"scene_open":
+			return _handle_scene_open(params)
+		"scene_instance":
+			return _handle_scene_instance(params)
 		"resource_list":
 			return _handle_resource_list(params)
 		"run_game":
@@ -173,7 +181,7 @@ func _handle_request(json_str: String) -> String:
 			return _handle_errors(params)
 		_:
 			return _error_response("EACTION", "Unknown action: " + action, 
-				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, scene_save, resource_list, run_game, stop_game, errors")
+				"Valid actions: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, resource_list, run_game, stop_game, errors")
 
 
 func _validate_workspace(workspace_root: String) -> String:
@@ -683,6 +691,168 @@ func _handle_class_info(params: Dictionary) -> String:
 	})
 
 
+func _handle_ensure_node(params: Dictionary) -> String:
+	## Idempotently ensure a node exists at the given path with the given type.
+	## If the node exists and type matches, optionally update properties.
+	## If the node doesn't exist, create it.
+	var target_path: String = params.get("path", "")
+	var node_type: String = params.get("type", "")
+	var props: Dictionary = params.get("props", {})
+	var if_exists: String = params.get("if_exists", "update")
+	
+	if target_path.is_empty() or node_type.is_empty():
+		return _error_response("EARG", "path and type are required", "")
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	# Try to find existing node
+	var existing := _resolve_node_path(target_path, root)
+	
+	if existing:
+		# Node exists - check type
+		if existing.get_class() != node_type:
+			# Check if it's a subclass (e.g., CharacterBody2D is a Node2D)
+			if not ClassDB.is_parent_class(existing.get_class(), node_type):
+				return _error_response("ETYPE_MISMATCH",
+					"Node exists but type mismatch: expected '%s', found '%s'" % [node_type, existing.get_class()],
+					"Use node_delete first if you want to replace the node with a different type.")
+		
+		# Handle based on if_exists policy
+		match if_exists:
+			"error":
+				return _error_response("ENODE_EXISTS",
+					"Node already exists at: " + target_path,
+					"Use if_exists='update' or 'ignore' to handle existing nodes.")
+			"ignore":
+				return _success_response({
+					"status": "exists",
+					"path": _get_scene_path(existing, root),
+					"type": existing.get_class(),
+					"created": false,
+					"updated_props": [],
+				})
+			"update", _:
+				# Update properties if provided
+				var updated_props: Array[String] = []
+				if not props.is_empty():
+					_undo_redo.create_action("AI: Ensure Node %s props" % existing.name)
+					for prop_name in props:
+						var value_str: String = str(props[prop_name])
+						var current_value = existing.get(prop_name)
+						
+						# Check property exists
+						var prop_exists := false
+						for prop in existing.get_property_list():
+							if prop.name == prop_name:
+								prop_exists = true
+								break
+						
+						if not prop_exists:
+							_undo_redo.commit_action()  # Commit empty action to avoid issues
+							var valid_props := _get_valid_properties(existing)
+							return _error_response("EPROP_NOT_FOUND",
+								"Property '%s' not found on node type '%s'" % [prop_name, existing.get_class()],
+								"Valid properties include: " + ", ".join(valid_props.slice(0, 10)))
+						
+						var typed_value = _convert_value(value_str, typeof(current_value))
+						if typed_value == null and not value_str.is_empty():
+							_undo_redo.commit_action()
+							return _error_response("ETYPE_CONVERSION",
+								"Cannot convert '%s' to type %s" % [value_str, type_string(typeof(current_value))],
+								"Expected format: " + _get_type_format_hint(typeof(current_value)))
+						
+						_undo_redo.add_do_property(existing, prop_name, typed_value)
+						_undo_redo.add_undo_property(existing, prop_name, current_value)
+						updated_props.append(prop_name)
+					
+					_undo_redo.commit_action()
+				
+				return _success_response({
+					"status": "exists",
+					"path": _get_scene_path(existing, root),
+					"type": existing.get_class(),
+					"created": false,
+					"updated_props": updated_props,
+				})
+	
+	# Node doesn't exist - create it
+	# Parse path to get parent and name
+	var path_parts := target_path.split("/")
+	if path_parts.size() < 3:  # Need at least /root/SceneName/NodeName
+		return _error_response("EARG", "Invalid path format: " + target_path,
+			"Path must be like /root/SceneName/NodeName")
+	
+	var node_name := path_parts[-1]
+	var parent_path := "/".join(path_parts.slice(0, -1))
+	
+	var parent := _resolve_node_path(parent_path, root)
+	if not parent:
+		return _error_response("ENODE_NOT_FOUND", "Parent node not found: " + parent_path,
+			"Create parent nodes first or check the path.")
+	
+	# Validate class exists
+	if not ClassDB.class_exists(node_type):
+		return _error_response("ETYPE_INVALID", "Invalid Godot class: " + node_type,
+			"Use a valid Godot class name like Node2D, Sprite2D, CharacterBody2D, etc.")
+	
+	# Create node
+	var new_node: Node = ClassDB.instantiate(node_type)
+	if not new_node:
+		return _error_response("ETYPE_INVALID", "Cannot instantiate class: " + node_type, "")
+	
+	new_node.name = node_name
+	
+	# Build undo/redo action for creation + property setting
+	_undo_redo.create_action("AI: Ensure Node " + node_name)
+	_undo_redo.add_do_method(parent, "add_child", new_node)
+	_undo_redo.add_do_method(new_node, "set_owner", root)
+	_undo_redo.add_do_reference(new_node)
+	_undo_redo.add_undo_method(parent, "remove_child", new_node)
+	
+	# Apply properties during creation
+	var props_applied: Array[String] = []
+	for prop_name in props:
+		var value_str: String = str(props[prop_name])
+		
+		# We need to check if property exists on the class
+		var prop_info: Dictionary = {}
+		for prop in ClassDB.class_get_property_list(node_type, true):
+			if prop.name == prop_name:
+				prop_info = prop
+				break
+		
+		if prop_info.is_empty():
+			# Property might be inherited or dynamic, try to get default
+			var default_value = new_node.get(prop_name)
+			if default_value == null:
+				_undo_redo.commit_action()
+				new_node.queue_free()
+				return _error_response("EPROP_NOT_FOUND",
+					"Property '%s' not found on class '%s'" % [prop_name, node_type], "")
+			
+			var typed_value = _convert_value(value_str, typeof(default_value))
+			if typed_value != null or value_str.is_empty():
+				_undo_redo.add_do_property(new_node, prop_name, typed_value)
+				props_applied.append(prop_name)
+		else:
+			var typed_value = _convert_value(value_str, prop_info.type)
+			if typed_value != null or value_str.is_empty():
+				_undo_redo.add_do_property(new_node, prop_name, typed_value)
+				props_applied.append(prop_name)
+	
+	_undo_redo.commit_action()
+	
+	return _success_response({
+		"status": "created",
+		"path": _get_scene_path(new_node, root),
+		"type": node_type,
+		"created": true,
+		"props_applied": props_applied,
+	})
+
+
 func _handle_scene_save() -> String:
 	var root := EditorInterface.get_edited_scene_root()
 	if not root:
@@ -693,6 +863,140 @@ func _handle_scene_save() -> String:
 	var scene_path := root.scene_file_path
 	return _success_response({
 		"ok": true,
+		"scene_path": scene_path,
+	})
+
+
+func _handle_scene_list(params: Dictionary) -> String:
+	## List all scenes in the project, optionally filtered by path.
+	var search_path: String = params.get("path", "res://")
+	var max_results: int = params.get("max_results", 100)
+	var recursive: bool = params.get("recursive", true)
+	
+	if not search_path.begins_with("res://"):
+		search_path = "res://" + search_path.lstrip("/")
+	
+	var scenes: Array[Dictionary] = []
+	_find_scenes_recursive(search_path, scenes, max_results, recursive)
+	
+	return _success_response({
+		"scenes": scenes,
+		"search_path": search_path,
+		"count": scenes.size(),
+		"truncated": scenes.size() >= max_results,
+	})
+
+
+func _find_scenes_recursive(path: String, scenes: Array[Dictionary], max_results: int, recursive: bool) -> void:
+	## Recursively find .tscn files.
+	var dir := DirAccess.open(path)
+	if not dir:
+		return
+	
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "" and scenes.size() < max_results:
+		if file_name.begins_with("."):
+			file_name = dir.get_next()
+			continue
+		
+		var full_path := path.path_join(file_name)
+		
+		if dir.current_is_dir():
+			if recursive:
+				_find_scenes_recursive(full_path, scenes, max_results, recursive)
+		elif file_name.ends_with(".tscn"):
+			scenes.append({
+				"path": full_path,
+				"name": file_name.get_basename(),
+			})
+		
+		file_name = dir.get_next()
+	dir.list_dir_end()
+
+
+func _handle_scene_open(params: Dictionary) -> String:
+	## Open a scene in the editor.
+	var scene_path: String = params.get("path", "")
+	
+	if scene_path.is_empty():
+		return _error_response("EARG", "path is required", "")
+	
+	if not scene_path.begins_with("res://"):
+		scene_path = "res://" + scene_path.lstrip("/")
+	
+	if not ResourceLoader.exists(scene_path):
+		return _error_response("ESCENE_NOT_FOUND", "Scene not found: " + scene_path,
+			"Ensure the scene file exists at the specified res:// path.")
+	
+	# Check if scene is a valid PackedScene
+	var resource := load(scene_path)
+	if not resource or not resource is PackedScene:
+		return _error_response("ESCENE_INVALID", "Not a valid scene file: " + scene_path, "")
+	
+	# Open the scene
+	EditorInterface.open_scene_from_path(scene_path)
+	
+	# Get the new root after opening
+	var new_root := EditorInterface.get_edited_scene_root()
+	
+	return _success_response({
+		"ok": true,
+		"scene_path": scene_path,
+		"root_name": new_root.name if new_root else "",
+		"root_type": new_root.get_class() if new_root else "",
+	})
+
+
+func _handle_scene_instance(params: Dictionary) -> String:
+	## Instance a scene as a child of a node.
+	var scene_path: String = params.get("scene_path", "")
+	var parent_path: String = params.get("parent_path", "")
+	var instance_name: String = params.get("name", "")
+	
+	if scene_path.is_empty() or parent_path.is_empty():
+		return _error_response("EARG", "scene_path and parent_path are required", "")
+	
+	if not scene_path.begins_with("res://"):
+		scene_path = "res://" + scene_path.lstrip("/")
+	
+	var root := EditorInterface.get_edited_scene_root()
+	if not root:
+		return _error_response("EEDITOR_STATE", "No scene currently open in editor", "")
+	
+	var parent := _resolve_node_path(parent_path, root)
+	if not parent:
+		return _error_response("ENODE_NOT_FOUND", "Parent node not found: " + parent_path, "")
+	
+	# Load the scene
+	if not ResourceLoader.exists(scene_path):
+		return _error_response("ESCENE_NOT_FOUND", "Scene not found: " + scene_path, "")
+	
+	var packed_scene: PackedScene = load(scene_path)
+	if not packed_scene:
+		return _error_response("ESCENE_INVALID", "Failed to load scene: " + scene_path, "")
+	
+	# Instance the scene
+	var instance := packed_scene.instantiate()
+	if not instance:
+		return _error_response("ESCENE_INVALID", "Failed to instantiate scene: " + scene_path, "")
+	
+	# Set name if provided
+	if not instance_name.is_empty():
+		instance.name = instance_name
+	
+	# Add with undo/redo
+	_undo_redo.create_action("AI: Instance Scene " + instance.name)
+	_undo_redo.add_do_method(parent, "add_child", instance)
+	_undo_redo.add_do_method(instance, "set_owner", root)
+	_undo_redo.add_do_reference(instance)
+	_undo_redo.add_undo_method(parent, "remove_child", instance)
+	_undo_redo.commit_action()
+	
+	return _success_response({
+		"ok": true,
+		"instance_path": _get_scene_path(instance, root),
+		"instance_name": instance.name,
 		"scene_path": scene_path,
 	})
 

@@ -57,7 +57,11 @@ See docs/godot/editor_integration.md for detailed documentation.`,
 		newGodotAttachScriptCommand(),
 		newGodotConnectSignalCommand(),
 		newGodotClassInfoCommand(),
+		newGodotEnsureNodeCommand(),
 		newGodotSaveCommand(),
+		newGodotSceneListCommand(),
+		newGodotSceneOpenCommand(),
+		newGodotSceneInstanceCommand(),
 		newGodotResourcesCommand(),
 		newGodotRunCommand(),
 		newGodotStopCommand(),
@@ -412,6 +416,70 @@ func newGodotClassInfoCommand() *cobra.Command {
 	return cmd
 }
 
+func newGodotEnsureNodeCommand() *cobra.Command {
+	var f godotFlags
+	var props []string
+	var ifExists string
+
+	cmd := &cobra.Command{
+		Use:   "ensure-node <path> <type>",
+		Short: "Idempotently ensure a node exists",
+		Long: `Ensure a node exists at the given path with the given type.
+
+If the node already exists and the type matches:
+  - With --if-exists=update (default): update properties if --prop flags are provided
+  - With --if-exists=ignore: return info without modifying
+  - With --if-exists=error: fail with ENODE_EXISTS
+
+If the node doesn't exist, create it with the specified type and properties.
+All operations are registered with Godot's Undo/Redo system.`,
+		Example: `  # Ensure a Node2D exists (create if missing)
+  agentctl godot ensure-node /root/GameRoot/Player Node2D
+
+  # Ensure with properties
+  agentctl godot ensure-node /root/GameRoot/Player CharacterBody2D \
+    --prop position="Vector2(100, 200)" \
+    --prop visible=true
+
+  # Fail if node already exists
+  agentctl godot ensure-node /root/GameRoot/NewNode Sprite2D --if-exists error`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse --prop flags into a map
+			propsMap := make(map[string]string)
+			for _, p := range props {
+				parts := strings.SplitN(p, "=", 2)
+				if len(parts) == 2 {
+					propsMap[parts[0]] = parts[1]
+				} else {
+					return fmt.Errorf("invalid --prop format %q, expected key=value", p)
+				}
+			}
+
+			payload := map[string]any{
+				"action":     "ensure_node",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"node_path":  args[0],
+				"node_type":  args[1],
+			}
+			if len(propsMap) > 0 {
+				payload["props"] = propsMap
+			}
+			if ifExists != "" {
+				payload["if_exists"] = ifExists
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringArrayVar(&props, "prop", nil, "Property to set (format: key=value, repeatable)")
+	cmd.Flags().StringVar(&ifExists, "if-exists", "update", "Behavior if node exists: update, ignore, or error")
+	return cmd
+}
+
 func newGodotSaveCommand() *cobra.Command {
 	var f godotFlags
 
@@ -432,6 +500,112 @@ func newGodotSaveCommand() *cobra.Command {
 	}
 
 	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotSceneListCommand() *cobra.Command {
+	var f godotFlags
+	var path string
+	var maxResults int
+	var recursive bool
+
+	cmd := &cobra.Command{
+		Use:   "scene-list",
+		Short: "List scenes in the project",
+		Long:  "List all .tscn scene files in the Godot project.",
+		Example: `  # List all scenes
+  agentctl godot scene-list
+
+  # List scenes in a specific directory
+  agentctl godot scene-list --path res://Scenes
+
+  # Non-recursive listing
+  agentctl godot scene-list --path res://Scenes --no-recursive`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"action":        "scene_list",
+				"host":          f.host,
+				"port":          f.port,
+				"timeout_ms":    f.timeoutMS,
+				"resource_path": path,
+				"max_results":   maxResults,
+				"recursive":     recursive,
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&path, "path", "res://", "Directory to search for scenes")
+	cmd.Flags().IntVar(&maxResults, "max-results", 100, "Maximum scenes to return")
+	cmd.Flags().BoolVar(&recursive, "recursive", true, "Search subdirectories recursively")
+	return cmd
+}
+
+func newGodotSceneOpenCommand() *cobra.Command {
+	var f godotFlags
+
+	cmd := &cobra.Command{
+		Use:   "scene-open <scene-path>",
+		Short: "Open a scene in the editor",
+		Long:  "Open the specified scene file in the Godot Editor.",
+		Example: `  # Open main scene
+  agentctl godot scene-open res://Scenes/Main.tscn
+
+  # Open a specific scene
+  agentctl godot scene-open res://Scenes/Maps/Level1.tscn`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":     "scene_open",
+				"host":       f.host,
+				"port":       f.port,
+				"timeout_ms": f.timeoutMS,
+				"scene_path": args[0],
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	return cmd
+}
+
+func newGodotSceneInstanceCommand() *cobra.Command {
+	var f godotFlags
+	var instanceName string
+
+	cmd := &cobra.Command{
+		Use:   "scene-instance <scene-path> <parent-path>",
+		Short: "Instance a scene as a child node",
+		Long: `Instance a PackedScene as a child of the specified parent node.
+
+This is useful for adding prefabs/templates to your scene.
+The operation is registered with Godot's Undo/Redo system.`,
+		Example: `  # Instance an enemy prefab
+  agentctl godot scene-instance res://Scenes/Entities/Enemy.tscn /root/GameRoot
+
+  # Instance with a custom name
+  agentctl godot scene-instance res://Scenes/Entities/Enemy.tscn /root/GameRoot --name Boss`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			payload := map[string]any{
+				"action":      "scene_instance",
+				"host":        f.host,
+				"port":        f.port,
+				"timeout_ms":  f.timeoutMS,
+				"scene_path":  args[0],
+				"parent_path": args[1],
+			}
+			if instanceName != "" {
+				payload["instance_name"] = instanceName
+			}
+			return runGodotSkill(cmd, payload, f.skipCache, f.dataOnly)
+		},
+	}
+
+	addGodotFlags(cmd, &f)
+	cmd.Flags().StringVar(&instanceName, "name", "", "Name for the instanced node (default: scene root name)")
 	return cmd
 }
 

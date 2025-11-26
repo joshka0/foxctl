@@ -31,7 +31,11 @@ const (
 	ActionNodeAttachScript = "node_attach_script"
 	ActionSignalConnect    = "signal_connect"
 	ActionClassInfo        = "class_info"
+	ActionEnsureNode       = "ensure_node"
 	ActionSceneSave        = "scene_save"
+	ActionSceneList        = "scene_list"
+	ActionSceneOpen        = "scene_open"
+	ActionSceneInstance    = "scene_instance"
 	ActionResourceList     = "resource_list"
 	ActionRunGame          = "run_game"
 	ActionStopGame         = "stop_game"
@@ -40,29 +44,34 @@ const (
 
 // Input represents the skill input parameters.
 type Input struct {
-	Action        string `json:"action"`
-	Host          string `json:"host"`
-	Port          int    `json:"port"`
-	TimeoutMS     int    `json:"timeout_ms"`
-	NodePath      string `json:"node_path"`
-	ParentPath    string `json:"parent_path"`
-	NewParentPath string `json:"new_parent_path"`
-	NodeType      string `json:"node_type"`
-	NodeName      string `json:"node_name"`
-	NewName       string `json:"new_name"`
-	Property      string `json:"property"`
-	Value         string `json:"value"`
-	ScriptPath    string `json:"script_path"`
-	SignalName    string `json:"signal_name"`
-	TargetPath    string `json:"target_path"`
-	MethodName    string `json:"method_name"`
-	ClassName     string `json:"class_name"`
-	ResourcePath  string `json:"resource_path"`
-	Pattern       string `json:"pattern"`
-	MaxDepth      int    `json:"max_depth"`
-	MaxNodes      int    `json:"max_nodes"`
-	MaxResults    int    `json:"max_results"`
-	ErrorLimit    int    `json:"error_limit"`
+	Action        string            `json:"action"`
+	Host          string            `json:"host"`
+	Port          int               `json:"port"`
+	TimeoutMS     int               `json:"timeout_ms"`
+	NodePath      string            `json:"node_path"`
+	ParentPath    string            `json:"parent_path"`
+	NewParentPath string            `json:"new_parent_path"`
+	NodeType      string            `json:"node_type"`
+	NodeName      string            `json:"node_name"`
+	NewName       string            `json:"new_name"`
+	Property      string            `json:"property"`
+	Value         string            `json:"value"`
+	ScriptPath    string            `json:"script_path"`
+	SignalName    string            `json:"signal_name"`
+	TargetPath    string            `json:"target_path"`
+	MethodName    string            `json:"method_name"`
+	ClassName     string            `json:"class_name"`
+	ResourcePath  string            `json:"resource_path"`
+	Pattern       string            `json:"pattern"`
+	MaxDepth      int               `json:"max_depth"`
+	MaxNodes      int               `json:"max_nodes"`
+	MaxResults    int               `json:"max_results"`
+	ErrorLimit    int               `json:"error_limit"`
+	Props         map[string]string `json:"props"`
+	IfExists      string            `json:"if_exists"`
+	ScenePath     string            `json:"scene_path"`
+	Recursive     bool              `json:"recursive"`
+	InstanceName  string            `json:"instance_name"`
 }
 
 // PluginRequest is sent to the GodotAIBridge plugin.
@@ -250,12 +259,32 @@ func validateInput(in Input) error {
 		if strings.TrimSpace(in.ClassName) == "" {
 			return fmt.Errorf("class_name is required for action %q", in.Action)
 		}
+	case ActionEnsureNode:
+		if strings.TrimSpace(in.NodePath) == "" {
+			return fmt.Errorf("node_path is required for action %q", in.Action)
+		}
+		if strings.TrimSpace(in.NodeType) == "" {
+			return fmt.Errorf("node_type is required for action %q", in.Action)
+		}
 	case ActionSceneSave, ActionStopGame:
 		// No additional required fields
+	case ActionSceneList:
+		// Optional path, max_results, recursive
+	case ActionSceneOpen:
+		if strings.TrimSpace(in.ScenePath) == "" {
+			return fmt.Errorf("scene_path is required for action %q", in.Action)
+		}
+	case ActionSceneInstance:
+		if strings.TrimSpace(in.ScenePath) == "" {
+			return fmt.Errorf("scene_path is required for action %q", in.Action)
+		}
+		if strings.TrimSpace(in.ParentPath) == "" {
+			return fmt.Errorf("parent_path is required for action %q", in.Action)
+		}
 	case ActionResourceList:
 		// Optional path, pattern, max_results
 	default:
-		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, scene_save, resource_list, run_game, stop_game, errors)", in.Action)
+		return fmt.Errorf("unknown action: %q (valid: ping, scene_tree, node_inspect, node_create, node_delete, node_rename, node_reparent, node_set_prop, node_attach_script, signal_connect, class_info, ensure_node, scene_save, scene_list, scene_open, scene_instance, resource_list, run_game, stop_game, errors)", in.Action)
 	}
 	return nil
 }
@@ -295,6 +324,31 @@ func buildParams(in Input) map[string]any {
 		params["method_name"] = in.MethodName
 	case ActionClassInfo:
 		params["class_name"] = in.ClassName
+	case ActionEnsureNode:
+		params["path"] = in.NodePath
+		params["type"] = in.NodeType
+		if len(in.Props) > 0 {
+			params["props"] = in.Props
+		}
+		if in.IfExists != "" {
+			params["if_exists"] = in.IfExists
+		}
+	case ActionSceneList:
+		if in.ResourcePath != "" {
+			params["path"] = in.ResourcePath
+		}
+		if in.MaxResults > 0 {
+			params["max_results"] = in.MaxResults
+		}
+		params["recursive"] = in.Recursive
+	case ActionSceneOpen:
+		params["path"] = in.ScenePath
+	case ActionSceneInstance:
+		params["scene_path"] = in.ScenePath
+		params["parent_path"] = in.ParentPath
+		if in.InstanceName != "" {
+			params["name"] = in.InstanceName
+		}
 	case ActionResourceList:
 		if in.ResourcePath != "" {
 			params["path"] = in.ResourcePath
@@ -522,12 +576,45 @@ func generateSummary(action string, data any) string {
 		}
 		return "Retrieved class info"
 
+	case ActionEnsureNode:
+		if m, ok := data.(map[string]any); ok {
+			status, _ := m["status"].(string)
+			path, _ := m["path"].(string)
+			created, _ := m["created"].(bool)
+			if created {
+				return fmt.Sprintf("Created node at %s", path)
+			}
+			return fmt.Sprintf("Node exists at %s (status: %s)", path, status)
+		}
+		return "Ensured node"
+
 	case ActionSceneSave:
 		if m, ok := data.(map[string]any); ok {
 			scenePath, _ := m["scene_path"].(string)
 			return fmt.Sprintf("Saved scene to %s", scenePath)
 		}
 		return "Scene saved"
+
+	case ActionSceneList:
+		if m, ok := data.(map[string]any); ok {
+			count, _ := m["count"].(float64)
+			return fmt.Sprintf("Found %d scene(s)", int(count))
+		}
+		return "Listed scenes"
+
+	case ActionSceneOpen:
+		if m, ok := data.(map[string]any); ok {
+			scenePath, _ := m["scene_path"].(string)
+			return fmt.Sprintf("Opened scene %s", scenePath)
+		}
+		return "Opened scene"
+
+	case ActionSceneInstance:
+		if m, ok := data.(map[string]any); ok {
+			instancePath, _ := m["instance_path"].(string)
+			return fmt.Sprintf("Instanced scene at %s", instancePath)
+		}
+		return "Instanced scene"
 
 	case ActionResourceList:
 		if m, ok := data.(map[string]any); ok {
