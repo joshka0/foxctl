@@ -10,10 +10,13 @@ RUN apt-get update \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Pre-warm module cache and install tools used by CI
-RUN go install mvdan.cc/gofumpt@v0.7.0 \
-    && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-
 WORKDIR /workspace
+
+COPY go.mod go.sum ./
+
+# Pre-warm module cache and install tools used by CI
+RUN go mod download \
+    && go install mvdan.cc/gofumpt@v0.7.0 \
+    && go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
 ENV CGO_ENABLED=1

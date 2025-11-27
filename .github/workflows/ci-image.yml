@@ -9,6 +9,8 @@ on:
         paths:
             - Dockerfile.ci
             - .github/workflows/ci-image.yml
+            - go.mod
+            - go.sum
     workflow_dispatch:
 
 permissions:

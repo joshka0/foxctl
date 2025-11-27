@@ -58,24 +58,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Capture Go cache paths
-        id: go-env
-        run: |
-          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Go modules and build cache
-        continue-on-error: true
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.go-env.outputs.gomodcache }}
-            ${{ steps.go-env.outputs.gocache }}
-          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.24.x-
-            ${{ runner.os }}-go-
-
       - name: Lint (golangci-lint)
         env:
           GOTOOLCHAIN: go1.24.3
@@ -90,24 +72,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Capture Go cache paths
-        id: go-env
-        run: |
-          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Go modules and build cache
-        continue-on-error: true
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.go-env.outputs.gomodcache }}
-            ${{ steps.go-env.outputs.gocache }}
-          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.24.x-
-            ${{ runner.os }}-go-
-
       - name: Unit tests (no race)
         run: make test-short
 
@@ -120,24 +84,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Capture Go cache paths
-        id: go-env
-        run: |
-          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Go modules and build cache
-        continue-on-error: true
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.go-env.outputs.gomodcache }}
-            ${{ steps.go-env.outputs.gocache }}
-          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.24.x-
-            ${{ runner.os }}-go-
-
       - name: Race tests
         run: make test-race
 
@@ -149,24 +95,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Capture Go cache paths
-        id: go-env
-        run: |
-          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Go modules and build cache
-        continue-on-error: true
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.go-env.outputs.gomodcache }}
-            ${{ steps.go-env.outputs.gocache }}
-          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.24.x-
-            ${{ runner.os }}-go-
 
       - name: Coverage
         run: |
@@ -183,24 +111,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Capture Go cache paths
-        id: go-env
-        run: |
-          echo "gomodcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
-          echo "gocache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Go modules and build cache
-        continue-on-error: true
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ steps.go-env.outputs.gomodcache }}
-            ${{ steps.go-env.outputs.gocache }}
-          key: ${{ runner.os }}-go-1.24.x-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-1.24.x-
-            ${{ runner.os }}-go-
 
       - name: Build CLI
         run: make build
