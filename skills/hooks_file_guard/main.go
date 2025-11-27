@@ -173,7 +173,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		ExpiresAt:   time.Now().Add(DefaultReservationTTL),
 	}
 
-	if err := boardStore.Reserve(ctx, reservation); err != nil {
+	if err := boardStore.Reserve(ctx, &reservation); err != nil {
 		// Failed to reserve, but no conflicts - allow the operation
 		return emitOutput(rc, hook.Output{
 			Decision: hook.DecisionApprove,

@@ -691,7 +691,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Subject:     fmt.Sprintf("%s:%s", eventType, rootTaskID),
 				Body:        fmt.Sprintf("Plan for %q: created %d tasks", req.Goal, len(createdTasks)),
 			}
-			if err := boardStore.SendMessage(ctx, msg); err != nil {
+			if err := boardStore.SendMessage(ctx, &msg); err != nil {
 				// Log but don't fail the operation
 				fmt.Fprintf(os.Stderr, "warning: failed to send plan event: %v\n", err)
 			}

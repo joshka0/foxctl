@@ -114,6 +114,17 @@ func (s *Scorer) Recommend(ctx context.Context, workspaceID string, limit int) (
 		}
 	}
 
+	// Find max mail counts for normalization (avoids unbounded score inflation)
+	maxAdmin, maxOverseer := 0, 0
+	for _, mc := range taskMailCounts {
+		if mc.admin > maxAdmin {
+			maxAdmin = mc.admin
+		}
+		if mc.overseer > maxOverseer {
+			maxOverseer = mc.overseer
+		}
+	}
+
 	// Compute scores for each task
 	scores := make([]TaskScore, 0, len(pending))
 	now := time.Now().UTC()
@@ -142,14 +153,23 @@ func (s *Scorer) Recommend(ctx context.Context, workspaceID string, limit int) (
 		daysSince := now.Sub(lastUpdate).Hours() / 24.0
 		recencyFactor := 1.0 / (1.0 + daysSince)
 
-		// Compute weighted score
+		// Normalize mail counts (0-1) to avoid unbounded score inflation
+		var normAdmin, normOverseer float64
+		if maxAdmin > 0 {
+			normAdmin = float64(mailCount.admin) / float64(maxAdmin)
+		}
+		if maxOverseer > 0 {
+			normOverseer = float64(mailCount.overseer) / float64(maxOverseer)
+		}
+
+		// Compute weighted score (all components are now 0-1 normalized)
 		score := WeightCriticalPath*normCritPath +
 			WeightPageRank*normPageRank +
-			WeightAdminMail*float64(mailCount.admin)*10.0 +
-			WeightOverseerMail*float64(mailCount.overseer)*5.0 +
+			WeightAdminMail*normAdmin +
+			WeightOverseerMail*normOverseer +
 			WeightRecency*recencyFactor
 
-		// Normalize score to 0-1 range (approximately)
+		// Cap at 1.0 as a safety measure (should be rare with normalized inputs)
 		score = math.Min(score, 1.0)
 
 		scores = append(scores, TaskScore{

@@ -22,7 +22,7 @@ type BoardStore interface {
 	Close() error
 
 	// Message operations
-	SendMessage(ctx context.Context, msg agent.BoardMessage) error
+	SendMessage(ctx context.Context, msg *agent.BoardMessage) error
 	Inbox(ctx context.Context, filter agent.InboxFilter) ([]agent.BoardMessage, error)
 	MarkRead(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
 	AckMessages(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
@@ -30,7 +30,7 @@ type BoardStore interface {
 	CountMessagesByTask(ctx context.Context, workspaceID, taskID string) (admin, overseer, total int, err error)
 
 	// Reservation operations
-	Reserve(ctx context.Context, res agent.FileReservation) error
+	Reserve(ctx context.Context, res *agent.FileReservation) error
 	CheckConflicts(ctx context.Context, workspaceID string, paths []string, holder string, mode agent.ReservationMode) ([]agent.ReservationConflict, error)
 	Release(ctx context.Context, workspaceID, actorID string, paths []string) (int, error)
 	ReleaseByID(ctx context.Context, reservationIDs []string) (int, error)
@@ -56,7 +56,8 @@ func (s *boardSQLStore) Close() error {
 }
 
 // SendMessage inserts a new BoardMessage.
-func (s *boardSQLStore) SendMessage(ctx context.Context, msg agent.BoardMessage) error {
+// The msg.ID is populated with a ULID if not already set.
+func (s *boardSQLStore) SendMessage(ctx context.Context, msg *agent.BoardMessage) error {
 	if msg.ID == "" {
 		msg.ID = ulid.Make().String()
 	}
@@ -196,7 +197,8 @@ func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, actorID st
 }
 
 // Reserve creates a file reservation.
-func (s *boardSQLStore) Reserve(ctx context.Context, res agent.FileReservation) error {
+// The res.ID is populated with a ULID if not already set.
+func (s *boardSQLStore) Reserve(ctx context.Context, res *agent.FileReservation) error {
 	if res.ID == "" {
 		res.ID = ulid.Make().String()
 	}

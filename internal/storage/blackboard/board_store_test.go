@@ -29,7 +29,7 @@ func TestBoardStore_SendAndInbox(t *testing.T) {
 		Body:        "This is a test",
 		Priority:    1,
 	}
-	if err := store.SendMessage(ctx, msg); err != nil {
+	if err := store.SendMessage(ctx, &msg); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func TestBoardStore_BroadcastMessage(t *testing.T) {
 		Subject:     "Broadcast",
 		Body:        "Everyone should see this",
 	}
-	if err := store.SendMessage(ctx, msg); err != nil {
+	if err := store.SendMessage(ctx, &msg); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestBoardStore_AckMessages(t *testing.T) {
 		Subject:     "Needs ack",
 		AckRequired: true,
 	}
-	if err := store.SendMessage(ctx, msg); err != nil {
+	if err := store.SendMessage(ctx, &msg); err != nil {
 		t.Fatalf("SendMessage: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestBoardStore_ReserveAndRelease(t *testing.T) {
 		Mode:        agent.ReservationModeExclusive,
 		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	}
-	if err := store.Reserve(ctx, res); err != nil {
+	if err := store.Reserve(ctx, &res); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestBoardStore_ReservationConflicts(t *testing.T) {
 		Mode:        agent.ReservationModeExclusive,
 		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	}
-	if err := store.Reserve(ctx, res); err != nil {
+	if err := store.Reserve(ctx, &res); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestBoardStore_SharedReservations(t *testing.T) {
 		Mode:        agent.ReservationModeShared,
 		ExpiresAt:   time.Now().Add(10 * time.Minute),
 	}
-	if err := store.Reserve(ctx, res1); err != nil {
+	if err := store.Reserve(ctx, &res1); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 
@@ -263,7 +263,7 @@ func TestBoardStore_ExpiredReservations(t *testing.T) {
 		Mode:        agent.ReservationModeExclusive,
 		ExpiresAt:   time.Now().Add(-1 * time.Minute), // Already expired
 	}
-	if err := store.Reserve(ctx, res); err != nil {
+	if err := store.Reserve(ctx, &res); err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 
@@ -296,8 +296,8 @@ func TestBoardStore_PriorityOrdering(t *testing.T) {
 		{WorkspaceID: "ws1", Sender: "admin", Recipient: "actor:agent:coder", Subject: "High priority", Priority: 1},
 		{WorkspaceID: "ws1", Sender: "admin", Recipient: "actor:agent:coder", Subject: "Medium priority", Priority: 3},
 	}
-	for _, m := range msgs {
-		if err := store.SendMessage(ctx, m); err != nil {
+	for i := range msgs {
+		if err := store.SendMessage(ctx, &msgs[i]); err != nil {
 			t.Fatalf("SendMessage: %v", err)
 		}
 	}

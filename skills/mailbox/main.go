@@ -140,7 +140,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			msg.Priority = agent.DefaultPriority
 		}
 
-		if err := store.SendMessage(ctx, msg); err != nil {
+		if err := store.SendMessage(ctx, &msg); err != nil {
 			return err
 		}
 		data = map[string]any{
@@ -256,7 +256,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 				ExpiresAt:   now.Add(ttl),
 				CreatedAt:   now,
 			}
-			if err := store.Reserve(ctx, res); err != nil {
+			if err := store.Reserve(ctx, &res); err != nil {
 				return err
 			}
 			granted = append(granted, res)
