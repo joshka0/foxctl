@@ -21,6 +21,7 @@ func newTodoCommand() *cobra.Command {
 		newTodoActiveCommand(),
 		newTodoInsightsCommand(),
 		newTodoRecommendCommand(),
+		newTodoPlanCommand(),
 	)
 	return cmd
 }
@@ -209,6 +210,77 @@ func newTodoRecommendCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
 	cmd.Flags().IntVar(&limit, "limit", 10, "Max recommendations to return")
+	return cmd
+}
+
+func newTodoPlanCommand() *cobra.Command {
+	var workspaceID string
+	var goal string
+	var desc string
+	var scopePaths []string
+	var attachToTaskID string
+	var apply bool
+	var maxTasks int
+	var strategy string
+
+	cmd := &cobra.Command{
+		Use:   "plan",
+		Short: "Create or refine a task plan (epic decomposition)",
+		Long: `Create or refine a task plan from a goal.
+
+In draft mode (default), shows proposed tasks without creating them.
+In apply mode (--apply), creates the tasks and emits plan.created events.
+
+Examples:
+  # Draft a plan
+  agentctl todo plan --goal "Implement user authentication"
+
+  # Apply a plan with scope paths
+  agentctl todo plan --goal "Add OAuth2 support" --scope cmd/auth --scope internal/auth --apply
+
+  # Refine an existing epic
+  agentctl todo plan --goal "Add Google provider" --attach-to <epic-id> --apply`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := rejectBackticks("goal", goal); err != nil {
+				return err
+			}
+			if err := rejectBackticks("description", desc); err != nil {
+				return err
+			}
+			mode := "draft"
+			if apply {
+				mode = "apply"
+			}
+			payload := map[string]any{
+				"operation": "plan",
+				"plan": map[string]any{
+					"goal":              goal,
+					"description":       desc,
+					"scope_paths":       scopePaths,
+					"attach_to_task_id": attachToTaskID,
+					"mode":              mode,
+					"max_tasks":         maxTasks,
+					"strategy":          strategy,
+				},
+			}
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
+			}
+			return runTodoSkill(cmd, payload)
+		},
+	}
+
+	cmd.Flags().StringVar(&goal, "goal", "", "One-sentence goal for the plan (required)")
+	cmd.Flags().StringVar(&desc, "description", "", "Detailed description/context for planning")
+	cmd.Flags().StringSliceVar(&scopePaths, "scope", nil, "Directories/files likely to be touched")
+	cmd.Flags().StringVar(&attachToTaskID, "attach-to", "", "Attach subtasks to an existing epic task ID")
+	cmd.Flags().BoolVar(&apply, "apply", false, "Apply the plan (create tasks), default is draft mode")
+	cmd.Flags().IntVar(&maxTasks, "max-tasks", 20, "Max tasks to create")
+	cmd.Flags().StringVar(&strategy, "strategy", "auto", "Planning strategy: auto, epic, or flat")
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
+	if err := cmd.MarkFlagRequired("goal"); err != nil {
+		panic(err)
+	}
 	return cmd
 }
 

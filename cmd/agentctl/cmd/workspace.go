@@ -161,8 +161,8 @@ func parseAgentSets(s string) []string {
 }
 
 // collectAgents collects all agents matching the specified sets.
-func collectAgents(sets []string) ([]builtin.BuiltinAsset, error) {
-	var agents []builtin.BuiltinAsset
+func collectAgents(sets []string) ([]builtin.Asset, error) {
+	var agents []builtin.Asset
 
 	includeCore := false
 	includeFactory := false
@@ -201,7 +201,7 @@ func collectAgents(sets []string) ([]builtin.BuiltinAsset, error) {
 }
 
 // initWorkspace initializes a workspace with the specified agents.
-func initWorkspace(workspaceDir string, agents []builtin.BuiltinAsset, force, dryRun bool) (map[string]any, error) {
+func initWorkspace(workspaceDir string, agents []builtin.Asset, force, dryRun bool) (map[string]any, error) {
 	claudeDir := filepath.Join(workspaceDir, ".claude")
 	agentsDir := filepath.Join(claudeDir, "agents")
 

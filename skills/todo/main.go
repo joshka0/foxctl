@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/planning/llm"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
@@ -571,25 +572,76 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 			}
 		}
 	} else {
-		// No explicit tasks: create a single epic task from the goal
-		epicTitle := "Epic: " + req.Goal
-		if epicTask != nil {
-			epicTitle = req.Goal // Refining existing, don't prefix
+		// No explicit tasks: try LLM planning or fall back to single epic
+		planner := llm.AutoPlanner()
+		if planner != nil && planner.Available() {
+			// Use LLM to generate task decomposition
+			maxTasks := req.MaxTasks
+			if maxTasks == 0 {
+				maxTasks = 20
+			}
+			maxDepth := req.MaxDepth
+			if maxDepth == 0 {
+				maxDepth = 3
+			}
+
+			llmResult, err := planner.Plan(ctx, llm.PlanRequest{
+				Goal:        req.Goal,
+				Description: req.Description,
+				ScopePaths:  req.ScopePaths,
+				MaxTasks:    maxTasks,
+				MaxDepth:    maxDepth,
+				Strategy:    req.Strategy,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: LLM planning failed, falling back to simple epic: %v\n", err)
+			} else {
+				// Convert LLM tasks to internal tasks
+				fmt.Fprintf(os.Stderr, "info: LLM planning generated %d tasks using %s\n", len(llmResult.Tasks), llmResult.ModelUsed)
+				titleToID := make(map[string]string)
+				for i, pt := range llmResult.Tasks {
+					scopePath := pt.ScopePath
+					if scopePath == "" && len(req.ScopePaths) > 0 {
+						scopePath = req.ScopePaths[0]
+					}
+					t := tasks.Task{
+						WorkspaceID: workspaceID,
+						Title:       pt.Title,
+						Description: pt.Description,
+						ScopePath:   scopePath,
+						Status:      statusPending,
+						DependsOn:   pt.DependsOn, // Titles for now
+					}
+					if epicTask != nil {
+						t.ParentID = epicTask.ID
+					}
+					plannedTasks = append(plannedTasks, t)
+					titleToID[pt.Title] = fmt.Sprintf("temp-%d", i)
+				}
+			}
 		}
 
-		t := tasks.Task{
-			WorkspaceID: workspaceID,
-			Title:       epicTitle,
-			Description: req.Description,
-			Status:      statusPending,
+		// Fallback: create a single epic task from the goal
+		if len(plannedTasks) == 0 {
+			epicTitle := "Epic: " + req.Goal
+			if epicTask != nil {
+				epicTitle = req.Goal // Refining existing, don't prefix
+			}
+
+			t := tasks.Task{
+				WorkspaceID: workspaceID,
+				Title:       epicTitle,
+				Description: req.Description,
+				Status:      statusPending,
+			}
+			if len(req.ScopePaths) > 0 {
+				t.ScopePath = req.ScopePaths[0]
+			}
+			if epicTask != nil {
+				t.ParentID = epicTask.ID
+			}
+			plannedTasks = append(plannedTasks, t)
 		}
-		if len(req.ScopePaths) > 0 {
-			t.ScopePath = req.ScopePaths[0]
-		}
-		if epicTask != nil {
-			t.ParentID = epicTask.ID
-		}
-		plannedTasks = append(plannedTasks, t)
 	}
 
 	// Apply mode: actually create the tasks

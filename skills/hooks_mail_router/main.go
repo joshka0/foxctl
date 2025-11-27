@@ -141,46 +141,111 @@ func buildMailContext(messages []agent.BoardMessage) string {
 		return ""
 	}
 
-	var sb strings.Builder
-	sb.WriteString("## Mailbox Messages\n\n")
-
-	count := 0
+	// Separate plan events from other messages for special handling
+	var planEvents []agent.BoardMessage
+	var otherMessages []agent.BoardMessage
 	for _, msg := range messages {
-		if count >= MaxMessagesInContext {
-			break
+		if isPlanEvent(msg.Subject) {
+			planEvents = append(planEvents, msg)
+		} else {
+			otherMessages = append(otherMessages, msg)
 		}
-
-		// Format sender with role indicator
-		senderLabel := formatSender(msg.Sender)
-
-		// Priority indicator
-		priorityLabel := ""
-		if msg.Priority <= 2 {
-			priorityLabel = " [HIGH PRIORITY]"
-		}
-
-		// Ack indicator
-		ackLabel := ""
-		if msg.AckRequired {
-			ackLabel = " [ACK REQUIRED]"
-		}
-
-		sb.WriteString(fmt.Sprintf("### %s%s%s\n", senderLabel, priorityLabel, ackLabel))
-		sb.WriteString(fmt.Sprintf("**Subject:** %s\n", msg.Subject))
-		if msg.Body != "" {
-			sb.WriteString(fmt.Sprintf("%s\n", msg.Body))
-		}
-		sb.WriteString(fmt.Sprintf("_Stream: %s | ID: %s_\n\n", msg.Stream, msg.ID))
-
-		count++
 	}
 
-	remaining := len(messages) - count
-	if remaining > 0 {
-		sb.WriteString(fmt.Sprintf("_...and %d more unread messages_\n", remaining))
+	var sb strings.Builder
+
+	// Format plan events first (high visibility)
+	if len(planEvents) > 0 {
+		sb.WriteString("## Plan Updates from Overseer\n\n")
+		for _, msg := range planEvents {
+			eventType := extractPlanEventType(msg.Subject)
+			taskID := extractPlanTaskID(msg.Subject)
+
+			switch eventType {
+			case "plan.created":
+				sb.WriteString(fmt.Sprintf("**New Plan Created** (task: `%s`)\n", taskID))
+			case "plan.updated":
+				sb.WriteString(fmt.Sprintf("**Plan Updated** (task: `%s`)\n", taskID))
+			case "plan.review_needed":
+				sb.WriteString(fmt.Sprintf("**Plan Review Needed** (task: `%s`) [ACTION REQUIRED]\n", taskID))
+			default:
+				sb.WriteString(fmt.Sprintf("**Plan Event:** %s\n", msg.Subject))
+			}
+
+			if msg.Body != "" {
+				sb.WriteString(fmt.Sprintf("%s\n", msg.Body))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Format other messages
+	if len(otherMessages) > 0 {
+		sb.WriteString("## Mailbox Messages\n\n")
+
+		count := 0
+		for _, msg := range otherMessages {
+			if count >= MaxMessagesInContext {
+				break
+			}
+
+			// Format sender with role indicator
+			senderLabel := formatSender(msg.Sender)
+
+			// Priority indicator
+			priorityLabel := ""
+			if msg.Priority <= 2 {
+				priorityLabel = " [HIGH PRIORITY]"
+			}
+
+			// Ack indicator
+			ackLabel := ""
+			if msg.AckRequired {
+				ackLabel = " [ACK REQUIRED]"
+			}
+
+			sb.WriteString(fmt.Sprintf("### %s%s%s\n", senderLabel, priorityLabel, ackLabel))
+			sb.WriteString(fmt.Sprintf("**Subject:** %s\n", msg.Subject))
+			if msg.Body != "" {
+				sb.WriteString(fmt.Sprintf("%s\n", msg.Body))
+			}
+			sb.WriteString(fmt.Sprintf("_Stream: %s | ID: %s_\n\n", msg.Stream, msg.ID))
+
+			count++
+		}
+
+		remaining := len(otherMessages) - count
+		if remaining > 0 {
+			sb.WriteString(fmt.Sprintf("_...and %d more unread messages_\n", remaining))
+		}
 	}
 
 	return sb.String()
+}
+
+// isPlanEvent checks if a subject indicates a plan event.
+func isPlanEvent(subject string) bool {
+	return strings.HasPrefix(subject, "plan.")
+}
+
+// extractPlanEventType extracts the event type from a plan subject.
+func extractPlanEventType(subject string) string {
+	// Subject format: "plan.created:<task-id>" or "plan.updated:<task-id>"
+	parts := strings.SplitN(subject, ":", 2)
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return subject
+}
+
+// extractPlanTaskID extracts the task ID from a plan subject.
+func extractPlanTaskID(subject string) string {
+	// Subject format: "plan.created:<task-id>"
+	parts := strings.SplitN(subject, ":", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return ""
 }
 
 // formatSender formats the sender with role indicators.
