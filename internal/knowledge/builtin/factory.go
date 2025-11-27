@@ -19,8 +19,8 @@ var factoryDroids embed.FS
 //go:embed data/agents/*.md
 var coreAgents embed.FS
 
-// BuiltinAsset represents a single embedded knowledge asset.
-type BuiltinAsset struct {
+// Asset represents a single embedded knowledge asset.
+type Asset struct {
 	// Name is the knowledge item name (e.g., "factory/droid/orchestrator").
 	Name string
 	// Kind is the knowledge item kind.
@@ -36,18 +36,18 @@ type BuiltinAsset struct {
 }
 
 // ListFactoryDroids returns all embedded Factory droid assets.
-func ListFactoryDroids() ([]BuiltinAsset, error) {
+func ListFactoryDroids() ([]Asset, error) {
 	return listEmbeddedAssets(factoryDroids, "data/droids", "factory/droid", "builtin://factory/droids")
 }
 
 // ListCoreAgents returns all embedded core agent assets.
-func ListCoreAgents() ([]BuiltinAsset, error) {
+func ListCoreAgents() ([]Asset, error) {
 	return listEmbeddedAssets(coreAgents, "data/agents", "core/agent", "builtin://core/agents")
 }
 
 // listEmbeddedAssets walks an embedded FS and parses all markdown files.
-func listEmbeddedAssets(fsys embed.FS, dir, namePrefix, sourcePrefix string) ([]BuiltinAsset, error) {
-	var assets []BuiltinAsset
+func listEmbeddedAssets(fsys embed.FS, dir, namePrefix, sourcePrefix string) ([]Asset, error) {
+	var assets []Asset
 
 	err := fs.WalkDir(fsys, dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -78,21 +78,18 @@ func listEmbeddedAssets(fsys embed.FS, dir, namePrefix, sourcePrefix string) ([]
 }
 
 // parseAgentAsset parses an agent/droid markdown file and extracts metadata.
-func parseAgentAsset(path, content, dir, namePrefix, sourcePrefix string) (BuiltinAsset, error) {
+func parseAgentAsset(path, content, dir, namePrefix, sourcePrefix string) (Asset, error) {
 	// Extract filename without extension for slug
 	filename := strings.TrimPrefix(path, dir+"/")
 	slug := strings.TrimSuffix(filename, ".md")
 
 	// Parse YAML frontmatter
-	name, description := parseYAMLFrontmatter(content)
-	if name == "" {
-		name = slug
-	}
+	_, description := parseYAMLFrontmatter(content)
 
 	// Generate keywords from description
 	keywords := extractKeywords(description)
 
-	return BuiltinAsset{
+	return Asset{
 		Name:        fmt.Sprintf("%s/%s", namePrefix, slug),
 		Kind:        knowledge.KindAgent,
 		Description: description,
@@ -176,7 +173,7 @@ func extractKeywords(description string) []string {
 // SeedBuiltinKnowledge seeds all builtin knowledge (Factory droids + core agents) into the store.
 // This is idempotent - existing items are updated, not duplicated.
 func SeedBuiltinKnowledge(ctx context.Context, store knowledge.Store) (int, error) {
-	var allAssets []BuiltinAsset
+	var allAssets []Asset
 
 	// Collect Factory droids
 	droids, err := ListFactoryDroids()
@@ -222,7 +219,7 @@ func SeedFactoryKnowledge(ctx context.Context, store knowledge.Store) (int, erro
 }
 
 // seedAsset seeds a single asset into the store.
-func seedAsset(ctx context.Context, store knowledge.Store, asset BuiltinAsset) error {
+func seedAsset(ctx context.Context, store knowledge.Store, asset Asset) error {
 	// Upsert the knowledge item
 	item, err := store.UpsertItem(ctx, knowledge.Item{
 		Name:        asset.Name,

@@ -70,7 +70,7 @@ func TestListCoreAgents(t *testing.T) {
 	}
 }
 
-func verifyAsset(t *testing.T, a BuiltinAsset, expectedPrefix string) {
+func verifyAsset(t *testing.T, a Asset, expectedPrefix string) {
 	t.Helper()
 	if a.Name == "" {
 		t.Error("asset has empty Name")
@@ -193,7 +193,11 @@ func TestSeedFactoryKnowledge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("knowledge.Open() error = %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if cerr := store.Close(); cerr != nil {
+			t.Fatalf("store.Close() error = %v", cerr)
+		}
+	}()
 
 	// First seed
 	count1, err := SeedFactoryKnowledge(ctx, store)
@@ -273,7 +277,11 @@ func TestSeedBuiltinKnowledge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("knowledge.Open() error = %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if cerr := store.Close(); cerr != nil {
+			t.Fatalf("store.Close() error = %v", cerr)
+		}
+	}()
 
 	// Seed all builtin knowledge
 	count, err := SeedBuiltinKnowledge(ctx, store)
