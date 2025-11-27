@@ -78,7 +78,7 @@ Triggers are extracted from:
 
 			// Seed builtin knowledge unless skipped
 			if !skipBuiltin {
-				builtinSeeded, err = builtin.SeedFactoryKnowledge(ctx, store)
+				builtinSeeded, err = builtin.SeedBuiltinKnowledge(ctx, store)
 				if err != nil {
 					return fmt.Errorf("seed builtin knowledge: %w", err)
 				}

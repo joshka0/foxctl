@@ -28,32 +28,70 @@ func TestListFactoryDroids(t *testing.T) {
 		if _, ok := expected[d.Name]; ok {
 			expected[d.Name] = true
 		}
-
-		// Verify all required fields
-		if d.Name == "" {
-			t.Error("droid has empty Name")
-		}
-		if d.Kind != knowledge.KindAgent {
-			t.Errorf("droid %s has kind %s, want %s", d.Name, d.Kind, knowledge.KindAgent)
-		}
-		if d.Description == "" {
-			t.Errorf("droid %s has empty Description", d.Name)
-		}
-		if d.SourcePath == "" {
-			t.Errorf("droid %s has empty SourcePath", d.Name)
-		}
-		if d.Body == "" {
-			t.Errorf("droid %s has empty Body", d.Name)
-		}
-		if len(d.Keywords) == 0 {
-			t.Errorf("droid %s has no Keywords", d.Name)
-		}
+		verifyAsset(t, d, "factory/droid/")
 	}
 
 	for name, found := range expected {
 		if !found {
 			t.Errorf("expected droid %s not found", name)
 		}
+	}
+}
+
+func TestListCoreAgents(t *testing.T) {
+	agents, err := ListCoreAgents()
+	if err != nil {
+		t.Fatalf("ListCoreAgents() error = %v", err)
+	}
+
+	if len(agents) == 0 {
+		t.Error("ListCoreAgents() returned no agents")
+	}
+
+	// Verify expected agents are present
+	expected := map[string]bool{
+		"core/agent/code-reviewer":  false,
+		"core/agent/debugger":       false,
+		"core/agent/refactorer":     false,
+		"core/agent/test-automator": false,
+	}
+
+	for _, a := range agents {
+		if _, ok := expected[a.Name]; ok {
+			expected[a.Name] = true
+		}
+		verifyAsset(t, a, "core/agent/")
+	}
+
+	for name, found := range expected {
+		if !found {
+			t.Errorf("expected agent %s not found", name)
+		}
+	}
+}
+
+func verifyAsset(t *testing.T, a BuiltinAsset, expectedPrefix string) {
+	t.Helper()
+	if a.Name == "" {
+		t.Error("asset has empty Name")
+	}
+	if !contains(a.Name, expectedPrefix) {
+		t.Errorf("asset %s does not have expected prefix %s", a.Name, expectedPrefix)
+	}
+	if a.Kind != knowledge.KindAgent {
+		t.Errorf("asset %s has kind %s, want %s", a.Name, a.Kind, knowledge.KindAgent)
+	}
+	if a.Description == "" {
+		t.Errorf("asset %s has empty Description", a.Name)
+	}
+	if a.SourcePath == "" {
+		t.Errorf("asset %s has empty SourcePath", a.Name)
+	}
+	if a.Body == "" {
+		t.Errorf("asset %s has empty Body", a.Name)
+	}
+	if len(a.Keywords) == 0 {
+		t.Errorf("asset %s has no Keywords", a.Name)
 	}
 }
 
@@ -224,6 +262,65 @@ func TestSeedFactoryKnowledge(t *testing.T) {
 	}
 	if len(items2) != len(items) {
 		t.Errorf("ListItems() after second seed = %d, want %d (no duplicates)", len(items2), len(items))
+	}
+}
+
+func TestSeedBuiltinKnowledge(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := knowledge.Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("knowledge.Open() error = %v", err)
+	}
+	defer store.Close()
+
+	// Seed all builtin knowledge
+	count, err := SeedBuiltinKnowledge(ctx, store)
+	if err != nil {
+		t.Fatalf("SeedBuiltinKnowledge() error = %v", err)
+	}
+
+	// Should include both Factory droids and core agents
+	droids, _ := ListFactoryDroids()
+	agents, _ := ListCoreAgents()
+	expectedCount := len(droids) + len(agents)
+
+	if count != expectedCount {
+		t.Errorf("SeedBuiltinKnowledge() seeded %d items, want %d", count, expectedCount)
+	}
+
+	// Verify both types are present
+	items, err := store.ListItems(ctx, knowledge.KindAgent)
+	if err != nil {
+		t.Fatalf("ListItems() error = %v", err)
+	}
+
+	factoryCount := 0
+	coreCount := 0
+	for _, item := range items {
+		if contains(item.Name, "factory/droid/") {
+			factoryCount++
+		}
+		if contains(item.Name, "core/agent/") {
+			coreCount++
+		}
+	}
+
+	if factoryCount != len(droids) {
+		t.Errorf("Found %d factory droids, want %d", factoryCount, len(droids))
+	}
+	if coreCount != len(agents) {
+		t.Errorf("Found %d core agents, want %d", coreCount, len(agents))
+	}
+
+	// Verify a core agent is present
+	_, found, err := store.GetItemByName(ctx, "core/agent/code-reviewer")
+	if err != nil {
+		t.Fatalf("GetItemByName() error = %v", err)
+	}
+	if !found {
+		t.Error("code-reviewer agent not found")
 	}
 }
 

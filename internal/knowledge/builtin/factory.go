@@ -16,6 +16,9 @@ import (
 //go:embed data/droids/*.md
 var factoryDroids embed.FS
 
+//go:embed data/agents/*.md
+var coreAgents embed.FS
+
 // BuiltinAsset represents a single embedded knowledge asset.
 type BuiltinAsset struct {
 	// Name is the knowledge item name (e.g., "factory/droid/orchestrator").
@@ -34,9 +37,19 @@ type BuiltinAsset struct {
 
 // ListFactoryDroids returns all embedded Factory droid assets.
 func ListFactoryDroids() ([]BuiltinAsset, error) {
+	return listEmbeddedAssets(factoryDroids, "data/droids", "factory/droid", "builtin://factory/droids")
+}
+
+// ListCoreAgents returns all embedded core agent assets.
+func ListCoreAgents() ([]BuiltinAsset, error) {
+	return listEmbeddedAssets(coreAgents, "data/agents", "core/agent", "builtin://core/agents")
+}
+
+// listEmbeddedAssets walks an embedded FS and parses all markdown files.
+func listEmbeddedAssets(fsys embed.FS, dir, namePrefix, sourcePrefix string) ([]BuiltinAsset, error) {
 	var assets []BuiltinAsset
 
-	err := fs.WalkDir(factoryDroids, "data/droids", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -44,14 +57,14 @@ func ListFactoryDroids() ([]BuiltinAsset, error) {
 			return nil
 		}
 
-		content, err := factoryDroids.ReadFile(path)
+		content, err := fsys.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read embedded file %s: %w", path, err)
 		}
 
-		asset, err := parseDroidAsset(path, string(content))
+		asset, err := parseAgentAsset(path, string(content), dir, namePrefix, sourcePrefix)
 		if err != nil {
-			return fmt.Errorf("parse droid %s: %w", path, err)
+			return fmt.Errorf("parse asset %s: %w", path, err)
 		}
 
 		assets = append(assets, asset)
@@ -64,10 +77,10 @@ func ListFactoryDroids() ([]BuiltinAsset, error) {
 	return assets, nil
 }
 
-// parseDroidAsset parses a droid markdown file and extracts metadata.
-func parseDroidAsset(path, content string) (BuiltinAsset, error) {
+// parseAgentAsset parses an agent/droid markdown file and extracts metadata.
+func parseAgentAsset(path, content, dir, namePrefix, sourcePrefix string) (BuiltinAsset, error) {
 	// Extract filename without extension for slug
-	filename := strings.TrimPrefix(path, "data/droids/")
+	filename := strings.TrimPrefix(path, dir+"/")
 	slug := strings.TrimSuffix(filename, ".md")
 
 	// Parse YAML frontmatter
@@ -80,10 +93,10 @@ func parseDroidAsset(path, content string) (BuiltinAsset, error) {
 	keywords := extractKeywords(description)
 
 	return BuiltinAsset{
-		Name:        fmt.Sprintf("factory/droid/%s", slug),
+		Name:        fmt.Sprintf("%s/%s", namePrefix, slug),
 		Kind:        knowledge.KindAgent,
 		Description: description,
-		SourcePath:  fmt.Sprintf("builtin://factory/droids/%s.md", slug),
+		SourcePath:  fmt.Sprintf("%s/%s.md", sourcePrefix, slug),
 		Body:        content,
 		Keywords:    keywords,
 	}, nil
@@ -160,8 +173,37 @@ func extractKeywords(description string) []string {
 	return keywords
 }
 
-// SeedFactoryKnowledge seeds all Factory builtin knowledge into the store.
+// SeedBuiltinKnowledge seeds all builtin knowledge (Factory droids + core agents) into the store.
 // This is idempotent - existing items are updated, not duplicated.
+func SeedBuiltinKnowledge(ctx context.Context, store knowledge.Store) (int, error) {
+	var allAssets []BuiltinAsset
+
+	// Collect Factory droids
+	droids, err := ListFactoryDroids()
+	if err != nil {
+		return 0, fmt.Errorf("list factory droids: %w", err)
+	}
+	allAssets = append(allAssets, droids...)
+
+	// Collect core agents
+	agents, err := ListCoreAgents()
+	if err != nil {
+		return 0, fmt.Errorf("list core agents: %w", err)
+	}
+	allAssets = append(allAssets, agents...)
+
+	seeded := 0
+	for _, asset := range allAssets {
+		if err := seedAsset(ctx, store, asset); err != nil {
+			return seeded, err
+		}
+		seeded++
+	}
+
+	return seeded, nil
+}
+
+// SeedFactoryKnowledge seeds only Factory droids (for backwards compatibility).
 func SeedFactoryKnowledge(ctx context.Context, store knowledge.Store) (int, error) {
 	droids, err := ListFactoryDroids()
 	if err != nil {
@@ -170,61 +212,75 @@ func SeedFactoryKnowledge(ctx context.Context, store knowledge.Store) (int, erro
 
 	seeded := 0
 	for _, asset := range droids {
-		// Upsert the knowledge item
-		item, err := store.UpsertItem(ctx, knowledge.Item{
-			Name:        asset.Name,
-			Kind:        asset.Kind,
-			Description: asset.Description,
-			SourcePath:  asset.SourcePath,
-			Priority:    "medium",
-		})
-		if err != nil {
-			return seeded, fmt.Errorf("upsert item %s: %w", asset.Name, err)
+		if err := seedAsset(ctx, store, asset); err != nil {
+			return seeded, err
 		}
-
-		// Clear existing triggers and add new ones
-		if err := store.DeleteTriggersForItem(ctx, item.ID); err != nil {
-			return seeded, fmt.Errorf("delete triggers for %s: %w", asset.Name, err)
-		}
-
-		// Add keyword triggers
-		for _, kw := range asset.Keywords {
-			_, err := store.AddTrigger(ctx, knowledge.Trigger{
-				ItemID:      item.ID,
-				TriggerKind: knowledge.TriggerKeyword,
-				Pattern:     kw,
-			})
-			if err != nil {
-				return seeded, fmt.Errorf("add trigger for %s: %w", asset.Name, err)
-			}
-		}
-
-		// Also add "factory" and "droid" as standard triggers
-		for _, tag := range []string{"factory", "droid"} {
-			_, _ = store.AddTrigger(ctx, knowledge.Trigger{
-				ItemID:      item.ID,
-				TriggerKind: knowledge.TriggerKeyword,
-				Pattern:     tag,
-			})
-		}
-
-		// Clear existing documents and add the body
-		if err := store.DeleteDocumentsForItem(ctx, item.ID); err != nil {
-			return seeded, fmt.Errorf("delete documents for %s: %w", asset.Name, err)
-		}
-
-		_, err = store.UpsertDocument(ctx, knowledge.Document{
-			ItemID:     item.ID,
-			Title:      asset.Name,
-			SourcePath: asset.SourcePath,
-			Body:       asset.Body,
-		})
-		if err != nil {
-			return seeded, fmt.Errorf("upsert document for %s: %w", asset.Name, err)
-		}
-
 		seeded++
 	}
 
 	return seeded, nil
+}
+
+// seedAsset seeds a single asset into the store.
+func seedAsset(ctx context.Context, store knowledge.Store, asset BuiltinAsset) error {
+	// Upsert the knowledge item
+	item, err := store.UpsertItem(ctx, knowledge.Item{
+		Name:        asset.Name,
+		Kind:        asset.Kind,
+		Description: asset.Description,
+		SourcePath:  asset.SourcePath,
+		Priority:    "medium",
+	})
+	if err != nil {
+		return fmt.Errorf("upsert item %s: %w", asset.Name, err)
+	}
+
+	// Clear existing triggers and add new ones
+	if err := store.DeleteTriggersForItem(ctx, item.ID); err != nil {
+		return fmt.Errorf("delete triggers for %s: %w", asset.Name, err)
+	}
+
+	// Add keyword triggers
+	for _, kw := range asset.Keywords {
+		_, err := store.AddTrigger(ctx, knowledge.Trigger{
+			ItemID:      item.ID,
+			TriggerKind: knowledge.TriggerKeyword,
+			Pattern:     kw,
+		})
+		if err != nil {
+			return fmt.Errorf("add trigger for %s: %w", asset.Name, err)
+		}
+	}
+
+	// Add category tags based on name prefix
+	var tags []string
+	if strings.HasPrefix(asset.Name, "factory/droid/") {
+		tags = []string{"factory", "droid"}
+	} else if strings.HasPrefix(asset.Name, "core/agent/") {
+		tags = []string{"core", "agent"}
+	}
+	for _, tag := range tags {
+		_, _ = store.AddTrigger(ctx, knowledge.Trigger{
+			ItemID:      item.ID,
+			TriggerKind: knowledge.TriggerKeyword,
+			Pattern:     tag,
+		})
+	}
+
+	// Clear existing documents and add the body
+	if err := store.DeleteDocumentsForItem(ctx, item.ID); err != nil {
+		return fmt.Errorf("delete documents for %s: %w", asset.Name, err)
+	}
+
+	_, err = store.UpsertDocument(ctx, knowledge.Document{
+		ItemID:     item.ID,
+		Title:      asset.Name,
+		SourcePath: asset.SourcePath,
+		Body:       asset.Body,
+	})
+	if err != nil {
+		return fmt.Errorf("upsert document for %s: %w", asset.Name, err)
+	}
+
+	return nil
 }
