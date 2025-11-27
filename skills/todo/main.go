@@ -14,6 +14,7 @@ import (
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/analysis/overseer"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -35,6 +36,7 @@ type input struct {
 	EnsureActive  *ensureActiveReq  `json:"ensure_active"`
 	GraphInsights *graphInsightsReq `json:"graph_insights"`
 	Recommend     *recommendReq     `json:"recommend"`
+	Plan          *planReq          `json:"plan"`
 }
 
 type addRequest struct {
@@ -67,6 +69,53 @@ type graphInsightsReq struct {
 
 type recommendReq struct {
 	Limit int `json:"limit"` // Max recommendations to return (default: 10)
+}
+
+// planReq defines the input for the plan operation.
+type planReq struct {
+	Goal           string     `json:"goal"`              // One-sentence description of desired outcome
+	Description    string     `json:"description"`       // Longer context for planning
+	ScopePaths     []string   `json:"scope_paths"`       // Directories/files likely to be touched
+	AttachToTaskID string     `json:"attach_to_task_id"` // Empty=new epic, non-empty=refine within that epic
+	Mode           string     `json:"mode"`              // "draft" or "apply"
+	MaxTasks       int        `json:"max_tasks"`         // Max tasks to create (default: 20)
+	MaxDepth       int        `json:"max_depth"`         // Max nesting depth (default: 3)
+	Strategy       string     `json:"strategy"`          // "auto", "epic", or "flat"
+	Tasks          []planTask `json:"tasks"`             // Optional: explicit task list to create
+}
+
+// planTask defines a task to create as part of a plan.
+type planTask struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	ScopePath   string   `json:"scope_path"`
+	DependsOn   []string `json:"depends_on"` // Titles of other tasks in this plan
+}
+
+// planOutput is the JSON representation of a plan result.
+type planOutput struct {
+	RootTaskID string           `json:"root_task_id"`
+	Applied    bool             `json:"applied"`
+	Tasks      []*taskOutput    `json:"tasks"`
+	Graph      *planGraphOutput `json:"graph,omitempty"`
+	Diff       *planDiffOutput  `json:"diff"`
+}
+
+type planGraphOutput struct {
+	Nodes  []tasksgraph.NodeMetrics `json:"nodes"`
+	Edges  []planEdge               `json:"edges"`
+	Cycles [][]string               `json:"cycles"`
+}
+
+type planEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+type planDiffOutput struct {
+	AddedTaskIDs   []string `json:"added_task_ids"`
+	UpdatedTaskIDs []string `json:"updated_task_ids"`
+	RemovedTaskIDs []string `json:"removed_task_ids"`
 }
 
 // taskOutput is the JSON representation of a task for envelope output.
@@ -274,8 +323,29 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"summary":        summary,
 		}
 
+	case "plan":
+		// Open board store for plan event emission
+		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+		if boardStore != nil {
+			defer boardStore.Close()
+		}
+		planResult, err := handlePlan(ctx, store, boardStore, workspaceID, in.Plan)
+		if err != nil {
+			return err
+		}
+		summary := fmt.Sprintf("plan for %q: %d tasks", in.Plan.Goal, len(planResult.Tasks))
+		if planResult.Applied {
+			summary += " (applied)"
+		} else {
+			summary += " (draft)"
+		}
+		data = map[string]any{
+			"plan":    planResult,
+			"summary": summary,
+		}
+
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend)", op)
+		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan)", op)
 	}
 
 	return rc.Emit("todo/manage", data, "application/json", envelope.Meta{
@@ -408,6 +478,225 @@ func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, 
 	}
 
 	return toOutput(updated), allTasks, nil
+}
+
+// handlePlan creates or refines a task graph based on the plan request.
+// If mode="draft", it returns a proposed plan without persisting.
+// If mode="apply", it creates the tasks and emits plan events via mailbox.
+func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.BoardStore, workspaceID string, req *planReq) (*planOutput, error) {
+	if req == nil {
+		return nil, fmt.Errorf("plan payload is required")
+	}
+	if req.Goal == "" {
+		return nil, fmt.Errorf("plan.goal is required")
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		mode = "draft"
+	}
+	if mode != "draft" && mode != "apply" {
+		return nil, fmt.Errorf("plan.mode must be 'draft' or 'apply', got %q", mode)
+	}
+
+	// Determine the root task (epic)
+	var rootTaskID string
+	var epicTask *tasks.Task
+
+	if req.AttachToTaskID != "" {
+		// Refining an existing epic
+		existing, err := store.Get(ctx, req.AttachToTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("attach_to_task_id %s not found: %w", req.AttachToTaskID, err)
+		}
+		rootTaskID = existing.ID
+		epicTask = &existing
+	}
+
+	// Build the list of tasks to create
+	var plannedTasks []tasks.Task
+	var addedIDs []string
+
+	// If explicit tasks are provided, use them; otherwise create from goal
+	if len(req.Tasks) > 0 {
+		// Use explicitly provided task list
+		titleToID := make(map[string]string)
+
+		// First pass: create all tasks (without dependencies)
+		for i, pt := range req.Tasks {
+			scopePath := pt.ScopePath
+			if scopePath == "" && len(req.ScopePaths) > 0 {
+				// Use first scope path as default
+				scopePath = req.ScopePaths[0]
+			}
+
+			t := tasks.Task{
+				WorkspaceID: workspaceID,
+				Title:       pt.Title,
+				Description: pt.Description,
+				ScopePath:   scopePath,
+				Status:      statusPending,
+			}
+
+			// If we have an epic, make tasks children of it
+			if epicTask != nil {
+				t.ParentID = epicTask.ID
+			} else if i == 0 {
+				// First task becomes the epic if no attach_to_task_id
+				t.Title = "Epic: " + req.Goal
+				t.Description = req.Description
+			}
+
+			plannedTasks = append(plannedTasks, t)
+			// Use index as temporary ID for dependency resolution
+			titleToID[pt.Title] = fmt.Sprintf("temp-%d", i)
+		}
+
+		// If no epic was attached and we have tasks, first task is the epic
+		if epicTask == nil && len(plannedTasks) > 0 {
+			plannedTasks[0].Title = "Epic: " + req.Goal
+			plannedTasks[0].Description = req.Description
+		}
+
+		// Second pass: resolve dependencies by title
+		for i, pt := range req.Tasks {
+			var deps []string
+			for _, depTitle := range pt.DependsOn {
+				if _, ok := titleToID[depTitle]; ok {
+					deps = append(deps, depTitle) // Will resolve after creation
+				}
+			}
+			if len(deps) > 0 {
+				plannedTasks[i].DependsOn = deps // Store titles temporarily
+			}
+		}
+	} else {
+		// No explicit tasks: create a single epic task from the goal
+		epicTitle := "Epic: " + req.Goal
+		if epicTask != nil {
+			epicTitle = req.Goal // Refining existing, don't prefix
+		}
+
+		t := tasks.Task{
+			WorkspaceID: workspaceID,
+			Title:       epicTitle,
+			Description: req.Description,
+			Status:      statusPending,
+		}
+		if len(req.ScopePaths) > 0 {
+			t.ScopePath = req.ScopePaths[0]
+		}
+		if epicTask != nil {
+			t.ParentID = epicTask.ID
+		}
+		plannedTasks = append(plannedTasks, t)
+	}
+
+	// Apply mode: actually create the tasks
+	var createdTasks []*taskOutput
+	titleToActualID := make(map[string]string)
+
+	if mode == "apply" {
+		for i := range plannedTasks {
+			// Resolve title-based dependencies to actual IDs
+			var resolvedDeps []string
+			for _, depTitle := range plannedTasks[i].DependsOn {
+				if actualID, ok := titleToActualID[depTitle]; ok {
+					resolvedDeps = append(resolvedDeps, actualID)
+				}
+			}
+			plannedTasks[i].DependsOn = resolvedDeps
+
+			created, err := store.Add(ctx, plannedTasks[i])
+			if err != nil {
+				return nil, fmt.Errorf("create task %q: %w", plannedTasks[i].Title, err)
+			}
+
+			titleToActualID[plannedTasks[i].Title] = created.ID
+			addedIDs = append(addedIDs, created.ID)
+			createdTasks = append(createdTasks, toOutput(created))
+
+			// Set root task ID from first created task if not attached
+			if rootTaskID == "" && i == 0 {
+				rootTaskID = created.ID
+			}
+		}
+
+		// Emit plan event via mailbox if boardStore is available
+		if boardStore != nil && len(createdTasks) > 0 {
+			eventType := "plan.created"
+			if req.AttachToTaskID != "" {
+				eventType = "plan.updated"
+			}
+
+			msg := agent.BoardMessage{
+				WorkspaceID: workspaceID,
+				TaskID:      rootTaskID,
+				Sender:      "actor:system:overseer",
+				Recipient:   "actor:agent:*", // Broadcast
+				Kind:        agent.BoardMessageKindInfo,
+				Priority:    3,
+				Subject:     fmt.Sprintf("%s:%s", eventType, rootTaskID),
+				Body:        fmt.Sprintf("Plan for %q: created %d tasks", req.Goal, len(createdTasks)),
+			}
+			if err := boardStore.SendMessage(ctx, msg); err != nil {
+				// Log but don't fail the operation
+				fmt.Fprintf(os.Stderr, "warning: failed to send plan event: %v\n", err)
+			}
+		}
+	} else {
+		// Draft mode: just return the proposed tasks without IDs
+		for _, t := range plannedTasks {
+			out := &taskOutput{
+				ID:          "(draft)",
+				Title:       t.Title,
+				Description: t.Description,
+				ScopePath:   t.ScopePath,
+				ParentID:    t.ParentID,
+				DependsOn:   t.DependsOn,
+				Status:      statusPending,
+				CreatedAt:   time.Now().Format(time.RFC3339),
+			}
+			createdTasks = append(createdTasks, out)
+		}
+		if rootTaskID == "" {
+			rootTaskID = "(draft)"
+		}
+	}
+
+	// Build graph output if we have created tasks
+	var graphOutput *planGraphOutput
+	if mode == "apply" && len(addedIDs) > 0 {
+		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+		if err == nil {
+			insights, err := tasksgraph.NewAnalyzer().Analyze(allTasks, workspaceID)
+			if err == nil {
+				var edges []planEdge
+				for _, t := range allTasks {
+					for _, dep := range t.DependsOn {
+						edges = append(edges, planEdge{From: t.ID, To: dep})
+					}
+				}
+				graphOutput = &planGraphOutput{
+					Nodes:  insights.Nodes,
+					Edges:  edges,
+					Cycles: insights.Cycles,
+				}
+			}
+		}
+	}
+
+	return &planOutput{
+		RootTaskID: rootTaskID,
+		Applied:    mode == "apply",
+		Tasks:      createdTasks,
+		Graph:      graphOutput,
+		Diff: &planDiffOutput{
+			AddedTaskIDs:   addedIDs,
+			UpdatedTaskIDs: nil,
+			RemovedTaskIDs: nil,
+		},
+	}, nil
 }
 
 func validateText(field, value string) error {
