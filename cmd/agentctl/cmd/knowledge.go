@@ -64,7 +64,7 @@ Triggers are extracted from:
 			if err != nil {
 				return fmt.Errorf("open knowledge store: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			// Run sync
 			opts := knowledge.DefaultSyncOptions(workspaceDir)
@@ -113,7 +113,7 @@ func newKnowledgeListCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("open knowledge store: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			var items []knowledge.Item
 			if kindFilter != "" {
@@ -192,7 +192,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("open knowledge store: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			var items []knowledge.Item
 
