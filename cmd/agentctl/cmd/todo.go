@@ -20,6 +20,7 @@ func newTodoCommand() *cobra.Command {
 		newTodoListCommand(),
 		newTodoActiveCommand(),
 		newTodoInsightsCommand(),
+		newTodoRecommendCommand(),
 	)
 	return cmd
 }
@@ -176,6 +177,38 @@ func newTodoInsightsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
 	cmd.Flags().BoolVar(&includeCompleted, "include-completed", false, "Include completed tasks in analysis")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Max nodes to return (0 = all)")
+	return cmd
+}
+
+func newTodoRecommendCommand() *cobra.Command {
+	var workspaceID string
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "recommend",
+		Short: "Recommend next tasks based on graph metrics and mailbox state",
+		Long: `Recommend next tasks based on overseer scoring formula:
+  - Critical path score (30%)
+  - PageRank (20%)
+  - Unread admin messages (25%)
+  - Unread overseer messages (15%)
+  - Recency factor (10%)`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"operation": "recommend",
+				"recommend": map[string]any{
+					"limit": limit,
+				},
+			}
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
+			}
+			return runTodoSkill(cmd, payload)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
+	cmd.Flags().IntVar(&limit, "limit", 10, "Max recommendations to return")
 	return cmd
 }
 

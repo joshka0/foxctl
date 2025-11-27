@@ -12,10 +12,12 @@ import (
 	"time"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/analysis/overseer"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
@@ -32,6 +34,7 @@ type input struct {
 	SetActive     *setActiveReq     `json:"set_active"`
 	EnsureActive  *ensureActiveReq  `json:"ensure_active"`
 	GraphInsights *graphInsightsReq `json:"graph_insights"`
+	Recommend     *recommendReq     `json:"recommend"`
 }
 
 type addRequest struct {
@@ -60,6 +63,10 @@ type ensureActiveReq struct {
 type graphInsightsReq struct {
 	IncludeCompleted bool `json:"include_completed"`
 	Limit            int  `json:"limit"`
+}
+
+type recommendReq struct {
+	Limit int `json:"limit"` // Max recommendations to return (default: 10)
 }
 
 // taskOutput is the JSON representation of a task for envelope output.
@@ -243,8 +250,32 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"summary":  fmt.Sprintf("analyzed %d tasks, %d cycles", len(allTasks), len(insights.Cycles)),
 		}
 
+	case "recommend":
+		limit := 10
+		if in.Recommend != nil && in.Recommend.Limit > 0 {
+			limit = in.Recommend.Limit
+		}
+		// Open board store for mailbox integration (optional)
+		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+		if boardStore != nil {
+			defer boardStore.Close()
+		}
+		scorer := overseer.NewScorer(store, boardStore)
+		rec, err := scorer.Recommend(ctx, workspaceID, limit)
+		if err != nil {
+			return err
+		}
+		summary := fmt.Sprintf("recommended %d of %d pending tasks", len(rec.Tasks), rec.TotalPending)
+		if rec.TopRecommended != nil {
+			summary += fmt.Sprintf("; top: %s (score=%.2f)", rec.TopRecommended.Title, rec.TopRecommended.Score)
+		}
+		data = map[string]any{
+			"recommendation": rec,
+			"summary":        summary,
+		}
+
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights)", op)
+		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend)", op)
 	}
 
 	return rc.Emit("todo/manage", data, "application/json", envelope.Meta{
