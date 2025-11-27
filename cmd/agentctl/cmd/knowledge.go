@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/knowledge/builtin"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/knowledge"
 	"github.com/spf13/cobra"
@@ -33,6 +34,8 @@ This is distinct from agentctl skills, which are executable Go/WASI/exec plugins
 
 func newKnowledgeSyncCommand() *cobra.Command {
 	var workspaceDir string
+	var skipBuiltin bool
+	var builtinOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -40,9 +43,13 @@ func newKnowledgeSyncCommand() *cobra.Command {
 		Long: `Walks docs/knowledge/, .claude/agents/, and .claude/commands/ and populates
 the knowledge registry with items, triggers, and documents.
 
+Builtin knowledge (Factory droids, etc.) is seeded automatically unless --skip-builtin is set.
+Use --builtin-only to seed only builtin knowledge without scanning the workspace.
+
 Triggers are extracted from:
 - docs/knowledge/skill-rules.json (keywords, intent patterns, path patterns)
-- Agent/command descriptions (keywords)`,
+- Agent/command descriptions (keywords)
+- Builtin asset descriptions (Factory droids)`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 
@@ -66,22 +73,39 @@ Triggers are extracted from:
 			}
 			defer func() { _ = store.Close() }()
 
-			// Run sync
-			opts := knowledge.DefaultSyncOptions(workspaceDir)
-			result, err := knowledge.Sync(ctx, store, opts)
-			if err != nil {
-				return fmt.Errorf("sync: %w", err)
+			var result *knowledge.SyncResult
+			var builtinSeeded int
+
+			// Seed builtin knowledge unless skipped
+			if !skipBuiltin {
+				builtinSeeded, err = builtin.SeedFactoryKnowledge(ctx, store)
+				if err != nil {
+					return fmt.Errorf("seed builtin knowledge: %w", err)
+				}
+			}
+
+			// Run filesystem sync unless builtin-only
+			if !builtinOnly {
+				opts := knowledge.DefaultSyncOptions(workspaceDir)
+				result, err = knowledge.Sync(ctx, store, opts)
+				if err != nil {
+					return fmt.Errorf("sync: %w", err)
+				}
+			} else {
+				result = &knowledge.SyncResult{}
 			}
 
 			// Emit JSON envelope
 			data := map[string]any{
-				"sync_result": result,
-				"summary": fmt.Sprintf("Synced %d packs, %d agents, %d commands (%d triggers, %d documents)",
+				"sync_result":    result,
+				"builtin_seeded": builtinSeeded,
+				"summary": fmt.Sprintf("Synced %d packs, %d agents, %d commands (%d triggers, %d documents); %d builtin items",
 					result.PacksAdded+result.PacksUpdated,
 					result.AgentsAdded+result.AgentsUpdated,
 					result.CommandsAdded+result.CommandsUpdated,
 					result.TriggersAdded,
-					result.DocumentsAdded),
+					result.DocumentsAdded,
+					builtinSeeded),
 			}
 
 			env := envelope.OK("knowledge/sync", data, envelope.WithMeta(envelope.Meta{
@@ -92,6 +116,8 @@ Triggers are extracted from:
 	}
 
 	cmd.Flags().StringVar(&workspaceDir, "workspace", "", "Workspace root directory (default: current directory)")
+	cmd.Flags().BoolVar(&skipBuiltin, "skip-builtin", false, "Skip seeding builtin knowledge (Factory droids, etc.)")
+	cmd.Flags().BoolVar(&builtinOnly, "builtin-only", false, "Seed only builtin knowledge, skip workspace scan")
 	return cmd
 }
 
