@@ -35,7 +35,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tasks.Open: %v", err)
 	}
-	defer taskStore.Close()
+	defer func() { _ = taskStore.Close() }()
 
 	// Create a task graph: A -> B -> C (A depends on B, B depends on C)
 	taskC, err := taskStore.Add(ctx, tasks.Task{
@@ -126,10 +126,10 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	// Admin sends directive to coder agent about Task C
-	err = boardStore.SendMessage(ctx, agent.BoardMessage{
+	err = boardStore.SendMessage(ctx, &agent.BoardMessage{
 		WorkspaceID: testWorkspaceID,
 		TaskID:      taskC.ID,
 		Sender:      "admin",
@@ -145,7 +145,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	}
 
 	// Overseer sends status update about Task A
-	err = boardStore.SendMessage(ctx, agent.BoardMessage{
+	err = boardStore.SendMessage(ctx, &agent.BoardMessage{
 		WorkspaceID: testWorkspaceID,
 		TaskID:      taskA.ID,
 		Sender:      "actor:system:overseer",
@@ -190,7 +190,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	t.Log("Phase 4: Testing file reservations")
 
 	// Coder1 reserves a file for Task C
-	err = boardStore.Reserve(ctx, agent.FileReservation{
+	err = boardStore.Reserve(ctx, &agent.FileReservation{
 		WorkspaceID: testWorkspaceID,
 		TaskID:      taskC.ID,
 		Path:        "src/foundation/core.go",
@@ -216,7 +216,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	}
 
 	// Coder2 reserves a different file - should succeed
-	err = boardStore.Reserve(ctx, agent.FileReservation{
+	err = boardStore.Reserve(ctx, &agent.FileReservation{
 		WorkspaceID: testWorkspaceID,
 		TaskID:      taskD.ID,
 		Path:        "docs/README.md",
@@ -295,7 +295,7 @@ func TestMultiAgentWorkflow_CyclicDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tasks.Open: %v", err)
 	}
-	defer taskStore.Close()
+	defer func() { _ = taskStore.Close() }()
 
 	// Create cyclic dependencies: A -> B -> C -> A
 	// First create all tasks without dependencies
@@ -339,7 +339,7 @@ func TestMultiAgentWorkflow_CyclicDependencies(t *testing.T) {
 
 	// Verify recommendations still work with cycles
 	boardStore, _ := blackboard.OpenBoardStore(ctx, dir)
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	scorer := overseer.NewScorer(taskStore, boardStore)
 	rec, err := scorer.Recommend(ctx, testWorkspaceID, 10)
@@ -360,13 +360,13 @@ func TestMultiAgentWorkflow_MessagePrioritization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tasks.Open: %v", err)
 	}
-	defer taskStore.Close()
+	defer func() { _ = taskStore.Close() }()
 
 	boardStore, err := blackboard.OpenBoardStore(ctx, dir)
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	// Create two identical tasks
 	task1, _ := taskStore.Add(ctx, tasks.Task{
@@ -381,7 +381,7 @@ func TestMultiAgentWorkflow_MessagePrioritization(t *testing.T) {
 	})
 
 	// Send admin message to task2 only
-	boardStore.SendMessage(ctx, agent.BoardMessage{
+	err = boardStore.SendMessage(ctx, &agent.BoardMessage{
 		WorkspaceID: testWorkspaceID,
 		TaskID:      task2.ID,
 		Sender:      "admin",
@@ -391,6 +391,9 @@ func TestMultiAgentWorkflow_MessagePrioritization(t *testing.T) {
 		Subject:     "Urgent: Complete this task",
 		Body:        "Drop everything and work on this.",
 	})
+	if err != nil {
+		t.Fatalf("SendMessage (admin): %v", err)
+	}
 
 	// Get recommendations
 	scorer := overseer.NewScorer(taskStore, boardStore)
@@ -428,12 +431,12 @@ func TestMultiAgentWorkflow_FileGuardConflictResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	// Agent 1 reserves multiple files
 	files := []string{"src/main.go", "src/config.go", "src/utils.go"}
 	for _, f := range files {
-		err := boardStore.Reserve(ctx, agent.FileReservation{
+		err := boardStore.Reserve(ctx, &agent.FileReservation{
 			WorkspaceID: testWorkspaceID,
 			Path:        f,
 			Holder:      "actor:agent:coder1",
@@ -488,10 +491,10 @@ func TestMultiAgentWorkflow_SharedReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	// Agent 1 creates a shared reservation
-	err = boardStore.Reserve(ctx, agent.FileReservation{
+	err = boardStore.Reserve(ctx, &agent.FileReservation{
 		WorkspaceID: testWorkspaceID,
 		Path:        "src/shared.go",
 		Holder:      "actor:agent:coder1",
@@ -504,7 +507,7 @@ func TestMultiAgentWorkflow_SharedReservations(t *testing.T) {
 	}
 
 	// Agent 2 should be able to create another shared reservation
-	err = boardStore.Reserve(ctx, agent.FileReservation{
+	err = boardStore.Reserve(ctx, &agent.FileReservation{
 		WorkspaceID: testWorkspaceID,
 		Path:        "src/shared.go",
 		Holder:      "actor:agent:coder2",
@@ -545,10 +548,10 @@ func TestMultiAgentWorkflow_BroadcastMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	// Admin broadcasts to all agents
-	err = boardStore.SendMessage(ctx, agent.BoardMessage{
+	err = boardStore.SendMessage(ctx, &agent.BoardMessage{
 		WorkspaceID: testWorkspaceID,
 		Sender:      "admin",
 		Recipient:   "*", // Broadcast
@@ -590,21 +593,21 @@ func TestMultiAgentWorkflow_PlanOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	// Open task store
 	taskStore, err := tasks.Open(ctx, tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to open task store: %v", err)
 	}
-	defer taskStore.Close()
+	defer func() { _ = taskStore.Close() }()
 
 	// Open board store for mailbox
 	boardStore, err := blackboard.OpenBoardStore(ctx, tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to open board store: %v", err)
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	t.Log("Phase 1: Testing draft mode (no persistence)")
 
@@ -681,7 +684,7 @@ func TestMultiAgentWorkflow_PlanOperation(t *testing.T) {
 		Subject:     "plan.created:" + epicTask.ID,
 		Body:        "Plan for 'Multi-agent E2E Tests': created 4 tasks",
 	}
-	err = boardStore.SendMessage(ctx, planEventMsg)
+	err = boardStore.SendMessage(ctx, &planEventMsg)
 	if err != nil {
 		t.Fatalf("Failed to send plan.created event: %v", err)
 	}

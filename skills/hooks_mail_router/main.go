@@ -66,7 +66,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	taskID := ""
 	taskStore, err := tasks.Open(ctx, cfg.Storage.Root)
 	if err == nil {
-		defer taskStore.Close()
+		defer func() { _ = taskStore.Close() }()
 		if task, found, _ := taskStore.GetActive(ctx, workspaceID); found {
 			taskID = task.ID
 		}
@@ -81,7 +81,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			Reason:   "mail_router: could not open board store",
 		})
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	// Query inbox for relevant messages
 	filter := agent.InboxFilter{
@@ -112,7 +112,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 	// Mark surfaced messages as read
 	if len(messages) > 0 {
-		ids := make([]string, 0, min(len(messages), MaxMessagesInContext))
+		ids := make([]string, 0, minInt(len(messages), MaxMessagesInContext))
 		for i, m := range messages {
 			if i >= MaxMessagesInContext {
 				break
@@ -124,7 +124,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 	return emitOutput(rc, hook.Output{
 		Decision: hook.DecisionNone, // Advisory only
-		Reason:   fmt.Sprintf("surfaced %d messages", min(len(messages), MaxMessagesInContext)),
+		Reason:   fmt.Sprintf("surfaced %d messages", minInt(len(messages), MaxMessagesInContext)),
 		Context:  contextStr,
 		Meta: map[string]any{
 			"message_count": len(messages),
@@ -275,7 +275,7 @@ func fail(command, code string, err error) {
 	os.Exit(1)
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

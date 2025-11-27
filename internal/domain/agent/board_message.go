@@ -6,9 +6,13 @@ import "time"
 type BoardMessageKind string
 
 const (
-	BoardMessageKindInstruction   BoardMessageKind = "instruction"
-	BoardMessageKindInfo          BoardMessageKind = "info"
-	BoardMessageKindAlert         BoardMessageKind = "alert"
+	// BoardMessageKindInstruction represents a directive or instruction message.
+	BoardMessageKindInstruction BoardMessageKind = "instruction"
+	// BoardMessageKindInfo represents an informational message.
+	BoardMessageKindInfo BoardMessageKind = "info"
+	// BoardMessageKindAlert represents an alert or warning message.
+	BoardMessageKindAlert BoardMessageKind = "alert"
+	// BoardMessageKindReviewRequest represents a code or work review request.
 	BoardMessageKindReviewRequest BoardMessageKind = "review_request"
 )
 
@@ -16,9 +20,12 @@ const (
 type BoardMessageStatus string
 
 const (
+	// BoardMessageStatusUnread is the initial status for new messages.
 	BoardMessageStatusUnread BoardMessageStatus = "unread"
-	BoardMessageStatusRead   BoardMessageStatus = "read"
-	BoardMessageStatusAcked  BoardMessageStatus = "acked"
+	// BoardMessageStatusRead indicates the message has been read.
+	BoardMessageStatusRead BoardMessageStatus = "read"
+	// BoardMessageStatusAcked indicates the message has been acknowledged.
+	BoardMessageStatusAcked BoardMessageStatus = "acked"
 )
 
 // BoardMessage represents a workspace-scoped message for coordination.
@@ -43,8 +50,10 @@ type BoardMessage struct {
 type ReservationMode string
 
 const (
+	// ReservationModeExclusive represents an exclusive file reservation.
 	ReservationModeExclusive ReservationMode = "exclusive"
-	ReservationModeShared    ReservationMode = "shared"
+	// ReservationModeShared represents a shared (non-exclusive) reservation.
+	ReservationModeShared ReservationMode = "shared"
 )
 
 // FileReservation represents an advisory lock over a file path.

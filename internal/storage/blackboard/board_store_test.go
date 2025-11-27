@@ -18,7 +18,12 @@ func TestBoardStore_SendAndInbox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		_ = store.Close()
+		if err := os.RemoveAll(dir); err != nil {
+			t.Logf("RemoveAll: %v", err)
+		}
+	}()
 
 	// Send a message
 	msg := agent.BoardMessage{
@@ -62,7 +67,9 @@ func TestBoardStore_BroadcastMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		_ = store.Close()
+	}()
 
 	// Send broadcast message
 	msg := agent.BoardMessage{
@@ -99,7 +106,7 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Send message
 	msg := agent.BoardMessage{
@@ -137,7 +144,7 @@ func TestBoardStore_ReserveAndRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Reserve a file
 	res := agent.FileReservation{
@@ -184,7 +191,7 @@ func TestBoardStore_ReservationConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// First actor reserves exclusively
 	res := agent.FileReservation{
@@ -220,7 +227,7 @@ func TestBoardStore_SharedReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// First actor reserves shared
 	res1 := agent.FileReservation{
@@ -253,7 +260,7 @@ func TestBoardStore_ExpiredReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Create already-expired reservation
 	res := agent.FileReservation{
@@ -288,7 +295,7 @@ func TestBoardStore_PriorityOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Send messages with different priorities (out of order)
 	msgs := []agent.BoardMessage{
@@ -328,7 +335,7 @@ func TestMain(m *testing.M) {
 	// Clean up any leftover test databases
 	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "board_test_*"))
 	for _, match := range matches {
-		os.RemoveAll(match)
+		_ = os.RemoveAll(match)
 	}
 	os.Exit(code)
 }

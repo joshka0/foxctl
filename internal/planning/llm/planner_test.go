@@ -96,14 +96,14 @@ func TestAutoPlanner_NoAPIKey(t *testing.T) {
 	// Temporarily clear env
 	groqKey := os.Getenv("GROQ_API_KEY")
 	openaiKey := os.Getenv("OPENAI_API_KEY")
-	os.Unsetenv("GROQ_API_KEY")
-	os.Unsetenv("OPENAI_API_KEY")
+	_ = os.Unsetenv("GROQ_API_KEY")
+	_ = os.Unsetenv("OPENAI_API_KEY")
 	defer func() {
 		if groqKey != "" {
-			os.Setenv("GROQ_API_KEY", groqKey)
+			_ = os.Setenv("GROQ_API_KEY", groqKey)
 		}
 		if openaiKey != "" {
-			os.Setenv("OPENAI_API_KEY", openaiKey)
+			_ = os.Setenv("OPENAI_API_KEY", openaiKey)
 		}
 	}()
 

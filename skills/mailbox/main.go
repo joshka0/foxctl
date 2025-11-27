@@ -233,13 +233,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		}
 
 		var granted []agent.FileReservation
-		var conflictPaths []string
 
 		// Create conflict lookup
 		conflictSet := make(map[string]bool)
 		for _, c := range conflicts {
 			conflictSet[c.Path] = true
-			conflictPaths = append(conflictPaths, c.Path)
 		}
 
 		// Reserve non-conflicting paths

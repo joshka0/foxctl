@@ -138,7 +138,7 @@ func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]
 }
 
 // MarkRead marks messages as read.
-func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
+func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}
@@ -168,7 +168,7 @@ func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, actorID strin
 }
 
 // AckMessages marks messages as acknowledged.
-func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
+func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
 	if len(messageIDs) == 0 {
 		return 0, nil
 	}

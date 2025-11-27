@@ -115,7 +115,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			Context:  "**Warning:** File reservation system unavailable. Proceeding without conflict checking.",
 		})
 	}
-	defer boardStore.Close()
+	defer func() { _ = boardStore.Close() }()
 
 	// Check for conflicts
 	conflicts, err := boardStore.CheckConflicts(ctx, workspaceID, []string{relPath}, actorID, agent.ReservationModeExclusive)
@@ -208,7 +208,7 @@ func getTaskContext(ctx context.Context, cfg config.Config, workspaceID, toolNam
 		// Fallback to tool-based reason
 		return "", fmt.Sprintf("%s on %s", toolName, filepath.Base(filePath))
 	}
-	defer taskStore.Close()
+	defer func() { _ = taskStore.Close() }()
 
 	task, found, err := taskStore.GetActive(ctx, workspaceID)
 	if err != nil || !found {

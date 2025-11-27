@@ -308,7 +308,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		// Open board store for mailbox integration (optional)
 		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
 		if boardStore != nil {
-			defer boardStore.Close()
+			defer func() { _ = boardStore.Close() }()
 		}
 		scorer := overseer.NewScorer(store, boardStore)
 		rec, err := scorer.Recommend(ctx, workspaceID, limit)
@@ -328,7 +328,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		// Open board store for plan event emission
 		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
 		if boardStore != nil {
-			defer boardStore.Close()
+			defer func() { _ = boardStore.Close() }()
 		}
 		planResult, err := handlePlan(ctx, store, boardStore, workspaceID, in.Plan)
 		if err != nil {
