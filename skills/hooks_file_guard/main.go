@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 // Mode controls file_guard behavior.
@@ -158,12 +159,17 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		})
 	}
 
+	// Get active task context for the reservation reason
+	taskID, reason := getTaskContext(ctx, cfg, workspaceID, in.ToolName, relPath)
+
 	// No conflicts - create a reservation for this actor
 	reservation := agent.FileReservation{
 		WorkspaceID: workspaceID,
+		TaskID:      taskID,
 		Path:        relPath,
 		Holder:      actorID,
 		Mode:        agent.ReservationModeExclusive,
+		Reason:      reason,
 		ExpiresAt:   time.Now().Add(DefaultReservationTTL),
 	}
 
@@ -187,10 +193,40 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			"reservation_id": reservation.ID,
 			"workspace_id":   workspaceID,
 			"actor_id":       actorID,
+			"task_id":        taskID,
+			"reason":         reason,
 			"file_path":      relPath,
 			"expires_at":     reservation.ExpiresAt.Format(time.RFC3339),
 		},
 	})
+}
+
+// getTaskContext retrieves active task info to provide context for the reservation.
+func getTaskContext(ctx context.Context, cfg config.Config, workspaceID, toolName, filePath string) (taskID, reason string) {
+	taskStore, err := tasks.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		// Fallback to tool-based reason
+		return "", fmt.Sprintf("%s on %s", toolName, filepath.Base(filePath))
+	}
+	defer taskStore.Close()
+
+	task, found, err := taskStore.GetActive(ctx, workspaceID)
+	if err != nil || !found {
+		return "", fmt.Sprintf("%s on %s", toolName, filepath.Base(filePath))
+	}
+
+	// Build reason from task title and description
+	reason = task.Title
+	if task.Description != "" {
+		// Truncate long descriptions
+		desc := task.Description
+		if len(desc) > 100 {
+			desc = desc[:97] + "..."
+		}
+		reason = fmt.Sprintf("%s: %s", task.Title, desc)
+	}
+
+	return task.ID, reason
 }
 
 // extractFilePath extracts the file_path from tool input JSON.
@@ -208,17 +244,25 @@ func extractFilePath(toolInput json.RawMessage) string {
 	return input.FilePath
 }
 
-// formatConflicts creates a warning message for conflicts.
+// formatConflicts creates a warning message for conflicts with context about the other agent's work.
 func formatConflicts(conflicts []agent.ReservationConflict) string {
 	var sb strings.Builder
 	sb.WriteString("## File Reservation Conflict\n\n")
 	sb.WriteString("**Warning:** The following files are currently reserved by other agents:\n\n")
 
 	for _, c := range conflicts {
-		sb.WriteString(fmt.Sprintf("- `%s` - held by **%s** (%s mode)\n", c.Path, c.Holder, c.Mode))
+		sb.WriteString(fmt.Sprintf("### `%s`\n", c.Path))
+		sb.WriteString(fmt.Sprintf("- **Held by:** %s (%s mode)\n", c.Holder, c.Mode))
+		if c.Reason != "" {
+			sb.WriteString(fmt.Sprintf("- **Purpose:** %s\n", c.Reason))
+		}
+		if c.TaskID != "" {
+			sb.WriteString(fmt.Sprintf("- **Task ID:** %s\n", c.TaskID))
+		}
+		sb.WriteString(fmt.Sprintf("- **Expires:** %s\n\n", c.ExpiresAt.Format(time.RFC3339)))
 	}
 
-	sb.WriteString("\n**Recommendation:** Coordinate with the other agent before proceeding, or wait for the reservation to expire.\n")
+	sb.WriteString("**Recommendation:** Review the other agent's purpose above. If your changes are compatible, coordinate with them. Otherwise, wait for their reservation to expire or ask them to release it.\n")
 	return sb.String()
 }
 

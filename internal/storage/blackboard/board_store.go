@@ -206,9 +206,9 @@ func (s *boardSQLStore) Reserve(ctx context.Context, res agent.FileReservation) 
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO file_reservations (id, workspace_id, path, holder, mode, expires_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		res.ID, res.WorkspaceID, res.Path, res.Holder, res.Mode, res.ExpiresAt.Unix(), res.CreatedAt.Unix())
+		INSERT INTO file_reservations (id, workspace_id, task_id, path, holder, mode, reason, expires_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		res.ID, res.WorkspaceID, res.TaskID, res.Path, res.Holder, res.Mode, res.Reason, res.ExpiresAt.Unix(), res.CreatedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("board: reserve: %w", err)
 	}
@@ -245,12 +245,12 @@ func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, 
 	if mode == agent.ReservationModeExclusive {
 		// Exclusive conflicts with any existing by other holders
 		query = fmt.Sprintf(`
-			SELECT path, holder, mode FROM file_reservations
+			SELECT path, holder, mode, task_id, reason, expires_at FROM file_reservations
 			WHERE workspace_id = ? AND path IN (%s) AND holder != ? AND expires_at >= ?`, placeholders)
 	} else {
 		// Shared only conflicts with exclusive by other holders
 		query = fmt.Sprintf(`
-			SELECT path, holder, mode FROM file_reservations
+			SELECT path, holder, mode, task_id, reason, expires_at FROM file_reservations
 			WHERE workspace_id = ? AND path IN (%s) AND holder != ? AND mode = 'exclusive' AND expires_at >= ?`, placeholders)
 	}
 
@@ -265,9 +265,11 @@ func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, 
 	var conflicts []agent.ReservationConflict
 	for rows.Next() {
 		var c agent.ReservationConflict
-		if err := rows.Scan(&c.Path, &c.Holder, &c.Mode); err != nil {
+		var expiresAt int64
+		if err := rows.Scan(&c.Path, &c.Holder, &c.Mode, &c.TaskID, &c.Reason, &expiresAt); err != nil {
 			return nil, fmt.Errorf("board: scan conflict: %w", err)
 		}
+		c.ExpiresAt = time.Unix(expiresAt, 0).UTC()
 		conflicts = append(conflicts, c)
 	}
 	return conflicts, nil
@@ -331,7 +333,7 @@ func (s *boardSQLStore) ReleaseByID(ctx context.Context, reservationIDs []string
 func (s *boardSQLStore) ListReservations(ctx context.Context, workspaceID string) ([]agent.FileReservation, error) {
 	now := time.Now().UTC().Unix()
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_id, path, holder, mode, expires_at, created_at
+		SELECT id, workspace_id, task_id, path, holder, mode, reason, expires_at, created_at
 		FROM file_reservations
 		WHERE workspace_id = ? AND expires_at >= ?
 		ORDER BY created_at DESC`, workspaceID, now)
@@ -377,9 +379,11 @@ CREATE INDEX IF NOT EXISTS idx_board_msg_priority_created ON board_messages(prio
 CREATE TABLE IF NOT EXISTS file_reservations (
 	id           TEXT PRIMARY KEY,
 	workspace_id TEXT NOT NULL,
+	task_id      TEXT,
 	path         TEXT NOT NULL,
 	holder       TEXT NOT NULL,
 	mode         TEXT NOT NULL DEFAULT 'exclusive',
+	reason       TEXT,
 	expires_at   INTEGER NOT NULL,
 	created_at   INTEGER NOT NULL
 );
@@ -408,7 +412,7 @@ func scanBoardMessage(rows *sql.Rows) (agent.BoardMessage, error) {
 func scanReservation(rows *sql.Rows) (agent.FileReservation, error) {
 	var res agent.FileReservation
 	var expiresAt, createdAt int64
-	if err := rows.Scan(&res.ID, &res.WorkspaceID, &res.Path, &res.Holder, &res.Mode, &expiresAt, &createdAt); err != nil {
+	if err := rows.Scan(&res.ID, &res.WorkspaceID, &res.TaskID, &res.Path, &res.Holder, &res.Mode, &res.Reason, &expiresAt, &createdAt); err != nil {
 		return agent.FileReservation{}, fmt.Errorf("board: scan reservation: %w", err)
 	}
 	res.ExpiresAt = time.Unix(expiresAt, 0).UTC()

@@ -51,9 +51,11 @@ const (
 type FileReservation struct {
 	ID          string          `json:"id"`
 	WorkspaceID string          `json:"workspace_id"`
-	Path        string          `json:"path"` // Relative to workspace root
+	TaskID      string          `json:"task_id,omitempty"` // Associated task if any
+	Path        string          `json:"path"`              // Relative to workspace root
 	Holder      string          `json:"holder"`
 	Mode        ReservationMode `json:"mode"`
+	Reason      string          `json:"reason,omitempty"` // Why this file is being modified
 	ExpiresAt   time.Time       `json:"expires_at"`
 	CreatedAt   time.Time       `json:"created_at"`
 }
@@ -65,9 +67,12 @@ func (r *FileReservation) IsExpired() bool {
 
 // ReservationConflict describes a conflict when acquiring a reservation.
 type ReservationConflict struct {
-	Path   string `json:"path"`
-	Holder string `json:"holder"`
-	Mode   string `json:"mode"`
+	Path      string    `json:"path"`
+	Holder    string    `json:"holder"`
+	Mode      string    `json:"mode"`
+	TaskID    string    `json:"task_id,omitempty"`
+	Reason    string    `json:"reason,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // InboxFilter defines query parameters for reading messages.
