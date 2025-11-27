@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -23,12 +25,13 @@ const (
 )
 
 type input struct {
-	Operation    string           `json:"operation"`
-	WorkspaceID  string           `json:"workspace_id"`
-	Add          *addRequest      `json:"add"`
-	Complete     *completeRequest `json:"complete"`
-	SetActive    *setActiveReq    `json:"set_active"`
-	EnsureActive *ensureActiveReq `json:"ensure_active"`
+	Operation     string            `json:"operation"`
+	WorkspaceID   string            `json:"workspace_id"`
+	Add           *addRequest       `json:"add"`
+	Complete      *completeRequest  `json:"complete"`
+	SetActive     *setActiveReq     `json:"set_active"`
+	EnsureActive  *ensureActiveReq  `json:"ensure_active"`
+	GraphInsights *graphInsightsReq `json:"graph_insights"`
 }
 
 type addRequest struct {
@@ -52,6 +55,11 @@ type setActiveReq struct {
 type ensureActiveReq struct {
 	DefaultTitle string `json:"default_title"`
 	ScopePath    string `json:"scope_path"`
+}
+
+type graphInsightsReq struct {
+	IncludeCompleted bool `json:"include_completed"`
+	Limit            int  `json:"limit"`
 }
 
 // taskOutput is the JSON representation of a task for envelope output.
@@ -206,8 +214,37 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"summary": fmt.Sprintf("active task is %s (created=%v)", task.ID, created),
 		}
 
+	case "graph_insights":
+		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		// Filter completed tasks if not requested
+		if in.GraphInsights == nil || !in.GraphInsights.IncludeCompleted {
+			allTasks = filterPending(allTasks)
+		}
+		insights, err := tasksgraph.NewAnalyzer().Analyze(allTasks, workspaceID)
+		if err != nil {
+			return err
+		}
+		// Apply limit if specified
+		if in.GraphInsights != nil && in.GraphInsights.Limit > 0 && len(insights.Nodes) > in.GraphInsights.Limit {
+			// Sort by CriticalPathScore desc, then PageRank desc
+			sort.Slice(insights.Nodes, func(i, j int) bool {
+				if insights.Nodes[i].CriticalPathScore != insights.Nodes[j].CriticalPathScore {
+					return insights.Nodes[i].CriticalPathScore > insights.Nodes[j].CriticalPathScore
+				}
+				return insights.Nodes[i].PageRank > insights.Nodes[j].PageRank
+			})
+			insights.Nodes = insights.Nodes[:in.GraphInsights.Limit]
+		}
+		data = map[string]any{
+			"insights": insights,
+			"summary":  fmt.Sprintf("analyzed %d tasks, %d cycles", len(allTasks), len(insights.Cycles)),
+		}
+
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active)", op)
+		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights)", op)
 	}
 
 	return rc.Emit("todo/manage", data, "application/json", envelope.Meta{
@@ -401,6 +438,16 @@ func countPending(taskList []tasks.Task) int {
 		}
 	}
 	return count
+}
+
+func filterPending(taskList []tasks.Task) []tasks.Task {
+	var out []tasks.Task
+	for _, t := range taskList {
+		if t.Status == statusPending {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func toOutput(t tasks.Task) *taskOutput {

@@ -19,6 +19,7 @@ func newTodoCommand() *cobra.Command {
 		newTodoCompleteCommand(),
 		newTodoListCommand(),
 		newTodoActiveCommand(),
+		newTodoInsightsCommand(),
 	)
 	return cmd
 }
@@ -146,6 +147,35 @@ func newTodoActiveCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
+	return cmd
+}
+
+func newTodoInsightsCommand() *cobra.Command {
+	var workspaceID string
+	var includeCompleted bool
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "insights",
+		Short: "Show task graph insights (PageRank, critical path, cycles)",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload := map[string]any{
+				"operation": "graph_insights",
+				"graph_insights": map[string]any{
+					"include_completed": includeCompleted,
+					"limit":             limit,
+				},
+			}
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
+			}
+			return runTodoSkill(cmd, payload)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
+	cmd.Flags().BoolVar(&includeCompleted, "include-completed", false, "Include completed tasks in analysis")
+	cmd.Flags().IntVar(&limit, "limit", 0, "Max nodes to return (0 = all)")
 	return cmd
 }
 
