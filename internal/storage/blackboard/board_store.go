@@ -26,6 +26,8 @@ type BoardStore interface {
 	Inbox(ctx context.Context, filter agent.InboxFilter) ([]agent.BoardMessage, error)
 	MarkRead(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
 	AckMessages(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
+	// CountMessagesByTask counts unread messages per task grouped by sender type
+	CountMessagesByTask(ctx context.Context, workspaceID, taskID string) (admin, overseer, total int, err error)
 
 	// Reservation operations
 	Reserve(ctx context.Context, res agent.FileReservation) error
@@ -422,3 +424,31 @@ func scanReservation(rows *sql.Rows) (agent.FileReservation, error) {
 
 // ErrReservationConflict indicates a reservation conflict.
 var ErrReservationConflict = errors.New("board: reservation conflict")
+
+// CountMessagesByTask counts unread messages per task grouped by sender type.
+func (s *boardSQLStore) CountMessagesByTask(ctx context.Context, workspaceID, taskID string) (admin, overseer, total int, err error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT sender FROM board_messages
+		WHERE workspace_id = ? AND task_id = ? AND status = ?`,
+		workspaceID, taskID, agent.BoardMessageStatusUnread)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("board: count messages: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close count messages rows")
+	}()
+
+	for rows.Next() {
+		var sender string
+		if err := rows.Scan(&sender); err != nil {
+			return 0, 0, 0, fmt.Errorf("board: scan sender: %w", err)
+		}
+		total++
+		if agent.IsAdminSender(sender) {
+			admin++
+		} else if agent.IsOverseerSender(sender) {
+			overseer++
+		}
+	}
+	return admin, overseer, total, nil
+}

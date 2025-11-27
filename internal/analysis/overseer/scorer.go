@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -206,31 +205,17 @@ func (s *Scorer) getTaskMailCounts(ctx context.Context, workspaceID string, task
 		return counts
 	}
 
-	// For each task, check for unread messages
+	// For each task, count unread messages by sender type
 	for _, t := range taskList {
-		filter := agent.InboxFilter{
-			WorkspaceID: workspaceID,
-			ActorID:     "*", // Get all messages (we'll filter by task)
-			TaskID:      t.ID,
-			OnlyUnread:  true,
-			Limit:       100,
-		}
-
-		messages, err := s.boardStore.Inbox(ctx, filter)
+		admin, overseerCnt, total, err := s.boardStore.CountMessagesByTask(ctx, workspaceID, t.ID)
 		if err != nil {
 			continue
 		}
-
-		var mc mailCount
-		for _, m := range messages {
-			mc.total++
-			if agent.IsAdminSender(m.Sender) {
-				mc.admin++
-			} else if agent.IsOverseerSender(m.Sender) {
-				mc.overseer++
-			}
+		counts[t.ID] = mailCount{
+			admin:    admin,
+			overseer: overseerCnt,
+			total:    total,
 		}
-		counts[t.ID] = mc
 	}
 
 	return counts
