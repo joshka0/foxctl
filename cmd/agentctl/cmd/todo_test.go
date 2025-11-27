@@ -31,7 +31,7 @@ func TestNewTodoCommand(t *testing.T) {
 		t.Fatalf("expected use todo, got %s", cmd.Use)
 	}
 	subs := cmd.Commands()
-	expected := []string{"add", "complete", "list", "active"}
+	expected := []string{"add", "complete", "list", "active", "insights", "recommend", "plan"}
 	if len(subs) != len(expected) {
 		t.Fatalf("expected %d subcommands, got %d", len(expected), len(subs))
 	}

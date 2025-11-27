@@ -1,778 +1,326 @@
-# Tasks for PR #82: claude harness
+# Tasks for PR #83: factory support, workspace init
 
 **Repository:** jkatigb/agentctl
-**URL:** https://github.com/jkatigb/agentctl/pull/82
+**URL:** https://github.com/jkatigb/agentctl/pull/83
 
-## 📝 Review Comments to Address (20)
+## 🔴 CI Failures to Fix (8)
 
-### Task 1: coderabbitai[bot]'s feedback
+### Task 1: Fix build
 
-> [!NOTE]
-> Currently processing new changes in this PR. This may take a few minutes, please wait...
->
-> <details>
-> <summary>📥 Commits</summary>
->
-> Reviewing files that changed from the base of the PR and between cb3301f3b45a1fefe36d2da0fb8c9db8a4ee4fcc and 38132872b050b8e55a9adceeedad345124193c36.
->
-> </details>
->
-> <details>
-> <summary>📒 Files selected for processing (2)</summary>
->
-> * `.claude/CLAUDE.md` (1 hunks)
-> * `.claude/hooks/task-guard.sh` (1 hunks)
->
-> </details>
->
-> ```ascii
->  ________________________________________________________________________
-> < OpenAI said I could be anything I wanted, so I became a code reviewer. >
->  ------------------------------------------------------------------------
->   \
->    \   \
->         \ /\
->         ( )
->       .( o ).
-> ```
+**Failed step:** Build CLI
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480789
+
+**Error output:**
+
+```
+Error: Process completed with exit code 2.
+```
+
+---
+
+### Task 2: Fix coverage
+
+**Failed step:** Coverage
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480673
+
+**Error output:**
+
+```
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl [build failed]
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: Process completed with exit code 1.
+```
+
+---
+
+### Task 3: Fix e2e-tests (1.24.x, TestEndToEndCacheMemoryWorkflow)
+
+**Failed step:** Run TestEndToEndCacheMemoryWorkflow (cmd/agentctl/cmd)
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480671
+
+**Error output:**
+
+```
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: cmd/agentctl/cmd/workspace.go:164:46: undefined: builtin.BuiltinAsset
+Error: cmd/agentctl/cmd/workspace.go:165:23: undefined: builtin.BuiltinAsset
+Error: cmd/agentctl/cmd/workspace.go:204:58: undefined: builtin.BuiltinAsset
+Error: Process completed with exit code 1.
+```
+
+---
+
+### Task 4: Fix race-tests
+
+**Failed step:** Race tests
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480658
+
+**Error output:**
+
+```
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl [build failed]
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: Process completed with exit code 2.
+```
+
+---
+
+### Task 5: Fix e2e-tests (1.24.x, TestFSReadCommandRemember)
+
+**Failed step:** Run TestFSReadCommandRemember (cmd/agentctl/cmd)
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480651
+
+**Error output:**
+
+```
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: cmd/agentctl/cmd/workspace.go:164:46: undefined: builtin.BuiltinAsset
+Error: cmd/agentctl/cmd/workspace.go:165:23: undefined: builtin.BuiltinAsset
+Error: cmd/agentctl/cmd/workspace.go:204:58: undefined: builtin.BuiltinAsset
+Error: Process completed with exit code 1.
+```
+
+---
+
+### Task 6: Fix e2e-tests (1.24.x, TestFSReadCommandOutputsPreview)
+
+**Failed step:** Run TestFSReadCommandOutputsPreview (cmd/agentctl/cmd)
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480643
+
+**Error output:**
+
+```
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: cmd/agentctl/cmd/workspace.go:164:46: undefined: builtin.BuiltinAsset
+Error: cmd/agentctl/cmd/workspace.go:165:23: undefined: builtin.BuiltinAsset
+Error: cmd/agentctl/cmd/workspace.go:204:58: undefined: builtin.BuiltinAsset
+Error: Process completed with exit code 1.
+```
+
+---
+
+### Task 7: Fix lint
+
+**Failed step:** Lint (golangci-lint)
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480639
+
+**Error output:**
+
+```
+Error: Process completed with exit code 2.
+```
+
+---
+
+### Task 8: Fix unit-tests
+
+**Failed step:** Unit tests (no race)
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19740969487/job/56564480632
+
+**Error output:**
+
+```
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl [build failed]
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: Process completed with exit code 2.
+```
+
+---
+
+## 📝 Review Comments to Address (8)
+
+### Task 9: coderabbitai[bot]'s feedback
+
 ## Walkthrough
-Introduces Claude Code integration framework with agents, hooks, knowledge registry, and task management. Adds comprehensive developer documentation for backend and frontend patterns. Implements SQLite-backed storage for knowledge items and test watcher configuration. Extends agentctl CLI with knowledge management and test watch commands.
+Adds embedded builtin knowledge assets (Factory droids and core agents), seeding logic and CLI flags to control seeding; introduces a workspace command (init, list-agents) to initialize agent files; adds parsing, keyword extraction, seeding functions with tests and several new markdown assets and docs.
 ## Changes
 | Cohort / File(s) | Summary |
 |---|---|
-| **Claude Code Framework** <br> `.claude/CLAUDE.md`, `.claude/settings.json`, `.claude/settings.local.json.example`, `.claude/hooks/{task-guard,knowledge-router,test-feedback}.sh` | New integration setup, hook configuration, and shell wrapper scripts for PreToolUse/PostToolUse event handling |
-| **Agent Definitions** <br> `.claude/agents/{auth-route-debugger,auth-route-tester,auto-error-resolver,code-architecture-reviewer,code-refactor-master,documentation-architect,frontend-error-fixer,plan-reviewer,refactor-planner,web-research-specialist}.md`, `.claude/agents/README.md` | New agent specifications for specialized tasks (debugging, testing, refactoring, planning, research) with workflows and responsibilities |
-| **Command Documentation** <br> `.claude/commands/{dev-docs,dev-docs-update,route-research-for-testing}.md` | New procedural guides for development tasks and strategic planning |
-| **Backend Dev Knowledge** <br> `docs/knowledge/backend-dev-guidelines/{SKILL.md,resources/*}.md` | Comprehensive backend patterns including architecture, async/error handling, database, middleware, routing, services, Sentry monitoring, validation |
-| **Frontend Dev Knowledge** <br> `docs/knowledge/frontend-dev-guidelines/{SKILL.md,resources/*}.md` | Comprehensive frontend patterns including component design, data fetching, file organization, performance, routing, styling, TypeScript standards |
-| **Knowledge Skill System** <br> `docs/knowledge/{README.md,skill-rules.json}`, `docs/knowledge/skill-developer/{SKILL.md,ADVANCED.md,HOOK_MECHANISMS.md,PATTERNS_LIBRARY.md,SKILL_RULES_REFERENCE.md,TRIGGER_TYPES.md,TROUBLESHOOTING.md}` | Skill framework documentation covering concepts, rules, triggers, hooks, patterns, and troubleshooting |
-| **Error Tracking Skill** <br> `docs/knowledge/error-tracking/SKILL.md` | Sentry v8 integration patterns for error tracking and performance monitoring |
-| **Route Testing Skill** <br> `docs/knowledge/route-tester/SKILL.md` | Authentication route testing methodology and tooling documentation |
-| **Specification Documents** <br> `docs/spec/{knowledge_registry.md,task_hooks_memory.md,test_watch_feedback.md}`, `docs/changelogs/{2024-11-27_knowledge-registry.md,2024-11-27_test-watcher-impl.md,2025-11-26_sqlite_task_store_and_hooks.md}` | Formal specs and changelogs for knowledge registry, task/hook/memory integration, test watcher system |
-| **Go CLI Commands** <br> `cmd/agentctl/cmd/{knowledge.go,testwatch.go,todo.go,watch.go}` | New CLI subcommands for knowledge management (sync/list/search), test watcher configuration (list/add/remove), todo workspace scoping, and watch runtime |
-| **Knowledge Storage Layer** <br> `internal/storage/knowledge/{store.go,store_test.go}` | SQLite-backed knowledge store with CRUD operations, triggers, documents, keyword/path search; comprehensive test suite |
-| **Hook Domain Types** <br> `internal/domain/hook/types.go` | Standardized hook input/output types and decision constants for Claude Code integration |
-| **Configuration & Dependencies** <br> `.gitignore`, `go.mod` | Git ignore update for local settings; new indirect dependencies (fsnotify, doublestar) |
-## Sequence Diagram(s)
-```mermaid
-sequenceDiagram
-    participant Claude as Claude Code
-    participant Hook as Hook Wrapper<br/>(task-guard.sh)
-    participant Agentctl as agentctl CLI
-    participant Store as SQLite Store
-    Claude->>Hook: PreToolUse Event<br/>(tool_name, tool_input)
-    Hook->>Hook: Parse event, build JSON
-    Hook->>Agentctl: agentctl run hooks/task_guard
-    Agentctl->>Store: Load active task
-    Agentctl->>Store: Check workspace context
-    alt Task Guard Decision
-        Agentctl-->>Hook: {"decision":"block", "reason":"..."}
-        Hook-->>Claude: {"decision":"block", "reason":"..."}
-        Claude->>Claude: Block tool execution
-    else
-        Agentctl-->>Hook: {"decision":"approve", "context":"..."}
-        Hook-->>Claude: {"decision":"approve", "context":"..."}
-        Claude->>Claude: Proceed with tool
-    end
-```
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant CLI as agentctl
-    participant Config as YAML Config
-    participant Runner as Test Runner
-    participant Store as SQLite Store
-    User->>CLI: agentctl watch tests
-    CLI->>Config: Load test-watch.yaml
-    CLI->>Store: Initialize status store
-    CLI->>Runner: Setup file watcher
-    loop Watch Loop
-        Runner->>Runner: File change event
-        Runner->>Runner: Debounce/throttle
-        Runner->>Runner: Execute watcher command
-        Runner->>Store: Save test results
-        Runner-->>User: Display summary
-    end
-    User->>CLI: SIGINT
-    CLI->>Runner: Graceful shutdown
-```
-```mermaid
-sequenceDiagram
-    participant Agentctl as agentctl CLI
-    participant FS as Filesystem
-    participant Store as SQLite Knowledge<br/>Store
-    participant Search as Search Engine
-    Agentctl->>Agentctl: agentctl knowledge sync
-    Agentctl->>FS: Discover knowledge-packs/
-    FS-->>Agentctl: Pack directories
-    loop For each pack
-        Agentctl->>FS: Read YAML/JSON metadata
-        Agentctl->>Store: UpsertItem(pack)
-        Agentctl->>FS: Extract triggers, docs
-        Agentctl->>Store: AddTrigger, UpsertDocument
-    end
-    Agentctl-->>Agentctl: Return sync results
-    Agentctl->>Agentctl: agentctl knowledge search --query "auth"
-    Agentctl->>Search: Extract keywords
-    Agentctl->>Store: MatchByKeyword
-    Store-->>Agentctl: Matching items
-    Agentctl-->>Agentctl: Format & return results
-```
+| **Knowledge sync command extension** <br> `cmd/agentctl/cmd/knowledge.go` | Adds `--skip-builtin` and `--builtin-only` flags; conditionally seeds builtin knowledge during sync and optionally skips workspace scanning; extends sync result/envelope with `builtin_seeded` and adjusted summary/counts. |
+| **Workspace command & tests** <br> `cmd/agentctl/cmd/workspace.go`, `cmd/agentctl/cmd/workspace_test.go` | New `workspace` top-level command with `init` and `list-agents` subcommands; init creates `.claude/agents`, supports `--agents` (core|factory|all), `--dry-run`, and `--force`; list-agents returns builtin agent listings; tests cover parsing, collection, and filesystem behaviors. |
+| **Builtin knowledge factory & tests** <br> `internal/knowledge/builtin/factory.go`, `internal/knowledge/builtin/factory_test.go` | New builtin asset loader: go:embed assets, Asset type, ListFactoryDroids, ListCoreAgents, SeedBuiltinKnowledge, SeedFactoryKnowledge; frontmatter parsing, keyword extraction, idempotent seeding/upsert and document storage; comprehensive unit tests. |
+| **Builtin markdown assets (core agents)** <br> `internal/knowledge/builtin/data/agents/code-reviewer.md`, `debugger.md`, `refactorer.md`, `test-automator.md` | New markdown agent profiles describing roles, procedures, outputs, and orchestrator integration. |
+| **Builtin markdown assets (Factory droids)** <br> `internal/knowledge/builtin/data/droids/backend-architect.md`, `frontend-developer.md`, `orchestrator.md` | New markdown droid profiles defining capabilities, workflows, tools, examples, and orchestrator guidance. |
+| **Documentation & specs** <br> `docs/changelogs/2024-11-27_factory-knowledge-builtin.md`, `docs/spec/knowledge_factory_bridge.md`, `docs/spec/unified_agents.md`, plus mailbox/task-graph/mail specs under `docs/spec/*.md` | Changelog describing builtin seeding and CLI flags; new specs for knowledge–factory bridge, unified agents, mailbox/graph/mail integration and task-graph insights (design docs added). |
 ## Estimated code review effort
-🎯 4 (Complex) | ⏱️ ~60–75 minutes
-**Areas requiring extra attention:**
-- `internal/storage/knowledge/store.go` — SQLite schema, CRUD operations, transaction handling, search logic (MatchByKeyword, MatchByPath)
-- `cmd/agentctl/cmd/watch.go` — File watcher implementation, fsnotify event handling, graceful shutdown, debouncing/throttling coordination
-- `cmd/agentctl/cmd/knowledge.go` — CLI command structure, keyword extraction, knowledge item filtering, envelope response formatting
-- `.claude/hooks/*.sh` — Hook wrapper integration; ensure stdin/stdout handling, JSON parsing robustness, fail-open semantics, and proper error propagation
-- `cmd/agentctl/cmd/todo.go` — Migration from store_path to workspace_id; verify backward compatibility and scope_path introduction don't break existing workflows
-- Hook domain types vs wrapper script contract — Verify that Input/Output types in `internal/domain/hook/types.go` align with shell script JSON construction and parsing
+🎯 4 (Complex) | ⏱️ ~60 minutes
+- Areas to focus review on:
+  - frontmatter parsing and keyword extraction heuristics in `internal/knowledge/builtin/factory.go`
+  - idempotent upsert/seeding logic and trigger/document association
+  - CLI flag interaction (`--skip-builtin`, `--builtin-only`) with existing sync flow
+  - Filesystem operations and overwrite semantics in `workspace.go`
+  - Test expectations covering error cases and edge inputs
 ## Possibly related PRs
-- jkatigb/agentctl#18: Overlaps on storage/hook/CLI surfaces; introduces complementary storage-interface and policy/refactor patterns
-- jkatigb/agentctl#69: Mega-PR touching similar internal/storage, search/vector, and CLI integration points for knowledge and vector-search capabilities
+- jkatigb/agentctl#82 — Related: overlaps with builtin knowledge seeding and CLI sync integration (knowledge sync workflow and builtin assets).
+- jkatigb/agentctl#69 — Related: overlaps implementation of internal/knowledge/builtin factory and CLI workspace/knowledge changes.
 ## Suggested labels
-`codex`, `ai-generated`
+`ai-generated`
 ## Poem
-> 🐰 *Hops with glee through docs so bright,*
-> *Agents dance, hooks ignite!*
-> *Knowledge packs in SQLite rest,*
-> *Tasks and tests, developers blessed—*
-> *Claude now guides with wisdom's might!* ✨
+> 🐰 I hopped through markdown, seeds in my paw,
+> Planted droids and agents with meticulous awe.
+> I nibbled flags, dug workspaces neat,
+> Seeded knowledge fields for every CLI feat.
+> Happy thumps — the warren's now complete! 🥕✨
 ## Pre-merge checks and finishing touches
 <details>
-<summary>❌ Failed checks (1 warning, 2 inconclusive)</summary>
-|     Check name     | Status         | Explanation                                                                                                                                                        | Resolution                                                                                                                                                                                                     |
-| :----------------: | :------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Docstring Coverage | ⚠️ Warning     | Docstring coverage is 15.38% which is insufficient. The required threshold is 80.00%.                                                                              | You can run `@coderabbitai generate docstrings` to improve docstring coverage.                                                                                                                                 |
-|     Title check    | ❓ Inconclusive | The title 'claude harness' is vague and generic, using non-descriptive terms that do not clearly convey the substantial changes in this large, multi-component PR. | Provide a more specific title that captures the primary objective, such as 'Add Claude Code integration with task store, knowledge registry, and test watcher' or focus on the main feature if one is primary. |
-|  Description check | ❓ Inconclusive | The PR description lists six checkpoints but lacks substantive detail in the Summary and Notes sections; the Testing checklist is present but unchecked.           | Add a clear Summary explaining the overall goal and impact, fill in the Notes section with migration notes or breaking changes, and mark completed testing items to indicate which checks passed.              |
+<summary>❌ Failed checks (1 warning, 1 inconclusive)</summary>
+|     Check name     | Status         | Explanation                                                                                                                                                                                       | Resolution                                                                                                                                                                                                             |
+| :----------------: | :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docstring Coverage | ⚠️ Warning     | Docstring coverage is 42.86% which is insufficient. The required threshold is 80.00%.                                                                                                             | You can run `@coderabbitai generate docstrings` to improve docstring coverage.                                                                                                                                         |
+|  Description check | ❓ Inconclusive | The PR description includes three checkpoint labels that map to major features but lacks a substantive Summary section and detailed explanation of changes, which is a required template section. | Expand the Summary section with a brief description of the three checkpoints and their purpose. Provide context on how factory knowledge seeding, unified agents, and workspace init relate to the project objectives. |
 </details>
+<details>
+<summary>✅ Passed checks (1 passed)</summary>
+|  Check name | Status   | Explanation                                                                                                                                              |
+| :---------: | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Title check | ✅ Passed | The title clearly identifies two main changes: factory support and workspace init, which align with the primary objectives and changes in the changeset. |
+</details>
+<details>
+<summary>✨ Finishing touches</summary>
+- [ ]  📝 Generate docstrings
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+- [ ]    Create PR with unit tests
+- [ ]    Post copyable unit tests in a comment
+- [ ]    Commit unit tests in branch `feature/multi-agent`
+</details>
+</details>
+> [!TIP]
+> <details>
+> <summary>📝 Customizable high-level summaries are now available in beta!</summary>
+>
+> You can now customize how CodeRabbit generates the **high-level summary** in your pull requests — including its content, structure, tone, and formatting.
+>
+> - Provide your own instructions using the `high_level_summary_instructions` setting.
+> - Format the summary however you like (bullet lists, tables, multi-section layouts, contributor stats, etc.).
+> - Use `high_level_summary_in_walkthrough` to move the summary from the description to the walkthrough section.
+>
+> **Example instruction:**
+>
+> > "Divide the high-level summary into five sections:
+> >  1. **📝 Description** — Summarize the main change in 50–60 words, explaining what was done.
+> >  2. **📓 References** — List relevant issues, discussions, documentation, or related PRs.
+> >  3. **📦 Dependencies & Requirements** — Mention any new/updated dependencies, environment variable changes, or configuration updates.
+> >  4. **📊 Contributor Summary** — Include a Markdown table showing contributions:
+> >     `| Contributor | Lines Added | Lines Removed | Files Changed |`
+> >  5. **✔️ Additional Notes** — Add any extra reviewer context.
+> >  Keep each section concise (under 200 words) and use bullet or numbered lists for clarity."
+>
+> Note: This feature is currently in beta for Pro-tier users, and pricing will be announced later.
+>
+> </details>
 ---
 <sub>Comment `@coderabbitai help` to get the list of available commands and usage tips.</sub>
 
 ---
 
-### Task 2: coderabbitai[bot]'s feedback
-
-**File:** `.claude/CLAUDE.md`
-
-**Add language identifier to fenced code block.**
-Markdown linting (MD040) requires code fences to specify a language for syntax highlighting and clarity.
-Apply this diff:
-```diff
--```
-+```text
- Claude Code → Hooks (bash wrappers) → agentctl skills → SQLite/CAS
-                                            ↓
-                                     JSON envelope output
--```
-+```
-```
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
-14-14: Fenced code blocks should have a language specified
-(MD040, fenced-code-language)
-</details>
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-````
-In .claude/CLAUDE.md around lines 14 to 18, the fenced code block is missing a
-language identifier which violates MD040; update the opening fence from ``` to
-```text so the block starts with ```text and keep the existing closing ``` fence
-unchanged.
-````
-</details>
-✅ Addressed in commit 3813287
-
----
-
-### Task 3: coderabbitai[bot]'s feedback
-
-**File:** `.claude/CLAUDE.md:236`
-
-**Replace hard tabs with spaces in JSON code block.**
-Markdown linting (MD010) flags hard tabs in code blocks. Replace all tabs with spaces (use 2 spaces per indentation level) for consistency and copy-paste usability.
-Apply this diff (replace tabs with 2 spaces):
-```diff
- **Output** (stdout JSON envelope):
- \`\`\`json
- {
--	"version": 1,
--	"status": "ok",
--	"command": "hooks/task_guard",
--	"data": {
--		"hook_output": {
--			"decision": "approve",
--			"reason": "task ensured",
--			"meta": { "task_id": "...", "created": true }
--		}
--	}
-+  "version": 1,
-+  "status": "ok",
-+  "command": "hooks/task_guard",
-+  "data": {
-+    "hook_output": {
-+      "decision": "approve",
-+      "reason": "task ensured",
-+      "meta": { "task_id": "...", "created": true }
-+    }
-+  }
- }
- \`\`\`
-```
-> Committable suggestion skipped: line range outside the PR's diff.
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
-213-213: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-214-214: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-215-215: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-216-216: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-217-217: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-225-225: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-226-226: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-227-227: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-228-228: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-229-229: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-230-230: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-231-231: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-232-232: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-233-233: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-234-234: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
-</details>
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-.claude/CLAUDE.md around lines 209 to 236: the JSON code blocks contain hard tab
-characters which trigger MD010; replace all hard tabs inside those code blocks
-with two spaces per indentation level (convert each tab to two spaces),
-preserving the existing indentation structure and line breaks for both the
-"Input" and "Output" JSON blocks so they remain valid JSON and copy-paste
-friendly.
-```
-</details>
-
----
-
-### Task 4: coderabbitai[bot]'s feedback
-
-**File:** `.claude/hooks/task-guard.sh:70`
-
-**Fix unsafe JSON construction for `reason` / `context` strings**
-`reason` and `context` are injected into JSON with `printf`:
-```bash
-reason="$(printf '%s' "$hook_output" | jq -r '.reason // "Operation blocked by task guard"')"
-printf '{"decision": "block", "reason": "%s"}\n' "$reason"
-...
-context="$(printf '%s' "$hook_output" | jq -r '.context // empty')"
-printf '{"decision": "approve", "context": "%s"}\n' "$context"
-```
-If either value contains quotes, backslashes, or newlines, the output is not valid JSON. Since hook_output is already JSON, it’s safer to let `jq` handle encoding:
-```diff
--# Check decision
--decision="$(printf '%s' "$hook_output" | jq -r '.decision // "approve"')"
--
--if [[ "$decision" == "block" ]]; then
--  # Return the block reason to Claude
--  reason="$(printf '%s' "$hook_output" | jq -r '.reason // "Operation blocked by task guard"')"
--  printf '{"decision": "block", "reason": "%s"}\n' "$reason"
--else
--  # Approve - optionally include context
--  context="$(printf '%s' "$hook_output" | jq -r '.context // empty')"
--  if [[ -n "$context" ]]; then
--    printf '{"decision": "approve", "context": "%s"}\n' "$context"
--  else
--    printf '{}\n'
--  fi
--fi
-+# Check decision and render JSON via jq to ensure proper escaping
-+decision="$(printf '%s' "$hook_output" | jq -r '.decision // "approve"')"
-+
-+if [[ "$decision" == "block" ]]; then
-+  printf '%s\n' "$hook_output" | jq -c '{
-+    decision: "block",
-+    reason: (.reason // "Operation blocked by task guard")
-+  }'
-+else
-+  printf '%s\n' "$hook_output" | jq -c '
-+    if (.context // "") != "" then
-+      { decision: "approve", context: .context }
-+    else
-+      {}
-+    end
-+  '
-+fi
-```
-This preserves behavior while guaranteeing valid JSON.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In .claude/hooks/task-guard.sh around lines 51-69 the script injects raw
-reason/context strings into JSON using printf which breaks JSON when those
-strings contain quotes, backslashes, or newlines; replace the printf-based
-construction with jq-built JSON (use jq -n and --arg or construct objects from
-the existing hook_output) so jq performs proper string escaping: when decision
-is "block" emit {"decision":"block","reason":<reason>} with reason provided by
-jq (using a default if missing), when "approve" emit
-{"decision":"approve","context":<context>} only if context exists (otherwise
-emit {}), preserving current behavior but guaranteeing valid JSON output.
-```
-</details>
-✅ Addressed in commit 3813287
-
----
-
-### Task 5: coderabbitai[bot]'s feedback
-
-**File:** `cmd/agentctl/cmd/knowledge.go:224`
-
-**Variable shadowing: `err` is redeclared.**
-The `err` on line 209 shadows the outer `err` from line 187. While this works correctly here, it can lead to subtle bugs if the logic changes. Use a different name or reuse the outer variable.
-```diff
- 		if filePath != "" {
--			pathItems, err := store.MatchByPath(ctx, filePath)
-+			pathItems, pathErr := store.MatchByPath(ctx, filePath)
--			if err != nil {
-+			if pathErr != nil {
--				return fmt.Errorf("search by path: %w", err)
-+				return fmt.Errorf("search by path: %w", pathErr)
- 			}
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-			if filePath != "" {
-				pathItems, pathErr := store.MatchByPath(ctx, filePath)
-				if pathErr != nil {
-					return fmt.Errorf("search by path: %w", pathErr)
-				}
-				// Merge results (dedupe by ID)
-				seen := make(map[string]bool)
-				for _, item := range items {
-					seen[item.ID] = true
-				}
-				for _, item := range pathItems {
-					if !seen[item.ID] {
-						items = append(items, item)
-						seen[item.ID] = true
-					}
-				}
-			}
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In cmd/agentctl/cmd/knowledge.go around lines 208 to 224, the local declaration
-"pathItems, err := store.MatchByPath(ctx, filePath)" re-declares and shadows the
-outer "err" variable; change it to reuse the existing err (e.g., "pathItems, err
-= store.MatchByPath(...)" if err is already declared) or rename the variable
-(e.g., "pathItems, err2 := ...") to avoid shadowing, adjust subsequent error
-handling to reference the chosen variable, and run `go vet`/`golangci-lint` to
-verify no shadowing remains.
-```
-</details>
-
----
-
-### Task 6: coderabbitai[bot]'s feedback
-
-**File:** `docs/changelogs/2024-11-27_knowledge-registry.md:4`
-
-**Incorrect date in changelog.**
-The date `2024-11-27` appears to be a typo. Based on the PR context, this should likely be `2025-11-27`.
-```diff
--**Date:** 2024-11-27\
-+**Date:** 2025-11-27\
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-**Date:** 2025-11-27\
-**Feature:** Knowledge Registry (rule-based matching, no embeddings yet)
-```
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/changelogs/2024-11-27_knowledge-registry.md around lines 3 to 4, the
-changelog date is incorrect (2024-11-27); update the date to 2025-11-27 to match
-the PR context and ensure filename and front-matter (if any) reflect the
-corrected year.
-```
-</details>
-
----
-
-### Task 7: coderabbitai[bot]'s feedback
-
-**File:** `docs/knowledge/backend-dev-guidelines/resources/architecture-overview.md:61`
-
-_🛠️ Refactor suggestion_ | _🟠 Major_
-**Add language specifications to fenced code blocks.**
-Markdownlint requires language specification for fenced code blocks (MD040). Lines with unlabeled code fences should specify a language:
-- Lines 20–60: ASCII diagram → use ` ```text ` or ` ```plain `
-- Lines 155–171, 189–206, 326–334, 345–350: Directory structure → use ` ```plaintext ` or ` ```text `
-Example:
-```diff
--```
-+```text
- email/src/
- ├── controllers/
-```
-Per the PR testing checklist ("Formatting: make fmt (no diffs)"), these should be corrected to pass linting.
-Also applies to: 155-171, 189-206, 326-334, 345-350
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
-20-20: Fenced code blocks should have a language specified
-(MD040, fenced-code-language)
-</details>
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-````
-docs/knowledge/backend-dev-guidelines/resources/architecture-overview.md lines
-20-61 (and also apply same fix to blocks at 155-171, 189-206, 326-334, 345-350):
-several fenced code blocks contain ASCII diagrams or directory listings without
-a language tag which triggers MD040; update each opening triple-backtick to
-include a plain text language identifier (e.g., ```text or ```plaintext) so the
-blocks are labeled and linting passes.
-````
-</details>
-
----
-
-### Task 8: coderabbitai[bot]'s feedback
-
-**File:** `docs/knowledge/backend-dev-guidelines/resources/database-patterns.md:224`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-Script executed:
-```shell
-#!/bin/bash
-# Search for the referenced markdown files in the docs directory
-echo "=== Searching for referenced files in docs directory ==="
-fd -type f -name "*.md" docs/ | grep -E "(SKILL|services-and-repositories|async-and-errors)" | head -20
-```
-Repository: jkatigb/agentctl
----
-<shell_result>
-Repository: jkatigb/agentctl
-Exit code: 0
-stdout:
-```
-=== Searching for referenced files in docs directory ===
-```
-stderr:
-```
-error: 'ype' isn't a valid value for '--type <filetype>'
-  [possible values: file, directory, symlink, executable, empty, socket, pipe]
-For more information try '--help'
-```
-</shell_result>
----
-Script executed:
-```shell
-#!/bin/bash
-# Search for the referenced markdown files
-echo "=== Searching for SKILL.md ==="
-fd "SKILL\.md" docs/
-echo -e "\n=== Searching for services-and-repositories.md ==="
-fd "services-and-repositories\.md" docs/
-echo -e "\n=== Searching for async-and-errors.md ==="
-fd "async-and-errors\.md" docs/
-echo -e "\n=== Listing docs directory structure ==="
-find docs -type f -name "*.md" | head -30
-```
-Repository: jkatigb/agentctl
----
-<shell_result>
-Repository: jkatigb/agentctl
-Exit code: 0
-stdout:
-```
-=== Searching for SKILL.md ===
-docs/knowledge/backend-dev-guidelines/SKILL.md
-docs/knowledge/error-tracking/SKILL.md
-docs/knowledge/frontend-dev-guidelines/SKILL.md
-docs/knowledge/route-tester/SKILL.md
-docs/knowledge/skill-developer/SKILL.md
-=== Searching for services-and-repositories.md ===
-docs/knowledge/backend-dev-guidelines/resources/services-and-repositories.md
-=== Searching for async-and-errors.md ===
-docs/knowledge/backend-dev-guidelines/resources/async-and-errors.md
-=== Listing docs directory structure ===
-docs/SECURITY.md
-docs/TROUBLESHOOTING.md
-docs/agent_profile.md
-docs/changelogs/2025-11-22_ci-prcomments-ci-github-checks.md
-docs/changelogs/2024-11-27_knowledge-registry.md
-docs/changelogs/2024-11-27_test-watcher-impl.md
-docs/changelogs/2025-11-26_sqlite_task_store_and_hooks.md
-docs/ci/github_checks.md
-docs/ci/prcomments.md
-docs/error-handling.md
-docs/examples/git_worktree_workflow.md
-docs/examples/minimum_workflow_skills.md
-docs/examples/skills_chain.md
-docs/godot/editor_integration.md
-docs/godot/roadmap.md
-docs/guides/agent_loop.md
-docs/guides/protocol_v1_implementation.md
-docs/local-testing.md
-docs/openapi_implementation_summary.md
-docs/openapi_plugin_guide.md
-docs/prcomments/pr66.md
-docs/prcomments/pr77.md
-docs/refactoring/README.md
-docs/refactoring/SPEC-008-reorganize-packages.md
-docs/refactoring/SPEC-009-extract-skill-discovery.md
-docs/refactoring/SPEC-011-pathvalidator-hardening.md
-docs/refactoring/SPEC-012-openapi-spec-loader.md
-docs/refactoring/SPEC-013-openapi-request-builder.md
-docs/refactoring/SPEC-014-openapi-http-client.md
-docs/refactoring/SPEC-015-openapi-pagination.md
-```
-</shell_result>
----
-Script executed:
-```shell
-#!/bin/bash
-# First, check the actual link format in the database-patterns.md file
-echo "=== Viewing lines 220-224 of database-patterns.md ==="
-sed -n '220,224p' docs/knowledge/backend-dev-guidelines/resources/database-patterns.md
-echo -e "\n=== Checking file structure around database-patterns.md ==="
-ls -la docs/knowledge/backend-dev-guidelines/resources/
-echo -e "\n=== Reading SKILL.md from backend-dev-guidelines ==="
-head -50 docs/knowledge/backend-dev-guidelines/SKILL.md
-```
-Repository: jkatigb/agentctl
----
-<shell_result>
-Repository: jkatigb/agentctl
-Exit code: 0
-stdout:
-```
-=== Viewing lines 220-224 of database-patterns.md ===
-**Related Files:**
-- [SKILL.md](SKILL.md)
-- [services-and-repositories.md](services-and-repositories.md)
-- [async-and-errors.md](async-and-errors.md)
-=== Checking file structure around database-patterns.md ===
-total 148
-drwxr-xr-x 2 jailuser jailuser   260 Nov 26 22:31 .
-drwxr-xr-x 3 jailuser jailuser    80 Nov 26 22:31 ..
--rw-r--r-- 1 jailuser jailuser 12866 Nov 26 22:31 architecture-overview.md
--rw-r--r-- 1 jailuser jailuser  6862 Nov 26 22:31 async-and-errors.md
--rw-r--r-- 1 jailuser jailuser 16478 Nov 26 22:31 complete-examples.md
--rw-r--r-- 1 jailuser jailuser  5816 Nov 26 22:31 configuration.md
--rw-r--r-- 1 jailuser jailuser  4937 Nov 26 22:31 database-patterns.md
--rw-r--r-- 1 jailuser jailuser  5169 Nov 26 22:31 middleware-guide.md
--rw-r--r-- 1 jailuser jailuser 19930 Nov 26 22:31 routing-and-controllers.md
--rw-r--r-- 1 jailuser jailuser  7753 Nov 26 22:31 sentry-and-monitoring.md
--rw-r--r-- 1 jailuser jailuser 22299 Nov 26 22:31 services-and-repositories.md
--rw-r--r-- 1 jailuser jailuser  5420 Nov 26 22:31 testing-guide.md
--rw-r--r-- 1 jailuser jailuser 18038 Nov 26 22:31 validation-patterns.md
-=== Reading SKILL.md from backend-dev-guidelines ===
----
-name: backend-dev-guidelines
-description: Comprehensive backend development guide for Node.js/Express/TypeScript microservices. Use when creating routes, controllers, services, repositories, middleware, or working with Express APIs, Prisma database access, Sentry error tracking, Zod validation, unifiedConfig, dependency injection, or async patterns. Covers layered architecture (routes → controllers → services → repositories), BaseController pattern, error handling, performance monitoring, testing strategies, and migration from legacy patterns.
----
-# Backend Development Guidelines
-## Purpose
-Establish consistency and best practices across backend microservices (blog-api, auth-service, notifications-service) using modern Node.js/Express/TypeScript patterns.
-## When to Use This Skill
-Automatically activates when working on:
-- Creating or modifying routes, endpoints, APIs
-- Building controllers, services, repositories
-- Implementing middleware (auth, validation, error handling)
-- Database operations with Prisma
-- Error tracking with Sentry
-- Input validation with Zod
-- Configuration management
-- Backend testing and refactoring
----
-## Quick Start
-### New Backend Feature Checklist
-- [ ] **Route**: Clean definition, delegate to controller
-- [ ] **Controller**: Extend BaseController
-- [ ] **Service**: Business logic with DI
-- [ ] **Repository**: Database access (if complex)
-- [ ] **Validation**: Zod schema
-- [ ] **Sentry**: Error tracking
-- [ ] **Tests**: Unit + integration tests
-- [ ] **Config**: Use unifiedConfig
-### New Microservice Checklist
-- [ ] Directory structure (see [architecture-overview.md](architecture-overview.md))
-- [ ] instrument.ts for Sentry
-- [ ] unifiedConfig setup
-- [ ] BaseController class
-- [ ] Middleware stack
-- [ ] Error boundary
-- [ ] Testing framework
----
-```
-</shell_result>
----
-</details>
-**Fix broken relative path for SKILL.md link.**
-The reference to `[SKILL.md](SKILL.md)` will be broken—the file exists at `../SKILL.md` (in the parent `backend-dev-guidelines/` directory), not in the `resources/` directory. Update the link to `[SKILL.md](../SKILL.md)`. The other two files (`services-and-repositories.md` and `async-and-errors.md`) exist in the same directory and are appropriately scoped for database/service-layer guidance. SKILL.md itself is also relevant (it documents repository patterns, database operations with Prisma, and is the core backend development guide).
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/knowledge/backend-dev-guidelines/resources/database-patterns.md around
-lines 220 to 224, the relative link to SKILL.md is incorrect; update the
-markdown link target from SKILL.md to ../SKILL.md so it points to the SKILL.md
-file in the parent backend-dev-guidelines directory (leave the other two links
-unchanged).
-```
-</details>
-
----
-
-### Task 9: coderabbitai[bot]'s feedback
-
-**File:** `docs/knowledge/backend-dev-guidelines/resources/middleware-guide.md:13`
-
-**Broken link: Validation Middleware section is missing.**
-The Table of Contents references `#validation-middleware`, but there's no corresponding `## Validation Middleware` section in the document. Either add the section or remove it from the TOC.
-```diff
- ## Table of Contents
- - [Authentication Middleware](#authentication-middleware)
- - [Audit Middleware with AsyncLocalStorage](#audit-middleware-with-asynclocalstorage)
- - [Error Boundary Middleware](#error-boundary-middleware)
--- [Validation Middleware](#validation-middleware)
- - [Composable Middleware](#composable-middleware)
- - [Middleware Ordering](#middleware-ordering)
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-## Table of Contents
-- [Authentication Middleware](#authentication-middleware)
-- [Audit Middleware with AsyncLocalStorage](#audit-middleware-with-asynclocalstorage)
-- [Error Boundary Middleware](#error-boundary-middleware)
-- [Composable Middleware](#composable-middleware)
-- [Middleware Ordering](#middleware-ordering)
-```
-</details>
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
-10-10: Link fragments should be valid
-(MD051, link-fragments)
-</details>
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/knowledge/backend-dev-guidelines/resources/middleware-guide.md around
-lines 5 to 13, the Table of Contents contains a "Validation Middleware" entry
-linking to #validation-middleware but the document lacks a corresponding
-section; either add a "## Validation Middleware" section (with a brief
-explanation of purpose, common patterns, and an example or link to shared
-validators) placed appropriately in the document and update any anchors, or
-remove the "Validation Middleware" line from the TOC to keep the TOC accurate.
-```
-</details>
-
----
-
 ### Task 10: coderabbitai[bot]'s feedback
 
-**File:** `docs/knowledge/backend-dev-guidelines/resources/routing-and-controllers.md:548`
+**File:** `cmd/agentctl/cmd/workspace.go:258`
 
-_🛠️ Refactor suggestion_ | _🟠 Major_
-**Fix markdown heading structure in refactoring guide.**
-Lines 452, 483, and 527 use bold emphasis (**Step N:**) where markdown headings (### Step N:) are more appropriate. This affects document structure and navigation. Additionally, proper heading levels improve parsing by documentation generators and screen readers.
-Apply this pattern for better structure:
-```diff
--**Step 1: Create Controller**
-+### Step 1: Create Controller
+**Ensure JSON uses empty slices (not null) and surface per-file write failures**
+Two related issues in `initWorkspace`:
+1. **Nil vs empty slices in JSON**
+   `created`, `skipped`, and `errors` all start as `var []string`. If no entries are added, they remain `nil` and will serialize as `null`, which conflicts with the guideline to return empty slices/maps in JSON responses.
+   Initialize them explicitly to empty slices:
+   ```diff
+-	var created []string
+-	var skipped []string
+-	var errors []string
++	created := make([]string, 0, len(agents))
++	skipped := make([]string, 0, len(agents))
++	errors := []string{}
+   ```
+2. **Errors are reported in the payload but never cause a non-zero exit**
+   When `os.WriteFile` fails, you append to `errors` but still return `nil` error from `initWorkspace`. From a CLI/automation perspective, that means `agentctl workspace init` can partially fail while still exiting 0.
+   Consider treating any non-empty `errors` as a failure condition and returning an error alongside the detailed payload, e.g.:
+   ```diff
+-	result := map[string]any{
++	result := map[string]any{
+ 		"workspace":    workspaceDir,
+@@
+-		"summary": fmt.Sprintf("Created %d agents, skipped %d, errors %d",
+-			len(created), len(skipped), len(errors)),
++		"summary": fmt.Sprintf("Created %d agents, skipped %d, errors %d",
++			len(created), len(skipped), len(errors)),
+ 	}
+-
+-	return result, nil
++	if len(errors) > 0 {
++		return result, fmt.Errorf("one or more agent files failed to write")
++	}
++	return result, nil
+   ```
+   The envelope body will still expose detailed per-file error messages, but callers also get a clear signal via the return error / exit code.
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+// initWorkspace initializes a workspace with the specified agents.
+func initWorkspace(workspaceDir string, agents []builtin.BuiltinAsset, force, dryRun bool) (map[string]any, error) {
+	claudeDir := filepath.Join(workspaceDir, ".claude")
+	agentsDir := filepath.Join(claudeDir, "agents")
+	created := make([]string, 0, len(agents))
+	skipped := make([]string, 0, len(agents))
+	errors := []string{}
+	// Create directories
+	if !dryRun {
+		if err := os.MkdirAll(agentsDir, 0755); err != nil {
+			return nil, fmt.Errorf("create agents directory: %w", err)
+		}
+	}
+	// Write agent files
+	for _, agent := range agents {
+		// Extract filename from agent name (e.g., "core/agent/code-reviewer" -> "code-reviewer.md")
+		parts := strings.Split(agent.Name, "/")
+		filename := parts[len(parts)-1] + ".md"
+		destPath := filepath.Join(agentsDir, filename)
+		// Check if file exists
+		if _, err := os.Stat(destPath); err == nil && !force {
+			skipped = append(skipped, filename)
+			continue
+		}
+		if dryRun {
+			created = append(created, filename)
+			continue
+		}
+		// Write file
+		if err := os.WriteFile(destPath, []byte(agent.Body), 0644); err != nil {
+			errors = append(errors, fmt.Sprintf("%s: %v", filename, err))
+			continue
+		}
+		created = append(created, filename)
+	}
+	result := map[string]any{
+		"workspace":    workspaceDir,
+		"agents_dir":   agentsDir,
+		"created":      created,
+		"skipped":      skipped,
+		"errors":       errors,
+		"dry_run":      dryRun,
+		"total_agents": len(agents),
+		"summary": fmt.Sprintf("Created %d agents, skipped %d, errors %d",
+			len(created), len(skipped), len(errors)),
+	}
+	if len(errors) > 0 {
+		return result, fmt.Errorf("one or more agent files failed to write")
+	}
+	return result, nil
+}
 ```
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
-452-452: Emphasis used instead of a heading
-(MD036, no-emphasis-as-heading)
----
-483-483: Emphasis used instead of a heading
-(MD036, no-emphasis-as-heading)
----
-527-527: Emphasis used instead of a heading
-(MD036, no-emphasis-as-heading)
-</details>
 </details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In docs/knowledge/backend-dev-guidelines/resources/routing-and-controllers.md
-around lines 450 to 548, replace the inline bold step labels (lines ~452, ~483,
-~527) with proper markdown heading lines (e.g., "### Step 1: Create Controller",
-"### Step 2: Create Service", "### Step 3: Update Route") so the document
-structure and navigation are correct; ensure each step uses the same heading
-level and update any adjacent paragraph breaks so headings render correctly for
-doc generators and screen readers.
+In cmd/agentctl/cmd/workspace.go around lines 203 to 258, the function
+initWorkspace currently leaves created/skipped/errors as nil (which serializes
+to null) and appends write failures to errors but still returns a nil error;
+change the initial declarations to empty slices (e.g., created, skipped, errors
+:= []string{}) so JSON returns [] instead of null, and after writing files if
+len(errors) > 0 return the result map along with a non-nil error (e.g.,
+fmt.Errorf("failed to write %d agent files", len(errors))) so callers/CLI get a
+non-zero exit while the payload still contains per-file error details.
 ```
 </details>
 
@@ -780,34 +328,109 @@ doc generators and screen readers.
 
 ### Task 11: coderabbitai[bot]'s feedback
 
-**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:161`
+**File:** `docs/spec/unified_agents.md:265`
 
-**Minor: Add language specifier to fenced code block.**
-The code block at line 161 should specify a language for proper syntax highlighting.
-Based on learnings from static analysis, apply this diff:
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Replace hard tabs with spaces.**
+Lines 255-265 use hard tabs, which should be replaced with spaces for consistency with Markdown formatting standards.
+Apply this diff to replace tabs with spaces:
 ```diff
--```
-+```text
- features/
-   users/
+ ### Phase 4: Command Merge
+-	1. Unify command format
+-	2. Add key commands to builtin
+-	3. Support workspace init for commands
++1. Unify command format
++2. Add key commands to builtin
++3. Support workspace init for commands
+ ## Future Considerations
+-	- **Agent versioning**: Track agent versions for updates
+-	- **Custom agents**: Allow users to add custom agents to registry
+-	- **Agent discovery**: Search agents by capability, not just name
+-	- **Agent composition**: Combine agents for complex workflows
++- **Agent versioning**: Track agent versions for updates
++- **Custom agents**: Allow users to add custom agents to registry
++- **Agent discovery**: Search agents by capability, not just name
++- **Agent composition**: Combine agents for complex workflows
 ```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+### Phase 4: Command Merge
+1. Unify command format
+2. Add key commands to builtin
+3. Support workspace init for commands
+## Future Considerations
+- **Agent versioning**: Track agent versions for updates
+- **Custom agents**: Allow users to add custom agents to registry
+- **Agent discovery**: Search agents by capability, not just name
+- **Agent composition**: Combine agents for complex workflows
+```
+</details>
 <details>
 <summary>🧰 Tools</summary>
 <details>
+<summary>🪛 LanguageTool</summary>
+[grammar] ~257-~257: Ensure spelling is correct
+Context: ...y command format 2. Add key commands to builtin 3. Support workspace init for commands  ## ...
+(QB_NEW_EN_ORTHOGRAPHY_ERROR_IDS_1)
+</details>
+<details>
 <summary>🪛 markdownlint-cli2 (0.18.1)</summary>
-161-161: Fenced code blocks should have a language specified
-(MD040, fenced-code-language)
+255-255: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+256-256: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+257-257: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+258-258: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+259-259: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+260-260: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+261-261: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+262-262: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+263-263: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+264-264: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
+---
+265-265: Hard tabs
+Column: 1
+(MD010, no-hard-tabs)
 </details>
 </details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
-line 161, the fenced code block lacks a language specifier; update the block to
-use a text language tag and include the two lines shown in the diff so the block
-reads as a text snippet containing the directory lines "features/" and "users/".
-Replace the existing triple-backtick fence with one that specifies "text" and
-ensure the two content lines are inside the fenced block.
+In docs/spec/unified_agents.md around lines 255 to 265, the block contains hard
+tab characters which must be replaced with spaces for consistent Markdown
+formatting; open the file, replace each tab in those lines with appropriate
+spaces (preferably 4 spaces per tab or match repository convention), save the
+file, and verify there are no remaining tabs in that range.
 ```
 </details>
 
@@ -815,60 +438,139 @@ ensure the two content lines are inside the fenced block.
 
 ### Task 12: coderabbitai[bot]'s feedback
 
-**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:486`
+**File:** `docs/spec/task_graph_insights.md:190`
 
-**Critical: Fix incorrect "blog" references - should be "form".**
-Example 5 contains multiple instances where "form" has been incorrectly replaced with "blog". This appears to be a find-replace error that breaks the code:
-- Line 388: `useBlog` should be `useForm` (from `react-hook-form`)
-- Line 389: `@hookblog/resolvers/zod` should be `@hookform/resolvers/zod`
-- Line 412: `blogState` should be `formState`
-- Lines 443, 486: `<blog>` and `</blog>` should be `<form>` and `</form>`
-Apply this diff to fix the form-related errors in Example 5:
+**Replace hard tabs with spaces in JSON example.**
+The JSON example contains hard tabs (lines 171-188) which violates markdown formatting standards. Use spaces for indentation consistency.
+As per static analysis hints, apply this change:
 ```diff
--import { useBlog } from 'react-hook-blog';
--import { zodResolver } from '@hookblog/resolvers/zod';
-+import { useForm } from 'react-hook-form';
-+import { zodResolver } from '@hookform/resolvers/zod';
- import { z } from 'zod';
- import { useMutation, useQueryClient } from '@tanstack/react-query';
- import { userApi } from '../api/userApi';
-@@ -409,7 +409,7 @@
- export const CreateUserBlog: React.FC<CreateUserBlogProps> = ({ onSuccess }) => {
-     const queryClient = useQueryClient();
-     const { showSuccess, showError } = useMuiSnackbar();
--    const { register, handleSubmit, blogState: { errors }, reset } = useBlog<UserBlogData>({
-+    const { register, handleSubmit, formState: { errors }, reset } = useForm<UserBlogData>({
-         resolver: zodResolver(userSchema),
-         defaultValues: {
-             username: '',
-@@ -440,7 +440,7 @@
-     return (
-         <Paper sx={{ p: 3, maxWidth: 500 }}>
--            <blog onSubmit={handleSubmit(onSubmit)}>
-+            <form onSubmit={handleSubmit(onSubmit)}>
-                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                     <TextField
-                         {...register('username')}
-@@ -483,7 +483,7 @@
-                         {createMutation.isPending ? 'Creating...' : 'Create User'}
-                     </Button>
-                 </Box>
--            </blog>
-+            </form>
-         </Paper>
-     );
- };
+   ```jsonc
+   {
+-  	"workspace_id": "...",
+-  	"generated_at": "2025-11-27T12:34:56Z",
+-  	"nodes": [
+-  		{
+-  			"task_id": "T-123",
+-  			"title": "...",
+-  			"status": "pending",
+-  			"pagerank": 0.0123,
+-  			"critical_path_score": 5.0,
+-  			"in_degree": 3,
+-  			"out_degree": 1
+-  		}
+-  		// ...
+-  	],
+-  	"topological_order": ["T-1", "T-2", "T-3"],
+-  	"cycles": [
+-  		["T-10", "T-20", "T-10"]
+-  	]
++    "workspace_id": "...",
++    "generated_at": "2025-11-27T12:34:56Z",
++    "nodes": [
++      {
++        "task_id": "T-123",
++        "title": "...",
++        "status": "pending",
++        "pagerank": 0.0123,
++        "critical_path_score": 5.0,
++        "in_degree": 3,
++        "out_degree": 1
++      }
++      // ...
++    ],
++    "topological_order": ["T-1", "T-2", "T-3"],
++    "cycles": [
++      ["T-10", "T-20", "T-10"]
++    ]
+   }
+   ```
 ```
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
+171-171: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+172-172: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+173-173: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+174-174: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+175-175: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+176-176: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+177-177: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+178-178: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+179-179: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+180-180: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+181-181: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+182-182: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+183-183: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+184-184: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+185-185: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+186-186: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+187-187: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+---
+188-188: Hard tabs
+Column: 3
+(MD010, no-hard-tabs)
+</details>
+</details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
-lines 388 to 486, several accidental "blog" replacements broke the form usage:
-change useBlog to useForm (import from react-hook-form), change
-@hookblog/resolvers/zod to @hookform/resolvers/zod, rename blogState to
-formState, and replace the <blog>...</blog> elements with <form>...</form>;
-ensure imports/usage match react-hook-form API and keep the rest of the
-component logic identical.
+In docs/spec/task_graph_insights.md around lines 169 to 190, the JSON code block
+uses hard tabs for indentation; replace all hard tab characters in that example
+with spaces (e.g., 2 or 4 spaces per indent as used elsewhere) so the JSON block
+is consistently spaced and conforms to markdown formatting standards, preserving
+the existing structure and content but converting each tab to the chosen number
+of spaces.
 ```
 </details>
 
@@ -876,42 +578,36 @@ component logic identical.
 
 ### Task 13: coderabbitai[bot]'s feedback
 
-**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:538`
+**File:** `internal/knowledge/builtin/factory.go:78`
 
-**Critical: Fix typo "perblogance" → "performance" and "Blogs" → "Forms".**
-Additional find-replace errors in the text:
-- Line 538: "perblogance" should be "performance"
-- Line 867: "Blogs: React Hook Blog" should be "Forms: React Hook Form"
-- Line 869: "Perblogance" should be "Performance"
-Apply this diff:
+**Verify context cancellation is honored during FS walk.**
+The `fs.WalkDir` operation doesn't check `ctx` for cancellation. If this function is called with a cancellable context and the walk takes a long time (e.g., many files), the cancellation won't be honored until after the walk completes.
+Consider adding a context check inside the walk function:
 ```diff
- **Benefits:**
- - Each section loads independently
- - User sees partial content sooner
--- Better perceived perblogance
-+- Better perceived performance
- ---
-@@ -864,9 +864,9 @@
- 2. **Feature Structure**: Organized subdirectories (api/, components/, hooks/, etc.)
- 3. **Routing**: Folder-based with lazy loading
- 4. **Data Fetching**: useSuspenseQuery with cache-first strategy
--5. **Blogs**: React Hook Blog + Zod validation
-+5. **Forms**: React Hook Form + Zod validation
- 6. **Error Handling**: useMuiSnackbar + onError callbacks
--7. **Perblogance**: useMemo, useCallback, React.memo, debouncing
-+7. **Performance**: useMemo, useCallback, React.memo, debouncing
- 8. **Styling**: Inline <100 lines, sx prop, MUI v7 syntax
+ err := fs.WalkDir(fsys, dir, func(path string, d fs.DirEntry, err error) error {
++	// Check for context cancellation
++	select {
++	case <-ctx.Done():
++		return ctx.Err()
++	default:
++	}
++
+ 	if err != nil {
+ 		return err
+ 	}
 ```
-Also applies to: 867-869
+Note: You'll need to pass `ctx` as a parameter to `listEmbeddedAssets` from the calling functions.
+> Committable suggestion skipped: line range outside the PR's diff.
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
-line 538 and also lines 867–869, fix typos caused by bad find/replace: on line
-538 change "perblogance" to "performance"; on line 867 change "Blogs: React Hook
-Blog" to "Forms: React Hook Form"; on line 869 change "Perblogance" to
-"Performance". Update the text in-place preserving surrounding punctuation and
-capitalization.
+internal/knowledge/builtin/factory.go around lines 48 to 78: the fs.WalkDir
+callback doesn't check a cancellable context so cancellation won't be honored
+during long walks; update the function signature to accept a context.Context,
+pass that ctx from callers, and inside the WalkDir callback check select { case
+<-ctx.Done(): return ctx.Err() default: } (or equivalent) before heavy
+work/ReadFile to abort promptly; ensure any returned ctx.Err() is propagated up
+so callers receive the cancellation error.
 ```
 </details>
 
@@ -919,67 +615,66 @@ capitalization.
 
 ### Task 14: coderabbitai[bot]'s feedback
 
-**File:** `docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md:743`
+**File:** `internal/knowledge/builtin/factory.go:201`
 
-**Critical: Fix incorrect "blog" references in Dialog example.**
-The dialog example (lines 645-743) also contains the same find-replace error:
-- Line 660: `useBlog` should be `useForm`
-- Line 661: `@hookblog` should be `@hookform`
-- Line 682: `blogState` should be `formState`
-- Line 691: `handleBlogSubmit` should be `handleFormSubmit`
-- Lines 710, 739: `<blog>` and `</blog>` should be `<form>` and `</form>`
-Apply this diff to fix the form-related errors:
+**Early return on partial failure could leave inconsistent state.**
+The seeding loop returns immediately on the first error, potentially leaving some assets seeded and others not. This makes it difficult to understand the final state if seeding fails partway through. Consider aggregating errors or using a transaction-like approach.
+Consider one of these approaches:
+**Option 1: Continue on error and aggregate**
 ```diff
--import { useBlog } from 'react-hook-blog';
--import { zodResolver } from '@hookblog/resolvers/zod';
-+import { useForm } from 'react-hook-form';
-+import { zodResolver } from '@hookform/resolvers/zod';
- import { z } from 'zod';
- const blogSchema = z.object({
-@@ -679,7 +679,7 @@
-     onClose,
-     onSubmit,
- }) => {
--    const { register, handleSubmit, blogState: { errors }, reset } = useBlog<BlogData>({
-+    const { register, handleSubmit, formState: { errors }, reset } = useForm<BlogData>({
-         resolver: zodResolver(blogSchema),
-     });
-@@ -688,7 +688,7 @@
-         onClose();
-     };
--    const handleBlogSubmit = async (data: BlogData) => {
-+    const handleFormSubmit = async (data: BlogData) => {
-         await onSubmit(data);
-         handleClose();
-     };
-@@ -707,7 +707,7 @@
-                 </Box>
-             </DialogTitle>
--            <blog onSubmit={handleSubmit(handleBlogSubmit)}>
-+            <form onSubmit={handleSubmit(handleFormSubmit)}>
-                 <DialogContent>
-                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                         <TextField
-@@ -736,7 +736,7 @@
-                         Add User
-                     </Button>
-                 </DialogActions>
--            </blog>
-+            </form>
-         </Dialog>
-     );
- };
+ 	seeded := 0
++	var errors []error
+ 	for _, asset := range allAssets {
+ 		if err := seedAsset(ctx, store, asset); err != nil {
+-			return seeded, err
++			errors = append(errors, fmt.Errorf("seed %s: %w", asset.Name, err))
++			continue
+ 		}
+ 		seeded++
+ 	}
+-	return seeded, nil
++	if len(errors) > 0 {
++		return seeded, fmt.Errorf("seeded %d/%d assets with errors: %v", seeded, len(allAssets), errors)
++	}
++	return seeded, nil
 ```
+**Option 2: Wrap in transaction (if store supports it)**
+If the knowledge.Store supports transactions, consider wrapping the entire seeding operation in a transaction to ensure all-or-nothing semantics.
 <details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/knowledge/frontend-dev-guidelines/resources/complete-examples.md around
-lines 645-743, the dialog example contains incorrect find-replace artifacts:
-change useBlog to useForm on line 660, change @hookblog to @hookform on line
-661, change blogState to formState on line 682, rename handleBlogSubmit to
-handleFormSubmit on line 691 (and update its usages), and replace the <blog> and
-</blog> tags on lines ~710 and ~739 with standard <form> and </form> so the
-component uses React Hook Form correctly.
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+// SeedBuiltinKnowledge seeds all builtin knowledge (Factory droids + core agents) into the store.
+// This is idempotent - existing items are updated, not duplicated.
+func SeedBuiltinKnowledge(ctx context.Context, store knowledge.Store) (int, error) {
+	var allAssets []Asset
+	// Collect Factory droids
+	droids, err := ListFactoryDroids()
+	if err != nil {
+		return 0, fmt.Errorf("list factory droids: %w", err)
+	}
+	allAssets = append(allAssets, droids...)
+	// Collect core agents
+	agents, err := ListCoreAgents()
+	if err != nil {
+		return 0, fmt.Errorf("list core agents: %w", err)
+	}
+	allAssets = append(allAssets, agents...)
+	seeded := 0
+	var errors []error
+	for _, asset := range allAssets {
+		if err := seedAsset(ctx, store, asset); err != nil {
+			errors = append(errors, fmt.Errorf("seed %s: %w", asset.Name, err))
+			continue
+		}
+		seeded++
+	}
+	if len(errors) > 0 {
+		return seeded, fmt.Errorf("seeded %d/%d assets with errors: %v", seeded, len(allAssets), errors)
+	}
+	return seeded, nil
+}
 ```
 </details>
 
@@ -987,43 +682,110 @@ component uses React Hook Form correctly.
 
 ### Task 15: coderabbitai[bot]'s feedback
 
-**File:** `docs/knowledge/skill-developer/ADVANCED.md:101`
+**File:** `internal/knowledge/builtin/factory.go:283`
 
-**Minor: Fix typo "Dashbord" → "Dashboard".**
-Simple typo in the heading.
-Apply this diff:
-```diff
--- Time to skill usage after suggestion
--- User override rate (skip markers, env vars)
--- Performance metrics (execution time)
--**Dashbord Ideas:**
-+**Dashboard Ideas:**
- - Most/least used skills
+<details>
+<summary>🧩 Analysis chain</summary>
+🏁 Script executed:
+```shell
+#!/bin/bash
+# Step 1: Find the knowledge.Store interface definition
+echo "=== Finding Store interface ==="
+rg -nP -C5 'type\s+Store\s+interface'
+# Step 2: Look for transaction support
+echo -e "\n=== Looking for transaction/atomicity methods ==="
+rg -nP '(Begin|Commit|Rollback|Transaction|Tx|Atomic)' --type=go
+# Step 3: Check for concurrency documentation
+echo -e "\n=== Checking for concurrency documentation ==="
+rg -nP '(concurrent|thread-safe|goroutine|mutex|lock|atomic)' --type=go | head -50
 ```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-**Dashboard Ideas:**
+Repository: jkatigb/agentctl
+Length of output: 22143
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# View the full knowledge.Store interface definition
+echo "=== Full knowledge.Store interface ==="
+sed -n '74,150p' internal/storage/knowledge/store.go
+echo -e "\n=== Check if there are any transaction/atomicity methods further down ==="
+grep -nP '(Begin|Commit|Rollback|Transaction)' internal/storage/knowledge/store.go
 ```
+Repository: jkatigb/agentctl
+Length of output: 2693
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# View seedAsset function implementation
+echo "=== seedAsset function ==="
+sed -n '221,283p' internal/knowledge/builtin/factory.go
+echo -e "\n=== Check Store method implementations ==="
+# Check DeleteTriggersForItem implementation
+echo "--- DeleteTriggersForItem ---"
+rg -nA 15 'func.*DeleteTriggersForItem' internal/storage/knowledge/
+echo -e "\n--- AddTrigger ---"
+rg -nA 15 'func.*AddTrigger' internal/storage/knowledge/ | head -40
+echo -e "\n--- UpsertItem ---"
+rg -nA 15 'func.*UpsertItem' internal/storage/knowledge/ | head -40
+```
+Repository: jkatigb/agentctl
+Length of output: 5518
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# Check SQLite configuration
+echo "=== SQLite OpenDB configuration ==="
+rg -nA 20 'func OpenDB' internal/storage/sqliteutil/
+echo -e "\n=== Check seedAsset usage/calls ==="
+rg -n 'seedAsset' internal/knowledge/builtin/
+# Check if seedAsset is called from concurrent context
+echo -e "\n=== Seed function context ==="
+rg -nB 5 -A 10 'func Seed' internal/knowledge/builtin/factory.go | head -50
+```
+Repository: jkatigb/agentctl
+Length of output: 5981
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# Check the full context of seedAsset function and any comments about idempotence
+echo "=== Full seedAsset context with comments ==="
+sed -n '215,285p' internal/knowledge/builtin/factory.go
+# Check if there's any documentation about concurrent seeding
+echo -e "\n=== Check SeedBuiltinKnowledge documentation ==="
+sed -n '173,175p' internal/knowledge/builtin/factory.go
+# Check if seedAsset is documented as idempotent
+echo -e "\n=== Look for idempotence documentation ==="
+rg -nB 5 'idempotent' internal/knowledge/builtin/factory.go
+```
+Repository: jkatigb/agentctl
+Length of output: 2502
+---
 </details>
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 LanguageTool</summary>
-[grammar] ~101-~101: Ensure spelling is correct
-Context: ...Performance metrics (execution time)  **Dashbord Ideas:** - Most/least used skills - Ski...
-(QB_NEW_EN_ORTHOGRAPHY_ERROR_IDS_1)
-</details>
-</details>
+Based on my verification, I can now provide the rewritten review comment. The key findings are:
+1. **SQLite Configuration**: The store uses WAL (Write-Ahead Logging) mode with a 5-second busy timeout, which provides good concurrency mitigation
+2. **Current Usage**: `seedAsset` is a private function called sequentially in loops, not concurrently
+3. **Idempotence Claim**: The comment "The function claims to be idempotent" is imprecise—`SeedBuiltinKnowledge` claims idempotence, but `seedAsset` itself does not
+4. **Actual Concurrency Risk**: A real race condition window exists *if* `seedAsset` is called concurrently for the same asset, but this is not the current usage pattern
+**Verify idempotence under concurrent seeding and document concurrency guarantees.**
+The Store interface uses individual SQL operations (no transactions), so concurrent `seedAsset` calls for the same asset could leave inconsistent state: a concurrent call could delete triggers/documents that another call just added, before the first call completes. However, SQLite's WAL mode + 5-second busy timeout mitigates this significantly.
+Since `seedAsset` is private and currently called only sequentially, this is a defensive hardening concern rather than an immediate bug. Recommend either: (1) document that concurrent seeding of the same asset is unsupported, or (2) implement atomic seeding using a transaction wrapper at the Store interface level or within `seedAsset`.
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In docs/knowledge/skill-developer/ADVANCED.md around line 101, the heading
-contains a typo "Dashbord Ideas:"; update it to "Dashboard Ideas:" by correcting
-the spelling of "Dashbord" to "Dashboard" so the heading reads "Dashboard
-Ideas:".
+internal/knowledge/builtin/factory.go lines 221-283: seedAsset performs multiple
+separate store operations (upsert item, delete/add triggers, delete/add
+documents) that are not atomic, so concurrent calls for the same asset can race
+and leave inconsistent state; either document that concurrent seeding of the
+same asset is unsupported, or make seeding atomic by wrapping the whole sequence
+in a transaction (use the Store's transaction API or add Begin/Commit/Rollback
+helpers) or serialize with a per-asset lock: start a tx, perform UpsertItem,
+DeleteTriggersForItem, AddTrigger(s), DeleteDocumentsForItem, UpsertDocument,
+then Commit (and Rollback on error), or if transactions are unavailable, acquire
+a mutex keyed by asset.Name around the whole function and release on completion;
+update comments to state the concurrency guarantee chosen.
 ```
 </details>
 
@@ -1031,313 +793,54 @@ Ideas:".
 
 ### Task 16: coderabbitai[bot]'s feedback
 
-**File:** `docs/knowledge/skill-developer/SKILL.md:220`
+**File:** `internal/knowledge/builtin/factory.go:265`
 
-**Minor grammar issue: hyphenate "Low-priority".**
-Per static analysis, "Low priority" should be hyphenated when used as a compound adjective.
+**Silently ignoring errors from AddTrigger for tags.**
+Lines 260-264 use `_, _ = store.AddTrigger(...)` which silently ignores errors when adding category tag triggers. This could lead to tags not being properly associated with assets without any indication of failure.
+Either handle the error or document why it's acceptable to ignore:
 ```diff
- ### WARN (Optional)
--- Low priority suggestions
-+- Low-priority suggestions
- - Advisory only, minimal enforcement
-```
-<details>
-<summary>📝 Committable suggestion</summary>
-> ‼️ **IMPORTANT**
-> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
-```suggestion
-### WARN (Optional)
-- Low-priority suggestions
-- Advisory only, minimal enforcement
-- **Use For**: Nice-to-have suggestions, informational reminders
-**Rarely used** - most skills are either BLOCK or SUGGEST.
-```
-</details>
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 LanguageTool</summary>
-[grammar] ~216-~216: Use a hyphen to join words.
-Context: ...t guidelines  ### WARN (Optional)  - Low priority suggestions - Advisory only, mi...
-(QB_NEW_EN_HYPHEN)
-</details>
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/knowledge/skill-developer/SKILL.md around lines 214 to 220, change the
-compound adjective "Low priority" to the hyphenated form "Low-priority" (e.g.,
-"Low-priority suggestions") to fix the grammar; update any other occurrences in
-that block to use "Low-priority" consistently.
-```
-</details>
-
----
-
-### Task 17: coderabbitai[bot]'s feedback
-
-**File:** `docs/spec/knowledge_registry.md:215`
-
-**Align decision naming between algorithm text and JSON example**
-Section “4. Threshold check” talks about emitting `DecisionNone`, but the JSON example below uses `"decision": "none"`. To avoid confusion about the actual wire value vs internal enum name, please standardize on a single canonical value (likely `"none"` to match Core Profile decisions) and update the text to say that the hook always returns `decision: "none"` with/without `meta.recommended` depending on the threshold.
-<details>
-<summary>🧰 Tools</summary>
-<details>
-<summary>🪛 markdownlint-cli2 (0.18.1)</summary>
-202-202: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-203-203: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-204-204: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-205-205: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-206-206: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-207-207: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-208-208: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-209-209: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-210-210: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-211-211: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-212-212: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-213-213: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
----
-214-214: Hard tabs
-Column: 1
-(MD010, no-hard-tabs)
-</details>
-</details>
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/spec/knowledge_registry.md around lines 194 to 215, the prose uses the
-enum-style name `DecisionNone` while the JSON example uses the wire value
-`"none"`; standardize to the canonical wire value and update the text and
-example so they match: change the algorithm description to state the hook always
-returns decision: "none" (not DecisionNone) and explain that meta.recommended is
-present only when the top score ≥ threshold, then adjust the JSON example
-text/metadata to reflect the same canonical `"none"` decision and consistency in
-wording.
-```
-</details>
-
----
-
-### Task 18: coderabbitai[bot]'s feedback
-
-**File:** `docs/spec/knowledge_registry.md:291`
-
-**Make `cosineSimilarity` example valid Go or mark it as pseudo-code**
-The `cosineSimilarity` snippet uses `sqrt(normA)` but Go only provides `math.Sqrt` (float64) and would require imports and casts to compile, plus a guard for zero norms:
-```go
-import "math"
-func cosineSimilarity(a, b []float32) float32 {
-    var dot, normA, normB float64
-    for i := range a {
-        av, bv := float64(a[i]), float64(b[i])
-        dot += av * bv
-        normA += av * av
-        normB += bv * bv
-    }
-    if normA == 0 || normB == 0 {
-        return 0
-    }
-    return float32(dot / (math.Sqrt(normA) * math.Sqrt(normB)))
-}
-```
-Either adjust the example toward something like this or call out that it’s pseudo‑code, so readers don’t copy a non‑compiling version.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/spec/knowledge_registry.md around lines 281 to 291, the cosineSimilarity
-snippet is not valid Go (uses sqrt without math import/casts and lacks a
-zero-norm guard); either convert it to compile-ready Go by using math.Sqrt with
-float64 accumulation and casts and add a check returning 0 for zero norms, or
-explicitly mark the block as pseudo-code and add a short note warning readers it
-won’t compile as-is.
-```
-</details>
-
----
-
-### Task 19: coderabbitai[bot]'s feedback
-
-**File:** `docs/spec/test_watch_feedback.md:520`
-
-<details>
-<summary>🧩 Analysis chain</summary>
-Script executed:
-```shell
-#!/bin/bash
-# Check file size and structure
-wc -l docs/spec/test_watch_feedback.md
-# Read section 8.1 around line 359 to understand hook directory specifications
-echo "=== Section 8.1 (around line 359) ==="
-sed -n '350,370p' docs/spec/test_watch_feedback.md
-# Read the section around lines 519-520 to understand the current documentation
-echo -e "\n=== Section around lines 519-520 ==="
-sed -n '510,530p' docs/spec/test_watch_feedback.md
-# Search for all references to .agentctl/hooks/ and settings.json
-echo -e "\n=== All references to .agentctl/hooks/ ==="
-rg -n "\.agentctl/hooks/" docs/spec/test_watch_feedback.md
-echo -e "\n=== All references to settings.json ==="
-rg -n "settings\.json" docs/spec/test_watch_feedback.md
-echo -e "\n=== All references to PostToolUse ==="
-rg -n "PostToolUse" docs/spec/test_watch_feedback.md
-```
-Repository: jkatigb/agentctl
----
-<shell_result>
-Repository: jkatigb/agentctl
-Exit code: 0
-stdout:
-```
-546 docs/spec/test_watch_feedback.md
-=== Section 8.1 (around line 359) ===
-## 8. Hook: `hooks/test_feedback`
-### 8.1 Event & Wiring
-- **Event:** `PostToolUse`\
-  Triggered after tools that can mutate the workspace (e.g.
-  edit/write/multi-edit/git apply).
-- **Wrapper:** A standard Claude hook wrapper under `.claude/hooks/`, similar to
-  `task-guard.sh` and `knowledge-router.sh`, that:
-  - Reads hook payload JSON from stdin.
-  - Invokes `agentctl run hooks/test_feedback --input -`.
-  - Emits `data.hook_output` as the hook’s JSON output.
-- **Settings:** The harness example SHOULD wire this hook for `PostToolUse`
-  events on write-like tools once implemented.
-### 8.2 Input
-`hooks/test_feedback` receives the standard `hook.Input` structure (see
-=== Section around lines 519-520 ===
-3. **`agentctl watch tests` CLI**
-   - Implement watch and `--once` / `--status-only` modes.
-   - Add basic parsers for Go, Pytest, and Jest/Vitest where cheap; otherwise
-     default to `summary` + `raw_tail`.
-4. **`hooks/test_feedback` Skill**
-   - Implement as an exec skill similar to `hooks/task_guard` and
-     `hooks/knowledge_router`.
-   - Add bash wrapper under `.agentctl/hooks/` and wire into
-     `.agentctl/settings.json` for `PostToolUse`.
-5. **Harness Integration**
-   - Provide an example `.agentctl/test-watch.yaml` in the harness repo.
-   - Document the workflow in `AGENTCTL.md`.
-6. **Future Enhancements**
-   - Optional history of runs (`test_runs` table).
-   - Deeper framework-specific parsing for richer failure reporting.
-   - Task-aware tagging of test runs.
-=== All references to .agentctl/hooks/ ===
-519:   - Add bash wrapper under `.agentctl/hooks/` and wire into
-=== All references to settings.json ===
-520:     `.agentctl/settings.json` for `PostToolUse`.
-=== All references to PostToolUse ===
-17:  `PostToolUse` hook after code edits, without having to explicitly run tests.
-46:  `PostToolUse`, keeping Claude’s integration surface consistent with other
-71:| **Feedback hook** | The `hooks/test_feedback` skill, wired on `PostToolUse`, that surfaces test failures to Claude. |
-355:- **Event:** `PostToolUse`\
-365:- **Settings:** The harness example SHOULD wire this hook for `PostToolUse`
-375:  "event": "PostToolUse",
-520:     `.agentctl/settings.json` for `PostToolUse`.
-```
-</shell_result>
----
-</details>
-Based on my verification, I found the actual inconsistency in the specification. The original review comment was partially correct but identifies the wrong issue. Here's what I found:
-**Section 8.1 (line 359)** specifies the wrapper should be under `.claude/hooks/` (not `.agentctl/hooks/`):
-- "A standard Claude hook wrapper under `.claude/hooks/`, similar to `task-guard.sh` and `knowledge-router.sh`"
-**Lines 519-520** (implementation tasks) specify `.agentctl/hooks/`:
-- "Add bash wrapper under `.agentctl/hooks/` and wire into `.agentctl/settings.json` for `PostToolUse`"
-This is a **path mismatch between specification and implementation task**, not just a settings file clarification issue.
----
-**Specification and implementation task paths diverge: section 8.1 specifies `.claude/hooks/` but line 519 specifies `.agentctl/hooks/`. Align both to use the same directory path.**
-The wrapper location should be consistent between the hook specification (section 8.1, line 354-363) and the implementation task (line 519). Currently, section 8.1 documents the wrapper under `.claude/hooks/`, while the implementation checklist on line 519 directs adding it under `.agentctl/hooks/`. Clarify which path is correct and update accordingly.
-<details>
-<summary>🤖 Prompt for AI Agents</summary>
-```
-In docs/spec/test_watch_feedback.md around lines 519-520 (and referencing
-section 8.1 at line 359), there is a path mismatch: the specification calls for
-a wrapper under `.claude/hooks/` but the implementation task directs
-`.agentctl/hooks/`; reconcile by choosing a single canonical path and updating
-both places to match (either change section 8.1 to `.agentctl/hooks/` or change
-the task at 519-520 to `.claude/hooks/`), and ensure any related references
-(e.g., wiring into settings.json) are updated to reference the chosen directory
-consistently.
-```
-</details>
-
----
-
-### Task 20: coderabbitai[bot]'s feedback
-
-**File:** `internal/storage/knowledge/store.go:368`
-
-**Case mismatch in keyword search.**
-`LOWER(t.pattern)` lowercases the stored pattern, but the input keywords (line 366) are not lowercased. A search for `["API"]` won't match a trigger pattern `"api"`.
-```diff
- 	for i, kw := range keywords {
- 		if i > 0 {
- 			query += ", "
- 		}
- 		query += "?"
--		args[i] = kw
-+		args[i] = strings.ToLower(kw)
+ 	for _, tag := range tags {
+-		_, _ = store.AddTrigger(ctx, knowledge.Trigger{
++		if _, err := store.AddTrigger(ctx, knowledge.Trigger{
+ 			ItemID:      item.ID,
+ 			TriggerKind: knowledge.TriggerKeyword,
+ 			Pattern:     tag,
+-		})
++		}); err != nil {
++			// Log but don't fail the entire seed for tag triggers
++			// Tags are supplementary to the primary keywords
++			// Consider using zerolog here if logging is added
++		}
  	}
 ```
-Add `"strings"` to the imports.
 <details>
 <summary>📝 Committable suggestion</summary>
 > ‼️ **IMPORTANT**
 > Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
 ```suggestion
-WHERE t.trigger_kind = 'keyword' AND LOWER(t.pattern) IN (`
-	args := make([]any, len(keywords))
-	for i, kw := range keywords {
-		if i > 0 {
-			query += ", "
+	for _, tag := range tags {
+		if _, err := store.AddTrigger(ctx, knowledge.Trigger{
+			ItemID:      item.ID,
+			TriggerKind: knowledge.TriggerKeyword,
+			Pattern:     tag,
+		}); err != nil {
+			// Log but don't fail the entire seed for tag triggers
+			// Tags are supplementary to the primary keywords
+			// Consider using zerolog here if logging is added
 		}
-		query += "?"
-		args[i] = strings.ToLower(kw)
 	}
-	query += `) ORDER BY i.priority DESC, i.name`
 ```
 </details>
 <details>
 <summary>🤖 Prompt for AI Agents</summary>
 ```
-In internal/storage/knowledge/store.go around lines 359 to 368, the SQL compares
-LOWER(t.pattern) to the provided keywords but the keywords in args are not
-lowercased; change the loop that builds args so each kw is converted with
-strings.ToLower(kw) before assigning to args[i], and add "strings" to the file
-imports.
+In internal/knowledge/builtin/factory.go around lines 259-265 the call to
+store.AddTrigger ignores errors (using "_, _ = ..."), which can hide failures
+when attaching tag triggers; change it to capture the returned error and handle
+it — either log a contextual warning/error including item.ID and tag and
+continue if tag creation is best-effort, or propagate/return the error if tag
+creation must succeed (choose the behavior consistent with surrounding
+transactional semantics).
 ```
 </details>
 
@@ -1345,5 +848,6 @@ imports.
 
 ## Summary
 
-**Total tasks:** 20
-- 📝 Review comments: 20
+**Total tasks:** 16
+- 🔴 CI failures: 8
+- 📝 Review comments: 8

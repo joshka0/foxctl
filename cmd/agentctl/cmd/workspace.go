@@ -205,9 +205,9 @@ func initWorkspace(workspaceDir string, agents []builtin.Asset, force, dryRun bo
 	claudeDir := filepath.Join(workspaceDir, ".claude")
 	agentsDir := filepath.Join(claudeDir, "agents")
 
-	var created []string
-	var skipped []string
-	var errors []string
+	created := make([]string, 0, len(agents))
+	skipped := make([]string, 0, len(agents))
+	errors := []string{}
 
 	// Create directories
 	if !dryRun {
@@ -254,6 +254,9 @@ func initWorkspace(workspaceDir string, agents []builtin.Asset, force, dryRun bo
 			len(created), len(skipped), len(errors)),
 	}
 
+	if len(errors) > 0 {
+		return result, fmt.Errorf("failed to write %d agent file(s)", len(errors))
+	}
 	return result, nil
 }
 

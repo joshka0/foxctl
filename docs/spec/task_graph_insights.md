@@ -168,24 +168,24 @@ graph insights for a workspace.
 
   ```jsonc
   {
-  	"workspace_id": "...",
-  	"generated_at": "2025-11-27T12:34:56Z",
-  	"nodes": [
-  		{
-  			"task_id": "T-123",
-  			"title": "...",
-  			"status": "pending",
-  			"pagerank": 0.0123,
-  			"critical_path_score": 5.0,
-  			"in_degree": 3,
-  			"out_degree": 1
-  		}
-  		// ...
-  	],
-  	"topological_order": ["T-1", "T-2", "T-3"],
-  	"cycles": [
-  		["T-10", "T-20", "T-10"]
-  	]
+    "workspace_id": "...",
+    "generated_at": "2025-11-27T12:34:56Z",
+    "nodes": [
+      {
+        "task_id": "T-123",
+        "title": "...",
+        "status": "pending",
+        "pagerank": 0.0123,
+        "critical_path_score": 5.0,
+        "in_degree": 3,
+        "out_degree": 1
+      }
+      // ...
+    ],
+    "topological_order": ["T-1", "T-2", "T-3"],
+    "cycles": [
+      ["T-10", "T-20", "T-10"]
+    ]
   }
   ```
 

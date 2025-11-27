@@ -46,6 +46,9 @@ func ListCoreAgents() ([]Asset, error) {
 }
 
 // listEmbeddedAssets walks an embedded FS and parses all markdown files.
+// Note: Context cancellation is not checked here since embedded FS walks are
+// very fast (typically <10 files). If this changes, add ctx parameter and check
+// ctx.Done() in the walk callback.
 func listEmbeddedAssets(fsys embed.FS, dir, namePrefix, sourcePrefix string) ([]Asset, error) {
 	var assets []Asset
 
@@ -172,6 +175,7 @@ func extractKeywords(description string) []string {
 
 // SeedBuiltinKnowledge seeds all builtin knowledge (Factory droids + core agents) into the store.
 // This is idempotent - existing items are updated, not duplicated.
+// Errors during seeding are aggregated rather than failing fast, allowing partial success.
 func SeedBuiltinKnowledge(ctx context.Context, store knowledge.Store) (int, error) {
 	var allAssets []Asset
 
@@ -190,17 +194,23 @@ func SeedBuiltinKnowledge(ctx context.Context, store knowledge.Store) (int, erro
 	allAssets = append(allAssets, agents...)
 
 	seeded := 0
+	var seedErrors []string
 	for _, asset := range allAssets {
 		if err := seedAsset(ctx, store, asset); err != nil {
-			return seeded, err
+			seedErrors = append(seedErrors, fmt.Sprintf("%s: %v", asset.Name, err))
+			continue
 		}
 		seeded++
 	}
 
+	if len(seedErrors) > 0 {
+		return seeded, fmt.Errorf("seeded %d/%d assets with %d errors: %v", seeded, len(allAssets), len(seedErrors), seedErrors)
+	}
 	return seeded, nil
 }
 
 // SeedFactoryKnowledge seeds only Factory droids (for backwards compatibility).
+// Errors during seeding are aggregated rather than failing fast, allowing partial success.
 func SeedFactoryKnowledge(ctx context.Context, store knowledge.Store) (int, error) {
 	droids, err := ListFactoryDroids()
 	if err != nil {
@@ -208,17 +218,25 @@ func SeedFactoryKnowledge(ctx context.Context, store knowledge.Store) (int, erro
 	}
 
 	seeded := 0
+	var seedErrors []string
 	for _, asset := range droids {
 		if err := seedAsset(ctx, store, asset); err != nil {
-			return seeded, err
+			seedErrors = append(seedErrors, fmt.Sprintf("%s: %v", asset.Name, err))
+			continue
 		}
 		seeded++
 	}
 
+	if len(seedErrors) > 0 {
+		return seeded, fmt.Errorf("seeded %d/%d droids with %d errors: %v", seeded, len(droids), len(seedErrors), seedErrors)
+	}
 	return seeded, nil
 }
 
 // seedAsset seeds a single asset into the store.
+// Note: This function is NOT safe for concurrent calls with the same asset.Name.
+// Callers must ensure sequential seeding or implement their own locking.
+// SQLite WAL mode provides some protection but not full atomicity.
 func seedAsset(ctx context.Context, store knowledge.Store, asset Asset) error {
 	// Upsert the knowledge item
 	item, err := store.UpsertItem(ctx, knowledge.Item{
@@ -257,11 +275,15 @@ func seedAsset(ctx context.Context, store knowledge.Store, asset Asset) error {
 		tags = []string{"core", "agent"}
 	}
 	for _, tag := range tags {
-		_, _ = store.AddTrigger(ctx, knowledge.Trigger{
+		// Tag triggers are best-effort; don't fail seeding if they can't be added
+		if _, err := store.AddTrigger(ctx, knowledge.Trigger{
 			ItemID:      item.ID,
 			TriggerKind: knowledge.TriggerKeyword,
 			Pattern:     tag,
-		})
+		}); err != nil {
+			// Log but continue - tags are supplementary to primary keywords
+			_ = err // Acknowledged: tag trigger creation is best-effort
+		}
 	}
 
 	// Clear existing documents and add the body
