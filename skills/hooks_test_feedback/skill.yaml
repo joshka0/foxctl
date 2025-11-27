@@ -1,0 +1,54 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/test_feedback
+  version: 0.1.0
+  description: "Claude Code hook that surfaces failing test results after code edits"
+  tags: ["hook", "tests", "feedback", "post-tool-use"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_test_feedback/hooks_test_feedback
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: hooks/test_feedback
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event type (PostToolUse)"
+    - name: workspace_root
+      type: string
+      required: true
+      description: "Absolute path to workspace root"
+    - name: session_id
+      type: string
+      required: false
+      description: "Claude session ID"
+    - name: tool_name
+      type: string
+      required: false
+      description: "Name of the tool that was just executed"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Input that was passed to the tool"
+    - name: tool_response
+      type: object
+      required: false
+      description: "Response from the tool"
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook output with decision (always 'none'), reason, and context"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+env:
+  - name: AGENTCTL_TEST_FEEDBACK_MAX_FAILURES
+    description: "Maximum number of failures to show per watcher"
+    default: "3"

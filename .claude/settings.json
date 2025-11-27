@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Read:*",
+      "Bash(make):*",
+      "Bash(go):*",
+      "Bash(git):*"
+    ],
+    "defaultMode": "askEdits"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/task-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/knowledge-router.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/test-feedback.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -2,8 +2,8 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: todo/manage
-  version: 0.1.0
-  description: "Manage nested TODOs with dependencies and completion notes"
+  version: 0.2.0
+  description: "Manage nested TODOs with dependencies, completion notes, and active task tracking"
   tags: ["todo", "planning", "tasks"]
 distribution:
   type: exec
@@ -18,14 +18,18 @@ signature:
     - name: operation
       type: string
       required: false
-      description: "add|complete|list (default list)"
-    - name: store_path
+      description: "add|complete|list|get_active|set_active|clear_active|ensure_active (default list)"
+    - name: workspace_id
       type: string
       required: false
-      description: "Location of the todo store (default: ~/.agentctl/todo/tasks.json)"
+      description: "Workspace identifier for task scoping (default: current working directory)"
 returns:
   - name: tasks
     type: array
+  - name: task
+    type: object
+  - name: active
+    type: boolean
 capabilities:
   network: "none"
   filesystem:

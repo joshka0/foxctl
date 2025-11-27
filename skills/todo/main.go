@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,20 +14,21 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/oklog/ulid/v2"
+	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 const (
 	statusPending = "pending"
-	statusDone    = "done"
-	storeVersion  = "1"
+	statusDone    = "completed"
 )
 
 type input struct {
-	Operation string           `json:"operation"`
-	StorePath string           `json:"store_path"`
-	Add       *addRequest      `json:"add"`
-	Complete  *completeRequest `json:"complete"`
+	Operation    string           `json:"operation"`
+	WorkspaceID  string           `json:"workspace_id"`
+	Add          *addRequest      `json:"add"`
+	Complete     *completeRequest `json:"complete"`
+	SetActive    *setActiveReq    `json:"set_active"`
+	EnsureActive *ensureActiveReq `json:"ensure_active"`
 }
 
 type addRequest struct {
@@ -36,6 +36,7 @@ type addRequest struct {
 	Description string   `json:"description"`
 	ParentID    string   `json:"parent_id"`
 	DependsOn   []string `json:"depends_on"`
+	ScopePath   string   `json:"scope_path"`
 }
 
 type completeRequest struct {
@@ -44,15 +45,21 @@ type completeRequest struct {
 	Gotchas string `json:"gotchas"`
 }
 
-type store struct {
-	Version string  `json:"version"`
-	Tasks   []*task `json:"tasks"`
+type setActiveReq struct {
+	TaskID string `json:"task_id"`
 }
 
-type task struct {
+type ensureActiveReq struct {
+	DefaultTitle string `json:"default_title"`
+	ScopePath    string `json:"scope_path"`
+}
+
+// taskOutput is the JSON representation of a task for envelope output.
+type taskOutput struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
+	ScopePath   string   `json:"scope_path,omitempty"`
 	ParentID    string   `json:"parent_id,omitempty"`
 	Children    []string `json:"children,omitempty"`
 	DependsOn   []string `json:"depends_on,omitempty"`
@@ -86,59 +93,121 @@ func main() {
 	}
 }
 
-func run(_ context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
-	storePath := in.StorePath
-	if storePath == "" {
-		storePath = filepath.Join(cfg.Home, "todo", "tasks.json")
+func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
+	// Open SQLite-backed task store
+	store, err := tasks.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return fmt.Errorf("open task store: %w", err)
 	}
+	defer func() { _ = store.Close() }()
+
 	op := strings.ToLower(strings.TrimSpace(in.Operation))
 	if op == "" {
 		op = "list"
 	}
 
-	s, err := loadStore(storePath)
-	if err != nil {
-		return err
+	workspaceID := in.WorkspaceID
+	if workspaceID == "" {
+		// Default to current working directory as workspace ID
+		workspaceID, _ = os.Getwd()
 	}
 
 	var data map[string]any
 
 	switch op {
 	case "add":
-		task, err := handleAdd(s, in.Add)
+		task, allTasks, err := handleAdd(ctx, store, workspaceID, in.Add)
 		if err != nil {
-			return err
-		}
-		if err := saveStore(storePath, s); err != nil {
 			return err
 		}
 		data = map[string]any{
 			"task":          task,
-			"total_tasks":   len(s.Tasks),
-			"pending_tasks": countStatus(s, statusPending),
+			"total_tasks":   len(allTasks),
+			"pending_tasks": countPending(allTasks),
 			"summary":       fmt.Sprintf("added task %s", task.ID),
 		}
+
 	case "complete":
-		task, err := handleComplete(in.Complete, s)
+		task, allTasks, err := handleComplete(ctx, store, workspaceID, in.Complete)
 		if err != nil {
-			return err
-		}
-		if err := saveStore(storePath, s); err != nil {
 			return err
 		}
 		data = map[string]any{
 			"task":          task,
-			"pending_tasks": countStatus(s, statusPending),
+			"pending_tasks": countPending(allTasks),
 			"summary":       fmt.Sprintf("completed task %s", task.ID),
 		}
+
 	case "list":
-		data = map[string]any{
-			"tasks":         s.Tasks,
-			"total_tasks":   len(s.Tasks),
-			"pending_tasks": countStatus(s, statusPending),
+		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
+			return err
 		}
+		data = map[string]any{
+			"tasks":         toOutputList(allTasks),
+			"total_tasks":   len(allTasks),
+			"pending_tasks": countPending(allTasks),
+		}
+
+	case "get_active":
+		task, found, err := store.GetActive(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			data = map[string]any{
+				"active": false,
+				"task":   nil,
+			}
+		} else {
+			data = map[string]any{
+				"active": true,
+				"task":   toOutput(task),
+			}
+		}
+
+	case "set_active":
+		if in.SetActive == nil || in.SetActive.TaskID == "" {
+			return fmt.Errorf("set_active.task_id is required")
+		}
+		task, err := store.SetActive(ctx, workspaceID, in.SetActive.TaskID)
+		if err != nil {
+			return err
+		}
+		data = map[string]any{
+			"task":    toOutput(task),
+			"summary": fmt.Sprintf("set active task to %s", task.ID),
+		}
+
+	case "clear_active":
+		if err := store.ClearActive(ctx, workspaceID); err != nil {
+			return err
+		}
+		data = map[string]any{
+			"summary": "cleared active task",
+		}
+
+	case "ensure_active":
+		title := "Unnamed task"
+		scopePath := ""
+		if in.EnsureActive != nil {
+			if in.EnsureActive.DefaultTitle != "" {
+				title = in.EnsureActive.DefaultTitle
+			}
+			scopePath = in.EnsureActive.ScopePath
+		}
+		task, created, err := store.EnsureActive(ctx, workspaceID, title, scopePath)
+		if err != nil {
+			return err
+		}
+		data = map[string]any{
+			"task":    toOutput(task),
+			"created": created,
+			"summary": fmt.Sprintf("active task is %s (created=%v)", task.ID, created),
+		}
+
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|complete|list)", op)
+		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active)", op)
 	}
 
 	return rc.Emit("todo/manage", data, "application/json", envelope.Meta{
@@ -147,90 +216,130 @@ func run(_ context.Context, rc *runner.RunnerContext, cfg config.Config, in inpu
 	})
 }
 
-func handleAdd(s *store, req *addRequest) (*task, error) {
+func handleAdd(ctx context.Context, store tasks.Store, workspaceID string, req *addRequest) (*taskOutput, []tasks.Task, error) {
 	if req == nil {
-		return nil, fmt.Errorf("add payload is required")
+		return nil, nil, fmt.Errorf("add payload is required")
 	}
 	if err := validateText("title", req.Title); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := validateText("description", req.Description); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
 	if req.Title == "" {
-		return nil, fmt.Errorf("title is required")
+		return nil, nil, fmt.Errorf("title is required")
 	}
 
-	index := buildIndex(s)
+	// Validate parent and dependencies exist
+	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	index := buildIndex(allTasks)
+
 	if req.ParentID != "" {
 		parent, ok := index[req.ParentID]
 		if !ok {
-			return nil, fmt.Errorf("parent task %s not found", req.ParentID)
+			return nil, nil, fmt.Errorf("parent task %s not found", req.ParentID)
 		}
 		if parent.Status == statusDone {
-			return nil, fmt.Errorf("cannot add child to completed task %s", req.ParentID)
+			return nil, nil, fmt.Errorf("cannot add child to completed task %s", req.ParentID)
 		}
 	}
 	if err := validateDependencies(req.DependsOn, index); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	id := ulid.Make().String()
-	task := &task{
-		ID:          id,
+	newTask := tasks.Task{
+		WorkspaceID: workspaceID,
 		Title:       req.Title,
 		Description: req.Description,
+		ScopePath:   req.ScopePath,
 		ParentID:    req.ParentID,
 		DependsOn:   dedupe(req.DependsOn),
 		Status:      statusPending,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
+
+	added, err := store.Add(ctx, newTask)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Update parent's children if needed
 	if req.ParentID != "" {
 		parent := index[req.ParentID]
-		parent.Children = append(parent.Children, task.ID)
-	}
-	s.Tasks = append(s.Tasks, task)
-	return task, nil
-}
-
-func handleComplete(req *completeRequest, s *store) (*task, error) {
-	if req == nil {
-		return nil, fmt.Errorf("complete payload is required")
-	}
-	if req.ID == "" {
-		return nil, fmt.Errorf("complete.id is required")
-	}
-	if err := validateText("notes", req.Notes); err != nil {
-		return nil, err
-	}
-	if err := validateText("gotchas", req.Gotchas); err != nil {
-		return nil, err
-	}
-
-	index := buildIndex(s)
-	task, ok := index[req.ID]
-	if !ok {
-		return nil, fmt.Errorf("task %s not found", req.ID)
-	}
-	if task.Status == statusDone {
-		return nil, fmt.Errorf("task %s already completed", req.ID)
-	}
-	for _, dep := range task.DependsOn {
-		if depTask, ok := index[dep]; ok {
-			if depTask.Status != statusDone {
-				return nil, fmt.Errorf("task %s depends on incomplete task %s", req.ID, dep)
-			}
-		} else {
-			return nil, fmt.Errorf("dependency %s for task %s not found", dep, req.ID)
+		parent.Children = append(parent.Children, added.ID)
+		if _, err := store.Update(ctx, *parent); err != nil {
+			return nil, nil, fmt.Errorf("update parent children: %w", err)
 		}
 	}
 
+	// Refresh task list
+	allTasks, err = store.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return toOutput(added), allTasks, nil
+}
+
+func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, req *completeRequest) (*taskOutput, []tasks.Task, error) {
+	if req == nil {
+		return nil, nil, fmt.Errorf("complete payload is required")
+	}
+	if req.ID == "" {
+		return nil, nil, fmt.Errorf("complete.id is required")
+	}
+	if err := validateText("notes", req.Notes); err != nil {
+		return nil, nil, err
+	}
+	if err := validateText("gotchas", req.Gotchas); err != nil {
+		return nil, nil, err
+	}
+
+	task, err := store.Get(ctx, req.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("task %s not found", req.ID)
+	}
+	if task.Status == statusDone {
+		return nil, nil, fmt.Errorf("task %s already completed", req.ID)
+	}
+
+	// Check dependencies
+	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	index := buildIndex(allTasks)
+
+	for _, dep := range task.DependsOn {
+		if depTask, ok := index[dep]; ok {
+			if depTask.Status != statusDone {
+				return nil, nil, fmt.Errorf("task %s depends on incomplete task %s", req.ID, dep)
+			}
+		} else {
+			return nil, nil, fmt.Errorf("dependency %s for task %s not found", dep, req.ID)
+		}
+	}
+
+	now := time.Now().UTC()
 	task.Status = statusDone
-	task.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	task.CompletedAt = &now
 	task.Notes = strings.TrimSpace(req.Notes)
 	task.Gotchas = strings.TrimSpace(req.Gotchas)
-	return task, nil
+
+	updated, err := store.Update(ctx, task)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Refresh task list
+	allTasks, err = store.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return toOutput(updated), allTasks, nil
 }
 
 func validateText(field, value string) error {
@@ -240,7 +349,7 @@ func validateText(field, value string) error {
 	return nil
 }
 
-func validateDependencies(depends []string, index map[string]*task) error {
+func validateDependencies(depends []string, index map[string]*tasks.Task) error {
 	seen := make(map[string]struct{})
 	for _, dep := range depends {
 		if dep == "" {
@@ -257,46 +366,10 @@ func validateDependencies(depends []string, index map[string]*task) error {
 	return nil
 }
 
-func loadStore(path string) (*store, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return &store{
-				Version: storeVersion,
-				Tasks:   []*task{},
-			}, nil
-		}
-		return nil, fmt.Errorf("read store: %w", err)
-	}
-	var s store
-	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("parse store: %w", err)
-	}
-	if s.Tasks == nil {
-		s.Tasks = []*task{}
-	}
-	return &s, nil
-}
-
-func saveStore(path string, s *store) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir store dir: %w", err)
-	}
-	buf, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode store: %w", err)
-	}
-	if err := os.WriteFile(path, buf, 0o644); err != nil {
-		return fmt.Errorf("write store: %w", err)
-	}
-	return nil
-}
-
-func buildIndex(s *store) map[string]*task {
-	idx := make(map[string]*task, len(s.Tasks))
-	for _, t := range s.Tasks {
-		idx[t.ID] = t
+func buildIndex(taskList []tasks.Task) map[string]*tasks.Task {
+	idx := make(map[string]*tasks.Task, len(taskList))
+	for i := range taskList {
+		idx[taskList[i].ID] = &taskList[i]
 	}
 	return idx
 }
@@ -320,14 +393,42 @@ func dedupe(in []string) []string {
 	return out
 }
 
-func countStatus(s *store, status string) int {
+func countPending(taskList []tasks.Task) int {
 	count := 0
-	for _, t := range s.Tasks {
-		if t.Status == status {
+	for _, t := range taskList {
+		if t.Status == statusPending {
 			count++
 		}
 	}
 	return count
+}
+
+func toOutput(t tasks.Task) *taskOutput {
+	out := &taskOutput{
+		ID:          t.ID,
+		Title:       t.Title,
+		Description: t.Description,
+		ScopePath:   t.ScopePath,
+		ParentID:    t.ParentID,
+		Children:    t.Children,
+		DependsOn:   t.DependsOn,
+		Status:      t.Status,
+		CreatedAt:   t.CreatedAt.Format(time.RFC3339),
+		Notes:       t.Notes,
+		Gotchas:     t.Gotchas,
+	}
+	if t.CompletedAt != nil {
+		out.CompletedAt = t.CompletedAt.Format(time.RFC3339)
+	}
+	return out
+}
+
+func toOutputList(taskList []tasks.Task) []*taskOutput {
+	out := make([]*taskOutput, len(taskList))
+	for i, t := range taskList {
+		out[i] = toOutput(t)
+	}
+	return out
 }
 
 func fail(command, code string, err error) {

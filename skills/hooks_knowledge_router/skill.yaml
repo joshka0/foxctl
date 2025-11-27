@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/knowledge_router
+  version: 0.1.0
+  description: "Claude Code hook that surfaces relevant knowledge packs based on context"
+  tags: ["hook", "knowledge", "router", "advisory"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_knowledge_router/knowledge_router
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: hooks/knowledge_router
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event type (e.g., PreToolUse, UserPromptSubmit)"
+    - name: workspace_root
+      type: string
+      required: true
+      description: "Absolute path to workspace root"
+    - name: session_id
+      type: string
+      required: false
+      description: "Claude session identifier"
+    - name: tool_name
+      type: string
+      required: false
+      description: "Name of the tool being used (for PreToolUse)"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Raw JSON input to the tool"
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook output with decision (always 'none'), context hint, and recommendations"
+  - name: recommendations
+    type: array
+    description: "List of recommended knowledge packs with scores"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+env:
+  - name: AGENTCTL_KNOWLEDGE_THRESHOLD
+    description: "Minimum score threshold for recommendations (0.0-1.0)"
+    default: "0.5"
