@@ -271,6 +271,15 @@ Conceptual `TrajectoryEpisode` shape:
     - `checks` (list of `{name, status}`).
   - `metrics` (object, optional):
     - `tool_calls` (int), `duration_ms` (int), etc.
+    - `loc_added`, `loc_deleted`, `files_touched` (ints) – derived from diffs.
+    - `review_iterations` (int), `review_latency_ms` (int) – number of review
+      cycles and total wall-clock latency before acceptance or failure.
+    - `tests_run` (int), `tests_failed` (int) – tests associated with the
+      episode.
+    - `maintainability_style_score` (float, 0.0–1.0) – coarse score reflecting
+      adherence to workspace best practices and coding style, primarily derived
+      from objective signals such as lint findings, complexity/duplication
+      changes, and optional reviewer tags.
 
 - `meta` (object):
   - `job_id`, `trace_id`, `review_id`, `agent_actor_id`, `llm_model`, etc.
@@ -292,6 +301,104 @@ The exporter SHOULD:
 
 - Use agent input signatures as `input` for the episode.
 - Use final agent outputs + review artifacts as `output` and `metrics`.
+
+### 6.3 Signature-to-Metrics Mapping (Conceptual)
+
+The following table summarizes how existing dspy-go agent signatures map onto
+trajectory episode fields, metrics, and underlying artifacts:
+
+| Role           | Primary signature inputs                                                                                                                               | Episode input / meta fields                                                                                                                                                    | Episode metrics & review signals                                                                                                                                                                             | Primary artifacts / sources                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Coding Agent   | `goal`, `description`, `workspace_id`, `epic_id`, `task_id`, `scope_paths`, `constraints`, `mode` (see `dspy_go_agents.md` §6.1)                       | `input.user_request`, `input.goal`, `input.description`, `input.constraints`, `input.context_summary`, plus `workspace_id` / `epic_id` / `task_id` and `scope_paths` in `meta` | `metrics.tool_calls`, `metrics.duration_ms`, `metrics.loc_added`, `metrics.loc_deleted`, `metrics.files_touched`, `metrics.tests_run`, `metrics.tests_failed`                                                | CAS diffs and changed files, tool/job envelopes, telemetry events, test logs                                        |
+| Planning Agent | `workspace_id`, `epic_id`/`root_task_id`, `goal`, `description`, `scope_paths`, current task list and graph insights (see §6.2 in `dspy_go_agents.md`) | `input.user_request`, `input.goal`, `input.description`, `input.context_summary` (often a summary of task graph state), plus `workspace_id` / `epic_id` in `meta`              | `metrics.tool_calls`, `metrics.duration_ms` and optional plan-size or graph metrics (non-normative)                                                                                                          | Plan deltas, mailbox messages, task/graph snapshots, CAS traces                                                     |
+| Review Agent   | `ReviewInput` (workspace/task, goal/description, files/diff, constraints; see `dspy_go_agents.md` §6.3)                                                | `input.user_request` (e.g. "please review T-123"), `input.goal`, `input.description`, `input.context_summary` (short diff summary and scope), plus `task_id` in `meta`         | `output.review_outcome.status`, `output.review_outcome.checks`, `metrics.review_iterations`, `metrics.review_latency_ms`, `metrics.tests_run`, `metrics.tests_failed`, `metrics.maintainability_style_score` | Review artifacts from `review_gate.md` (structured findings, labels, checks), CAS diffs and logs, lint/test outputs |
+
+This mapping is intended as a reference when adding new agent roles or
+fine-tuning which fields and metrics to include in exported episodes.
+
+### 6.4 Optimization Objectives and Weighting (Non-Normative)
+
+Offline optimizers (GEPA, MIPRO, SIMBA-style) operating over trajectories MAY
+combine episode metrics into a multi-objective score vector. A typical set of
+objectives could include:
+
+- **Success / correctness** – prefer episodes where `output.status = "ok"` and
+  any associated reviews pass.
+- **Spec and prompt adherence** – derived from review findings that flag
+  requirement violations or missing behaviors.
+- **Safety and robustness** – emphasized when security/performance findings are
+  present or when follow-up bug-fix episodes appear soon after completion.
+- **Maintainability and style** – using `metrics.maintainability_style_score`
+  and related lint/complexity signals as a lower-weight but still meaningful
+  objective.
+- **Efficiency** – prefer lower `metrics.review_iterations`, lower
+  `metrics.review_latency_ms`, and reasonable `metrics.tool_calls` / token
+  usage, without sacrificing the higher-priority objectives above.
+
+Exact weights and aggregation formulas are left to implementations. This spec
+only standardizes the **inputs** (episode fields and metrics) so that workspaces
+can experiment with different optimizers without changing the core trajectory
+schema.
+
+### 6.4.1 Visual Sketches
+
+High-level flow from signatures to episodes to optimizers:
+
+```text
+Agent Signatures ──┐
+                   │
+                   ▼
+Trajectory Episodes
+                   │
+                   ▼
+  GEPA / MIPRO / SIMBA-style optimizers
+       (multi-objective tuning)
+```
+
+Role-specific view (conceptual only):
+
+```text
+Coding Agent  : Signature → edits/tests → metrics (loc, tests, duration)
+Planning Agent: Signature → plans/graph ops → metrics (tool_calls, duration)
+Review Agent  : ReviewInput/Output → review artifacts → metrics
+                               (iterations, latency, tests, maintainability_style_score)
+```
+
+### 6.5 Visual Sketches (Non-Normative)
+
+High-level flow from user intent and signatures to optimizers:
+
+```text
+UserRequestCapture ──┐
+                     │
+Coder / Planner / Reviewer signatures
+  (see dspy_go_agents.md §6.x)
+                     │
+                     ▼
+      Trajectory + TrajectoryEvents
+                     │
+     (jobs + envelopes + CAS)
+                     │
+                     ▼
+          TrajectoryEpisode
+     (input, output, metrics, meta)
+                     │
+                     ▼
+  GEPA / MIPRO / SIMBA-style optimizers
+       (multi-objective tuning)
+```
+
+Role-specific view (conceptual only):
+
+```text
+Coding Agent  : Signature → edits/tests → metrics (loc, tests, duration)
+Planning Agent: Signature → plans/graph ops → metrics (tool_calls, duration)
+Review Agent  : ReviewInput/Output → review artifacts → metrics
+                               (iterations, latency, tests, maintainability_style_score)
+```
+
+These sketches are intended as an orientation aid when wiring new agent roles or
+metrics into the trajectory exporter and downstream optimizers.
 
 ---
 

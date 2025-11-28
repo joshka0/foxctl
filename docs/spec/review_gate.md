@@ -269,6 +269,26 @@ Downstream agents can use the structured findings and tags to:
 - Filter by concern (e.g. show only `security` or `performance` findings).
 - Decide whether it is safe to advance a task to `completed`.
 
+## Review Quality Metrics (Conceptual)
+
+Review artifacts and trajectories SHOULD carry a small set of derived metrics to
+support analysis and offline optimizers. Non-normative examples include:
+
+- `loc_added`, `loc_deleted`, `files_touched` – basic change size signals.
+- `review_iterations` – number of review cycles for a task before acceptance.
+- `review_latency_ms` – wall-clock latency between first review request and
+  final acceptance or failure.
+- `tests_run` / `tests_failed` – number of test runs and failures associated
+  with this review episode.
+- `maintainability_style_score` – a coarse score (e.g. 0.0–1.0) reflecting
+  adherence to workspace best practices and coding style, primarily derived from
+  objective signals such as lint findings, complexity/duplication changes, and
+  optional reviewer tags.
+
+These metrics are derived from existing artifacts (diffs, test logs, lint
+results, and review findings) and SHOULD be exposed in trajectory exports
+(`dspy_trajectory_capture.md`) rather than as new wire-level fields.
+
 ## APIs / Skills
 
 The review gate extends the `todo/manage` skill with additional operations and
