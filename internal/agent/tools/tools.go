@@ -143,7 +143,7 @@ func (r *Registry) wrapWithTelemetry(
 			ToolName:  name,
 			Args:      args,
 			Result:    result,
-			Duration:  duration,
+			Duration:  types.Duration(duration),
 			Timestamp: start,
 		}
 		if err != nil {

@@ -147,7 +147,7 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 		WorkspaceID:   workspace,
 		ActorID:       fmt.Sprintf("dspy:%s", dspyRole),
 		MaxIterations: dspyMaxIter,
-		Timeout:       time.Duration(dspyTimeoutMins) * time.Minute,
+		Timeout:       types.Duration(time.Duration(dspyTimeoutMins) * time.Minute),
 		LLMProvider:   dspyLLMProvider,
 		LLMModel:      dspyLLMModel,
 		LLMAPIKey:     os.Getenv("AGENTCTL_LLM_API_KEY"), // Get from env

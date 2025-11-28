@@ -51,6 +51,10 @@ type Config struct {
 	// SpawnHandler is called when an agent requests to spawn subagents.
 	// If nil, spawn requests return a "pending" status without actual spawning.
 	SpawnHandler SpawnHandler
+
+	// MaxConcurrentAgents is the maximum number of concurrent agent sessions.
+	// If > 0, Spawn() atomically enforces this limit to avoid TOCTOU races.
+	MaxConcurrentAgents int
 }
 
 // SpawnHandler processes spawn requests from agents.
@@ -104,8 +108,8 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = r.config.DefaultMaxIterations
 	}
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = r.config.DefaultTimeout
+	if cfg.Timeout.Duration() <= 0 {
+		cfg.Timeout = types.Duration(r.config.DefaultTimeout)
 	}
 	if cfg.LLMProvider == "" {
 		cfg.LLMProvider = r.config.LLMProvider
@@ -183,8 +187,14 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		cancel:    cancel,
 	}
 
-	// Store session
+	// Store session (atomic with limit check to avoid TOCTOU race)
 	r.mu.Lock()
+	if r.config.MaxConcurrentAgents > 0 && len(r.sessions) >= r.config.MaxConcurrentAgents {
+		r.mu.Unlock()
+		cancel() // Cancel the session context since we won't use it
+		return nil, fmt.Errorf("resource_exhausted: max concurrent agents reached (current: %d, max: %d)",
+			len(r.sessions), r.config.MaxConcurrentAgents)
+	}
 	r.sessions[sessionID] = session
 	r.mu.Unlock()
 
@@ -202,7 +212,7 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 	// Create the ReActAgent with options
 	opts := []react.Option{
 		react.WithMaxIterations(cfg.MaxIterations),
-		react.WithTimeout(cfg.Timeout),
+		react.WithTimeout(cfg.Timeout.Duration()),
 	}
 
 	// Create agent ID based on config
@@ -346,7 +356,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	}()
 
 	// Apply timeout
-	ctx, cancel := context.WithTimeout(ctx, session.Config.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, session.Config.Timeout.Duration())
 	defer cancel()
 
 	// Build the task prompt based on config

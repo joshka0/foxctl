@@ -158,7 +158,8 @@ jobs:
     env:
       AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      OPENROUTER_MODEL_NAME: ${{ secrets.OPENROUTER_MODEL_NAME }}
+      # Default model for OpenRouter integration tests (not sensitive, so not a secret)
+      OPENROUTER_MODEL_NAME: "openai/gpt-4o-mini"
     steps:
       - uses: actions/checkout@v4
         with:

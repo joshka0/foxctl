@@ -60,6 +60,8 @@ func NewOverseer(rt *Runtime, cfg OverseerConfig) *Overseer {
 	// Configure runtime to use this overseer as spawn handler
 	rt.config.SpawnHandler = o
 	rt.config.DefaultMaxDepth = cfg.MaxDepth
+	// Pass limit to runtime for atomic enforcement in Spawn()
+	rt.config.MaxConcurrentAgents = cfg.MaxConcurrentAgents
 
 	return o
 }
@@ -75,7 +77,9 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 		DeniedAgents:  []types.DeniedAgent{},
 	}
 
-	// Check concurrent agent limit using thread-safe method
+	// Advisory early check for concurrent agent limit.
+	// The actual enforcement happens atomically in Runtime.Spawn() to avoid TOCTOU races.
+	// This check provides a friendlier error response before attempting spawns.
 	activeSessions := len(o.runtime.List())
 	if activeSessions >= o.config.MaxConcurrentAgents {
 		resp.Accepted = false
