@@ -96,14 +96,19 @@ func TestAutoPlanner_NoAPIKey(t *testing.T) {
 	// Temporarily clear env
 	groqKey := os.Getenv("GROQ_API_KEY")
 	openaiKey := os.Getenv("OPENAI_API_KEY")
+	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
 	_ = os.Unsetenv("GROQ_API_KEY")
 	_ = os.Unsetenv("OPENAI_API_KEY")
+	_ = os.Unsetenv("OPENROUTER_API_KEY")
 	defer func() {
 		if groqKey != "" {
 			_ = os.Setenv("GROQ_API_KEY", groqKey)
 		}
 		if openaiKey != "" {
 			_ = os.Setenv("OPENAI_API_KEY", openaiKey)
+		}
+		if openrouterKey != "" {
+			_ = os.Setenv("OPENROUTER_API_KEY", openrouterKey)
 		}
 	}()
 
@@ -118,8 +123,15 @@ func TestAutoPlanner_NoAPIKey(t *testing.T) {
 }
 
 // TestOpenAIPlanner_Integration is an integration test that requires an API key.
-// Set GROQ_API_KEY or OPENAI_API_KEY to run this test.
+// Set AGENTCTL_ENABLE_LIVE_LLM_TESTS=1 and one of OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY to run this test.
 func TestOpenAIPlanner_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping LLM integration test in -short mode")
+	}
+	if os.Getenv("AGENTCTL_ENABLE_LIVE_LLM_TESTS") != "1" {
+		t.Skip("Skipping LLM integration test: set AGENTCTL_ENABLE_LIVE_LLM_TESTS=1 to enable")
+	}
+
 	if !IsLLMPlanningAvailable() {
 		t.Skip("Skipping LLM integration test: no API key configured (set GROQ_API_KEY or OPENAI_API_KEY)")
 	}

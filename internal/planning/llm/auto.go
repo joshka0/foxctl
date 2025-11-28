@@ -3,10 +3,23 @@ package llm
 import "os"
 
 // AutoPlanner returns the best available LLM planner based on environment.
-// Checks for GROQ_API_KEY, OPENAI_API_KEY in that order.
-// Returns nil if no API keys are configured.
+// Prefers OpenRouter (OPENROUTER_API_KEY), then Groq (GROQ_API_KEY), then OpenAI (OPENAI_API_KEY).
+// Returns nil if no supported API keys are configured.
 func AutoPlanner() *OpenAIPlanner {
-	// Check for Groq
+	// Prefer OpenRouter if configured
+	if os.Getenv("OPENROUTER_API_KEY") != "" {
+		model := os.Getenv("OPENROUTER_MODEL_NAME")
+		if model == "" {
+			model = "openrouter/auto"
+		}
+		return NewOpenAIPlanner(OpenAIConfig{
+			APIKey:  os.Getenv("OPENROUTER_API_KEY"),
+			BaseURL: "https://openrouter.ai/api/v1",
+			Model:   model,
+		})
+	}
+
+	// Next, check for Groq
 	if os.Getenv("GROQ_API_KEY") != "" {
 		return NewOpenAIPlanner(OpenAIConfig{
 			APIKey:  os.Getenv("GROQ_API_KEY"),
@@ -15,7 +28,7 @@ func AutoPlanner() *OpenAIPlanner {
 		})
 	}
 
-	// Check for OpenAI
+	// Finally, check for OpenAI
 	if os.Getenv("OPENAI_API_KEY") != "" {
 		return NewOpenAIPlanner(OpenAIConfig{
 			APIKey:  os.Getenv("OPENAI_API_KEY"),
@@ -30,5 +43,7 @@ func AutoPlanner() *OpenAIPlanner {
 
 // IsLLMPlanningAvailable returns true if LLM-based planning is available.
 func IsLLMPlanningAvailable() bool {
-	return os.Getenv("GROQ_API_KEY") != "" || os.Getenv("OPENAI_API_KEY") != ""
+	return os.Getenv("OPENROUTER_API_KEY") != "" ||
+		os.Getenv("GROQ_API_KEY") != "" ||
+		os.Getenv("OPENAI_API_KEY") != ""
 }

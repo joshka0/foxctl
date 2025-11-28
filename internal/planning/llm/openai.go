@@ -177,8 +177,12 @@ func (p *OpenAIPlanner) Available() bool {
 
 // Provider returns the provider name (e.g., "groq" or "openai").
 func (p *OpenAIPlanner) Provider() string {
-	if p.config.BaseURL == "https://api.groq.com/openai/v1" {
+	switch p.config.BaseURL {
+	case "https://api.groq.com/openai/v1":
 		return "groq"
+	case "https://openrouter.ai/api/v1":
+		return "openrouter"
+	default:
+		return "openai"
 	}
-	return "openai"
 }

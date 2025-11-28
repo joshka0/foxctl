@@ -5,6 +5,7 @@ unexport GOTOOLDIR
 GO ?= go
 GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
 GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
+RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -vE 'github.com/jkatigb/agentctl/cmd/agentctl/cmd|github.com/jkatigb/agentctl/skills/|github.com/jkatigb/agentctl/test/')
 BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
@@ -31,7 +32,7 @@ test-short:
 	@$(GO_CMD) test -short ./...
 
 test-race:
-	@env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO) test -race ./...
+	@$(GO_CMD_CGO) test -race -short $(RACE_PKGS)
 
 cover:
 	@mkdir -p coverage

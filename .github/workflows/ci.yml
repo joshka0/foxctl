@@ -123,6 +123,7 @@ jobs:
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: agentctl-${{ runner.os }}-go1.24
           path: |
@@ -150,8 +151,35 @@ jobs:
         run: |
           CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
 
+  llm-planner-integration:
+    runs-on: arc-runner-agentctl
+    if: ${{ secrets.OPENROUTER_API_KEY != '' }}
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+    env:
+      AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_MODEL_NAME: ${{ secrets.OPENROUTER_MODEL_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: LLM planner integration test (OpenRouter)
+        run: |
+          CGO_ENABLED=1 go test ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
+
   all-checks:
-    needs: [lint, unit-tests, race-tests, coverage, build, e2e-tests]
+    needs:
+      [
+        lint,
+        unit-tests,
+        race-tests,
+        coverage,
+        build,
+        e2e-tests,
+        llm-planner-integration,
+      ]
     runs-on: arc-runner-agentctl
     steps:
       - run: echo "✅ All checks passed"
