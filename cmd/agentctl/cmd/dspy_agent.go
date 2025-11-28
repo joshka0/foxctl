@@ -99,12 +99,18 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 		return nil, fmt.Errorf("get working directory: %w", err)
 	}
 
+	// Get API key with fallbacks
+	apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("GEMINI_API_KEY") // Fallback to GEMINI_API_KEY
+	}
+
 	runtimeCfg := runtime.RuntimeConfig{
 		DefaultMaxIterations: 10,
 		DefaultTimeout:       30 * time.Minute,
 		LLMProvider:          os.Getenv("AGENTCTL_LLM_PROVIDER"),
 		LLMModel:             os.Getenv("AGENTCTL_LLM_MODEL"),
-		LLMAPIKey:            os.Getenv("AGENTCTL_LLM_API_KEY"),
+		LLMAPIKey:            apiKey,
 		WorkspaceRoot:        workspaceRoot,
 	}
 

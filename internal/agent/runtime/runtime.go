@@ -171,7 +171,7 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 		model = r.config.LLMModel
 	}
 	if model == "" {
-		model = "gemini-2.0-flash" // Default to Gemini Flash
+		model = "gemini-2.5-flash" // Default to Gemini 2.5 Flash (supported by dspy-go)
 	}
 
 	if apiKey == "" {

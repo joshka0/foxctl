@@ -19,7 +19,10 @@ import (
 func TestDspyAgentFileWrite(t *testing.T) {
 	apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
 	if apiKey == "" {
-		t.Skip("AGENTCTL_LLM_API_KEY not set, skipping integration test")
+		apiKey = os.Getenv("GEMINI_API_KEY") // Fallback
+	}
+	if apiKey == "" {
+		t.Skip("AGENTCTL_LLM_API_KEY or GEMINI_API_KEY not set, skipping integration test")
 	}
 
 	// Create temp workspace
@@ -31,12 +34,12 @@ func TestDspyAgentFileWrite(t *testing.T) {
 
 	t.Logf("Workspace: %s", workspace)
 
-	// Create runtime
+	// Create runtime - use empty model to let runtime pick default (gemini-2.5-flash)
 	rt := runtime.NewRuntime(runtime.RuntimeConfig{
 		DefaultMaxIterations: 10,
 		DefaultTimeout:       5 * time.Minute,
 		LLMProvider:          "gemini",
-		LLMModel:             "gemini-2.0-flash",
+		LLMModel:             "", // Let runtime use default (gemini-2.5-flash)
 		LLMAPIKey:            apiKey,
 		WorkspaceRoot:        workspace,
 	})
