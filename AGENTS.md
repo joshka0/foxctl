@@ -354,17 +354,16 @@ func Ok(cmd string, data any, meta Meta) Envelope {
 
 **Race test scope**
 
-- `make test-race` runs `go test -race` with `CGO_ENABLED=0` across all packages
+- `make test-race` runs `go test -race` (with CGO enabled) across all packages
   **except** `internal/storage/vector`.
-- Race tests use pure-Go SQLite (`modernc.org/sqlite`) to avoid linker conflicts
-  between `github.com/mattn/go-sqlite3` (used by vector) and
-  `github.com/tursodatabase/go-libsql` (used by libsql/turso drivers). Both
-  embed their own SQLite and cannot coexist in the same binary.
-- The vector package is excluded from race tests because it requires CGO and
-  would pull in `go-sqlite3`. To exercise vector search separately, run:
+- The vector package links `github.com/mattn/go-sqlite3` for sqlite-vector
+  support, which conflicts with `github.com/tursodatabase/go-libsql`'s embedded
+  SQLite when both are linked into the same binary. The package is therefore
+  excluded from the default race test set.
+- To exercise vector search separately under race, run:
 
   ```bash
-  CGO_ENABLED=1 go test -tags vector ./internal/storage/vector/...
+  CGO_ENABLED=1 go test -race -tags vector ./internal/storage/vector/...
   ```
 
 - Under `-race` or when the `vector` build tag is set, the libSQL and Turso

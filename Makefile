@@ -11,9 +11,7 @@ GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
 # which conflicts with github.com/tursodatabase/go-libsql's embedded SQLite
 # symbols (both define sqlite3_data_directory). See AGENTS.md "Testing Requirements"
 # for details and manual vector test commands.
-# Note: We use CGO_ENABLED=0 for race tests to avoid the SQLite symbol conflicts
-# entirely. The race detector works fine with pure-Go code.
-RACE_PKGS := $(shell $(GO_CMD) list ./... | grep -v 'github.com/jkatigb/agentctl/internal/storage/vector')
+RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -v 'github.com/jkatigb/agentctl/internal/storage/vector')
 BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
@@ -40,7 +38,7 @@ test-short:
 	@$(GO_CMD) test -short ./...
 
 test-race:
-	@$(GO_CMD) test -race $(RACE_PKGS)
+	@$(GO_CMD_CGO) test -race $(RACE_PKGS)
 
 cover:
 	@mkdir -p coverage
