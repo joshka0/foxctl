@@ -3,22 +3,23 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
 )
 
 // Registry holds all registered agent tools.
 type Registry struct {
-	tools    *dstools.InMemoryToolRegistry
-	recorder TelemetryRecorder
-	config   ToolsConfig
+	tools         *dstools.InMemoryToolRegistry
+	recorder      TelemetryRecorder
+	config        ToolsConfig
+	pathValidator *policy.PathValidator
 }
 
 // ToolsConfig configures tool behavior.
@@ -37,6 +38,9 @@ type ToolsConfig struct {
 
 	// MaxSearchResults limits code search results.
 	MaxSearchResults int
+
+	// AllowedRoots are additional directories outside workspace that paths can resolve to.
+	AllowedRoots []string
 }
 
 // TelemetryRecorder records tool usage for observability.
@@ -71,10 +75,17 @@ func NewRegistry(cfg ToolsConfig, recorder TelemetryRecorder) (*Registry, error)
 		recorder = noopRecorder{}
 	}
 
+	// Initialize PathValidator for secure path resolution
+	pathValidator, err := policy.NewPathValidator(cfg.WorkspaceRoot, cfg.AllowedRoots)
+	if err != nil {
+		return nil, fmt.Errorf("init path validator: %w", err)
+	}
+
 	r := &Registry{
-		tools:    dstools.NewInMemoryToolRegistry(),
-		recorder: recorder,
-		config:   cfg,
+		tools:         dstools.NewInMemoryToolRegistry(),
+		recorder:      recorder,
+		config:        cfg,
+		pathValidator: pathValidator,
 	}
 
 	// Register all V1 tools
@@ -144,26 +155,28 @@ func (r *Registry) wrapWithTelemetry(
 	}
 }
 
-// resolvePath resolves a relative path to an absolute path within the workspace.
-func (r *Registry) resolvePath(path string) (string, error) {
-	// Handle absolute paths
-	if filepath.IsAbs(path) {
-		// Ensure it's within workspace
-		rel, err := filepath.Rel(r.config.WorkspaceRoot, path)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return "", fmt.Errorf("path %q is outside workspace", path)
+// resolvePath resolves a user-provided path using the PathValidator.
+// It ensures paths are safe and within the workspace or allowed roots.
+func (r *Registry) resolvePath(userPath string) (string, error) {
+	if r.pathValidator == nil {
+		return "", fmt.Errorf("path validator not configured")
+	}
+
+	abs, err := r.pathValidator.ValidatePath(userPath)
+	if err != nil {
+		// Map validator errors to user-friendly messages
+		switch {
+		case errors.Is(err, policy.ErrPathEscape):
+			return "", fmt.Errorf("path %q escapes workspace boundary", userPath)
+		case errors.Is(err, policy.ErrSymlinkEscape):
+			return "", fmt.Errorf("path %q contains symlink pointing outside workspace", userPath)
+		case errors.Is(err, policy.ErrNullByte):
+			return "", fmt.Errorf("path %q contains invalid characters", userPath)
+		case errors.Is(err, policy.ErrInvalidPath):
+			return "", fmt.Errorf("path %q is invalid", userPath)
+		default:
+			return "", fmt.Errorf("invalid path %q: %w", userPath, err)
 		}
-		return path, nil
 	}
-
-	// Resolve relative path
-	absPath := filepath.Join(r.config.WorkspaceRoot, path)
-
-	// Verify it's still within workspace (handles .. attempts)
-	rel, err := filepath.Rel(r.config.WorkspaceRoot, absPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("path %q escapes workspace", path)
-	}
-
-	return absPath, nil
+	return abs, nil
 }
