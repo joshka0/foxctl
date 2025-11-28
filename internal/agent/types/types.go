@@ -153,6 +153,25 @@ type AgentConfig struct {
 	// TeamID is the optional team this agent belongs to.
 	TeamID string `json:"team_id,omitempty"`
 
+	// --- Hierarchy fields (see agent_hierarchy.md) ---
+
+	// RootActorID is the tree root (usually actor:system:overseer).
+	RootActorID string `json:"root_actor_id,omitempty"`
+
+	// ParentActorID is the immediate parent; empty for overseer.
+	ParentActorID string `json:"parent_actor_id,omitempty"`
+
+	// Depth is 0 for overseer, increments per level.
+	Depth int `json:"depth"`
+
+	// MaxDepth is the global cap for the entire tree (set by overseer).
+	MaxDepth int `json:"max_depth"`
+
+	// LocalMaxDepth is the subtree cap; can be tightened but never loosened.
+	LocalMaxDepth int `json:"local_max_depth"`
+
+	// --- Execution config ---
+
 	// MaxIterations limits the number of ReAct iterations.
 	MaxIterations int `json:"max_iterations,omitempty"`
 
@@ -235,3 +254,105 @@ type Iteration struct {
 	Observation string     `json:"observation,omitempty"`
 	Timestamp   time.Time  `json:"timestamp"`
 }
+
+// --- Spawn request/response types (see agent_hierarchy.md) ---
+
+// SpawnRequest is the payload for agent.spawn tool requests.
+type SpawnRequest struct {
+	// EpicID is the epic scope for the spawn request.
+	EpicID string `json:"epic_id"`
+
+	// ParentPlanNodeID is the plan node to attach new subtasks under.
+	ParentPlanNodeID string `json:"parent_plan_node_id,omitempty"`
+
+	// SpawnReason explains why splitting is beneficial.
+	SpawnReason string `json:"spawn_reason"`
+
+	// RequestedSubagents are the subagents to spawn.
+	RequestedSubagents []SubagentRequest `json:"requested_subagents"`
+
+	// WaitForCompletion blocks until subagents finish if true.
+	WaitForCompletion bool `json:"wait_for_completion"`
+
+	// --- Caller context (filled by runtime, not user) ---
+
+	// CallerActorID is the agent making the request.
+	CallerActorID string `json:"caller_actor_id,omitempty"`
+
+	// CallerDepth is the caller's depth in the tree.
+	CallerDepth int `json:"caller_depth,omitempty"`
+
+	// CallerMaxDepth is the global max depth.
+	CallerMaxDepth int `json:"caller_max_depth,omitempty"`
+
+	// CallerLocalMaxDepth is the caller's subtree limit.
+	CallerLocalMaxDepth int `json:"caller_local_max_depth,omitempty"`
+}
+
+// SubagentRequest describes a single subagent to spawn.
+type SubagentRequest struct {
+	// Role is the agent type (coder, planner, reviewer, fixer).
+	Role AgentRole `json:"role"`
+
+	// Task is the task description for the subagent.
+	Task string `json:"task"`
+
+	// SuggestedActorID is the suggested actor ID (e.g., actor:team:backend).
+	SuggestedActorID string `json:"suggested_actor_id,omitempty"`
+
+	// LocalMaxDepth is the requested subtree depth limit.
+	LocalMaxDepth int `json:"local_max_depth,omitempty"`
+}
+
+// SpawnResponse is the overseer's response to a spawn request.
+type SpawnResponse struct {
+	// Accepted indicates whether the request was accepted (at least partially).
+	Accepted bool `json:"accepted"`
+
+	// SpawnedAgents are the agents that were created.
+	SpawnedAgents []SpawnedAgent `json:"spawned_agents,omitempty"`
+
+	// DeniedAgents are requests that were denied.
+	DeniedAgents []DeniedAgent `json:"denied_agents,omitempty"`
+
+	// Reason is the overall reason if fully denied.
+	Reason string `json:"reason,omitempty"`
+
+	// Suggestion is guidance if denied.
+	Suggestion string `json:"suggestion,omitempty"`
+}
+
+// SpawnedAgent describes a successfully spawned subagent.
+type SpawnedAgent struct {
+	// ActorID is the assigned actor ID.
+	ActorID string `json:"actor_id"`
+
+	// SessionID is the session identifier.
+	SessionID string `json:"session_id"`
+
+	// Depth is the agent's depth in the tree.
+	Depth int `json:"depth"`
+
+	// PlanNodeID is the plan node created for this agent.
+	PlanNodeID string `json:"plan_node_id,omitempty"`
+}
+
+// DeniedAgent describes a spawn request that was denied.
+type DeniedAgent struct {
+	// Role is the requested role.
+	Role AgentRole `json:"role"`
+
+	// Task is the requested task.
+	Task string `json:"task"`
+
+	// Reason is why the request was denied.
+	Reason string `json:"reason"`
+}
+
+// SpawnDenialReason constants for spawn denial.
+const (
+	DenialDepthLimitExceeded = "depth_limit_exceeded"
+	DenialLocalLimitExceeded = "local_limit_exceeded"
+	DenialResourceExhausted  = "resource_exhausted"
+	DenialPolicyViolation    = "policy_violation"
+)
