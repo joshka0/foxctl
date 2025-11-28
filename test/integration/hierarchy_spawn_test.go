@@ -148,8 +148,8 @@ func TestHierarchySpawn(t *testing.T) {
 	}
 
 	// Kill all sessions
-	rt.Kill(session.ID)
-	rt.Kill(childAgent.SessionID)
+	_ = rt.Kill(session.ID)
+	_ = rt.Kill(childAgent.SessionID)
 
 	t.Log("Hierarchy spawn test completed successfully")
 }
@@ -187,7 +187,7 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to spawn overseer: %v", err)
 	}
-	defer rt.Kill(session.ID)
+	defer func() { _ = rt.Kill(session.ID) }()
 
 	// Spawn first child (counts as 2)
 	req1 := types.SpawnRequest{
@@ -205,7 +205,7 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 	if !resp1.Accepted {
 		t.Fatalf("First spawn should succeed: %s", resp1.Reason)
 	}
-	defer rt.Kill(resp1.SpawnedAgents[0].SessionID)
+	defer func() { _ = rt.Kill(resp1.SpawnedAgents[0].SessionID) }()
 
 	// Try to spawn another (should hit limit)
 	req2 := types.SpawnRequest{
@@ -223,7 +223,7 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 	if resp2.Accepted {
 		t.Error("Second spawn should be denied due to concurrency limit")
 		if len(resp2.SpawnedAgents) > 0 {
-			rt.Kill(resp2.SpawnedAgents[0].SessionID)
+			_ = rt.Kill(resp2.SpawnedAgents[0].SessionID)
 		}
 	} else {
 		t.Logf("Correctly denied due to concurrency: %s", resp2.Reason)

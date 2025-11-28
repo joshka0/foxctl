@@ -248,20 +248,27 @@ type HierarchyNode struct {
 }
 
 func (o *Overseer) buildHierarchyNode(session *Session) *HierarchyNode {
-	// Copy session fields under lock to avoid data races
+	// Copy session fields into locals under lock to avoid data races
 	session.mu.RLock()
-	node := &HierarchyNode{
-		SessionID: session.ID,
-		ActorID:   session.Config.ActorID,
-		Role:      session.Config.Role,
-		Depth:     session.Config.Depth,
-		Status:    session.Status,
-		Children:  []*HierarchyNode{},
-	}
+	sessionID := session.ID
+	actorID := session.Config.ActorID
+	role := session.Config.Role
+	depth := session.Config.Depth
+	status := session.Status
 	session.mu.RUnlock()
 
-	// Recursively build children
-	childIDs := o.children[session.ID]
+	// Construct node using copied values (lock released)
+	node := &HierarchyNode{
+		SessionID: sessionID,
+		ActorID:   actorID,
+		Role:      role,
+		Depth:     depth,
+		Status:    status,
+		Children:  []*HierarchyNode{},
+	}
+
+	// Recursively build children (no lock held)
+	childIDs := o.children[sessionID]
 	for _, childID := range childIDs {
 		if childSession, ok := o.runtime.Get(childID); ok {
 			childNode := o.buildHierarchyNode(childSession)

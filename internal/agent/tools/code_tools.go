@@ -154,7 +154,7 @@ func parseRipgrepOutput(output, workspaceRoot string) []SearchMatch {
 				file = strings.TrimPrefix(file, workspaceRoot+"/")
 			}
 			lineNum := 0
-			fmt.Sscanf(parts[1], "%d", &lineNum)
+			_, _ = fmt.Sscanf(parts[1], "%d", &lineNum)
 			matches = append(matches, SearchMatch{
 				File:    file,
 				Line:    lineNum,

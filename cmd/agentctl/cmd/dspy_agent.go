@@ -209,10 +209,10 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 
 	// Also print a human-readable table to stderr
 	w := tabwriter.NewWriter(os.Stderr, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SESSION ID\tROLE\tSTATUS\tITERATIONS\tSTARTED")
+	_, _ = fmt.Fprintln(w, "SESSION ID\tROLE\tSTATUS\tITERATIONS\tSTARTED")
 	for _, s := range sessions {
 		sess := s.GetSession()
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
 			sess.ID[:8]+"...",
 			sess.Config.Role,
 			sess.Status,
@@ -220,7 +220,7 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 			sess.StartedAt.Format("15:04:05"),
 		)
 	}
-	w.Flush()
+	_ = w.Flush()
 
 	// Write success envelope
 	env := envelope.OK("dspy-agent/list", map[string]interface{}{
