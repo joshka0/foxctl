@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -16,7 +17,11 @@ import (
 )
 
 // Global dspy-go agent runtime (singleton for the process)
-var globalDspyRuntime *runtime.Runtime
+var (
+	globalDspyRuntime     *runtime.Runtime
+	globalDspyRuntimeOnce sync.Once
+	globalDspyRuntimeErr  error
+)
 
 var dspyAgentCmd = &cobra.Command{
 	Use:   "dspy-agent",
@@ -87,34 +92,38 @@ func init() {
 
 // getOrCreateRuntime returns the global dspy-go runtime, creating it if necessary.
 func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
-	if globalDspyRuntime != nil {
-		return globalDspyRuntime, nil
-	}
-
 	_ = config.MustFromContext(ctx) // Validate context has config
 
-	// Get workspace root
-	workspaceRoot, err := os.Getwd()
-	if err != nil {
-		return nil, fmt.Errorf("get working directory: %w", err)
+	globalDspyRuntimeOnce.Do(func() {
+		// Get workspace root
+		workspaceRoot, err := os.Getwd()
+		if err != nil {
+			globalDspyRuntimeErr = fmt.Errorf("get working directory: %w", err)
+			return
+		}
+
+		// Get API key with fallbacks
+		apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
+		if apiKey == "" {
+			apiKey = os.Getenv("GEMINI_API_KEY") // Fallback to GEMINI_API_KEY
+		}
+
+		runtimeCfg := runtime.Config{
+			DefaultMaxIterations: 10,
+			DefaultTimeout:       30 * time.Minute,
+			LLMProvider:          os.Getenv("AGENTCTL_LLM_PROVIDER"),
+			LLMModel:             os.Getenv("AGENTCTL_LLM_MODEL"),
+			LLMAPIKey:            apiKey,
+			WorkspaceRoot:        workspaceRoot,
+		}
+
+		globalDspyRuntime = runtime.NewRuntime(runtimeCfg)
+	})
+
+	if globalDspyRuntimeErr != nil {
+		return nil, globalDspyRuntimeErr
 	}
 
-	// Get API key with fallbacks
-	apiKey := os.Getenv("AGENTCTL_LLM_API_KEY")
-	if apiKey == "" {
-		apiKey = os.Getenv("GEMINI_API_KEY") // Fallback to GEMINI_API_KEY
-	}
-
-	runtimeCfg := runtime.Config{
-		DefaultMaxIterations: 10,
-		DefaultTimeout:       30 * time.Minute,
-		LLMProvider:          os.Getenv("AGENTCTL_LLM_PROVIDER"),
-		LLMModel:             os.Getenv("AGENTCTL_LLM_MODEL"),
-		LLMAPIKey:            apiKey,
-		WorkspaceRoot:        workspaceRoot,
-	}
-
-	globalDspyRuntime = runtime.NewRuntime(runtimeCfg)
 	return globalDspyRuntime, nil
 }
 
@@ -139,6 +148,12 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 	// Parse role
 	role := parseAgentRole(dspyRole)
 
+	// Resolve API key with same fallback as runtime (AGENTCTL_LLM_API_KEY, then GEMINI_API_KEY)
+	agentAPIKey := os.Getenv("AGENTCTL_LLM_API_KEY")
+	if agentAPIKey == "" {
+		agentAPIKey = os.Getenv("GEMINI_API_KEY")
+	}
+
 	// Build agent config
 	agentCfg := types.AgentConfig{
 		Role:          role,
@@ -150,7 +165,7 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 		Timeout:       types.Duration(time.Duration(dspyTimeoutMins) * time.Minute),
 		LLMProvider:   dspyLLMProvider,
 		LLMModel:      dspyLLMModel,
-		LLMAPIKey:     os.Getenv("AGENTCTL_LLM_API_KEY"), // Get from env
+		LLMAPIKey:     agentAPIKey, // From AGENTCTL_LLM_API_KEY or GEMINI_API_KEY
 	}
 
 	// Spawn the agent

@@ -6,11 +6,9 @@ GO ?= go
 GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
 GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
 
-# RACE_PKGS excludes packages that are not suitable for race testing:
-# - cmd/agentctl/cmd: CLI command handlers with minimal concurrency
-# - skills/: standalone plugin binaries, tested separately
-# - test/: integration tests requiring special setup/fixtures
-RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -vE 'github.com/jkatigb/agentctl/cmd/agentctl/cmd|github.com/jkatigb/agentctl/skills/|github.com/jkatigb/agentctl/test/')
+# RACE_PKGS currently includes all packages. If you need to exclude any package
+# from race testing, document the rationale here and add an entry to AGENTS.md.
+RACE_PKGS := $(shell $(GO_CMD_CGO) list ./...)
 BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
@@ -44,21 +42,51 @@ cover:
 	@$(GO_CMD) test ./... -covermode=atomic -coverprofile=coverage/coverage.out
 	@$(GO_CMD) tool cover -func=coverage/coverage.out
 
-# Coverage thresholds:
-# - Line coverage: 60% (baseline for core packages)
-# - Packages with <60% are flagged but not blocking (use check-coverage-strict for stricter enforcement)
-# Note: Some packages like internal/agent/runtime require live LLM APIs and have lower coverage.
+# Coverage thresholds (see AGENTS.md):
+# - Line coverage:    85%
+# - Function coverage: 80%
+# - Branch coverage:   75% (approximated from line coverage due to Go tool limitations)
 check-coverage:
-	@echo "Checking test coverage..."
+	@echo "Checking test coverage (line/function/branch)..."
 	@mkdir -p coverage
 	@$(GO_CMD) test ./... -coverprofile=coverage/coverage.out -covermode=atomic 2>&1 | grep -v "no test files" || true
 	@$(GO_CMD) tool cover -func=coverage/coverage.out | tee coverage/coverage.txt
 	@echo ""
 	@echo "=== Coverage Summary ==="
-	@awk '/^total:/ {gsub("%",""); if ($$3 < 60.0) { \
-		print "⚠️  Coverage " $$3 "% is below 60% threshold"; exit 1; } \
-		else { print "✅ Coverage " $$3 "% meets 60% threshold"; exit 0; }}' \
-		coverage/coverage.txt
+	@awk '
+		/^total:/ {
+			gsub("%","",$$3);
+			line = $$3;
+		}
+		/^total:/ {
+			# For now, function and branch coverage use the same total metric;
+			# this can be refined if more detailed tooling is added.
+			func = line;
+			branch = line;
+		}
+		END {
+			status = 0;
+			if (line < 85.0) {
+				print "❌ Line coverage", line "% is below 85% threshold";
+				status = 1;
+			} else {
+				print "✅ Line coverage", line "% meets 85% threshold";
+			}
+			if (func < 80.0) {
+				print "❌ Function coverage", func "% is below 80% threshold";
+				status = 1;
+			} else {
+				print "✅ Function coverage", func "% meets 80% threshold";
+			}
+			if (branch < 75.0) {
+				print "❌ Branch coverage", branch "% is below 75% threshold";
+				status = 1;
+			} else {
+				print "✅ Branch coverage", branch "% meets 75% threshold";
+			}
+			exit status;
+		}
+	' coverage/coverage.txt
 
 build:
 	@set -euo pipefail; \

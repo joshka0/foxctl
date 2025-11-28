@@ -13,7 +13,7 @@ import (
 
 // OpenAIConfig configures the OpenAI-compatible planner.
 type OpenAIConfig struct {
-	APIKey   string // API key (from env OPENAI_API_KEY or GROQ_API_KEY)
+	APIKey   string // API key (from env OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY, in that order)
 	BaseURL  string // API base URL (default: https://api.openai.com/v1)
 	Model    string // Model name (default: gpt-4o-mini)
 	Timeout  time.Duration
@@ -126,7 +126,7 @@ type openAIResponse struct {
 // Plan implements the Planner interface.
 func (p *OpenAIPlanner) Plan(ctx context.Context, req PlanRequest) (*PlanResult, error) {
 	if p.config.APIKey == "" {
-		return nil, fmt.Errorf("no API key configured (set GROQ_API_KEY or OPENAI_API_KEY)")
+		return nil, fmt.Errorf("no API key configured (set OPENROUTER_API_KEY, GROQ_API_KEY or OPENAI_API_KEY)")
 	}
 
 	prompt := buildPrompt(req)
