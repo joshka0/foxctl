@@ -9,6 +9,8 @@ import (
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/llms"
 	"github.com/oklog/ulid/v2"
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
@@ -35,6 +37,9 @@ type RuntimeConfig struct {
 
 	// LLMModel is the default model name.
 	LLMModel string
+
+	// LLMAPIKey is the API key for the LLM provider.
+	LLMAPIKey string
 
 	// WorkspaceRoot is the workspace root directory.
 	WorkspaceRoot string
@@ -151,6 +156,42 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 
 	agent := react.NewReActAgent(agentID, agentName, opts...)
 
+	// Initialize LLM
+	llms.EnsureFactory()
+
+	// Determine API key (prefer agent-level, fall back to runtime default)
+	apiKey := cfg.LLMAPIKey
+	if apiKey == "" {
+		apiKey = r.config.LLMAPIKey
+	}
+
+	// Determine model (prefer agent-level, fall back to runtime default)
+	model := cfg.LLMModel
+	if model == "" {
+		model = r.config.LLMModel
+	}
+	if model == "" {
+		model = "gemini-2.0-flash" // Default to Gemini Flash
+	}
+
+	if apiKey == "" {
+		return nil, fmt.Errorf("LLM API key not configured (set AGENTCTL_LLM_API_KEY or pass via config)")
+	}
+
+	// Create LLM based on provider
+	llm, err := llms.NewGeminiLLM(apiKey, core.ModelID(model))
+	if err != nil {
+		return nil, fmt.Errorf("create LLM: %w", err)
+	}
+
+	// Create a signature for the agent
+	signature := buildAgentSignature(cfg)
+
+	// Initialize the agent with LLM and signature
+	if err := agent.Initialize(llm, *signature); err != nil {
+		return nil, fmt.Errorf("initialize agent: %w", err)
+	}
+
 	// Register all tools from the registry
 	for _, tool := range toolsRegistry.List() {
 		if err := agent.RegisterTool(tool); err != nil {
@@ -159,6 +200,45 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 	}
 
 	return agent, nil
+}
+
+// buildAgentSignature creates the signature for the agent based on its role.
+func buildAgentSignature(cfg types.AgentConfig) *core.Signature {
+	var instruction string
+	switch cfg.Role {
+	case types.RoleCoder:
+		instruction = `You are a coding agent. You have access to file system tools to read and write code.
+Available tools:
+- fs.read_file: Read file contents
+- fs.list_dir: List directory contents
+- edit.create_file: Create new files
+- edit.apply_patch: Modify existing files
+- code.search: Search code using ripgrep
+- tests.run: Run tests
+
+Use these tools to complete coding tasks. Always create or modify files as needed.`
+	case types.RolePlanner:
+		instruction = `You are a planning agent. You analyze tasks and create structured plans.
+Available tools:
+- todo.add: Add new tasks
+- todo.query: Query existing tasks
+- todo.graph_insights: Get task graph analysis
+- mail.send: Send messages to other agents
+
+Use these tools to plan and coordinate work.`
+	default:
+		instruction = `You are a helpful agent. Complete the given task using available tools.`
+	}
+
+	sig := core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewField("task", core.WithDescription("The task to be completed by the agent"))},
+		},
+		[]core.OutputField{
+			{Field: core.NewField("result", core.WithDescription("The final result or answer from completing the task"))},
+		},
+	).WithInstruction(instruction)
+	return &sig
 }
 
 // runSession executes the agent session.

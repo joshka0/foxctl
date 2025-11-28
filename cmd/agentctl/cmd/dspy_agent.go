@@ -104,6 +104,7 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 		DefaultTimeout:       30 * time.Minute,
 		LLMProvider:          os.Getenv("AGENTCTL_LLM_PROVIDER"),
 		LLMModel:             os.Getenv("AGENTCTL_LLM_MODEL"),
+		LLMAPIKey:            os.Getenv("AGENTCTL_LLM_API_KEY"),
 		WorkspaceRoot:        workspaceRoot,
 	}
 
@@ -143,6 +144,7 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 		Timeout:       time.Duration(dspyTimeoutMins) * time.Minute,
 		LLMProvider:   dspyLLMProvider,
 		LLMModel:      dspyLLMModel,
+		LLMAPIKey:     os.Getenv("AGENTCTL_LLM_API_KEY"), // Get from env
 	}
 
 	// Spawn the agent

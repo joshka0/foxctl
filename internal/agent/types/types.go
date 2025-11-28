@@ -164,6 +164,9 @@ type AgentConfig struct {
 
 	// LLMModel specifies the model name.
 	LLMModel string `json:"llm_model,omitempty"`
+
+	// LLMAPIKey is the API key for the LLM provider.
+	LLMAPIKey string `json:"-"` // Never serialize API keys
 }
 
 // AgentSession represents a running or completed agent session.
