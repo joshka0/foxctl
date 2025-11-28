@@ -4,6 +4,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -219,23 +220,47 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 		apiKey = r.config.LLMAPIKey
 	}
 
-	// Determine model (prefer agent-level, fall back to runtime default)
+	// Resolve provider: agent → runtime → env → default
+	provider := cfg.LLMProvider
+	if provider == "" {
+		provider = r.config.LLMProvider
+	}
+	if provider == "" {
+		provider = os.Getenv("AGENTCTL_LLM_PROVIDER")
+	}
+	if provider == "" {
+		provider = "gemini" // Default provider
+	}
+
+	// Resolve model: agent → runtime → env → provider-specific default
 	model := cfg.LLMModel
 	if model == "" {
 		model = r.config.LLMModel
 	}
 	if model == "" {
-		model = "gemini-2.5-flash" // Default to Gemini 2.5 Flash (supported by dspy-go)
+		model = os.Getenv("AGENTCTL_LLM_MODEL")
+	}
+	if model == "" {
+		model = defaultModelForProvider(provider)
 	}
 
 	if apiKey == "" {
-		return nil, fmt.Errorf("LLM API key not configured (set AGENTCTL_LLM_API_KEY or pass via config)")
+		return nil, fmt.Errorf("LLM API key not configured for provider %q (set AGENTCTL_LLM_API_KEY or pass via config)", provider)
 	}
 
 	// Create LLM based on provider
-	llm, err := llms.NewGeminiLLM(apiKey, core.ModelID(model))
+	var llm core.LLM
+	var err error
+	switch provider {
+	case "gemini", "":
+		llm, err = llms.NewGeminiLLM(apiKey, core.ModelID(model))
+	case "openai":
+		llm, err = llms.NewOpenAILLM(core.ModelID(model), llms.WithAPIKey(apiKey))
+	default:
+		return nil, fmt.Errorf("unsupported LLM provider: %q (supported: gemini, openai)", provider)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("create LLM: %w", err)
+		return nil, fmt.Errorf("create %s LLM: %w", provider, err)
 	}
 
 	// Create a signature for the agent
@@ -293,6 +318,18 @@ Use these tools to plan and coordinate work.`
 		},
 	).WithInstruction(instruction)
 	return &sig
+}
+
+// defaultModelForProvider returns the default model for a given LLM provider.
+func defaultModelForProvider(provider string) string {
+	switch provider {
+	case "openai":
+		return "gpt-4.1-mini"
+	case "gemini", "":
+		return "gemini-2.5-flash"
+	default:
+		return "gemini-2.5-flash"
+	}
 }
 
 // runSession executes the agent session.
