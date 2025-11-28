@@ -43,6 +43,19 @@ type RuntimeConfig struct {
 
 	// WorkspaceRoot is the workspace root directory.
 	WorkspaceRoot string
+
+	// DefaultMaxDepth is the default max hierarchy depth for spawned agents.
+	DefaultMaxDepth int
+
+	// SpawnHandler is called when an agent requests to spawn subagents.
+	// If nil, spawn requests return a "pending" status without actual spawning.
+	SpawnHandler SpawnHandler
+}
+
+// SpawnHandler processes spawn requests from agents.
+type SpawnHandler interface {
+	// HandleSpawnRequest processes a spawn request and returns the response.
+	HandleSpawnRequest(ctx context.Context, req types.SpawnRequest) (*types.SpawnResponse, error)
 }
 
 // Session represents a running agent session.
@@ -58,6 +71,7 @@ type Session struct {
 	Summary    string
 	Error      string
 	ToolCalls  []types.ToolCall
+	Children   []string // IDs of spawned child sessions
 	cancel     context.CancelFunc
 	mu         sync.RWMutex
 }
@@ -69,6 +83,9 @@ func NewRuntime(cfg RuntimeConfig) *Runtime {
 	}
 	if cfg.DefaultTimeout <= 0 {
 		cfg.DefaultTimeout = 30 * time.Minute
+	}
+	if cfg.DefaultMaxDepth <= 0 {
+		cfg.DefaultMaxDepth = 3 // Default: overseer -> agent -> subagent
 	}
 
 	return &Runtime{
@@ -96,6 +113,18 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		cfg.LLMModel = r.config.LLMModel
 	}
 
+	// Initialize hierarchy fields if not set
+	if cfg.MaxDepth <= 0 {
+		cfg.MaxDepth = r.config.DefaultMaxDepth
+	}
+	if cfg.LocalMaxDepth <= 0 {
+		cfg.LocalMaxDepth = cfg.MaxDepth
+	}
+	// RootActorID defaults to self if this is the root agent (depth 0)
+	if cfg.RootActorID == "" && cfg.Depth == 0 {
+		cfg.RootActorID = cfg.ActorID
+	}
+
 	// Create tools registry with telemetry recorder
 	recorder := &sessionRecorder{sessionID: sessionID}
 	toolsCfg := agenttools.ToolsConfig{
@@ -106,6 +135,30 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	toolsRegistry, err := agenttools.NewRegistry(toolsCfg, recorder)
 	if err != nil {
 		return nil, fmt.Errorf("create tools registry: %w", err)
+	}
+
+	// Register spawn tool with hierarchy config
+	spawnCfg := agenttools.SpawnToolConfig{
+		CallerActorID:       cfg.ActorID,
+		CallerDepth:         cfg.Depth,
+		CallerMaxDepth:      cfg.MaxDepth,
+		CallerLocalMaxDepth: cfg.LocalMaxDepth,
+		EpicID:              cfg.EpicID,
+	}
+
+	// Wire up spawn handler if configured
+	if r.config.SpawnHandler != nil {
+		spawnCfg.MailSender = func(ctx context.Context, to, subject string, body any) (any, error) {
+			req, ok := body.(types.SpawnRequest)
+			if !ok {
+				return nil, fmt.Errorf("invalid spawn request body type")
+			}
+			return r.config.SpawnHandler.HandleSpawnRequest(ctx, req)
+		}
+	}
+
+	if err := toolsRegistry.RegisterSpawnTool(spawnCfg); err != nil {
+		return nil, fmt.Errorf("register spawn tool: %w", err)
 	}
 
 	// Create the dspy-go agent based on role
@@ -125,6 +178,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		Tools:     toolsRegistry,
 		StartedAt: time.Now(),
 		ToolCalls: []types.ToolCall{},
+		Children:  []string{},
 		cancel:    cancel,
 	}
 
