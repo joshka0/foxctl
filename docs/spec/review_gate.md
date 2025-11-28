@@ -389,6 +389,11 @@ artifacts.
   - Mark the existing review as stale so that another review is required before
     completion.
 
+When `hooks/task_guard` is configured in strict mode and blocks a write, callers
+that surface this as a top-level tool error SHOULD map the block to
+`E_GUARD_VIOLATION` (see `dspy_go_agents.md` §11.3) and treat it as a
+non-retryable, scope/guard violation rather than a transient runtime error.
+
 Exact "dirtying" behavior is left to implementation, but the spec recommends
 that new writes after a successful review invalidate that review for the
 relevant scope.

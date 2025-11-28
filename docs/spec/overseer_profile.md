@@ -2,9 +2,8 @@
 
 **Status:** Draft\
 **Scope:** Canonical profile for the overseer in agentctl-based workspaces.\
-**Related specs:**
-[overseer_planning.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0),
-[bd_mail_agent_interface.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0),
+**Related specs:** [overseer_planning.md](./overseer_planning.md),
+[bd_mail_agent_interface.md](./bd_mail_agent_interface.md),
 `mailbox_blackboard.md`, `task_graph_insights.md`, `unified_agents.md`,
 `semantic_file_index.md`
 
@@ -61,8 +60,8 @@ endpoints) as needed.
 The overseer SHOULD have the following specs in its knowledge set for a
 workspace:
 
-- [docs/spec/overseer_planning.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)
-- [docs/spec/bd_mail_agent_interface.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/bd_mail_agent_interface.md:0:0-0:0)
+- [overseer_planning.md](./overseer_planning.md)
+- [bd_mail_agent_interface.md](./bd_mail_agent_interface.md)
 - `docs/spec/mailbox_blackboard.md`
 - `docs/spec/task_graph_insights.md`
 - `docs/spec/unified_agents.md`
@@ -138,6 +137,207 @@ behavior contract.
   - Overseer profile SHOULD be reflected in Factory / Claude agent
     configuration:
     - Actor ID, allowed operations, and knowledge set configured as above.
-    - Hooks enabled and wired per
-      [overseer_planning.md](cci:7://file:///Users/jkatigbak/repos/personal/claude-harness/agentctl/docs/spec/overseer_planning.md:0:0-0:0)
+    - Hooks enabled and wired per [overseer_planning.md](./overseer_planning.md)
       §9.
+
+---
+
+## 8. Wire Contract & Error Codes
+
+This section describes the canonical message envelope for **plan events**
+emitted by the overseer over the mailbox/blackboard and via jobs. It builds on
+Protocol v1 envelopes (`protocol_v1.md`) but focuses on the `data` and `meta.*`
+fields specific to planning.
+
+### 8.1 Plan Event Envelope (Conceptual)
+
+Plan events are typically carried as mailbox messages (`mailbox/manage.send`) or
+job progress/result envelopes. Conceptually, a plan event looks like:
+
+```jsonc
+{
+  "version": 1,
+  "status": "ok|error",
+  "command": "mailbox/manage.send", // or jobs/submit, jobs/tail
+  "data": {
+    "MessageType": "plan.created" | "plan.updated" | "plan.review_needed",
+    "Subject": "plan.created:<epic-id>",
+    "Sender": "actor:system:overseer",
+    "Recipients": ["actor:agent:dspy-planner:main"],
+    "Timestamp": "2025-11-15T12:34:56Z",
+    "Body": {
+      /* Plan payload; see overseer_planning.md for exact shape */
+    }
+  },
+  "meta": {
+    "epic_id": "epic-123",
+    "plan_id": "plan-01H...",
+    "version": 3,
+    "source": "overseer",            // e.g. overseer|agent|human
+    "reason": "initial_create|replan|guard_violation",
+    "trace_id": "...",              // Protocol v1 trace id
+    "workspace_id": "ws-123"        // conceptual workspace identifier
+  },
+  "error": {
+    /* present only for status:"error", see §8.3 */
+  }
+}
+```
+
+### 8.2 Meta Fields for Plan Events
+
+The following `meta.*` keys are defined for overseer plan events:
+
+| Field          | Type   | Required | Meaning                                                                                  |
+| -------------- | ------ | -------- | ---------------------------------------------------------------------------------------- |
+| `epic_id`      | string | yes      | Epic identifier this plan event relates to.                                              |
+| `plan_id`      | string | yes      | Logical plan identifier (e.g. ULID per epic).                                            |
+| `version`      | int    | yes      | Monotonically increasing plan version per `(workspace_id, epic_id)`.                     |
+| `source`       | string | yes      | Originator: `"overseer"                                                                  |
+| `reason`       | string | yes      | Short machine-readable reason, e.g. `"initial_create"`, `"replan"`, `"guard_violation"`. |
+| `trace_id`     | string | optional | Protocol v1 trace id linking envelopes.                                                  |
+| `workspace_id` | string | optional | Logical workspace identifier.                                                            |
+| `reviewer`     | string | optional | Actor id of human/agent reviewer when applicable.                                        |
+| `priority`     | string | optional | Advisory priority (`"low"                                                                |
+
+`version` MUST be incremented on every `plan.updated` event for a given
+`(workspace_id, epic_id)` pair. `plan.created` MUST start at `version = 1`.
+
+### 8.3 Error Codes and Status Mapping
+
+When plan operations fail (e.g. invalid apply attempt, conflicts), the overseer
+and underlying skills MUST use Protocol v1 error envelopes and SHOULD use the
+following codes in addition to the global catalog:
+
+| Code             | HTTP/RPC Status  | Meaning                                                                                    |
+| ---------------- | ---------------- | ------------------------------------------------------------------------------------------ |
+| `E_UNAUTHORIZED` | 401 Unauthorized | Non-overseer or unauthorized actor attempted a plan apply or privileged action.            |
+| `E_INVALID_PLAN` | 400 Bad Request  | Plan payload is structurally invalid or violates invariants (cycles, missing epics, etc.). |
+| `E_CONFLICT`     | 409 Conflict     | Concurrent plan edits or stale `version` detected.                                         |
+| `E_NOT_FOUND`    | 404 Not Found    | Referenced epic/plan/task does not exist.                                                  |
+
+These codes appear in `error.code` with a human-readable `error.message` and
+machine hints in `error.details` (e.g. offending `epic_id`, expected vs actual
+`version`).
+
+### 8.4 Example Plan Event Envelopes
+
+**plan.created**
+
+```jsonc
+{
+	"version": 1,
+	"status": "ok",
+	"command": "mailbox/manage.send",
+	"data": {
+		"MessageType": "plan.created",
+		"Subject": "plan.created:epic-123",
+		"Sender": "actor:system:overseer",
+		"Recipients": ["team:backend"],
+		"Timestamp": "2025-11-15T12:00:00Z",
+		"Body": {
+			"epic_id": "epic-123",
+			"tasks": [/* see overseer_planning.md */]
+		}
+	},
+	"meta": {
+		"epic_id": "epic-123",
+		"plan_id": "plan-01HF...",
+		"version": 1,
+		"source": "overseer",
+		"reason": "initial_create"
+	},
+	"error": { "code": null, "message": null }
+}
+```
+
+**plan.updated**
+
+```jsonc
+{
+	"version": 1,
+	"status": "ok",
+	"command": "mailbox/manage.send",
+	"data": {
+		"MessageType": "plan.updated",
+		"Subject": "plan.updated:epic-123",
+		"Sender": "actor:system:overseer",
+		"Recipients": ["team:backend"],
+		"Timestamp": "2025-11-15T13:00:00Z",
+		"Body": {
+			"epic_id": "epic-123",
+			"changes": [/* diff-style summary */]
+		}
+	},
+	"meta": {
+		"epic_id": "epic-123",
+		"plan_id": "plan-01HF...",
+		"version": 2,
+		"source": "overseer",
+		"reason": "replan"
+	},
+	"error": { "code": null, "message": null }
+}
+```
+
+**plan.review_needed**
+
+```jsonc
+{
+	"version": 1,
+	"status": "ok",
+	"command": "mailbox/manage.send",
+	"data": {
+		"MessageType": "plan.review_needed",
+		"Subject": "plan.review_needed:epic-123",
+		"Sender": "actor:system:overseer",
+		"Recipients": ["actor:human:jane"],
+		"Timestamp": "2025-11-15T13:30:00Z",
+		"Body": {
+			"epic_id": "epic-123",
+			"reason": "file_guard_conflicts"
+		}
+	},
+	"meta": {
+		"epic_id": "epic-123",
+		"plan_id": "plan-01HF...",
+		"version": 2,
+		"source": "overseer",
+		"reason": "guard_violation",
+		"priority": "high"
+	},
+	"error": { "code": null, "message": null }
+}
+```
+
+**Example error response (version conflict)**
+
+```jsonc
+{
+	"version": 1,
+	"status": "error",
+	"command": "todo/manage.plan",
+	"data": {
+		"hint": "plan version conflict; reload plan and retry with latest version"
+	},
+	"meta": {
+		"epic_id": "epic-123",
+		"plan_id": "plan-01HF...",
+		"version": 2,
+		"source": "overseer",
+		"reason": "apply",
+		"trace_id": "..."
+	},
+	"error": {
+		"code": "E_CONFLICT",
+		"message": "plan version 3 expected, but request used version 2",
+		"details": {
+			"expected_version": 3,
+			"actual_version": 2
+		}
+	}
+}
+```
+
+These examples are illustrative and must still conform to the canonical envelope
+invariants in `protocol_v1.md`.

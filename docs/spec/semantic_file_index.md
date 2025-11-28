@@ -81,8 +81,11 @@ available.
     - `id` (string) – stable chunk identifier for this file.
     - `index` (int) – zero-based chunk index.
     - `of` (int) – total number of chunks for this file.
-    - `span` (object, optional) – `{ "start_byte": int, "end_byte": int }` or
-      line-based span.
+    - `span` (object, optional) – span within the file. MUST use one of:
+      - **Byte-based:** `{ "unit": "byte", "start": int, "end": int }`.
+      - **Line-based:** `{ "unit": "line", "start": int, "end": int }`. The
+        `unit` discriminator is required when `span` is present; unspecified
+        optional fields are omitted and have no implicit defaults.
   - `source` (object, optional) – provenance:
     - `task_id` (string, optional) – task that triggered (re)indexing.
     - `review_id` (string, optional) – review record if triggered post-review.
@@ -109,17 +112,48 @@ For **single-embedding-per-file** entries:
 For **chunked** entries:
 
 - `type = "file_embedding_chunk"`
-- `name = "file://<workspace_id>/<rel_path>#chunk-<chunk_id>"`
+- `name = "file://<workspace_id>/<rel_path>#chunk-<chunk_id>?cfg=<hash>"`
 
-`chunk_id` is a stable identifier determined at initial indexing and reused on
-all subsequent re-embeds for that file while the chunking configuration remains
-unchanged.
+Where:
+
+- `chunk_id` is a stable identifier determined at initial indexing for the given
+  chunking configuration.
+- `cfg=<hash>` is a stable `chunking_config_hash` derived from
+  `(chunk_bytes, chunk_overlap_bytes, provider.model)`.
 
 This ensures that:
 
 - A file has exactly one _active_ `file_embedding` entry.
 - If chunking is enabled, a file has a fixed set of `file_embedding_chunk`
-  entries whose IDs and boundaries do not change across re-embedding runs.
+  entries whose IDs and boundaries do not change across re-embedding runs as
+  long as `chunking_config_hash` remains the same.
+
+#### 3.2.1 Chunking Configuration Changes
+
+When chunking configuration changes (e.g. `chunk_bytes` or
+`chunk_overlap_bytes`), the indexer MUST treat the new configuration as a
+distinct `chunking_config_hash` and MUST NOT silently reuse old chunk spans.
+
+Preferred behavior (**automatic replacement**, normative):
+
+1. Detect that the effective chunking configuration for `(workspace, path)` has
+   changed by comparing the stored `chunking_config_hash` with the current
+   configuration.
+2. Generate a new set of `file_embedding_chunk` entries using the new
+   configuration and a new `cfg=<hash>` value in their `name`.
+3. Mark the previous chunk set as deprecated via a flag in `result.source` or a
+   dedicated `result.deprecated: true` field, or tombstone them according to the
+   memory store’s deletion semantics.
+4. Once the new chunks are written successfully, the deprecated set MUST NOT be
+   used for search; implementations MAY physically delete them as a cleanup
+   step.
+
+Alternative behavior (**manual reindex**, optional):
+
+- The indexer MAY reject re-embedding under a changed configuration with a clear
+  error (`CHUNK_BOUNDARY_MISMATCH`, see §11) instructing the caller to trigger
+  an explicit full re-index job. Implementations choosing this path SHOULD
+  document it clearly in operator docs.
 
 ---
 
@@ -198,6 +232,32 @@ Behavior mirrors post-review updates but without requiring a review record.
 
 - If entries exist → re-embed using existing chunking.
 - If not → perform initial index.
+
+### 4.4 Concurrency & Idempotency
+
+Indexing operations MUST be safe under retries and concurrent attempts.
+
+- **Idempotency**
+  - Indexers MUST use upsert semantics keyed by
+    `(workspace, path, type,
+    chunk.id, chunking_config_hash)`.
+  - If the stored `result.digest` matches the currently indexed file digest,
+    implementations MAY short-circuit and skip re-embedding to avoid duplicate
+    work.
+- **Concurrency controls**
+  - Implementations SHOULD use either per-file mutex/lease mechanisms or
+    optimistic concurrency with conditional updates based on
+    `(digest, last_write_timestamp, last_write_actor)`.
+  - Concurrent attempts to index the same `(workspace, path)` MUST resolve
+    deterministically (e.g. last-write-wins with a monotonic timestamp) and MUST
+    NOT corrupt the index.
+- **Ordering & consistency**
+  - Post-review indexing (§4.2) is the **canonical refresh** for reviewed state.
+    It may run asynchronously by default (eventual consistency), but an
+    implementation MAY offer a blocking mode where task completion waits for a
+    successful post-review index update.
+  - Manual/CLI updates MUST NOT regress the index below the last known reviewed
+    state unless explicitly requested.
 
 ---
 
@@ -296,13 +356,73 @@ For each file in `files`:
    - When vector is enabled, use the vector helper / store to write embeddings.
 
 6. **Result envelope**
-   - `data.summary` includes counts (e.g. `"indexed 12 files, 34 chunks"`).
-   - Optionally attach a CAS artifact listing all updated entries.
+   - `data.summary` MUST include numeric counts:
+     - `files_indexed` (int)
+     - `chunks_indexed` (int)
+     - `files_skipped` (int)
+   - `data.cas_artifact` (optional) MAY point to a CAS blob with detailed
+     per-file/chunk results:
+     - `artifact_id` (string), `path` (string), `digest` (string),
+       `entries_count` (int).
 
-Error handling:
+### 6.4 Job Result Envelope & Error Reporting
 
-- Per-file failures should be recorded but SHOULD NOT fail the entire job unless
-  they are systemic (e.g. provider outage, DB failure).
+Embedding jobs use standard Protocol v1 envelopes for their terminal result.
+Conceptual shape:
+
+```jsonc
+{
+	"version": 1,
+	"status": "ok|error",
+	"command": "jobs/info", // or jobs/tail final event
+	"data": {
+		"summary": {
+			"files_indexed": 12,
+			"chunks_indexed": 34,
+			"files_skipped": 1
+		},
+		"failures": [
+			{
+				"file": {
+					"path": "foo/bar.go",
+					"digest": "sha256:..." // optional; may be empty on read failures
+				},
+				"error_code": "EMBEDDING_PROVIDER_FAILURE",
+				"error_message": "HTTP 503 from embedding provider",
+				"provider_request_id": "req-123", // optional
+				"timestamp": "2025-11-15T12:34:56Z"
+			}
+		],
+		"cas_artifact": {
+			"artifact_id": "semantic_index.update_files:01HF...",
+			"path": "jobs/01HF.../semantic_index_results.ndjson",
+			"digest": "sha256:...",
+			"entries_count": 46
+		}
+	},
+	"meta": {
+		"job_id": "01HF...",
+		"workspace_id": "ws-123"
+	},
+	"error": {
+		/* see §11 for error codes; may be null when status:"ok" */
+	}
+}
+```
+
+Job-level status semantics:
+
+- `status: "ok"` with `data.failures` empty → **success**.
+- `status: "ok"` with one or more `data.failures` entries → **partial_success**
+  (per-file failures, but no systemic errors).
+- `status: "error"` → **failure** due to a systemic error (see §11).
+
+Systemic errors that SHOULD cause `status: "error"` include:
+
+- Embedding provider outage or repeated timeouts above a configured threshold.
+- Database write failures for the memory or vector stores.
+- CAS being unavailable or failing integrity checks.
+- Authentication/authorization failures when calling embedding providers.
 
 ---
 
@@ -423,3 +543,77 @@ Potential follow-ons:
 - Cross-workspace semantic search over shared libraries.
 - A dedicated `code_symbol_dag` / dependency graph spec building on the
   post-review indexer abstraction defined here.
+
+---
+
+## 11. Error Codes & Contract
+
+This section standardizes error codes and result shapes for the semantic file
+index and its embedding jobs. It extends the Protocol v1 error catalog in
+`protocol_v1.md` §5.
+
+### 11.1 Standard Error Codes
+
+| Code                         | Description                                                             |
+| ---------------------------- | ----------------------------------------------------------------------- |
+| `SEMANTIC_INDEX_NOT_FOUND`   | Requested file/path has no semantic index entry.                        |
+| `PROVIDER_CONFIG_INVALID`    | Embedding provider configuration is incomplete or invalid.              |
+| `CHUNK_BOUNDARY_MISMATCH`    | Existing chunk metadata does not match current chunking configuration.  |
+| `VECTOR_NOT_ENABLED`         | Vector search/embedding support is not enabled in the current build/DB. |
+| `EMBEDDING_PROVIDER_FAILURE` | Embedding provider returned non-2xx or protocol error after retries.    |
+| `CAS_RESOLVE_ERROR`          | CAS read/write failed or digest mismatch detected.                      |
+
+Implementations MAY define additional, more granular codes as long as they do
+not conflict with these names.
+
+### 11.2 Classification & Recovery Guidance
+
+Each error code is classified as recoverable/non-recoverable and comes with
+guidance:
+
+| Code                         | Recoverable? | Suggested Handling                                                                                                          |
+| ---------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `SEMANTIC_INDEX_NOT_FOUND`   | yes          | Log at debug; return empty search results or trigger initial index if configured.                                           |
+| `PROVIDER_CONFIG_INVALID`    | no           | Log at error; fail job; require operator to fix configuration.                                                              |
+| `CHUNK_BOUNDARY_MISMATCH`    | yes          | Log at warn; either perform automatic replacement (§3.2.1) or surface to caller to trigger manual reindex.                  |
+| `VECTOR_NOT_ENABLED`         | yes          | Log at info; skip embedding work; allow metadata-only entries.                                                              |
+| `EMBEDDING_PROVIDER_FAILURE` | yes (often)  | Log at error; retry with backoff up to budget; on exhaustion, mark job as failure or partial_success depending on coverage. |
+| `CAS_RESOLVE_ERROR`          | no           | Log at error; fail job; operator must correct storage or disk issues.                                                       |
+
+Recoverable errors MAY be retried within a single job attempt; non-recoverable
+errors SHOULD cause the job to fail fast.
+
+### 11.3 Result Error Shape
+
+Per-file errors MUST be expressed as entries in `data.failures` on the job
+result envelope (see §6.4). Each failure object MUST include:
+
+- `file.path` (string)
+- `error_code` (string; one of the codes above or from Protocol v1 catalog)
+- `error_message` (string)
+
+It SHOULD also include when available:
+
+- `file.digest` (string, optional)
+- `provider_request_id` (string, optional)
+- `timestamp` (string, RFC3339 UTC)
+
+Systemic errors (provider outage, DB errors, CAS failures) MUST be surfaced via
+the top-level `error` object on the job envelope, using one of the codes above
+and a meaningful `error.message`. In that case, `status` MUST be `"error"` and
+consumers SHOULD treat `data.failures` as incomplete.
+
+### 11.4 Protocol v1 Semantics
+
+All envelopes and error codes described here are extensions of the Core Profile
+v1 contract defined in `protocol_v1.md`:
+
+- `version` MUST be `1`.
+- `status` MUST be `"ok"` or `"error"` for terminal job envelopes.
+- `error.code` MUST be set for `status: "error"`.
+- `meta.cas_digest` MUST be set when `data.cas_artifact` is present and MUST
+  match the artifact digest.
+
+HTTP or RPC layers integrating with these jobs SHOULD map error codes to
+statuses consistent with Core Profile guidance (e.g. provider configuration
+issues → `400`, authorization issues → `401/403`, storage issues → `500`).

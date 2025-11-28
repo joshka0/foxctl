@@ -123,8 +123,31 @@ Fields (conceptual):
 - `status` (string, optional) – derived from `env.status` or review status.
 - `data_inline` (object, optional) – small preview (e.g. truncated message).
 - `data_artifact` (string, optional) – CAS digest for full details.
-- `meta` (object, optional):
-  - `job_id`, `trace_id`, `task_id`, `epic_id`, `review_id`, etc.
+- `meta` (object, optional) – see **Meta Field Reference** below.
+
+#### 3.3.1 Meta Field Reference (Conceptual)
+
+Trajectory events reuse the Protocol v1 `meta.*` namespace for correlation. The
+following keys are recognized for trajectory-related envelopes and index rows:
+
+| Field                     | Type   | Required | Scope / Uniqueness                                                             | Usage Notes                                                                         |
+| ------------------------- | ------ | -------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `trace_id`                | string | yes      | Unique per trajectory (UUID/ULID/hex); reused by all envelopes in the same run | Primary correlation id; MUST be set on all trajectory-related envelopes and events. |
+| `job_id`                  | string | optional | ULID; unique per job in a workspace                                            | Set when events originate from a `jobs/*` command.                                  |
+| `task_id`                 | string | optional | Task identifier; unique per tasks store                                        | Set for task-scoped events.                                                         |
+| `epic_id`                 | string | optional | Epic identifier                                                                | Set when an event relates to an epic-level plan.                                    |
+| `review_id`               | string | optional | Review artifact identifier                                                     | Set on `review_result` events and related envelopes.                                |
+| `review_request_id`       | string | optional | ID of review request message or job                                            | Use when linking events back to a specific review request.                          |
+| `review_result_id`        | string | optional | ID of review result message or job                                             | Use when capturing async review completions.                                        |
+| `actor_id` / `agent_id`   | string | optional | Mailbox/agent actor id (e.g. `actor:agent:dspy:<slug>`)                        | Set for agent-initiated events and tool calls.                                      |
+| `task_run_id` / `run_id`  | string | optional | Unique id per execution attempt of a given task                                | Useful for distinguishing retries of the same task.                                 |
+| `trace_parent`            | string | optional | Parent trace id                                                                | Set when a trajectory is spawned from another trajectory/trace.                     |
+| `job_attempt` / `attempt` | int    | optional | Non-negative integer; monotonic per `job_id`                                   | Incremented on each retry of the same job.                                          |
+| `created_by`              | string | optional | Service or user identifier                                                     | E.g. `agentctl`, `actor:system:overseer`, `actor:human:<id>`.                       |
+| `cas_digest`              | string | optional | `sha256:<hex>`; MUST match any referenced CAS artifact                         | Set whenever `data_artifact` / `data.artifact` is present.                          |
+
+Unless otherwise specified, optional fields are omitted when not applicable;
+they have no implicit default meaning.
 
 Events SHOULD be derived from:
 
@@ -217,6 +240,56 @@ Implementations MUST follow Protocol v1 rules:
 - Use `meta.cas_digest` whenever `data.artifact` is present.
 - Keep inline previews (`data.summary` / `data_inline`) ≤ configured size.
 - Never store secrets in trajectories; secret redaction rules still apply.
+
+### 5.3 Wire Contract & Error Codes
+
+Trajectory capture and export reuse the Protocol v1 envelope. This section
+specializes a few rules for trajectories.
+
+#### 5.3.1 Wire Contract Rules
+
+- **Inline vs CAS thresholds**
+  - Respect `trajectory_capture.max_inline_bytes` (see §8) and/or the global
+    Protocol v1 `inline_output_kb` value.
+  - If a serialized trajectory payload (full trace, large tool logs) would
+    exceed this threshold, it MUST be stored in CAS and referenced via
+    `data.artifact` / `meta.cas_digest`.
+  - `data_inline` / `data.summary` MUST remain small (≤ configured preview
+    size); previews SHOULD be deterministic and secret-free.
+- **Redaction**
+  - All Protocol v1 redaction rules apply: no secrets or raw environment
+    variables may be persisted in `data`, `meta`, or CAS artifacts.
+  - Export jobs MAY apply additional redaction filters via
+    `trajectory_capture.redact_patterns`.
+- **Uniqueness & indexing constraints**
+  - `Trajectory.id` MUST be unique per `(workspace_id, id)` pair.
+  - `UserRequestCapture.id` MUST be unique per `(workspace_id, id)` pair.
+  - `TrajectoryEvent.id` SHOULD be globally unique (ULID) or, at minimum, unique
+    per `trajectory_id`.
+  - `meta.trace_id` MUST be present on all trajectory-related envelopes and
+    SHOULD uniquely identify a single logical run within a workspace.
+- **Ordering guarantees**
+  - Within a given `trajectory_id`, events MUST be ordered by `ts` when
+    presented to callers.
+  - Implementations SHOULD ensure `ts` is monotonic for events emitted from the
+    same process; cross-process skew is tolerated but SHOULD be bounded.
+
+#### 5.3.2 Error Codes
+
+Trajectory-related commands (capture/export jobs, indexers) SHOULD use the
+following error codes in addition to the base catalog in `protocol_v1.md` §5:
+
+| Code                                 | Recommended HTTP status | Meaning                                                                   |
+| ------------------------------------ | ----------------------- | ------------------------------------------------------------------------- |
+| `trajectory.capture.invalid_request` | 400                     | Malformed or missing required fields when capturing a trajectory or event |
+| `trajectory.capture.storage_error`   | 500                     | Failure persisting trajectory/index rows or CAS artifacts                 |
+| `trajectory.export.access_denied`    | 403                     | Export attempted without sufficient permissions or workspace-level opt-in |
+| `trajectory.invalid_schema`          | 400                     | Envelope or episode shape does not conform to this spec                   |
+| `trajectory_event.missing_trace_id`  | 400                     | Event missing `meta.trace_id` where it is required                        |
+
+These codes MUST appear in `error.code` when `status: "error"` and MAY be
+augmented with additional context in `error.details` (e.g., offending
+`trajectory_id`, `event_id`, or field names).
 
 ### 5.2 Suggested Tables / Memory Types (Non-Normative)
 

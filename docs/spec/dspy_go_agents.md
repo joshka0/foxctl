@@ -581,3 +581,215 @@ For a V1 implementation, the following subset is sufficient:
 - Jobs + basic telemetry recording.
 - Manual spawn/kill via CLI, with logs in jobs storage.
 - No viewer yet; use CLI and logs to inspect behavior.
+
+---
+
+## 11. Wire Contracts, Error Codes, and Envelopes
+
+This section specializes the Core Profile v1 envelope rules (`protocol_v1.md`)
+for dspy-go agents and their tools. It is **normative** for the agent/dspy
+integration, but does not change the underlying Protocol v1 wire contract.
+
+### 11.1 Agent Invocation Envelope
+
+Agent invocations (coding, planning, review) are always carried inside Protocol
+v1 envelopes with `command` in the `agent/*` or `jobs/*` namespaces.
+Conceptually:
+
+```jsonc
+{
+  "version": 1,
+  "status": "ok|error|progress",
+  "command": "agent/spawn" | "agent/send" | "jobs/submit",
+  "data": {
+    "kind": "coding" | "planning" | "review",
+    "input": { /* Coding/Planning/ReviewInput as per §6 */ },
+    "output": { /* optional ReviewOutput / status summaries on results */ }
+  },
+  "meta": {
+    "ts": "...",              // Core v1 timestamp
+    "workspace": "...",      // Workspace path or id
+    "job_id": "01H...",      // Job representing the agent session (if any)
+    "trace_id": "...",       // Correlates all envelopes for this run
+    "source": "run|cache",   // As per Core v1
+    "profiles": ["core/v1", "agent/v1"]
+  },
+  "error": { /* see §11.4 */ }
+}
+```
+
+Implementations MAY wrap agent signatures in different specific commands
+(`agent/spawn`, `jobs/submit`, etc.), but MUST preserve:
+
+- `data.kind` and `data.input` matching the signatures in §6.
+- A stable `meta.trace_id` shared across all envelopes for a given agent run.
+- A `meta.workspace` and (when applicable) `meta.job_id` so trajectories and
+  jobs can be joined.
+
+### 11.2 Required Meta Fields for Tools and Telemetry
+
+For dspy-go tool calls (the tools in §5) and their corresponding telemetry
+events, the following metadata MUST be available, either via Protocol v1
+`meta.*` fields or via the telemetry/event record that wraps the envelopes:
+
+- `meta.actor_id` (string, required for agent-originated calls)
+  - The mailbox identity of the agent, e.g. `actor:agent:dspy:<slug>`.
+- `meta.workspace_id` (string, required)
+  - Logical workspace identifier (may be derived from `meta.workspace`).
+- `meta.task_id` (string, required for task-scoped calls)
+  - The primary task the tool call is associated with.
+- `meta.trace_id` (string, required)
+  - Correlation id linking all envelopes for a given agent step/run.
+- `meta.epic_id` (string, optional)
+  - Epic/plan root, when available.
+
+Additional optional fields such as `meta.run_id`, `meta.job_attempt`, and
+`meta.cas_digest` follow the conventions in `dspy_trajectory_capture.md` §3.3.
+
+### 11.3 Canonical Tool Error Codes and Shapes
+
+Tools in §5 MUST use Core Profile v1 error envelopes (`status: "error"` with
+`error.code` / `error.message` / `error.details`) and SHOULD use the following
+additional codes for common agent scenarios. These codes extend the base error
+catalog in `protocol_v1.md` §5.
+
+| Code                  | Applies to                             | Meaning / Typical Cause                                   |
+| --------------------- | -------------------------------------- | --------------------------------------------------------- |
+| `E_GUARD_VIOLATION`   | `edit.*`, `fs.*`, `tests.run`          | Blocked by `task_guard` / `file_guard` (scope/lock issue) |
+| `E_PERMISSION_DENIED` | `fs.*`, `edit.*`, `tests.run`          | OS-level or policy-level permission failure               |
+| `E_FILE_NOT_FOUND`    | `fs.read_file`, `edit.apply_patch`     | Requested path does not exist                             |
+| `E_PATCH_FAILED`      | `edit.apply_patch`, `edit.multi_patch` | Patch could not be applied cleanly (conflict/invalid)     |
+| `E_TEST_FAILED`       | `tests.run`                            | Tests executed but one or more failed                     |
+| `E_MAILBOX_NOT_FOUND` | `mail.*`                               | Target mailbox/recipient does not exist                   |
+
+Error envelopes MUST conform to Protocol v1, with additional fields in
+`error.details` scoped per tool. Examples (non-exhaustive):
+
+- `fs.read_file`:
+  - `error.details`: `{ "path": "...", "exists": false }`.
+- `edit.apply_patch`:
+  - `error.details`: `{ "path": "...", "reason": "conflict", "hunk": 3 }`.
+- `tests.run`:
+  - `error.details`: `{ "failed": ["TestFoo", "TestBar"], "total": 27 }`.
+- `mail.send`:
+  - `error.details`: `{ "recipient": "...", "reason": "not_found" }`.
+
+Guard-specific errors (`E_GUARD_VIOLATION`, `E_PERMISSION_DENIED`) SHOULD also
+include which guard fired:
+
+```jsonc
+"error": {
+  "code": "E_GUARD_VIOLATION",
+  "message": "edit blocked by task_guard",
+  "details": {
+    "guard": "task_guard",
+    "scope_paths": ["agentctl/internal/..."],
+    "reason": "outside_task_scope"
+  }
+}
+```
+
+### 11.4 Jobs and Error Propagation to dspy-go
+
+Agent runs are typically represented as jobs (see `jobs/*` commands in
+`protocol_v1.md` §3). For dspy-go agents:
+
+- The **job creation envelope** (`jobs/submit`) MUST include:
+  - `data.kind` = `"agent_session"` (or similar profile-specific marker).
+  - `data.agent_role` = `"coder" | "planner" | "reviewer"`.
+  - `data.input` = Coding/Planning/ReviewInput from §6.
+  - `meta.trace_id` and `meta.workspace`.
+- The **terminal job envelope** (`jobs/tail` final event or `jobs/info`):
+  - Uses `status: "ok"` when the agent completes without unhandled errors.
+  - Uses `status: "error"` when the session aborts due to an unhandled tool or
+    runtime error.
+  - MUST surface the last failing tool envelope (or a summary) in
+    `data.last_error` or `error.details.last_error_digest`.
+
+Error propagation semantics back to the dspy-go runtime:
+
+- **Retryable errors** (MAY be retried by the agent/tool wrapper):
+  - `ERUNTIME`, `ETIMEOUT`, `ERATELIMIT`, transient provider/network errors.
+- **Terminal errors** (SHOULD NOT be retried automatically):
+  - `E_GUARD_VIOLATION`, `E_PERMISSION_DENIED`, `E_FILE_NOT_FOUND`,
+    `E_PATCH_FAILED`, `EARG`, `EINVALID_PLAN` (when applicable).
+- Tool wrappers SHOULD:
+  - Map retryable errors to dspy exceptions that can trigger built-in retry
+    logic (e.g. with backoff).
+  - Map terminal errors to structured results (`status = "blocked"` or
+    `status = "error"` in Coding/Review outputs) rather than untyped
+    panics/exceptions.
+
+When mapping to HTTP/gRPC-style status codes (for external APIs or logs), the
+following conventions are recommended:
+
+- `E_GUARD_VIOLATION` → `409 Conflict`.
+- `E_PERMISSION_DENIED` → `403 Forbidden`.
+- `E_FILE_NOT_FOUND` → `404 Not Found`.
+- `E_PATCH_FAILED` → `409 Conflict` or `422 Unprocessable Entity`.
+- `E_TEST_FAILED` → `422 Unprocessable Entity`.
+
+### 11.5 Example Envelopes (edit.apply_patch)
+
+**Successful patch application:**
+
+```jsonc
+{
+  "version": 1,
+  "status": "ok",
+  "command": "edit/apply_patch",
+  "data": {
+    "path": "agentctl/internal/foo.go",
+    "summary": {
+      "loc_added": 12,
+      "loc_deleted": 3
+    }
+  },
+  "meta": {
+    "ts": "2025-11-15T12:34:56Z",
+    "workspace": "/Users/example/repos/agentctl",
+    "workspace_id": "ws-123", // conceptual field for telemetry/join
+    "job_id": "01HF...",
+    "trace_id": "4f8a...",
+    "actor_id": "actor:agent:dspy:coder-main"
+  },
+  "error": {
+    "code": null,
+    "message": null
+  }
+}
+```
+
+**Guard-blocked patch (task_guard):**
+
+```jsonc
+{
+  "version": 1,
+  "status": "error",
+  "command": "edit/apply_patch",
+  "data": {
+    "hint": "edit blocked by task_guard; path is outside task scope"
+  },
+  "meta": {
+    "ts": "2025-11-15T12:35:02Z",
+    "workspace": "/Users/example/repos/agentctl",
+    "workspace_id": "ws-123",
+    "job_id": "01HF...",
+    "trace_id": "4f8a...",
+    "actor_id": "actor:agent:dspy:coder-main"
+  },
+  "error": {
+    "code": "E_GUARD_VIOLATION",
+    "message": "edit blocked by task_guard",
+    "details": {
+      "guard": "task_guard",
+      "scope_paths": ["agentctl/internal/storage"],
+      "path": "agentctl/testdata/manual_hack.go",
+      "reason": "outside_task_scope"
+    }
+  }
+}
+```
+
+These examples are illustrative only; implementations MUST still conform to the
+canonical envelope rules in `protocol_v1.md`.
