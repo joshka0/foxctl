@@ -65,7 +65,7 @@ Gemini:
 - `gemini-2.5-flash` (default) - Best price/performance for agents
 - `gemini-2.5-pro` - Advanced reasoning
 - `gemini-2.5-flash-lite` - Ultra-fast, cheapest
-- `gemini-3-pro-preview` - Latest preview
+- `gemini-3-pro-preview` - Latest preview  // brand new model as of November 28, 2025
 
 OpenAI:
 
