@@ -248,9 +248,10 @@ func buildAgentctlBinary(t *testing.T) string {
 	}
 	cmd := exec.Command("go", "build", "-o", bin, "./cmd/agentctl")
 	cmd.Dir = repoRoot(t)
-	// Same as above: respect CGO settings from the test environment.
+	// Build CLI without CGO to use pure-Go SQLite (modernc.org/sqlite) and avoid
+	// linker conflicts between go-libsql and mattn/go-sqlite3 when both are present.
 	env := append([]string{}, os.Environ()...)
-	env = append(env, "GOFLAGS=-modcacherw -buildvcs=false")
+	env = append(env, "CGO_ENABLED=0", "GOFLAGS=-modcacherw -buildvcs=false")
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {

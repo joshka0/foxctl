@@ -233,6 +233,11 @@ UX path for auto-creating tasks.
 4. Else → `block` with guidance in `reason` (e.g. "No active task. Use agentctl
    todo add ... or /start-task").
 
+Hook semantics are limited to `hook.Output` (`DecisionApprove`/`DecisionBlock`).
+Callers that translate a `DecisionBlock` into a top-level tool error SHOULD use
+`E_GUARD_VIOLATION` as the error code (see `dspy_go_agents.md` §11.3),
+indicating a guard/scope violation rather than a transient runtime failure.
+
 ### 5.2 `hooks/task_update` (optional initial scope)
 
 **Event:** `PostToolUse` (for edits/writes)\

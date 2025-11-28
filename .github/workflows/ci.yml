@@ -99,8 +99,8 @@ jobs:
       - name: Coverage
         run: |
           mkdir -p coverage
-          CGO_ENABLED=1 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
-          CGO_ENABLED=1 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
+          CGO_ENABLED=0 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
+          CGO_ENABLED=0 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
           awk '/total:/ { if ($3+0 < 40.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
 
   build:
@@ -123,6 +123,7 @@ jobs:
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: agentctl-${{ runner.os }}-go1.24
           path: |
@@ -150,8 +151,40 @@ jobs:
         run: |
           CGO_ENABLED=0 go test ./cmd/agentctl/cmd -run ^${{ matrix.test }}$ -count=1 -timeout 10m -v
 
+  llm-planner-integration:
+    runs-on: arc-runner-agentctl
+    container:
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+    env:
+      AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      # Default model for OpenRouter integration tests (not sensitive, so not a secret)
+      OPENROUTER_MODEL_NAME: "openai/gpt-4o-mini"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip if OpenRouter secret not set
+        if: env.OPENROUTER_API_KEY == ''
+        run: echo "OPENROUTER_API_KEY not set; skipping LLM planner integration test"
+
+      - name: LLM planner integration test (OpenRouter)
+        if: env.OPENROUTER_API_KEY != ''
+        run: |
+          CGO_ENABLED=1 go test ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
+
   all-checks:
-    needs: [lint, unit-tests, race-tests, coverage, build, e2e-tests]
+    needs:
+      [
+        lint,
+        unit-tests,
+        race-tests,
+        coverage,
+        build,
+        e2e-tests,
+        llm-planner-integration,
+      ]
     runs-on: arc-runner-agentctl
     steps:
       - run: echo "✅ All checks passed"

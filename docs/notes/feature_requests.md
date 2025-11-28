@@ -1,0 +1,3 @@
+- --review after a feature is done before we can finish a task?
+- --embed update after file is accepted and written?
+- capture user requests --> use that to enhance dspy trajectories in the future?

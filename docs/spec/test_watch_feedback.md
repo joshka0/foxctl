@@ -44,7 +44,10 @@ The design is **language-agnostic** and must support at least:
 - **G4: Hook-First UX**\
   Feedback is surfaced via a dedicated `hooks/test_feedback` skill wired to
   `PostToolUse`, keeping Claude’s integration surface consistent with other
-  hooks (`task_guard`, `knowledge_router`).
+  hooks (`task_guard`, `knowledge_router`). Unlike `task_guard`/`file_guard`,
+  which may lead to guard errors such as `E_GUARD_VIOLATION` when propagated to
+  tools (see `dspy_go_agents.md` §11.3), `hooks/test_feedback` is
+  **advisory-only** and MUST NOT block writes or change tool error codes.
 
 - **G5: Simple, Queryable Storage**\
   Test watcher state is persisted in SQLite alongside other agentctl storage so

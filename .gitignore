@@ -25,4 +25,5 @@ mcp_install
 pr*.json
 
 # Claude Code local settings
-.claude/settings.local.json
+.claude/settings.local.json.env
+prcomments.txt
