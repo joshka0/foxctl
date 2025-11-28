@@ -115,13 +115,30 @@ Logical fields:
 - `task_id` (string).
 - `kind` (string) – `auto`, `human`, or `mixed`.
 - `status` (string) – `ok` or `failed`.
+- `inputs` (object, optional) – describes what was actually reviewed:
+  - `files` (list of objects):
+    - `path` (string) – file path relative to workspace root.
+    - `digest` (string) – CAS digest of the file contents at review time.
+    - `changed_since_last_review` (bool, optional) – whether this file changed
+      since the previous review for this task.
+  - `diff_digest` (string, optional) – CAS digest of a diff/patch blob that was
+    presented to reviewers (AI or human).
+- `labels` (list of strings, optional) – high-level tags such as `"holistic"`,
+  `"security"`, `"performance"`.
 - `checks` (list of objects):
-  - `name` (string) – e.g. `lint`, `tests-short`, `tests-race`.
+  - `name` (string) – e.g. `lint`, `tests-short`, `tests-race`, `ai_review`,
+    `security_review`.
   - `status` (string) – `ok` or `failed`.
   - `details` (string, optional) – human-readable summary.
-  - `artifact_digest` (string, optional) – CAS digest for large logs/output.
+  - `artifact_digest` (string, optional) – CAS digest for large logs/output or
+    structured payloads (such as AI review findings).
+  - `reviewer_role` (string, optional) – logical role used by the reviewer, e.g.
+    `holistic_reviewer`, `security_analyst`, `perf_analyst`.
+  - `tags` (list of strings, optional) – additional tags such as `"holistic"`,
+    `"security"`, or `"performance"`.
 - `created_at` (timestamp).
-- `created_by` (string) – actor ID (agent or human) that initiated the review.
+- `created_by` (string) – actor ID (agent or human) that initiated the review
+  (often `actor:system:overseer` for automated reviews).
 
 Implementations SHOULD:
 
@@ -201,6 +218,56 @@ Conceptual execution steps:
 
 Exact transition behavior is controlled by workspace policy (see below), but
 review artifacts MUST be recorded regardless.
+
+## AI / agent reviewers
+
+AI- or agent-based reviewers are modeled as specific **checks** within a review
+artifact. They typically produce structured findings instead of, or in addition
+to, freeform text.
+
+- Common check names include:
+  - `ai_review` – general/holistic review of changes.
+  - `security_review` – security-focused review.
+  - `perf_review` – performance-focused review.
+- For these checks, `artifact_digest` SHOULD point to a CAS blob containing a
+  structured JSON payload such as:
+
+  ```jsonc
+  {
+    "summary": "High-level verdict, e.g. 'OK with nits' or 'Refactor recommended'",
+    "findings": [
+      {
+        "file": "agentctl/internal/agent/runtime/overseer.go",
+        "range": { "start_line": 77, "end_line": 93 },
+        "severity": "warn", // info | warn | error
+        "category": "code_smell", // bug | smell | style | test | docs | perf | security
+        "message": "Concurrent agent limit check is TOCTOU; rely on atomic runtime check instead.",
+        "suggested_fix": "Use Runtime.Spawn() limit enforcement and treat overseer check as advisory."
+      }
+    ]
+  }
+  ```
+
+Overseer behavior for AI/agent reviewers:
+
+- The overseer is the **orchestrator** for review checks. It:
+  - Consumes `review_request` events (often via mailbox messages).
+  - Decides which checks to run based on workspace configuration
+    (`review.checks`).
+  - Owns the top-level review artifact (`created_by` typically set to
+    `actor:system:overseer`).
+- Implementations MAY have the overseer:
+  - Perform a holistic `ai_review` itself as part of its own dspy-go program, or
+  - Spawn dedicated reviewer subagents with specific roles (e.g.
+    `security_analyst`, `perf_analyst`) that produce their own findings. The
+    overseer then aggregates or references those findings in the main review
+    artifact using `reviewer_role` and `tags`.
+
+Downstream agents can use the structured findings and tags to:
+
+- Identify which parts of the code need changes.
+- Filter by concern (e.g. show only `security` or `performance` findings).
+- Decide whether it is safe to advance a task to `completed`.
 
 ## APIs / Skills
 
@@ -387,8 +454,27 @@ Workspaces MAY configure review behavior via config files (exact keys
 implementation-defined). Examples of policy knobs:
 
 - `review.require_for_completion` (bool; default true for new workspaces).
-- `review.checks` (list): which named checks to run (e.g. `lint`,
-  `tests-short`).
+- `review.checks` (list): which named checks to run and, optionally, which
+  reviewer roles/tags to use. For example:
+
+  ```yaml
+  review:
+    require_for_completion: true
+    checks:
+      - name: lint
+      - name: tests-short
+      - name: ai_review
+        role: holistic_reviewer
+        tags: ["holistic"]
+      - name: security_review
+        role: security_analyst
+        tags: ["security"]
+        optional: true
+  ```
+
+  The overseer uses this configuration to decide which checks to run and which
+  dspy-go roles (if any) to spawn for AI-based reviewers.
+
 - `review.auto_on_complete` (bool): whether `todo complete` auto-triggers a
   review.
 - `review.human_ack_required` (bool): whether human/admin `ack` is required

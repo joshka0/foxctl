@@ -386,6 +386,87 @@ matching the above fields, then convert to a legacy signature for
 Planner agents MUST NOT call `todo/manage.plan` with `mode="apply"` directly.
 Application of proposed plans is overseer-only.
 
+### 6.3 Review Agent Signature
+
+Review agents are specialized dspy-go agents that perform structured reviews of
+code for a specific task and workspace. Their inputs and outputs are designed to
+align with the review artifact structure in `review_gate.md`.
+
+#### 6.3.1 ReviewInput (conceptual)
+
+**Input fields:**
+
+- `workspace_id` (string) – Workspace anchor.
+- `task_id` (string) – Task being reviewed.
+- `goal` (string) – One-sentence description of what the review should focus on
+  (e.g. "holistic review", "security review for new auth flow").
+- `description` (string) – Richer context (user request, acceptance criteria,
+  links to design docs).
+- `files` (list):
+  - `path` (string) – relative path.
+  - `content` (string) – current file contents or a truncated view (agent
+    runtime MAY load this via `fs.read_file`).
+  - `digest` (string, optional) – CAS digest for traceability.
+- `diff` (string, optional) – Unified diff or patch representing the changes
+  under review (may be reconstructed from CAS and edit history).
+- `constraints` ([]string, optional) – Any additional constraints from
+  overseer/admin (e.g. "do not relax validation", "avoid new dependencies").
+
+The runtime SHOULD ensure that the `files` and `diff` presented here correspond
+to what will later be recorded in the review artifact `inputs` section
+(`inputs.files`, `inputs.diff_digest`).
+
+#### 6.3.2 ReviewOutput (conceptual)
+
+**Output fields:**
+
+- `status` (string) – `"ok" | "failed" | "needs_changes"`.
+- `summary` (string) – High-level verdict suitable for humans/overseer.
+- `labels` ([]string, optional) – High-level tags such as `"holistic"`,
+  `"security"`, `"performance"`.
+- `findings` (list):
+  - `file` (string) – relative path.
+  - `range` (object, optional): `{ "start_line": int, "end_line": int }`.
+  - `severity` (string) – `"info" | "warn" | "error"`.
+  - `category` (string) –
+    `"bug" | "smell" | "style" | "test" | "docs" | "perf" | "security"`.
+  - `message` (string) – Description of the issue.
+  - `suggested_fix` (string, optional) – Concrete guidance for how to address
+    the issue.
+
+This structure is intentionally compatible with the structured JSON payload
+described under **AI / agent reviewers** in `review_gate.md`. The overseer (or
+runtime) MAY:
+
+- Serialize `ReviewOutput` to JSON, store it in CAS, and set the
+  `artifact_digest` for a corresponding review `check` (e.g. `ai_review`,
+  `security_review`).
+- Populate `reviewer_role` and `tags` on the `check` from the agent's configured
+  role and `labels`.
+
+#### 6.3.3 Roles and wiring to review checks
+
+Review agents SHOULD use explicit roles that map to review checks in
+`review_gate.md`:
+
+- `holistic_reviewer` → typically used for `ai_review` checks.
+- `security_analyst` → typically used for `security_review` checks.
+- `perf_analyst` → typically used for `perf_review` checks.
+
+When the overseer processes a `review_request`:
+
+- It consults `review.checks` configuration (see `review_gate.md`).
+- For each AI-based check (e.g. `ai_review`, `security_review`), it:
+  - Chooses a dspy-go role (e.g. `holistic_reviewer`, `security_analyst`).
+  - Constructs a `ReviewInput` with the relevant files/diff and constraints.
+  - Spawns or invokes a review agent with that signature and role.
+  - Converts the resulting `ReviewOutput` into a check entry and structured
+    artifact in the review record.
+
+This keeps the overseer as the single orchestrator of reviews while allowing
+specialized reviewer agents to provide focused analysis for security,
+performance, or other concerns.
+
 ---
 
 ## 7. Lifecycle & Integration with Overseer / Mailbox

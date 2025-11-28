@@ -6,9 +6,12 @@ GO ?= go
 GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
 GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
 
-# RACE_PKGS currently includes all packages. If you need to exclude any package
-# from race testing, document the rationale here and add an entry to AGENTS.md.
-RACE_PKGS := $(shell $(GO_CMD_CGO) list ./...)
+# RACE_PKGS includes all packages except internal/storage/vector.
+# The vector package links github.com/mattn/go-sqlite3 for sqlite-vector support,
+# which conflicts with github.com/tursodatabase/go-libsql's embedded SQLite
+# symbols under -race (both define sqlite3_data_directory). See AGENTS.md
+# "Testing Requirements" for details and manual vector test commands.
+RACE_PKGS := $(shell $(GO_CMD_CGO) list ./... | grep -v 'github.com/jkatigb/agentctl/internal/storage/vector')
 BINARY ?= agentctl
 GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
