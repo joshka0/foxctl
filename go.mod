@@ -1,10 +1,11 @@
 module github.com/jkatigb/agentctl
 
-go 1.24.0
+go 1.24.1
 
-toolchain go1.24.3
+toolchain go1.24.10
 
 require (
+	github.com/XiaoConstantine/dspy-go v0.64.0
 	github.com/bmatcuk/doublestar/v4 v4.9.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/getkin/kin-openapi v0.133.0
@@ -42,6 +43,8 @@ require (
 	github.com/GaijinEntertainment/go-exhaustruct/v3 v3.3.1 // indirect
 	github.com/Masterminds/semver/v3 v3.3.1 // indirect
 	github.com/OpenPeeDeeP/depguard/v2 v2.2.1 // indirect
+	github.com/XiaoConstantine/anthropic-go v0.0.8 // indirect
+	github.com/XiaoConstantine/mcp-go v0.3.1 // indirect
 	github.com/alecthomas/go-check-sumtype v0.3.1 // indirect
 	github.com/alexkohler/nakedret/v2 v2.0.6 // indirect
 	github.com/alexkohler/prealloc v1.0.0 // indirect
