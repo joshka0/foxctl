@@ -108,7 +108,7 @@ switch provider {
 case "gemini", "":
     llm, err = llms.NewGeminiLLM(apiKey, core.ModelID(model))
 case "openai":
-    llm, err = llms.NewOpenAILLM(apiKey, core.ModelID(model))
+    llm, err = llms.NewOpenAILLM(core.ModelID(model), llms.WithAPIKey(apiKey))
 default:
     return nil, fmt.Errorf("unsupported LLM provider: %s (supported: gemini, openai)", provider)
 }
