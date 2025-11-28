@@ -149,7 +149,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 
 	// Wire up spawn handler if configured
 	if r.config.SpawnHandler != nil {
-		spawnCfg.MailSender = func(ctx context.Context, to, subject string, body any) (any, error) {
+		spawnCfg.MailSender = func(ctx context.Context, _, _ string, body any) (any, error) {
 			req, ok := body.(types.SpawnRequest)
 			if !ok {
 				return nil, fmt.Errorf("invalid spawn request body type")

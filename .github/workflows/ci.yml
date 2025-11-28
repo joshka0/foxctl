@@ -99,8 +99,8 @@ jobs:
       - name: Coverage
         run: |
           mkdir -p coverage
-          CGO_ENABLED=1 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
-          CGO_ENABLED=1 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
+          CGO_ENABLED=0 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
+          CGO_ENABLED=0 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
           awk '/total:/ { if ($3+0 < 40.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
 
   build:

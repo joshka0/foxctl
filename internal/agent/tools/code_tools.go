@@ -68,7 +68,7 @@ func (r *Registry) codeSearch(ctx context.Context, args map[string]any) (*models
 	}
 
 	// Build search path
-	searchPath := "."
+	var searchPath string
 	if p, ok := args["path"].(string); ok && p != "" {
 		resolved, err := r.resolvePath(p)
 		if err != nil {
