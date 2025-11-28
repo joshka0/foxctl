@@ -1,4 +1,4 @@
-//go:build cgo && !race
+//go:build cgo && !race && !vector
 
 package dbdriver
 

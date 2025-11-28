@@ -421,3 +421,5 @@ Potential follow-ons:
 - Tight integration with a code-symbol DAG for joint semantic + structural
   retrieval.
 - Cross-workspace semantic search over shared libraries.
+- A dedicated `code_symbol_dag` / dependency graph spec building on the
+  post-review indexer abstraction defined here.

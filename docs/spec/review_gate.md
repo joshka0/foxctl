@@ -431,6 +431,10 @@ can:
 - Send nudges or assignments via mailbox messages (e.g. "please review T-123" or
   "fix failing tests for T-456").
 
+In addition to coordinating review work, the overseer MAY trigger post-review
+indexers such as the semantic file index described in `semantic_file_index.md`
+to keep semantic search and related code indexes aligned with accepted changes.
+
 ## dspy-go Agents & Trajectories
 
 For dspy-go agents (`dspy_go_agents.md`, `agent_hierarchy.md`):

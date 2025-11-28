@@ -5,7 +5,7 @@
 workspaces.\
 **Related specs:** `overseer_profile.md`, `overseer_planning.md`,
 `mailbox_blackboard.md`, `task_graph_insights.md`, `test_watch_feedback.md`,
-`unified_agents.md`
+`unified_agents.md`, `dspy_trajectory_capture.md`
 
 ---
 

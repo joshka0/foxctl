@@ -345,25 +345,33 @@ func Ok(cmd string, data any, meta Meta) Envelope {
 
 ```json
 {
-    "lines": 85,
-    "functions": 80,
-    "branches": 75,
-    "statements": 85
+  "lines": 85,
+  "functions": 80,
+  "branches": 75,
+  "statements": 85
 }
 ```
 
 **Race test scope**
 
-- `make test-race` runs `go test -race` across all packages **except**
-  `internal/storage/vector`.
-- The vector package links `github.com/mattn/go-sqlite3` for sqlite-vector
-  support, which conflicts with `github.com/tursodatabase/go-libsql`'s embedded
-  SQLite under `-race` (multiple definition of `sqlite3_data_directory`).
-- To exercise vector search separately, run (when needed):
+- `make test-race` runs `go test -race` with `CGO_ENABLED=0` across all packages
+  **except** `internal/storage/vector`.
+- Race tests use pure-Go SQLite (`modernc.org/sqlite`) to avoid linker conflicts
+  between `github.com/mattn/go-sqlite3` (used by vector) and
+  `github.com/tursodatabase/go-libsql` (used by libsql/turso drivers). Both
+  embed their own SQLite and cannot coexist in the same binary.
+- The vector package is excluded from race tests because it requires CGO and
+  would pull in `go-sqlite3`. To exercise vector search separately, run:
 
   ```bash
-  CGO_ENABLED=1 go test -race -tags vector ./internal/storage/vector/...
+  CGO_ENABLED=1 go test -tags vector ./internal/storage/vector/...
   ```
+
+- Under `-race` or when the `vector` build tag is set, the libSQL and Turso
+  drivers are compiled out via build tags; their `openLibSQL` / `openTurso`
+  helpers return clear runtime errors instead of linking the embedded SQLite
+  libraries. Production builds still use libSQL/Turso when built with
+  `CGO_ENABLED=1`, without `-race`, and without `-tags vector`.
 
 ### Must‑have suites
 
