@@ -7,7 +7,7 @@
 #     ./run_dspy_test.sh
 #
 #   For Groq (OpenAI compatible):
-#     export AGENTCTL_LLM_API_KEY="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"
+#     export AGENTCTL_LLM_API_KEY="your-groq-api-key"
 #     # Note: dspy-go currently only supports Gemini natively
 
 set -e

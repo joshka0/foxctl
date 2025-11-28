@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/storage/knowledge"
@@ -333,5 +334,5 @@ func TestSeedBuiltinKnowledge(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr))
+	return strings.Contains(s, substr)
 }

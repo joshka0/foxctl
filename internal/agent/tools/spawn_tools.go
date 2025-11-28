@@ -94,10 +94,20 @@ func (r *Registry) executeSpawn(ctx context.Context, args map[string]any, cfg Sp
 		))
 	}
 
-	// Parse requested subagents
-	subagentsRaw, ok := args["requested_subagents"].([]any)
-	if !ok || len(subagentsRaw) == 0 {
-		return errorResult("requested_subagents must be a non-empty array")
+	// Parse requested subagents (handles both []any and JSON string)
+	var subagentsRaw []any
+	switch v := args["requested_subagents"].(type) {
+	case []any:
+		subagentsRaw = v
+	case string:
+		if err := json.Unmarshal([]byte(v), &subagentsRaw); err != nil {
+			return errorResult(fmt.Sprintf("requested_subagents JSON parse error: %v", err))
+		}
+	default:
+		return errorResult("requested_subagents must be a JSON array or array string")
+	}
+	if len(subagentsRaw) == 0 {
+		return errorResult("requested_subagents must be non-empty")
 	}
 
 	spawnReason, _ := args["spawn_reason"].(string)

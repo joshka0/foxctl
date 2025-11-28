@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -84,7 +85,7 @@ func (r *Registry) runTests(ctx context.Context, args map[string]any) (*models.C
 	var testType string
 
 	// Check for Go project
-	if fileExists(testPath + "/go.mod") {
+	if fileExists(filepath.Join(testPath, "go.mod")) {
 		testType = "go"
 		goArgs := []string{"test"}
 		if v, ok := args["verbose"].(bool); ok && v {
@@ -95,7 +96,7 @@ func (r *Registry) runTests(ctx context.Context, args map[string]any) (*models.C
 		}
 		goArgs = append(goArgs, "./...")
 		cmd = exec.CommandContext(ctx, "go", goArgs...)
-	} else if fileExists(testPath+"/pytest.ini") || fileExists(testPath+"/setup.py") || fileExists(testPath+"/pyproject.toml") {
+	} else if fileExists(filepath.Join(testPath, "pytest.ini")) || fileExists(filepath.Join(testPath, "setup.py")) || fileExists(filepath.Join(testPath, "pyproject.toml")) {
 		testType = "pytest"
 		pytestArgs := []string{}
 		if v, ok := args["verbose"].(bool); ok && v {
@@ -105,7 +106,7 @@ func (r *Registry) runTests(ctx context.Context, args map[string]any) (*models.C
 			pytestArgs = append(pytestArgs, "-k", pattern)
 		}
 		cmd = exec.CommandContext(ctx, "pytest", pytestArgs...)
-	} else if fileExists(testPath + "/package.json") {
+	} else if fileExists(filepath.Join(testPath, "package.json")) {
 		testType = "npm"
 		cmd = exec.CommandContext(ctx, "npm", "test")
 	} else {

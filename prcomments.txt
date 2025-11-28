@@ -1,0 +1,1026 @@
+# Tasks for PR #84: dspy driven agents
+
+**Repository:** jkatigb/agentctl
+**URL:** https://github.com/jkatigb/agentctl/pull/84
+
+## 🔴 CI Failures to Fix (5)
+
+### Task 1: Fix coverage
+
+**Failed step:** Coverage
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19759561917/job/56618098376
+
+**Error output:**
+
+```
+/usr/local/go/pkg/tool/linux_amd64/link: running gcc failed: exit status 1
+collect2: error: ld returned 1 exit status
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: Process completed with exit code 1.
+```
+
+---
+
+### Task 2: Fix build
+
+**Failed step:** Build CLI
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19759561917/job/56618098364
+
+**Error output:**
+
+```
+/usr/local/go/pkg/tool/linux_amd64/link: running gcc failed: exit status 1
+collect2: error: ld returned 1 exit status
+Error: Process completed with exit code 2.
+```
+
+---
+
+### Task 3: Fix race-tests
+
+**Failed step:** Race tests
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19759561917/job/56618098337
+
+**Error output:**
+
+```
+/usr/local/go/pkg/tool/linux_amd64/link: running gcc failed: exit status 1
+collect2: error: ld returned 1 exit status
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: Process completed with exit code 2.
+```
+
+---
+
+### Task 4: Fix lint
+
+**Failed step:** Lint (golangci-lint)
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19759561917/job/56618098329
+
+**Error output:**
+
+```
+Error: Process completed with exit code 2.
+```
+
+---
+
+### Task 5: Fix unit-tests
+
+**Failed step:** Unit tests (no race)
+**URL:** https://github.com/jkatigb/agentctl/actions/runs/19759561917/job/56618098317
+
+**Error output:**
+
+```
+/usr/local/go/pkg/tool/linux_amd64/link: running gcc failed: exit status 1
+collect2: error: ld returned 1 exit status
+FAIL	github.com/jkatigb/agentctl/cmd/agentctl/cmd [build failed]
+Error: Process completed with exit code 2.
+```
+
+---
+
+## 📝 Review Comments to Address (18)
+
+### Task 6: coderabbitai[bot]'s feedback
+
+## Walkthrough
+The PR implements a comprehensive multi-agent orchestration system with integrated planning, task-graph analysis, mailbox coordination, and embedded knowledge. It introduces dspy-go agent runtimes with hierarchy-based spawning, depth/concurrency constraints, task-graph analysis with PageRank and critical-path metrics, LLM-based planning via OpenAI/Groq APIs, SQLite-backed mailbox and file-reservation coordination, builtin knowledge seeding of Factory droids and core agents, and extensive CLI tooling for workspace initialization, agent management, and planning operations.
+## Changes
+| Cohort / File(s) | Summary |
+|---|---|
+| **Agent Runtime & Hierarchy** <br> `internal/agent/runtime/runtime.go`, `internal/agent/runtime/overseer.go`, `internal/agent/runtime/overseer_test.go` | Introduces agent session runtime with spawn/lifecycle management, ReAct-based agent coordination via dspy-go, and overseer component for hierarchical agent spawning with depth/concurrency validation and parent-child relationship tracking. |
+| **Agent Types & Configuration** <br> `internal/agent/types/types.go` | Defines core data models: agent roles (Coder, Planner, Reviewer, Fixer), status enums, spawn request/response payloads, execution traces, coding/planning I/O structures, and hierarchy context fields. |
+| **Agent Tools Ecosystem** <br> `internal/agent/tools/tools.go`, `internal/agent/tools/fs_tools.go`, `internal/agent/tools/code_tools.go`, `internal/agent/tools/edit_tools.go`, `internal/agent/tools/test_tools.go`, `internal/agent/tools/todo_tools.go`, `internal/agent/tools/mail_tools.go`, `internal/agent/tools/spawn_tools.go` | Implements telemetry-enabled tool registry with eight tool categories: filesystem read/list, code search via ripgrep, file create/patch, test execution (Go/pytest/npm), todo query/graph-insights/add/complete, mail send/inbox/ack, and agent spawning with depth validation. |
+| **Task Graph Analysis** <br> `internal/analysis/tasksgraph/graph.go`, `internal/analysis/tasksgraph/graph_test.go` | Adds gonum-backed directed graph analyzer computing PageRank, critical-path scores, in/out degrees, Tarjan cycle detection, topological ordering, and per-node metrics exported as JSON. |
+| **Overseer Scoring** <br> `internal/analysis/overseer/scorer.go` | Implements task recommendation scoring that combines critical-path/PageRank graph metrics with mailbox unread counts, normalized weighting, and recency factors. |
+| **LLM Planning** <br> `internal/planning/llm/planner.go`, `internal/planning/llm/openai.go`, `internal/planning/llm/auto.go`, `internal/planning/llm/planner_test.go` | Introduces OpenAI-compatible planner interface with implementations for Groq/OpenAI, auto-detection via environment variables, prompt engineering, JSON response parsing, and integration tests. |
+| **Mailbox & Blackboard Storage** <br> `internal/storage/blackboard/board_store.go`, `internal/storage/blackboard/board_store_test.go`, `internal/domain/agent/board_message.go` | Adds SQLite-backed board store for messages and file reservations with filtering, prioritization, expiration, exclusive/shared reservation modes, and conflict detection. |
+| **Builtin Knowledge & Factory Droids** <br> `internal/knowledge/builtin/factory.go`, `internal/knowledge/builtin/factory_test.go`, `internal/knowledge/builtin/data/droids/*`, `internal/knowledge/builtin/data/agents/*` | Embeds Factory droid and core agent markdown assets with YAML frontmatter parsing, keyword extraction, and seeding logic to populate knowledge registry with builtin items and triggers. |
+| **CLI: dspy-agent Commands** <br> `cmd/agentctl/cmd/dspy_agent.go` | Adds top-level dspy-agent command with spawn, list, kill, status subcommands for agent session lifecycle management with environment-based LLM configuration. |
+| **CLI: workspace Init** <br> `cmd/agentctl/cmd/workspace.go`, `cmd/agentctl/cmd/workspace_test.go` | Introduces workspace init/list-agents commands to initialize .claude/agents with builtin droids and query available agent sets (core, factory, all). |
+| **CLI: Knowledge Enhancements** <br> `cmd/agentctl/cmd/knowledge.go` | Adds --skip-builtin and --builtin-only flags to knowledge sync command for controlling builtin knowledge seeding and workspace filesystem scanning. |
+| **CLI: Todo Extensions** <br> `cmd/agentctl/cmd/todo.go`, `cmd/agentctl/cmd/todo_test.go` | Adds graph-insights, recommend, and plan subcommands to todo with support for workspace filtering, goal/description validation, mode selection (draft/apply), and task scope specifications. |
+| **Skills: Mailbox & Routing** <br> `skills/mailbox/main.go`, `skills/hooks_mail_router/main.go`, `skills/hooks_file_guard/main.go` | Implements mailbox/manage skill with send/inbox/ack/reserve/release operations and hooks for mail routing (prioritizes plan events, marks read) and file-guard enforcement (strict/advisory conflict blocking). |
+| **Skill: Enhanced Todo** <br> `skills/todo/main.go` | Extends todo/manage skill with graph-insights, recommend, and plan operations supporting draft/apply modes and optional LLM-based task generation. |
+| **Specifications & Documentation** <br> `docs/spec/agent_hierarchy.md`, `docs/spec/overseer_planning.md`, `docs/spec/dspy_go_agents.md`, `docs/spec/task_graph_insights.md`, `docs/spec/mailbox_blackboard.md`, `docs/spec/knowledge_factory_bridge.md`, `docs/spec/unified_agents.md`, `docs/spec/bd_mail_agent_*.md`, `docs/changelogs/*` | Comprehensive design specs detailing agent hierarchy spawn protocol, overseer planning/coordination, dspy-go integration, task-graph metrics, mailbox architecture, Factory knowledge bridging, and unified agent model; also documents implementation phase plans. |
+| **Integration & E2E Tests** <br> `test/integration/dspy_agent_test.go`, `test/integration/hierarchy_spawn_test.go`, `test/e2e/multiagent_workflow_test.go`, `test/integration/run_dspy_test.sh` | Adds integration tests for dspy-agent spawning, hierarchy depth/concurrency validation, and comprehensive E2E multi-agent workflow covering task creation, graph analysis, mailbox messaging, file reservations, recommendations, and planning. |
+| **Dependencies & Config** <br> `go.mod`, `.gitignore` | Updates Go toolchain (1.24.0 → 1.24.1), adds dspy-go/mcp-go/gonum/fsnotify/pflag dependencies, updates .gitignore for Claude settings. |
+## Sequence Diagram(s)
+```mermaid
+sequenceDiagram
+    participant CLI as agentctl CLI
+    participant Runtime as Agent Runtime
+    participant Overseer as Overseer
+    participant LLM as LLM (Groq/OpenAI)
+    participant Store as BoardStore
+    participant Graph as Task Graph Analyzer
+    CLI->>Runtime: Spawn Agent (Coder role, task)
+    activate Runtime
+    Runtime->>Overseer: Check depth/concurrency constraints
+    activate Overseer
+    Overseer-->>Runtime: Approved (depth=1, max=2)
+    deactivate Overseer
+    Runtime->>Runtime: Initialize dspy-go agent with tools
+    Runtime->>Runtime: Start ReAct loop
+    loop Agent Execution
+        Runtime->>Runtime: Tool invocation (fs.read, code.search, edit.apply, tests.run)
+        Runtime->>Store: Store tool calls & outcomes
+    end
+    Runtime-->>CLI: Session result (status, tool_calls, artifacts)
+    deactivate Runtime
+    Note over CLI,Graph: Planning Workflow
+    CLI->>LLM: Plan request (goal, scope, max_tasks)
+    activate LLM
+    LLM-->>CLI: Task list with dependencies
+    deactivate LLM
+    CLI->>Graph: Analyze task graph
+    activate Graph
+    Graph->>Graph: Compute PageRank, critical_path_score, in/out degrees
+    Graph->>Graph: Tarjan cycle detection
+    Graph-->>CLI: Insights (nodes, topological_order, cycles)
+    deactivate Graph
+    Note over Store: Coordination via Mailbox
+    Runtime->>Store: Send mail (type: instruction, recipient: overseer)
+    activate Store
+    Store->>Store: Check file reservations for conflicts
+    Store-->>Runtime: Reservation granted/denied
+    deactivate Store
+    Overseer->>Store: Query inbox (actor: overseer)
+    Store-->>Overseer: Messages (priority-sorted, unread)
+    Overseer->>Store: Acknowledge messages
+```
+## Estimated code review effort
+🎯 5 (Critical) | ⏱️ ~90+ minutes
+- **Agent runtime spawn/hierarchy logic**: Depth validation, concurrency limits, parent-child relationship tracking, and spawn-denial conditions require careful verification
+- **Graph analyzer implementation**: PageRank algorithm, critical-path computation via DFS, Tarjan cycle detection, and edge case handling (orphan dependencies, self-loops)
+- **OpenAI planner prompt engineering**: Prompt structure, JSON response parsing, and fallback behavior when LLM is unavailable
+- **BoardStore SQLite schema and concurrent access**: Transaction handling, file-reservation conflict resolution modes (exclusive/shared), expiration cleanup, and isolation
+- **Tool implementations**: Path resolution security, process execution safety (tests.run, code.search), and error handling consistency across eight tool variants
+- **Mail router and file-guard hooks**: Decision logic for Advisory vs. Strict modes, conflict prioritization, context enrichment, and integration with task/actor metadata
+- **Integration of multiple subsystems**: Agent runtime → overseer → LLM planning → task store → board store → mail routing → graph analysis represents a complex orchestration requiring end-to-end validation
+- **Heterogeneity**: Changes span new runtime systems, storage backends, LLM integrations, CLI commands, and specifications—each with distinct reasoning requirements
+## Possibly related PRs
+- **PR `#65`**: Both PRs add overlapping agent/profile and inter-agent infrastructure (mailbox/blackboard domain types and SQLite stores, agent domain models and CLI agent commands).
+- **PR `#82`**: Both PRs modify Claude harness, knowledge registry, hooks, and agentctl CLI (e.g., `cmd/agentctl/cmd/knowledge.go` and .claude hook/settings integrations).
+- **PR `#69`**: Both touch overlapping subsystems (agent runtime/overseer, agent CLI/tools, mailbox/blackboard, tasksgraph/graph analyzer, builtin knowledge seeding, and related CLI commands).
+## Suggested labels
+`feature`, `multi-agent`, `orchestration`, `graph-analysis`, `planning`, `mailbox`, `dspy-go`
+## Poem
+> 🐰 *Hops through hierarchies of agents deep,*
+> *Graphs map tasks while overseer keeps,*
+> *Mail routes wisdom, tools search and build,*
+> *Plans bloom and spawn—a vision fulfilled!*
+> *From builtin droids to LLM's might,*
+> *Coordination shines ever bright! ✨*
+## Pre-merge checks and finishing touches
+<details>
+<summary>❌ Failed checks (2 warnings, 1 inconclusive)</summary>
+|     Check name     | Status         | Explanation                                                                                                                                                                                             | Resolution                                                                                                                                                                                                                    |
+| :----------------: | :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  Description check | ⚠️ Warning     | The PR description lists 22 checkpoint/fix entries in the commit messages but lacks a proper Summary section, testing checklist is not marked complete, and detailed explanation of changes is missing. | Fill in the Summary section with a concise overview of the PR objectives, mark testing checklist items as complete or provide status, and add Notes explaining key architectural changes or integration points if applicable. |
+| Docstring Coverage | ⚠️ Warning     | Docstring coverage is 41.73% which is insufficient. The required threshold is 80.00%.                                                                                                                   | You can run `@coderabbitai generate docstrings` to improve docstring coverage.                                                                                                                                                |
+|     Title check    | ❓ Inconclusive | The title 'dspy driven agents' is vague and generic, using non-descriptive terms that don't clearly convey the scope or primary changes of this large, multi-feature PR.                                | Consider a more specific title that captures the main theme, such as 'Add dspy-driven agent runtime with hierarchy and planning' or 'Integrate dspy-go agents with overseer, mailbox, and planning.'                          |
+</details>
+<details>
+<summary>✨ Finishing touches</summary>
+- [ ]  📝 Generate docstrings
+<details>
+<summary>🧪 Generate unit tests (beta)</summary>
+- [ ]    Create PR with unit tests
+- [ ]    Post copyable unit tests in a comment
+- [ ]    Commit unit tests in branch `feature/dspy-go-agent`
+</details>
+</details>
+---
+<sub>Comment `@coderabbitai help` to get the list of available commands and usage tips.</sub>
+
+---
+
+### Task 7: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/runtime/overseer.go:85`
+
+**Potential data race when reading `o.runtime.sessions` without holding runtime's lock.**
+`HandleSpawnRequest` acquires `o.mu.Lock()` but reads `o.runtime.sessions` directly at line 78. The runtime's `sessions` map is protected by `r.mu` (as shown in `runtime.go`), not `o.mu`. This creates a potential data race if sessions are added/removed concurrently.
+```diff
+ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnRequest) (*types.SpawnResponse, error) {
+ 	o.mu.Lock()
+ 	defer o.mu.Unlock()
+ 	resp := &types.SpawnResponse{
+ 		SpawnedAgents: []types.SpawnedAgent{},
+ 		DeniedAgents:  []types.DeniedAgent{},
+ 	}
+ 	// Check concurrent agent limit
+-	activeSessions := len(o.runtime.sessions)
++	activeSessions := len(o.runtime.List())
+ 	if activeSessions >= o.config.MaxConcurrentAgents {
+```
+Alternatively, expose a thread-safe `Count()` method on the runtime to avoid copying all sessions.
+> Committable suggestion skipped: line range outside the PR's diff.
+
+---
+
+### Task 8: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/runtime/overseer.go:152`
+
+**RootActorID should be the tree root, not the caller.**
+Per the `AgentConfig` definition in `types.go`, `RootActorID` is "the tree root (usually actor:system:overseer)". Setting it to `req.CallerActorID` is incorrect when the caller is not the overseer. The root should propagate from the original overseer.
+```diff
+ 		childCfg := types.AgentConfig{
+ 			Role:          sub.Role,
+ 			ActorID:       actorID,
+ 			WorkspaceID:   "", // Will be inherited from runtime
+ 			EpicID:        req.EpicID,
+ 			TaskID:        "", // Can be set by caller or plan
+-			RootActorID:   req.CallerActorID,
++			RootActorID:   OverseerActorID, // Always the tree root
+ 			ParentActorID: req.CallerActorID,
+ 			Depth:         childDepth,
+ 			MaxDepth:      childMaxDepth,
+ 			LocalMaxDepth: childLocalMaxDepth,
+ 		}
+```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+			RootActorID:   OverseerActorID, // Always the tree root
+			ParentActorID: req.CallerActorID,
+```
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/runtime/overseer.go around lines 151-152, RootActorID is being
+set to req.CallerActorID but per AgentConfig in types.go it must be the tree
+root (usually actor:system:overseer); change the assignment to use the
+propagated root from the original request (e.g., req.RootActorID) instead of the
+caller, leaving ParentActorID as req.CallerActorID, and if req.RootActorID can
+be empty add a fallback to the known overseer root constant or error handling to
+ensure the root is always the overseer tree root.
+```
+</details>
+
+---
+
+### Task 9: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/runtime/overseer.go:186`
+
+**Data race on `o.runtime.sessions` map iteration and parent session access.**
+The loop iterating over `o.runtime.sessions` (line 172) and accessing `parentSession` (line 181) does not hold the runtime's lock. This can cause data races with concurrent `Spawn`/`Kill` operations.
+Consider using the runtime's `Get(sessionID)` method after finding the parent session ID, or expose a thread-safe lookup method by actor ID.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/runtime/overseer.go around lines 169–186, the code iterates
+and reads o.runtime.sessions without holding the runtime lock then later
+accesses a parent session directly, causing a data race; change the flow to
+first find the parentSessionID (no direct access to session object), then call
+the runtime's thread-safe lookup (e.g., runtime.Get(parentSessionID) or a new
+GetByActorID method) to obtain the parent session under proper locking, and use
+that returned session to update its Children slice (with its mu held) and update
+o.children; do not iterate or access o.runtime.sessions directly without using
+the runtime's concurrency-safe API.
+```
+</details>
+
+---
+
+### Task 10: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/runtime/overseer.go:313`
+
+**Busy-wait loop with no actual sleep causes CPU spin.**
+The inner `select` block at lines 302-306 does nothing—it immediately falls through to `break` at line 308 on the first iteration, never actually waiting for status changes. The polling loop effectively only checks once per child and exits.
+```diff
+ func (o *Overseer) WaitForChildren(ctx context.Context, parentSessionID string) error {
+ 	childIDs := o.GetChildren(parentSessionID)
+ 	for _, childID := range childIDs {
+ 		session, ok := o.runtime.Get(childID)
+ 		if !ok {
+ 			continue
+ 		}
+ 		// Wait for session to complete
+ 		for {
+ 			select {
+ 			case <-ctx.Done():
+ 				return ctx.Err()
+ 			default:
+ 				session.mu.RLock()
+ 				status := session.Status
+ 				session.mu.RUnlock()
+ 				if status != types.StatusRunning {
+-					break
++					goto nextChild
+ 				}
+-				// Small sleep to avoid busy loop
+-				select {
+-				case <-ctx.Done():
+-					return ctx.Err()
+-				default:
+-				}
++				// Sleep to avoid busy loop
++				time.Sleep(100 * time.Millisecond)
+ 			}
+-			break
+ 		}
++	nextChild:
+ 	}
+ 	return nil
+ }
+```
+Or better yet, use a channel-based notification from the session when it completes.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/runtime/overseer.go around lines 278 to 313, the inner polling
+loop is effectively a no-op and causes a busy-wait / CPU spin because the inner
+select does not block and the outer loop breaks immediately; replace this with
+an actual wait mechanism by either (preferred) using a session-completion
+notification channel on the session (add/get a done/completed channel on the
+session and wait on it with select alongside ctx.Done), or (if changing session
+shape is not possible) replace the inner no-op select with a blocking sleep
+(e.g., time.Sleep with a short interval) and re-check status until it is no
+longer StatusRunning; ensure you release locks before blocking and always honor
+ctx.Done to return promptly.
+```
+</details>
+
+---
+
+### Task 11: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/runtime/runtime.go:239`
+
+**LLM provider is hardcoded to Gemini despite configurable provider field.**
+`createAgent` ignores `cfg.LLMProvider` and always creates a Gemini LLM at line 236. The `LLMProvider` field in `RuntimeConfig` and `AgentConfig` is never used for provider selection.
+Consider implementing provider switching:
+```diff
+ 	// Create LLM based on provider
+-	llm, err := llms.NewGeminiLLM(apiKey, core.ModelID(model))
++	var llm core.LLM
++	provider := cfg.LLMProvider
++	if provider == "" {
++		provider = r.config.LLMProvider
++	}
++	switch provider {
++	case "openai":
++		llm, err = llms.NewOpenAILLM(apiKey, core.ModelID(model))
++	case "gemini", "":
++		llm, err = llms.NewGeminiLLM(apiKey, core.ModelID(model))
++	default:
++		return nil, fmt.Errorf("unsupported LLM provider: %s", provider)
++	}
+ 	if err != nil {
+ 		return nil, fmt.Errorf("create LLM: %w", err)
+ 	}
+```
+> Committable suggestion skipped: line range outside the PR's diff.
+
+---
+
+### Task 12: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/code_tools.go:64`
+
+**Context cancellation not honored for subprocess.**
+The `context.Context` parameter is ignored. Use `exec.CommandContext` to respect context cancellation and timeouts, preventing indefinite blocking.
+```diff
+-func (r *Registry) codeSearch(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
++func (r *Registry) codeSearch(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+ 	// ... argument parsing ...
+ 	// Execute ripgrep
+-	cmd := exec.Command("rg", rgArgs...)
++	cmd := exec.CommandContext(ctx, "rg", rgArgs...)
+ 	output, err := cmd.Output()
+```
+Per coding guidelines, context cancellation and timeouts must be honored.
+Also applies to: 106-107
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/tools/code_tools.go around line 64 (and similarly at lines
+106-107), the provided context.Context parameter is ignored when spawning
+subprocesses; change uses of exec.Command to exec.CommandContext with the passed
+context so the child process is terminated when the context is cancelled or
+times out. Update the function signature usage to pass the ctx into
+exec.CommandContext, handle the returned *exec.Cmd the same way
+(Start/Run/CombinedOutput), and ensure any process cleanup or error wrapping
+accounts for context cancellations (e.g., return ctx.Err() or wrap errors
+indicating cancellation) so the subprocess respects context
+cancellation/timeouts.
+```
+</details>
+
+---
+
+### Task 13: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/code_tools.go:86`
+
+**Mismatch: `--json` flag but parser expects text format.**
+Ripgrep is invoked with `--json` (line 84), but `parseRipgrepOutput` parses `file:line:content` text format. JSON output from ripgrep is structured differently and will not match the `strings.SplitN(line, ":", 3)` pattern.
+Either remove `--json` to get text output:
+```diff
+ 	rgArgs := []string{
+-		"--json",
+ 		"--max-count", "100", // Limit matches per file
++		"--line-number",
+ 	}
+```
+Or properly parse JSON output (recommended for structured data):
+```go
+import "encoding/json"
+type rgMessage struct {
+    Type string `json:"type"`
+    Data struct {
+        Path struct {
+            Text string `json:"text"`
+        } `json:"path"`
+        LineNumber int `json:"line_number"`
+        Lines struct {
+            Text string `json:"text"`
+        } `json:"lines"`
+    } `json:"data"`
+}
+```
+Also applies to: 142-164
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/tools/code_tools.go around lines 83-86 (and also apply the
+same fix to 142-164), ripgrep is invoked with the --json flag but
+parseRipgrepOutput expects text lines in the file:line:content format; fix by
+either removing --json to emit plain text ripgrep output or (recommended) keep
+--json and change parseRipgrepOutput to decode ripgrep JSON records: unmarshal
+each JSON line into a struct matching ripgrep's message/data/path/lines fields,
+filter for messages of type "match", and extract path.text, data.line_number and
+data.lines.text to build matches; update error handling and any tests to reflect
+the chosen approach.
+```
+</details>
+
+---
+
+### Task 14: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/fs_tools.go:117`
+
+<details>
+<summary>🧩 Analysis chain</summary>
+🏁 Script executed:
+```shell
+#!/bin/bash
+# First, find the resolvePath implementation in the Registry type
+ast-grep --pattern $'func ($_ *Registry) resolvePath($_ string) $_ {
+  $$$
+}'
+```
+Repository: jkatigb/agentctl
+Length of output: 42
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# Search for resolvePath method definition
+rg -n "resolvePath" --type=go
+# Also check the fs_tools.go file for imports and full context
+echo "=== Checking fs_tools.go imports and Registry type ==="
+head -50 internal/agent/tools/fs_tools.go
+```
+Repository: jkatigb/agentctl
+Length of output: 4137
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# Get the resolvePath implementation from tools.go
+sed -n '148,200p' internal/agent/tools/tools.go
+echo "=== Check for policy package imports in tools.go ==="
+head -30 internal/agent/tools/tools.go
+```
+Repository: jkatigb/agentctl
+Length of output: 1641
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# Search for policy.PathValidator in the codebase
+rg -n "policy\.PathValidator" --type=go
+echo "=== Search for policy package ==="
+fd -type f -name "*.go" | xargs rg -l "package policy" | head -5
+echo "=== Check if policy package exists ==="
+fd -type d -name "policy"
+```
+Repository: jkatigb/agentctl
+Length of output: 786
+---
+🏁 Script executed:
+```shell
+#!/bin/bash
+# Check PathValidator implementation
+cat internal/domain/policy/pathvalidator.go
+echo "=== Check how it's used in skillslib runner ==="
+sed -n '20,40p' internal/adapters/skillslib/runner/context.go
+```
+Repository: jkatigb/agentctl
+Length of output: 6652
+---
+</details>
+Perfect! I have now verified the concern. The evidence is clear:
+**`resolvePath` does NOT use `policy.PathValidator` despite it being required by coding guidelines.**
+The current implementation in `tools.go` uses only basic string prefix checking for `".."`, while the `policy.PathValidator` available in the codebase provides comprehensive path validation including:
+- Symlink resolution and escaping detection
+- UTF-8 and null byte validation
+- Canonical path resolution
+- Support for allowed root directories
+- Proper Windows path handling
+The `policy.PathValidator` is already in use elsewhere in the codebase (e.g., `skillslib/runner/context.go`), confirming it's the intended approach.
+---
+**`resolvePath` must use `policy.PathValidator` for path validation per coding guidelines.**
+The current implementation at lines 149-171 uses only manual string prefix checking for `".."` escapes, which is insufficient. The `policy.PathValidator` in `internal/domain/policy/pathvalidator.go` provides comprehensive validation including symlink handling, UTF-8 validation, null byte detection, and canonical path resolution. Update `resolvePath` to:
+1. Import `"github.com/jkatigb/agentctl/internal/domain/policy"`
+2. Add a `*policy.PathValidator` field to `Registry`
+3. Use `validator.ValidatePath(path)` instead of manual checks
+4. Handle the returned errors appropriately
+This aligns with the coding guideline requirement: "Validate all user-provided filesystem paths through policy.PathValidator; anchor to workspace and allowlist explicit roots."
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/tools/fs_tools.go around lines 69 to 117, resolvePath is using
+manual string checks and must be replaced with the canonical
+policy.PathValidator usage: add an import for
+"github.com/jkatigb/agentctl/internal/domain/policy", add a
+*policy.PathValidator field to the Registry struct, and update resolvePath to
+call r.pathValidator.ValidatePath(path) (or ValidatePath returning the
+canonical/absolute path) instead of the manual ".." checks; propagate and handle
+validation errors (return errorResult with the validator's message), ensure
+symlink/canonicalization/UTF-8/null-byte/allowed-roots behavior is preserved,
+and remove the manual prefix checks so all user paths go through the
+PathValidator.
+```
+</details>
+
+---
+
+### Task 15: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/mail_tools.go:177`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Honor context cancellation in stub implementation.**
+The context parameter is unused. Even in stub implementations, context cancellation should be checked to maintain consistency with Go best practices.
+Apply this diff to add context awareness:
+```diff
+-func (r *Registry) mailSend(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
++func (r *Registry) mailSend(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
++	if err := ctx.Err(); err != nil {
++		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
++	}
++
+ 	recipient, ok := args["recipient"].(string)
+```
+---
+**Consider using ULID for message IDs.**
+The current `time.Now().UnixNano()` approach at line 159 is not collision-safe. Consider using ULID (as mentioned in the mailbox spec) for deterministic, time-sortable, collision-resistant IDs.
+As per coding guidelines, context.Context should be the first parameter and honored for cancellation.
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+// mailSend implements the mail.send tool.
+// Note: This is a stub - in production it would use the agentctl mailbox.
+func (r *Registry) mailSend(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
+	}
+	recipient, ok := args["recipient"].(string)
+	if !ok || recipient == "" {
+		return errorResult("recipient is required"), nil
+	}
+	subject, ok := args["subject"].(string)
+	if !ok || subject == "" {
+		return errorResult("subject is required"), nil
+	}
+	body, ok := args["body"].(string)
+	if !ok || body == "" {
+		return errorResult("body is required"), nil
+	}
+	kind := "info"
+	if k, ok := args["kind"].(string); ok {
+		kind = k
+	}
+	priority := 2
+	if p, ok := args["priority"].(float64); ok {
+		priority = int(p)
+	}
+	ackRequired := false
+	if a, ok := args["ack_required"].(bool); ok {
+		ackRequired = a
+	}
+	// Stub implementation - would send via agentctl mailbox
+	message := MailMessage{
+		ID:          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+		From:        r.config.ActorID,
+		To:          recipient,
+		Subject:     subject,
+		Body:        body,
+		Kind:        kind,
+		Priority:    priority,
+		AckRequired: ackRequired,
+		Read:        false,
+		Timestamp:   time.Now(),
+	}
+	return successResult(map[string]any{
+		"message_id": message.ID,
+		"sent_to":    recipient,
+		"success":    true,
+		"note":       "Stub implementation - connect to agentctl mailbox for real delivery",
+	}), nil
+}
+```
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/tools/mail_tools.go around lines 124-177, the mailSend stub
+ignores the provided context and uses time.Now().UnixNano() for IDs; update the
+function to accept and use the context parameter (rename _ to ctx) and check
+ctx.Done() for cancellation before doing work and before returning the success
+result, returning an appropriate errorResult on cancellation, and replace the
+UnixNano ID with a ULID generated per the mailbox spec (use a
+cryptographic/rand-backed entropy source and time-based ULID generation) so IDs
+are time-sortable and collision-resistant.
+```
+</details>
+
+---
+
+### Task 16: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/mail_tools.go:216`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Honor context cancellation in mailInbox stub.**
+Similar to `mailSend`, the context parameter should be checked even in stub implementations.
+Apply this diff:
+```diff
+-func (r *Registry) mailInbox(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
++func (r *Registry) mailInbox(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
++	if err := ctx.Err(); err != nil {
++		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
++	}
++
+ 	unreadOnly := true
+```
+As per coding guidelines, context.Context should be honored for cancellation and timeouts.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/tools/mail_tools.go around lines 179 to 216, the mailInbox
+stub ignores the provided context and therefore won't respond to
+cancellation/timeouts; add a quick context cancellation check at the start (and
+before any simulated work or long-running steps) by selecting on ctx.Done() and
+returning an appropriate error/result when cancelled, so the stub mirrors
+mailSend's behavior and honors timeouts/cancellation.
+```
+</details>
+
+---
+
+### Task 17: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/mail_tools.go:239`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Honor context cancellation in mailAck stub.**
+The context parameter should be checked for cancellation.
+Apply this diff:
+```diff
+-func (r *Registry) mailAck(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
++func (r *Registry) mailAck(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
++	if err := ctx.Err(); err != nil {
++		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
++	}
++
+ 	messageID, ok := args["message_id"].(string)
+```
+As per coding guidelines, context.Context should be the first parameter and honored for cancellation.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+internal/agent/tools/mail_tools.go lines 218-239: the mailAck stub currently
+ignores the passed context (uses blank identifier) and doesn't honor
+cancellation; change the signature to bind the context (e.g., ctx
+context.Context), then immediately check ctx for cancellation (either if
+ctx.Err() != nil or a select on ctx.Done()) and if canceled return early (return
+nil, ctx.Err() or an appropriate error), and also check the context again before
+doing any work/returning the successResult so the stub respects cancellation.
+```
+</details>
+
+---
+
+### Task 18: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/spawn_tools.go:101`
+
+**Type assertion may fail for JSON-decoded arrays.**
+When arguments come from JSON deserialization, arrays typically arrive as `[]any`. However, if `requested_subagents` is provided as a JSON string (per the schema description at line 60: "JSON array as string"), this type assertion will fail.
+The schema indicates it's a string containing JSON, but the code expects `[]any`. This is a mismatch.
+Either:
+1. Parse the string as JSON first:
+```diff
+-	subagentsRaw, ok := args["requested_subagents"].([]any)
+-	if !ok || len(subagentsRaw) == 0 {
+-		return errorResult("requested_subagents must be a non-empty array")
+-	}
++	var subagentsRaw []any
++	switch v := args["requested_subagents"].(type) {
++	case []any:
++		subagentsRaw = v
++	case string:
++		if err := json.Unmarshal([]byte(v), &subagentsRaw); err != nil {
++			return errorResult(fmt.Sprintf("requested_subagents JSON parse error: %v", err))
++		}
++	default:
++		return errorResult("requested_subagents must be a JSON array or array string")
++	}
++	if len(subagentsRaw) == 0 {
++		return errorResult("requested_subagents must be non-empty")
++	}
+```
+2. Or update the schema to indicate the property accepts an array directly.
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+	// Parse requested subagents
+	var subagentsRaw []any
+	switch v := args["requested_subagents"].(type) {
+	case []any:
+		subagentsRaw = v
+	case string:
+		if err := json.Unmarshal([]byte(v), &subagentsRaw); err != nil {
+			return errorResult(fmt.Sprintf("requested_subagents JSON parse error: %v", err))
+		}
+	default:
+		return errorResult("requested_subagents must be a JSON array or array string")
+	}
+	if len(subagentsRaw) == 0 {
+		return errorResult("requested_subagents must be non-empty")
+	}
+```
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/tools/spawn_tools.go around lines 97 to 101, the code blindly
+type-asserts args["requested_subagents"] to []any but the schema allows a JSON
+array encoded as a string, so the assertion will fail for string inputs; modify
+the handling to accept both forms: if the value is a string, unmarshal it into a
+[]any (returning an errorResult on JSON parse failure), and if it is already a
+[]any use it directly, and otherwise return the existing errorResult indicating
+the argument must be a non-empty array; ensure you also validate the resulting
+slice is non-empty.
+```
+</details>
+
+---
+
+### Task 19: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/test_tools.go:115`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Use `filepath.Join` for path construction.**
+String concatenation for paths is non-portable and could cause issues on Windows. Use `filepath.Join` for proper path handling.
+```diff
++import "path/filepath"
++
+ // Check for Go project
+-if fileExists(testPath + "/go.mod") {
++if fileExists(filepath.Join(testPath, "go.mod")) {
+     testType = "go"
+     // ...
+-} else if fileExists(testPath+"/pytest.ini") || fileExists(testPath+"/setup.py") || fileExists(testPath+"/pyproject.toml") {
++} else if fileExists(filepath.Join(testPath, "pytest.ini")) || fileExists(filepath.Join(testPath, "setup.py")) || fileExists(filepath.Join(testPath, "pyproject.toml")) {
+     testType = "pytest"
+     // ...
+-} else if fileExists(testPath + "/package.json") {
++} else if fileExists(filepath.Join(testPath, "package.json")) {
+     testType = "npm"
+```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+	// Check for Go project
+	if fileExists(filepath.Join(testPath, "go.mod")) {
+		testType = "go"
+		goArgs := []string{"test"}
+		if v, ok := args["verbose"].(bool); ok && v {
+			goArgs = append(goArgs, "-v")
+		}
+		if pattern, ok := args["pattern"].(string); ok && pattern != "" {
+			goArgs = append(goArgs, "-run", pattern)
+		}
+		goArgs = append(goArgs, "./...")
+		cmd = exec.CommandContext(ctx, "go", goArgs...)
+	} else if fileExists(filepath.Join(testPath, "pytest.ini")) || fileExists(filepath.Join(testPath, "setup.py")) || fileExists(filepath.Join(testPath, "pyproject.toml")) {
+		testType = "pytest"
+		pytestArgs := []string{}
+		if v, ok := args["verbose"].(bool); ok && v {
+			pytestArgs = append(pytestArgs, "-v")
+		}
+		if pattern, ok := args["pattern"].(string); ok && pattern != "" {
+			pytestArgs = append(pytestArgs, "-k", pattern)
+		}
+		cmd = exec.CommandContext(ctx, "pytest", pytestArgs...)
+	} else if fileExists(filepath.Join(testPath, "package.json")) {
+		testType = "npm"
+		cmd = exec.CommandContext(ctx, "npm", "test")
+	} else {
+		// Default to go test
+		testType = "go"
+		cmd = exec.CommandContext(ctx, "go", "test", "./...")
+	}
+```
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/agent/tools/test_tools.go around lines 86 to 115, path strings are
+built via simple concatenation (e.g. testPath + "/go.mod") which is
+non-portable; replace those concatenations with filepath.Join(testPath,
+"go.mod"), filepath.Join(testPath, "pytest.ini"), filepath.Join(testPath,
+"setup.py"), filepath.Join(testPath, "pyproject.toml"), and
+filepath.Join(testPath, "package.json") respectively, update the
+exec.CommandContext calls to use the joined paths where needed, and add the
+"path/filepath" import at the top of the file if it is not already imported.
+```
+</details>
+
+---
+
+### Task 20: coderabbitai[bot]'s feedback
+
+**File:** `internal/agent/tools/tools.go:13`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Duplicate import with different aliases is redundant.**
+The package `github.com/XiaoConstantine/dspy-go/pkg/tools` is imported twice with different aliases (`tools` and `dstools`). This is confusing and unnecessary.
+```diff
+-	"github.com/XiaoConstantine/dspy-go/pkg/tools"
+ 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+```
+Then update line 76:
+```diff
+-		tools:    tools.NewInMemoryToolRegistry(),
++		tools:    dstools.NewInMemoryToolRegistry(),
+```
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
+```
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+internal/agent/tools/tools.go lines 12-13: the package
+github.com/XiaoConstantine/dspy-go/pkg/tools is imported twice under different
+aliases (tools and dstools); remove the duplicate import so the package is only
+imported once under a single alias (choose either tools or dstools), then update
+the usage at line 76 to reference the chosen alias and adjust any other
+references accordingly.
+```
+</details>
+
+---
+
+### Task 21: coderabbitai[bot]'s feedback
+
+**File:** `internal/knowledge/builtin/factory_test.go:337`
+
+_🛠️ Refactor suggestion_ | _🟠 Major_
+**Replace custom `contains` with `strings.Contains`.**
+This recursive implementation could stack overflow on long strings and is less efficient than the standard library function.
+```diff
+ func contains(s, substr string) bool {
+-	return len(s) >= len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr))
++	return strings.Contains(s, substr)
+ }
+```
+Or simply use `strings.Contains` directly at call sites and remove this function.
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In internal/knowledge/builtin/factory_test.go around lines 335-337, the custom
+recursive contains(s, substr string) function is unsafe and inefficient; replace
+uses with the standard library by removing this function and calling
+strings.Contains(s, substr) at call sites, adding/importing the "strings"
+package where needed and ensuring tests compile after updating references.
+```
+</details>
+
+---
+
+### Task 22: coderabbitai[bot]'s feedback
+
+**File:** `skills/todo/main.go:337`
+
+**Potential nil pointer dereference when accessing `in.Plan.Goal`.**
+If `in.Plan` is nil, accessing `in.Plan.Goal` at line 337 will panic. While `handlePlan` checks for nil, this line executes before the check.
+```diff
+ 	case "plan":
+ 		// Open board store for plan event emission
+ 		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+ 		if boardStore != nil {
+ 			defer func() { _ = boardStore.Close() }()
+ 		}
+ 		planResult, err := handlePlan(ctx, store, boardStore, workspaceID, in.Plan)
+ 		if err != nil {
+ 			return err
+ 		}
++		goal := ""
++		if in.Plan != nil {
++			goal = in.Plan.Goal
++		}
+-		summary := fmt.Sprintf("plan for %q: %d tasks", in.Plan.Goal, len(planResult.Tasks))
++		summary := fmt.Sprintf("plan for %q: %d tasks", goal, len(planResult.Tasks))
+```
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In skills/todo/main.go at line 337, the code formats summary using in.Plan.Goal
+but in.Plan can be nil which will panic; to fix, avoid dereferencing in.Plan
+before verifying it's non-nil: either move the summary creation to after the
+existing nil-check in handlePlan, or guard access by using a local safe variable
+(e.g. goal := "" or "unknown"; if in.Plan != nil { goal = in.Plan.Goal }) and
+use that variable in fmt.Sprintf so you never dereference a nil pointer.
+```
+</details>
+
+---
+
+### Task 23: coderabbitai[bot]'s feedback
+
+**File:** `test/integration/run_dspy_test.sh:11`
+
+**Critical: Hardcoded API key must be removed.**
+Line 10 contains what appears to be a real Groq API key (`gsk_...`). Even in comments, secrets must never be committed to source control. This key should be rotated immediately and the line removed or replaced with a placeholder.
+```diff
+ #   For Groq (OpenAI compatible):
+-#     export AGENTCTL_LLM_API_KEY="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"
++#     export AGENTCTL_LLM_API_KEY="your-groq-api-key"
+ #     # Note: dspy-go currently only supports Gemini natively
+```
+**Action required:** Rotate this API key on the Groq dashboard as it is now exposed in git history.
+<details>
+<summary>📝 Committable suggestion</summary>
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+```suggestion
+#   For Groq (OpenAI compatible):
+#     export AGENTCTL_LLM_API_KEY="your-groq-api-key"
+#     # Note: dspy-go currently only supports Gemini natively
+```
+</details>
+<details>
+<summary>🧰 Tools</summary>
+<details>
+<summary>🪛 Gitleaks (8.29.1)</summary>
+[high] 10-10: Detected a Generic API Key, potentially exposing access to various services and sensitive operations.
+(generic-api-key)
+</details>
+</details>
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+```
+In test/integration/run_dspy_test.sh around lines 9 to 11, remove the hardcoded
+Groq API key comment (the gsk_... value) and replace it with a non-sensitive
+placeholder (e.g., export AGENTCTL_LLM_API_KEY="<GROQ_API_KEY>") or remove the
+line entirely; commit the change and add a note to rotate/revoke the exposed key
+immediately in the Groq dashboard and update any CI/secret store to use the new
+key instead of embedding it in the repo.
+```
+</details>
+
+---
+
+## Summary
+
+**Total tasks:** 23
+- 🔴 CI failures: 5
+- 📝 Review comments: 18

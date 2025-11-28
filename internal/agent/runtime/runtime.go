@@ -396,6 +396,19 @@ func (r *Runtime) List() []*Session {
 	return sessions
 }
 
+// FindSessionByActorID returns the session ID for an actor, or empty string if not found.
+func (r *Runtime) FindSessionByActorID(actorID string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for id, s := range r.sessions {
+		if s.Config.ActorID == actorID {
+			return id
+		}
+	}
+	return ""
+}
+
 // Kill cancels and removes a session.
 func (r *Runtime) Kill(sessionID string) error {
 	r.mu.Lock()

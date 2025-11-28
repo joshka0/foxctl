@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/XiaoConstantine/dspy-go/pkg/tools"
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/agent/types"
@@ -73,7 +72,7 @@ func NewRegistry(cfg ToolsConfig, recorder TelemetryRecorder) (*Registry, error)
 	}
 
 	r := &Registry{
-		tools:    tools.NewInMemoryToolRegistry(),
+		tools:    dstools.NewInMemoryToolRegistry(),
 		recorder: recorder,
 		config:   cfg,
 	}

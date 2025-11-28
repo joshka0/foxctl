@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
@@ -74,8 +75,8 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 		DeniedAgents:  []types.DeniedAgent{},
 	}
 
-	// Check concurrent agent limit
-	activeSessions := len(o.runtime.sessions)
+	// Check concurrent agent limit using thread-safe method
+	activeSessions := len(o.runtime.List())
 	if activeSessions >= o.config.MaxConcurrentAgents {
 		resp.Accepted = false
 		resp.Reason = "resource_exhausted: max concurrent agents reached"
@@ -147,8 +148,8 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 			ActorID:       actorID,
 			WorkspaceID:   "", // Will be inherited from runtime
 			EpicID:        req.EpicID,
-			TaskID:        "", // Can be set by caller or plan
-			RootActorID:   req.CallerActorID,
+			TaskID:        "",              // Can be set by caller or plan
+			RootActorID:   OverseerActorID, // Always the tree root
 			ParentActorID: req.CallerActorID,
 			Depth:         childDepth,
 			MaxDepth:      childMaxDepth,
@@ -166,19 +167,12 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 			continue
 		}
 
-		// Track parent-child relationship
-		// Find parent session by actor ID
-		var parentSessionID string
-		for id, s := range o.runtime.sessions {
-			if s.Config.ActorID == req.CallerActorID {
-				parentSessionID = id
-				break
-			}
-		}
+		// Track parent-child relationship using thread-safe methods
+		parentSessionID := o.runtime.FindSessionByActorID(req.CallerActorID)
 		if parentSessionID != "" {
 			o.children[parentSessionID] = append(o.children[parentSessionID], session.ID)
 			// Update parent session's children list
-			if parentSession, ok := o.runtime.sessions[parentSessionID]; ok {
+			if parentSession, ok := o.runtime.Get(parentSessionID); ok {
 				parentSession.mu.Lock()
 				parentSession.Children = append(parentSession.Children, session.ID)
 				parentSession.mu.Unlock()
@@ -280,32 +274,36 @@ func (o *Overseer) WaitForChildren(ctx context.Context, parentSessionID string) 
 	childIDs := o.GetChildren(parentSessionID)
 
 	for _, childID := range childIDs {
-		session, ok := o.runtime.Get(childID)
-		if !ok {
-			continue
-		}
-
-		// Wait for session to complete
+		// Poll until session completes or context is cancelled
 		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				session.mu.RLock()
-				status := session.Status
-				session.mu.RUnlock()
-
-				if status != types.StatusRunning {
-					break
-				}
-				// Small sleep to avoid busy loop
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
 			}
-			break
+
+			session, ok := o.runtime.Get(childID)
+			if !ok {
+				// Session no longer exists, move to next child
+				break
+			}
+
+			session.mu.RLock()
+			status := session.Status
+			session.mu.RUnlock()
+
+			if status != types.StatusRunning {
+				// Session completed, move to next child
+				break
+			}
+
+			// Sleep to avoid busy loop
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+				// Continue polling
+			}
 		}
 	}
 

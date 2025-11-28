@@ -123,7 +123,11 @@ type MailMessage struct {
 
 // mailSend implements the mail.send tool.
 // Note: This is a stub - in production it would use the agentctl mailbox.
-func (r *Registry) mailSend(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
+func (r *Registry) mailSend(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
+	}
+
 	recipient, ok := args["recipient"].(string)
 	if !ok || recipient == "" {
 		return errorResult("recipient is required"), nil
@@ -178,7 +182,11 @@ func (r *Registry) mailSend(_ context.Context, args map[string]any) (*models.Cal
 
 // mailInbox implements the mail.inbox tool.
 // Note: This is a stub - in production it would read from the agentctl mailbox.
-func (r *Registry) mailInbox(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
+func (r *Registry) mailInbox(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
+	}
+
 	unreadOnly := true
 	if u, ok := args["unread_only"].(bool); ok {
 		unreadOnly = u
@@ -217,7 +225,11 @@ func (r *Registry) mailInbox(_ context.Context, args map[string]any) (*models.Ca
 
 // mailAck implements the mail.ack tool.
 // Note: This is a stub - in production it would update the agentctl mailbox.
-func (r *Registry) mailAck(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
+func (r *Registry) mailAck(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
+	}
+
 	messageID, ok := args["message_id"].(string)
 	if !ok || messageID == "" {
 		return errorResult("message_id is required"), nil

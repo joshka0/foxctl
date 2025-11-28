@@ -61,7 +61,7 @@ type SearchMatch struct {
 }
 
 // codeSearch implements the code.search tool using ripgrep.
-func (r *Registry) codeSearch(_ context.Context, args map[string]any) (*models.CallToolResult, error) {
+func (r *Registry) codeSearch(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	pattern, ok := args["pattern"].(string)
 	if !ok || pattern == "" {
 		return errorResult("pattern is required"), nil
@@ -79,9 +79,10 @@ func (r *Registry) codeSearch(_ context.Context, args map[string]any) (*models.C
 		searchPath = r.config.WorkspaceRoot
 	}
 
-	// Build rg command
+	// Build rg command (using text output format for simpler parsing)
 	rgArgs := []string{
-		"--json",
+		"--line-number",
+		"--no-heading",
 		"--max-count", "100", // Limit matches per file
 	}
 
@@ -102,8 +103,8 @@ func (r *Registry) codeSearch(_ context.Context, args map[string]any) (*models.C
 	// Add pattern and path
 	rgArgs = append(rgArgs, pattern, searchPath)
 
-	// Execute ripgrep
-	cmd := exec.Command("rg", rgArgs...)
+	// Execute ripgrep with context for cancellation support
+	cmd := exec.CommandContext(ctx, "rg", rgArgs...)
 	output, err := cmd.Output()
 	if err != nil {
 		// rg returns exit code 1 when no matches found
@@ -116,7 +117,7 @@ func (r *Registry) codeSearch(_ context.Context, args map[string]any) (*models.C
 		return errorResult(fmt.Sprintf("ripgrep error: %v", err)), nil
 	}
 
-	// Parse JSON output from ripgrep
+	// Parse text output from ripgrep (file:line:content format)
 	matches := parseRipgrepOutput(string(output), r.config.WorkspaceRoot)
 
 	// Apply max results limit
@@ -134,8 +135,7 @@ func (r *Registry) codeSearch(_ context.Context, args map[string]any) (*models.C
 	}), nil
 }
 
-// parseRipgrepOutput parses ripgrep JSON output into SearchMatch slice.
-// This is a simplified parser - ripgrep JSON format is complex.
+// parseRipgrepOutput parses ripgrep text output (file:line:content format) into SearchMatch slice.
 func parseRipgrepOutput(output, workspaceRoot string) []SearchMatch {
 	var matches []SearchMatch
 
