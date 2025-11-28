@@ -35,7 +35,7 @@ func TestDspyAgentFileWrite(t *testing.T) {
 	t.Logf("Workspace: %s", workspace)
 
 	// Create runtime - use empty model to let runtime pick default (gemini-2.5-flash)
-	rt := runtime.NewRuntime(runtime.RuntimeConfig{
+	rt := runtime.NewRuntime(runtime.Config{
 		DefaultMaxIterations: 10,
 		DefaultTimeout:       5 * time.Minute,
 		LLMProvider:          "gemini",

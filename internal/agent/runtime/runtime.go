@@ -22,11 +22,11 @@ import (
 type Runtime struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
-	config   RuntimeConfig
+	config   Config
 }
 
-// RuntimeConfig configures the agent runtime.
-type RuntimeConfig struct {
+// Config configures the agent runtime.
+type Config struct {
 	// DefaultMaxIterations is the default limit for ReAct iterations.
 	DefaultMaxIterations int
 
@@ -78,7 +78,7 @@ type Session struct {
 }
 
 // NewRuntime creates a new agent runtime.
-func NewRuntime(cfg RuntimeConfig) *Runtime {
+func NewRuntime(cfg Config) *Runtime {
 	if cfg.DefaultMaxIterations <= 0 {
 		cfg.DefaultMaxIterations = 10
 	}
@@ -128,7 +128,7 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 
 	// Create tools registry with telemetry recorder
 	recorder := &sessionRecorder{sessionID: sessionID}
-	toolsCfg := agenttools.ToolsConfig{
+	toolsCfg := agenttools.Config{
 		WorkspaceRoot: r.config.WorkspaceRoot,
 		WorkspaceID:   cfg.WorkspaceID,
 		ActorID:       cfg.ActorID,

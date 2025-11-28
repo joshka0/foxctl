@@ -1,3 +1,5 @@
+//revive:disable:var-naming // "types" is the intended cross-cutting agent types package
+
 // Package types defines core types for dspy-go agent integration.
 package types
 
@@ -6,23 +8,35 @@ import "time"
 // AgentRole defines the type of agent (coder, planner, reviewer, etc.).
 type AgentRole string
 
+// Agent role constants define the supported agent types.
 const (
-	RoleCoder    AgentRole = "coder"
-	RolePlanner  AgentRole = "planner"
+	// RoleCoder is the default role for coding agents that read/write files.
+	RoleCoder AgentRole = "coder"
+	// RolePlanner is a planning agent that creates and manages task graphs.
+	RolePlanner AgentRole = "planner"
+	// RoleReviewer is a review agent that validates code changes.
 	RoleReviewer AgentRole = "reviewer"
-	RoleFixer    AgentRole = "fixer"
+	// RoleFixer is a fixing agent that addresses review feedback.
+	RoleFixer AgentRole = "fixer"
 )
 
 // AgentStatus represents the current state of an agent session.
 type AgentStatus string
 
+// Agent status constants define the possible session states.
 const (
-	StatusRunning     AgentStatus = "running"
-	StatusOK          AgentStatus = "ok"
+	// StatusRunning indicates the agent session is currently executing.
+	StatusRunning AgentStatus = "running"
+	// StatusOK indicates the session completed successfully.
+	StatusOK AgentStatus = "ok"
+	// StatusNeedsReview indicates the agent needs human review.
 	StatusNeedsReview AgentStatus = "needs_review"
-	StatusBlocked     AgentStatus = "blocked"
-	StatusError       AgentStatus = "error"
-	StatusCanceled    AgentStatus = "canceled"
+	// StatusBlocked indicates the agent is blocked on external input.
+	StatusBlocked AgentStatus = "blocked"
+	// StatusError indicates the session failed with an error.
+	StatusError AgentStatus = "error"
+	// StatusCanceled indicates the session was canceled.
+	StatusCanceled AgentStatus = "canceled"
 )
 
 // CodingInput defines the input fields for a coding agent.

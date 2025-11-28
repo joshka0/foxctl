@@ -18,12 +18,12 @@ import (
 type Registry struct {
 	tools         *dstools.InMemoryToolRegistry
 	recorder      TelemetryRecorder
-	config        ToolsConfig
+	config        Config
 	pathValidator *policy.PathValidator
 }
 
-// ToolsConfig configures tool behavior.
-type ToolsConfig struct {
+// Config configures tool behavior.
+type Config struct {
 	// WorkspaceRoot is the root directory for file operations.
 	WorkspaceRoot string
 
@@ -54,7 +54,7 @@ type noopRecorder struct{}
 func (noopRecorder) RecordToolCall(types.ToolCall) {}
 
 // NewRegistry creates a new tool registry with all V1 tools.
-func NewRegistry(cfg ToolsConfig, recorder TelemetryRecorder) (*Registry, error) {
+func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	if cfg.WorkspaceRoot == "" {
 		wd, err := os.Getwd()
 		if err != nil {

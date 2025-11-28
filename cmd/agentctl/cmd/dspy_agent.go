@@ -105,7 +105,7 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 		apiKey = os.Getenv("GEMINI_API_KEY") // Fallback to GEMINI_API_KEY
 	}
 
-	runtimeCfg := runtime.RuntimeConfig{
+	runtimeCfg := runtime.Config{
 		DefaultMaxIterations: 10,
 		DefaultTimeout:       30 * time.Minute,
 		LLMProvider:          os.Getenv("AGENTCTL_LLM_PROVIDER"),

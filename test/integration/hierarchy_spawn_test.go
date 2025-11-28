@@ -25,7 +25,7 @@ func TestHierarchySpawn(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create runtime with overseer
-	rt := runtime.NewRuntime(runtime.RuntimeConfig{
+	rt := runtime.NewRuntime(runtime.Config{
 		DefaultMaxIterations: 5,
 		DefaultTimeout:       2 * time.Minute,
 		LLMProvider:          "gemini",
@@ -166,7 +166,7 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	rt := runtime.NewRuntime(runtime.RuntimeConfig{
+	rt := runtime.NewRuntime(runtime.Config{
 		DefaultMaxIterations: 5,
 		DefaultTimeout:       2 * time.Minute,
 		LLMProvider:          "gemini",

@@ -58,7 +58,7 @@ func TestValidateSpawnDepth(t *testing.T) {
 			}
 
 			// Create a minimal overseer for testing
-			rt := NewRuntime(RuntimeConfig{
+			rt := NewRuntime(Config{
 				DefaultMaxDepth: 5,
 				LLMAPIKey:       "test-key", // Won't actually be used
 			})
@@ -170,7 +170,7 @@ func computeChildDepthLimits(parentDepth, parentMaxDepth, parentLocalMaxDepth, r
 }
 
 func TestOverseerRoleFilter(t *testing.T) {
-	rt := NewRuntime(RuntimeConfig{
+	rt := NewRuntime(Config{
 		DefaultMaxDepth: 5,
 		LLMAPIKey:       "test-key",
 	})
