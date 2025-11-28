@@ -334,7 +334,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		if err != nil {
 			return err
 		}
-		summary := fmt.Sprintf("plan for %q: %d tasks", in.Plan.Goal, len(planResult.Tasks))
+		// Safely access Plan.Goal (may be nil if handlePlan validated early)
+		goal := ""
+		if in.Plan != nil {
+			goal = in.Plan.Goal
+		}
+		summary := fmt.Sprintf("plan for %q: %d tasks", goal, len(planResult.Tasks))
 		if planResult.Applied {
 			summary += " (applied)"
 		} else {
