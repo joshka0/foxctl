@@ -269,13 +269,17 @@ func (idx *Indexer) updateFileMeta(ctx context.Context, workspace, filePath, dig
 }
 
 // deleteFileSymbols removes all symbols for a file.
+// Returns accumulated errors if any delete operations fail.
 func (idx *Indexer) deleteFileSymbols(ctx context.Context, workspace, filePath string) error {
+	var errs []error
+
 	// Delete file meta
 	metaName := FileMetaEntryName(workspace, filePath)
 	if err := idx.memoryStore.Delete(ctx, metaName, workspace); err != nil {
 		// Ignore not found errors
 		if !errors.Is(err, memory.ErrNotFound) {
 			idx.logger.Warn().Err(err).Str("path", filePath).Msg("failed to delete file meta")
+			errs = append(errs, fmt.Errorf("delete file meta: %w", err))
 		}
 	}
 
@@ -285,11 +289,12 @@ func (idx *Indexer) deleteFileSymbols(ctx context.Context, workspace, filePath s
 	deleted, err := idx.memoryStore.DeleteByNamePrefix(ctx, workspace, symbolPrefix)
 	if err != nil {
 		idx.logger.Warn().Err(err).Str("path", filePath).Msg("failed to delete symbol entries")
+		errs = append(errs, fmt.Errorf("delete symbol entries: %w", err))
 	} else if deleted > 0 {
 		idx.logger.Debug().Str("path", filePath).Int("count", deleted).Msg("deleted symbol entries")
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // detectLanguage detects the programming language from file extension or metadata.

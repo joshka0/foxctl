@@ -373,6 +373,8 @@ func (e *GoExtractor) extractCallName(call *ast.CallExpr) string {
 // exprToString converts an AST expression to a string representation.
 func (e *GoExtractor) exprToString(expr ast.Expr) string {
 	switch t := expr.(type) {
+	case *ast.BasicLit:
+		return t.Value
 	case *ast.Ident:
 		return t.Name
 	case *ast.StarExpr:

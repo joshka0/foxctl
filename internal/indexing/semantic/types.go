@@ -33,6 +33,10 @@ type FileEmbeddingResult struct {
 	// SizeBytes is the file size in bytes.
 	SizeBytes int64 `json:"size_bytes,omitempty"`
 
+	// Embedding is the generated embedding vector (for single-file embeddings).
+	// Empty for chunked files; use chunk entries for embeddings.
+	Embedding []float32 `json:"embedding,omitempty"`
+
 	// ChunkCount is the number of chunks (0 for single-embedding files).
 	ChunkCount int `json:"chunk_count,omitempty"`
 
@@ -55,6 +59,9 @@ type ChunkEmbeddingResult struct {
 
 	// Language is the detected or configured language (optional).
 	Language string `json:"language,omitempty"`
+
+	// Embedding is the generated embedding vector for this chunk.
+	Embedding []float32 `json:"embedding,omitempty"`
 
 	// Chunk contains chunk-specific metadata.
 	Chunk ChunkInfo `json:"chunk"`

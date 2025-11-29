@@ -133,12 +133,13 @@ func (idx *Indexer) indexSingleFile(ctx context.Context, event indexing.PostRevi
 		return fmt.Errorf("embed: %w", err)
 	}
 
-	// Create result metadata
+	// Create result metadata with embedding
 	result := FileEmbeddingResult{
 		Path:      file.Path,
 		Digest:    file.Digest,
 		Language:  file.Language,
 		SizeBytes: file.SizeBytes,
+		Embedding: embedding,
 		Source: &EmbeddingSource{
 			TaskID:   event.TaskID,
 			ReviewID: event.ReviewID,
@@ -239,9 +240,10 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 		chunkID := fmt.Sprintf("%d", i)
 
 		chunkResult := ChunkEmbeddingResult{
-			Path:     file.Path,
-			Digest:   file.Digest,
-			Language: file.Language,
+			Path:      file.Path,
+			Digest:    file.Digest,
+			Language:  file.Language,
+			Embedding: chunkEmbeddings[i],
 			Chunk: ChunkInfo{
 				ID:    chunkID,
 				Index: i,
