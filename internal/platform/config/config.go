@@ -22,15 +22,16 @@ const (
 
 // Config represents the fully materialized runtime configuration.
 type Config struct {
-	Home           string          `mapstructure:"home" json:"home"`
-	InlineOutputKB int             `mapstructure:"inline_output_kb" json:"inline_output_kb"`
-	MaxCaptureKB   int             `mapstructure:"max_capture_kb" json:"max_capture_kb"`
-	Paths          Paths           `mapstructure:"paths" json:"paths"`
-	Storage        StorageSettings `mapstructure:"storage" json:"storage"`
-	Memory         MemorySettings  `mapstructure:"memory" json:"memory"`
-	Cache          CacheSettings   `mapstructure:"cache" json:"cache"`
-	Logging        LoggingSettings `mapstructure:"logging" json:"logging"`
-	OpenAPI        OpenAPISettings `mapstructure:"openapi" json:"openapi"`
+	Home           string           `mapstructure:"home" json:"home"`
+	InlineOutputKB int              `mapstructure:"inline_output_kb" json:"inline_output_kb"`
+	MaxCaptureKB   int              `mapstructure:"max_capture_kb" json:"max_capture_kb"`
+	Paths          Paths            `mapstructure:"paths" json:"paths"`
+	Storage        StorageSettings  `mapstructure:"storage" json:"storage"`
+	Memory         MemorySettings   `mapstructure:"memory" json:"memory"`
+	Cache          CacheSettings    `mapstructure:"cache" json:"cache"`
+	Logging        LoggingSettings  `mapstructure:"logging" json:"logging"`
+	OpenAPI        OpenAPISettings  `mapstructure:"openapi" json:"openapi"`
+	Indexing       IndexingSettings `mapstructure:"indexing" json:"indexing"`
 }
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
@@ -71,6 +72,47 @@ type OpenAPISettings struct {
 	// absolute. Environment variables may override this value via
 	// AGENTCTL_OPENAPI_PLUGIN_PATH.
 	PluginPath []string `mapstructure:"plugin_path" json:"plugin_path"`
+}
+
+// IndexingSettings configure post-review indexing pipelines.
+// See: docs/spec/semantic_file_index.md §8.2
+type IndexingSettings struct {
+	// PostReview configures the post-review indexing pipeline.
+	PostReview PostReviewSettings `mapstructure:"post_review" json:"post_review"`
+}
+
+// PostReviewSettings holds the configuration for post-review indexers.
+type PostReviewSettings struct {
+	// Enabled controls whether post-review indexing is active.
+	Enabled bool `mapstructure:"enabled" json:"enabled"`
+
+	// Async controls whether indexing runs asynchronously (default: true).
+	// When false, task completion blocks until indexing completes.
+	Async bool `mapstructure:"async" json:"async"`
+
+	// Indexers lists the configured indexers.
+	Indexers []IndexerSettings `mapstructure:"indexers" json:"indexers"`
+}
+
+// IndexerSettings defines the configuration for a single indexer.
+type IndexerSettings struct {
+	// ID is a unique identifier for this indexer instance.
+	ID string `mapstructure:"id" json:"id"`
+
+	// Kind identifies the indexer type (e.g., "semantic_file_index", "code_symbol_dag").
+	Kind string `mapstructure:"kind" json:"kind"`
+
+	// Enabled controls whether this indexer is active.
+	Enabled bool `mapstructure:"enabled" json:"enabled"`
+
+	// IncludeGlobs are glob patterns for files to include.
+	IncludeGlobs []string `mapstructure:"include_globs" json:"include_globs"`
+
+	// ExcludeGlobs are glob patterns for files to exclude.
+	ExcludeGlobs []string `mapstructure:"exclude_globs" json:"exclude_globs"`
+
+	// MaxFileKB is the maximum file size in KB to index (0 = no limit).
+	MaxFileKB int `mapstructure:"max_file_kb" json:"max_file_kb"`
 }
 
 // Option customizes the loader.
@@ -145,6 +187,9 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
 	v.SetDefault("openapi.plugin_path", filepath.Join(defaultHome, "plugins"))
+	v.SetDefault("indexing.post_review.enabled", false)
+	v.SetDefault("indexing.post_review.async", true)
+	v.SetDefault("indexing.post_review.indexers", []map[string]any{})
 }
 
 func configureConfigFile(v *viper.Viper, l *loader, defaultHome string) {
