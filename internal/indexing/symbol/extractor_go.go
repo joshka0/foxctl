@@ -77,10 +77,13 @@ func (e *GoExtractor) extractFunc(fset *token.FileSet, fn *ast.FuncDecl, filePat
 		doc = fn.Doc.Text()
 	}
 
-	// Extract body for digest
-	bodyStart := fn.Pos()
-	bodyEnd := fn.End()
-	body := content[bodyStart-1 : bodyEnd-1]
+	// Extract body for digest (with bounds checking to prevent panic)
+	var body []byte
+	bodyStart := int(fn.Pos()) - 1
+	bodyEnd := int(fn.End()) - 1
+	if bodyStart >= 0 && bodyEnd <= len(content) && bodyStart < bodyEnd {
+		body = content[bodyStart:bodyEnd]
+	}
 
 	return Symbol{
 		ID:            ID(filePath, name),
@@ -215,7 +218,13 @@ func (e *GoExtractor) extractTypeSpec(fset *token.FileSet, decl *ast.GenDecl, sp
 		doc = decl.Doc.Text()
 	}
 
-	body := content[spec.Pos()-1 : spec.End()-1]
+	// Bounds check before slicing
+	var body []byte
+	start := int(spec.Pos()) - 1
+	end := int(spec.End()) - 1
+	if start >= 0 && end <= len(content) && start < end {
+		body = content[start:end]
+	}
 
 	return Symbol{
 		ID:            ID(filePath, spec.Name.Name),
@@ -258,7 +267,13 @@ func (e *GoExtractor) extractValueSpec(fset *token.FileSet, decl *ast.GenDecl, s
 			doc = decl.Doc.Text()
 		}
 
-		body := content[spec.Pos()-1 : spec.End()-1]
+		// Bounds check before slicing
+		var body []byte
+		start := int(spec.Pos()) - 1
+		end := int(spec.End()) - 1
+		if start >= 0 && end <= len(content) && start < end {
+			body = content[start:end]
+		}
 
 		sym := Symbol{
 			ID:            ID(filePath, name.Name),

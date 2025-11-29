@@ -2,6 +2,7 @@ package symbol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
 
@@ -261,8 +263,8 @@ func (idx *Indexer) deleteFileSymbols(ctx context.Context, workspace, filePath s
 	// Delete file meta
 	metaName := FileMetaEntryName(workspace, filePath)
 	if err := idx.memoryStore.Delete(ctx, metaName, workspace); err != nil {
-		// Ignore not found
-		if !strings.Contains(err.Error(), "not found") {
+		// Ignore not found errors
+		if !errors.Is(err, memory.ErrNotFound) {
 			idx.logger.Warn().Err(err).Str("path", filePath).Msg("failed to delete file meta")
 		}
 	}

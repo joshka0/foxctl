@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 )
 
 // FileEmbeddingType is the memory entry type for single-file embeddings.
@@ -141,14 +143,29 @@ func (c Config) ChunkingConfigHash() string {
 
 // FileEmbeddingName generates the canonical name for a file embedding entry.
 // Format: file://<workspace>/<path>
+// Escapes special URI characters (#, ?) that could cause parsing issues.
 func FileEmbeddingName(workspace, path string) string {
-	return fmt.Sprintf("file://%s/%s", workspace, path)
+	return fmt.Sprintf("file://%s/%s", escapeURIComponent(workspace), escapeURIComponent(path))
 }
 
 // ChunkEmbeddingName generates the canonical name for a chunk embedding entry.
 // Format: file://<workspace>/<path>#chunk-<chunk_id>?cfg=<hash>
+// Escapes special URI characters to prevent parsing issues.
 func ChunkEmbeddingName(workspace, path, chunkID, configHash string) string {
-	return fmt.Sprintf("file://%s/%s#chunk-%s?cfg=%s", workspace, path, chunkID, configHash)
+	return fmt.Sprintf("file://%s/%s#chunk-%s?cfg=%s",
+		escapeURIComponent(workspace),
+		escapeURIComponent(path),
+		url.PathEscape(chunkID),
+		url.QueryEscape(configHash))
+}
+
+// escapeURIComponent escapes characters that have special meaning in URIs
+// (# and ?) while preserving path separators (/).
+func escapeURIComponent(s string) string {
+	// Only escape # and ? which are URI special characters
+	s = strings.ReplaceAll(s, "#", "%23")
+	s = strings.ReplaceAll(s, "?", "%3F")
+	return s
 }
 
 // MarshalResult serializes a result struct to JSON bytes for storage.

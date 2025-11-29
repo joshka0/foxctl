@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )
 
@@ -324,7 +326,7 @@ func (idx *Indexer) deleteFileEmbedding(ctx context.Context, workspace, path str
 	name := FileEmbeddingName(workspace, path)
 	if err := idx.memoryStore.Delete(ctx, name, workspace); err != nil {
 		// Ignore not found errors
-		if err.Error() != "not found" {
+		if !errors.Is(err, memory.ErrNotFound) {
 			return err
 		}
 	}

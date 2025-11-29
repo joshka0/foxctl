@@ -2,6 +2,7 @@ package symbol
 
 import (
 	"context"
+	"sort"
 )
 
 // Extractor extracts symbols from source code.
@@ -39,12 +40,13 @@ func (r *ExtractorRegistry) Get(language string) Extractor {
 	return r.extractors[language]
 }
 
-// SupportedLanguages returns all registered languages.
+// SupportedLanguages returns all registered languages in sorted order.
 func (r *ExtractorRegistry) SupportedLanguages() []string {
 	var langs []string
 	for lang := range r.extractors {
 		langs = append(langs, lang)
 	}
+	sort.Strings(langs)
 	return langs
 }
 
