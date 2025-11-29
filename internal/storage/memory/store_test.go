@@ -163,3 +163,73 @@ func TestRelevantRanking(t *testing.T) {
 		t.Fatalf("expected sorted scores, got %f < %f", entries[0].Score, entries[1].Score)
 	}
 }
+
+func TestDeleteByNamePrefix(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+	})
+
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+
+	// Create entries with prefixed names
+	if _, err := store.SaveFromResult(ctx, "file://ws/src/main.go", "file_embedding", "ws", "main.go", result); err != nil {
+		t.Fatalf("save main.go: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "file://ws/src/main.go#chunk-0", "file_embedding_chunk", "ws", "chunk 0", result); err != nil {
+		t.Fatalf("save chunk-0: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "file://ws/src/main.go#chunk-1", "file_embedding_chunk", "ws", "chunk 1", result); err != nil {
+		t.Fatalf("save chunk-1: %v", err)
+	}
+	if _, err := store.SaveFromResult(ctx, "file://ws/src/other.go", "file_embedding", "ws", "other.go", result); err != nil {
+		t.Fatalf("save other.go: %v", err)
+	}
+
+	// Delete all chunks for main.go
+	deleted, err := store.DeleteByNamePrefix(ctx, "ws", "file://ws/src/main.go#chunk-")
+	if err != nil {
+		t.Fatalf("delete by prefix: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected 2 deleted, got %d", deleted)
+	}
+
+	// Verify chunks are gone but main.go entry still exists
+	entries, err := store.List(ctx, "ws", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries remaining, got %d", len(entries))
+	}
+
+	// Verify specific entries
+	_, err = store.Get(ctx, "file://ws/src/main.go", "ws")
+	if err != nil {
+		t.Fatalf("main.go should still exist: %v", err)
+	}
+	_, err = store.Get(ctx, "file://ws/src/other.go", "ws")
+	if err != nil {
+		t.Fatalf("other.go should still exist: %v", err)
+	}
+	_, err = store.Get(ctx, "file://ws/src/main.go#chunk-0", "ws")
+	if err == nil {
+		t.Fatal("chunk-0 should be deleted")
+	}
+
+	// Delete with no matches should return 0
+	deleted, err = store.DeleteByNamePrefix(ctx, "ws", "nonexistent://")
+	if err != nil {
+		t.Fatalf("delete nonexistent prefix: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("expected 0 deleted for nonexistent prefix, got %d", deleted)
+	}
+}

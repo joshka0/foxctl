@@ -269,9 +269,15 @@ func (idx *Indexer) deleteFileSymbols(ctx context.Context, workspace, filePath s
 		}
 	}
 
-	// TODO: Delete all symbol entries for this file
-	// This requires listing symbols by file path, which may need a different approach
-	// For now, orphaned symbols will be cleaned up on next full reindex
+	// Delete all symbol entries for this file
+	// Symbols are named: symbol://<workspace>/<file_path>:<symbol_name>
+	symbolPrefix := fmt.Sprintf("symbol://%s/%s:", workspace, filePath)
+	deleted, err := idx.memoryStore.DeleteByNamePrefix(ctx, workspace, symbolPrefix)
+	if err != nil {
+		idx.logger.Warn().Err(err).Str("path", filePath).Msg("failed to delete symbol entries")
+	} else if deleted > 0 {
+		idx.logger.Debug().Str("path", filePath).Int("count", deleted).Msg("deleted symbol entries")
+	}
 
 	return nil
 }

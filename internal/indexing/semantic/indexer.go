@@ -321,8 +321,9 @@ func (idx *Indexer) splitIntoChunks(content []byte) []Chunk {
 	return chunks
 }
 
-// deleteFileEmbedding removes a file's embedding entries.
+// deleteFileEmbedding removes a file's embedding entries (both single-file and chunks).
 func (idx *Indexer) deleteFileEmbedding(ctx context.Context, workspace, path string) error {
+	// Delete the single-file embedding entry
 	name := FileEmbeddingName(workspace, path)
 	if err := idx.memoryStore.Delete(ctx, name, workspace); err != nil {
 		// Ignore not found errors
@@ -330,7 +331,14 @@ func (idx *Indexer) deleteFileEmbedding(ctx context.Context, workspace, path str
 			return err
 		}
 	}
-	// TODO: Also delete chunk entries if they exist
+
+	// Delete all chunk entries for this file
+	// Chunks are named: file://<workspace>/<path>#chunk-<id>?cfg=<hash>
+	chunkPrefix := name + "#chunk-"
+	if _, err := idx.memoryStore.DeleteByNamePrefix(ctx, workspace, chunkPrefix); err != nil {
+		idx.logger.Warn().Err(err).Str("path", path).Msg("failed to delete chunk entries")
+	}
+
 	return nil
 }
 
