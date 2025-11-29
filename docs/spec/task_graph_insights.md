@@ -99,8 +99,10 @@ Graph construction steps (conceptually):
 
 5. **Detect cycles**
    - Run a cycle detection algorithm over the graph.
-   - Cycles MUST be surfaced in the output (list of task-id sequences) and MAY
-     be used to dampen or adjust certain metrics.
+   - Cycles MUST be surfaced in the output (list of task-id sequences).
+   - The analyzer MUST also compute strongly connected components (SCCs) and
+     conceptually treat each SCC as a single super-node for metrics that assume
+     a DAG (e.g. critical path).
 
 ## Metrics
 
@@ -126,9 +128,11 @@ All node-level metrics are keyed by `task_id`.
 
 - **Critical Path Score** – `critical_path_score[task_id]`
   - Heuristic reflecting how deep a task sits on dependency chains.
-  - One common formulation: longest distance (in edges) from this node to any
-    sink node reachable following dependencies.
-  - Higher scores indicate tasks that gate long chains of work.
+  - Computed on the DAG of SCC super-nodes from cycle detection; a common
+    formulation is the longest distance (in edges) from the task's SCC to any
+    sink SCC reachable following dependencies.
+  - Higher scores indicate tasks that gate long chains of work; tasks within the
+    same SCC MAY share the same base score.
 
 Implementations MAY compute additional metrics (e.g. betweenness, eigenvector,
 HITS) but they are not required for v1 and SHOULD be surfaced as optional fields
@@ -140,7 +144,8 @@ Graph-level outputs include:
 
 - **Topological Order** – `topological_order`
   - An ordering of task IDs consistent with dependencies if the graph is a DAG.
-  - If cycles exist, this field MAY be omitted or marked incomplete.
+  - If cycles exist, this field MAY instead reflect a topological ordering of
+    SCC super-nodes, or be omitted/marked incomplete.
 
 - **Cycles** – `cycles`
   - List of cycles, each represented as an ordered list of `task_id`s.

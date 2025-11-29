@@ -17,6 +17,8 @@ This spec is intentionally aligned with:
 - `overseer_profile.md` (overseer orchestration and hooks).
 - `vector-search.md` and `vector-search-implementation-notes.md` (optional
   sqlite-vector integration).
+- `code_symbol_index_and_swe_grep.md` (code symbol index, call graph, and SWE
+  Grep funnel-style retrieval built on top of post-review events).
 - The existing `named_memory` and `embedding` column in the memory store.
 
 The goal is to expose a **single, canonical embedding view per file** (with
@@ -258,6 +260,9 @@ Indexing operations MUST be safe under retries and concurrent attempts.
     successful post-review index update.
   - Manual/CLI updates MUST NOT regress the index below the last known reviewed
     state unless explicitly requested.
+  - Implementations MAY also schedule best-effort refreshes on git commits or
+    other events between reviews, but post-review refresh remains the canonical
+    source of truth for downstream metrics and training data.
 
 ---
 
@@ -286,9 +291,9 @@ Chunking policy:
 - If `chunk_bytes` is set and file size > `chunk_bytes` → initial index
   generates fixed, overlapping chunks.
 - Chunk boundaries are a pure function of
-  `(path, digest, chunk_bytes,
-  chunk_overlap_bytes)`; as long as configuration
-  does not change, boundaries stay stable across re-embeds.
+  `(path, chunk_bytes, chunk_overlap_bytes, chunking_config_hash)` and MUST NOT
+  depend on file contents; as long as configuration does not change, boundaries
+  stay stable across re-embeds.
 
 ### 5.2 Interaction with Vector Support
 
@@ -372,41 +377,41 @@ Conceptual shape:
 
 ```jsonc
 {
-	"version": 1,
-	"status": "ok|error",
-	"command": "jobs/info", // or jobs/tail final event
-	"data": {
-		"summary": {
-			"files_indexed": 12,
-			"chunks_indexed": 34,
-			"files_skipped": 1
-		},
-		"failures": [
-			{
-				"file": {
-					"path": "foo/bar.go",
-					"digest": "sha256:..." // optional; may be empty on read failures
-				},
-				"error_code": "EMBEDDING_PROVIDER_FAILURE",
-				"error_message": "HTTP 503 from embedding provider",
-				"provider_request_id": "req-123", // optional
-				"timestamp": "2025-11-15T12:34:56Z"
-			}
-		],
-		"cas_artifact": {
-			"artifact_id": "semantic_index.update_files:01HF...",
-			"path": "jobs/01HF.../semantic_index_results.ndjson",
-			"digest": "sha256:...",
-			"entries_count": 46
-		}
-	},
-	"meta": {
-		"job_id": "01HF...",
-		"workspace_id": "ws-123"
-	},
-	"error": {
-		/* see §11 for error codes; may be null when status:"ok" */
-	}
+  "version": 1,
+  "status": "ok|error",
+  "command": "jobs/info", // or jobs/tail final event
+  "data": {
+    "summary": {
+      "files_indexed": 12,
+      "chunks_indexed": 34,
+      "files_skipped": 1
+    },
+    "failures": [
+      {
+        "file": {
+          "path": "foo/bar.go",
+          "digest": "sha256:..." // optional; may be empty on read failures
+        },
+        "error_code": "EMBEDDING_PROVIDER_FAILURE",
+        "error_message": "HTTP 503 from embedding provider",
+        "provider_request_id": "req-123", // optional
+        "timestamp": "2025-11-15T12:34:56Z"
+      }
+    ],
+    "cas_artifact": {
+      "artifact_id": "semantic_index.update_files:01HF...",
+      "path": "jobs/01HF.../semantic_index_results.ndjson",
+      "digest": "sha256:...",
+      "entries_count": 46
+    }
+  },
+  "meta": {
+    "job_id": "01HF...",
+    "workspace_id": "ws-123"
+  },
+  "error": {
+    /* see §11 for error codes; may be null when status:"ok" */
+  }
 }
 ```
 
@@ -483,18 +488,18 @@ Configuration (illustrative):
 
 ```yaml
 indexing:
-    post_review:
-        enabled: true
-        indexers:
-            - id: semantic_embed
-              kind: semantic_file_index
-              include_globs: ["**/*.go", "**/*.md"]
-              exclude_globs: ["vendor/**", "dist/**"]
-            - id: code_symbol_graph
-              kind: code_symbol_dag
-              include_globs: ["**/*.go"]
-              # Implementation may call out to Joern, Neo4J, or an internal graph
-              # builder using exec/WASI skills and CAS snapshots.
+  post_review:
+    enabled: true
+    indexers:
+      - id: semantic_embed
+        kind: semantic_file_index
+        include_globs: ["**/*.go", "**/*.md"]
+        exclude_globs: ["vendor/**", "dist/**"]
+      - id: code_symbol_graph
+        kind: code_symbol_dag
+        include_globs: ["**/*.go"]
+        # Implementation may call out to Joern, Neo4J, or an internal graph
+        # builder using exec/WASI skills and CAS snapshots.
 ```
 
 The overseer’s **post-review handler** (see `overseer_profile.md` and
@@ -506,8 +511,12 @@ The overseer’s **post-review handler** (see `overseer_profile.md` and
 
 ### 8.3 Code-Symbol DAG (Future Work)
 
-While detailed design of a symbol DAG is out of scope here, this spec clarifies
-that:
+An internal code symbol index and SWE Grep skill are defined in
+`code_symbol_index_and_swe_grep.md`. This section focuses on how such an indexer
+fits into the generalized post-review pipeline.
+
+While integration with external DAG systems (e.g. Joern, Neo4J) is out of scope
+here, this spec clarifies that:
 
 - The **same post-review event** used for semantic embeddings is the preferred
   place to:

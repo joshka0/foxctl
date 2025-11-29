@@ -94,16 +94,29 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			return fmt.Errorf("ensure active task: %w", err)
 		}
 
+		// Check if task needs dirtying (ready_for_review or completed -> in_progress)
+		dirtied := false
+		if !created {
+			task, dirtied, err = store.DirtyIfReviewed(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("dirty task: %w", err)
+			}
+		}
+
 		reason := "task ensured"
 		if created {
 			reason = fmt.Sprintf("auto-created task: %s", task.Title)
+		} else if dirtied {
+			reason = fmt.Sprintf("task dirtied (demoted to in_progress): %s", task.Title)
 		}
 
 		output = hook.NewApprove(reason, map[string]any{
 			"task_id":      task.ID,
 			"task_title":   task.Title,
+			"task_status":  task.Status,
 			"workspace_id": workspaceID,
 			"created":      created,
+			"dirtied":      dirtied,
 		})
 
 	case ModeStrict:
@@ -118,10 +131,23 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 				"No active task. Create one with: agentctl todo add --title \"<task>\" or use /start-task",
 			)
 		} else {
-			output = hook.NewApprove("active task exists", map[string]any{
+			// Check if task needs dirtying (ready_for_review or completed -> in_progress)
+			task, dirtied, err := store.DirtyIfReviewed(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("dirty task: %w", err)
+			}
+
+			reason := "active task exists"
+			if dirtied {
+				reason = fmt.Sprintf("task dirtied (demoted to in_progress): %s", task.Title)
+			}
+
+			output = hook.NewApprove(reason, map[string]any{
 				"task_id":      task.ID,
 				"task_title":   task.Title,
+				"task_status":  task.Status,
 				"workspace_id": workspaceID,
+				"dirtied":      dirtied,
 			})
 		}
 	}

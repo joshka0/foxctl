@@ -117,7 +117,8 @@ Fields (conceptual):
 - `ts` (timestamp).
 - `kind` (string):
   - `"user_request"`, `"agent_thought"`, `"tool_call"`, `"tool_result"`,
-    `"review_request"`, `"review_result"`, `"task_transition"`, etc.
+    `"review_request"`, `"review_result"`, `"task_transition"`,
+    `"graph_search"`, `"swe_grep"`, etc.
 - `actor` (string) – e.g. `actor:agent:dspy:<slug>`, `actor:system:overseer`.
 - `command` (string, optional) – Protocol v1 `command` when applicable.
 - `status` (string, optional) – derived from `env.status` or review status.

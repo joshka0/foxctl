@@ -232,6 +232,194 @@ func TestStore_DependsOnAndChildren(t *testing.T) {
 	}
 }
 
+func TestStore_DirtyIfReviewed_PendingTask(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	// Create a pending task
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Pending Task",
+		Status:      StatusPending,
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// DirtyIfReviewed should not modify a pending task
+	result, dirtied, err := store.DirtyIfReviewed(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("DirtyIfReviewed failed: %v", err)
+	}
+	if dirtied {
+		t.Error("expected dirtied=false for pending task")
+	}
+	if result.Status != StatusPending {
+		t.Errorf("expected status %q, got %q", StatusPending, result.Status)
+	}
+}
+
+func TestStore_DirtyIfReviewed_InProgressTask(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	// Create an in_progress task
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "In Progress Task",
+		Status:      StatusInProgress,
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// DirtyIfReviewed should not modify an in_progress task
+	result, dirtied, err := store.DirtyIfReviewed(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("DirtyIfReviewed failed: %v", err)
+	}
+	if dirtied {
+		t.Error("expected dirtied=false for in_progress task")
+	}
+	if result.Status != StatusInProgress {
+		t.Errorf("expected status %q, got %q", StatusInProgress, result.Status)
+	}
+}
+
+func TestStore_DirtyIfReviewed_ReadyForReviewTask(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	// Create a ready_for_review task with passing review
+	task, err := store.Add(ctx, Task{
+		WorkspaceID:      "ws-1",
+		Title:            "Ready for Review Task",
+		Status:           StatusReadyForReview,
+		LastReviewStatus: ReviewStatusOK,
+		LastReviewID:     "review-123",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// DirtyIfReviewed should demote to in_progress and mark review as stale
+	result, dirtied, err := store.DirtyIfReviewed(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("DirtyIfReviewed failed: %v", err)
+	}
+	if !dirtied {
+		t.Error("expected dirtied=true for ready_for_review task")
+	}
+	if result.Status != StatusInProgress {
+		t.Errorf("expected status %q, got %q", StatusInProgress, result.Status)
+	}
+	if result.LastReviewStatus != ReviewStatusStale {
+		t.Errorf("expected last_review_status %q, got %q", ReviewStatusStale, result.LastReviewStatus)
+	}
+	// Review ID should be preserved
+	if result.LastReviewID != "review-123" {
+		t.Errorf("expected last_review_id %q, got %q", "review-123", result.LastReviewID)
+	}
+}
+
+func TestStore_DirtyIfReviewed_CompletedTask(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	// Create a completed task with passing review
+	now := time.Now().UTC()
+	task, err := store.Add(ctx, Task{
+		WorkspaceID:      "ws-1",
+		Title:            "Completed Task",
+		Status:           StatusCompleted,
+		CompletedAt:      &now,
+		LastReviewStatus: ReviewStatusOK,
+		LastReviewID:     "review-456",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// DirtyIfReviewed should demote to in_progress and mark review as stale
+	result, dirtied, err := store.DirtyIfReviewed(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("DirtyIfReviewed failed: %v", err)
+	}
+	if !dirtied {
+		t.Error("expected dirtied=true for completed task")
+	}
+	if result.Status != StatusInProgress {
+		t.Errorf("expected status %q, got %q", StatusInProgress, result.Status)
+	}
+	if result.LastReviewStatus != ReviewStatusStale {
+		t.Errorf("expected last_review_status %q, got %q", ReviewStatusStale, result.LastReviewStatus)
+	}
+}
+
+func TestStore_DirtyIfReviewed_FailedReviewNotMarkedStale(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	// Create a ready_for_review task with failed review
+	task, err := store.Add(ctx, Task{
+		WorkspaceID:      "ws-1",
+		Title:            "Failed Review Task",
+		Status:           StatusReadyForReview,
+		LastReviewStatus: ReviewStatusFailed,
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// DirtyIfReviewed should demote but NOT mark as stale (only ok reviews become stale)
+	result, dirtied, err := store.DirtyIfReviewed(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("DirtyIfReviewed failed: %v", err)
+	}
+	if !dirtied {
+		t.Error("expected dirtied=true for ready_for_review task")
+	}
+	if result.Status != StatusInProgress {
+		t.Errorf("expected status %q, got %q", StatusInProgress, result.Status)
+	}
+	// Failed review should remain failed, not stale
+	if result.LastReviewStatus != ReviewStatusFailed {
+		t.Errorf("expected last_review_status %q, got %q", ReviewStatusFailed, result.LastReviewStatus)
+	}
+}
+
+func TestStore_ReviewFields(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	reviewAt := time.Now().UTC()
+	task, err := store.Add(ctx, Task{
+		WorkspaceID:      "ws-1",
+		Title:            "Task with review",
+		LastReviewStatus: ReviewStatusOK,
+		LastReviewAt:     &reviewAt,
+		LastReviewID:     "review-789",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	got, err := store.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	if got.LastReviewStatus != ReviewStatusOK {
+		t.Errorf("expected last_review_status %q, got %q", ReviewStatusOK, got.LastReviewStatus)
+	}
+	if got.LastReviewAt == nil {
+		t.Error("expected LastReviewAt to be set")
+	}
+	if got.LastReviewID != "review-789" {
+		t.Errorf("expected last_review_id %q, got %q", "review-789", got.LastReviewID)
+	}
+}
+
 func setupTestStore(t *testing.T) Store {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "tasks-test-*")

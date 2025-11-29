@@ -5,7 +5,8 @@
 workspaces.\
 **Related specs:** `overseer_profile.md`, `overseer_planning.md`,
 `mailbox_blackboard.md`, `task_graph_insights.md`, `test_watch_feedback.md`,
-`unified_agents.md`, `dspy_trajectory_capture.md`
+`unified_agents.md`, `dspy_trajectory_capture.md`,
+`code_symbol_index_and_swe_grep.md`
 
 ---
 
@@ -161,8 +162,10 @@ Non-normative data shape for a team:
 - `primary_epics` ([]string, optional) – epic IDs this team primarily owns. \
 - `tags` ([]string, optional).
 
-This data MAY live in a separate teams store or as configuration in the
-workspace; exact storage is left to implementation.
+This data SHOULD live in a dedicated teams store (e.g. SQLite tables `teams` and
+`team_members`) so that future `teams/manage` skills have a stable schema.
+Configuration files MAY seed initial team definitions, but runtime updates and
+dashboards SHOULD use the store.
 
 #### 4.3.2 Use in planning and execution
 
@@ -227,6 +230,21 @@ policies apply.
   - Inputs: `workspace_id`, `path`.
   - Backend: Language-aware helper skill if/when available.
 
+- **`code.symbol_search`** (optional v1, strongly recommended later)
+  - Purpose: Retrieve relevant symbols and files using the code symbol index and
+    call graph.
+  - Inputs: `workspace_id`, `question`, optional `mode` (`"search"`,
+    `"callers"`, `"callees"`), and filters.
+  - Backend: Internal helper backed by the symbol index described in
+    `code_symbol_index_and_swe_grep.md`.
+
+- **`code.swe_grep`** (optional v1, strongly recommended later)
+  - Purpose: Given a question and candidate files/symbols, extract high-signal
+    code snippets via live reads and the SWE Grep skill.
+  - Inputs: `workspace_id`, `question`, candidate files/symbols.
+  - Backend: `code/swe_grep` exec skill as defined in
+    `code_symbol_index_and_swe_grep.md`.
+
 ### 5.2 Editing & Refactoring
 
 All writing tools MUST go through `agentctl` skills so `task_guard` and
@@ -237,7 +255,8 @@ All writing tools MUST go through `agentctl` skills so `task_guard` and
   - Inputs:
     - `workspace_id`
     - `path`
-    - `patch` (structured diff representation, not raw shell patch)
+    - `patch` (JSON structured diff as emitted by the `code_diff` skill; not raw
+      shell patch)
     - `reason` (human-readable justification)
   - Backend: Edit skill that ultimately uses `replace_file_content` or
     equivalent under the hood.

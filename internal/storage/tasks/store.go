@@ -36,6 +36,11 @@ type Store interface {
 	ClearActive(ctx context.Context, workspaceID string) error
 	// EnsureActive returns the active task or creates one with the given defaults.
 	EnsureActive(ctx context.Context, workspaceID, defaultTitle, scopePath string) (Task, bool, error)
+
+	// DirtyIfReviewed checks if the task is in ready_for_review or completed status.
+	// If so, it demotes the status to in_progress and marks the review as stale.
+	// Returns (task, dirtied, error) where dirtied is true if the task was modified.
+	DirtyIfReviewed(ctx context.Context, taskID string) (Task, bool, error)
 }
 
 // Task represents a persisted task record.
@@ -53,13 +58,40 @@ type Task struct {
 	CompletedAt *time.Time
 	Notes       string
 	Gotchas     string
+
+	// Review gate fields (review_gate.md)
+	LastReviewStatus string     // "ok", "failed", "pending", or empty
+	LastReviewAt     *time.Time // timestamp of last review
+	LastReviewID     string     // ID of most recent review artifact
 }
 
-// StatusPending is the default status for new tasks.
-const StatusPending = "pending"
+// Task status constants per review_gate.md
+const (
+	// StatusPending is the default status for new tasks.
+	StatusPending = "pending"
+	// StatusInProgress indicates work is actively happening.
+	StatusInProgress = "in_progress"
+	// StatusReadyForReview indicates implementation is believed complete, awaiting review.
+	StatusReadyForReview = "ready_for_review"
+	// StatusCompleted marks a task as done (has passed review).
+	StatusCompleted = "completed"
+	// StatusBlocked indicates the task is blocked on dependencies or other issues.
+	StatusBlocked = "blocked"
+	// StatusCanceled indicates the task has been abandoned or superseded.
+	StatusCanceled = "canceled"
+)
 
-// StatusCompleted marks a task as done.
-const StatusCompleted = "completed"
+// Review status constants
+const (
+	// ReviewStatusOK indicates the last review passed.
+	ReviewStatusOK = "ok"
+	// ReviewStatusFailed indicates the last review failed.
+	ReviewStatusFailed = "failed"
+	// ReviewStatusPending indicates a review is in progress.
+	ReviewStatusPending = "pending"
+	// ReviewStatusStale indicates a review was invalidated by new writes.
+	ReviewStatusStale = "stale"
+)
 
 type sqlStore struct {
 	db *sql.DB
@@ -95,7 +127,10 @@ CREATE TABLE IF NOT EXISTS tasks (
 	created_at TEXT NOT NULL,
 	completed_at TEXT,
 	notes TEXT,
-	gotchas TEXT
+	gotchas TEXT,
+	last_review_status TEXT,
+	last_review_at TEXT,
+	last_review_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace_created ON tasks(workspace_id, created_at DESC);
 
@@ -107,6 +142,17 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("tasks: migrate: %w", err)
+	}
+
+	// Add review columns to existing tables (idempotent migration)
+	alterDDL := []string{
+		`ALTER TABLE tasks ADD COLUMN last_review_status TEXT`,
+		`ALTER TABLE tasks ADD COLUMN last_review_at TEXT`,
+		`ALTER TABLE tasks ADD COLUMN last_review_id TEXT`,
+	}
+	for _, stmt := range alterDDL {
+		// Ignore errors from "duplicate column" - columns may already exist
+		_, _ = db.ExecContext(ctx, stmt)
 	}
 	return nil
 }
@@ -144,12 +190,19 @@ func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
 		completedAt = &s
 	}
 
+	var lastReviewAt *string
+	if t.LastReviewAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.LastReviewAt)
+		lastReviewAt = &s
+	}
+
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.WorkspaceID, t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status,
-		timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.Notes, t.Gotchas)
+		timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.Notes, t.Gotchas,
+		t.LastReviewStatus, lastReviewAt, t.LastReviewID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
 	}
@@ -173,15 +226,21 @@ func (s *sqlStore) Update(ctx context.Context, t Task) (Task, error) {
 		completedAt = &s
 	}
 
+	var lastReviewAt *string
+	if t.LastReviewAt != nil {
+		s := timeutil.FormatRFC3339Nano(*t.LastReviewAt)
+		lastReviewAt = &s
+	}
+
 	res, err := s.db.ExecContext(ctx, `
 UPDATE tasks SET
 	title = ?, description = ?, scope_path = ?, parent_id = ?,
 	children = ?, depends_on = ?, status = ?, completed_at = ?,
-	notes = ?, gotchas = ?
+	notes = ?, gotchas = ?, last_review_status = ?, last_review_at = ?, last_review_id = ?
 WHERE id = ?`,
 		t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status, completedAt,
-		t.Notes, t.Gotchas, t.ID)
+		t.Notes, t.Gotchas, t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.ID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: update: %w", err)
 	}
@@ -195,7 +254,7 @@ WHERE id = ?`,
 // Get returns a task by ID.
 func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id
 FROM tasks WHERE id = ?`, id)
 	return scanTask(row)
 }
@@ -203,7 +262,7 @@ FROM tasks WHERE id = ?`, id)
 // ListByWorkspace returns tasks scoped to a workspace.
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id
 FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
@@ -224,7 +283,7 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 // GetActive returns the active task for a workspace, if any.
 func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas
+SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id
 FROM tasks t
 JOIN active_tasks a ON t.id = a.task_id
 WHERE a.workspace_id = ?`, workspaceID)
@@ -296,6 +355,36 @@ func (s *sqlStore) EnsureActive(ctx context.Context, workspaceID, defaultTitle, 
 	return t, true, nil
 }
 
+// DirtyIfReviewed checks if the task is in ready_for_review or completed status.
+// If so, it demotes the status to in_progress and marks the review as stale.
+// Returns (task, dirtied, error) where dirtied is true if the task was modified.
+func (s *sqlStore) DirtyIfReviewed(ctx context.Context, taskID string) (Task, bool, error) {
+	t, err := s.Get(ctx, taskID)
+	if err != nil {
+		return Task{}, false, err
+	}
+
+	// Only dirty if task is in ready_for_review or completed status
+	if t.Status != StatusReadyForReview && t.Status != StatusCompleted {
+		return t, false, nil
+	}
+
+	// Demote status to in_progress
+	t.Status = StatusInProgress
+
+	// Mark any previous passing review as stale
+	if t.LastReviewStatus == ReviewStatusOK {
+		t.LastReviewStatus = ReviewStatusStale
+	}
+
+	updated, err := s.Update(ctx, t)
+	if err != nil {
+		return Task{}, false, fmt.Errorf("tasks: dirty: %w", err)
+	}
+
+	return updated, true, nil
+}
+
 // scanTask scans a single task from a row.
 func scanTask(row *sql.Row) (Task, error) {
 	var t Task
@@ -303,11 +392,12 @@ func scanTask(row *sql.Row) (Task, error) {
 	var createdAtStr string
 	var completedAtStr sql.NullString
 	var description, scopePath, parentID, notes, gotchas sql.NullString
+	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
 
 	err := row.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
-		&notes, &gotchas)
+		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return Task{}, err
@@ -320,11 +410,17 @@ func scanTask(row *sql.Row) (Task, error) {
 	t.ParentID = parentID.String
 	t.Notes = notes.String
 	t.Gotchas = gotchas.String
+	t.LastReviewStatus = lastReviewStatus.String
+	t.LastReviewID = lastReviewID.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
 		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
 		t.CompletedAt = &ct
+	}
+	if lastReviewAt.Valid {
+		rt := timeutil.MustParseRFC3339Nano(lastReviewAt.String)
+		t.LastReviewAt = &rt
 	}
 
 	t.Children = dbutil.ScanJSONArrayMust(childrenJSON)
@@ -340,11 +436,12 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	var createdAtStr string
 	var completedAtStr sql.NullString
 	var description, scopePath, parentID, notes, gotchas sql.NullString
+	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
 
 	err := rows.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
-		&notes, &gotchas)
+		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
 	}
@@ -354,11 +451,17 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.ParentID = parentID.String
 	t.Notes = notes.String
 	t.Gotchas = gotchas.String
+	t.LastReviewStatus = lastReviewStatus.String
+	t.LastReviewID = lastReviewID.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
 		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
 		t.CompletedAt = &ct
+	}
+	if lastReviewAt.Valid {
+		rt := timeutil.MustParseRFC3339Nano(lastReviewAt.String)
+		t.LastReviewAt = &rt
 	}
 
 	t.Children = dbutil.ScanJSONArrayMust(childrenJSON)

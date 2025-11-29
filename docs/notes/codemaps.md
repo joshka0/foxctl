@@ -90,7 +90,7 @@ Each entry has:
 
 ---
 
-## 10. Knowledge System & Factory Droids
+## 10. Knowledge System & Factory Droids / Claude Code
 
 - **Name**: `@[agentctl Knowledge System & Factory Droids]`
 - **Goal**: Explain the knowledge registry and built-in Factory droid documents.

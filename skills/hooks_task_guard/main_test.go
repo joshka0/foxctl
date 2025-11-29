@@ -154,6 +154,153 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 	}
 }
 
+func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create a ready_for_review task with passing review
+	ctx := context.Background()
+	store, err := tasks.Open(ctx, env.cfg.Storage.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := store.Add(ctx, tasks.Task{
+		WorkspaceID:      env.workspaceRoot,
+		Title:            "Ready for Review Task",
+		Status:           tasks.StatusReadyForReview,
+		LastReviewStatus: tasks.ReviewStatusOK,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SetActive(ctx, env.workspaceRoot, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+
+	// Write operation should approve and dirty the task
+	in := hook.Input{
+		Event:         "PreToolUse",
+		WorkspaceRoot: env.workspaceRoot,
+		ToolName:      "Edit",
+		ToolInput:     json.RawMessage(`{"file_path": "/path/to/file.go"}`),
+	}
+
+	output := env.run(t, in)
+	if output.Decision != hook.DecisionApprove {
+		t.Errorf("expected approve, got %s", output.Decision)
+	}
+	if output.Meta["dirtied"] != true {
+		t.Error("expected task to be dirtied")
+	}
+	if output.Meta["task_status"] != tasks.StatusInProgress {
+		t.Errorf("expected task_status %q, got %v", tasks.StatusInProgress, output.Meta["task_status"])
+	}
+
+	// Verify the task was actually dirtied in storage
+	store, err = tasks.Open(ctx, env.cfg.Storage.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+
+	updated, err := store.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != tasks.StatusInProgress {
+		t.Errorf("expected status %q, got %q", tasks.StatusInProgress, updated.Status)
+	}
+	if updated.LastReviewStatus != tasks.ReviewStatusStale {
+		t.Errorf("expected last_review_status %q, got %q", tasks.ReviewStatusStale, updated.LastReviewStatus)
+	}
+}
+
+func TestTaskGuard_StrictMode_DirtiesCompletedTask(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Set strict mode
+	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
+
+	// Create a completed task with passing review
+	ctx := context.Background()
+	store, err := tasks.Open(ctx, env.cfg.Storage.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := store.Add(ctx, tasks.Task{
+		WorkspaceID:      env.workspaceRoot,
+		Title:            "Completed Task",
+		Status:           tasks.StatusCompleted,
+		LastReviewStatus: tasks.ReviewStatusOK,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SetActive(ctx, env.workspaceRoot, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+
+	// Write operation should approve and dirty the task
+	in := hook.Input{
+		Event:         "PreToolUse",
+		WorkspaceRoot: env.workspaceRoot,
+		ToolName:      "Write",
+	}
+
+	output := env.run(t, in)
+	if output.Decision != hook.DecisionApprove {
+		t.Errorf("expected approve, got %s", output.Decision)
+	}
+	if output.Meta["dirtied"] != true {
+		t.Error("expected task to be dirtied")
+	}
+	if output.Meta["task_status"] != tasks.StatusInProgress {
+		t.Errorf("expected task_status %q, got %v", tasks.StatusInProgress, output.Meta["task_status"])
+	}
+}
+
+func TestTaskGuard_AutoMode_DoesNotDirtyInProgressTask(t *testing.T) {
+	env := newTestEnv(t)
+
+	// Create an in_progress task
+	ctx := context.Background()
+	store, err := tasks.Open(ctx, env.cfg.Storage.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := store.Add(ctx, tasks.Task{
+		WorkspaceID: env.workspaceRoot,
+		Title:       "In Progress Task",
+		Status:      tasks.StatusInProgress,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.SetActive(ctx, env.workspaceRoot, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Close()
+
+	// Write operation should approve but NOT dirty the task
+	in := hook.Input{
+		Event:         "PreToolUse",
+		WorkspaceRoot: env.workspaceRoot,
+		ToolName:      "Edit",
+	}
+
+	output := env.run(t, in)
+	if output.Decision != hook.DecisionApprove {
+		t.Errorf("expected approve, got %s", output.Decision)
+	}
+	if output.Meta["dirtied"] != false {
+		t.Error("expected task NOT to be dirtied")
+	}
+}
+
 type testEnv struct {
 	ctx           context.Context
 	workspaceRoot string
