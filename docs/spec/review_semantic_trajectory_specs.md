@@ -11,6 +11,8 @@ specs.
   integration with hooks, mailbox, and overseer.
 - `semantic_file_index.md` – Single-embedding-per-file semantic index, lifecycle
   triggers (especially post-review), and integration with vector search.
+- `code_symbol_index_and_swe_grep.md` – Code symbol index, SWE Grep skill, and
+  funnel-style retrieval architecture for agents.
 - `dspy_go_agents.md` – dspy-go agent runtime, canonical Coding/Planning/Review
   signatures, and overseer/ mailbox integration.
 - `dspy_trajectory_capture.md` – Trajectory index, user request capture,
@@ -30,6 +32,8 @@ User request / tasks
         ├─ Review artifacts (review_gate.md)
         │
         ├─ Semantic file index updates (semantic_file_index.md)
+        │
+        ├─ Symbol index + SWE Grep (code_symbol_index_and_swe_grep.md)
         │
         ▼
   Trajectories + episodes (dspy_trajectory_capture.md)

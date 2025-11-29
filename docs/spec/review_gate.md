@@ -170,7 +170,9 @@ completion, but when the gate is enabled, the following behavior SHOULD hold.
 
 At minimum, a review pipeline SHOULD be able to:
 
-1. Run static checks / lint.
+1. Run static checks / lint, including workspace-defined quality gates such as
+   complexity/duplication thresholds and max file/function lengths where
+   configured.
 2. Run fast tests (e.g. `-short`).
 3. Optionally run additional checks (formatting, security, etc.).
 
@@ -384,19 +386,20 @@ artifacts.
 
 - Ensures write operations are associated with an active `task_id`.
 - When a task is in `ready_for_review` or `completed` and new writes occur under
-  its scope, implementations MAY:
-  - Automatically move the task back to `in_progress` or a "dirty" variant, or
-  - Mark the existing review as stale so that another review is required before
-    completion.
+  its scope, `hooks/task_guard` MUST:
+  - Automatically move the task status back to `in_progress`.
+  - Treat any previously `ok` review for that task as **stale** so that a new
+    review is required before the task can be considered `completed` again.
 
 When `hooks/task_guard` is configured in strict mode and blocks a write, callers
 that surface this as a top-level tool error SHOULD map the block to
 `E_GUARD_VIOLATION` (see `dspy_go_agents.md` §11.3) and treat it as a
 non-retryable, scope/guard violation rather than a transient runtime error.
 
-Exact "dirtying" behavior is left to implementation, but the spec recommends
-that new writes after a successful review invalidate that review for the
-relevant scope.
+Dirtying policy is **kernel-owned**: agents and reviewers do not make this
+decision. Implementations MAY vary in how they present stale reviews in UIs, but
+MUST preserve the semantics that new writes after a successful review invalidate
+that review for the relevant task scope.
 
 ### Test watcher & feedback (`hooks_test_feedback`)
 
@@ -458,7 +461,8 @@ can:
 
 In addition to coordinating review work, the overseer MAY trigger post-review
 indexers such as the semantic file index described in `semantic_file_index.md`
-to keep semantic search and related code indexes aligned with accepted changes.
+and the code symbol index described in `code_symbol_index_and_swe_grep.md` to
+keep semantic search and related code indexes aligned with accepted changes.
 
 ## dspy-go Agents & Trajectories
 
