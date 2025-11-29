@@ -3,6 +3,7 @@ package symbol
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -295,32 +296,56 @@ func (e *GoExtractor) extractValueSpec(fset *token.FileSet, decl *ast.GenDecl, s
 }
 
 // ExtractCalls extracts function call identifiers from a symbol's body.
+// It parses the full source file once and locates the AST node corresponding
+// to the symbol's byte range, then extracts call expressions from that node.
 func (e *GoExtractor) ExtractCalls(_ context.Context, symbol Symbol, content []byte) ([]string, error) {
-	// Parse just the function body
-	if symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
+	// Validate bounds
+	if symbol.StartByte < 0 || symbol.EndByte > len(content) || symbol.StartByte >= symbol.EndByte {
 		return nil, nil
 	}
 
-	// Wrap the body in a valid Go file for parsing
-	body := content[symbol.StartByte:symbol.EndByte]
-
-	// Parse as expression list to find call expressions
+	// Parse the full source file once with a single FileSet
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "", "package p\n"+string(body), 0)
+	file, err := parser.ParseFile(fset, symbol.FilePath, content, 0)
 	if err != nil {
-		// Try parsing just as source
-		file, err = parser.ParseFile(fset, "", content, 0)
-		if err != nil {
-			return nil, nil
-		}
+		return nil, fmt.Errorf("parse file for call extraction: %w", err)
 	}
 
-	var calls []string
+	// Find the AST node that corresponds to our symbol's byte range
+	var targetNode ast.Node
 	ast.Inspect(file, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		// Convert token positions to byte offsets
+		nodeStart := int(n.Pos()) - 1 // token.Pos is 1-indexed
+		nodeEnd := int(n.End()) - 1
+
+		// Check if this node encompasses our symbol's range
+		if nodeStart <= symbol.StartByte && nodeEnd >= symbol.EndByte {
+			// Prefer the most specific (innermost) matching node
+			switch n.(type) {
+			case *ast.FuncDecl, *ast.FuncLit:
+				targetNode = n
+			}
+		}
+		return true
+	})
+
+	if targetNode == nil {
+		// Fallback: if we can't find the exact node, return empty
+		return nil, nil
+	}
+
+	// Extract calls from the target node only
+	var calls []string
+	seenCalls := make(map[string]bool)
+	ast.Inspect(targetNode, func(n ast.Node) bool {
 		if call, ok := n.(*ast.CallExpr); ok {
 			callName := e.extractCallName(call)
-			if callName != "" {
+			if callName != "" && !seenCalls[callName] {
 				calls = append(calls, callName)
+				seenCalls[callName] = true
 			}
 		}
 		return true
@@ -356,7 +381,8 @@ func (e *GoExtractor) exprToString(expr ast.Expr) string {
 		if t.Len == nil {
 			return "[]" + e.exprToString(t.Elt)
 		}
-		return "[...]" + e.exprToString(t.Elt)
+		// Fixed-size array: include the length expression
+		return "[" + e.exprToString(t.Len) + "]" + e.exprToString(t.Elt)
 	case *ast.MapType:
 		return "map[" + e.exprToString(t.Key) + "]" + e.exprToString(t.Value)
 	case *ast.SelectorExpr:

@@ -161,7 +161,17 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		sym.Language = lang
 
 		// Extract calls for this symbol
-		calls, _ := extractor.ExtractCalls(ctx, sym, content)
+		var calls []string
+		if extractedCalls, extractErr := extractor.ExtractCalls(ctx, sym, content); extractErr != nil {
+			idx.logger.Warn().
+				Err(extractErr).
+				Str("symbol", sym.ID).
+				Str("path", file.Path).
+				Msg("failed to extract calls, proceeding without call graph")
+			// Continue with empty calls - symbol indexing should not fail due to call extraction
+		} else {
+			calls = extractedCalls
+		}
 
 		if err := idx.saveSymbol(ctx, event, sym, calls); err != nil {
 			return fmt.Errorf("save symbol %s: %w", sym.Name, err)
@@ -317,14 +327,59 @@ func (idx *Indexer) detectLanguage(file indexing.FileChange) string {
 	}
 }
 
-// readFileContent reads file content from the workspace.
+// maxReadFileSize is the maximum file size we'll read (10MB).
+const maxReadFileSize = 10 * 1024 * 1024
+
+// readFileContent reads file content from the workspace with path validation and size limits.
 func (idx *Indexer) readFileContent(path string) ([]byte, error) {
-	fullPath := filepath.Join(idx.workspaceRoot, path)
-	f, err := os.Open(fullPath)
+	// Clean the path to prevent traversal attacks
+	cleanPath := filepath.Clean(path)
+
+	// Reject absolute paths or paths that escape the workspace
+	if filepath.IsAbs(cleanPath) {
+		return nil, fmt.Errorf("absolute paths not allowed: %s", path)
+	}
+	if strings.HasPrefix(cleanPath, "..") {
+		return nil, fmt.Errorf("path traversal not allowed: %s", path)
+	}
+
+	// Join with workspace root and resolve
+	fullPath := filepath.Join(idx.workspaceRoot, cleanPath)
+
+	// Resolve to absolute path and verify it's within workspace
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+	absWorkspace, err := filepath.Abs(idx.workspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	// Ensure the resolved path is within the workspace
+	if !strings.HasPrefix(absPath, absWorkspace+string(filepath.Separator)) && absPath != absWorkspace {
+		return nil, fmt.Errorf("path escapes workspace: %s", path)
+	}
+
+	// Stat the file to check type and size
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file: %s", path)
+	}
+	if info.Size() > maxReadFileSize {
+		return nil, fmt.Errorf("file too large (%d bytes, max %d): %s", info.Size(), maxReadFileSize, path)
+	}
+
+	// Open and read with size limit
+	f, err := os.Open(absPath)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 
-	return io.ReadAll(f)
+	// Use LimitReader as additional safety even though we checked size
+	return io.ReadAll(io.LimitReader(f, maxReadFileSize))
 }

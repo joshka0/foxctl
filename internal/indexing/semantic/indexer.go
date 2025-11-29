@@ -175,6 +175,7 @@ func (idx *Indexer) indexSingleFile(ctx context.Context, event indexing.PostRevi
 }
 
 // indexChunkedFile creates multiple chunk embeddings for a large file.
+// It implements cleanup on failure to prevent partial index state.
 func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostReviewEvent, file indexing.FileChange, content []byte, configHash string) error {
 	chunks := idx.splitIntoChunks(content)
 	chunkCount := len(chunks)
@@ -185,7 +186,18 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 		Str("config_hash", configHash).
 		Msg("indexing chunked file")
 
-	// First, create the parent file_embedding entry
+	// Phase 1: Generate all embeddings first (fail fast before any persistence)
+	chunkEmbeddings := make([][]float32, chunkCount)
+	for i, chunk := range chunks {
+		embedding, err := idx.provider.Embed(ctx, string(chunk.Content))
+		if err != nil {
+			return fmt.Errorf("embed chunk %d: %w", i, err)
+		}
+		chunkEmbeddings[i] = embedding
+	}
+
+	// Phase 2: Prepare all entries
+	fileName := FileEmbeddingName(event.WorkspaceID, file.Path)
 	fileResult := FileEmbeddingResult{
 		Path:               file.Path,
 		Digest:             file.Digest,
@@ -206,7 +218,6 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 		return fmt.Errorf("marshal file result: %w", err)
 	}
 
-	fileName := FileEmbeddingName(event.WorkspaceID, file.Path)
 	fileEntry := storage.NamedEntry{
 		Name:      fileName,
 		Type:      FileEmbeddingType,
@@ -215,19 +226,17 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 		Result:    fileResultBytes,
 	}
 
+	// Phase 3: Save file entry first
 	if _, err := idx.memoryStore.Save(ctx, fileEntry); err != nil {
 		return fmt.Errorf("save file entry: %w", err)
 	}
 
-	// Then, create chunk entries
+	// Phase 4: Save chunk entries with cleanup on failure
+	savedChunks := 0
+	var saveErr error
+
 	for i, chunk := range chunks {
 		chunkID := fmt.Sprintf("%d", i)
-
-		// Generate embedding for chunk
-		embedding, err := idx.provider.Embed(ctx, string(chunk.Content))
-		if err != nil {
-			return fmt.Errorf("embed chunk %d: %w", i, err)
-		}
 
 		chunkResult := ChunkEmbeddingResult{
 			Path:     file.Path,
@@ -253,7 +262,8 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 
 		chunkResultBytes, err := MarshalResult(chunkResult)
 		if err != nil {
-			return fmt.Errorf("marshal chunk result: %w", err)
+			saveErr = fmt.Errorf("marshal chunk result %d: %w", i, err)
+			break
 		}
 
 		chunkName := ChunkEmbeddingName(event.WorkspaceID, file.Path, chunkID, configHash)
@@ -266,14 +276,36 @@ func (idx *Indexer) indexChunkedFile(ctx context.Context, event indexing.PostRev
 		}
 
 		if _, err := idx.memoryStore.Save(ctx, chunkEntry); err != nil {
-			return fmt.Errorf("save chunk entry %d: %w", i, err)
+			saveErr = fmt.Errorf("save chunk entry %d: %w", i, err)
+			break
 		}
+
+		savedChunks++
 
 		idx.logger.Debug().
 			Str("path", file.Path).
 			Int("chunk", i).
-			Int("embedding_dim", len(embedding)).
+			Int("embedding_dim", len(chunkEmbeddings[i])).
 			Msg("indexed chunk")
+	}
+
+	// Cleanup on failure: remove file entry and any saved chunks
+	if saveErr != nil {
+		idx.logger.Warn().
+			Err(saveErr).
+			Str("path", file.Path).
+			Int("saved_chunks", savedChunks).
+			Msg("chunk indexing failed, cleaning up partial state")
+
+		// Delete the file entry and any saved chunks
+		if cleanupErr := idx.deleteFileEmbedding(ctx, event.WorkspaceID, file.Path); cleanupErr != nil {
+			idx.logger.Warn().
+				Err(cleanupErr).
+				Str("path", file.Path).
+				Msg("failed to cleanup partial index state")
+		}
+
+		return saveErr
 	}
 
 	return nil
