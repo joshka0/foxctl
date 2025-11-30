@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
+	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/spf13/cobra"
 )
 
@@ -108,9 +110,13 @@ func newMemoryGetCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
 				ws := resolveWorkspace(cfg, workspaceFlag)
+				name := args[0]
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					entry, err := store.Get(ctx, args[0], ws)
+					entry, err := store.Get(ctx, name, ws)
 					if err != nil {
+						if errors.Is(err, memstore.ErrNotFound) {
+							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.get", name, ws)
+						}
 						return err
 					}
 					modified, err := cache.AnnotateMemory(entry.Result, envelope.MemoryRef{
@@ -254,10 +260,13 @@ func newMemoryUpdateCommand() *cobra.Command {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if summary == "" && typ == "" {
-				return fmt.Errorf("at least one of --summary or --type must be set")
+				return memorycmd.WriteArgError(cmd.OutOrStdout(), "agentctl.memory.update",
+					"at least one of --summary or --type must be set",
+					"Use --summary to update the summary or --type to change the memory type.")
 			}
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
 				ws := resolveWorkspace(cfg, workspaceFlag)
+				name := args[0]
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
 					var summaryPtr *string
 					var typePtr *string
@@ -267,8 +276,11 @@ func newMemoryUpdateCommand() *cobra.Command {
 					if typ != "" {
 						typePtr = &typ
 					}
-					entry, err := store.Update(ctx, args[0], ws, summaryPtr, typePtr)
+					entry, err := store.Update(ctx, name, ws, summaryPtr, typePtr)
 					if err != nil {
+						if errors.Is(err, memstore.ErrNotFound) {
+							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.update", name, ws)
+						}
 						return err
 					}
 					payload := struct {
@@ -304,16 +316,22 @@ func newMemoryDeleteCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return memorycmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
 				ws := resolveWorkspace(cfg, workspaceFlag)
+				name := args[0]
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					if err := store.Delete(ctx, args[0], ws); err != nil {
+					if err := store.Delete(ctx, name, ws); err != nil {
+						if errors.Is(err, memstore.ErrNotFound) {
+							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.delete", name, ws)
+						}
 						return err
 					}
 					payload := struct {
-						Name      string `json:"name"`
-						Workspace string `json:"workspace"`
+						Name         string `json:"name"`
+						Workspace    string `json:"workspace"`
+						DeletedCount int    `json:"deleted_count"`
 					}{
-						Name:      args[0],
-						Workspace: ws,
+						Name:         name,
+						Workspace:    ws,
+						DeletedCount: 1,
 					}
 					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.delete", payload)
 				})

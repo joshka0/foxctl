@@ -1,12 +1,20 @@
-Below is a cohesive **Core Profile v1 (JSON‑Envelope Edition)** rewritten to incorporate the **generic OpenAPI skill**, **extensibility for auth/pagination via plugins**, **spec‑as‑memory**, and **Golang‑first implementation guidance**. I’ve tightened language, resolved previous naming collisions, and added Go interfaces/stubs where code helps pin down behavior.
+Below is a cohesive **Core Profile v1 (JSON‑Envelope Edition)** rewritten to
+incorporate the **generic OpenAPI skill**, **extensibility for auth/pagination
+via plugins**, **spec‑as‑memory**, and **Golang‑first implementation guidance**.
+I’ve tightened language, resolved previous naming collisions, and added Go
+interfaces/stubs where code helps pin down behavior.
 
 ---
 
 # agentctl Core Profile v1 — JSON Envelope Edition (with OpenAPI Integration, Go-first)
 
-> **Purpose:** A practical, single‑agent runtime for structured LLM workflows with memory and artifact management, plus a first‑class path to invoke real-world REST APIs described by OpenAPI.
-> **Audience:** Developers building LLM‑powered tools who need deterministic I/O, token efficiency, and persistent context.
-> **Scope:** Minimal, production‑ready `agentctl` for daily use. The **Agent Profile** (separate spec) adds multi‑agent orchestration, mailbox/blackboard, quotas, and OCI skills.
+> **Purpose:** A practical, single‑agent runtime for structured LLM workflows
+> with memory and artifact management, plus a first‑class path to invoke
+> real-world REST APIs described by OpenAPI. **Audience:** Developers building
+> LLM‑powered tools who need deterministic I/O, token efficiency, and persistent
+> context. **Scope:** Minimal, production‑ready `agentctl` for daily use. The
+> **Agent Profile** (separate spec) adds multi‑agent orchestration,
+> mailbox/blackboard, quotas, and OCI skills.
 
 ---
 
@@ -14,32 +22,39 @@ Below is a cohesive **Core Profile v1 (JSON‑Envelope Edition)** rewritten to i
 
 ### 0.1 Naming note (TOON vs JSON)
 
-Earlier drafts called the envelope **“TOON”**. To avoid collision with the external **TOON serialization format** (a compact alternative to JSON), this spec uses **“JSON envelope”** for the canonical wire format. Future adapters MAY support encoding/decoding to real TOON for prompt efficiency, but JSON remains authoritative in Core v1.
+Earlier drafts called the envelope **“TOON”**. To avoid collision with the
+external **TOON serialization format** (a compact alternative to JSON), this
+spec uses **“JSON envelope”** for the canonical wire format. Future adapters MAY
+support encoding/decoding to real TOON for prompt efficiency, but JSON remains
+authoritative in Core v1.
 
 ### 0.2 What is agentctl Core?
 
 `agentctl` is a **single‑binary CLI** that provides:
 
-* **Structured I/O:** predictable **JSON envelopes** for every operation.
-* **Skills:** discoverable, typed tools with WASI/exec isolation.
-* **Jobs:** async execution with progress and durable state.
-* **Artifacts (CAS):** content‑addressable blobs for large outputs.
-* **Memory:** auto‑cache plus named, persistent memories.
+- **Structured I/O:** predictable **JSON envelopes** for every operation.
+- **Skills:** discoverable, typed tools with WASI/exec isolation.
+- **Jobs:** async execution with progress and durable state.
+- **Artifacts (CAS):** content‑addressable blobs for large outputs.
+- **Memory:** auto‑cache plus named, persistent memories.
 
 **Think:** `bash` for LLMs, but with structured output and memory.
 
 ### 0.3 Why Core (vs Agent)?
 
-Core targets **single‑agent** workflows: run skills with deterministic I/O, store large outputs as artifacts, and reuse context across conversations. You can **upgrade** to the Agent Profile later without breaking Core contracts.
+Core targets **single‑agent** workflows: run skills with deterministic I/O,
+store large outputs as artifacts, and reuse context across conversations. You
+can **upgrade** to the Agent Profile later without breaking Core contracts.
 
 ### 0.4 Design principles
 
-* **Token efficiency:** Large outputs go to CAS; envelopes return **summaries + digests**.
-* **Memory‑first:** Recent work auto‑cached; durable work explicitly named.
-* **Deterministic when possible:** Same inputs → same outputs.
-* **Zero‑config:** Works out‑of‑the‑box; advanced features opt‑in.
-* **Composable:** Unix‑style piping (stdin) and digest chaining.
-* **Extensible:** Pluggable auth & pagination for the OpenAPI skill.
+- **Token efficiency:** Large outputs go to CAS; envelopes return **summaries +
+  digests**.
+- **Memory‑first:** Recent work auto‑cached; durable work explicitly named.
+- **Deterministic when possible:** Same inputs → same outputs.
+- **Zero‑config:** Works out‑of‑the‑box; advanced features opt‑in.
+- **Composable:** Unix‑style piping (stdin) and digest chaining.
+- **Extensible:** Pluggable auth & pagination for the OpenAPI skill.
 
 ### 0.5 Normative keywords
 
@@ -53,26 +68,27 @@ Core targets **single‑agent** workflows: run skills with deterministic I/O, st
 
 Executable, typed capability with:
 
-* Name `category/verb[-noun]` (e.g., `test/pytest`, `repo/index`).
-* Input/Output schema.
-* Isolation: **WASI** (preferred) or **exec**.
-* Deterministic **JSON envelope** I/O.
+- Name `category/verb[-noun]` (e.g., `test/pytest`, `repo/index`).
+- Input/Output schema.
+- Isolation: **WASI** (preferred) or **exec**.
+- Deterministic **JSON envelope** I/O.
 
-**Name regex:** `^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*(?:-[a-z0-9-]+)?$` (lowercase; hyphens allowed).
+**Name regex:** `^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*(?:-[a-z0-9-]+)?$`
+(lowercase; hyphens allowed).
 
 ### 1.2 Job
 
 One skill execution: `queued → running → ok|error|canceled` (terminal).
-**Sync:** `agentctl run <skill>` blocks.
-**Async:** `agentctl jobs submit <skill>` returns `job_id`.
+**Sync:** `agentctl run <skill>` blocks. **Async:**
+`agentctl jobs submit <skill>` returns `job_id`.
 
 ### 1.3 Artifact (CAS)
 
 Large outputs stored by digest `sha256:<hex>`.
 
-* **Token‑efficient** (return digest not megabytes).
-* **Deduplicated & persistent**.
-* Fetch via `cas get`.
+- **Token‑efficient** (return digest not megabytes).
+- **Deduplicated & persistent**.
+- Fetch via `cas get`.
 
 ### 1.4 Memory
 
@@ -94,22 +110,22 @@ Stable JSON wrapper for all I/O (see §2).
 ```json
 {
   "version": 1,
-  "status": "ok",                       // "ok" | "error"
+  "status": "ok", // "ok" | "error"
   "command": "repo/index",
-  "data": { /* JSON-compatible */ },
+  "data": {/* JSON-compatible */},
   "meta": {
-    "ts": "2025-11-07T12:34:56Z",       // RFC3339 UTC (wall clock)
-    "duration_ms": 153,                 // integer >= 0 (monotonic-derived)
-    "source": "run",                    // "run" | "cache" | "memory"
-    "runner": "wasi",                   // "wasi" | "exec"
-    "seq": 0,                           // streaming only
-    "final": false,                     // streaming only
-    "cas_digest": null,                 // sha256:... when data.artifact present
-    "memory": null,                     // {name,type,workspace} when source=="memory"
-    "job_id": null,                     // RECOMMENDED (jobs)
-    "skill_version": null,              // RECOMMENDED
-    "workspace": null,                  // RECOMMENDED
-    "cache_key": null                   // RECOMMENDED on cache hits
+    "ts": "2025-11-07T12:34:56Z", // RFC3339 UTC (wall clock)
+    "duration_ms": 153, // integer >= 0 (monotonic-derived)
+    "source": "run", // "run" | "cache" | "memory"
+    "runner": "wasi", // "wasi" | "exec"
+    "seq": 0, // streaming only
+    "final": false, // streaming only
+    "cas_digest": null, // sha256:... when data.artifact present
+    "memory": null, // {name,type,workspace} when source=="memory"
+    "job_id": null, // RECOMMENDED (jobs)
+    "skill_version": null, // RECOMMENDED
+    "workspace": null, // RECOMMENDED
+    "cache_key": null // RECOMMENDED on cache hits
   },
   "error": { "code": null, "message": null }
 }
@@ -117,34 +133,43 @@ Stable JSON wrapper for all I/O (see §2).
 
 **Rules (normative):**
 
-* Envelopes **MUST** be valid UTF‑8 and well‑formed JSON; `version` **MUST** be `1`.
-* `status` **MUST** be `"ok"` or `"error"`.
-* `meta.ts` **MUST** be RFC3339 UTC; `meta.duration_ms` **MUST** be integer ≥ 0.
-* `error.code` + `error.message` **MUST** exist; for `status:"ok"` they **SHOULD** be `null`.
-* If `data.artifact` exists, `meta.cas_digest` **MUST** equal it.
-* No binary blobs inline; large outputs **MUST** use CAS (see §4).
-* Error envelopes **MAY** include partials and **SHOULD** set `meta.partial:true`.
+- Envelopes **MUST** be valid UTF‑8 and well‑formed JSON; `version` **MUST** be
+  `1`.
+- `status` **MUST** be `"ok"` or `"error"`.
+- `meta.ts` **MUST** be RFC3339 UTC; `meta.duration_ms` **MUST** be integer ≥ 0.
+- `error.code` + `error.message` **MUST** exist; for `status:"ok"` they
+  **SHOULD** be `null`.
+- If `data.artifact` exists, `meta.cas_digest` **MUST** equal it.
+- No binary blobs inline; large outputs **MUST** use CAS (see §4).
+- Error envelopes **MAY** include partials and **SHOULD** set
+  `meta.partial:true`.
 
 ### 2.2 Streaming (NDJSON)
 
-* Streams **MUST** be **NDJSON** (`\n` delimited; normalize `\r\n`).
-* Each streamed envelope **MUST** use `command:"progress"` and include `meta.seq` (int, starting 0).
-* If present, `data.percent` **MUST** be 0–100 and **MUST NOT** decrease.
-* Exactly one progress envelope **MUST** set `meta.final:true` (or an error envelope terminates the stream).
-* `jobs tail` streams progress only; retrieve the final result via `jobs result`.
+- Streams **MUST** be **NDJSON** (`\n` delimited; normalize `\r\n`).
+- Each streamed envelope **MUST** use `command:"progress"` and include
+  `meta.seq` (int, starting 0).
+- If present, `data.percent` **MUST** be 0–100 and **MUST NOT** decrease.
+- Exactly one progress envelope **MUST** set `meta.final:true` (or an error
+  envelope terminates the stream).
+- `jobs tail` streams progress only; retrieve the final result via
+  `jobs result`.
 
 ### 2.3 Limits & truncation
 
-Defaults: `inline_output_kb=32`, `max_capture_kb=1024`, `max_stream_line_kb=1024`.
-Runners **MUST** stream‑parse envelopes:
+Defaults: `inline_output_kb=32`, `max_capture_kb=1024`,
+`max_stream_line_kb=1024`. Runners **MUST** stream‑parse envelopes:
 
-* If serialized `data` exceeds `inline_output_kb`, **artifactize** per §4 (wrapper + digest) without exceeding `max_capture_kb`.
-* If raw stdout exceeds `max_capture_kb` before a valid envelope is parsed, emit `status:"error"`, `error.code:"EOUTPUT_TOO_LARGE"`.
-* Non‑UTF‑8 or malformed JSON → `status:"error"`, `error.code:"EPARSE"`.
+- If serialized `data` exceeds `inline_output_kb`, **artifactize** per §4
+  (wrapper + digest) without exceeding `max_capture_kb`.
+- If raw stdout exceeds `max_capture_kb` before a valid envelope is parsed, emit
+  `status:"error"`, `error.code:"EOUTPUT_TOO_LARGE"`.
+- Non‑UTF‑8 or malformed JSON → `status:"error"`, `error.code:"EPARSE"`.
 
 ### 2.4 Optional encodings (adapters)
 
-JSON is canonical. Adapters (e.g., real TOON) MAY be provided for prompt efficiency **without changing** the JSON envelope contract.
+JSON is canonical. Adapters (e.g., real TOON) MAY be provided for prompt
+efficiency **without changing** the JSON envelope contract.
 
 ---
 
@@ -152,7 +177,10 @@ JSON is canonical. Adapters (e.g., real TOON) MAY be provided for prompt efficie
 
 ### 3.1 Overview
 
-A single **generic** skill, `http/openapi`, enables calling *any* OpenAPI 3.x operation using a spec loaded from file, CAS, or memory. This covers ~90% of real REST use cases with **zero codegen** and bakes in pagination, retries, auth mapping, and CAS handling.
+A single **generic** skill, `http/openapi`, enables calling _any_ OpenAPI 3.x
+operation using a spec loaded from file, CAS, or memory. This covers ~90% of
+real REST use cases with **zero codegen** and bakes in pagination, retries, auth
+mapping, and CAS handling.
 
 ### 3.2 Skill signature
 
@@ -170,27 +198,64 @@ io:
 signature:
   command: http/openapi
   parameters:
-    - { name: spec, type: string, required: true,  description: "path|sha256:<hex>|memory:<name>" }
+    - {
+        name: spec,
+        type: string,
+        required: true,
+        description: "path|sha256:<hex>|memory:<name>",
+      }
     - { name: operationId, type: string, required: true }
-    - { name: params, type: object, required: false, description: "path/query/header/body map" }
-    - { name: paging, type: object, required: false, description: "strategy & limits" }
-    - { name: retry, type: object, required: false, description: "backoff for 429/5xx" }
-    - { name: auth,  type: object, required: false, description: "override or choose auth scheme" }
-    - { name: dry_run, type: boolean, required: false, description: "print request plan only" }
+    - {
+        name: params,
+        type: object,
+        required: false,
+        description: "path/query/header/body map",
+      }
+    - {
+        name: paging,
+        type: object,
+        required: false,
+        description: "strategy & limits",
+      }
+    - {
+        name: retry,
+        type: object,
+        required: false,
+        description: "backoff for 429/5xx",
+      }
+    - {
+        name: auth,
+        type: object,
+        required: false,
+        description: "override or choose auth scheme",
+      }
+    - {
+        name: dry_run,
+        type: boolean,
+        required: false,
+        description: "print request plan only",
+      }
   returns:
-    - { name: result_digest, type: string, description: "artifact digest when large" }
+    - {
+        name: result_digest,
+        type: string,
+        description: "artifact digest when large",
+      }
 capabilities:
   network: "egress"
 ```
 
 ### 3.3 Spec‑as‑memory
 
-* `agentctl openapi import <file|url> --as=<name>` **MUST** store the original spec as a CAS artifact and create a **named memory** entry (`type: openapi_spec`) pointing to it.
-* Invocations may reference `--spec=memory:<name>`.
+- `agentctl openapi import <file|url> --as=<name>` **MUST** store the original
+  spec as a CAS artifact and create a **named memory** entry
+  (`type: openapi_spec`) pointing to it.
+- Invocations may reference `--spec=memory:<name>`.
 
 ### 3.4 Auth mapping (built‑in)
 
-Built‑ins cover common schemes; each may read secrets from `/run/secrets/…` or `AGENTCTL_*` env overrides.
+Built‑ins cover common schemes; each may read secrets from `/run/secrets/…` or
+`AGENTCTL_*` env overrides.
 
 | Scheme                    | Mapping                                                            |
 | ------------------------- | ------------------------------------------------------------------ |
@@ -199,21 +264,24 @@ Built‑ins cover common schemes; each may read secrets from `/run/secrets/…` 
 | HTTP Basic                | `Authorization: Basic base64(user:pass)` via `$OAS_BASIC_AUTH`     |
 | OAuth2 Client Credentials | Exchange via helper `auth/token` (client_id/secret) → bearer token |
 
-**Extensibility:** Additional schemes (e.g., HMAC, AWS SigV4, mTLS) **MUST** be provided via plugins (§3.7).
+**Extensibility:** Additional schemes (e.g., HMAC, AWS SigV4, mTLS) **MUST** be
+provided via plugins (§3.7).
 
 **Secret selection:**
 
-* If multiple APIs are used concurrently, the caller **MAY** pass `--auth.secret_name=<name>` to pick a secret bundle; otherwise the skill uses the default secret names above.
-* Secrets **MUST NOT** appear in logs/envelopes; redact as `"***"`.
+- If multiple APIs are used concurrently, the caller **MAY** pass
+  `--auth.secret_name=<name>` to pick a secret bundle; otherwise the skill uses
+  the default secret names above.
+- Secrets **MUST NOT** appear in logs/envelopes; redact as `"***"`.
 
 ### 3.5 Pagination strategies (built‑in)
 
 The skill auto‑detects common patterns and **MAY** be overridden:
 
-* **Link headers** (`rel="next"`) — GitHub style.
-* **Cursor** fields (e.g., `next`, `next_page_token`) — Stripe/Google style.
-* **Offset/limit** — classic pagination.
-* **Total‑count heuristics** — stop when len(items) < requested page size.
+- **Link headers** (`rel="next"`) — GitHub style.
+- **Cursor** fields (e.g., `next`, `next_page_token`) — Stripe/Google style.
+- **Offset/limit** — classic pagination.
+- **Total‑count heuristics** — stop when len(items) < requested page size.
 
 Caller overrides:
 
@@ -226,20 +294,29 @@ Caller overrides:
 
 ### 3.6 Retry & rate limiting
 
-* Default exponential backoff (jitter) on `429, 502, 503, 504` with `Retry-After` respected.
-* Configurable via `--retry.base_ms --retry.factor --retry.max_attempts --retry.max_ms`.
+- Default exponential backoff (jitter) on `429, 502, 503, 504` with
+  `Retry-After` respected.
+- Configurable via
+  `--retry.base_ms --retry.factor --retry.max_attempts --retry.max_ms`.
 
 ### 3.7 Plugins (auth & pagination)
 
-To support “snowflake” APIs, `http/openapi` loads **out‑of‑process plugins** (exec or WASI) that communicate via **JSON envelopes** on stdin/stdout. Plugins are referenced by **name** or **path** and are discoverable via `AGENTCTL_PLUGIN_PATH`.
+To support “snowflake” APIs, `http/openapi` loads **out‑of‑process plugins**
+(exec or WASI) that communicate via **JSON envelopes** on stdin/stdout. Plugins
+are referenced by **name** or **path** and are discoverable via
+`AGENTCTL_PLUGIN_PATH`.
 
 **Plugin protocol (envelope):**
 
-* **Auth plugin** command: `plugin/auth`. Input `data` includes the request (method, url, headers, body) and spec context; output **MUST** return adjusted headers and (optional) signed body.
-* **Pagination plugin** command: `plugin/pagination`. Input includes the last response and requested max items; output indicates the next request or termination.
+- **Auth plugin** command: `plugin/auth`. Input `data` includes the request
+  (method, url, headers, body) and spec context; output **MUST** return adjusted
+  headers and (optional) signed body.
+- **Pagination plugin** command: `plugin/pagination`. Input includes the last
+  response and requested max items; output indicates the next request or
+  termination.
 
-**Vendor extensions (hints):**
-Specs MAY include `x-agentctl` hints; the skill **MUST** prefer explicit hints over heuristics.
+**Vendor extensions (hints):** Specs MAY include `x-agentctl` hints; the skill
+**MUST** prefer explicit hints over heuristics.
 
 ```yaml
 x-agentctl:
@@ -254,24 +331,31 @@ x-agentctl:
 
 ### 3.8 Dry run
 
-`--dry_run=true` **MUST** emit an `ok` envelope with `data.summary.request_plan` (method, URL with query, redacted headers) and **MUST NOT** perform the network call.
+`--dry_run=true` **MUST** emit an `ok` envelope with `data.summary.request_plan`
+(method, URL with query, redacted headers) and **MUST NOT** perform the network
+call.
 
 ### 3.9 Response wrapping & summaries
 
-* For successful calls:
+- For successful calls:
 
-  * **Always include** `status_code` and response **headers** summary (`ratelimit`, `etag`, `link`, pagination hints).
-  * If body is large, CAS wrapper per §4; summary **SHOULD** include `record_count|first_keys|sample_record`.
-* For **4xx** with validation errors: **MUST NOT** artifactize the error details by default; include the structured error object inline (bounded to `inline_output_kb`).
-* For **5xx** after retries: return error envelope with `error.code:"ERUNTIME"` and include service `request-id` header when available.
+  - **Always include** `status_code` and response **headers** summary
+    (`ratelimit`, `etag`, `link`, pagination hints).
+  - If body is large, CAS wrapper per §4; summary **SHOULD** include
+    `record_count|first_keys|sample_record`.
+- For **4xx** with validation errors: **MUST NOT** artifactize the error details
+  by default; include the structured error object inline (bounded to
+  `inline_output_kb`).
+- For **5xx** after retries: return error envelope with `error.code:"ERUNTIME"`
+  and include service `request-id` header when available.
 
 ### 3.10 Error normalization (additions)
 
-* `EAUTH` — missing/invalid auth.
-* `EPAGINATION` — pagination detection failed or inconsistent.
-* `EOPENAPI` — spec parse/validation failure.
-* `ERATELIMIT` — exceeded rate limit (after retries).
-  All errors **SHOULD** include actionable `data.hint`.
+- `EAUTH` — missing/invalid auth.
+- `EPAGINATION` — pagination detection failed or inconsistent.
+- `EOPENAPI` — spec parse/validation failure.
+- `ERATELIMIT` — exceeded rate limit (after retries). All errors **SHOULD**
+  include actionable `data.hint`.
 
 ---
 
@@ -284,7 +368,8 @@ x-agentctl:
 3. Set `meta.cas_digest` to that digest.
 4. Optionally set `data.kind` and `data.size_bytes`.
 
-**HTTP responses:** summary **SHOULD** add `status_code`, selected headers (`ETag`, rate‑limit), and pagination markers.
+**HTTP responses:** summary **SHOULD** add `status_code`, selected headers
+(`ETag`, rate‑limit), and pagination markers.
 
 ---
 
@@ -333,7 +418,8 @@ agentctl version
 ```
 
 **Envelopes everywhere:** All commands **MUST** emit JSON envelopes on stdout.
-`jobs result --emit=digest` returns an `ok` envelope with `data:{artifact:"sha256:…"}` (or `{note:"no artifact"}`).
+`jobs result --emit=digest` returns an `ok` envelope with
+`data:{artifact:"sha256:…"}` (or `{note:"no artifact"}`).
 
 ---
 
@@ -352,17 +438,21 @@ capabilities:
 ### 6.2 Parameter typing (recommended set)
 
 `string | integer | number | boolean | enum | array | object | file | dir`.
-`file|dir` parameters use **content digests** for caching (dirs recursive; ignore `.git`, `node_modules` by default; configurable).
+`file|dir` parameters use **content digests** for caching (dirs recursive;
+ignore `.git`, `node_modules` by default; configurable).
 
 ---
 
 ## 7. Jobs & Execution
 
-* States: `queued`, `running`, `ok`, `error`, `canceled` (terminal).
-* `jobs submit --dedupe` returns the existing running job if `(skill, args_hash, inputs_hash, workspace)` matches.
-* `cancel` target latency SHOULD be < 2s; terminal state `canceled` with `error.code:"ECANCELED"`.
+- States: `queued`, `running`, `ok`, `error`, `canceled` (terminal).
+- `jobs submit --dedupe` returns the existing running job if
+  `(skill, args_hash, inputs_hash, workspace)` matches.
+- `cancel` target latency SHOULD be < 2s; terminal state `canceled` with
+  `error.code:"ECANCELED"`.
 
-SQLite tables and filesystem layout as in the previous Core spec; add indexes on `(workspace, created_at)` and `(args_hash, inputs_hash)`.
+SQLite tables and filesystem layout as in the previous Core spec; add indexes on
+`(workspace, created_at)` and `(args_hash, inputs_hash)`.
 
 ---
 
@@ -379,14 +469,56 @@ cache_key = sha256(
 )
 ```
 
-* RFC 8785 JSON canonicalization.
-* For OpenAPI calls, **ETag/Last‑Modified** (when present) **MAY** be folded into the key or used for conditional requests; cache hits **MUST** include `meta.cache_key`.
+- RFC 8785 JSON canonicalization.
+- For OpenAPI calls, **ETag/Last‑Modified** (when present) **MAY** be folded
+  into the key or used for conditional requests; cache hits **MUST** include
+  `meta.cache_key`.
 
 ### 8.2 Modes
 
-`auto` (read‑through), `off`, `only` (fail on miss).
+| Mode   | Behavior                                                                                       |
+| ------ | ---------------------------------------------------------------------------------------------- |
+| `auto` | Read-through + write-through (default). Cache errors are **non-fatal**: log and treat as miss. |
+| `off`  | Skip cache entirely (no read, no write).                                                       |
+| `only` | Read-only; emit error envelope with `ECACHE_MISS` on miss.                                     |
 
-### 8.3 Pure skills (opt‑in)
+**Mode semantics:**
+
+- **`auto`:** On cache hit, return result with `meta.source:"cache"` and
+  `meta.cache_key`. On miss, execute skill and persist result. On cache store
+  errors (e.g., storage unavailable), log warning to stderr and proceed as if
+  cache miss.
+- **`off`:** Never open or query the cache store. Useful for debugging or
+  forcing fresh execution.
+- **`only`:** Query cache; on hit return as `auto`. On miss, emit an error
+  envelope:
+  ```json
+  {
+    "version": 1,
+    "status": "error",
+    "command": "<skill_name>",
+    "error": {
+      "code": "ECACHE_MISS",
+      "message": "cache miss for key <cache_key>"
+    },
+    "data": {
+      "cache_key": "<cache_key>",
+      "hint": "No cached result exists. Run with --cache=auto to execute the skill and populate the cache."
+    }
+  }
+  ```
+
+### 8.3 Cache hit annotation
+
+On a cache hit, the returned envelope **MUST** include:
+
+- `meta.source = "cache"` — indicates result came from cache
+- `meta.cache_key = "<cache_key>"` — the computed cache key
+
+All other fields (data, error, etc.) are preserved from the original cached
+result.
+
+### 8.4 Pure skills (opt‑in)
 
 `pure:true` indicates determinism; caches MAY be portable across workspaces.
 
@@ -396,11 +528,13 @@ cache_key = sha256(
 
 ### 9.1 Stdin chaining
 
-`--input=stdin` accepts a single envelope; treat `data` as input. Consumers MUST ignore upstream `command` unless validated.
+`--input=stdin` accepts a single envelope; treat `data` as input. Consumers MUST
+ignore upstream `command` unless validated.
 
 ### 9.2 Digest chaining
 
-`--input=sha256:<hex>` → the runner fetches from CAS and supplies content (stdin or temp file). Binary chaining MUST use CAS.
+`--input=sha256:<hex>` → the runner fetches from CAS and supplies content (stdin
+or temp file). Binary chaining MUST use CAS.
 
 ---
 
@@ -408,8 +542,8 @@ cache_key = sha256(
 
 ### 10.1 Isolation
 
-* **WASI:** sandboxed; **no network** in Core v1.
-* **Exec:** process isolation; resource limits; ephemeral `/work`.
+- **WASI:** sandboxed; **no network** in Core v1.
+- **Exec:** process isolation; resource limits; ephemeral `/work`.
 
 ### 10.2 Egress control
 
@@ -423,19 +557,22 @@ capabilities:
     - "localhost:5432"
 ```
 
-* DNS resolved at execution; resolved IPs SHOULD be logged and cached for the job (respect TTL).
-* Wildcards match domain suffixes; CIDRs and literal IPs supported; `:*` any port.
-* If `network:"egress"` with no `egressAllow`, **all** outbound egress is allowed (subject to policy).
-* Loopback and UNIX sockets are **denied** unless explicitly allowed.
+- DNS resolved at execution; resolved IPs SHOULD be logged and cached for the
+  job (respect TTL).
+- Wildcards match domain suffixes; CIDRs and literal IPs supported; `:*` any
+  port.
+- If `network:"egress"` with no `egressAllow`, **all** outbound egress is
+  allowed (subject to policy).
+- Loopback and UNIX sockets are **denied** unless explicitly allowed.
 
 ### 10.3 Secrets
 
-* Mounted read‑only under `/run/secrets/<name>`; not inherited unless allowed.
-* Values MUST NOT appear in logs/envelopes/artifacts.
+- Mounted read‑only under `/run/secrets/<name>`; not inherited unless allowed.
+- Values MUST NOT appear in logs/envelopes/artifacts.
 
 ### 10.4 Verification
 
-* MUST verify checksums at install; SHOULD verify signatures per policy.
+- MUST verify checksums at install; SHOULD verify signatures per policy.
 
 ---
 
@@ -447,46 +584,131 @@ capabilities:
 
 ### 11.2 Metadata schema (add tags)
 
-`tags TEXT NOT NULL DEFAULT '[]'` (JSON array). Pinned artifacts excluded from GC. Integrity MUST be verified on `cas get`.
+`tags TEXT NOT NULL DEFAULT '[]'` (JSON array). Pinned artifacts excluded from
+GC. Integrity MUST be verified on `cas get`.
 
 ---
 
 ## 12. Memory
 
-### 12.1 Auto‑cache
+Memory provides persistent storage for skill results and contextual data, scoped
+by workspace.
 
-`memory recent` queries within TTL (24h default).
+### 12.1 Named Memory Entry
 
-### 12.2 Named memory
+| Field           | Type        | Description                                     |
+| --------------- | ----------- | ----------------------------------------------- |
+| `id`            | `string`    | UUID primary key                                |
+| `name`          | `string`    | User key; unique per workspace                  |
+| `type`          | `string`    | E.g. `result`, `plan`, `spec`; default `result` |
+| `workspace`     | `string`    | Normalized workspace path                       |
+| `summary`       | `string`    | Short human-oriented summary                    |
+| `result`        | `bytes`     | Full JSON envelope                              |
+| `digests`       | `[]string`  | CAS digests referenced by result                |
+| `created_at`    | `timestamp` | Immutable                                       |
+| `updated_at`    | `timestamp` | Updated on write                                |
+| `last_accessed` | `timestamp` | Updated on read                                 |
+| `access_count`  | `int`       | Incremented on read                             |
 
-`memory save <job_id> --as=<name>` persists; uniqueness is `(name, workspace)`.
+**Invariants:**
 
-### 12.3 Workspace detection & ranking
+- `(name, workspace)` MUST be unique.
+- Named memories have **no TTL**; persistent until deleted.
+- Digests MUST be pinned on save, unpinned on delete.
 
-Auto‑detect workspace from `.agentctl/`, `.git/`, or project files; or override with `--workspace`.
-Ranking score = `0.6 * recency + 0.4 * log1p(access_count)`.
+### 12.2 Creation
+
+**Via `agentctl run --remember`:**
+
+```bash
+agentctl run skill/name --input '{}' \
+  --remember my-result \
+  --remember-type result \
+  --remember-summary "Brief description"
+```
+
+- Saves final result envelope regardless of status.
+- If `--remember-summary` omitted, auto-generates from envelope.
+- Memory failures are best-effort; run still succeeds.
+
+**Via CLI:**
+
+```bash
+# From job result
+agentctl memory save <job_id> --as=<name>
+
+# From envelope
+agentctl memory put --name=<name> --data='{"version":1,...}'
+```
+
+### 12.3 Retrieval
+
+```bash
+# Get specific memory (writes original envelope to stdout)
+agentctl memory get <name> --workspace=/path
+
+# List all memories in workspace
+agentctl memory list --workspace=/path --limit=20
+
+# Search by name/summary
+agentctl memory search --query="term" --workspace=/path
+```
+
+**On not found:** Emit `ENOTFOUND` error envelope with hint.
+
+### 12.4 Workspace Detection & Ranking
+
+**Detection priority:**
+
+1. `--workspace` flag if provided
+2. Auto-detect from `.agentctl/`, `.git/`, or project files
+3. Current working directory
+
+**Relevance ranking:**
+
+```
+score = 0.6 * recency + 0.4 * log1p(access_count)
+```
+
+```bash
+agentctl memory relevant --workspace=/path --limit=10
+```
+
+### 12.5 Mutation
+
+```bash
+# Update metadata
+agentctl memory update <name> --summary="New summary" --type=plan
+
+# Delete
+agentctl memory delete <name> --workspace=/path
+```
+
+**On not found:** Emit `ENOTFOUND` error envelope.
 
 ---
 
 ## 13. Error Codes (expanded)
 
-| Code                | Meaning                               |
-| ------------------- | ------------------------------------- |
-| `EARG`              | Invalid arguments                     |
-| `ENOTFOUND`         | Resource not found                    |
-| `ETIMEOUT`          | Operation exceeded timeout            |
-| `ERUNTIME`          | Skill process error/crash             |
-| `ERUNTIME_RESTART`  | Runner recovered after restart        |
-| `EENVELOPE`         | Invalid/malformed envelope            |
-| `EPARSE`            | JSON parse error / invalid UTF‑8      |
-| `EOUTPUT_TOO_LARGE` | Stdout exceeded capture limit         |
-| `EPOLICY`           | Capability/policy violation           |
-| `EIO`               | Filesystem or I/O error               |
-| **`EAUTH`**         | Authentication failed/missing         |
-| **`EPAGINATION`**   | Pagination detection/logic failure    |
-| **`EOPENAPI`**      | OpenAPI spec parse/validation failure |
-| **`ERATELIMIT`**    | Rate limit exceeded after retries     |
-| `ECANCELED`         | Job canceled by user                  |
+| Code                     | Meaning                               |
+| ------------------------ | ------------------------------------- |
+| `EARG`                   | Invalid arguments                     |
+| `ENOTFOUND`              | Resource not found                    |
+| `ETIMEOUT`               | Operation exceeded timeout            |
+| `ERUNTIME`               | Skill process error/crash             |
+| `ERUNTIME_RESTART`       | Runner recovered after restart        |
+| `EENVELOPE`              | Invalid/malformed envelope            |
+| `EPARSE`                 | JSON parse error / invalid UTF‑8      |
+| `EOUTPUT_TOO_LARGE`      | Stdout exceeded capture limit         |
+| `EPOLICY`                | Capability/policy violation           |
+| `EIO`                    | Filesystem or I/O error               |
+| **`EAUTH`**              | Authentication failed/missing         |
+| **`EPAGINATION`**        | Pagination detection/logic failure    |
+| **`EOPENAPI`**           | OpenAPI spec parse/validation failure |
+| **`ERATELIMIT`**         | Rate limit exceeded after retries     |
+| `ECANCELED`              | Job canceled by user                  |
+| **`ECACHE_MISS`**        | Cache-only mode and no cached result  |
+| **`ECACHE_UNAVAILABLE`** | Cache storage unavailable             |
 
 ---
 
@@ -538,8 +760,9 @@ adapters:
   toon_enabled: false
 ```
 
-**Env overrides (examples):**
-`AGENTCTL_BASE_PATH`, `AGENTCTL_INLINE_OUTPUT_KB`, `AGENTCTL_MAX_CAPTURE_KB`, `AGENTCTL_CACHE_MODE`, `AGENTCTL_OPENAPI_PLUGIN_PATH`, `AGENTCTL_OPENAPI_STRICT_VALIDATE`.
+**Env overrides (examples):** `AGENTCTL_BASE_PATH`, `AGENTCTL_INLINE_OUTPUT_KB`,
+`AGENTCTL_MAX_CAPTURE_KB`, `AGENTCTL_CACHE_MODE`,
+`AGENTCTL_OPENAPI_PLUGIN_PATH`, `AGENTCTL_OPENAPI_STRICT_VALIDATE`.
 
 ---
 
@@ -701,7 +924,9 @@ func (s *Skill) Execute(ctx context.Context, in Input) (*envelope.Envelope, erro
 }
 ```
 
-*(All code above is illustrative and keeps to standard Go `net/http`, `context`, and JSON. Runners SHOULD use `context.Context` for timeouts/cancellation and a pooled `http.Client` with sane transport defaults.)*
+_(All code above is illustrative and keeps to standard Go `net/http`, `context`,
+and JSON. Runners SHOULD use `context.Context` for timeouts/cancellation and a
+pooled `http.Client` with sane transport defaults.)_
 
 ---
 
@@ -733,9 +958,21 @@ agentctl run http/openapi \
   "version": 1,
   "status": "error",
   "command": "http/openapi",
-  "data": { "issue": "pagination_detection_failed", "hint": "Try --paging.strategy=cursor --paging.cursor_field=next" },
-  "meta": { "ts":"...", "duration_ms": 420, "source":"run", "runner":"exec", "partial": true },
-  "error": { "code": "EPAGINATION", "message": "Could not auto-detect pagination strategy" }
+  "data": {
+    "issue": "pagination_detection_failed",
+    "hint": "Try --paging.strategy=cursor --paging.cursor_field=next"
+  },
+  "meta": {
+    "ts": "...",
+    "duration_ms": 420,
+    "source": "run",
+    "runner": "exec",
+    "partial": true
+  },
+  "error": {
+    "code": "EPAGINATION",
+    "message": "Could not auto-detect pagination strategy"
+  }
 }
 ```
 
@@ -749,17 +986,23 @@ agentctl run http/openapi \
   "data": {
     "summary": {
       "status_code": 200,
-      "headers": { "etag":"W/\"abc...\"", "ratelimit-remaining": "4374" },
+      "headers": { "etag": "W/\"abc...\"", "ratelimit-remaining": "4374" },
       "kind": "application/json",
       "size_bytes": 1048576,
       "record_count": 247,
-      "preview": { "first_keys": ["id","name","created_at","private"] }
+      "preview": { "first_keys": ["id", "name", "created_at", "private"] }
     },
     "artifact": "sha256:abc123...",
     "kind": "application/json",
     "size_bytes": 1048576
   },
-  "meta": { "ts":"...", "duration_ms": 1210, "source":"run", "runner":"exec", "cas_digest":"sha256:abc123..." },
+  "meta": {
+    "ts": "...",
+    "duration_ms": 1210,
+    "source": "run",
+    "runner": "exec",
+    "cas_digest": "sha256:abc123..."
+  },
   "error": { "code": null, "message": null }
 }
 ```
@@ -768,25 +1011,31 @@ agentctl run http/openapi \
 
 ## 17. Versioning & Compatibility
 
-* **Spec:** `v1`.
-* **Envelope:** `version: 1`.
-* **Skill API:** `agentctl/v1`.
-  Backward‑compatible changes MAY add optional fields. Breaking changes MUST bump versions. The `http/openapi` skill **MUST** include `min_spec_version` and `max_spec_version` compatibility metadata.
+- **Spec:** `v1`.
+- **Envelope:** `version: 1`.
+- **Skill API:** `agentctl/v1`. Backward‑compatible changes MAY add optional
+  fields. Breaking changes MUST bump versions. The `http/openapi` skill **MUST**
+  include `min_spec_version` and `max_spec_version` compatibility metadata.
 
 ---
 
 ## 18. Testing Guidance (non‑normative)
 
-* **Tier 0:** unit tests with minimal specs (bearer, apiKey, basic; link/cursor/offset).
-* **Tier 1:** real APIs (GitHub, Stripe, OpenWeatherMap).
-* **Tier 2:** tricky specs (multiple auth schemes, non‑standard pagination, huge bodies).
-* **CLI:** `agentctl openapi test` generates smoke tests for each operation (HEAD/GET if safe).
+- **Tier 0:** unit tests with minimal specs (bearer, apiKey, basic;
+  link/cursor/offset).
+- **Tier 1:** real APIs (GitHub, Stripe, OpenWeatherMap).
+- **Tier 2:** tricky specs (multiple auth schemes, non‑standard pagination, huge
+  bodies).
+- **CLI:** `agentctl openapi test` generates smoke tests for each operation
+  (HEAD/GET if safe).
 
 ---
 
 ### Appendix A — Optional Tier‑2 Codegen (DX)
 
-If desired, `agentctl openapi generate` MAY emit a “skillpack” with **one skill per operationId** (or grouped by tag) whose wrappers simply call `http/openapi`. This improves human CLI discovery while keeping logic centralized.
+If desired, `agentctl openapi generate` MAY emit a “skillpack” with **one skill
+per operationId** (or grouped by tag) whose wrappers simply call `http/openapi`.
+This improves human CLI discovery while keeping logic centralized.
 
 ### Appendix B — Digest ABNF
 
@@ -796,7 +1045,10 @@ If desired, `agentctl openapi generate` MAY emit a “skillpack” with **one sk
 
 **Bottom line:**
 
-* JSON envelopes remain the **canonical wire contract**.
-* A **generic OpenAPI skill** brings immediate, broad API coverage with **built‑in pagination, retry, auth mapping, CAS, and dry‑run**.
-* **Plugins** (subprocesses speaking envelopes) make auth/pagination strategies **extensible** without bloating core.
-* All examples and interfaces are **Go‑centric**, aligning with your implementation preference.
+- JSON envelopes remain the **canonical wire contract**.
+- A **generic OpenAPI skill** brings immediate, broad API coverage with
+  **built‑in pagination, retry, auth mapping, CAS, and dry‑run**.
+- **Plugins** (subprocesses speaking envelopes) make auth/pagination strategies
+  **extensible** without bloating core.
+- All examples and interfaces are **Go‑centric**, aligning with your
+  implementation preference.

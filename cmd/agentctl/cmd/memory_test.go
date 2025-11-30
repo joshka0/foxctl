@@ -221,6 +221,192 @@ func TestMemoryStatsCommand(t *testing.T) {
 	}
 }
 
+func TestMemoryGetNotFound(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	ctx := context.Background()
+
+	cmd := newMemoryGetCommand()
+	cmd.SetContext(config.WithContext(ctx, cfg))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--workspace", cfg.Home, "nonexistent"})
+
+	// Should not return an error - error envelope is written to stdout
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("expected status=error, got %s", env.Status)
+	}
+	if env.Error.Code != "ENOTFOUND" {
+		t.Fatalf("expected error.code=ENOTFOUND, got %s", env.Error.Code)
+	}
+	if env.Command != "agentctl.memory.get" {
+		t.Fatalf("expected command=agentctl.memory.get, got %s", env.Command)
+	}
+	// Verify data contains hint
+	if data, ok := env.Data.(map[string]any); ok {
+		if hint, ok := data["hint"].(string); !ok || hint == "" {
+			t.Fatalf("expected non-empty hint in data")
+		}
+		if name, ok := data["name"].(string); !ok || name != "nonexistent" {
+			t.Fatalf("expected name=nonexistent in data, got %v", name)
+		}
+	} else {
+		t.Fatalf("expected data to be a map")
+	}
+}
+
+func TestMemoryDeleteNotFound(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	ctx := context.Background()
+
+	cmd := newMemoryDeleteCommand()
+	cmd.SetContext(config.WithContext(ctx, cfg))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--workspace", cfg.Home, "nonexistent"})
+
+	// Should not return an error - error envelope is written to stdout
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("expected status=error, got %s", env.Status)
+	}
+	if env.Error.Code != "ENOTFOUND" {
+		t.Fatalf("expected error.code=ENOTFOUND, got %s", env.Error.Code)
+	}
+}
+
+func TestMemoryUpdateNotFound(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	ctx := context.Background()
+
+	cmd := newMemoryUpdateCommand()
+	cmd.SetContext(config.WithContext(ctx, cfg))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--workspace", cfg.Home, "--summary", "new summary", "nonexistent"})
+
+	// Should not return an error - error envelope is written to stdout
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("expected status=error, got %s", env.Status)
+	}
+	if env.Error.Code != "ENOTFOUND" {
+		t.Fatalf("expected error.code=ENOTFOUND, got %s", env.Error.Code)
+	}
+}
+
+func TestMemoryUpdateMissingArgs(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	ctx := context.Background()
+
+	cmd := newMemoryUpdateCommand()
+	cmd.SetContext(config.WithContext(ctx, cfg))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--workspace", cfg.Home, "somename"}) // No --summary or --type
+
+	// Should not return an error - error envelope is written to stdout
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("expected status=error, got %s", env.Status)
+	}
+	if env.Error.Code != "EARG" {
+		t.Fatalf("expected error.code=EARG, got %s", env.Error.Code)
+	}
+}
+
+func TestMemoryDeleteSuccess(t *testing.T) {
+	cfg := setupMemoryTestEnv(t)
+	ctx := context.Background()
+
+	// Create a memory entry first
+	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	result := []byte(`{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"2025-01-01T00:00:00Z"},"error":{}}`)
+	if _, err := store.SaveFromResult(ctx, "to-delete", "result", cfg.Home, "test", result); err != nil {
+		t.Fatalf("save memory: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	// Delete it
+	cmd := newMemoryDeleteCommand()
+	cmd.SetContext(config.WithContext(ctx, cfg))
+	stdout := &bytes.Buffer{}
+	cmd.SetOut(stdout)
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--workspace", cfg.Home, "to-delete"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
+
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "ok" {
+		t.Fatalf("expected status=ok, got %s", env.Status)
+	}
+	if env.Command != "agentctl.memory.delete" {
+		t.Fatalf("expected command=agentctl.memory.delete, got %s", env.Command)
+	}
+
+	// Verify deleted_count in response
+	if data, ok := env.Data.(map[string]any); ok {
+		if count, ok := data["deleted_count"].(float64); !ok || count != 1 {
+			t.Fatalf("expected deleted_count=1, got %v", count)
+		}
+	}
+
+	// Verify it's actually gone
+	store, err = memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	if err != nil {
+		t.Fatalf("reopen memory store: %v", err)
+	}
+	defer requireClose(t, store, "memory store delete verify")
+
+	_, err = store.Get(ctx, "to-delete", cfg.Home)
+	if err == nil {
+		t.Fatal("expected entry to be deleted")
+	}
+}
+
 func setupMemoryTestEnv(t *testing.T) config.Config {
 	t.Helper()
 	tmp := t.TempDir()
