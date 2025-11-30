@@ -1,0 +1,18 @@
+{
+	"version": 1,
+	"status": "error",
+	"command": "todo/manage",
+	"data": {
+		"hint": "Start work on the task before requesting review (set status to in_progress)"
+	},
+	"meta": {
+		"ts": "2025-11-30T15:31:00Z",
+		"duration_ms": 23,
+		"source": "run",
+		"runner": "exec"
+	},
+	"error": {
+		"code": "EARG",
+		"message": "task 01JDXYZ123456789ABCDEFGH is pending; start work before requesting review"
+	}
+}

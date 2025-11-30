@@ -16,6 +16,10 @@ Obey global rules first, then these:
 - **WASI = `network:"none"`** — Core v1 mandates isolation; do not relax.
 - **Large outputs → CAS** — use `data.summary` + `data.artifact` + `meta.cas_digest`.
 - **`--dry-run` required** for any state-changing CLI command.
+<<<<<<< HEAD
+=======
+- **Every production bug or near-miss becomes a Gotchas Graveyard row and a new rule entry in `docs/start/gotchas.md` within 24 hours — no exceptions.**
+>>>>>>> 9454134f21553b09485dfda92d9e72ba7dfadc45
 
 ## 🤖 Hello, AI Assistant!
 
@@ -310,6 +314,28 @@ feedback hooks, and CI jobs, see:
 
 - `docs/start/testing_and_ci.md`
 - `docs/impl_plan/universal_swe_grep_and_agents_testing.md`
+
+---
+
+## 🪦 Gotchas Graveyard — Every scar is now a law
+
+These are the issues that have already hurt us (or nearly did). Each row is a
+real incident → real root cause → a permanent new rule plus a regression test.
+
+| #  | Gotcha (what hurts)                                                | Real incident (date + link)                                         | Root cause                                      | Permanent new AUTO-REJECT rule (id)                          | Added regression test? |
+|----|--------------------------------------------------------------------|---------------------------------------------------------------------|-------------------------------------------------|---------------------------------------------------------------|------------------------|
+| G1 | Local Go CGO toolchain crash (`runtime/cgo: ... cgo: exit status 2`) when running race tests or building certain skills | 2025-11-30 — local dev on macOS with Go 1.24.10 via mise (`make test-race`) | Misconfigured local Go/CGO toolchain, not a code regression | See rule entry `R1` in `docs/start/gotchas.md`; never treat toolchain/CGO crashes as "tests green" | Pending                 |
+
+### How the graveyard works (zero tolerance)
+
+1. Every time we hit a production bug or serious near-miss, we add one row
+   to this table **within 24 hours**.
+2. In the same PR, we add or update the corresponding rule entry in
+   `docs/start/gotchas.md` that references the Gotcha ID (e.g. `G1`) and
+   documents how the mistake is blocked going forward.
+3. We add or update a regression test that would have caught the incident.
+4. The mistake becomes structurally impossible to repeat for both humans and
+   agents without tripping the new rule and test.
 
 ---
 

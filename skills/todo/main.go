@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/analysis/overseer"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
@@ -28,6 +29,19 @@ const (
 	statusDone    = "completed"
 )
 
+// isReviewGateEnabled reports whether the review gate is enabled for this
+// process. For v1 this is controlled by an environment variable and applies to
+// all workspaces.
+func isReviewGateEnabled() bool {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("AGENTCTL_TODO_REVIEW_GATE")))
+	switch mode {
+	case "1", "true", "on", "enabled":
+		return true
+	default:
+		return false
+	}
+}
+
 type input struct {
 	Operation     string            `json:"operation"`
 	WorkspaceID   string            `json:"workspace_id"`
@@ -38,6 +52,8 @@ type input struct {
 	GraphInsights *graphInsightsReq `json:"graph_insights"`
 	Recommend     *recommendReq     `json:"recommend"`
 	Plan          *planReq          `json:"plan"`
+	ReviewRequest *reviewRequestReq `json:"review_request"`
+	ReviewStatus  *reviewStatusReq  `json:"review_status"`
 }
 
 type addRequest struct {
@@ -52,6 +68,18 @@ type completeRequest struct {
 	ID      string `json:"id"`
 	Notes   string `json:"notes"`
 	Gotchas string `json:"gotchas"`
+}
+
+// reviewRequestReq defines the input for the review_request operation.
+// Per review_gate.md, this initiates a review for a task.
+type reviewRequestReq struct {
+	TaskID string `json:"task_id"` // Required
+	Kind   string `json:"kind"`    // Optional: "auto", "human", or "mixed" (default: "auto")
+}
+
+// reviewStatusReq defines the input for the review_status operation.
+type reviewStatusReq struct {
+	TaskID string `json:"task_id"` // Required
 }
 
 type setActiveReq struct {
@@ -133,6 +161,11 @@ type taskOutput struct {
 	CompletedAt string   `json:"completed_at,omitempty"`
 	Notes       string   `json:"notes,omitempty"`
 	Gotchas     string   `json:"gotchas,omitempty"`
+
+	// Review gate fields (review_gate.md)
+	LastReviewStatus string `json:"last_review_status,omitempty"`
+	LastReviewAt     string `json:"last_review_at,omitempty"`
+	LastReviewID     string `json:"last_review_id,omitempty"`
 }
 
 func main() {
@@ -350,8 +383,31 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"summary": summary,
 		}
 
+	case "review_request":
+		task, err := handleReviewRequest(ctx, store, workspaceID, cfg, in.ReviewRequest)
+		if err != nil {
+			return err
+		}
+		data = map[string]any{
+			"task":    task,
+			"summary": fmt.Sprintf("review requested for task %s", task.ID),
+		}
+
+	case "review_status":
+		task, err := handleReviewStatus(ctx, store, workspaceID, in.ReviewStatus)
+		if err != nil {
+			return err
+		}
+		data = map[string]any{
+			"task_id":            task.ID,
+			"last_review_status": task.LastReviewStatus,
+			"last_review_at":     formatTime(task.LastReviewAt),
+			"last_review_id":     task.LastReviewID,
+			"summary":            fmt.Sprintf("review status for task %s: %s", task.ID, task.LastReviewStatus),
+		}
+
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan)", op)
+		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status)", op)
 	}
 
 	return rc.Emit("todo/manage", data, "application/json", envelope.Meta{
@@ -466,6 +522,16 @@ func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, 
 		}
 	}
 
+	// Enforce review gate semantics when enabled.
+	if isReviewGateEnabled() {
+		if task.Status != tasks.StatusReadyForReview {
+			return nil, nil, fmt.Errorf("task %s must be ready_for_review before completion", req.ID)
+		}
+		if task.LastReviewStatus != tasks.ReviewStatusOK || task.LastReviewID == "" {
+			return nil, nil, fmt.Errorf("task %s requires an 'ok' review before completion", req.ID)
+		}
+	}
+
 	now := time.Now().UTC()
 	task.Status = statusDone
 	task.CompletedAt = &now
@@ -484,6 +550,98 @@ func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, 
 	}
 
 	return toOutput(updated), allTasks, nil
+}
+
+// handleReviewRequest initiates a review for a task per review_gate.md.
+// It validates that the task is in an allowed state (in_progress or ready_for_review),
+// then sets status to ready_for_review and LastReviewStatus to pending.
+func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID string, cfg config.Config, req *reviewRequestReq) (*taskOutput, error) {
+	if req == nil {
+		return nil, fmt.Errorf("review_request payload is required")
+	}
+	if req.TaskID == "" {
+		return nil, fmt.Errorf("review_request.task_id is required")
+	}
+
+	task, err := store.Get(ctx, req.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("task %s not found", req.TaskID)
+	}
+
+	// Validate task state: only in_progress or ready_for_review can be reviewed
+	switch task.Status {
+	case tasks.StatusInProgress, tasks.StatusReadyForReview:
+		// OK
+	case tasks.StatusPending:
+		return nil, fmt.Errorf("task %s is pending; start work before requesting review", req.TaskID)
+	case tasks.StatusCompleted:
+		return nil, fmt.Errorf("task %s is already completed", req.TaskID)
+	case tasks.StatusBlocked:
+		return nil, fmt.Errorf("task %s is blocked; resolve blockers before requesting review", req.TaskID)
+	case tasks.StatusCanceled:
+		return nil, fmt.Errorf("task %s is canceled", req.TaskID)
+	default:
+		return nil, fmt.Errorf("task %s has unknown status %q", req.TaskID, task.Status)
+	}
+
+	// Persist a minimal review artifact via CAS so downstream components have a
+	// stable anchor even in Phase 1.
+	kind := strings.ToLower(strings.TrimSpace(req.Kind))
+	if kind == "" {
+		kind = "auto"
+	}
+	review := agent.ReviewArtifact{
+		WorkspaceID: workspaceID,
+		TaskID:      task.ID,
+		Kind:        kind,
+		Status:      tasks.ReviewStatusPending,
+		Summary:     fmt.Sprintf("pending review for task %s: %s", task.ID, task.Title),
+		CreatedBy:   os.Getenv("AGENTCTL_AGENT_NAME"),
+	}
+	review, err = artifacts.StoreReviewArtifact(ctx, cfg, review, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store review artifact: %w", err)
+	}
+
+	// Transition to ready_for_review and mark review as pending
+	task.Status = tasks.StatusReadyForReview
+	task.LastReviewStatus = tasks.ReviewStatusPending
+	now := time.Now().UTC()
+	task.LastReviewAt = &now
+	task.LastReviewID = review.ID
+
+	updated, err := store.Update(ctx, task)
+	if err != nil {
+		return nil, fmt.Errorf("update task: %w", err)
+	}
+
+	return toOutput(updated), nil
+}
+
+// handleReviewStatus returns the review status fields for a task.
+// This is a cheap status probe that does not touch CAS or jobs.
+func handleReviewStatus(ctx context.Context, store tasks.Store, _ string, req *reviewStatusReq) (tasks.Task, error) {
+	if req == nil {
+		return tasks.Task{}, fmt.Errorf("review_status payload is required")
+	}
+	if req.TaskID == "" {
+		return tasks.Task{}, fmt.Errorf("review_status.task_id is required")
+	}
+
+	task, err := store.Get(ctx, req.TaskID)
+	if err != nil {
+		return tasks.Task{}, fmt.Errorf("task %s not found", req.TaskID)
+	}
+
+	return task, nil
+}
+
+// formatTime safely formats a *time.Time for JSON output.
+func formatTime(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }
 
 // handlePlan creates or refines a task graph based on the plan request.
@@ -829,20 +987,25 @@ func filterPending(taskList []tasks.Task) []tasks.Task {
 
 func toOutput(t tasks.Task) *taskOutput {
 	out := &taskOutput{
-		ID:          t.ID,
-		Title:       t.Title,
-		Description: t.Description,
-		ScopePath:   t.ScopePath,
-		ParentID:    t.ParentID,
-		Children:    t.Children,
-		DependsOn:   t.DependsOn,
-		Status:      t.Status,
-		CreatedAt:   t.CreatedAt.Format(time.RFC3339),
-		Notes:       t.Notes,
-		Gotchas:     t.Gotchas,
+		ID:               t.ID,
+		Title:            t.Title,
+		Description:      t.Description,
+		ScopePath:        t.ScopePath,
+		ParentID:         t.ParentID,
+		Children:         t.Children,
+		DependsOn:        t.DependsOn,
+		Status:           t.Status,
+		CreatedAt:        t.CreatedAt.Format(time.RFC3339),
+		Notes:            t.Notes,
+		Gotchas:          t.Gotchas,
+		LastReviewStatus: t.LastReviewStatus,
+		LastReviewID:     t.LastReviewID,
 	}
 	if t.CompletedAt != nil {
 		out.CompletedAt = t.CompletedAt.Format(time.RFC3339)
+	}
+	if t.LastReviewAt != nil {
+		out.LastReviewAt = t.LastReviewAt.Format(time.RFC3339)
 	}
 	return out
 }
