@@ -163,6 +163,7 @@ type MemoryStore interface {
 	Get(ctx context.Context, name, workspace string) (NamedEntry, error)
 	List(ctx context.Context, workspace string, limit int) ([]NamedEntry, error)
 	Delete(ctx context.Context, name, workspace string) error
+	DeleteByNamePrefix(ctx context.Context, workspace, namePrefix string) (int, error)
 	Search(ctx context.Context, workspace, query string, limit int) ([]ScoredEntry, error)
 	Update(ctx context.Context, name, workspace string, summary, typ *string) (NamedEntry, error)
 	Relevant(ctx context.Context, workspace string, limit int) ([]ScoredEntry, error)

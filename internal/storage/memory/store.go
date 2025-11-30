@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"math"
 	"path/filepath"
 	"sort"
@@ -255,6 +256,56 @@ func (s *Store) Delete(ctx context.Context, name, workspace string) error {
 	}
 	s.unpin(ctx, arr)
 	return nil
+}
+
+// DeleteByNamePrefix deletes all entries whose name starts with the given prefix.
+// Returns the number of entries deleted.
+func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix string) (int, error) {
+	// First collect digests from matching entries to unpin later
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT digests FROM named_memory 
+		WHERE workspace = ? AND name LIKE ? || '%'`,
+		workspace, namePrefix)
+	if err != nil {
+		return 0, fmt.Errorf("memory: query delete prefix: %w", err)
+	}
+
+	var allDigests []string
+	for rows.Next() {
+		var digests string
+		if err := rows.Scan(&digests); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("memory: scan delete prefix digests: %w", err)
+		}
+		var arr []string
+		if err := sqlutil.ScanJSON(digests, &arr); err != nil {
+			// Log JSON parse error but continue processing to remain resilient
+			// This can indicate corrupted digest entries which may cause CAS leaks
+			log.Printf("memory: warning: failed to parse digests JSON for workspace=%q prefix=%q digests=%q: %v",
+				workspace, namePrefix, digests, err)
+			continue
+		}
+		allDigests = append(allDigests, arr...)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, fmt.Errorf("memory: close rows: %w", err)
+	}
+
+	// Delete matching entries
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM named_memory 
+		WHERE workspace = ? AND name LIKE ? || '%'`,
+		workspace, namePrefix)
+	if err != nil {
+		return 0, fmt.Errorf("memory: delete prefix: %w", err)
+	}
+
+	count, _ := result.RowsAffected()
+
+	// Unpin collected digests
+	s.unpin(ctx, allDigests)
+
+	return int(count), nil
 }
 
 // SaveOptions contains parameters for saving memory entries.

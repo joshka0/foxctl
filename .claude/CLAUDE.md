@@ -247,3 +247,10 @@ go test ./...
 # Build skills
 make skills-build
 ```
+
+## Security Notes
+
+- **TOCTOU vulnerabilities:** When validating paths (symlinks, containment
+  checks), always use the _resolved_ path for all subsequent file operations
+  (`os.Stat`, `os.Open`). Validating path A then operating on path B allows
+  symlink swaps between check and use.
