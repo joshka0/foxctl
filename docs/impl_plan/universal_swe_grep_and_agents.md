@@ -12,10 +12,18 @@ Related specs:
 - `docs/spec/review_gate.md`
 - `docs/spec/semantic_file_index.md`
 - `docs/spec/code_symbol_index_and_swe_grep.md`
+- `docs/spec/post_review_harness.md`
 - `docs/spec/dspy_go_agents.md`
 - `docs/spec/dspy_trajectory_capture.md`
 - `docs/spec/task_graph_insights.md`
 - `docs/spec/skills_spec/README.md`
+
+Related impl plan docs:
+
+- `docs/impl_plan/universal_swe_grep_and_agents_specs_phase1_review_gate_todo.md`
+- `docs/impl_plan/universal_swe_grep_and_agents_specs_phase2_post_review_harness_todo.md`
+- `docs/impl_plan/universal_swe_grep_and_agents_deferred.md` – deferred work tracker
+- `docs/impl_plan/universal_swe_grep_and_agents_codemap.md`
 
 ---
 
