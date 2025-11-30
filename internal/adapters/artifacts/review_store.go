@@ -54,7 +54,7 @@ func StoreReviewArtifact(ctx context.Context, cfg config.Config, art agent.Revie
 		if err != nil {
 			return art, fmt.Errorf("store review body: %w", err)
 		}
-		art.CASDigest = obj.Metadata.Digest
+		art.CASDigest = obj.Digest
 	}
 
 	buf, err := json.Marshal(art)
@@ -71,7 +71,7 @@ func StoreReviewArtifact(ctx context.Context, cfg config.Config, art agent.Revie
 	if err != nil {
 		return art, fmt.Errorf("store review artifact: %w", err)
 	}
-	art.ID = obj.Metadata.Digest
+	art.ID = obj.Digest
 
 	return art, nil
 }

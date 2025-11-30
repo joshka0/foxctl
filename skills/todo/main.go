@@ -620,7 +620,7 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 
 // handleReviewStatus returns the review status fields for a task.
 // This is a cheap status probe that does not touch CAS or jobs.
-func handleReviewStatus(ctx context.Context, store tasks.Store, workspaceID string, req *reviewStatusReq) (tasks.Task, error) {
+func handleReviewStatus(ctx context.Context, store tasks.Store, _ string, req *reviewStatusReq) (tasks.Task, error) {
 	if req == nil {
 		return tasks.Task{}, fmt.Errorf("review_status payload is required")
 	}

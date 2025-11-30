@@ -50,13 +50,21 @@ func TestStoreReviewArtifact_StoresJSONInCAS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open cas store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close cas store: %v", err)
+		}
+	}()
 
 	rc, meta, err := store.Get(ctx, got.ID)
 	if err != nil {
 		t.Fatalf("Get artifact from CAS: %v", err)
 	}
-	defer rc.Close()
+	defer func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close artifact reader: %v", err)
+		}
+	}()
 
 	if meta.Digest != got.ID {
 		t.Fatalf("expected digest %q, got %q", got.ID, meta.Digest)
@@ -111,14 +119,22 @@ func TestStoreReviewArtifact_WithBodyStoresCASDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open cas store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Fatalf("close cas store: %v", err)
+		}
+	}()
 
 	// Ensure body blob exists
 	bodyRC, bodyMeta, err := store.Get(ctx, got.CASDigest)
 	if err != nil {
 		t.Fatalf("Get body from CAS: %v", err)
 	}
-	defer bodyRC.Close()
+	defer func() {
+		if err := bodyRC.Close(); err != nil {
+			t.Fatalf("close body reader: %v", err)
+		}
+	}()
 	if bodyMeta.Digest != got.CASDigest {
 		t.Fatalf("expected body digest %q, got %q", got.CASDigest, bodyMeta.Digest)
 	}
