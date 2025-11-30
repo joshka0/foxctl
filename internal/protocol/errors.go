@@ -36,6 +36,10 @@ const (
 	ErrorCodeEIO ErrorCode = "EIO"
 	// ErrorCodeECanceled indicates job was canceled by user.
 	ErrorCodeECanceled ErrorCode = "ECANCELED"
+	// ErrorCodeECacheMiss indicates cache-only mode and no cached result exists.
+	ErrorCodeECacheMiss ErrorCode = "ECACHE_MISS"
+	// ErrorCodeECacheUnavailable indicates cache storage is unavailable.
+	ErrorCodeECacheUnavailable ErrorCode = "ECACHE_UNAVAILABLE"
 )
 
 // String returns the string representation of the error code.

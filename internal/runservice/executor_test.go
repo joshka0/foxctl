@@ -138,6 +138,117 @@ func TestExecutorTryServeCacheMiss(t *testing.T) {
 	}
 }
 
+func TestExecutorTryServeCacheModeOnlyMiss(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tmp := t.TempDir()
+	cfg := config.Config{
+		Paths: config.Paths{
+			Cache: filepath.Join(tmp, "cache"),
+			CAS:   filepath.Join(tmp, "cas"),
+		},
+		Memory: config.MemorySettings{AutoCacheTTL: time.Hour},
+	}
+	for _, dir := range []string{cfg.Paths.Cache, cfg.Paths.CAS} {
+		if err := ensureDir(dir); err != nil {
+			t.Fatalf("ensure dir: %v", err)
+		}
+	}
+
+	handle := SkillHandle{
+		Manifest: skill.Manifest{
+			Metadata: skill.Metadata{Name: "text/grep", Version: "1.0.0"},
+		},
+	}
+
+	stdout := &bytes.Buffer{}
+	executor := NewExecutor(ctx, cfg, handle, stdout, io.Discard, RunOptions{
+		CacheMode: cache.ModeOnly,
+		Workspace: "ws",
+	})
+	defer executor.Close()
+
+	// Should emit ECACHE_MISS error envelope when cache is empty
+	served, err := executor.TryServeCache([]byte(`{"query":"miss"}`))
+	if err != nil {
+		t.Fatalf("TryServeCache only miss: %v", err)
+	}
+	if !served {
+		t.Fatalf("expected served=true (error envelope was written)")
+	}
+
+	// Verify error envelope was written
+	var env envelope.Envelope
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if env.Status != "error" {
+		t.Fatalf("expected status=error, got %s", env.Status)
+	}
+	if env.Error.Code != "ECACHE_MISS" {
+		t.Fatalf("expected error.code=ECACHE_MISS, got %s", env.Error.Code)
+	}
+	if env.Meta.Workspace != "ws" {
+		t.Fatalf("expected workspace ws, got %s", env.Meta.Workspace)
+	}
+	// Verify data contains hint
+	if data, ok := env.Data.(map[string]any); ok {
+		if hint, ok := data["hint"].(string); !ok || hint == "" {
+			t.Fatalf("expected non-empty hint in data")
+		}
+	} else {
+		t.Fatalf("expected data to be a map")
+	}
+}
+
+func TestExecutorTryServeCacheAutoModeErrorsNonFatal(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	// Create a file at the cache path to prevent directory creation
+	cacheFilePath := filepath.Join(tmp, "cache")
+	if err := os.WriteFile(cacheFilePath, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("create blocking file: %v", err)
+	}
+
+	cfg := config.Config{
+		Paths: config.Paths{
+			Cache: cacheFilePath, // This is a file, not a directory - will cause error
+			CAS:   filepath.Join(tmp, "cas"),
+		},
+		Memory: config.MemorySettings{AutoCacheTTL: time.Hour},
+	}
+
+	handle := SkillHandle{
+		Manifest: skill.Manifest{
+			Metadata: skill.Metadata{Name: "text/grep", Version: "1.0.0"},
+		},
+	}
+
+	stderr := &bytes.Buffer{}
+	executor := NewExecutor(ctx, cfg, handle, io.Discard, stderr, RunOptions{
+		CacheMode: cache.ModeAuto,
+	})
+	defer executor.Close()
+
+	// In auto mode, cache errors should be non-fatal (returns false, nil)
+	served, err := executor.TryServeCache([]byte(`{"query":"test"}`))
+	if err != nil {
+		t.Fatalf("expected no error in auto mode, got: %v", err)
+	}
+	if served {
+		t.Fatalf("expected served=false on cache error")
+	}
+
+	// Verify warning was logged
+	if !strings.Contains(stderr.String(), "cache unavailable") {
+		t.Fatalf("expected cache unavailable warning, got: %q", stderr.String())
+	}
+}
+
 func TestExecutorSubmitAsyncUsesRunner(t *testing.T) {
 	t.Parallel()
 
