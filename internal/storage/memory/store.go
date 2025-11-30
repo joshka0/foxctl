@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"math"
 	"path/filepath"
 	"sort"
@@ -277,9 +278,14 @@ func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix st
 			return 0, fmt.Errorf("memory: scan delete prefix digests: %w", err)
 		}
 		var arr []string
-		if err := sqlutil.ScanJSON(digests, &arr); err == nil {
-			allDigests = append(allDigests, arr...)
+		if err := sqlutil.ScanJSON(digests, &arr); err != nil {
+			// Log JSON parse error but continue processing to remain resilient
+			// This can indicate corrupted digest entries which may cause CAS leaks
+			log.Printf("memory: warning: failed to parse digests JSON for workspace=%q prefix=%q digests=%q: %v",
+				workspace, namePrefix, digests, err)
+			continue
 		}
+		allDigests = append(allDigests, arr...)
 	}
 	if err := rows.Close(); err != nil {
 		return 0, fmt.Errorf("memory: close rows: %w", err)

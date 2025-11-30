@@ -150,29 +150,31 @@ func (c Config) ChunkingConfigHash() string {
 
 // FileEmbeddingName generates the canonical name for a file embedding entry.
 // Format: file://<workspace>/<path>
-// Escapes special URI characters (#, ?) that could cause parsing issues.
+// Uses url.PathEscape for each path segment to consistently encode URI-special characters.
 func FileEmbeddingName(workspace, path string) string {
-	return fmt.Sprintf("file://%s/%s", escapeURIComponent(workspace), escapeURIComponent(path))
+	return fmt.Sprintf("file://%s/%s", url.PathEscape(workspace), escapePathSegments(path))
 }
 
 // ChunkEmbeddingName generates the canonical name for a chunk embedding entry.
 // Format: file://<workspace>/<path>#chunk-<chunk_id>?cfg=<hash>
-// Escapes special URI characters to prevent parsing issues.
+// Uses url.PathEscape for path segments and url.QueryEscape for query parameters.
 func ChunkEmbeddingName(workspace, path, chunkID, configHash string) string {
 	return fmt.Sprintf("file://%s/%s#chunk-%s?cfg=%s",
-		escapeURIComponent(workspace),
-		escapeURIComponent(path),
+		url.PathEscape(workspace),
+		escapePathSegments(path),
 		url.PathEscape(chunkID),
 		url.QueryEscape(configHash))
 }
 
-// escapeURIComponent escapes characters that have special meaning in URIs
-// (# and ?) while preserving path separators (/).
-func escapeURIComponent(s string) string {
-	// Only escape # and ? which are URI special characters
-	s = strings.ReplaceAll(s, "#", "%23")
-	s = strings.ReplaceAll(s, "?", "%3F")
-	return s
+// escapePathSegments applies url.PathEscape to each segment of a path,
+// preserving the "/" separators. This ensures URI-special characters like
+// "#" and "?" are properly encoded while maintaining path structure.
+func escapePathSegments(path string) string {
+	segments := strings.Split(path, "/")
+	for i, seg := range segments {
+		segments[i] = url.PathEscape(seg)
+	}
+	return strings.Join(segments, "/")
 }
 
 // MarshalResult serializes a result struct to JSON bytes for storage.

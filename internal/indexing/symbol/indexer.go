@@ -359,7 +359,7 @@ func (idx *Indexer) readFileContent(path string) ([]byte, error) {
 	// Join with workspace root and resolve
 	fullPath := filepath.Join(idx.workspaceRoot, cleanPath)
 
-	// Resolve to absolute path and verify it's within workspace
+	// Resolve to absolute path
 	absPath, err := filepath.Abs(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve path: %w", err)
@@ -369,8 +369,24 @@ func (idx *Indexer) readFileContent(path string) ([]byte, error) {
 		return nil, fmt.Errorf("resolve workspace: %w", err)
 	}
 
-	// Ensure the resolved path is within the workspace
-	if !strings.HasPrefix(absPath, absWorkspace+string(filepath.Separator)) && absPath != absWorkspace {
+	// Resolve symlinks to detect symlink-based traversal attacks
+	// EvalSymlinks also calls Clean and Abs internally
+	evalPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		// If the file doesn't exist yet, EvalSymlinks fails; fall back to absPath
+		// but this is fine since os.Stat below will catch non-existent files
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("resolve symlinks for path: %w", err)
+		}
+		evalPath = absPath
+	}
+	evalWorkspace, err := filepath.EvalSymlinks(absWorkspace)
+	if err != nil {
+		return nil, fmt.Errorf("resolve symlinks for workspace: %w", err)
+	}
+
+	// Ensure the resolved path (with symlinks evaluated) is within the workspace
+	if !strings.HasPrefix(evalPath, evalWorkspace+string(filepath.Separator)) && evalPath != evalWorkspace {
 		return nil, fmt.Errorf("path escapes workspace: %s", path)
 	}
 
