@@ -10,7 +10,8 @@ docs/
 ├── start/                    # Quick-start guides (this directory)
 │   ├── README.md             # ← You are here
 │   ├── testing_and_ci.md     # Tests, coverage, race, CI pipelines
-│   └── openapi_and_plugins.md # http/openapi skill, auth/pagination plugins
+│   ├── openapi_and_plugins.md # http/openapi skill, auth/pagination plugins
+│   └── gotchas.md            # Gotchas Graveyard rules and "never again" list
 ├── spec/                     # Canonical specifications
 │   ├── core_profile_v1.md    # Envelope, CAS, jobs, WASI/exec runners
 │   ├── openapi_skill.md      # http/openapi input/output contract
@@ -46,6 +47,7 @@ docs/
 | **dspy-go agents** | `spec/dspy_go_agents.md` |
 | **Testing & CI** | `start/testing_and_ci.md` |
 | **OpenAPI & plugins** | `start/openapi_and_plugins.md` |
+| **Gotchas & rules** | `start/gotchas.md` |
 | **Architecture** | `architecture.md` |
 | **Roadmap** | `roadmap.md` |
 | **Error codes** | `error-handling.md` |
