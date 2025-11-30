@@ -391,7 +391,8 @@ func (idx *Indexer) readFileContent(path string) ([]byte, error) {
 	}
 
 	// Stat the file to check type and size
-	info, err := os.Stat(absPath)
+	// Use evalPath (symlink-resolved) for all I/O to avoid TOCTOU vulnerabilities
+	info, err := os.Stat(evalPath)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +404,7 @@ func (idx *Indexer) readFileContent(path string) ([]byte, error) {
 	}
 
 	// Open and read with size limit
-	f, err := os.Open(absPath)
+	f, err := os.Open(evalPath)
 	if err != nil {
 		return nil, err
 	}

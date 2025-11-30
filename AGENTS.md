@@ -319,6 +319,9 @@ Start
 - **Nil vs empty:** return empty slices/maps, not nil, in JSON (`omitempty` as
   appropriate).
 - **Panics:** never in library code; return errors.
+- **TOCTOU:** when validating paths (symlinks, containment), use the _same_
+  resolved path for subsequent I/O (`os.Stat`, `os.Open`). Never validate one
+  path and operate on another—symlinks can be swapped between check and use.
 
 **Example: envelope OK helper (Go)**
 
