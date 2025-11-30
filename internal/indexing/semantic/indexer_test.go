@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -396,4 +397,117 @@ func TestNoOpProvider(t *testing.T) {
 	if len(embeddings) != 3 {
 		t.Errorf("expected 3 embeddings, got %d", len(embeddings))
 	}
+}
+
+func TestIndexer_readFileContent_PathTraversal(t *testing.T) {
+	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	// Create a valid test file
+	createTestFile(t, workspaceDir, "valid.txt", "test content")
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{
+			name:    "valid path",
+			path:    "valid.txt",
+			wantErr: "",
+		},
+		{
+			name:    "path traversal with ..",
+			path:    "../../../etc/passwd",
+			wantErr: "path traversal not allowed",
+		},
+		{
+			name:    "absolute path",
+			path:    "/etc/passwd",
+			wantErr: "absolute paths not allowed",
+		},
+		{
+			name:    "traversal via subdirectory",
+			path:    "foo/../../etc/passwd",
+			wantErr: "path traversal not allowed", // After cleaning becomes ../etc/passwd
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := idx.readFileContent(tt.path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if !containsStr(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestIndexer_readFileContent_FileSizeLimit(t *testing.T) {
+	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	// Create a file larger than maxReadFileSize (10MB)
+	largeContent := make([]byte, 11*1024*1024) // 11MB
+	createTestFile(t, workspaceDir, "large.txt", string(largeContent))
+
+	_, err := idx.readFileContent("large.txt")
+	if err == nil {
+		t.Error("expected error for large file")
+	} else if !containsStr(err.Error(), "file too large") {
+		t.Errorf("expected 'file too large' error, got %q", err.Error())
+	}
+}
+
+func TestIndexer_EmbeddingStored(t *testing.T) {
+	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	createTestFile(t, workspaceDir, "embed.txt", "test content for embedding")
+
+	event := indexing.PostReviewEvent{
+		WorkspaceID: "ws-embed",
+		Files: []indexing.FileChange{
+			{Path: "embed.txt", ChangeKind: indexing.ChangeKindModified},
+		},
+	}
+
+	result, err := idx.Index(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Index failed: %v", err)
+	}
+	if result.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed, got %d", result.FilesIndexed)
+	}
+
+	// Verify the embedding was stored
+	entryName := FileEmbeddingName("ws-embed", "embed.txt")
+	entry, err := store.Get(context.Background(), entryName, "ws-embed")
+	if err != nil {
+		t.Fatalf("failed to get stored entry: %v", err)
+	}
+
+	var result2 FileEmbeddingResult
+	if err := json.Unmarshal(entry.Result, &result2); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	// NoOpProvider returns a zero vector of configured dimension (384 default)
+	if len(result2.Embedding) != 384 {
+		t.Errorf("expected embedding length 384 (NoOp default), got %d", len(result2.Embedding))
+	}
+}
+
+func containsStr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

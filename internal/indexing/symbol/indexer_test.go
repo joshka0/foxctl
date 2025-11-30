@@ -476,3 +476,123 @@ func TestComputeDigest(t *testing.T) {
 func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
+
+func TestIndexer_readFileContent_PathTraversal(t *testing.T) {
+	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	// Create a valid test file
+	createTestFile(t, workspaceDir, "valid.go", "package main")
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{
+			name:    "valid path",
+			path:    "valid.go",
+			wantErr: "",
+		},
+		{
+			name:    "path traversal with ..",
+			path:    "../../../etc/passwd",
+			wantErr: "path traversal not allowed",
+		},
+		{
+			name:    "absolute path",
+			path:    "/etc/passwd",
+			wantErr: "absolute paths not allowed",
+		},
+		{
+			name:    "traversal via subdirectory",
+			path:    "foo/../../etc/passwd",
+			wantErr: "path traversal not allowed", // After cleaning becomes ../etc/passwd
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := idx.readFileContent(tt.path)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			} else {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if !containsString(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got %q", tt.wantErr, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestIndexer_readFileContent_FileSizeLimit(t *testing.T) {
+	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	// Create a file larger than maxReadFileSize (10MB)
+	largeContent := make([]byte, 11*1024*1024) // 11MB
+	createTestFile(t, workspaceDir, "large.go", string(largeContent))
+
+	_, err := idx.readFileContent("large.go")
+	if err == nil {
+		t.Error("expected error for large file")
+	} else if !containsString(err.Error(), "file too large") {
+		t.Errorf("expected 'file too large' error, got %q", err.Error())
+	}
+}
+
+func TestIndexer_ErrUnchanged(t *testing.T) {
+	idx, _, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	goContent := `package main
+
+func Greet() string {
+	return "Hello"
+}
+`
+	createTestFile(t, workspaceDir, "greet.go", goContent)
+
+	event := indexing.PostReviewEvent{
+		WorkspaceID: "ws-1",
+		Files: []indexing.FileChange{
+			{Path: "greet.go", ChangeKind: indexing.ChangeKindModified, Language: "go"},
+		},
+	}
+
+	// First index should succeed
+	result1, err := idx.Index(context.Background(), event)
+	if err != nil {
+		t.Fatalf("First index failed: %v", err)
+	}
+	if result1.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed on first run, got %d", result1.FilesIndexed)
+	}
+
+	// Second index with same content should be skipped (not failed)
+	result2, err := idx.Index(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Second index failed: %v", err)
+	}
+	if result2.FilesSkipped != 1 {
+		t.Errorf("expected 1 file skipped on second run (unchanged), got skipped=%d indexed=%d failed=%d",
+			result2.FilesSkipped, result2.FilesIndexed, result2.FilesFailed)
+	}
+	if result2.FilesFailed != 0 {
+		t.Errorf("unchanged file should not be counted as failed, got %d", result2.FilesFailed)
+	}
+}
+
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || containsSubstring(s, substr)))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
