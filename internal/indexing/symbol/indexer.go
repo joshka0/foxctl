@@ -18,6 +18,9 @@ import (
 // IndexerID is the canonical identifier for the symbol indexer.
 const IndexerID = "code_symbol_dag"
 
+// ErrUnchanged indicates a file was skipped because its content hasn't changed.
+var ErrUnchanged = errors.New("file unchanged")
+
 // Indexer implements the indexing.Indexer interface for code symbols.
 type Indexer struct {
 	config        Config
@@ -106,6 +109,11 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 
 		// Index the file
 		if err := idx.indexFile(ctx, event, file, lang, extractor); err != nil {
+			if errors.Is(err, ErrUnchanged) {
+				// File content unchanged - count as skipped, not failed
+				result.FilesSkipped++
+				continue
+			}
 			idx.logger.Warn().Err(err).Str("path", file.Path).Msg("failed to index file")
 			result.FilesFailed++
 			result.Failures = append(result.Failures, indexing.IndexerFailure{
@@ -141,7 +149,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	// Check file meta for unchanged files
 	if !idx.fileChanged(ctx, event.WorkspaceID, file.Path, fileDigest) {
 		idx.logger.Debug().Str("path", file.Path).Msg("file unchanged, skipping")
-		return nil
+		return ErrUnchanged
 	}
 
 	// Extract symbols
