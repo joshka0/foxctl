@@ -1,0 +1,125 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/context_ripgrep
+  version: 0.1.0
+  description: "Search for patterns and return surrounding code blocks (functions, methods, classes)"
+  tags: ["code", "search", "context", "ast", "function"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_context_ripgrep/code_context_ripgrep
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/context_ripgrep
+  parameters:
+    - name: path
+      type: string
+      required: false
+      description: "Directory or file to search (default .)"
+    - name: pattern
+      type: string
+      required: true
+      description: "Regex pattern to search for (Rust regex syntax via ripgrep)"
+    - name: case_insensitive
+      type: boolean
+      required: false
+      description: "Case insensitive search"
+      default: false
+    - name: glob
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Include glob patterns (e.g., ['*.go', '*.py'])"
+    - name: glob_not
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Exclude glob patterns (e.g., ['vendor/*', 'node_modules/*'])"
+    - name: max_matches
+      type: integer
+      required: false
+      default: 10000
+      description: "Maximum number of raw ripgrep matches to process"
+    - name: max_blocks
+      type: integer
+      required: false
+      default: 50
+      description: "Maximum number of code blocks to return"
+    - name: max_block_lines
+      type: integer
+      required: false
+      default: 400
+      description: "Maximum lines per code block"
+    - name: hidden
+      type: boolean
+      required: false
+      default: false
+      description: "Search hidden files and directories"
+  returns:
+    - name: pattern
+      type: string
+    - name: match_count
+      type: integer
+      description: "Total number of ripgrep matches found"
+    - name: block_count
+      type: integer
+      description: "Number of code blocks returned"
+    - name: files_touched
+      type: integer
+    - name: preview
+      type: array
+      description: "Preview of matched blocks with file, start/end lines, symbol info"
+    - name: artifact
+      type: string
+      description: "CAS digest of full block data (NDJSON)"
+  help:
+    short: "Search for patterns and return full functions/methods/classes containing matches."
+    long: |
+      Use this skill to search code and get back meaningful code units instead of just lines.
+      For each match, the skill expands to the containing function, method, class, or code block
+      using language-specific heuristics.
+      
+      Supported languages with function/method detection:
+      - Go: func, method, type declarations
+      - Python: def, async def, class (indentation-based)
+      - JavaScript/TypeScript: function, arrow functions, class, interface, type
+      - GDScript: func, class_name, inner class (indentation-based)
+      
+      For unsupported languages, falls back to blank-line delimited blocks.
+      
+      Results include:
+      - Symbol name and kind (function, method, class, etc.)
+      - Start and end line numbers
+      - Full source code of the block
+      - List of match line numbers within each block
+      
+      Large results are stored in CAS with a digest reference in the envelope.
+    workflows:
+      - id: find-functions-using-pattern
+        description: "Find all functions that use a specific API or pattern."
+        example_input:
+          pattern: "PathValidator"
+          path: "."
+          glob: ["*.go"]
+          max_blocks: 20
+      - id: search-error-handling
+        description: "Find error handling patterns in Python code."
+        example_input:
+          pattern: "except.*Exception"
+          glob: ["*.py"]
+          case_insensitive: true
+      - id: search-godot-signals
+        description: "Find GDScript functions that emit signals."
+        example_input:
+          pattern: "\\.emit\\("
+          glob: ["*.gd"]
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
