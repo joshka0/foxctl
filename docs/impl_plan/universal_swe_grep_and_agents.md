@@ -29,14 +29,14 @@ Related specs:
 
 **Tasks**
 
-- [ ] Verify current state of:
+- [x] Verify current state of:
   - Jobs + CAS integration.
   - `task_guard`, `file_guard`, `test_watch_feedback` hooks.
   - Named memory + optional vector support.
-- [ ] Add/confirm CI checks for:
+- [x] Add/confirm CI checks for:
   - Lint, vet, `go test ./...` (with `-race` when feasible).
   - No CGO dependencies for new code.
-- [ ] Document in `README.md` / `ARCHITECTURE.md` where post-review and indexing
+- [x] Document in `README.md` / `ARCHITECTURE.md` where post-review and indexing
       fit in the execution picture (pointer to
       `review_semantic_trajectory_specs.md`).
 
@@ -53,10 +53,10 @@ Dependencies: none.
 
 **Tasks**
 
-- [ ] Extend `todo/manage` operations:
+- [x] Extend `todo/manage` operations:
   - `review_request`, `complete`, `review_status` as per spec.
 - [ ] Implement review artifact storage + CAS logs.
-- [ ] Implement `hooks/task_guard` dirtying behavior:
+- [x] Implement `hooks/task_guard` dirtying behavior:
   - When a task is `ready_for_review` or `completed` and a write occurs under
     its scope:
     - Auto-demote status to `in_progress`.
@@ -78,13 +78,13 @@ Dependencies: Phase 0.
 
 **Tasks**
 
-- [ ] Implement overseer post-review handler:
+- [x] Implement overseer post-review handler:
   - Triggered when a review artifact transitions to `ok` and diff is applied.
   - Collects
     `(workspace_id, files[{path, digest, change_kind}], task_id, review_id)`.
-- [ ] Implement configuration for `indexing.post_review.indexers` as in
+- [x] Implement configuration for `indexing.post_review.indexers` as in
       `semantic_file_index.md` §8.2.
-- [ ] Emit a single internal event/command consumed by downstream indexers
+- [x] Emit a single internal event/command consumed by downstream indexers
       (semantic, symbol, future indexers).
 
 Dependencies: Phase 1.
@@ -100,13 +100,13 @@ Dependencies: Phase 1.
 
 **Tasks**
 
-- [ ] Implement named-memory schema + helper lib for:
+- [x] Implement named-memory schema + helper lib for:
   - `type = "file_embedding"` and `"file_embedding_chunk"`.
   - Stable names and `chunking_config_hash`.
-- [ ] Implement embedding jobs:
+- [x] Implement embedding jobs:
   - `semantic_index.init_files` and `semantic_index.update_files` with the
     data/behavior from §6.
-- [ ] Wire to post-review handler:
+- [x] Wire to post-review handler:
   - Subscribe to Phase 2 output and reindex touched files.
 - [ ] Implement optional CLI (`agentctl semantic-index ...`).
 - [ ] Add tests + golden outputs for:

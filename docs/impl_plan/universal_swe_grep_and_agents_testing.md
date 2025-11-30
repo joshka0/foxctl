@@ -32,14 +32,14 @@ before moving to the next phase**. It assumes:
 **Focus:** verify that the existing infra can bear new work.
 
 - **Unit/infra checks**
-  - [ ] Ensure `go test ./...` is green on main.
-  - [ ] Ensure `make lint` / `golangci-lint` pass with reasonable time bounds.
-  - [ ] Add a small test that exercises:
+  - [x] Ensure `go test ./...` is green on main.
+  - [x] Ensure `make lint` / `golangci-lint` pass with reasonable time bounds.
+  - [x] Add a small test that exercises:
     - CAS put/get with digest verification.
     - A simple jobs submit + tail.
 
 - **Hook sanity**
-  - [ ] If not already covered, add tests that:
+  - [x] If not already covered, add tests that:
     - `task_guard` blocks writes without a task id.
     - `file_guard` reserves a path for a task and blocks conflicting
       reservations.
@@ -56,15 +56,15 @@ Gate: no new features until this is solid.
   - [ ] Task lifecycle transitions:
     - `pending → in_progress → ready_for_review → completed`.
     - `ready_for_review → in_progress` on failed review.
-  - [ ] `todo/manage.review_request` behavior:
+  - [x] `todo/manage.review_request` behavior:
     - Valid/invalid task states.
     - Creation of review artifacts.
-  - [ ] `todo/manage.complete` semantics when gate is enabled:
+  - [x] `todo/manage.complete` semantics when gate is enabled:
     - Requires a recent `ok` review.
     - Fails or triggers review when missing.
 
 - **Dirtying/`task_guard` tests**
-  - [ ] When a task is `ready_for_review` or `completed` and a write occurs
+  - [x] When a task is `ready_for_review` or `completed` and a write occurs
         under its scope:
     - Task status is auto-demoted to `in_progress`.
     - Any prior `ok` review is treated as stale (e.g. `last_review_status` no

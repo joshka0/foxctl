@@ -1,12 +1,16 @@
 # agentctl
 
-> **Bash for LLMs** — A single-binary CLI for structured, deterministic AI workflows
+> **Bash for LLMs** — A single-binary CLI for structured, deterministic AI
+> workflows
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/jkatigb/agentctl)](https://goreportcard.com/report/github.com/jkatigb/agentctl)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 [![Go Version](https://img.shields.io/badge/go-1.22+-blue.svg)](https://golang.org/dl/)
 
-**agentctl** implements the [Core Profile v1](docs/spec/core_profile_v1.md) specification, providing a universal toolkit for building reliable, reproducible AI-powered workflows with structured JSON I/O, content-addressable storage, and deterministic caching.
+**agentctl** implements the [Core Profile v1](docs/spec/core_profile_v1.md)
+specification, providing a universal toolkit for building reliable, reproducible
+AI-powered workflows with structured JSON I/O, content-addressable storage, and
+deterministic caching.
 
 ---
 
@@ -14,12 +18,17 @@
 
 Think of agentctl as **Unix pipelines for AI agents**. It provides:
 
-- **Structured I/O**: Canonical JSON envelopes (Version 1) for deterministic communication
-- **Skills**: Discoverable, sandboxed tools (like bash commands) that AI agents can invoke
-- **Job Persistence**: Durable async execution with crash recovery and progress tracking
+- **Structured I/O**: Canonical JSON envelopes (Version 1) for deterministic
+  communication
+- **Skills**: Discoverable, sandboxed tools (like bash commands) that AI agents
+  can invoke
+- **Job Persistence**: Durable async execution with crash recovery and progress
+  tracking
 - **Content-Addressable Storage (CAS)**: SHA-256 integrity for large outputs
-- **Memory System**: Auto-cache (24h TTL) + named persistent memories for context reuse
-- **Universal API Client**: Call any OpenAPI 3.x REST API without code generation (in development)
+- **Memory System**: Auto-cache (24h TTL) + named persistent memories for
+  context reuse
+- **Universal API Client**: Call any OpenAPI 3.x REST API without code
+  generation (in development)
 
 ### Design Principles
 
@@ -127,14 +136,14 @@ All I/O uses a canonical envelope format for deterministic communication:
 
 ### 🔧 Built-in Skills
 
-| Skill | Purpose | Distribution |
-|-------|---------|--------------|
-| `fs/ls` | List directory contents | exec |
-| `fs/read` | Read files with preview | exec |
-| `text/grep` | Regex search across files | exec |
-| `todo/manage` | Task management with dependencies | exec |
-| `wasi/echo` | WASM demo skill | WASI |
-| `http/openapi` | Universal REST API client | exec (in development) |
+| Skill          | Purpose                           | Distribution          |
+| -------------- | --------------------------------- | --------------------- |
+| `fs/ls`        | List directory contents           | exec                  |
+| `fs/read`      | Read files with preview           | exec                  |
+| `text/grep`    | Regex search across files         | exec                  |
+| `todo/manage`  | Task management with dependencies | exec                  |
+| `wasi/echo`    | WASM demo skill                   | WASI                  |
+| `http/openapi` | Universal REST API client         | exec (in development) |
 
 ### 💾 Content-Addressable Storage
 
@@ -204,7 +213,8 @@ agentctl run http/openapi \
   --paging '{"strategy": "cursor", "max_pages": 10}'
 ```
 
-**Status**: Core loader and auth in progress (see [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md))
+**Status**: Core loader and auth in progress (see
+[docs/roadmap.md](docs/roadmap.md))
 
 ---
 
@@ -260,21 +270,25 @@ CAS Storage (large outputs)
 JSON Envelope Output
 ```
 
+See `docs/spec/review_semantic_trajectory_specs.md` for how the review gate,
+post-review handler, semantic/symbol index, SWE Grep, and trajectory capture fit
+into this execution pipeline.
+
 ---
 
 ## 📊 Current Status
 
 ### Phase Completion
 
-| Phase | Status | Features |
-|-------|--------|----------|
-| 0-2: Foundation | ✅ 100% | Bootstrap, envelopes, CAS, CLI |
-| 3: Jobs | ✅ 100% | SQLite persistence, async execution, crash recovery |
-| 4: Runners | ✅ 100% | WASI + exec, skill manifests, sandboxing |
-| 5: Memory | ✅ 100% | Auto-cache, named memories, search |
-| **6: OpenAPI** | 🚧 5% | **Spec loader, request builder, HTTP client (in progress)** |
-| 7: Plugins | 🔜 0% | Custom auth/pagination (deferred to v1.1) |
-| 8: UX | 🔜 75% | Docs, golden tests, polish |
+| Phase           | Status  | Features                                                    |
+| --------------- | ------- | ----------------------------------------------------------- |
+| 0-2: Foundation | ✅ 100% | Bootstrap, envelopes, CAS, CLI                              |
+| 3: Jobs         | ✅ 100% | SQLite persistence, async execution, crash recovery         |
+| 4: Runners      | ✅ 100% | WASI + exec, skill manifests, sandboxing                    |
+| 5: Memory       | ✅ 100% | Auto-cache, named memories, search                          |
+| **6: OpenAPI**  | 🚧 5%   | **Spec loader, request builder, HTTP client (in progress)** |
+| 7: Plugins      | 🔜 0%   | Custom auth/pagination (deferred to v1.1)                   |
+| 8: UX           | 🔜 75%  | Docs, golden tests, polish                                  |
 
 **Overall Progress**: ~60% toward v1.0
 
@@ -282,7 +296,8 @@ JSON Envelope Output
 
 - ✅ All core infrastructure (envelopes, CAS, jobs, memory)
 - ✅ Skill execution (WASI + exec runners)
-- ✅ 6 built-in skills (fs/ls, fs/read, text/grep, todo/manage, wasi/echo, http/openapi stub)
+- ✅ 6 built-in skills (fs/ls, fs/read, text/grep, todo/manage, wasi/echo,
+  http/openapi stub)
 - ✅ Deterministic caching with 24h TTL
 - ✅ SQLite-backed persistence
 - ✅ ~70% test coverage with strict CI/CD
@@ -296,7 +311,7 @@ JSON Envelope Output
   - Pagination (Link headers, cursor, offset/limit)
   - Retry logic (exponential backoff)
 
-See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md) for detailed timeline.
+See [docs/roadmap.md](docs/roadmap.md) for detailed timeline.
 
 ---
 
@@ -304,24 +319,32 @@ See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md) for detailed timeline.
 
 ### Core Specifications
 
-- **[Protocol v1](docs/spec/protocol_v1.md)** — Canonical wire contract (envelope, commands, errors, artifactization)
-- **[Core Profile v1](docs/spec/core_profile_v1.md)** — Complete agentctl specification
-- **[OpenAPI Skill](docs/spec/openapi_skill.md)** — Universal REST API client (implementation in progress)
-- **[Plugin Protocol v1](docs/spec/plugin_protocol.md)** — Extensibility via auth/pagination plugins
-- **[Agent Profile v1](docs/spec/agent_profile_v1.md)** — Multi-agent orchestration (optional, v1.1+)
+- **[Protocol v1](docs/spec/protocol_v1.md)** — Canonical wire contract
+  (envelope, commands, errors, artifactization)
+- **[Core Profile v1](docs/spec/core_profile_v1.md)** — Complete agentctl
+  specification
+- **[OpenAPI Skill](docs/spec/openapi_skill.md)** — Universal REST API client
+  (implementation in progress)
+- **[Plugin Protocol v1](docs/spec/plugin_protocol.md)** — Extensibility via
+  auth/pagination plugins
+- **[Agent Profile v1](docs/spec/agent_profile_v1.md)** — Multi-agent
+  orchestration (optional, v1.1+)
 
 ### Implementation Guides
 
-- **[Protocol v1 Implementation](docs/guides/protocol_v1_implementation.md)** — Build-out plan, code organization, acceptance criteria
-- **[Agent Loop Guide](docs/guides/agent_loop.md)** — Using agentctl as LLM agent substrate
-- **[ROADMAP_TO_V1.md](ROADMAP_TO_V1.md)** — High-level roadmap and timeline
-- **[IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md)** — Prioritized task breakdown
-- **[Refactoring Specs](docs/refactoring/README.md)** — Detailed implementation specs (SPEC-001 through SPEC-019)
+- **[Protocol v1 Implementation](docs/guides/protocol_v1_implementation.md)** —
+  Build-out plan, code organization, acceptance criteria
+- **[Agent Loop Guide](docs/guides/agent_loop.md)** — Using agentctl as LLM
+  agent substrate
+- **[docs/roadmap.md](docs/roadmap.md)** — High-level roadmap and timeline
+- **[Refactoring Specs](docs/refactoring/README.md)** — Detailed implementation
+  specs (SPEC-001 through SPEC-019)
 - **[AGENTS.md](AGENTS.md)** — Guide for AI coding assistants
 
 ### Examples
 
-- **[Minimum Workflow Skills](docs/examples/minimum_workflow_skills.md)** — Essential skills guide
+- **[Minimum Workflow Skills](docs/examples/minimum_workflow_skills.md)** —
+  Essential skills guide
 - **[Skills Chain](docs/examples/skills_chain.md)** — Composing skills together
 
 ---
@@ -403,7 +426,7 @@ We welcome contributions! Here's how to get started:
 
 ### Quick Contribution Path
 
-1. **Pick a task** from [IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md)
+1. **Pick a task** from [docs/roadmap.md](docs/roadmap.md)
 2. **Read the spec** in [docs/refactoring/](docs/refactoring/)
 3. **Create a branch**: `codex/<feature-name>` or `<username>/<feature-name>`
 4. **Implement** following the spec's step-by-step plan
@@ -412,18 +435,20 @@ We welcome contributions! Here's how to get started:
 
 ### High-Impact Areas (Help Wanted!)
 
-| Area | Specs | Impact | Effort |
-|------|-------|--------|--------|
-| **OpenAPI Implementation** | SPEC-012-016 | 🔥 Critical | 55h |
-| **Security Hardening** | SPEC-011 | 🔒 High | 5.5h |
-| **Golden Test Fixtures** | SPEC-018 | ✅ Medium | 8h |
-| **Documentation** | SPEC-019 | 📖 Medium | 5h |
+| Area                       | Specs        | Impact      | Effort |
+| -------------------------- | ------------ | ----------- | ------ |
+| **OpenAPI Implementation** | SPEC-012-016 | 🔥 Critical | 55h    |
+| **Security Hardening**     | SPEC-011     | 🔒 High     | 5.5h   |
+| **Golden Test Fixtures**   | SPEC-018     | ✅ Medium   | 8h     |
+| **Documentation**          | SPEC-019     | 📖 Medium   | 5h     |
 
-See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md#contributing) for detailed contribution guide.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution
+guide.
 
 ### Development Guidelines
 
-- **Read [AGENTS.md](AGENTS.md)** for AI assistant guidelines (applies to humans too!)
+- **Read [AGENTS.md](AGENTS.md)** for AI assistant guidelines (applies to humans
+  too!)
 - **Follow Go conventions**: gofumpt formatting, golangci-lint rules
 - **Write tests**: Aim for 80%+ coverage on new code
 - **Update docs**: Specs, README, examples as needed
@@ -446,6 +471,7 @@ See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md#contributing) for detailed contribution 
 **Remaining Work**: ~87.5 hours over 11 weeks
 
 #### Critical Path
+
 1. **Complete refactoring** (SPEC-008, SPEC-009) — 9h
 2. **Security hardening** (SPEC-011) — 5.5h
 3. **OpenAPI implementation** (SPEC-012-016) — 55h
@@ -474,7 +500,7 @@ See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md#contributing) for detailed contribution 
 - **Observability**: Prometheus, OpenTelemetry, audit logging
 - **Skill Registry**: Centralized discovery and installation
 
-See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md) for detailed timeline.
+See [docs/roadmap.md](docs/roadmap.md) for detailed timeline.
 
 ---
 
@@ -493,7 +519,8 @@ See [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md) for detailed timeline.
 
 **Do not open public issues for security vulnerabilities.**
 
-Please report security vulnerabilities responsibly by creating a private security advisory on GitHub or contacting the maintainers directly.
+Please report security vulnerabilities responsibly by creating a private
+security advisory on GitHub or contacting the maintainers directly.
 
 ---
 
@@ -520,7 +547,7 @@ agentctl builds on excellent open source projects:
 
 - **Documentation**: [docs/](docs/)
 - **Specifications**: [docs/spec/](docs/spec/)
-- **Roadmap**: [ROADMAP_TO_V1.md](ROADMAP_TO_V1.md)
+- **Roadmap**: [docs/roadmap.md](docs/roadmap.md)
 - **Contributing**: [AGENTS.md](AGENTS.md)
 
 ---
@@ -532,8 +559,8 @@ Ready to dive in?
 1. **Read** [Core Profile v1](docs/spec/core_profile_v1.md) for the vision
 2. **Build** with `make build && make skills-build`
 3. **Try** the examples in [docs/examples/](docs/examples/)
-4. **Contribute** by picking a task from [IMPLEMENTATION_PRIORITY.md](IMPLEMENTATION_PRIORITY.md)
-5. **Explore** the [roadmap to v1.0](ROADMAP_TO_V1.md)
+4. **Contribute** by picking a task from [docs/roadmap.md](docs/roadmap.md)
+5. **Explore** the [roadmap to v1.0](docs/roadmap.md)
 
 ---
 
@@ -543,6 +570,7 @@ Ready to dive in?
 
 Built with ❤️ by the agentctl community
 
-[Documentation](docs/) • [Roadmap](ROADMAP_TO_V1.md) • [Contributing](AGENTS.md) • [Specifications](docs/spec/)
+[Documentation](docs/) • [Roadmap](docs/roadmap.md) • [Contributing](CONTRIBUTING.md)
+• [Specifications](docs/spec/)
 
 </div>
