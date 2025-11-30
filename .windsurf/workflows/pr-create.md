@@ -50,17 +50,13 @@ is auto-blocked by the AUTO-REJECT rules.
 
    - Fix **all** lint/type/test failures before proceeding.
 
-5. **Fill the PR template EXACTLY (do not delete sections)**
+5. **Prepare to fill the PR template EXACTLY**
 
-   - Open `.github/pull_request_template.md`.
-   - Update:
-     - `## Spec` → point to the correct `docs/spec/<YYYY-MM-DD_name>.md`.
-     - `## Phase` → e.g. `Phase 1 of 3 — review gate operations`.
-   - Check every box in the Gold Standard checklist only when it is truly met.
-   - Complete the completeness matrix, rollback plan, and (for bugfixes)
-     the root cause section.
+   - Open `.github/pull_request_template.md` locally as your source of truth.
+   - You will paste/fill this content in the GitHub UI **immediately after**
+     running `gh pr create`.
 
-6. **Create the PR via FILE (never inline)**
+6. **Create the PR via `gh pr create` (body in UI, not CLI)**
 
    Use a phase-prefixed title that matches your implementation plan:
 
@@ -68,9 +64,7 @@ is auto-blocked by the AUTO-REJECT rules.
    gh pr create \
      --base main \
      --head <type>/<feature>/<phase> \
-     --title "feat(<feature>/<phase>): <short summary>" \
-     --body "$(cat .github/PULL_REQUEST_TEMPLATE.md)" \
-     --draft
+     --title "feat(<feature>/<phase>): <short summary>"
    ```
 
    Examples:
@@ -78,11 +72,21 @@ is auto-blocked by the AUTO-REJECT rules.
    - `feat(review-gate/1): todo review gate + CAS artifacts`
    - `fix(openapi/2): handle 429 rate limit envelopes`
 
+   After the PR is created, GitHub will open it in the browser. In the PR
+   description:
+
+   - Ensure the body matches `.github/pull_request_template.md`.
+   - Fill in:
+     - `## Spec` → correct `docs/spec/<YYYY-MM-DD_name>.md`.
+     - `## Phase` → e.g. `Phase 1 of 3 — review gate operations`.
+   - Check every box in the Gold Standard checklist only when it is truly met.
+   - Complete the completeness matrix, rollback plan, and (for bugfixes) the
+     root cause section.
+
 7. **Immediately request human review (never self-merge)**
 
    - Assign at least one human reviewer.
-   - Keep the PR in **draft** until all checklist items are satisfied and
-     local checks are green.
+   - Do not self-merge; wait for CI + review to be green and approved.
 
 ---
 
