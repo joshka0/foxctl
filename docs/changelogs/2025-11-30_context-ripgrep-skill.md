@@ -1,6 +1,6 @@
 # code/context_ripgrep Skill
 
-**Date:** 2024-11-30\
+**Date:** 2025-11-30\
 **Branch:** `codex/context-ripgrep-skill`
 
 ## Summary

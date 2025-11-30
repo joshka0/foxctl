@@ -87,7 +87,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("code/context_ripgrep", "ECONFIG", err)
+		fail("code/context_ripgrep", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -180,8 +180,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	// Prepare preview and artifact
 	preview := prepareBlockPreview(blocks, rc.MaxPreview)
-	truncated := len(blocks) > rc.MaxPreview
-	artifact, err := persistBlocksArtifact(ctx, rc, blocks, truncated)
+	artifact, err := persistBlocksArtifact(ctx, rc, blocks)
 	if err != nil {
 		return err
 	}
@@ -369,7 +368,7 @@ func prepareBlockPreview(blocks []Block, limit int) []BlockPreview {
 	return previews
 }
 
-func persistBlocksArtifact(ctx context.Context, rc *runner.RunnerContext, blocks []Block, truncated bool) (runner.Artifact, error) {
+func persistBlocksArtifact(ctx context.Context, rc *runner.RunnerContext, blocks []Block) (runner.Artifact, error) {
 	// Always persist full blocks to CAS if we have any
 	if len(blocks) == 0 {
 		return runner.Artifact{}, nil
@@ -403,6 +402,9 @@ func relativeTo(base, target string) string {
 }
 
 func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
+	if len(counts) == 0 {
+		return [][2]any{}
+	}
 	type kv struct {
 		File  string
 		Count int
