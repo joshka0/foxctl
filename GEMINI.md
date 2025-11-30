@@ -1,5 +1,9 @@
 # Gemini Agent Context for agentctl
 
+> For the canonical agentctl protocol, profiles, and invariants, see
+> `AGENTS.md`. This file focuses on **Gemini-specific** integration and the MCP
+> bridge skills.
+
 ## Project Overview
 `agentctl` is a CLI tool for building structured, deterministic AI workflows ("Unix pipelines for AI agents").
 It uses "skills" (sandboxed tools) and structured JSON envelopes for communication.

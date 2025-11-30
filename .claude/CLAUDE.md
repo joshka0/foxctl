@@ -1,5 +1,8 @@
 # Claude Code Integration with agentctl
 
+> For the canonical agentctl protocol, profiles, and invariants, see
+> `AGENTS.md`. This file focuses on **Claude-specific** integration details.
+
 This project uses **agentctl** as the unified runtime for Claude Code hooks and
 skills. All automation flows through agentctl's JSON envelope protocol,
 providing:

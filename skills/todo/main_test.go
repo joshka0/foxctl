@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 func TestTodoAddAndList(t *testing.T) {
@@ -82,6 +85,174 @@ func TestTodoRejectsBackticks(t *testing.T) {
 	}
 }
 
+func TestTodoReviewRequest_InProgressTask(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	// Add a task (starts as pending)
+	addData := env.addTask(t, addRequest{Title: "Review me"})
+	id := taskID(t, addData)
+
+	// Set task to in_progress via store
+	env.setTaskStatus(t, id, tasks.StatusInProgress)
+
+	// Request review should succeed
+	data := env.run(t, input{
+		Operation:     "review_request",
+		WorkspaceID:   env.workspaceID,
+		ReviewRequest: &reviewRequestReq{TaskID: id},
+	})
+
+	task := taskFromData(t, data)
+	if task["status"].(string) != tasks.StatusReadyForReview {
+		t.Errorf("expected status %q, got %q", tasks.StatusReadyForReview, task["status"])
+	}
+	if task["last_review_status"] == nil || task["last_review_status"].(string) == "" {
+		t.Error("expected last_review_status to be set")
+	}
+	if task["last_review_id"] == nil || task["last_review_id"].(string) == "" {
+		t.Error("expected last_review_id to be set")
+	}
+}
+
+func TestTodoReviewRequest_PendingTask_Rejected(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	// Add a task (pending by default)
+	addData := env.addTask(t, addRequest{Title: "Pending task"})
+	id := taskID(t, addData)
+
+	// Request review on pending task should fail
+	err := env.expectError(t, input{
+		Operation:     "review_request",
+		ReviewRequest: &reviewRequestReq{TaskID: id},
+	})
+	if err == nil {
+		t.Fatal("expected error for review_request on pending task")
+	}
+	if !strings.Contains(err.Error(), "pending") {
+		t.Errorf("expected error to mention 'pending', got: %v", err)
+	}
+}
+
+func TestTodoReviewRequest_CompletedTask_Rejected(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	// Add and complete a task
+	addData := env.addTask(t, addRequest{Title: "Completed task"})
+	id := taskID(t, addData)
+	env.completeTask(t, completeRequest{ID: id})
+
+	// Request review on completed task should fail
+	err := env.expectError(t, input{
+		Operation:     "review_request",
+		ReviewRequest: &reviewRequestReq{TaskID: id},
+	})
+	if err == nil {
+		t.Fatal("expected error for review_request on completed task")
+	}
+	if !strings.Contains(err.Error(), "completed") {
+		t.Errorf("expected error to mention 'completed', got: %v", err)
+	}
+}
+
+func TestTodoReviewStatus_ReturnsFields(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	// Add a task and set it to in_progress
+	addData := env.addTask(t, addRequest{Title: "Status check"})
+	id := taskID(t, addData)
+	env.setTaskStatus(t, id, tasks.StatusInProgress)
+
+	// Request review to populate review fields
+	env.run(t, input{
+		Operation:     "review_request",
+		WorkspaceID:   env.workspaceID,
+		ReviewRequest: &reviewRequestReq{TaskID: id},
+	})
+
+	// Get review status
+	data := env.run(t, input{
+		Operation:    "review_status",
+		WorkspaceID:  env.workspaceID,
+		ReviewStatus: &reviewStatusReq{TaskID: id},
+	})
+
+	if data["task_id"].(string) != id {
+		t.Errorf("expected task_id %q, got %q", id, data["task_id"])
+	}
+	if data["last_review_status"].(string) != tasks.ReviewStatusPending {
+		t.Errorf("expected last_review_status %q, got %q", tasks.ReviewStatusPending, data["last_review_status"])
+	}
+	if data["last_review_id"].(string) == "" {
+		t.Error("expected last_review_id to be set")
+	}
+	if data["last_review_at"].(string) == "" {
+		t.Error("expected last_review_at to be set")
+	}
+}
+
+func TestTodoComplete_WithReviewGate_AllowsReviewedTask(t *testing.T) {
+	env := newTodoTestEnv(t)
+	t.Setenv("AGENTCTL_TODO_REVIEW_GATE", "on")
+
+	addData := env.addTask(t, addRequest{Title: "Gate ok"})
+	id := taskID(t, addData)
+
+	env.setTaskStatus(t, id, tasks.StatusReadyForReview)
+	env.setTaskReview(t, id, tasks.ReviewStatusOK, "review-1")
+
+	data := env.completeTask(t, completeRequest{ID: id})
+	task := taskFromData(t, data)
+	if task["status"].(string) != statusDone {
+		t.Fatalf("expected status %q, got %q", statusDone, task["status"])
+	}
+}
+
+func TestTodoComplete_WithReviewGate_RejectsWithoutOkReview(t *testing.T) {
+	env := newTodoTestEnv(t)
+	t.Setenv("AGENTCTL_TODO_REVIEW_GATE", "on")
+
+	addData := env.addTask(t, addRequest{Title: "No review"})
+	id := taskID(t, addData)
+
+	env.setTaskStatus(t, id, tasks.StatusReadyForReview)
+
+	err := env.expectError(t, input{
+		Operation:   "complete",
+		Complete:    &completeRequest{ID: id},
+		WorkspaceID: env.workspaceID,
+	})
+	if err == nil {
+		t.Fatal("expected error for complete without ok review")
+	}
+	if !strings.Contains(err.Error(), "requires an 'ok' review") {
+		t.Fatalf("expected error to mention ok review, got %v", err)
+	}
+}
+
+func TestTodoComplete_WithReviewGate_RejectsWhenNotReadyForReview(t *testing.T) {
+	env := newTodoTestEnv(t)
+	t.Setenv("AGENTCTL_TODO_REVIEW_GATE", "on")
+
+	addData := env.addTask(t, addRequest{Title: "Wrong status"})
+	id := taskID(t, addData)
+
+	env.setTaskStatus(t, id, tasks.StatusInProgress)
+	env.setTaskReview(t, id, tasks.ReviewStatusOK, "review-2")
+
+	err := env.expectError(t, input{
+		Operation:   "complete",
+		Complete:    &completeRequest{ID: id},
+		WorkspaceID: env.workspaceID,
+	})
+	if err == nil {
+		t.Fatal("expected error for complete when not ready_for_review")
+	}
+	if !strings.Contains(err.Error(), "must be ready_for_review") {
+		t.Fatalf("expected error to mention ready_for_review, got %v", err)
+	}
+}
+
 type todoTestEnv struct {
 	ctx         context.Context
 	workspaceID string
@@ -115,6 +286,48 @@ func (env *todoTestEnv) addTask(t *testing.T, req addRequest) map[string]any {
 func (env *todoTestEnv) completeTask(t *testing.T, req completeRequest) map[string]any {
 	t.Helper()
 	return env.run(t, input{Operation: "complete", WorkspaceID: env.workspaceID, Complete: &req})
+}
+
+// setTaskStatus directly updates a task's status via the store.
+// This is a test helper to set up specific task states for testing.
+func (env *todoTestEnv) setTaskStatus(t *testing.T, taskID, status string) {
+	t.Helper()
+	store, err := tasks.Open(env.ctx, env.rc.Config.Storage.Root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	task, err := store.Get(env.ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.Status = status
+	if _, err := store.Update(env.ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+}
+
+// setTaskReview updates the review fields for a task via the store.
+func (env *todoTestEnv) setTaskReview(t *testing.T, taskID, reviewStatus, reviewID string) {
+	t.Helper()
+	store, err := tasks.Open(env.ctx, env.rc.Config.Storage.Root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	task, err := store.Get(env.ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	now := time.Now().UTC()
+	task.LastReviewStatus = reviewStatus
+	task.LastReviewID = reviewID
+	task.LastReviewAt = &now
+	if _, err := store.Update(env.ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
 }
 
 func (env *todoTestEnv) listTasks(t *testing.T) []map[string]any {
