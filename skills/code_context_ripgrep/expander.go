@@ -533,10 +533,11 @@ func (e *Expander) findBraceEnd(lines []string, startLine int) int {
 				continue
 			}
 
-			if ch == '{' {
+			switch ch {
+			case '{':
 				depth++
 				foundOpen = true
-			} else if ch == '}' {
+			case '}':
 				depth--
 				if foundOpen && depth == 0 {
 					return i
@@ -587,12 +588,13 @@ func (e *Expander) findIndentEnd(lines []string, startLine int, baseIndent int) 
 func getIndentLevel(line string) int {
 	count := 0
 	for _, ch := range line {
-		if ch == ' ' {
+		switch ch {
+		case ' ':
 			count++
-		} else if ch == '\t' {
+		case '\t':
 			count += 4 // Treat tabs as 4 spaces
-		} else {
-			break
+		default:
+			return count
 		}
 	}
 	return count
