@@ -68,6 +68,37 @@ func WriteOK(out io.Writer, command string, data any) error {
 	return protocol.WriteOK(out, command, data, protocol.WithSource("run"))
 }
 
+// WriteNotFound renders an ENOTFOUND error envelope for the given name and workspace.
+func WriteNotFound(out io.Writer, command, name, workspace string) error {
+	data := map[string]any{
+		"name":      name,
+		"workspace": workspace,
+		"hint":      fmt.Sprintf("No memory named %q exists in workspace %q. Use 'agentctl memory list' to see available entries.", name, workspace),
+	}
+	env := protocol.Error(
+		command,
+		protocol.ErrorCodeENotFound,
+		fmt.Sprintf("memory %q not found", name),
+		data,
+		protocol.WithWorkspace(workspace),
+	)
+	return protocol.Write(out, env)
+}
+
+// WriteArgError renders an EARG error envelope for invalid arguments.
+func WriteArgError(out io.Writer, command, message, hint string) error {
+	data := map[string]any{
+		"hint": hint,
+	}
+	env := protocol.Error(
+		command,
+		protocol.ErrorCodeEARG,
+		message,
+		data,
+	)
+	return protocol.Write(out, env)
+}
+
 // WriteEnvelope writes a serialized JSON envelope to the output, ensuring it is newline terminated.
 func WriteEnvelope(out io.Writer, data []byte) error {
 	if len(data) == 0 {

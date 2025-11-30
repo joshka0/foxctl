@@ -591,18 +591,100 @@ GC. Integrity MUST be verified on `cas get`.
 
 ## 12. Memory
 
-### 12.1 Auto‑cache
+Memory provides persistent storage for skill results and contextual data, scoped
+by workspace.
 
-`memory recent` queries within TTL (24h default).
+### 12.1 Named Memory Entry
 
-### 12.2 Named memory
+| Field           | Type        | Description                                     |
+| --------------- | ----------- | ----------------------------------------------- |
+| `id`            | `string`    | UUID primary key                                |
+| `name`          | `string`    | User key; unique per workspace                  |
+| `type`          | `string`    | E.g. `result`, `plan`, `spec`; default `result` |
+| `workspace`     | `string`    | Normalized workspace path                       |
+| `summary`       | `string`    | Short human-oriented summary                    |
+| `result`        | `bytes`     | Full JSON envelope                              |
+| `digests`       | `[]string`  | CAS digests referenced by result                |
+| `created_at`    | `timestamp` | Immutable                                       |
+| `updated_at`    | `timestamp` | Updated on write                                |
+| `last_accessed` | `timestamp` | Updated on read                                 |
+| `access_count`  | `int`       | Incremented on read                             |
 
-`memory save <job_id> --as=<name>` persists; uniqueness is `(name, workspace)`.
+**Invariants:**
 
-### 12.3 Workspace detection & ranking
+- `(name, workspace)` MUST be unique.
+- Named memories have **no TTL**; persistent until deleted.
+- Digests MUST be pinned on save, unpinned on delete.
 
-Auto‑detect workspace from `.agentctl/`, `.git/`, or project files; or override
-with `--workspace`. Ranking score = `0.6 * recency + 0.4 * log1p(access_count)`.
+### 12.2 Creation
+
+**Via `agentctl run --remember`:**
+
+```bash
+agentctl run skill/name --input '{}' \
+  --remember my-result \
+  --remember-type result \
+  --remember-summary "Brief description"
+```
+
+- Saves final result envelope regardless of status.
+- If `--remember-summary` omitted, auto-generates from envelope.
+- Memory failures are best-effort; run still succeeds.
+
+**Via CLI:**
+
+```bash
+# From job result
+agentctl memory save <job_id> --as=<name>
+
+# From envelope
+agentctl memory put --name=<name> --data='{"version":1,...}'
+```
+
+### 12.3 Retrieval
+
+```bash
+# Get specific memory (writes original envelope to stdout)
+agentctl memory get <name> --workspace=/path
+
+# List all memories in workspace
+agentctl memory list --workspace=/path --limit=20
+
+# Search by name/summary
+agentctl memory search --query="term" --workspace=/path
+```
+
+**On not found:** Emit `ENOTFOUND` error envelope with hint.
+
+### 12.4 Workspace Detection & Ranking
+
+**Detection priority:**
+
+1. `--workspace` flag if provided
+2. Auto-detect from `.agentctl/`, `.git/`, or project files
+3. Current working directory
+
+**Relevance ranking:**
+
+```
+score = 0.6 * recency + 0.4 * log1p(access_count)
+```
+
+```bash
+agentctl memory relevant --workspace=/path --limit=10
+```
+
+### 12.5 Mutation
+
+```bash
+# Update metadata
+agentctl memory update <name> --summary="New summary" --type=plan
+
+# Delete
+agentctl memory delete <name> --workspace=/path
+```
+
+**On not found:** Emit `ENOTFOUND` error envelope.
 
 ---
 
