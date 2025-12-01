@@ -511,3 +511,384 @@ func containsStr(s, substr string) bool {
 	}
 	return false
 }
+
+// =============================================================================
+// P3.S4: Job Execution Tests
+// =============================================================================
+
+func TestRunInitFilesJob_SingleFile(t *testing.T) {
+	cfg := Config{Enabled: true}
+	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+
+	// Create test file
+	createTestFile(t, workspaceDir, "main.go", "package main\n\nfunc main() {}\n")
+
+	args := JobArgs{
+		WorkspaceID: "ws-init",
+		Files: []JobFileInput{
+			{Path: "main.go"},
+		},
+		Reason: ReasonInitialIndex,
+		TaskID: "task-init-1",
+	}
+
+	result, err := idx.RunInitFilesJob(context.Background(), args)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob failed: %v", err)
+	}
+
+	if result.Summary.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed, got %d", result.Summary.FilesIndexed)
+	}
+	if result.Summary.ChunksIndexed != 0 {
+		t.Errorf("expected 0 chunks for small file, got %d", result.Summary.ChunksIndexed)
+	}
+	if len(result.Failures) != 0 {
+		t.Errorf("expected no failures, got %d", len(result.Failures))
+	}
+
+	// Verify stored entry
+	entryName := FileEmbeddingName("ws-init", "main.go")
+	entry, err := store.Get(context.Background(), entryName, "ws-init")
+	if err != nil {
+		t.Fatalf("failed to get stored entry: %v", err)
+	}
+
+	var fileResult FileEmbeddingResult
+	if err := json.Unmarshal(entry.Result, &fileResult); err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	if fileResult.Path != "main.go" {
+		t.Errorf("expected path main.go, got %s", fileResult.Path)
+	}
+	if fileResult.Language != "go" {
+		t.Errorf("expected language go, got %s", fileResult.Language)
+	}
+	if fileResult.Source == nil {
+		t.Error("expected source to be set")
+	} else if fileResult.Source.TaskID != "task-init-1" {
+		t.Errorf("expected task_id task-init-1, got %s", fileResult.Source.TaskID)
+	}
+}
+
+func TestRunInitFilesJob_ChunkedFile(t *testing.T) {
+	cfg := Config{
+		Enabled:           true,
+		ChunkBytes:        50,
+		ChunkOverlapBytes: 10,
+		ProviderModel:     "test-model",
+	}
+	idx, _, workspaceDir := setupTestIndexer(t, cfg)
+
+	// Create large file (200 bytes)
+	content := make([]byte, 200)
+	for i := range content {
+		content[i] = byte('a' + (i % 26))
+	}
+	createTestFile(t, workspaceDir, "large.txt", string(content))
+
+	args := JobArgs{
+		WorkspaceID: "ws-chunk",
+		Files: []JobFileInput{
+			{Path: "large.txt"},
+		},
+		Reason: ReasonInitialIndex,
+	}
+
+	result, err := idx.RunInitFilesJob(context.Background(), args)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob failed: %v", err)
+	}
+
+	if result.Summary.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed, got %d", result.Summary.FilesIndexed)
+	}
+	if result.Summary.ChunksIndexed == 0 {
+		t.Error("expected chunks for large file")
+	}
+}
+
+func TestRunUpdateFilesJob_DeletedFile(t *testing.T) {
+	cfg := Config{Enabled: true}
+	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+
+	// First, create and index a file
+	createTestFile(t, workspaceDir, "todelete.go", "package main")
+
+	initArgs := JobArgs{
+		WorkspaceID: "ws-del",
+		Files: []JobFileInput{
+			{Path: "todelete.go"},
+		},
+		Reason: ReasonInitialIndex,
+	}
+
+	_, err := idx.RunInitFilesJob(context.Background(), initArgs)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob failed: %v", err)
+	}
+
+	// Verify it exists
+	entryName := FileEmbeddingName("ws-del", "todelete.go")
+	_, err = store.Get(context.Background(), entryName, "ws-del")
+	if err != nil {
+		t.Fatalf("entry should exist after init: %v", err)
+	}
+
+	// Now delete it via update job
+	updateArgs := JobArgs{
+		WorkspaceID: "ws-del",
+		Files: []JobFileInput{
+			{Path: "todelete.go", ChangeKind: ChangeKindDeleted},
+		},
+		Reason: ReasonPostReview,
+	}
+
+	result, err := idx.RunUpdateFilesJob(context.Background(), updateArgs)
+	if err != nil {
+		t.Fatalf("RunUpdateFilesJob failed: %v", err)
+	}
+
+	if result.Summary.FilesIndexed != 1 {
+		t.Errorf("expected 1 file processed, got %d", result.Summary.FilesIndexed)
+	}
+
+	// Verify it no longer exists
+	_, err = store.Get(context.Background(), entryName, "ws-del")
+	if err == nil {
+		t.Error("expected entry to be deleted")
+	}
+}
+
+func TestRunUpdateFilesJob_ModifiedFile(t *testing.T) {
+	cfg := Config{Enabled: true}
+	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+
+	// Create and index initial file
+	createTestFile(t, workspaceDir, "mod.go", "package main\n\nfunc old() {}\n")
+
+	initArgs := JobArgs{
+		WorkspaceID: "ws-mod",
+		Files: []JobFileInput{
+			{Path: "mod.go"},
+		},
+		Reason: ReasonInitialIndex,
+	}
+
+	_, err := idx.RunInitFilesJob(context.Background(), initArgs)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob failed: %v", err)
+	}
+
+	// Get initial digest
+	entryName := FileEmbeddingName("ws-mod", "mod.go")
+	entry1, err := store.Get(context.Background(), entryName, "ws-mod")
+	if err != nil {
+		t.Fatalf("failed to get initial entry: %v", err)
+	}
+	if len(entry1.Result) == 0 {
+		t.Fatalf("initial entry has empty result")
+	}
+	var result1 FileEmbeddingResult
+	if err := json.Unmarshal(entry1.Result, &result1); err != nil {
+		t.Fatalf("failed to unmarshal initial result: %v", err)
+	}
+	initialDigest := result1.Digest
+
+	// Modify the file
+	createTestFile(t, workspaceDir, "mod.go", "package main\n\nfunc new() {}\n")
+
+	// Update via job
+	updateArgs := JobArgs{
+		WorkspaceID: "ws-mod",
+		Files: []JobFileInput{
+			{Path: "mod.go", ChangeKind: ChangeKindModified},
+		},
+		Reason: ReasonPostReview,
+	}
+
+	result, err := idx.RunUpdateFilesJob(context.Background(), updateArgs)
+	if err != nil {
+		t.Fatalf("RunUpdateFilesJob failed: %v", err)
+	}
+
+	if result.Summary.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed, got %d", result.Summary.FilesIndexed)
+	}
+
+	// Verify digest changed
+	entry2, err := store.Get(context.Background(), entryName, "ws-mod")
+	if err != nil {
+		t.Fatalf("failed to get updated entry: %v", err)
+	}
+	if len(entry2.Result) == 0 {
+		t.Fatalf("updated entry has empty result")
+	}
+	var result2 FileEmbeddingResult
+	if err := json.Unmarshal(entry2.Result, &result2); err != nil {
+		t.Fatalf("failed to unmarshal updated result: %v", err)
+	}
+
+	if result2.Digest == initialDigest {
+		t.Error("expected digest to change after modification")
+	}
+}
+
+func TestRunInitFilesJob_FileNotFound(t *testing.T) {
+	cfg := Config{Enabled: true}
+	idx, _, _ := setupTestIndexer(t, cfg)
+
+	args := JobArgs{
+		WorkspaceID: "ws-notfound",
+		Files: []JobFileInput{
+			{Path: "nonexistent.go"},
+		},
+		Reason: ReasonInitialIndex,
+	}
+
+	result, err := idx.RunInitFilesJob(context.Background(), args)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob should not return error: %v", err)
+	}
+
+	if result.Summary.FilesIndexed != 0 {
+		t.Errorf("expected 0 files indexed, got %d", result.Summary.FilesIndexed)
+	}
+	if len(result.Failures) != 1 {
+		t.Fatalf("expected 1 failure, got %d", len(result.Failures))
+	}
+	if result.Failures[0].File.Path != "nonexistent.go" {
+		t.Errorf("expected failure for nonexistent.go, got %s", result.Failures[0].File.Path)
+	}
+}
+
+func TestRunInitFilesJob_ValidationError(t *testing.T) {
+	cfg := Config{Enabled: true}
+	idx, _, _ := setupTestIndexer(t, cfg)
+
+	// Empty workspace ID
+	args := JobArgs{
+		WorkspaceID: "",
+		Files: []JobFileInput{
+			{Path: "test.go"},
+		},
+	}
+
+	_, err := idx.RunInitFilesJob(context.Background(), args)
+	if err == nil {
+		t.Error("expected validation error for empty workspace_id")
+	}
+}
+
+func TestRunInitFilesJob_MultipleFiles(t *testing.T) {
+	cfg := Config{Enabled: true}
+	idx, store, workspaceDir := setupTestIndexer(t, cfg)
+
+	// Create multiple files
+	createTestFile(t, workspaceDir, "a.go", "package a")
+	createTestFile(t, workspaceDir, "b.py", "def b(): pass")
+	createTestFile(t, workspaceDir, "c.rs", "fn c() {}")
+
+	args := JobArgs{
+		WorkspaceID: "ws-multi",
+		Files: []JobFileInput{
+			{Path: "a.go"},
+			{Path: "b.py"},
+			{Path: "c.rs"},
+		},
+		Reason: ReasonManual,
+	}
+
+	result, err := idx.RunInitFilesJob(context.Background(), args)
+	if err != nil {
+		t.Fatalf("RunInitFilesJob failed: %v", err)
+	}
+
+	if result.Summary.FilesIndexed != 3 {
+		t.Errorf("expected 3 files indexed, got %d", result.Summary.FilesIndexed)
+	}
+
+	// Verify each file was stored with correct language
+	cases := []struct {
+		path     string
+		language string
+	}{
+		{"a.go", "go"},
+		{"b.py", "python"},
+		{"c.rs", "rust"},
+	}
+
+	for _, tc := range cases {
+		entryName := FileEmbeddingName("ws-multi", tc.path)
+		entry, err := store.Get(context.Background(), entryName, "ws-multi")
+		if err != nil {
+			t.Errorf("failed to get entry for %s: %v", tc.path, err)
+			continue
+		}
+
+		var fileResult FileEmbeddingResult
+		if err := json.Unmarshal(entry.Result, &fileResult); err != nil {
+			t.Errorf("failed to unmarshal result for %s: %v", tc.path, err)
+			continue
+		}
+
+		if fileResult.Language != tc.language {
+			t.Errorf("for %s: expected language %s, got %s", tc.path, tc.language, fileResult.Language)
+		}
+	}
+}
+
+func TestDetectLanguage(t *testing.T) {
+	cases := []struct {
+		path     string
+		expected string
+	}{
+		{"main.go", "go"},
+		{"app.py", "python"},
+		{"index.js", "javascript"},
+		{"component.ts", "typescript"},
+		{"lib.rs", "rust"},
+		{"App.java", "java"},
+		{"main.c", "c"},
+		{"main.cpp", "cpp"},
+		{"app.rb", "ruby"},
+		{"README.md", "markdown"},
+		{"config.json", "json"},
+		{"config.yaml", "yaml"},
+		{"config.yml", "yaml"},
+		{"Cargo.toml", "toml"},
+		{"script.sh", "shell"},
+		{"unknown.xyz", "text"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			got := detectLanguage(tc.path)
+			if got != tc.expected {
+				t.Errorf("detectLanguage(%q) = %q, want %q", tc.path, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestComputeDigest(t *testing.T) {
+	content := []byte("hello world")
+	digest := computeDigest(content)
+
+	if !containsStr(digest, "sha256:") {
+		t.Errorf("expected digest to start with sha256:, got %s", digest)
+	}
+
+	// Same content should produce same digest
+	digest2 := computeDigest(content)
+	if digest != digest2 {
+		t.Error("same content should produce same digest")
+	}
+
+	// Different content should produce different digest
+	digest3 := computeDigest([]byte("different"))
+	if digest == digest3 {
+		t.Error("different content should produce different digest")
+	}
+}

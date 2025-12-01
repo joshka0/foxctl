@@ -1,0 +1,15 @@
+{
+	"version": 1,
+	"status": "error",
+	"command": "semantic_index.init_files",
+	"data": {},
+	"meta": {
+		"ts": "2025-11-15T12:00:00Z",
+		"source": "cli"
+	},
+	"error": {
+		"code": "PROVIDER_CONFIG_INVALID",
+		"message": "Invalid embedding provider configuration: API key not set",
+		"hint": "Set GEMINI_API_KEY environment variable or configure provider in agentctl config"
+	}
+}

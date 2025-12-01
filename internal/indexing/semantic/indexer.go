@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -379,6 +381,316 @@ func (idx *Indexer) deleteFileEmbedding(ctx context.Context, workspace, path str
 
 // maxReadFileSize is the maximum file size we'll read (10MB).
 const maxReadFileSize = 10 * 1024 * 1024
+
+// =============================================================================
+// Job Execution Logic (P3.S4)
+// =============================================================================
+
+// RunInitFilesJob executes a semantic_index.init_files job in-process.
+// It indexes all provided files, treating them as new additions.
+func (idx *Indexer) RunInitFilesJob(ctx context.Context, args JobArgs) (*JobResult, error) {
+	if err := args.Validate(); err != nil {
+		return nil, fmt.Errorf("validate args: %w", err)
+	}
+
+	return idx.runIndexJob(ctx, args, true)
+}
+
+// RunUpdateFilesJob executes a semantic_index.update_files job in-process.
+// It processes file changes (add, modify, delete) based on ChangeKind.
+func (idx *Indexer) RunUpdateFilesJob(ctx context.Context, args JobArgs) (*JobResult, error) {
+	if err := args.Validate(); err != nil {
+		return nil, fmt.Errorf("validate args: %w", err)
+	}
+
+	return idx.runIndexJob(ctx, args, false)
+}
+
+// runIndexJob is the shared implementation for init_files and update_files.
+// isInit=true treats all files as new (ignores ChangeKind).
+func (idx *Indexer) runIndexJob(ctx context.Context, args JobArgs, isInit bool) (*JobResult, error) {
+	result := &JobResult{
+		Summary: JobSummary{},
+	}
+
+	configHash := idx.config.ChunkingConfigHash()
+
+	for _, file := range args.Files {
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		default:
+		}
+
+		// Handle deleted files (only in update mode)
+		if !isInit && file.ChangeKind == ChangeKindDeleted {
+			if err := idx.deleteFileEmbedding(ctx, args.WorkspaceID, file.Path); err != nil {
+				idx.addJobFailure(result, file, ErrCodeSemanticIndexNotFound, err)
+			} else {
+				result.Summary.FilesIndexed++
+			}
+			continue
+		}
+
+		// Index the file
+		chunksIndexed, err := idx.indexFileForJob(ctx, args, file, configHash)
+		if err != nil {
+			idx.addJobFailure(result, file, idx.classifyError(err), err)
+			continue
+		}
+
+		result.Summary.FilesIndexed++
+		result.Summary.ChunksIndexed += chunksIndexed
+	}
+
+	idx.logger.Info().
+		Str("workspace_id", args.WorkspaceID).
+		Int("files_indexed", result.Summary.FilesIndexed).
+		Int("chunks_indexed", result.Summary.ChunksIndexed).
+		Int("failures", len(result.Failures)).
+		Msg("job completed")
+
+	return result, nil
+}
+
+// indexFileForJob indexes a single file for a job, returning chunk count.
+func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobFileInput, configHash string) (chunksIndexed int, err error) {
+	// Read file content
+	content, err := idx.readFileContent(file.Path)
+	if err != nil {
+		return 0, fmt.Errorf("read file: %w", err)
+	}
+
+	// Determine language (use provided or detect)
+	language := file.Language
+	if language == "" {
+		language = detectLanguage(file.Path)
+	}
+
+	// Compute digest if not provided
+	digest := file.Digest
+	if digest == "" {
+		digest = computeDigest(content)
+	}
+
+	// Determine size
+	sizeBytes := file.SizeBytes
+	if sizeBytes == 0 {
+		sizeBytes = int64(len(content))
+	}
+
+	source := &EmbeddingSource{
+		TaskID:   args.TaskID,
+		ReviewID: args.ReviewID,
+		Actor:    "actor:system:semantic_indexer",
+		Reason:   string(args.Reason),
+	}
+
+	// Check if chunking is needed
+	if idx.config.ChunkBytes > 0 && len(content) > idx.config.ChunkBytes {
+		chunks := idx.splitIntoChunks(content)
+		chunkCount := len(chunks)
+
+		// Phase 1: Generate all embeddings first
+		chunkEmbeddings := make([][]float32, chunkCount)
+		for i, chunk := range chunks {
+			embedding, err := idx.provider.Embed(ctx, string(chunk.Content))
+			if err != nil {
+				return 0, fmt.Errorf("embed chunk %d: %w", i, err)
+			}
+			chunkEmbeddings[i] = embedding
+		}
+
+		// Phase 2: Save file entry (no embedding, just metadata)
+		fileResult := FileEmbeddingResult{
+			Path:               file.Path,
+			Digest:             digest,
+			Language:           language,
+			SizeBytes:          sizeBytes,
+			ChunkCount:         chunkCount,
+			ChunkingConfigHash: configHash,
+			Source:             source,
+		}
+
+		if err := idx.saveFileEntry(ctx, args.WorkspaceID, file.Path, fileResult); err != nil {
+			return 0, err
+		}
+
+		// Phase 3: Save all chunks
+		for i, chunk := range chunks {
+			chunkID := fmt.Sprintf("%d", i)
+			chunkResult := ChunkEmbeddingResult{
+				Path:      file.Path,
+				Digest:    digest,
+				Language:  language,
+				Embedding: chunkEmbeddings[i],
+				Chunk: ChunkInfo{
+					ID:    chunkID,
+					Index: i,
+					Of:    chunkCount,
+					Span: &ChunkSpan{
+						Unit:  "byte",
+						Start: chunk.Start,
+						End:   chunk.End,
+					},
+				},
+				Source: source,
+			}
+
+			if err := idx.saveChunkEntry(ctx, args.WorkspaceID, file.Path, chunkID, configHash, chunkResult); err != nil {
+				// Cleanup on failure
+				_ = idx.deleteFileEmbedding(ctx, args.WorkspaceID, file.Path)
+				return 0, err
+			}
+		}
+
+		return chunkCount, nil
+	}
+
+	// Single file embedding
+	embedding, err := idx.provider.Embed(ctx, string(content))
+	if err != nil {
+		return 0, fmt.Errorf("embed: %w", err)
+	}
+
+	fileResult := FileEmbeddingResult{
+		Path:      file.Path,
+		Digest:    digest,
+		Language:  language,
+		SizeBytes: sizeBytes,
+		Embedding: embedding,
+		Source:    source,
+	}
+
+	if err := idx.saveFileEntry(ctx, args.WorkspaceID, file.Path, fileResult); err != nil {
+		return 0, err
+	}
+
+	return 0, nil
+}
+
+// saveFileEntry saves a file embedding entry to the memory store.
+func (idx *Indexer) saveFileEntry(ctx context.Context, workspace, path string, result FileEmbeddingResult) error {
+	resultBytes, err := MarshalResult(result)
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
+	}
+
+	name := FileEmbeddingName(workspace, path)
+	summary := fmt.Sprintf("Semantic embedding for %s", path)
+	if result.ChunkCount > 0 {
+		summary = fmt.Sprintf("Semantic embedding for %s (%d chunks)", path, result.ChunkCount)
+	}
+
+	entry := storage.NamedEntry{
+		Name:      name,
+		Type:      FileEmbeddingType,
+		Workspace: workspace,
+		Summary:   summary,
+		Result:    resultBytes,
+	}
+
+	if _, err := idx.memoryStore.Save(ctx, entry); err != nil {
+		return fmt.Errorf("save entry: %w", err)
+	}
+
+	return nil
+}
+
+// saveChunkEntry saves a chunk embedding entry to the memory store.
+func (idx *Indexer) saveChunkEntry(ctx context.Context, workspace, path, chunkID, configHash string, result ChunkEmbeddingResult) error {
+	resultBytes, err := MarshalResult(result)
+	if err != nil {
+		return fmt.Errorf("marshal chunk result: %w", err)
+	}
+
+	name := ChunkEmbeddingName(workspace, path, chunkID, configHash)
+	entry := storage.NamedEntry{
+		Name:      name,
+		Type:      FileEmbeddingChunkType,
+		Workspace: workspace,
+		Summary:   fmt.Sprintf("Chunk %d/%d of %s", result.Chunk.Index+1, result.Chunk.Of, path),
+		Result:    resultBytes,
+	}
+
+	if _, err := idx.memoryStore.Save(ctx, entry); err != nil {
+		return fmt.Errorf("save chunk entry: %w", err)
+	}
+
+	return nil
+}
+
+// addJobFailure appends a failure to the job result.
+func (idx *Indexer) addJobFailure(result *JobResult, file JobFileInput, code string, err error) {
+	result.Failures = append(result.Failures, JobFailure{
+		File: JobFailureFile{
+			Path:   file.Path,
+			Digest: file.Digest,
+		},
+		ErrorCode:    code,
+		ErrorMessage: err.Error(),
+	})
+}
+
+// classifyError maps an error to an appropriate error code.
+func (idx *Indexer) classifyError(err error) string {
+	errStr := err.Error()
+
+	if strings.Contains(errStr, "embed") {
+		return ErrCodeEmbeddingProviderFailure
+	}
+	if strings.Contains(errStr, "read file") || strings.Contains(errStr, "not a regular file") {
+		return ErrCodeCASResolveError
+	}
+	if strings.Contains(errStr, "path escapes") || strings.Contains(errStr, "traversal") {
+		return ErrCodeCASResolveError
+	}
+
+	return ErrCodeSemanticIndexNotFound
+}
+
+// detectLanguage attempts to detect the language from file extension.
+func detectLanguage(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".js":
+		return "javascript"
+	case ".ts":
+		return "typescript"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".cc", ".hpp":
+		return "cpp"
+	case ".rb":
+		return "ruby"
+	case ".md":
+		return "markdown"
+	case ".json":
+		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".toml":
+		return "toml"
+	case ".sh", ".bash":
+		return "shell"
+	default:
+		return "text"
+	}
+}
+
+// computeDigest computes a SHA-256 digest of the content.
+func computeDigest(content []byte) string {
+	h := sha256.Sum256(content)
+	return "sha256:" + hex.EncodeToString(h[:])
+}
 
 // readFileContent reads file content from the workspace with path validation and size limits.
 func (idx *Indexer) readFileContent(path string) ([]byte, error) {

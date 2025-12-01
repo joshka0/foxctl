@@ -1,0 +1,20 @@
+{
+	"version": 1,
+	"status": "ok",
+	"command": "semantic_index.init_files",
+	"data": {
+		"summary": {
+			"files_indexed": 3,
+			"chunks_indexed": 0,
+			"files_skipped": 0
+		},
+		"failures": []
+	},
+	"meta": {
+		"ts": "2025-11-15T10:30:00Z",
+		"duration_ms": 1250,
+		"source": "cli",
+		"workspace_id": "ws-example"
+	},
+	"error": {}
+}
