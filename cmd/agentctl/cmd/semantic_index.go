@@ -117,6 +117,17 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, dryRun boo
 	if err != nil {
 		return writeSemanticError(cmd, semantic.ErrCodeCASResolveError, fmt.Sprintf("resolve workspace: %v", err))
 	}
+	info, err := os.Stat(absWorkspace)
+	if err != nil {
+		code := "ENOTFOUND"
+		if os.IsPermission(err) {
+			code = "EIO"
+		}
+		return writeSemanticError(cmd, code, fmt.Sprintf("workspace %q: %v", absWorkspace, err))
+	}
+	if !info.IsDir() {
+		return writeSemanticError(cmd, "EARG", fmt.Sprintf("workspace %q is not a directory", absWorkspace))
+	}
 
 	// Find files matching glob
 	files, err := findFilesMatchingGlob(absWorkspace, glob)
@@ -172,6 +183,17 @@ func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
 		return writeSemanticError(cmd, semantic.ErrCodeCASResolveError, fmt.Sprintf("resolve workspace: %v", err))
+	}
+	info, err := os.Stat(absWorkspace)
+	if err != nil {
+		code := "ENOTFOUND"
+		if os.IsPermission(err) {
+			code = "EIO"
+		}
+		return writeSemanticError(cmd, code, fmt.Sprintf("workspace %q: %v", absWorkspace, err))
+	}
+	if !info.IsDir() {
+		return writeSemanticError(cmd, "EARG", fmt.Sprintf("workspace %q is not a directory", absWorkspace))
 	}
 
 	// Dry run: just list files

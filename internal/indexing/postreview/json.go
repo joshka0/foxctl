@@ -20,7 +20,13 @@ func unmarshalFiles(data string) ([]indexing.FileChange, error) {
 	}
 	var files []indexing.FileChange
 	err := json.Unmarshal([]byte(data), &files)
-	return files, err
+	if err != nil {
+		return nil, err
+	}
+	if files == nil {
+		return []indexing.FileChange{}, nil
+	}
+	return files, nil
 }
 
 func marshalMetadata(meta map[string]any) (string, error) {
@@ -37,5 +43,11 @@ func unmarshalMetadata(data string) (map[string]any, error) {
 	}
 	var meta map[string]any
 	err := json.Unmarshal([]byte(data), &meta)
-	return meta, err
+	if err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		return map[string]any{}, nil
+	}
+	return meta, nil
 }
