@@ -11,9 +11,11 @@ emits high-signal snippets via Protocol v1 envelopes and CAS.
   introducing new wire-level fields.
 
 > **Cross-refs**
+>
 > - Impl plan: `docs/impl_plan/universal_swe_grep_and_agents.md` (Phase 5)
 > - Codemap: `docs/impl_plan/universal_swe_grep_and_agents_codemap.md` (Phase 5)
-> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md` (Phase 5)
+> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md`
+>   (Phase 5)
 > - Specs:
 >   - `docs/spec/code_symbol_index_and_swe_grep.md` (SWE Grep §5)
 >   - `docs/spec/dspy_go_agents.md` (`code.swe_grep` tool)
@@ -44,16 +46,17 @@ output contracts, manifest, and CLI surface.
   - WASI not used (exec only); no changes to WASI rules.
   - Filesystem capabilities limited to workspace via `workdir`.
 - [ ] Add basic docs snippet in `docs/start/` referencing this Phase 5 spec and
-  `code_symbol_index_and_swe_grep.md` §5.
+      `code_symbol_index_and_swe_grep.md` §5.
 
 ### A2. CLI/runner integration
 
 - [ ] Ensure `agentctl run code/swe_grep` works end-to-end:
-  - Discovery via existing skill resolver (`skills_run.go` + `skill_helpers.go`).
+  - Discovery via existing skill resolver (`skills_run.go` +
+    `skill_helpers.go`).
   - Execution via exec runner with `AGENTCTL_WORKSPACE` correctly set.
 - [ ] Decide whether any dedicated CLI aliases (e.g. `agentctl code swe-grep`)
-  are needed for developer UX; if added, they MUST be thin wrappers around the
-  existing `run` path and reuse Protocol v1 envelopes.
+      are needed for developer UX; if added, they MUST be thin wrappers around
+      the existing `run` path and reuse Protocol v1 envelopes.
 
 ---
 
@@ -65,27 +68,28 @@ reusing existing path validation and CAS rules.
 ### B1. Input validation
 
 - [ ] Implement input decoding in `main.go` consistent with
-  `code_symbol_index_and_swe_grep.md` §5.2:
+      `code_symbol_index_and_swe_grep.md` §5.2:
   - Required: `workspace_id`, `question`, `candidates[]`.
   - Each candidate: `path` (required), optional `symbol_id`, optional
     `priority`.
   - Optional `limits`: `max_files`, `max_snippets`, `max_bytes_per_file`.
 - [ ] Add argument validation and error envelopes using existing helpers:
   - On empty or invalid `candidates`, return `E_SWE_GREP_NO_CANDIDATES`.
-  - On malformed inputs, return `EARG` (via `ValidationError` or equivalent)
-    per `core_profile_v1`.
+  - On malformed inputs, return `EARG` (via `ValidationError` or equivalent) per
+    `core_profile_v1`.
 
 ### B2. Path validation and live reads
 
 - [ ] Use `skillslib.RunnerContext` + `policy.PathValidator` for all filesystem
-  access:
+      access:
   - Derive workspace from `AGENTCTL_WORKSPACE` (runner environment).
   - Validate each candidate `path` before opening files.
 - [ ] Map filesystem-related failures to the correct error codes:
-  - Path escapes or blocked by `task_guard` / `file_guard` → `E_GUARD_VIOLATION`.
+  - Path escapes or blocked by `task_guard` / `file_guard` →
+    `E_GUARD_VIOLATION`.
   - File missing after validation → `E_FILE_NOT_FOUND`.
 - [ ] Ensure SWE Grep **always** reads from live workspace files (never from
-  symbol/semantic index storage) to honor the freshness guarantees in §4.5.
+      symbol/semantic index storage) to honor the freshness guarantees in §4.5.
 
 ### B3. Output envelope and CAS behavior
 
@@ -117,6 +121,10 @@ scoring and limits that can be upgraded later without breaking contracts.
     context) to rank and down-select candidate files/symbols.
   - Do not introduce a second, independent full-repo retrieval scorer inside
     `code/swe_grep`; respect upstream ranking and any candidate limits.
+  - When available, upstream retrieval MAY incorporate `code_symbol` embeddings
+    (see `code_symbol_index_and_swe_grep.md` §3.1.2) to rank and filter
+    candidate symbols more precisely. SWE Grep itself remains embedding-
+    agnostic and operates purely on the candidate set it is given.
 - [ ] Use a cheap **LLM-based snippet extractor** per candidate:
   - For each candidate file/symbol, call a small model (or a deterministic stub
     in tests/CI) to decide which spans are relevant to `question`.
@@ -135,10 +143,10 @@ scoring and limits that can be upgraded later without breaking contracts.
   - `max_snippets`: global cap on emitted snippets.
   - `max_bytes_per_file`: cap on bytes read per file.
 - [ ] Add internal defaults for limits if not supplied, documented in the spec
-  or skill README.
+      or skill README.
 - [ ] Ensure the skill remains fast enough for interactive use; document any
-  cases where long-running behavior suggests using jobs or batched calls
-  (without changing wire semantics).
+      cases where long-running behavior suggests using jobs or batched calls
+      (without changing wire semantics).
 
 ---
 
@@ -171,8 +179,8 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
 ### D3. Golden / CAS tests
 
 - [ ] Add golden fixtures for SWE Grep outputs:
-  - Example OK envelope JSON(s) under `test/golden/envelopes/`
-    (e.g. `ok-code_swe_grep-inline.json`, `ok-code_swe_grep-cas.json`).
+  - Example OK envelope JSON(s) under `test/golden/envelopes/` (e.g.
+    `ok-code_swe_grep-inline.json`, `ok-code_swe_grep-cas.json`).
   - Example NDJSON snippets artifact under `test/golden/swe_grep/` (or similar).
 - [ ] Extend `test/golden/golden_test.go` (or a sibling) to validate:
   - Envelopes conform to `core_profile_v1`.
@@ -182,12 +190,12 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
 ### D4. Integration tests (query → candidates → SWE Grep)
 
 - [ ] Add an integration-style test that wires a simple candidate generator to
-  SWE Grep:
+      SWE Grep:
   - Use a small fixture repo.
   - Generate candidates (e.g. via a trivial grep or hard-coded list).
   - Run `code/swe_grep` and assert the end-to-end flow behaves as expected.
 - [ ] Optionally add a test that combines semantic/symbol index candidates with
-  SWE Grep to verify the Phase 3/4 → 5 funnel on fixtures.
+      SWE Grep to verify the Phase 3/4 → 5 funnel on fixtures.
 
 ### D5. Logging and metrics
 
@@ -197,11 +205,11 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
 - [ ] Add metrics hooks (aligned with existing infra) to capture:
   - Counters: `swe_grep_requests_total`, `swe_grep_errors_total`,
     `swe_grep_snippets_total`.
-  - Histograms: `swe_grep_duration_seconds`, distribution of
-    `files_considered` / `snippets_emitted`.
+  - Histograms: `swe_grep_duration_seconds`, distribution of `files_considered`
+    / `snippets_emitted`.
 - [ ] Ensure logs do **not** leak sensitive file contents beyond what is
-  necessary for debugging (snippets themselves travel via normal envelopes and
-  CAS, not logs).
+      necessary for debugging (snippets themselves travel via normal envelopes
+      and CAS, not logs).
 
 ---
 

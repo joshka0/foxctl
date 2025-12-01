@@ -136,7 +136,8 @@ func (idx *Indexer) Index(ctx context.Context, event indexing.PostReviewEvent) (
 	return result, nil
 }
 
-// indexFile indexes a single file's symbols.
+// indexFile indexes a single file's symbols with per-symbol incremental updates.
+// Per spec §4.3: unchanged body_digest means embeddings can be reused.
 func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEvent, file indexing.FileChange, lang string, extractor Extractor) error {
 	// Read file content
 	content, err := idx.readFileContent(file.Path)
@@ -144,10 +145,25 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		return fmt.Errorf("read file: %w", err)
 	}
 
+	// Check large-file thresholds per spec §4.2
+	if idx.config.MaxFileKB > 0 && len(content) > idx.config.MaxFileKB*1024 {
+		idx.logger.Debug().
+			Str("path", file.Path).
+			Int("size_kb", len(content)/1024).
+			Int("max_kb", idx.config.MaxFileKB).
+			Msg("file exceeds size limit, skipping")
+		// Use ErrUnchanged as a generic "skipped" sentinel so the caller can
+		// treat this as skipped (not indexed, not failed).
+		return ErrUnchanged
+	}
+
 	fileDigest := ComputeDigest(content)
 
-	// Check file meta for unchanged files
-	if !idx.fileChanged(ctx, event.WorkspaceID, file.Path, fileDigest) {
+	// Load existing file meta for per-symbol comparison
+	oldMeta := idx.loadFileMeta(ctx, event.WorkspaceID, file.Path)
+
+	// Check file-level freshness first
+	if oldMeta != nil && oldMeta.ContentHash == fileDigest {
 		idx.logger.Debug().Str("path", file.Path).Msg("file unchanged, skipping")
 		return ErrUnchanged
 	}
@@ -158,15 +174,56 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		return fmt.Errorf("extract symbols: %w", err)
 	}
 
+	// Check LOC limit for large files per spec §4.2
+	if idx.config.MaxFileLOC > 0 && len(symbols) == 0 {
+		// Count lines for empty-symbol files to decide if we should skip
+		lineCount := countLines(content)
+		if lineCount > idx.config.MaxFileLOC {
+			idx.logger.Debug().
+				Str("path", file.Path).
+				Int("lines", lineCount).
+				Int("max_loc", idx.config.MaxFileLOC).
+				Msg("file exceeds LOC limit with no extractable symbols, skipping")
+			// Signal skip to the caller via ErrUnchanged sentinel.
+			return ErrUnchanged
+		}
+	}
+
 	if len(symbols) == 0 {
 		idx.logger.Debug().Str("path", file.Path).Msg("no symbols found")
+		// Still update meta to mark file as processed
+		if err := idx.updateFileMetaFull(ctx, event.WorkspaceID, file.Path, fileDigest, 0, nil); err != nil {
+			return fmt.Errorf("update file meta: %w", err)
+		}
 		return nil
 	}
 
-	// Index each symbol
+	// Build map of old symbol digests for per-symbol incremental comparison
+	oldDigests := make(map[string]string)
+	if oldMeta != nil && oldMeta.SymbolDigests != nil {
+		oldDigests = oldMeta.SymbolDigests
+	}
+
+	// Track new symbol digests and IDs
+	newDigests := make(map[string]string)
+	newSymbolIDs := make(map[string]bool)
+
+	var savedCount, skippedCount int
+
+	// Index each symbol with per-symbol incrementality
 	for _, sym := range symbols {
 		sym.FileDigest = fileDigest
 		sym.Language = lang
+
+		newDigests[sym.ID] = sym.BodyDigest
+		newSymbolIDs[sym.ID] = true
+
+		// Per-symbol incremental check per spec §4.3:
+		// If existing symbol has identical body_digest, skip save (reuse embedding)
+		if oldDigest, exists := oldDigests[sym.ID]; exists && oldDigest == sym.BodyDigest {
+			skippedCount++
+			continue
+		}
 
 		// Extract calls for this symbol
 		var calls []string
@@ -176,7 +233,6 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 				Str("symbol", sym.ID).
 				Str("path", file.Path).
 				Msg("failed to extract calls, proceeding without call graph")
-			// Continue with empty calls - symbol indexing should not fail due to call extraction
 		} else {
 			calls = extractedCalls
 		}
@@ -184,19 +240,82 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 		if err := idx.saveSymbol(ctx, event, sym, calls); err != nil {
 			return fmt.Errorf("save symbol %s: %w", sym.Name, err)
 		}
+		savedCount++
 	}
 
-	// Update file meta
-	if err := idx.updateFileMeta(ctx, event.WorkspaceID, file.Path, fileDigest, len(symbols)); err != nil {
+	// Delete symbols that no longer exist in the file per spec §4.3
+	var deletedCount int
+	for oldID := range oldDigests {
+		if !newSymbolIDs[oldID] {
+			// Symbol was removed - delete its entry
+			if err := idx.deleteSymbol(ctx, event.WorkspaceID, file.Path, oldID); err != nil {
+				idx.logger.Warn().
+					Err(err).
+					Str("symbol_id", oldID).
+					Str("path", file.Path).
+					Msg("failed to delete removed symbol")
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	// Update file meta with new symbol digests
+	if err := idx.updateFileMetaFull(ctx, event.WorkspaceID, file.Path, fileDigest, len(symbols), newDigests); err != nil {
 		return fmt.Errorf("update file meta: %w", err)
 	}
 
 	idx.logger.Debug().
 		Str("path", file.Path).
-		Int("symbols", len(symbols)).
+		Int("total", len(symbols)).
+		Int("saved", savedCount).
+		Int("skipped", skippedCount).
+		Int("deleted", deletedCount).
 		Msg("indexed file symbols")
 
 	return nil
+}
+
+// countLines counts the number of lines in content.
+func countLines(content []byte) int {
+	if len(content) == 0 {
+		return 0
+	}
+	count := 1
+	for _, b := range content {
+		if b == '\n' {
+			count++
+		}
+	}
+	return count
+}
+
+// loadFileMeta loads the file meta entry, returning nil if not found.
+func (idx *Indexer) loadFileMeta(ctx context.Context, workspace, filePath string) *FileMeta {
+	name := FileMetaEntryName(workspace, filePath)
+	entry, err := idx.memoryStore.Get(ctx, name, workspace)
+	if err != nil {
+		return nil
+	}
+
+	meta, err := UnmarshalFileMeta(entry.Result)
+	if err != nil {
+		return nil
+	}
+	return meta
+}
+
+// deleteSymbol deletes a single symbol entry.
+func (idx *Indexer) deleteSymbol(ctx context.Context, workspace, filePath, symbolID string) error {
+	// Extract symbol name from ID (format: "file_path:symbol_name")
+	parts := strings.SplitN(symbolID, ":", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid symbol ID format: %s", symbolID)
+	}
+	symbolName := parts[1]
+
+	name := EntryName(workspace, filePath, symbolName)
+	return idx.memoryStore.Delete(ctx, name, workspace)
 }
 
 // saveSymbol saves a symbol to the memory store.
@@ -233,29 +352,14 @@ func (idx *Indexer) saveSymbol(ctx context.Context, event indexing.PostReviewEve
 	return nil
 }
 
-// fileChanged checks if a file has changed since last indexing.
-func (idx *Indexer) fileChanged(ctx context.Context, workspace, filePath, currentDigest string) bool {
-	name := FileMetaEntryName(workspace, filePath)
-	entry, err := idx.memoryStore.Get(ctx, name, workspace)
-	if err != nil {
-		// No previous meta = file is new
-		return true
-	}
-
-	meta, err := UnmarshalFileMeta(entry.Result)
-	if err != nil {
-		return true
-	}
-
-	return meta.ContentHash != currentDigest
-}
-
-// updateFileMeta updates the file meta entry.
-func (idx *Indexer) updateFileMeta(ctx context.Context, workspace, filePath, digest string, symbolCount int) error {
+// updateFileMetaFull updates the file meta entry with full symbol digest tracking.
+// This enables per-symbol incremental updates per spec §4.3.
+func (idx *Indexer) updateFileMetaFull(ctx context.Context, workspace, filePath, digest string, symbolCount int, symbolDigests map[string]string) error {
 	meta := FileMeta{
-		FilePath:    filePath,
-		ContentHash: digest,
-		Count:       symbolCount,
+		FilePath:      filePath,
+		ContentHash:   digest,
+		Count:         symbolCount,
+		SymbolDigests: symbolDigests,
 	}
 
 	metaBytes, err := MarshalResult(meta)
