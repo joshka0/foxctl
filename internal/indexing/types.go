@@ -182,7 +182,7 @@ type PostReviewConfig struct {
 	Indexers []IndexerConfig `yaml:"indexers" json:"indexers"`
 
 	// ConcurrencyPerIndexer limits concurrent jobs per indexer in jobs mode.
-	// Default: 3.
+	// Default: 3. A value of 0 means unlimited concurrency.
 	ConcurrencyPerIndexer int `yaml:"concurrency_per_indexer" json:"concurrency_per_indexer"`
 
 	// Async controls whether indexing runs asynchronously (default: true).
@@ -214,9 +214,9 @@ func (c PostReviewConfig) Validate() error {
 			c.Mode, FanoutModeInline, FanoutModeJobs)
 	}
 
-	// Validate concurrency
+	// Validate concurrency (0 = unlimited, negative is invalid).
 	if c.ConcurrencyPerIndexer < 0 {
-		return fmt.Errorf("indexing.post_review.concurrency_per_indexer: must be >= 0, got %d",
+		return fmt.Errorf("EARG: indexing.post_review.concurrency_per_indexer: must be >= 0 (0 = unlimited), got %d",
 			c.ConcurrencyPerIndexer)
 	}
 

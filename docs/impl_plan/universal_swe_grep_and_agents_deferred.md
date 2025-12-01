@@ -99,6 +99,34 @@ enforcement.
 
 ---
 
+## D4. Post-Review Metrics (Counters/Histograms/Gauges)
+
+**Status:** Deferred (out of Phase 2 scope)
+
+**What:**  
+Implement the metrics described in `docs/spec/post_review_harness.md` §10 for the post-review harness and indexers:
+
+- Counters: `post_review_events_total{indexer}`, `post_review_events_failures_total{reason}`.
+- Histograms: `post_review_index_duration_seconds{indexer}`.
+- Gauges: backlog size per indexer job queue.
+
+**Why deferred:**  
+Phase 2 focuses on the core event model, handler, and fanout infrastructure. Wiring full metrics (including label design, registration, and CI expectations) is additional work better done once the harness and initial indexers are stable.
+
+**When to address:**  
+- After Phase 2 lands and the semantic/symbol indexers are exercised in real workflows.  
+- Either as part of Phase 3 (Semantic File Index observability) or a dedicated observability/metrics milestone.
+
+**Cross-refs:**
+- `docs/spec/post_review_harness.md` §10 (Metrics)
+- `docs/impl_plan/universal_swe_grep_and_agents_specs_phase2_post_review_harness_todo.md` D3
+- `docs/impl_plan/universal_swe_grep_and_agents.md` Phase 2 / Phase 3 overview
+
+**Stub behavior (if any):**  
+Current implementation logs key fields (workspace/task/review IDs, event ID, indexer IDs, mode, file and index counts) but does **not** emit Prometheus metrics. Any dashboards or alerting on post-review behavior must currently be derived from logs only.
+
+---
+
 ## Template for New Entries
 
 ```markdown

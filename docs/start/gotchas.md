@@ -16,6 +16,7 @@ corresponding Gotcha row.
 | Rule ID | Gotcha ID | Short rule                                                     | Detection / enforcement hint                                      | Notes |
 |--------|-----------|-----------------------------------------------------------------|-------------------------------------------------------------------|-------|
 | R1     | G1        | Never treat Go/CGO toolchain crashes as "tests green"         | Look for `runtime/cgo: .* cgo: exit status 2` in local test runs. | If local `make test-race` fails due to toolchain/CGO, either fix the env or clearly document the exception and rely on CI's containerized Go image for race validation. |
+| R2     | G2        | JSON-facing helpers must return empty slices/maps, not nil     | Grep for `return nil, nil` / `return nil` in marshal/unmarshal helpers and JSON output paths; add tests that assert `[]`/`{}` instead of `null`. | See `AGENTS.md` nil-vs-empty guidance; regression fixed in post-review JSON helpers to normalize empty files/metadata. |
 
 ---
 
