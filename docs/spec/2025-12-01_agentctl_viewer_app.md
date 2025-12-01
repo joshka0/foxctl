@@ -48,13 +48,17 @@ The viewer must not change the core envelope contract or mutate jobs/CAS/memory.
 - **Core (agentctl)**  
   - Jobs DB + job dirs.  
   - CAS store.  
-  - Read-model/CLI from Spec A (jobs list/show etc.).
+  - Read-model/CLI from Spec A (jobs list/show/graph etc.).
+
+
+- **Viewer binary**  
+  - Shipped as `agentctl-viewer`, separate from the main `agentctl` CLI.
 
 
 - **Viewer backend (Go library)**  
-  - Wrapper that calls either:
-    - Direct Go APIs (internal/view/jobs), or
-    - Shells out to agentctl jobs ... and parses envelopes (to decouple versions).
+  - Uses direct Go imports for core agentctl state.
+  - May shell out to `agentctl` CLI for external skills that only expose
+    envelopes.
 
 
 - **Viewer TUI (Bubble Tea + Lipgloss)**  
@@ -67,22 +71,45 @@ The viewer must not change the core envelope contract or mutate jobs/CAS/memory.
 ### 2.2 Data Access Strategy
 
 
-Two options (decision required):
+- **Core agentctl state (jobs, CAS, runservice, tasksgraph, overseer)**  
+  - Viewer backend uses direct Go imports:
+    - `internal/view/jobs` (read model from core spec),
+    - `internal/storage/jobs`, `internal/storage/cas`,
+    - `internal/analysis/tasksgraph`, overseer/agent runtime as needed.
 
+- **External skills and extensions**  
+  - Viewer treats envelopes as the contract boundary:
+    - Consumes `result.json` envelopes from jobs.
+    - May shell out to `agentctl` CLI commands that emit envelopes.
+  - Viewer does not import individual skill packages.
 
-- **Option 1: CLI-based (preferred for contract‑safety)**  
-  - Viewer invokes agentctl jobs list/show in-process or via exec.Command.
-  - Pros: strict separation, respects envelope guarantees; viewer follows Core spec.
-  - Cons: more JSON (un)marshalling.
+### 2.3 Viewer Backend Interface
 
+The TUI depends on a narrow Go interface implemented by the viewer
+backend:
 
-- **Option 2: Direct Go imports**  
-  - Viewer imports internal/view/jobs, internal/storage/cas, etc.
-  - Pros: simpler, no subprocess management.
-  - Cons: tighter coupling; any internal change can break viewer.
+```go
+type Service interface {
+    ListJobs(ctx context.Context, f JobFilters) ([]JobSummary, error)
+    GetJobDetail(ctx context.Context, id string, opts DetailOptions) (JobDetail, error)
+    GetJobGraph(ctx context.Context, id string) (JobGraph, error)
+}
+```
 
+`JobSummary`, `JobDetail`, `JobFilters`, and `DetailOptions` come from
+`internal/view/jobs`. `JobGraph` mirrors the `jobs graph` JSON schema:
 
-Spec default: **start with Option 1** and only fall back to Option 2 if performance or ergonomics require it.
+```go
+type JobGraph struct {
+    JobID    string      `json:"job_id"`
+    RootNode string      `json:"root_node_id,omitempty"`
+    Nodes    []GraphNode `json:"nodes"`
+    Edges    []GraphEdge `json:"edges"`
+}
+```
+
+The TUI only depends on this interface and associated types; it does not
+reach directly into storage or CAS packages.
 
 
 ---
@@ -115,10 +142,11 @@ Spec default: **start with Option 1** and only fall back to Option 2 if performa
     - artifacts summary.
 
 
-### 3.3 Task/Agent Graph View (v1 or v1.1)
+### 3.3 Task/Agent Graph View (v1 requirement)
 
 
-- **Data**: future jobs graph output or a dedicated API mapping jobs → tasks/agents.
+- **Data**: `jobs graph` output (as defined in the core spec) or a
+  dedicated API mapping jobs → tasks/agents.
 - **Behavior**:
   - Node selection (up/down/left/right).
   - Node details (type, status, summary).

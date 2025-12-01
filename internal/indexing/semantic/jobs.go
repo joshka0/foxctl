@@ -1,7 +1,6 @@
 // Package semantic implements the semantic file index as a post-review indexer.
 // This file defines job contracts for semantic_index.init_files and
 // semantic_index.update_files jobs per semantic_file_index.md spec §6.
-
 package semantic
 
 import (
@@ -35,6 +34,7 @@ const (
 // FileChangeKind describes what kind of change occurred to a file.
 type FileChangeKind string
 
+// FileChangeKind values.
 const (
 	ChangeKindAdded    FileChangeKind = "added"
 	ChangeKindModified FileChangeKind = "modified"

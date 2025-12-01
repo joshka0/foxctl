@@ -160,9 +160,10 @@ Define **envelope-based** commands that use the read model:
 
    - Error cases: `error.code` like `EJOB_NOT_FOUND`, `EJOB_RESULT_MISSING` etc.
 
-3. (Optional follow‑up) `agentctl jobs graph <job-id>`
+3. `agentctl jobs graph <job-id>`
 
-   - Returns a **task/agent graph view** once spec’d (see Open Questions).
+   - Returns a **task/agent graph view** for the job (nodes + edges + basic metadata).
+   - This command is a prerequisite for the task/agent graph pane in `agentctl-viewer`.
 
 ### 3.3 CAS Preview Rules
 
@@ -171,6 +172,68 @@ Define **envelope-based** commands that use the read model:
   - `size_bytes <= inline_preview_kb * 1024` (reuse or align with `inline_output_kb`).
   - `kind` is text-like (`text/*`, `application/json`, etc.).
 - On digest mismatch, the CLI should emit an **error envelope** with `ECAS_DIGEST_MISMATCH`.
+
+### 3.4 Job Graph Schema (`agentctl jobs graph`)
+
+The `agentctl jobs graph <job-id>` command returns a task/agent graph view
+for a single job. The envelope data shape:
+
+```jsonc
+{
+  "job_id": "01J123…",
+  "root_node_id": "task-1",
+  "nodes": [
+    {
+      "id": "task-1",
+      "kind": "agent",                   // agent|tool|skill|job|other
+      "label": "overseer",
+      "status": "ok",                    // queued|running|ok|error|canceled|unknown
+      "parent_id": null,
+      "depends_on": ["task-2", "task-3"],
+      "summary": "orchestrate repo index",
+      "metrics": {
+        "critical_path_score": 3,
+        "pagerank": 0.12,
+        "in_degree": 1,
+        "out_degree": 2
+      },
+      "timing": {
+        "started_at": "2025-12-01T…Z",
+        "finished_at": "2025-12-01T…Z",
+        "duration_ms": 1532
+      }
+    }
+  ],
+  "edges": [
+    { "from": "task-1", "to": "task-2", "kind": "depends_on" },
+    { "from": "task-1", "to": "task-4", "kind": "spawns" },
+    { "from": "task-4", "to": "task-7", "kind": "calls" }
+  ]
+}
+```
+
+The CLI wraps this in a Core Profile v1 envelope:
+
+```jsonc
+{
+  "version": 1,
+  "status": "ok",
+  "command": "agentctl.jobs.graph",
+  "data": { /* as above */ },
+  "meta": {
+    "ts": "…",
+    "source": "run",
+    "workspace": "…"
+  }
+}
+```
+
+`nodes[].metrics` should reuse values from `tasksgraph.Insights` where
+possible (PageRank, critical path score, in/out-degree).
+
+All JSON-facing helpers in this read model MUST normalize nil slices/maps
+to empty (`[]` / `{}`) so envelopes never emit `null` where an empty
+collection is expected (see Gotcha R2).
 
 ---
 
@@ -204,8 +267,11 @@ flowchart LR
 3. **Phase 3: CAS preview + artifact summaries**
    - Wire CAS metadata into `ArtifactSummary`.
    - Add tests for pinned vs. GC-eligible artifacts.
-4. **Phase 4 (optional): `jobs graph`**
-   - Once task graph mapping is spec’d, add `jobs graph` command using [tasksgraph](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/internal/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph:0:0-0:0).
+4. **Phase 4: `jobs graph` (required for viewer v1)**
+   - Implement `agentctl jobs graph` using the schema above, backed by
+     `tasksgraph` and the overseer/agent runtime.
+   - Add tests that validate the JSON shape and ensure metrics are
+     populated (or explicitly zero-valued) in a stable way.
 
 ---
 
@@ -222,8 +288,10 @@ flowchart LR
 
 1. **Workspace column**  
    - Is the `workspace` file in job dir sufficient, or should it be duplicated into the `jobs` table for easier querying?
-2. **Task/agent graph schema**  
-   - How exactly do we map jobs → tasks → agents? Is `internal/storage/tasks` already complete enough?
+2. **Task/agent graph mapping**  
+   - How exactly do we map jobs → tasks → agents (source of truth: tasks
+     store vs overseer logs vs in-memory structures), and what additional
+     persistence—if any—is required to make `jobs graph` robust?
 3. **Result envelope size**  
    - Do we need a `--no-progress` / `--no-artifacts` flag to keep `jobs show` output small for scripting?
 ```

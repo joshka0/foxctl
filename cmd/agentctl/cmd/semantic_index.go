@@ -127,7 +127,7 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, dryRun boo
 	if len(files) == 0 {
 		return writeSemanticResult(cmd, semantic.JobTypeInitFiles, &semantic.JobResult{
 			Summary: semantic.JobSummary{FilesSkipped: 0},
-		}, absWorkspace, taskID, "", start)
+		}, absWorkspace, start)
 	}
 
 	// Dry run: just list files
@@ -157,7 +157,7 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, dryRun boo
 		return writeSemanticError(cmd, semantic.ErrCodeSemanticIndexNotFound, err.Error())
 	}
 
-	return writeSemanticResult(cmd, semantic.JobTypeInitFiles, result, absWorkspace, taskID, "", start)
+	return writeSemanticResult(cmd, semantic.JobTypeInitFiles, result, absWorkspace, start)
 }
 
 func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted []string, dryRun bool, taskID, reviewID string, chunkBytes, chunkOverlap int, model string) error {
@@ -213,7 +213,7 @@ func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted
 		return writeSemanticError(cmd, semantic.ErrCodeSemanticIndexNotFound, err.Error())
 	}
 
-	return writeSemanticResult(cmd, semantic.JobTypeUpdateFiles, result, absWorkspace, taskID, reviewID, start)
+	return writeSemanticResult(cmd, semantic.JobTypeUpdateFiles, result, absWorkspace, start)
 }
 
 func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, chunkOverlap int, model string) (*semantic.Indexer, func(), error) {
@@ -330,7 +330,7 @@ func findFilesMatchingGlob(root, pattern string) ([]string, error) {
 	return files, nil
 }
 
-func writeSemanticResult(cmd *cobra.Command, command string, result *semantic.JobResult, workspace, taskID, reviewID string, start time.Time) error {
+func writeSemanticResult(cmd *cobra.Command, command string, result *semantic.JobResult, workspace string, start time.Time) error {
 	data := map[string]any{
 		"summary":  result.Summary,
 		"failures": result.Failures,
