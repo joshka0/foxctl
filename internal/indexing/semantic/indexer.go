@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -629,6 +630,7 @@ func (idx *Indexer) addJobFailure(result *JobResult, file JobFileInput, code str
 		},
 		ErrorCode:    code,
 		ErrorMessage: err.Error(),
+		Timestamp:    time.Now().UTC(),
 	})
 }
 

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -275,56 +275,30 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 func findFilesMatchingGlob(root, pattern string) ([]string, error) {
 	var files []string
 
-	// Handle ** patterns by walking the directory
-	if strings.Contains(pattern, "**") {
-		// Extract the extension pattern after **
-		ext := ""
-		if idx := strings.LastIndex(pattern, "*."); idx >= 0 {
-			ext = pattern[idx+1:]
+	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk %s: %w", path, err)
 		}
-
-		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return nil // Skip errors
-			}
-			if info.IsDir() {
-				// Skip hidden directories
-				if strings.HasPrefix(info.Name(), ".") && info.Name() != "." {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			// Check extension match
-			if ext != "" && !strings.HasSuffix(path, ext) {
-				return nil
-			}
-
-			// Get relative path
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return nil
-			}
-
-			files = append(files, rel)
+		if info.IsDir() {
 			return nil
-		})
-		if err != nil {
-			return nil, err
 		}
-	} else {
-		// Simple glob
-		matches, err := filepath.Glob(filepath.Join(root, pattern))
+
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("rel %s: %w", path, err)
 		}
-		for _, m := range matches {
-			rel, err := filepath.Rel(root, m)
-			if err != nil {
-				continue
-			}
+
+		matched, err := doublestar.Match(pattern, filepath.ToSlash(rel))
+		if err != nil {
+			return fmt.Errorf("match pattern %q for %q: %w", pattern, rel, err)
+		}
+		if matched {
 			files = append(files, rel)
 		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
 	}
 
 	return files, nil

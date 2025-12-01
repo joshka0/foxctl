@@ -103,9 +103,8 @@ func (h *PostReviewHandler) Handle(ctx context.Context, event PostReviewEvent) (
 		// ConcurrencyPerIndexer cap. See deferred.md D3.
 		// For now, fall back to async goroutine to unblock callers.
 		if h.config.Async {
-			asyncCtx := context.WithoutCancel(ctx)
 			go func() {
-				result := h.runIndexers(asyncCtx, event, activeIndexers)
+				result := h.runIndexers(ctx, event, activeIndexers)
 				if result.HasFailures() {
 					h.logger.Warn().
 						Str("event_id", event.ID).

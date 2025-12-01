@@ -87,9 +87,10 @@ scheduler with per-namespace concurrency caps (`ConcurrencyPerIndexer`, default
 - Or when indexer load requires fair scheduling across workspaces.
 
 **Stub behavior:**  
-`handler.go` line ~100: jobs mode falls back to `go h.runIndexers(...)` with
-`context.WithoutCancel`. This is fire-and-forget without queue or concurrency
-enforcement.
+`handler.go` line ~100: jobs mode falls back to `go h.runIndexers(ctx, ...)`,
+reusing the parent context. This is still fire-and-forget with respect to job
+queue semantics (no WFQ scheduler, no per-indexer concurrency caps yet), but
+in-flight indexers will observe `ctx.Done()` for cancellation/shutdown.
 
 **Cross-refs:**
 - `docs/spec/post_review_harness.md` §7 (ConcurrencyPerIndexer)
