@@ -217,6 +217,107 @@ func TestPostReviewHandler_WithIndexerHandler(t *testing.T) {
 	}
 }
 
+// TestPostReviewHandler_IntegrationWithFakeIndexer is an integration-style test
+// that wires a fake indexer subscriber and verifies the full flow from
+// ReviewArtifact → PostReviewEvent → Indexer.Index() call.
+func TestPostReviewHandler_IntegrationWithFakeIndexer(t *testing.T) {
+	ctx := context.Background()
+	store, cleanup := openTestEventStore(t)
+	defer cleanup()
+
+	// Create a fake indexer that records received events
+	fakeIndexer := &fakeIndexer{id: "test_semantic"}
+
+	// Create indexer handler with the fake indexer enabled
+	indexerHandler := indexing.NewPostReviewHandler(
+		indexing.PostReviewConfig{
+			Enabled: true,
+			Mode:    indexing.FanoutModeInline,
+			Indexers: []indexing.IndexerConfig{
+				{ID: "test_semantic", Kind: "semantic_file_index", Enabled: true},
+			},
+		},
+		zerolog.Nop(),
+	)
+	if err := indexerHandler.RegisterIndexer(fakeIndexer); err != nil {
+		t.Fatalf("RegisterIndexer error: %v", err)
+	}
+
+	// Create the overseer handler
+	handler := NewPostReviewHandler(PostReviewHandlerConfig{
+		EventStore:     store,
+		IndexerHandler: indexerHandler,
+		Config:         indexing.DefaultPostReviewConfig(),
+		Logger:         zerolog.Nop(),
+	})
+
+	// Simulate a review artifact transitioning to ok
+	artifact := agent.ReviewArtifact{
+		ID:          "review-integration-1",
+		WorkspaceID: "ws-integration",
+		TaskID:      "task-integration",
+		Kind:        "auto",
+		Status:      "ok",
+		CreatedAt:   time.Now().UTC(),
+	}
+
+	files := []indexing.FileChange{
+		{Path: "main.go", Digest: "sha256:aaa", ChangeKind: indexing.ChangeKindModified},
+		{Path: "util.go", Digest: "sha256:bbb", ChangeKind: indexing.ChangeKindAdded},
+	}
+
+	// Handle the approved review
+	result, err := handler.HandleReviewApproved(ctx, artifact, files)
+	if err != nil {
+		t.Fatalf("HandleReviewApproved error: %v", err)
+	}
+
+	// Verify event was produced
+	if result.Event.ID == "" {
+		t.Error("expected event ID to be set")
+	}
+	if result.Event.WorkspaceID != "ws-integration" {
+		t.Errorf("WorkspaceID = %q, want ws-integration", result.Event.WorkspaceID)
+	}
+
+	// Verify fake indexer was called
+	if fakeIndexer.callCount != 1 {
+		t.Errorf("indexer call count = %d, want 1", fakeIndexer.callCount)
+	}
+
+	// Verify the event received by the indexer has the right data
+	receivedEvent := fakeIndexer.lastEvent
+	if receivedEvent.WorkspaceID != "ws-integration" {
+		t.Errorf("received event WorkspaceID = %q, want ws-integration", receivedEvent.WorkspaceID)
+	}
+	if receivedEvent.TaskID != "task-integration" {
+		t.Errorf("received event TaskID = %q, want task-integration", receivedEvent.TaskID)
+	}
+	if receivedEvent.ReviewID != "review-integration-1" {
+		t.Errorf("received event ReviewID = %q, want review-integration-1", receivedEvent.ReviewID)
+	}
+	if len(receivedEvent.Files) != 2 {
+		t.Errorf("received event file count = %d, want 2", len(receivedEvent.Files))
+	}
+}
+
+// fakeIndexer is a test double that records calls for verification.
+type fakeIndexer struct {
+	id        string
+	callCount int
+	lastEvent indexing.PostReviewEvent
+}
+
+func (f *fakeIndexer) ID() string { return f.id }
+
+func (f *fakeIndexer) Index(_ context.Context, event indexing.PostReviewEvent) (*indexing.IndexerResult, error) {
+	f.callCount++
+	f.lastEvent = event
+	return &indexing.IndexerResult{
+		FilesIndexed: len(event.Files),
+	}, nil
+}
+
 func openTestEventStore(t *testing.T) (postreview.Store, func()) {
 	t.Helper()
 	ctx := context.Background()

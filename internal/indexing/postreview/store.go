@@ -104,22 +104,10 @@ func (s *sqlStore) Put(ctx context.Context, event indexing.PostReviewEvent) (ind
 		return event, fmt.Errorf("postreview: marshal metadata: %w", err)
 	}
 
-	// Check for existing event with same (workspace, task, review)
-	existing, err := s.GetByReview(ctx, event.WorkspaceID, event.TaskID, event.ReviewID)
-	if err == nil {
-		// Event exists - check if payloads match (idempotent)
-		if eventsMatch(existing, event) {
-			return existing, nil
-		}
-		return event, ErrDuplicateEvent
-	}
-	if !errors.Is(err, ErrEventNotFound) {
-		return event, fmt.Errorf("postreview: check existing: %w", err)
-	}
-
-	// Insert new event
+	// Use INSERT OR IGNORE to avoid TOCTOU race. If a concurrent Put wins,
+	// this insert is a no-op and we fetch the existing row below.
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO post_review_events (
+INSERT OR IGNORE INTO post_review_events (
     id, workspace_id, task_id, review_id, review_kind, review_status,
     diff_applied_at, source, created_at, sequence, files_json, metadata_json
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -140,7 +128,20 @@ INSERT INTO post_review_events (
 		return event, fmt.Errorf("postreview: insert: %w", err)
 	}
 
-	return event, nil
+	// Fetch the canonical row (ours or the winner's)
+	existing, err := s.GetByReview(ctx, event.WorkspaceID, event.TaskID, event.ReviewID)
+	if err != nil {
+		return event, fmt.Errorf("postreview: fetch after insert: %w", err)
+	}
+
+	// If existing row was inserted by another caller, verify payload matches
+	if existing.ID != event.ID {
+		if !eventsMatch(existing, event) {
+			return event, ErrDuplicateEvent
+		}
+	}
+
+	return existing, nil
 }
 
 func (s *sqlStore) Get(ctx context.Context, id string) (indexing.PostReviewEvent, error) {
@@ -169,7 +170,8 @@ func (s *sqlStore) List(ctx context.Context, workspaceID string, limit int) ([]i
 		_ = rows.Close()
 	}()
 
-	var events []indexing.PostReviewEvent
+	// Initialize to empty slice so JSON serializes as [] not null
+	events := make([]indexing.PostReviewEvent, 0)
 	for rows.Next() {
 		event, err := scanEvent(rows)
 		if err != nil {
@@ -222,10 +224,22 @@ func scanEvent(s scanner) (indexing.PostReviewEvent, error) {
 		return event, fmt.Errorf("postreview: scan: %w", err)
 	}
 
-	event.DiffAppliedAt, _ = time.Parse(time.RFC3339, diffApplied)
-	event.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
-	event.Files, _ = unmarshalFiles(filesJSON)
-	event.Metadata, _ = unmarshalMetadata(metadataJSON)
+	event.DiffAppliedAt, err = time.Parse(time.RFC3339, diffApplied)
+	if err != nil {
+		return event, fmt.Errorf("postreview: parse diff_applied_at %q: %w", diffApplied, err)
+	}
+	event.CreatedAt, err = time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		return event, fmt.Errorf("postreview: parse created_at %q: %w", createdAt, err)
+	}
+	event.Files, err = unmarshalFiles(filesJSON)
+	if err != nil {
+		return event, fmt.Errorf("postreview: unmarshal files_json: %w", err)
+	}
+	event.Metadata, err = unmarshalMetadata(metadataJSON)
+	if err != nil {
+		return event, fmt.Errorf("postreview: unmarshal metadata_json: %w", err)
+	}
 
 	return event, nil
 }

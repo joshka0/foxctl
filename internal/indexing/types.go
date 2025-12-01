@@ -5,6 +5,7 @@ package indexing
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -199,6 +200,47 @@ func DefaultPostReviewConfig() PostReviewConfig {
 		ConcurrencyPerIndexer: 3,
 		Async:                 true,
 	}
+}
+
+// Validate checks that the configuration is valid and returns an error if not.
+// This should be called during startup to catch misconfigurations early.
+func (c PostReviewConfig) Validate() error {
+	// Validate mode
+	switch c.Mode {
+	case FanoutModeInline, FanoutModeJobs, "": // empty defaults to jobs
+		// ok
+	default:
+		return fmt.Errorf("indexing.post_review.mode: invalid value %q, must be %q or %q",
+			c.Mode, FanoutModeInline, FanoutModeJobs)
+	}
+
+	// Validate concurrency
+	if c.ConcurrencyPerIndexer < 0 {
+		return fmt.Errorf("indexing.post_review.concurrency_per_indexer: must be >= 0, got %d",
+			c.ConcurrencyPerIndexer)
+	}
+
+	// Validate indexer configs
+	seen := make(map[string]bool)
+	for i, idx := range c.Indexers {
+		if idx.ID == "" {
+			return fmt.Errorf("indexing.post_review.indexers[%d]: id is required", i)
+		}
+		if seen[idx.ID] {
+			return fmt.Errorf("indexing.post_review.indexers: duplicate id %q", idx.ID)
+		}
+		seen[idx.ID] = true
+	}
+
+	return nil
+}
+
+// EffectiveMode returns the mode to use, defaulting to jobs if empty.
+func (c PostReviewConfig) EffectiveMode() FanoutMode {
+	if c.Mode == "" {
+		return FanoutModeJobs
+	}
+	return c.Mode
 }
 
 // PostReviewConfigFromSettings converts platform config settings to indexing config.

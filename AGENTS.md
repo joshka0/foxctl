@@ -16,10 +16,7 @@ Obey global rules first, then these:
 - **WASI = `network:"none"`** — Core v1 mandates isolation; do not relax.
 - **Large outputs → CAS** — use `data.summary` + `data.artifact` + `meta.cas_digest`.
 - **`--dry-run` required** for any state-changing CLI command.
-<<<<<<< HEAD
-=======
 - **Every production bug or near-miss becomes a Gotchas Graveyard row and a new rule entry in `docs/start/gotchas.md` within 24 hours — no exceptions.**
->>>>>>> 9454134f21553b09485dfda92d9e72ba7dfadc45
 
 ## 🤖 Hello, AI Assistant!
 

@@ -81,26 +81,53 @@ func (h *PostReviewHandler) Handle(ctx context.Context, event PostReviewEvent) (
 		return &PostReviewResult{Skipped: true, Reason: "no_active_indexers"}, nil
 	}
 
+	mode := h.config.EffectiveMode()
+
 	h.logger.Info().
 		Str("workspace_id", event.WorkspaceID).
 		Str("task_id", event.TaskID).
 		Str("review_id", event.ReviewID).
+		Str("mode", string(mode)).
 		Int("file_count", len(event.Files)).
 		Int("indexer_count", len(activeIndexers)).
 		Msg("handling post-review event")
 
-	if h.config.Async {
-		// Dispatch async and return immediately.
-		// Note: We intentionally detach from parent context for async execution.
-		// Async indexers are fire-and-forget; cancellation of the parent context
-		// should not abort background indexing work.
-		asyncCtx := context.WithoutCancel(ctx)
-		go h.runIndexers(asyncCtx, event, activeIndexers)
-		return &PostReviewResult{Async: true}, nil
-	}
+	switch mode {
+	case FanoutModeInline:
+		// Run synchronously in the current goroutine
+		return h.runIndexers(ctx, event, activeIndexers), nil
 
-	// Run synchronously
-	return h.runIndexers(ctx, event, activeIndexers), nil
+	case FanoutModeJobs:
+		// Jobs mode: should enqueue one job per indexer with concurrency cap.
+		// TODO(phase2-c2): Wire to jobs system with WFQ scheduler and
+		// ConcurrencyPerIndexer cap. See deferred.md D3.
+		// For now, fall back to async goroutine to unblock callers.
+		if h.config.Async {
+			asyncCtx := context.WithoutCancel(ctx)
+			go func() {
+				result := h.runIndexers(asyncCtx, event, activeIndexers)
+				if result.HasFailures() {
+					h.logger.Warn().
+						Str("event_id", event.ID).
+						Int("failures", len(result.IndexerResults)).
+						Msg("async indexers completed with failures")
+				} else {
+					h.logger.Info().
+						Str("event_id", event.ID).
+						Int("files_indexed", result.TotalFilesIndexed()).
+						Msg("async indexers completed")
+				}
+			}()
+			return &PostReviewResult{Async: true}, nil
+		}
+		// If Async is false but mode is jobs, run sync as fallback
+		return h.runIndexers(ctx, event, activeIndexers), nil
+
+	default:
+		// Should not happen if Validate() was called, but be defensive
+		h.logger.Warn().Str("mode", string(mode)).Msg("unknown mode, running inline")
+		return h.runIndexers(ctx, event, activeIndexers), nil
+	}
 }
 
 type indexerWithConfig struct {

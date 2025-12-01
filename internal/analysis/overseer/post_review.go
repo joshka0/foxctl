@@ -116,12 +116,15 @@ func (h *PostReviewHandler) HandleReviewApproved(
 		}, err
 	}
 
-	return &PostReviewResult{
+	result := &PostReviewResult{
 		Event:         event,
 		IndexerResult: indexResult,
-		Skipped:       indexResult != nil && indexResult.Skipped,
-		Reason:        indexResult.Reason,
-	}, nil
+	}
+	if indexResult != nil {
+		result.Skipped = indexResult.Skipped
+		result.Reason = indexResult.Reason
+	}
+	return result, nil
 }
 
 // HandleReviewApprovedStub is a convenience method for handling approved

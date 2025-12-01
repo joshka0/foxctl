@@ -107,28 +107,38 @@ Goal: configure which indexers run post-review and how they subscribe to events.
 
 ### C1. Configuration surface
 
-- [ ] Implement configuration for `indexing.post_review` as in
+- [x] Implement configuration for `indexing.post_review` as in
   `semantic_file_index.md` §8.2, including:
   - `enabled` flag (default false; must be true to emit events/jobs).
   - `mode` (`inline` | `jobs`), with **production default = `jobs`**.
   - `indexers[]` entries (at minimum semantic and symbol indexers).
   - `concurrency_per_indexer` (default 3) for jobs mode.
-- [ ] Decide where this configuration lives (e.g. `config.Config`, a dedicated
-  indexing settings struct, or both).
-- [ ] Add validation to reject unknown indexer names or invalid modes with
-  actionable errors.
+  - Implemented in `internal/indexing/types.go` `PostReviewConfig`.
+- [x] Decide where this configuration lives (e.g. `config.Config`, a dedicated
+  indexing settings struct, or both):
+  - Lives in `indexing.PostReviewConfig` (dedicated struct).
+  - `PostReviewConfigFromSettings()` converts from platform config.
+- [x] Add validation to reject unknown indexer names or invalid modes with
+  actionable errors:
+  - `PostReviewConfig.Validate()` checks mode, concurrency, indexer IDs.
+  - `PostReviewConfig.EffectiveMode()` defaults empty to `jobs`.
+  - Tests in `handler_test.go` `TestPostReviewConfig_Validate`.
 
 ### C2. Indexer subscribers
 
-- [ ] Define a small interface that indexers implement to consume
-  post-review events (e.g. `HandlePostReviewEvent(ctx, event)`).
-- [ ] Implement basic fanout over the configured indexers:
-  - For `mode="inline"`, sequential or bounded-concurrency fanout.
-  - For `mode="jobs"`, create one job per indexer with queue + concurrency cap
-    3 and rely on the WFQ scheduler for dispatch.
-  - Clear logging and error propagation semantics in both modes.
-- [ ] Ensure that failure in one indexer does not corrupt others; document the
-  retry/backoff story or explicit non-goals for v1.
+- [x] Define a small interface that indexers implement to consume
+  post-review events (e.g. `HandlePostReviewEvent(ctx, event)`):
+  - `Indexer.Index(ctx, event)` in `internal/indexing/types.go`.
+- [x] Implement basic fanout over the configured indexers:
+  - For `mode="inline"`, sequential fanout in current goroutine.
+  - For `mode="jobs"`, **stub behavior**: falls back to async goroutine.
+    Full WFQ scheduler integration is deferred (see `deferred.md` D3).
+  - Mode-aware switch in `handler.go` `Handle()` with logging.
+- [x] Ensure that failure in one indexer does not corrupt others; document the
+  retry/backoff story or explicit non-goals for v1:
+  - Each indexer runs independently; errors are logged and recorded in
+    `IndexerResults` but do not abort other indexers.
+  - Retry/backoff is a non-goal for v1 (events are idempotent; re-run safe).
 
 ---
 
@@ -139,30 +149,40 @@ semantic/symbol indexers implemented.
 
 ### D1. Unit and integration tests
 
-- [ ] Add unit tests around the overseer handler and event emission:
+- [x] Add unit tests around the overseer handler and event emission:
   - Happy-path `ok` review producing one event.
-  - No event on non-`ok` statuses.
-- [ ] Add integration-style tests that:
+  - No event on non-`ok` statuses (error returned).
+  - Idempotence: same artifact → same event ID.
+  - Files passthrough to event.
+  - `internal/analysis/overseer/post_review_test.go` – 6 tests.
+- [x] Add integration-style tests that:
   - Wire a fake indexer subscriber.
   - Assert that it receives the expected events for a synthetic review flow.
+  - `TestPostReviewHandler_IntegrationWithFakeIndexer` – full flow test.
 
 ### D2. Golden envelopes / fixtures
 
-- [ ] If post-review events cross a process boundary, add golden JSON fixtures
-  under `test/golden/` (or appropriate `testdata/`) to lock in the shape.
-- [ ] Ensure these fixtures stay in sync with `core_profile_v1.md` and the
-  relevant specs.
+- [x] If post-review events cross a process boundary, add golden JSON fixtures
+  under `test/golden/` (or appropriate `testdata/`) to lock in the shape:
+  - `test/golden/envelopes/post_review_event.json` – canonical event shape.
+- [x] Ensure these fixtures stay in sync with `core_profile_v1.md` and the
+  relevant specs:
+  - `test/golden/golden_test.go` `TestGoldenPostReviewEvent` validates shape.
 
 ### D3. Logging and metrics
 
-- [ ] Decide on minimal logging fields for post-review processing
+- [x] Decide on minimal logging fields for post-review processing
   (workspace/task/review IDs, number of files, indexers invoked, mode,
-  indexer names).
+  indexer names):
+  - Implemented in `overseer/post_review.go` and `indexing/handler.go`.
+  - Fields: workspace_id, task_id, review_id, event_id, file_count,
+    indexer_count, mode, indexer_id, files_indexed.
 - [ ] Add metrics as per `docs/spec/post_review_harness.md` §10:
   - Counters: `post_review_events_total{indexer}`,
     `post_review_events_failures_total{reason}`.
   - Histograms: `post_review_index_duration_seconds{indexer}`.
   - Gauges: backlog size per indexer job queue.
+  - **Deferred:** Metrics implementation is out of scope for Phase 2.
 
 ---
 

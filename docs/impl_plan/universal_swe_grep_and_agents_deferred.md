@@ -67,23 +67,34 @@ deferred.
 
 ---
 
-## D3. Per-Indexer Concurrency Caps in WFQ Scheduler
+## D3. Jobs Mode WFQ Scheduler Integration
 
-**Status:** Deferred to Phase 2 C2 (fanout wiring)
+**Status:** Deferred (stub in place)
 
 **What:**  
-In jobs mode, each indexer should respect `ConcurrencyPerIndexer` (default 3).
-This requires wiring the WFQ scheduler to enforce per-namespace caps.
+In `mode="jobs"`, the handler should enqueue one job per indexer via the WFQ
+scheduler with per-namespace concurrency caps (`ConcurrencyPerIndexer`, default
+3). Currently, `handler.go` falls back to an async goroutine when mode is jobs.
 
 **Why deferred:**  
-Phase 2 A focuses on event model. B focuses on handler. C focuses on fanout.
-Concurrency enforcement is part of C2.
+- Phase 2 C2 established the Mode-aware fanout structure.
+- Actual job submission requires wiring `internal/storage/jobs` and the WFQ
+  scheduler, which is a larger integration piece.
+- The current async goroutine behavior is acceptable for initial testing.
 
 **When to address:**  
-- Phase 2 section C (Indexer Configuration & Fanout).
+- When jobs system is being exercised in production scenarios.
+- Or when indexer load requires fair scheduling across workspaces.
+
+**Stub behavior:**  
+`handler.go` line ~100: jobs mode falls back to `go h.runIndexers(...)` with
+`context.WithoutCancel`. This is fire-and-forget without queue or concurrency
+enforcement.
 
 **Cross-refs:**
 - `docs/spec/post_review_harness.md` §7 (ConcurrencyPerIndexer)
+- `internal/indexing/handler.go` `Handle()` switch on mode
+- `internal/storage/jobs` (target for integration)
 - `docs/impl_plan/universal_swe_grep_and_agents_specs_phase2_post_review_harness_todo.md` C2
 
 ---

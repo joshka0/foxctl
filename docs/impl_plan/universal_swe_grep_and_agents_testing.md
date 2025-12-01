@@ -84,20 +84,28 @@ Gate: no new features until this is solid.
 **Focus:** correct plumbing from `ok` review → post-review indexer inputs.
 
 - **Unit tests** (handler shape)
-  - [ ] Given a review artifact with `inputs.files` and `inputs.diff_digest`,
+  - [x] Given a review artifact with `inputs.files` and `inputs.diff_digest`,
         assert the handler produces the expected input payload:
     - `(workspace_id, files[{path, digest, change_kind}], task_id, review_id)`.
+    - `internal/analysis/overseer/post_review_test.go` – 6 tests covering happy
+      path, idempotence, non-ok rejection, files passthrough.
+    - `internal/indexing/postreview/producer_test.go` – event building tests.
 
 - **Integration tests**
-  - [ ] Simulate a successful review and ensure:
+  - [x] Simulate a successful review and ensure:
     - A post-review event/job is enqueued once and only once.
     - Multiple indexers can subscribe (semantic + symbol index) without
       interfering.
+    - `TestPostReviewHandler_IntegrationWithFakeIndexer` – full flow with fake
+      indexer subscriber.
+    - `internal/indexing/handler_test.go` – multi-indexer fanout tests.
 
 - **Golden tests**
-  - [ ] Capture one or two canonical post-review events as JSON in
+  - [x] Capture one or two canonical post-review events as JSON in
         `test/golden/envelopes/` and assert their shape does not change
         accidentally.
+    - `test/golden/envelopes/post_review_event.json` – canonical event shape.
+    - `test/golden/golden_test.go` `TestGoldenPostReviewEvent` – shape validation.
 
 Gate: post-review handler must be stable before semantic/symbol index jobs rely
 on it.
