@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
 
@@ -25,6 +26,10 @@ func TestGoldenEnvelopes(t *testing.T) {
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), ".json") {
+			// Skip non-envelope fixtures
+			if d.Name() == "post_review_event.json" {
+				return nil
+			}
 			files = append(files, path)
 		}
 		return nil
@@ -95,5 +100,57 @@ func TestGoldenProgressStream(t *testing.T) {
 	}
 	if lineNo == 0 {
 		t.Fatal("progress stream fixture empty")
+	}
+}
+
+// TestGoldenPostReviewEvent validates the PostReviewEvent fixture shape.
+func TestGoldenPostReviewEvent(t *testing.T) {
+	path := filepath.Join("envelopes", "post_review_event.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+
+	var event indexing.PostReviewEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatalf("decode post_review_event: %v", err)
+	}
+
+	// Validate required fields
+	if event.ID == "" {
+		t.Error("id is required")
+	}
+	if event.WorkspaceID == "" {
+		t.Error("workspace_id is required")
+	}
+	if event.TaskID == "" {
+		t.Error("task_id is required")
+	}
+	if event.ReviewID == "" {
+		t.Error("review_id is required")
+	}
+	if event.ReviewStatus != "ok" {
+		t.Errorf("review_status = %q, want ok", event.ReviewStatus)
+	}
+	if len(event.Files) == 0 {
+		t.Error("files should not be empty in example fixture")
+	}
+
+	// Validate file entries
+	for i, f := range event.Files {
+		if f.Path == "" {
+			t.Errorf("files[%d].path is required", i)
+		}
+		if f.ChangeKind == "" {
+			t.Errorf("files[%d].change_kind is required", i)
+		}
+	}
+
+	// Validate timestamps are parseable
+	if event.CreatedAt.IsZero() {
+		t.Error("created_at should be set")
+	}
+	if event.DiffAppliedAt.IsZero() {
+		t.Error("diff_applied_at should be set")
 	}
 }

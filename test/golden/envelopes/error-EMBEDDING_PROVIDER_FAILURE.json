@@ -1,0 +1,15 @@
+{
+	"version": 1,
+	"status": "error",
+	"command": "semantic_index.init_files",
+	"data": {},
+	"meta": {
+		"ts": "2025-11-15T12:00:00Z",
+		"source": "cli"
+	},
+	"error": {
+		"code": "EMBEDDING_PROVIDER_FAILURE",
+		"message": "Embedding provider returned HTTP 503",
+		"hint": "Check embedding provider status and API key configuration"
+	}
+}

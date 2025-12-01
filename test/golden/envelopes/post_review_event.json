@@ -1,0 +1,31 @@
+{
+	"_comment": "PostReviewEvent fixture - canonical shape for post-review indexing events",
+	"id": "01JEXAMPLE000000000000000",
+	"workspace_id": "ws-example-1",
+	"task_id": "task-example-1",
+	"review_id": "sha256:abc123def456",
+	"review_kind": "auto",
+	"review_status": "ok",
+	"diff_applied_at": "2024-11-30T12:00:00Z",
+	"source": "review_gate",
+	"created_at": "2024-11-30T12:00:01Z",
+	"sequence": 0,
+	"files": [
+		{
+			"path": "internal/foo/bar.go",
+			"digest": "sha256:aabbccdd",
+			"change_kind": "modified",
+			"size_bytes": 2048
+		},
+		{
+			"path": "internal/foo/baz.go",
+			"digest": "sha256:eeff0011",
+			"change_kind": "added",
+			"size_bytes": 1024
+		}
+	],
+	"metadata": {
+		"reviewer": "auto",
+		"commit_sha": "abc123"
+	}
+}

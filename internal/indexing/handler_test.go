@@ -418,3 +418,131 @@ func TestPostReviewResult_TotalFilesIndexed(t *testing.T) {
 		t.Errorf("expected total 8, got %d", total)
 	}
 }
+
+func TestPostReviewConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  PostReviewConfig
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "default config is valid",
+			config:  DefaultPostReviewConfig(),
+			wantErr: false,
+		},
+		{
+			name: "inline mode is valid",
+			config: PostReviewConfig{
+				Mode: FanoutModeInline,
+			},
+			wantErr: false,
+		},
+		{
+			name: "jobs mode is valid",
+			config: PostReviewConfig{
+				Mode: FanoutModeJobs,
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty mode is valid (defaults to jobs)",
+			config: PostReviewConfig{
+				Mode: "",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid mode",
+			config: PostReviewConfig{
+				Mode: "bogus",
+			},
+			wantErr: true,
+			errMsg:  "invalid value",
+		},
+		{
+			name: "negative concurrency",
+			config: PostReviewConfig{
+				ConcurrencyPerIndexer: -1,
+			},
+			wantErr: true,
+			errMsg:  "must be >= 0",
+		},
+		{
+			name: "missing indexer id",
+			config: PostReviewConfig{
+				Indexers: []IndexerConfig{{ID: ""}},
+			},
+			wantErr: true,
+			errMsg:  "id is required",
+		},
+		{
+			name: "duplicate indexer id",
+			config: PostReviewConfig{
+				Indexers: []IndexerConfig{
+					{ID: "foo"},
+					{ID: "foo"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "duplicate id",
+		},
+		{
+			name: "valid indexers",
+			config: PostReviewConfig{
+				Indexers: []IndexerConfig{
+					{ID: "semantic", Kind: "semantic_file_index", Enabled: true},
+					{ID: "symbol", Kind: "code_symbol_dag", Enabled: true},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if tt.errMsg != "" && !contains(err.Error(), tt.errMsg) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errMsg)
+				}
+			} else if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestPostReviewConfig_EffectiveMode(t *testing.T) {
+	tests := []struct {
+		mode FanoutMode
+		want FanoutMode
+	}{
+		{mode: "", want: FanoutModeJobs},
+		{mode: FanoutModeInline, want: FanoutModeInline},
+		{mode: FanoutModeJobs, want: FanoutModeJobs},
+	}
+
+	for _, tt := range tests {
+		cfg := PostReviewConfig{Mode: tt.mode}
+		if got := cfg.EffectiveMode(); got != tt.want {
+			t.Errorf("EffectiveMode() with mode=%q: got %q, want %q", tt.mode, got, tt.want)
+		}
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && searchString(s, substr)))
+}
+
+func searchString(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

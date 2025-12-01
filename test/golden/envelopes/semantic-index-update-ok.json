@@ -1,0 +1,22 @@
+{
+	"version": 1,
+	"status": "ok",
+	"command": "semantic_index.update_files",
+	"data": {
+		"summary": {
+			"files_indexed": 2,
+			"chunks_indexed": 5,
+			"files_skipped": 1
+		},
+		"failures": []
+	},
+	"meta": {
+		"ts": "2025-11-15T11:00:00Z",
+		"duration_ms": 850,
+		"source": "cli",
+		"workspace_id": "ws-example",
+		"task_id": "task-123",
+		"review_id": "review-456"
+	},
+	"error": {}
+}

@@ -5,23 +5,49 @@ package indexing
 
 import (
 	"context"
+	"fmt"
+	"time"
 )
 
 // PostReviewEvent represents the data emitted when a review passes and
 // changes are accepted. This is the canonical trigger for all post-review indexers.
-// See: docs/spec/semantic_file_index.md §8.2
+// See: docs/spec/post_review_harness.md §4.1
 type PostReviewEvent struct {
+	// ID is a unique identifier for this event (ULID or sha256: digest).
+	ID string `json:"id"`
+
 	// WorkspaceID identifies the workspace where the review occurred.
 	WorkspaceID string `json:"workspace_id"`
+
+	// TaskID is the task that was reviewed.
+	TaskID string `json:"task_id"`
+
+	// ReviewID is the review artifact ID (matches ReviewArtifact.ID).
+	ReviewID string `json:"review_id"`
+
+	// ReviewKind describes the review type: "auto", "human", or "mixed".
+	ReviewKind string `json:"review_kind"`
+
+	// ReviewStatus MUST be "ok" for emitted events.
+	ReviewStatus string `json:"review_status"`
+
+	// DiffAppliedAt is the UTC timestamp when the diff was applied.
+	DiffAppliedAt time.Time `json:"diff_applied_at"`
 
 	// Files lists the files affected by the reviewed changes.
 	Files []FileChange `json:"files"`
 
-	// TaskID is the task that was reviewed (optional).
-	TaskID string `json:"task_id,omitempty"`
+	// Source describes what produced this event (e.g., "review_gate_v1").
+	Source string `json:"source,omitempty"`
 
-	// ReviewID is the review artifact ID (optional).
-	ReviewID string `json:"review_id,omitempty"`
+	// Metadata holds optional context (commit ID, branch, etc.).
+	Metadata map[string]any `json:"metadata,omitempty"`
+
+	// CreatedAt is when this event was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Sequence is a monotonic counter per (workspace, task) for ordering.
+	Sequence int `json:"sequence,omitempty"`
 
 	// Reason describes why this event was triggered (e.g., "post_review", "manual", "git_commit").
 	Reason string `json:"reason,omitempty"`
@@ -129,26 +155,92 @@ type IndexerConfig struct {
 	Extra map[string]any `yaml:"extra" json:"extra,omitempty"`
 }
 
+// FanoutMode controls how post-review events are dispatched to indexers.
+type FanoutMode string
+
+const (
+	// FanoutModeInline runs indexers synchronously in the handler goroutine.
+	// Suitable for dev/test; not recommended for production.
+	FanoutModeInline FanoutMode = "inline"
+	// FanoutModeJobs enqueues one job per indexer via the WFQ scheduler.
+	// This is the default for production.
+	FanoutModeJobs FanoutMode = "jobs"
+)
+
 // PostReviewConfig holds the configuration for the post-review indexing pipeline.
+// See: docs/spec/post_review_harness.md §7
 type PostReviewConfig struct {
 	// Enabled controls whether post-review indexing is active.
+	// Default: false; must be true to emit events/jobs.
 	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// Mode controls how indexers are invoked: "inline" or "jobs".
+	// Default: "jobs" for production.
+	Mode FanoutMode `yaml:"mode" json:"mode"`
 
 	// Indexers lists the configured indexers.
 	Indexers []IndexerConfig `yaml:"indexers" json:"indexers"`
 
+	// ConcurrencyPerIndexer limits concurrent jobs per indexer in jobs mode.
+	// Default: 3. A value of 0 means unlimited concurrency.
+	ConcurrencyPerIndexer int `yaml:"concurrency_per_indexer" json:"concurrency_per_indexer"`
+
 	// Async controls whether indexing runs asynchronously (default: true).
 	// When false, task completion blocks until indexing completes.
+	// Deprecated: use Mode instead; kept for backward compatibility.
 	Async bool `yaml:"async" json:"async"`
 }
 
 // DefaultPostReviewConfig returns a sensible default configuration.
 func DefaultPostReviewConfig() PostReviewConfig {
 	return PostReviewConfig{
-		Enabled:  false, // Off by default until explicitly enabled
-		Indexers: []IndexerConfig{},
-		Async:    true,
+		Enabled:               false, // Off by default until explicitly enabled
+		Mode:                  FanoutModeJobs,
+		Indexers:              []IndexerConfig{},
+		ConcurrencyPerIndexer: 3,
+		Async:                 true,
 	}
+}
+
+// Validate checks that the configuration is valid and returns an error if not.
+// This should be called during startup to catch misconfigurations early.
+func (c PostReviewConfig) Validate() error {
+	// Validate mode
+	switch c.Mode {
+	case FanoutModeInline, FanoutModeJobs, "": // empty defaults to jobs
+		// ok
+	default:
+		return fmt.Errorf("indexing.post_review.mode: invalid value %q, must be %q or %q",
+			c.Mode, FanoutModeInline, FanoutModeJobs)
+	}
+
+	// Validate concurrency (0 = unlimited, negative is invalid).
+	if c.ConcurrencyPerIndexer < 0 {
+		return fmt.Errorf("EARG: indexing.post_review.concurrency_per_indexer: must be >= 0 (0 = unlimited), got %d",
+			c.ConcurrencyPerIndexer)
+	}
+
+	// Validate indexer configs
+	seen := make(map[string]bool)
+	for i, idx := range c.Indexers {
+		if idx.ID == "" {
+			return fmt.Errorf("indexing.post_review.indexers[%d]: id is required", i)
+		}
+		if seen[idx.ID] {
+			return fmt.Errorf("indexing.post_review.indexers: duplicate id %q", idx.ID)
+		}
+		seen[idx.ID] = true
+	}
+
+	return nil
+}
+
+// EffectiveMode returns the mode to use, defaulting to jobs if empty.
+func (c PostReviewConfig) EffectiveMode() FanoutMode {
+	if c.Mode == "" {
+		return FanoutModeJobs
+	}
+	return c.Mode
 }
 
 // PostReviewConfigFromSettings converts platform config settings to indexing config.
