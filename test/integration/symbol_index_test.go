@@ -367,8 +367,8 @@ func helper() {}
 		t.Fatalf("unmarshal result: %v", err)
 	}
 
-	// caller() calls callee() and helper() - should have 2 call edges
-	if len(result.Calls) < 2 {
-		t.Errorf("expected at least 2 calls, got %d: %v", len(result.Calls), result.Calls)
+	// caller() calls callee() and helper() - should have exactly 2 call edges
+	if len(result.Calls) != 2 {
+		t.Errorf("expected 2 calls, got %d: %v", len(result.Calls), result.Calls)
 	}
 }

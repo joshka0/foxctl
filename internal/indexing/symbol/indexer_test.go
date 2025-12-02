@@ -669,8 +669,8 @@ func TestGoExtractor_ExtractCalls_InvalidBounds(t *testing.T) {
 	if err != nil {
 		t.Errorf("ExtractCalls should not error on invalid bounds: %v", err)
 	}
-	if calls != nil && len(calls) > 0 {
-		t.Errorf("expected nil or empty calls for invalid bounds, got %v", calls)
+	if len(calls) > 0 {
+		t.Errorf("expected empty calls for invalid bounds, got %v", calls)
 	}
 }
 

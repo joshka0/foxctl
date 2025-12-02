@@ -107,7 +107,7 @@ type JobFailure struct {
 	// File contains path and optional digest of the failed file.
 	File JobFailureFile `json:"file"`
 
-	// ErrorCode is one of the standard error codes.
+	// ErrorCode is a canonical AGENTS.md error code (e.g., ENOTFOUND, EIO, ERUNTIME).
 	ErrorCode string `json:"error_code"`
 
 	// ErrorMessage is a human-readable description of the error.
@@ -145,34 +145,37 @@ func (r *JobResult) IsPartialSuccess() bool {
 	return r.Summary.FilesIndexed > 0 && r.HasFailures()
 }
 
-// Standard error codes for symbol indexing operations.
+// Canonical AGENTS.md error codes for symbol indexing operations.
+// These map internal error conditions to standard envelope error codes.
 const (
 	// ErrCodeSymbolIndexNotFound indicates the requested file has no index entry.
-	ErrCodeSymbolIndexNotFound = "SYMBOL_INDEX_NOT_FOUND"
+	// Maps to ENOTFOUND per AGENTS.md.
+	ErrCodeSymbolIndexNotFound = "ENOTFOUND"
 
 	// ErrCodeExtractorNotFound indicates no extractor for the file's language.
-	ErrCodeExtractorNotFound = "EXTRACTOR_NOT_FOUND"
+	// Maps to ENOTFOUND per AGENTS.md.
+	ErrCodeExtractorNotFound = "ENOTFOUND"
 
 	// ErrCodeExtractFailed indicates symbol extraction failed.
-	ErrCodeExtractFailed = "EXTRACT_FAILED"
+	// Maps to ERUNTIME per AGENTS.md.
+	ErrCodeExtractFailed = "ERUNTIME"
 
 	// ErrCodeFileReadError indicates a file read/access failure.
-	ErrCodeFileReadError = "FILE_READ_ERROR"
+	// Maps to EIO per AGENTS.md.
+	ErrCodeFileReadError = "EIO"
 
 	// ErrCodeFileTooLarge indicates the file exceeds size limits.
-	ErrCodeFileTooLarge = "FILE_TOO_LARGE"
+	// Maps to EOUTPUT_TOO_LARGE per AGENTS.md.
+	ErrCodeFileTooLarge = "EOUTPUT_TOO_LARGE"
 )
 
 // IsRecoverableError returns true if the error code represents a recoverable error.
 // Recoverable errors may be retried within a single job attempt.
 func IsRecoverableError(code string) bool {
 	switch code {
-	case ErrCodeSymbolIndexNotFound,
-		ErrCodeExtractorNotFound:
+	case "ENOTFOUND":
 		return true
-	case ErrCodeExtractFailed,
-		ErrCodeFileReadError,
-		ErrCodeFileTooLarge:
+	case "ERUNTIME", "EIO", "EOUTPUT_TOO_LARGE":
 		return false
 	default:
 		return false
@@ -206,6 +209,7 @@ func (idx *Indexer) runIndexJob(ctx context.Context, args JobArgs, isInit bool) 
 		TaskID:      args.TaskID,
 		ReviewID:    args.ReviewID,
 		Reason:      string(args.Reason),
+		Files:       make([]indexing.FileChange, 0, len(args.Files)),
 	}
 
 	for _, file := range args.Files {
@@ -235,6 +239,7 @@ func (idx *Indexer) runIndexJob(ctx context.Context, args JobArgs, isInit bool) 
 			FilesSkipped: indexResult.FilesSkipped,
 			// SymbolsIndexed would require tracking in the indexer; for now leave as 0
 		},
+		Failures: []JobFailure{}, // Initialize to empty slice for stable JSON serialization
 	}
 
 	// Convert failures
