@@ -154,25 +154,36 @@ pipeline.
     indexer via `Indexer` interface.
   - `internal/indexing/symbol/indexer.go` – `Indexer.Index` consumes
     `PostReviewEvent` and updates named memory.
-- [ ] Document the end-to-end flow:
+- [x] Document the end-to-end flow:
   - Review → `ReviewArtifact` → `PostReviewEvent` → `PostReviewHandler` → symbol
     indexer.
   - How `Source` (`task_id`, `review_id`, `reason`) is filled from events.
+  - Added `docs/start/symbol_index.md` with flow diagram and provenance table.
 
 ### C2. Jobs and `code_symbol_index.update_files`
 
-- [ ] Define the job contract for `code_symbol_index.update_files` in terms of
+- [x] Define the job contract for `code_symbol_index.update_files` in terms of
       existing inputs:
   - Reuse the same conceptual input as semantic index jobs (`workspace_id`,
     files `{path, digest, change_kind}`, task/review ids).
   - No new wire-level fields; stick to Core Profile v1 envelopes.
-- [ ] Implement a job-backed entrypoint that:
+  - Implemented in `internal/indexing/symbol/jobs.go` with:
+    - `JobTypeInitFiles` = `"code_symbol_index.init_files"`
+    - `JobTypeUpdateFiles` = `"code_symbol_index.update_files"`
+    - `JobArgs`, `JobSummary`, `JobFailure`, `JobResult` types.
+    - Error codes: `ErrCodeSymbolIndexNotFound`, `ErrCodeExtractorNotFound`,
+      `ErrCodeExtractFailed`, `ErrCodeFileReadError`, `ErrCodeFileTooLarge`.
+- [x] Implement a job-backed entrypoint that:
   - Accepts a post-review-like payload.
   - Uses the job system and WFQ scheduler (see job system codemaps) to run the
     symbol indexer over changed files.
   - Persists job results and logs for observability.
-- [ ] Decide how this job entrypoint interacts with the `PostReviewHandler`
+  - `Indexer.RunInitFilesJob` and `Indexer.RunUpdateFilesJob` in `jobs.go`
+    convert `JobArgs` to `PostReviewEvent` and delegate to `Indexer.Index`.
+- [x] Decide how this job entrypoint interacts with the `PostReviewHandler`
       modes (`inline` vs `jobs`) so Phase 2 + 4 remain consistent.
+  - Job entrypoints reuse the existing `Indexer.Index` method; the same indexer
+    is used for both inline post-review and job-driven execution.
 
 ### C3. Optional heuristic triggers (out of strict v1 scope)
 
@@ -194,38 +205,58 @@ with focused unit, integration, and golden tests.
     in `internal/indexing/symbol/indexer_test.go`.
   - Naming helpers (`ID`, `EntryName`, `FileMetaEntryName`).
   - File meta and unchanged-file handling.
-- [ ] Add explicit unit tests for call extraction:
+- [x] Add explicit unit tests for call extraction:
   - Verify that `ExtractCalls` produces reasonable `CallEdge` candidates for
     simple Go fixtures (self-contained callers/callees).
+  - Added `TestGoExtractor_ExtractCalls_SimpleCalls` – direct function calls.
+  - Added `TestGoExtractor_ExtractCalls_QualifiedCalls` – pkg.Func,
+    receiver.Method.
+  - Added `TestGoExtractor_ExtractCalls_NoCalls` – functions with no calls.
+  - Added `TestGoExtractor_ExtractCalls_NestedCalls` – calls in
+    closures/conditionals.
+  - Added `TestGoExtractor_ExtractCalls_InvalidBounds` – graceful handling.
 
 ### D2. Incrementality tests
 
 - [x] File-level incrementality:
   - `TestIndexer_Index_IncrementalUpdate` verifies content hash changes and
     symbol counts.
-- [ ] Per-symbol incrementality (after B2 is implemented):
+- [x] Per-symbol incrementality (after B2 is implemented):
   - Add tests that modify only one function/method in a file and assert that
-    only that symbol’s embedding/digest changes.
+    only that symbol's embedding/digest changes.
+    - `TestIndexer_PerSymbolIncrementality` verifies that modifying one function
+      leaves the other unchanged (same `body_digest`).
   - Add tests that add/remove functions and ensure stale symbols are removed.
+    - `TestIndexer_SymbolDeletion` verifies that removed symbols are deleted
+      from the index.
 
 ### D3. Golden symbol index dumps
 
-- [ ] Add golden fixtures for symbol index contents:
+- [x] Add golden fixtures for symbol index contents:
   - Store canonical dumps (e.g. JSON) of `code_symbol` + `code_symbol_call`
     entries for small Go fixture packages under `test/golden/symbol_index/`.
-- [ ] Add tests that:
+  - Created `test/golden/symbol_index/fixtures/fixture.go` with representative
+    symbols: constants, structs, interfaces, functions, methods.
+  - Created `test/golden/symbol_index/fixtures/fixture.golden.json` with
+    expected output including IDs, kinds, line ranges, docs, signatures, calls.
+- [x] Add tests that:
   - Re-index fixtures and compare the resulting entries to goldens (allowing for
     explicitly documented, intentional changes only).
   - Validate that changes in symbol layout are caught in review.
+  - `test/golden/symbol_index/golden_test.go` with `-update` flag to regenerate.
 
 ### D4. Integration tests (post-review → symbol index)
 
-- [ ] Add integration tests that:
+- [x] Add integration tests that:
   - Simulate a post-review event touching multiple files.
   - Run the post-review handler with both semantic and symbol indexers
     registered.
   - Assert that only changed files are parsed and updated in the symbol index.
   - Optionally verify basic call graph structure across files.
+  - Added `test/integration/symbol_index_test.go` with 3 tests:
+    - `TestSymbolIndex_PostReviewFlow` – full post-review → index flow.
+    - `TestSymbolIndex_IncrementalUpdate` – unchanged files are skipped.
+    - `TestSymbolIndex_CallGraph` – call edges are stored.
 
 ### D5. Logging and metrics
 

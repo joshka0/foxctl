@@ -1,0 +1,78 @@
+{
+  "file": "fixture.go",
+  "symbols": [
+    {
+      "id": "fixture.go:Config",
+      "name": "Config",
+      "kind": "struct",
+      "start_line": 8,
+      "end_line": 11,
+      "documentation": "Config holds service configuration.",
+      "signature": "type Config"
+    },
+    {
+      "id": "fixture.go:Handler",
+      "name": "Handler",
+      "kind": "interface",
+      "start_line": 38,
+      "end_line": 40,
+      "documentation": "Handler defines the request handler interface.",
+      "signature": "type Handler"
+    },
+    {
+      "id": "fixture.go:MaxRetries",
+      "name": "MaxRetries",
+      "kind": "constant",
+      "start_line": 5,
+      "end_line": 5,
+      "documentation": "MaxRetries is the default retry count."
+    },
+    {
+      "id": "fixture.go:NewService",
+      "name": "NewService",
+      "kind": "function",
+      "start_line": 19,
+      "end_line": 21,
+      "documentation": "NewService creates a new service.",
+      "signature": "func NewService(cfg Config) *Service"
+    },
+    {
+      "id": "fixture.go:Service",
+      "name": "Service",
+      "kind": "struct",
+      "start_line": 14,
+      "end_line": 16,
+      "documentation": "Service provides business logic.",
+      "signature": "type Service"
+    },
+    {
+      "id": "fixture.go:Service.Run",
+      "name": "Service.Run",
+      "kind": "method",
+      "start_line": 24,
+      "end_line": 27,
+      "documentation": "Run starts the service and calls helper functions.",
+      "signature": "func (s *Service) Run() error",
+      "calls": [
+        "s.validate",
+        "s.start"
+      ]
+    },
+    {
+      "id": "fixture.go:Service.start",
+      "name": "Service.start",
+      "kind": "method",
+      "start_line": 33,
+      "end_line": 35,
+      "signature": "func (s *Service) start() error"
+    },
+    {
+      "id": "fixture.go:Service.validate",
+      "name": "Service.validate",
+      "kind": "method",
+      "start_line": 29,
+      "end_line": 31,
+      "signature": "func (s *Service) validate()"
+    }
+  ]
+}

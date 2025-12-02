@@ -436,6 +436,244 @@ type Handler interface {
 	}
 }
 
+// =============================================================================
+// D1: Explicit call extraction tests
+// =============================================================================
+
+// TestGoExtractor_ExtractCalls_SimpleCalls tests that ExtractCalls identifies
+// direct function calls within a function body.
+func TestGoExtractor_ExtractCalls_SimpleCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+func helper() {}
+
+func doSomething() string {
+	return "done"
+}
+
+func main() {
+	helper()
+	result := doSomething()
+	_ = result
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "calls.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	// Find main function
+	var mainSym *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "main" {
+			mainSym = &symbols[i]
+			break
+		}
+	}
+	if mainSym == nil {
+		t.Fatal("main function not found")
+	}
+
+	// Extract calls from main
+	calls, err := extractor.ExtractCalls(ctx, *mainSym, content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	// Should find helper and doSomething
+	callSet := make(map[string]bool)
+	for _, c := range calls {
+		callSet[c] = true
+	}
+
+	if !callSet["helper"] {
+		t.Error("expected call to 'helper'")
+	}
+	if !callSet["doSomething"] {
+		t.Error("expected call to 'doSomething'")
+	}
+}
+
+// TestGoExtractor_ExtractCalls_QualifiedCalls tests that ExtractCalls identifies
+// qualified calls like pkg.Func or receiver.Method.
+func TestGoExtractor_ExtractCalls_QualifiedCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+import "fmt"
+
+type Service struct{}
+
+func (s *Service) Run() {}
+
+func process(svc *Service) {
+	fmt.Println("processing")
+	svc.Run()
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "qualified.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	// Find process function
+	var processSym *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "process" {
+			processSym = &symbols[i]
+			break
+		}
+	}
+	if processSym == nil {
+		t.Fatal("process function not found")
+	}
+
+	// Extract calls from process
+	calls, err := extractor.ExtractCalls(ctx, *processSym, content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	callSet := make(map[string]bool)
+	for _, c := range calls {
+		callSet[c] = true
+	}
+
+	// Should find fmt.Println and svc.Run (or just Run depending on impl)
+	if !callSet["fmt.Println"] {
+		t.Error("expected call to 'fmt.Println'")
+	}
+	if !callSet["svc.Run"] && !callSet["Run"] {
+		t.Error("expected call to 'svc.Run' or 'Run'")
+	}
+}
+
+// TestGoExtractor_ExtractCalls_NoCalls tests that ExtractCalls returns empty
+// for functions with no calls.
+func TestGoExtractor_ExtractCalls_NoCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+func returnValue() int {
+	return 42
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "nocalls.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	if len(symbols) == 0 {
+		t.Fatal("expected at least one symbol")
+	}
+
+	calls, err := extractor.ExtractCalls(ctx, symbols[0], content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	if len(calls) != 0 {
+		t.Errorf("expected 0 calls, got %d: %v", len(calls), calls)
+	}
+}
+
+// TestGoExtractor_ExtractCalls_NestedCalls tests that ExtractCalls identifies
+// calls within nested expressions and closures.
+func TestGoExtractor_ExtractCalls_NestedCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+func outer() {}
+func inner() int { return 1 }
+func wrapper() int { return 2 }
+
+func complex() {
+	if inner() > 0 {
+		outer()
+	}
+	fn := func() {
+		wrapper()
+	}
+	fn()
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "nested.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	// Find complex function
+	var complexSym *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "complex" {
+			complexSym = &symbols[i]
+			break
+		}
+	}
+	if complexSym == nil {
+		t.Fatal("complex function not found")
+	}
+
+	calls, err := extractor.ExtractCalls(ctx, *complexSym, content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	callSet := make(map[string]bool)
+	for _, c := range calls {
+		callSet[c] = true
+	}
+
+	// Should find inner, outer, wrapper (from closure), and fn
+	if !callSet["inner"] {
+		t.Error("expected call to 'inner'")
+	}
+	if !callSet["outer"] {
+		t.Error("expected call to 'outer'")
+	}
+	if !callSet["wrapper"] {
+		t.Error("expected call to 'wrapper'")
+	}
+}
+
+// TestGoExtractor_ExtractCalls_InvalidBounds tests that ExtractCalls handles
+// invalid symbol bounds gracefully.
+func TestGoExtractor_ExtractCalls_InvalidBounds(t *testing.T) {
+	extractor := NewGoExtractor()
+	ctx := context.Background()
+	content := []byte("package test\nfunc foo() {}")
+
+	// Symbol with invalid bounds
+	invalidSym := Symbol{
+		ID:        "test.go:invalid",
+		FilePath:  "test.go",
+		Name:      "invalid",
+		StartByte: -1,
+		EndByte:   100,
+	}
+
+	calls, err := extractor.ExtractCalls(ctx, invalidSym, content)
+	if err != nil {
+		t.Errorf("ExtractCalls should not error on invalid bounds: %v", err)
+	}
+	if calls != nil && len(calls) > 0 {
+		t.Errorf("expected nil or empty calls for invalid bounds, got %v", calls)
+	}
+}
+
 func TestSymbolID(t *testing.T) {
 	id := ID("pkg/auth/login.go", "Login")
 	expected := "pkg/auth/login.go:Login"
