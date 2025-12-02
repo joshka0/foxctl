@@ -6,6 +6,7 @@ package symbol
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
@@ -83,7 +84,7 @@ func (a *JobArgs) Validate() error {
 	}
 	for i, f := range a.Files {
 		if f.Path == "" {
-			return errors.New("file path is required at index " + itoa(i))
+			return errors.New("file path is required at index " + strconv.Itoa(i))
 		}
 	}
 	return nil
@@ -249,27 +250,4 @@ func (idx *Indexer) runIndexJob(ctx context.Context, args JobArgs, isInit bool) 
 	}
 
 	return result, nil
-}
-
-// itoa is a simple int-to-string helper to avoid importing strconv.
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	pos := len(buf)
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	for i > 0 {
-		pos--
-		buf[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	if neg {
-		pos--
-		buf[pos] = '-'
-	}
-	return string(buf[pos:])
 }
