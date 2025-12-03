@@ -8,7 +8,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/rs/zerolog"
@@ -23,6 +23,7 @@ import (
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
@@ -199,6 +200,8 @@ func parseInput(r io.Reader) (Input, error) {
 
 // run is the main skill logic.
 func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+	start := time.Now()
+
 	// Apply default limits
 	limits := applyDefaultLimits(in.Limits)
 
@@ -247,7 +250,28 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	// Observability: log summary stats (D5)
 	// Question is hashed to avoid leaking sensitive content
 	hasArtifact := data["artifact"] != nil
+	artifactKind := ""
+	if hasArtifact {
+		artifactKind = ArtifactKind
+	}
+	durationMS := time.Since(start).Milliseconds()
+
 	logSummary(in.WorkspaceID, in.Question, len(in.Candidates), filesConsidered, filesRelevant, len(snippets), hasArtifact)
+
+	// Write NDJSON event to observability dir (if configured)
+	ev := observability.NewSweGrepEvent(
+		in.WorkspaceID,
+		in.Question,
+		len(in.Candidates),
+		filesConsidered,
+		filesRelevant,
+		len(snippets),
+		hasArtifact,
+		artifactKind,
+		durationMS,
+		"run",
+	)
+	_ = observability.WriteSweGrepEvent(ctx, ev) // best-effort
 
 	return rc.Emit(Command, data, "application/json", envelope.Meta{
 		Source: "run",
@@ -258,15 +282,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 // logSummary writes a structured log entry to stderr with summary stats.
 // The question is hashed to avoid leaking sensitive content per D5.
 func logSummary(workspaceID, question string, numCandidates, filesConsidered, filesRelevant, snippetsEmitted int, hasArtifact bool) {
-	// Hash the question (first 8 chars of SHA256)
-	h := sha256.Sum256([]byte(question))
-	qHash := fmt.Sprintf("%x", h[:4])
-
 	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
 	log.Info().
 		Str("skill", Command).
 		Str("workspace_id", workspaceID).
-		Str("question_hash", qHash).
+		Str("question_hash", observability.HashQuestion(question)).
 		Int("candidates", numCandidates).
 		Int("files_considered", filesConsidered).
 		Int("files_relevant", filesRelevant).

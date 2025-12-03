@@ -22,6 +22,7 @@
 # Dev binaries
 mcp_bridge
 mcp_install
+code_swe_grep
 pr*.json
 
 # Claude Code local settings
