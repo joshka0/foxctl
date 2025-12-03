@@ -116,7 +116,14 @@ func TestWriteEvent_InvalidName(t *testing.T) {
 
 	// Verify no files created
 	eventsDir := filepath.Join(tmpDir, "events")
-	entries, _ := os.ReadDir(eventsDir)
+	entries, err := os.ReadDir(eventsDir)
+	if os.IsNotExist(err) {
+		// Directory doesn't exist means no files were created - expected
+		return
+	}
+	if err != nil {
+		t.Fatalf("os.ReadDir(%q): %v", eventsDir, err)
+	}
 	if len(entries) > 0 {
 		t.Errorf("expected no files for invalid names, got %d", len(entries))
 	}

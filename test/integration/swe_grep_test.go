@@ -122,38 +122,41 @@ func Load() *Config {
 		// Verify envelope structure
 		assertEnvelopeOK(t, envelope)
 
-		data := envelope["data"].(map[string]any)
-		summary := data["summary"].(map[string]any)
+		data := getMap(t, envelope, "data")
+		summary := getMap(t, data, "summary")
 
 		// Should consider all 3 files
-		filesConsidered := int(summary["files_considered"].(float64))
+		filesConsidered := int(getFloat(t, summary, "files_considered"))
 		if filesConsidered != 3 {
 			t.Errorf("files_considered = %d, want 3", filesConsidered)
 		}
 
 		// Should find relevant files
-		filesRelevant := int(summary["files_relevant"].(float64))
+		filesRelevant := int(getFloat(t, summary, "files_relevant"))
 		if filesRelevant < 1 {
 			t.Errorf("files_relevant = %d, want >= 1", filesRelevant)
 		}
 
 		// Should emit snippets
-		snippetsEmitted := int(summary["snippets_emitted"].(float64))
+		snippetsEmitted := int(getFloat(t, summary, "snippets_emitted"))
 		if snippetsEmitted < 1 {
 			t.Errorf("snippets_emitted = %d, want >= 1", snippetsEmitted)
 		}
 
 		// Verify snippets_inline contains login-related content
-		snippetsInline := data["snippets_inline"].([]any)
+		snippetsInline := getSlice(t, data, "snippets_inline")
 		if len(snippetsInline) == 0 {
 			t.Fatal("snippets_inline is empty")
 		}
 
-		firstSnippet := snippetsInline[0].(map[string]any)
-		if !strings.Contains(firstSnippet["file"].(string), "login.go") {
+		firstSnippet, ok := snippetsInline[0].(map[string]any)
+		if !ok {
+			t.Fatalf("snippets_inline[0] is not a map: got %T", snippetsInline[0])
+		}
+		if !strings.Contains(getString(t, firstSnippet, "file"), "login.go") {
 			t.Errorf("first snippet file = %q, want to contain 'login.go'", firstSnippet["file"])
 		}
-		if !strings.Contains(firstSnippet["preview"].(string), "Login") {
+		if !strings.Contains(getString(t, firstSnippet, "preview"), "Login") {
 			t.Errorf("first snippet preview should contain 'Login'")
 		}
 	})
@@ -170,8 +173,8 @@ func Load() *Config {
 		envelope := runSWEGrep(t, binPath, workspaceDir, input)
 		assertEnvelopeOK(t, envelope)
 
-		data := envelope["data"].(map[string]any)
-		snippetsInline := data["snippets_inline"].([]any)
+		data := getMap(t, envelope, "data")
+		snippetsInline := getSlice(t, data, "snippets_inline")
 
 		if len(snippetsInline) == 0 {
 			t.Fatal("snippets_inline is empty")
@@ -180,8 +183,12 @@ func Load() *Config {
 		// Should find config-related content
 		found := false
 		for _, s := range snippetsInline {
-			snippet := s.(map[string]any)
-			if strings.Contains(snippet["preview"].(string), "Config") {
+			snippet, ok := s.(map[string]any)
+			if !ok {
+				continue
+			}
+			preview, ok := snippet["preview"].(string)
+			if ok && strings.Contains(preview, "Config") {
 				found = true
 				break
 			}
@@ -209,10 +216,10 @@ func Load() *Config {
 		envelope := runSWEGrep(t, binPath, workspaceDir, input)
 		assertEnvelopeOK(t, envelope)
 
-		data := envelope["data"].(map[string]any)
-		summary := data["summary"].(map[string]any)
+		data := getMap(t, envelope, "data")
+		summary := getMap(t, data, "summary")
 
-		snippetsEmitted := int(summary["snippets_emitted"].(float64))
+		snippetsEmitted := int(getFloat(t, summary, "snippets_emitted"))
 		if snippetsEmitted > 1 {
 			t.Errorf("snippets_emitted = %d, want <= 1 (max_snippets limit)", snippetsEmitted)
 		}
@@ -231,7 +238,7 @@ func Load() *Config {
 		envelope := runSWEGrep(t, binPath, workspaceDir, input)
 		assertEnvelopeOK(t, envelope)
 
-		data := envelope["data"].(map[string]any)
+		data := getMap(t, envelope, "data")
 
 		// Should have CAS artifact
 		artifact, ok := data["artifact"].(string)
@@ -248,7 +255,7 @@ func Load() *Config {
 		}
 
 		// meta.cas_digest should match data.artifact
-		meta := envelope["meta"].(map[string]any)
+		meta := getMap(t, envelope, "meta")
 		casDigest, ok := meta["cas_digest"].(string)
 		if !ok || casDigest != artifact {
 			t.Errorf("meta.cas_digest = %q, want %q", casDigest, artifact)
@@ -317,6 +324,46 @@ func assertEnvelopeOK(t *testing.T, envelope map[string]any) {
 	if !ok || command != "code/swe_grep" {
 		t.Errorf("envelope.command = %q, want 'code/swe_grep'", command)
 	}
+}
+
+// getMap safely extracts a map[string]any from a parent map.
+func getMap(t *testing.T, parent map[string]any, key string) map[string]any {
+	t.Helper()
+	v, ok := parent[key].(map[string]any)
+	if !ok {
+		t.Fatalf("%q is not a map[string]any: got %T", key, parent[key])
+	}
+	return v
+}
+
+// getSlice safely extracts a []any from a parent map.
+func getSlice(t *testing.T, parent map[string]any, key string) []any {
+	t.Helper()
+	v, ok := parent[key].([]any)
+	if !ok {
+		t.Fatalf("%q is not a []any: got %T", key, parent[key])
+	}
+	return v
+}
+
+// getFloat safely extracts a float64 from a parent map.
+func getFloat(t *testing.T, parent map[string]any, key string) float64 {
+	t.Helper()
+	v, ok := parent[key].(float64)
+	if !ok {
+		t.Fatalf("%q is not a float64: got %T", key, parent[key])
+	}
+	return v
+}
+
+// getString safely extracts a string from a parent map.
+func getString(t *testing.T, parent map[string]any, key string) string {
+	t.Helper()
+	v, ok := parent[key].(string)
+	if !ok {
+		t.Fatalf("%q is not a string: got %T", key, parent[key])
+	}
+	return v
 }
 
 // findAgentctlBinary locates the agentctl binary.
