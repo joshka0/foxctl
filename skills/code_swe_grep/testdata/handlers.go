@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 )
 
@@ -16,21 +17,21 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate credentials against database
-	if !validateCredentials(username, password) {
+	if !validateCredentials(r.Context(), username, password) {
 		http.Error(w, "invalid login", http.StatusUnauthorized)
 		return
 	}
 
 	// Create session for authenticated user
-	createSession(w, username)
+	createSession(r.Context(), w, username)
 	w.WriteHeader(http.StatusOK)
 }
 
 // Logout terminates the user session.
 func Logout(w http.ResponseWriter, r *http.Request) {
-	session := getSession(r)
+	session := getSession(r.Context(), r)
 	if session != nil {
-		destroySession(w, session)
+		destroySession(r.Context(), w, session)
 	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -47,7 +48,7 @@ func Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create the new user
-	if err := createUser(username, email, password); err != nil {
+	if err := createUser(r.Context(), username, email, password); err != nil {
 		http.Error(w, "registration failed", http.StatusInternalServerError)
 		return
 	}
@@ -56,8 +57,8 @@ func Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // Helper functions (stubs)
-func validateCredentials(username, password string) bool        { return true }
-func createSession(w http.ResponseWriter, username string)      {}
-func getSession(r *http.Request) interface{}                    { return nil }
-func destroySession(w http.ResponseWriter, session interface{}) {}
-func createUser(username, email, password string) error         { return nil }
+func validateCredentials(ctx context.Context, username, password string) bool        { return true }
+func createSession(ctx context.Context, w http.ResponseWriter, username string)      {}
+func getSession(ctx context.Context, r *http.Request) interface{}                    { return nil }
+func destroySession(ctx context.Context, w http.ResponseWriter, session interface{}) {}
+func createUser(ctx context.Context, username, email, password string) error         { return nil }
