@@ -14,6 +14,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -65,6 +67,13 @@ const (
 	DefaultMaxBytesPerFile = 64 * 1024 // 64 KB
 	DefaultInlineKB        = 32        // 32 KB inline threshold
 	MaxPreviewBytes        = 512       // Max bytes for inline preview
+)
+
+// Snippet extraction tuning constants.
+const (
+	ContextLines       = 3  // Lines of context above/below matching lines
+	MaxLinesPerSnippet = 80 // Maximum lines in a single snippet block
+	MinKeywordLen      = 3  // Minimum length for a keyword to be considered
 )
 
 // ArtifactKind is the MIME type for SWE Grep NDJSON artifacts.
@@ -203,10 +212,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		}
 	}
 
-	// Extract snippets from file results
-	// TODO(phase5-pr5): implement proper snippet extraction with symbol awareness
-	// For now, treat each file's content as a single snippet
-	snippets := extractSnippets(fileResults, limits.MaxSnippets)
+	// Extract snippets from file results using question-aware matching
+	snippets := extractSnippets(fileResults, in.Question, limits.MaxSnippets)
 
 	// Create inline previews
 	previews := makeInlinePreviews(snippets)
@@ -240,10 +247,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	})
 }
 
-// extractSnippets creates snippets from file results.
-// TODO(phase5-pr5): implement proper snippet extraction with symbol awareness.
-// For now, each file with content becomes a single snippet.
-func extractSnippets(results []FileResult, maxSnippets int) []Snippet {
+// extractSnippets creates snippets from file results using question-aware matching.
+// It extracts keywords from the question and finds matching blocks in each file.
+// Files are processed in input order (respecting upstream ranking).
+func extractSnippets(results []FileResult, question string, maxSnippets int) []Snippet {
+	keywords := extractKeywords(question)
 	snippets := make([]Snippet, 0, len(results))
 
 	for _, fr := range results {
@@ -254,18 +262,207 @@ func extractSnippets(results []FileResult, maxSnippets int) []Snippet {
 			break
 		}
 
-		lineCount := countLines(fr.Content)
+		// Extract snippets for this file
+		remaining := maxSnippets - len(snippets)
+		fileSnippets := extractSnippetsForFile(fr, keywords, remaining)
+		snippets = append(snippets, fileSnippets...)
+	}
+
+	return snippets
+}
+
+// extractSnippetsForFile extracts matching snippet blocks from a single file.
+// Returns up to `remaining` snippets based on keyword matches.
+func extractSnippetsForFile(fr FileResult, keywords []string, remaining int) []Snippet {
+	if remaining <= 0 {
+		return nil
+	}
+
+	lines := splitLines(fr.Content)
+	if len(lines) == 0 {
+		return nil
+	}
+
+	// Find which lines match any keyword
+	matchingLines := findMatchingLines(lines, keywords)
+	if len(matchingLines) == 0 {
+		// No keyword matches - if file has content, return a fallback snippet
+		// from the beginning of the file (useful when question is vague)
+		return createFallbackSnippet(fr, lines, remaining)
+	}
+
+	// Group matching lines into blocks with context
+	blocks := groupIntoBlocks(matchingLines, len(lines))
+
+	// Convert blocks to snippets
+	snippets := make([]Snippet, 0, min(len(blocks), remaining))
+	for _, block := range blocks {
+		if len(snippets) >= remaining {
+			break
+		}
+
+		text := joinLines(lines, block.start, block.end)
 		snippets = append(snippets, Snippet{
 			File:      fr.Path,
 			SymbolID:  fr.SymbolID,
-			StartLine: 1,
-			EndLine:   lineCount,
-			Text:      string(fr.Content),
+			StartLine: block.start + 1, // 1-indexed
+			EndLine:   block.end + 1,   // 1-indexed, inclusive
+			Text:      text,
 			Priority:  fr.Priority,
 		})
 	}
 
 	return snippets
+}
+
+// lineBlock represents a contiguous block of lines.
+type lineBlock struct {
+	start int // 0-indexed start line
+	end   int // 0-indexed end line (inclusive)
+}
+
+// extractKeywords extracts meaningful keywords from a question.
+// It lowercases, splits on non-alphanumeric, and filters short/stop words.
+func extractKeywords(question string) []string {
+	// Common stop words to filter out
+	stopWords := map[string]bool{
+		"the": true, "and": true, "for": true, "are": true, "but": true,
+		"not": true, "you": true, "all": true, "can": true, "had": true,
+		"her": true, "was": true, "one": true, "our": true, "out": true,
+		"has": true, "have": true, "been": true, "this": true, "that": true,
+		"what": true, "when": true, "where": true, "which": true, "who": true,
+		"how": true, "does": true, "from": true, "with": true, "into": true,
+		"about": true, "would": true, "could": true, "should": true,
+	}
+
+	lower := strings.ToLower(question)
+
+	// Split on non-alphanumeric characters
+	words := strings.FieldsFunc(lower, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+
+	keywords := make([]string, 0, len(words))
+	seen := make(map[string]bool)
+
+	for _, w := range words {
+		if len(w) < MinKeywordLen {
+			continue
+		}
+		if stopWords[w] {
+			continue
+		}
+		if seen[w] {
+			continue
+		}
+		seen[w] = true
+		keywords = append(keywords, w)
+	}
+
+	return keywords
+}
+
+// splitLines splits content into lines, preserving empty lines.
+func splitLines(content []byte) []string {
+	if len(content) == 0 {
+		return nil
+	}
+	s := string(content)
+	// Remove trailing newline to avoid empty last element
+	s = strings.TrimSuffix(s, "\n")
+	return strings.Split(s, "\n")
+}
+
+// findMatchingLines returns 0-indexed line numbers that contain any keyword.
+func findMatchingLines(lines []string, keywords []string) []int {
+	if len(keywords) == 0 {
+		return nil
+	}
+
+	matching := make([]int, 0)
+	for i, line := range lines {
+		lower := strings.ToLower(line)
+		for _, kw := range keywords {
+			if strings.Contains(lower, kw) {
+				matching = append(matching, i)
+				break
+			}
+		}
+	}
+	return matching
+}
+
+// groupIntoBlocks groups matching line indices into contiguous blocks with context.
+// Adjacent or overlapping matches are merged. Each block is capped at MaxLinesPerSnippet.
+func groupIntoBlocks(matchingLines []int, totalLines int) []lineBlock {
+	if len(matchingLines) == 0 {
+		return nil
+	}
+
+	blocks := make([]lineBlock, 0)
+	var current *lineBlock
+
+	for _, lineIdx := range matchingLines {
+		// Calculate block boundaries with context
+		start := max(0, lineIdx-ContextLines)
+		end := min(totalLines-1, lineIdx+ContextLines)
+
+		if current == nil {
+			current = &lineBlock{start: start, end: end}
+		} else if start <= current.end+1 {
+			// Merge overlapping or adjacent blocks
+			current.end = max(current.end, end)
+			// Cap at MaxLinesPerSnippet
+			if current.end-current.start+1 > MaxLinesPerSnippet {
+				current.end = current.start + MaxLinesPerSnippet - 1
+			}
+		} else {
+			// Start a new block
+			blocks = append(blocks, *current)
+			current = &lineBlock{start: start, end: end}
+		}
+	}
+
+	if current != nil {
+		blocks = append(blocks, *current)
+	}
+
+	return blocks
+}
+
+// joinLines joins lines from start to end (inclusive, 0-indexed) into a single string.
+func joinLines(lines []string, start, end int) string {
+	if start < 0 {
+		start = 0
+	}
+	if end >= len(lines) {
+		end = len(lines) - 1
+	}
+	if start > end {
+		return ""
+	}
+	return strings.Join(lines[start:end+1], "\n")
+}
+
+// createFallbackSnippet creates a snippet from the beginning of a file
+// when no keyword matches are found. This handles vague questions.
+func createFallbackSnippet(fr FileResult, lines []string, remaining int) []Snippet {
+	if remaining <= 0 || len(lines) == 0 {
+		return nil
+	}
+
+	// Take up to MaxLinesPerSnippet lines from the beginning
+	end := min(len(lines)-1, MaxLinesPerSnippet-1)
+	text := joinLines(lines, 0, end)
+
+	return []Snippet{{
+		File:      fr.Path,
+		SymbolID:  fr.SymbolID,
+		StartLine: 1,
+		EndLine:   end + 1, // 1-indexed
+		Text:      text,
+		Priority:  fr.Priority,
+	}}
 }
 
 // makeInlinePreviews creates truncated previews for inline embedding.

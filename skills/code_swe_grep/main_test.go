@@ -536,13 +536,14 @@ func TestFindLastNewline(t *testing.T) {
 
 func TestExtractSnippets(t *testing.T) {
 	results := []FileResult{
-		{Path: "a.go", Content: []byte("package a\n"), Priority: 0.9},
-		{Path: "b.go", Content: []byte("package b\n"), Priority: 0.8},
+		{Path: "a.go", Content: []byte("package a\nfunc Login() {}\n"), Priority: 0.9},
+		{Path: "b.go", Content: []byte("package b\nfunc Login() {}\n"), Priority: 0.8},
 		{Path: "skipped.go", Skipped: true, Content: nil},
 		{Path: "empty.go", Content: []byte{}},
 	}
 
-	snippets := extractSnippets(results, 10)
+	// Question with "login" keyword should match both files
+	snippets := extractSnippets(results, "How does login work?", 10)
 
 	if len(snippets) != 2 {
 		t.Fatalf("extractSnippets returned %d snippets, want 2", len(snippets))
@@ -561,12 +562,13 @@ func TestExtractSnippets(t *testing.T) {
 
 func TestExtractSnippetsLimit(t *testing.T) {
 	results := []FileResult{
-		{Path: "a.go", Content: []byte("a")},
-		{Path: "b.go", Content: []byte("b")},
-		{Path: "c.go", Content: []byte("c")},
+		{Path: "a.go", Content: []byte("func Login()\n")},
+		{Path: "b.go", Content: []byte("func Login()\n")},
+		{Path: "c.go", Content: []byte("func Login()\n")},
 	}
 
-	snippets := extractSnippets(results, 2)
+	// Limit to 2 snippets
+	snippets := extractSnippets(results, "login", 2)
 
 	if len(snippets) != 2 {
 		t.Errorf("extractSnippets with limit 2 returned %d snippets, want 2", len(snippets))
@@ -641,4 +643,341 @@ func TestSnippetJSON(t *testing.T) {
 	if decoded.SymbolID != s.SymbolID {
 		t.Errorf("decoded.SymbolID = %q, want %q", decoded.SymbolID, s.SymbolID)
 	}
+}
+
+// --- PR5: Snippet Extraction Engine Tests ---
+
+func TestExtractKeywords(t *testing.T) {
+	tests := []struct {
+		name     string
+		question string
+		want     []string
+	}{
+		{
+			name:     "simple question",
+			question: "How does login work?",
+			want:     []string{"login", "work"},
+		},
+		{
+			name:     "question with stop words",
+			question: "What is the authentication handler?",
+			want:     []string{"authentication", "handler"},
+		},
+		{
+			name:     "question with short words filtered",
+			question: "Is it OK to do X?",
+			want:     []string{}, // all words are short or stop words
+		},
+		{
+			name:     "question with duplicates",
+			question: "login and login again",
+			want:     []string{"login", "again"},
+		},
+		{
+			name:     "question with punctuation",
+			question: "Where is user.password validated?",
+			want:     []string{"user", "password", "validated"},
+		},
+		{
+			name:     "empty question",
+			question: "",
+			want:     []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractKeywords(tt.question)
+			if len(got) != len(tt.want) {
+				t.Errorf("extractKeywords(%q) = %v, want %v", tt.question, got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("extractKeywords(%q)[%d] = %q, want %q", tt.question, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+		want    []string
+	}{
+		{"empty", []byte{}, nil},
+		{"single line no newline", []byte("hello"), []string{"hello"}},
+		{"single line with newline", []byte("hello\n"), []string{"hello"}},
+		{"two lines", []byte("line1\nline2\n"), []string{"line1", "line2"}},
+		{"three lines no trailing newline", []byte("a\nb\nc"), []string{"a", "b", "c"}},
+		{"empty lines preserved", []byte("a\n\nb\n"), []string{"a", "", "b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitLines(tt.content)
+			if len(got) != len(tt.want) {
+				t.Errorf("splitLines(%q) = %v (len %d), want %v (len %d)", tt.content, got, len(got), tt.want, len(tt.want))
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("splitLines(%q)[%d] = %q, want %q", tt.content, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFindMatchingLines(t *testing.T) {
+	lines := []string{
+		"package main",     // 0
+		"",                 // 1
+		"func Login() {",   // 2
+		"    // do login",  // 3
+		"}",                // 4
+		"",                 // 5
+		"func Logout() {",  // 6
+		"    // do logout", // 7
+		"}",                // 8
+	}
+
+	tests := []struct {
+		name     string
+		keywords []string
+		want     []int
+	}{
+		{"single keyword match", []string{"login"}, []int{2, 3}},
+		{"multiple keywords", []string{"login", "logout"}, []int{2, 3, 6, 7}},
+		{"no match", []string{"register"}, nil},
+		{"empty keywords", []string{}, nil},
+		// Note: keywords are expected to be lowercase (extractKeywords lowercases them)
+		// findMatchingLines lowercases lines for comparison, so this tests that flow
+		{"partial match", []string{"log"}, []int{2, 3, 6, 7}}, // "log" matches "Login" and "Logout"
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findMatchingLines(lines, tt.keywords)
+			if len(got) != len(tt.want) {
+				t.Errorf("findMatchingLines() = %v, want %v", got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("findMatchingLines()[%d] = %d, want %d", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestGroupIntoBlocks(t *testing.T) {
+	tests := []struct {
+		name          string
+		matchingLines []int
+		totalLines    int
+		want          []lineBlock
+	}{
+		{
+			name:          "single match with context",
+			matchingLines: []int{5},
+			totalLines:    10,
+			want:          []lineBlock{{start: 2, end: 8}}, // 5-3 to 5+3
+		},
+		{
+			name:          "adjacent matches merged",
+			matchingLines: []int{5, 6},
+			totalLines:    20,
+			want:          []lineBlock{{start: 2, end: 9}}, // merged
+		},
+		{
+			name:          "separate matches",
+			matchingLines: []int{2, 15},
+			totalLines:    20,
+			want:          []lineBlock{{start: 0, end: 5}, {start: 12, end: 18}},
+		},
+		{
+			name:          "match at start",
+			matchingLines: []int{0},
+			totalLines:    10,
+			want:          []lineBlock{{start: 0, end: 3}},
+		},
+		{
+			name:          "match at end",
+			matchingLines: []int{9},
+			totalLines:    10,
+			want:          []lineBlock{{start: 6, end: 9}},
+		},
+		{
+			name:          "empty matches",
+			matchingLines: []int{},
+			totalLines:    10,
+			want:          nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := groupIntoBlocks(tt.matchingLines, tt.totalLines)
+			if len(got) != len(tt.want) {
+				t.Errorf("groupIntoBlocks() = %v, want %v", got, tt.want)
+				return
+			}
+			for i := range got {
+				if got[i].start != tt.want[i].start || got[i].end != tt.want[i].end {
+					t.Errorf("groupIntoBlocks()[%d] = {%d,%d}, want {%d,%d}",
+						i, got[i].start, got[i].end, tt.want[i].start, tt.want[i].end)
+				}
+			}
+		})
+	}
+}
+
+func TestJoinLines(t *testing.T) {
+	lines := []string{"line0", "line1", "line2", "line3", "line4"}
+
+	tests := []struct {
+		name  string
+		start int
+		end   int
+		want  string
+	}{
+		{"single line", 0, 0, "line0"},
+		{"multiple lines", 1, 3, "line1\nline2\nline3"},
+		{"negative start clamped", -1, 1, "line0\nline1"},
+		{"end beyond length clamped", 3, 10, "line3\nline4"},
+		{"start > end empty", 3, 1, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinLines(lines, tt.start, tt.end)
+			if got != tt.want {
+				t.Errorf("joinLines(%d, %d) = %q, want %q", tt.start, tt.end, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractSnippetsForFile(t *testing.T) {
+	content := []byte(`package handlers
+
+import "net/http"
+
+// Login handles user authentication.
+func Login(w http.ResponseWriter, r *http.Request) {
+    username := r.FormValue("username")
+    password := r.FormValue("password")
+    // validate credentials
+}
+
+// Logout terminates the session.
+func Logout(w http.ResponseWriter, r *http.Request) {
+    // destroy session
+}
+`)
+
+	fr := FileResult{
+		Path:     "handlers.go",
+		Content:  content,
+		Priority: 0.9,
+	}
+
+	t.Run("keyword match", func(t *testing.T) {
+		keywords := []string{"login"}
+		snippets := extractSnippetsForFile(fr, keywords, 10)
+
+		if len(snippets) == 0 {
+			t.Fatal("expected at least 1 snippet")
+		}
+
+		// Should contain the Login function
+		if !strings.Contains(snippets[0].Text, "func Login") {
+			t.Errorf("snippet should contain 'func Login', got: %s", snippets[0].Text[:min(100, len(snippets[0].Text))])
+		}
+	})
+
+	t.Run("no keyword match fallback", func(t *testing.T) {
+		keywords := []string{"nonexistent"}
+		snippets := extractSnippetsForFile(fr, keywords, 10)
+
+		// Should return fallback snippet from beginning
+		if len(snippets) != 1 {
+			t.Fatalf("expected 1 fallback snippet, got %d", len(snippets))
+		}
+		if snippets[0].StartLine != 1 {
+			t.Errorf("fallback snippet StartLine = %d, want 1", snippets[0].StartLine)
+		}
+	})
+
+	t.Run("remaining limit respected", func(t *testing.T) {
+		keywords := []string{"login", "logout"}
+		snippets := extractSnippetsForFile(fr, keywords, 1)
+
+		if len(snippets) != 1 {
+			t.Errorf("expected 1 snippet (limited), got %d", len(snippets))
+		}
+	})
+}
+
+func TestExtractSnippetsIntegration(t *testing.T) {
+	// Simulate multiple files with varying relevance
+	results := []FileResult{
+		{
+			Path: "handlers.go",
+			Content: []byte(`package handlers
+
+func Login(w http.ResponseWriter, r *http.Request) {
+    // login implementation
+}
+
+func Logout(w http.ResponseWriter, r *http.Request) {
+    // logout implementation
+}
+`),
+			Priority: 0.95,
+		},
+		{
+			Path: "config.go",
+			Content: []byte(`package config
+
+func Load() *Config {
+    // load config
+}
+`),
+			Priority: 0.5,
+		},
+	}
+
+	t.Run("question matches first file", func(t *testing.T) {
+		snippets := extractSnippets(results, "How does login work?", 10)
+
+		// Should have snippet from handlers.go (login match)
+		// and fallback from config.go (no login keyword)
+		if len(snippets) < 1 {
+			t.Fatal("expected at least 1 snippet")
+		}
+
+		// First snippet should be from handlers.go with login content
+		if snippets[0].File != "handlers.go" {
+			t.Errorf("first snippet should be from handlers.go, got %s", snippets[0].File)
+		}
+		if !strings.Contains(snippets[0].Text, "Login") {
+			t.Errorf("first snippet should contain Login")
+		}
+	})
+
+	t.Run("files_relevant count", func(t *testing.T) {
+		// This would be tested in the run function, but we can verify
+		// extractSnippets produces snippets for both files
+		snippets := extractSnippets(results, "vague question", 10)
+
+		// Both files should produce fallback snippets
+		if len(snippets) != 2 {
+			t.Errorf("expected 2 snippets (fallbacks for both), got %d", len(snippets))
+		}
+	})
 }
