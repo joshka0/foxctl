@@ -817,6 +817,14 @@ func TestGroupIntoBlocks(t *testing.T) {
 			totalLines:    10,
 			want:          nil,
 		},
+		{
+			name:          "capped block forces new block",
+			matchingLines: generateSequence(0, 100), // 100 consecutive matches
+			totalLines:    200,
+			// Match 77 causes first block to exceed 80 lines, so it caps at {0, 79}
+			// Match 78 starts fresh block at {75, 81}, which continues to {75, 102}
+			want: []lineBlock{{start: 0, end: 79}, {start: 75, end: 102}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -980,4 +988,13 @@ func Load() *Config {
 			t.Errorf("expected 2 snippets (fallbacks for both), got %d", len(snippets))
 		}
 	})
+}
+
+// generateSequence returns a slice of integers from start to end-1 (exclusive).
+func generateSequence(start, end int) []int {
+	seq := make([]int, end-start)
+	for i := range seq {
+		seq[i] = start + i
+	}
+	return seq
 }

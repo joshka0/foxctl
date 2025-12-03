@@ -412,9 +412,11 @@ func groupIntoBlocks(matchingLines []int, totalLines int) []lineBlock {
 		} else if start <= current.end+1 {
 			// Merge overlapping or adjacent blocks
 			current.end = max(current.end, end)
-			// Cap at MaxLinesPerSnippet
+			// Cap at MaxLinesPerSnippet and finalize
 			if current.end-current.start+1 > MaxLinesPerSnippet {
 				current.end = current.start + MaxLinesPerSnippet - 1
+				blocks = append(blocks, *current)
+				current = nil // Force next match to start a fresh block
 			}
 		} else {
 			// Start a new block
