@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -487,5 +488,157 @@ func TestFileResult(t *testing.T) {
 	}
 	if len(fr.Content) == 0 {
 		t.Error("Content should not be empty")
+	}
+}
+
+func TestCountLines(t *testing.T) {
+	tests := []struct {
+		name    string
+		content []byte
+		want    int
+	}{
+		{"empty", []byte{}, 0},
+		{"single line no newline", []byte("hello"), 1},
+		{"single line with newline", []byte("hello\n"), 1},
+		{"two lines", []byte("line1\nline2\n"), 2},
+		{"three lines no trailing newline", []byte("a\nb\nc"), 3},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := countLines(tt.content)
+			if got != tt.want {
+				t.Errorf("countLines(%q) = %d, want %d", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindLastNewline(t *testing.T) {
+	tests := []struct {
+		s    string
+		want int
+	}{
+		{"", -1},
+		{"no newlines", -1},
+		{"has\nnewline", 3},
+		{"multiple\nnew\nlines", 12},
+		{"\n", 0},
+	}
+
+	for _, tt := range tests {
+		got := findLastNewline(tt.s)
+		if got != tt.want {
+			t.Errorf("findLastNewline(%q) = %d, want %d", tt.s, got, tt.want)
+		}
+	}
+}
+
+func TestExtractSnippets(t *testing.T) {
+	results := []FileResult{
+		{Path: "a.go", Content: []byte("package a\n"), Priority: 0.9},
+		{Path: "b.go", Content: []byte("package b\n"), Priority: 0.8},
+		{Path: "skipped.go", Skipped: true, Content: nil},
+		{Path: "empty.go", Content: []byte{}},
+	}
+
+	snippets := extractSnippets(results, 10)
+
+	if len(snippets) != 2 {
+		t.Fatalf("extractSnippets returned %d snippets, want 2", len(snippets))
+	}
+
+	if snippets[0].File != "a.go" {
+		t.Errorf("snippets[0].File = %q, want a.go", snippets[0].File)
+	}
+	if snippets[0].Priority != 0.9 {
+		t.Errorf("snippets[0].Priority = %f, want 0.9", snippets[0].Priority)
+	}
+	if snippets[1].File != "b.go" {
+		t.Errorf("snippets[1].File = %q, want b.go", snippets[1].File)
+	}
+}
+
+func TestExtractSnippetsLimit(t *testing.T) {
+	results := []FileResult{
+		{Path: "a.go", Content: []byte("a")},
+		{Path: "b.go", Content: []byte("b")},
+		{Path: "c.go", Content: []byte("c")},
+	}
+
+	snippets := extractSnippets(results, 2)
+
+	if len(snippets) != 2 {
+		t.Errorf("extractSnippets with limit 2 returned %d snippets, want 2", len(snippets))
+	}
+}
+
+func TestMakeInlinePreviews(t *testing.T) {
+	snippets := []Snippet{
+		{File: "a.go", StartLine: 1, EndLine: 5, Text: "short text", Priority: 0.9},
+	}
+
+	previews := makeInlinePreviews(snippets)
+
+	if len(previews) != 1 {
+		t.Fatalf("makeInlinePreviews returned %d previews, want 1", len(previews))
+	}
+
+	if previews[0].File != "a.go" {
+		t.Errorf("previews[0].File = %q, want a.go", previews[0].File)
+	}
+	if previews[0].Preview != "short text" {
+		t.Errorf("previews[0].Preview = %q, want 'short text'", previews[0].Preview)
+	}
+}
+
+func TestMakeInlinePreviewsTruncation(t *testing.T) {
+	// Create a snippet with text longer than MaxPreviewBytes
+	longText := strings.Repeat("x", MaxPreviewBytes+100)
+	snippets := []Snippet{
+		{File: "long.go", StartLine: 1, EndLine: 1, Text: longText},
+	}
+
+	previews := makeInlinePreviews(snippets)
+
+	if len(previews) != 1 {
+		t.Fatalf("makeInlinePreviews returned %d previews, want 1", len(previews))
+	}
+
+	// Should be truncated and end with "..."
+	if len(previews[0].Preview) > MaxPreviewBytes+4 { // +4 for "..."
+		t.Errorf("preview length = %d, should be <= %d", len(previews[0].Preview), MaxPreviewBytes+4)
+	}
+	if !strings.HasSuffix(previews[0].Preview, "...") {
+		t.Errorf("truncated preview should end with '...', got %q", previews[0].Preview[len(previews[0].Preview)-10:])
+	}
+}
+
+func TestSnippetJSON(t *testing.T) {
+	s := Snippet{
+		File:      "test.go",
+		SymbolID:  "test.go:Main",
+		StartLine: 1,
+		EndLine:   10,
+		Text:      "package main",
+		Priority:  0.95,
+	}
+
+	// Verify it marshals correctly
+	data, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var decoded Snippet
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if decoded.File != s.File {
+		t.Errorf("decoded.File = %q, want %q", decoded.File, s.File)
+	}
+	if decoded.SymbolID != s.SymbolID {
+		t.Errorf("decoded.SymbolID = %q, want %q", decoded.SymbolID, s.SymbolID)
 	}
 }

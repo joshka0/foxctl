@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -62,7 +63,12 @@ const (
 	DefaultMaxFiles        = 50
 	DefaultMaxSnippets     = 100
 	DefaultMaxBytesPerFile = 64 * 1024 // 64 KB
+	DefaultInlineKB        = 32        // 32 KB inline threshold
+	MaxPreviewBytes        = 512       // Max bytes for inline preview
 )
+
+// ArtifactKind is the MIME type for SWE Grep NDJSON artifacts.
+const ArtifactKind = "application/x-swe-grep-snippets+ndjson"
 
 // FileResult holds validated path and content for a candidate file.
 type FileResult struct {
@@ -75,6 +81,28 @@ type FileResult struct {
 	Skipped   bool    // True if file was skipped (not found, validation error, etc.)
 	SkipErr   string  // Reason for skipping, if skipped
 	ErrCode   string  // Error code if skipped due to error
+}
+
+// Snippet represents an extracted code snippet for output.
+// For NDJSON artifacts, all fields are included.
+// For inline previews, Text is truncated to MaxPreviewBytes.
+type Snippet struct {
+	File      string  `json:"file"`
+	SymbolID  string  `json:"symbol_id,omitempty"`
+	StartLine int     `json:"start_line"`
+	EndLine   int     `json:"end_line"`
+	Text      string  `json:"text"`
+	Priority  float64 `json:"priority,omitempty"`
+}
+
+// SnippetPreview is the inline representation with truncated text.
+type SnippetPreview struct {
+	File      string  `json:"file"`
+	SymbolID  string  `json:"symbol_id,omitempty"`
+	StartLine int     `json:"start_line"`
+	EndLine   int     `json:"end_line"`
+	Preview   string  `json:"preview"`
+	Priority  float64 `json:"priority,omitempty"`
 }
 
 // Input is the expected JSON input per spec §5.2.
@@ -175,21 +203,134 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		}
 	}
 
-	// TODO(phase5-pr5): implement snippet extraction from file contents
-	// For now, emit summary with files processed but no snippets
+	// Extract snippets from file results
+	// TODO(phase5-pr5): implement proper snippet extraction with symbol awareness
+	// For now, treat each file's content as a single snippet
+	snippets := extractSnippets(fileResults, limits.MaxSnippets)
+
+	// Create inline previews
+	previews := makeInlinePreviews(snippets)
+
+	// Build response data
 	data := map[string]any{
 		"summary": map[string]int{
 			"files_considered": filesConsidered,
 			"files_relevant":   filesRelevant,
-			"snippets_emitted": 0,
+			"snippets_emitted": len(snippets),
 		},
-		"snippets_inline": []any{},
+		"snippets_inline": previews,
+	}
+
+	// Persist full snippets to CAS if we have any
+	if len(snippets) > 0 {
+		artifact, err := persistSnippetsArtifact(ctx, rc, snippets)
+		if err != nil {
+			return fmt.Errorf("persist snippets artifact: %w", err)
+		}
+		if artifact.Digest != "" {
+			data["artifact"] = artifact.Digest
+			data["artifact_kind"] = artifact.Kind
+			data["artifact_size_bytes"] = artifact.Size
+		}
 	}
 
 	return rc.Emit(Command, data, "application/json", envelope.Meta{
 		Source: "run",
 		Runner: "exec",
 	})
+}
+
+// extractSnippets creates snippets from file results.
+// TODO(phase5-pr5): implement proper snippet extraction with symbol awareness.
+// For now, each file with content becomes a single snippet.
+func extractSnippets(results []FileResult, maxSnippets int) []Snippet {
+	snippets := make([]Snippet, 0, len(results))
+
+	for _, fr := range results {
+		if fr.Skipped || len(fr.Content) == 0 {
+			continue
+		}
+		if len(snippets) >= maxSnippets {
+			break
+		}
+
+		lineCount := countLines(fr.Content)
+		snippets = append(snippets, Snippet{
+			File:      fr.Path,
+			SymbolID:  fr.SymbolID,
+			StartLine: 1,
+			EndLine:   lineCount,
+			Text:      string(fr.Content),
+			Priority:  fr.Priority,
+		})
+	}
+
+	return snippets
+}
+
+// makeInlinePreviews creates truncated previews for inline embedding.
+func makeInlinePreviews(snippets []Snippet) []SnippetPreview {
+	previews := make([]SnippetPreview, len(snippets))
+	for i, s := range snippets {
+		preview := s.Text
+		if len(preview) > MaxPreviewBytes {
+			// Truncate at MaxPreviewBytes, try to break at newline
+			preview = preview[:MaxPreviewBytes]
+			if lastNL := findLastNewline(preview); lastNL > MaxPreviewBytes/2 {
+				preview = preview[:lastNL+1]
+			}
+			preview += "..."
+		}
+		previews[i] = SnippetPreview{
+			File:      s.File,
+			SymbolID:  s.SymbolID,
+			StartLine: s.StartLine,
+			EndLine:   s.EndLine,
+			Preview:   preview,
+			Priority:  s.Priority,
+		}
+	}
+	return previews
+}
+
+// persistSnippetsArtifact writes full snippets as NDJSON to CAS.
+func persistSnippetsArtifact(ctx context.Context, rc *runner.RunnerContext, snippets []Snippet) (runner.Artifact, error) {
+	if len(snippets) == 0 {
+		return runner.Artifact{}, nil
+	}
+
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	for _, s := range snippets {
+		if err := enc.Encode(s); err != nil {
+			return runner.Artifact{}, fmt.Errorf("encode snippet: %w", err)
+		}
+	}
+
+	return runner.PersistBuffer(ctx, rc, buf, ArtifactKind, "code_swe_grep")
+}
+
+// countLines counts the number of lines in content.
+func countLines(content []byte) int {
+	if len(content) == 0 {
+		return 0
+	}
+	count := bytes.Count(content, []byte{'\n'})
+	// Add 1 if content doesn't end with newline
+	if content[len(content)-1] != '\n' {
+		count++
+	}
+	return count
+}
+
+// findLastNewline returns the index of the last newline in s, or -1 if not found.
+func findLastNewline(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '\n' {
+			return i
+		}
+	}
+	return -1
 }
 
 // applyDefaultLimits fills in default values for unset limits.
