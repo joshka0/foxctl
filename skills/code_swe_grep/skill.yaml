@@ -1,0 +1,102 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/swe_grep
+  version: 0.1.0
+  description: "Extract high-signal code snippets from candidate files using live workspace reads"
+  tags: ["code", "grep", "snippets", "retrieval", "swe"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_swe_grep/code_swe_grep
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/swe_grep
+  parameters:
+    - name: workspace_id
+      type: string
+      required: true
+      description: "Workspace identifier"
+    - name: question
+      type: string
+      required: true
+      description: "Natural-language question or task guiding snippet extraction"
+    - name: candidates
+      type: array
+      required: true
+      items:
+        type: object
+        properties:
+          path:
+            type: string
+            description: "File path relative to workspace root"
+          symbol_id:
+            type: string
+            description: "Optional symbol ID from code symbol index"
+          priority:
+            type: number
+            description: "Optional advisory ordering from upstream retrieval"
+      description: "Candidate files/symbols to process"
+    - name: limits
+      type: object
+      required: false
+      properties:
+        max_files:
+          type: integer
+          description: "Maximum number of candidate files to inspect"
+        max_snippets:
+          type: integer
+          description: "Global cap on emitted snippets"
+        max_bytes_per_file:
+          type: integer
+          description: "Cap on bytes read per file"
+      description: "Optional limits for performance control"
+  returns:
+    - name: summary
+      type: object
+      description: "Aggregated stats: files_considered, files_relevant, snippets_emitted"
+    - name: snippets_inline
+      type: array
+      description: "Inline snippet previews when total output is small"
+    - name: artifact
+      type: string
+      description: "CAS digest of full NDJSON snippets when output is large"
+    - name: artifact_kind
+      type: string
+      description: "MIME type of artifact (application/x-swe-grep-snippets+ndjson)"
+    - name: artifact_size_bytes
+      type: integer
+      description: "Size of CAS artifact in bytes"
+  help:
+    short: "Extract high-signal code snippets from candidate files for a question."
+    long: |
+      SWE Grep is the final stage in the code retrieval funnel:
+      1. Semantic/symbol indexes provide candidate files/symbols (Phase 3/4).
+      2. SWE Grep reads those files live from the workspace.
+      3. It extracts relevant snippets based on the question.
+
+      The skill always reads live workspace files (not cached index data) to ensure
+      snippets reflect the current tree. Large results are stored in CAS as NDJSON.
+
+      See docs/spec/code_symbol_index_and_swe_grep.md §5 for the full contract.
+    workflows:
+      - id: extract-snippets-for-question
+        description: "Extract code snippets relevant to a question from candidates."
+        example_input:
+          workspace_id: "my-workspace"
+          question: "How does user authentication work?"
+          candidates:
+            - path: "internal/auth/login.go"
+              symbol_id: "internal/auth/login.go:Login"
+              priority: 0.95
+            - path: "internal/auth/session.go"
+          limits:
+            max_files: 10
+            max_snippets: 20
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

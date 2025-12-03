@@ -35,27 +35,30 @@ docs/
 
 ## Quick Reference
 
-| Topic | Document |
-|-------|----------|
-| **Envelope contract** | `spec/core_profile_v1.md` §2 |
-| **CAS & large outputs** | `spec/core_profile_v1.md` §4 |
-| **Jobs & caching** | `spec/core_profile_v1.md` §7–8 |
-| **WASI vs exec runners** | `spec/core_profile_v1.md` §10 |
-| **OpenAPI skill** | `spec/openapi_skill.md` |
-| **Plugin protocol** | `spec/plugin_protocol.md` |
-| **Agent orchestration** | `agent_profile.md` |
-| **dspy-go agents** | `spec/dspy_go_agents.md` |
-| **Testing & CI** | `start/testing_and_ci.md` |
-| **OpenAPI & plugins** | `start/openapi_and_plugins.md` |
-| **Gotchas & rules** | `start/gotchas.md` |
-| **Architecture** | `architecture.md` |
-| **Roadmap** | `roadmap.md` |
-| **Error codes** | `error-handling.md` |
+| Topic                    | Document                                    |
+| ------------------------ | ------------------------------------------- |
+| **Envelope contract**    | `spec/core_profile_v1.md` §2                |
+| **CAS & large outputs**  | `spec/core_profile_v1.md` §4                |
+| **Jobs & caching**       | `spec/core_profile_v1.md` §7–8              |
+| **WASI vs exec runners** | `spec/core_profile_v1.md` §10               |
+| **OpenAPI skill**        | `spec/openapi_skill.md`                     |
+| **Plugin protocol**      | `spec/plugin_protocol.md`                   |
+| **Agent orchestration**  | `agent_profile.md`                          |
+| **dspy-go agents**       | `spec/dspy_go_agents.md`                    |
+| **SWE Grep skill**       | `spec/code_symbol_index_and_swe_grep.md` §5 |
+| **Symbol index**         | `start/symbol_index.md`                     |
+| **Testing & CI**         | `start/testing_and_ci.md`                   |
+| **OpenAPI & plugins**    | `start/openapi_and_plugins.md`              |
+| **Gotchas & rules**      | `start/gotchas.md`                          |
+| **Architecture**         | `architecture.md`                           |
+| **Roadmap**              | `roadmap.md`                                |
+| **Error codes**          | `error-handling.md`                         |
 
 ## Where to Look
 
 - **Wire contract questions** → `spec/core_profile_v1.md`
 - **How to test / CI failing** → `start/testing_and_ci.md`
-- **OpenAPI skill behavior** → `spec/openapi_skill.md` + `start/openapi_and_plugins.md`
+- **OpenAPI skill behavior** → `spec/openapi_skill.md` +
+  `start/openapi_and_plugins.md`
 - **Multi-agent features** → `agent_profile.md`
 - **Implementation status** → `impl_plan/universal_swe_grep_and_agents.md`
