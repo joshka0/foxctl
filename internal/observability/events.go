@@ -22,23 +22,42 @@ const EnvObsDir = "AGENTCTL_OBS_DIR"
 
 // obsDir caches the resolved observability directory.
 var (
-	obsDir     string
-	obsDirOnce sync.Once
+	obsDir    string
+	obsDirSet bool
+	obsDirMu  sync.RWMutex
 )
 
 // getObsDir returns the configured observability directory, or empty if disabled.
 func getObsDir() string {
-	obsDirOnce.Do(func() {
-		obsDir = os.Getenv(EnvObsDir)
-	})
+	obsDirMu.RLock()
+	if obsDirSet {
+		dir := obsDir
+		obsDirMu.RUnlock()
+		return dir
+	}
+	obsDirMu.RUnlock()
+
+	// Upgrade to write lock for initialization
+	obsDirMu.Lock()
+	defer obsDirMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if obsDirSet {
+		return obsDir
+	}
+
+	obsDir = os.Getenv(EnvObsDir)
+	obsDirSet = true
 	return obsDir
 }
 
 // SetObsDirForTesting overrides the observability directory for testing.
 // This should only be called from tests.
 func SetObsDirForTesting(dir string) {
+	obsDirMu.Lock()
+	defer obsDirMu.Unlock()
 	obsDir = dir
-	obsDirOnce.Do(func() {}) // mark as done so getObsDir uses our value
+	obsDirSet = true
 }
 
 // WriteEvent appends an NDJSON-encoded event to $AGENTCTL_OBS_DIR/events/<name>.ndjson.
