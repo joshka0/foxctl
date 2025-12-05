@@ -7,6 +7,7 @@ Production-tested skills for Claude Code that auto-activate based on context.
 ## What Are Skills?
 
 Skills are modular knowledge bases that Claude loads when needed. They provide:
+
 - Domain-specific guidelines
 - Best practices
 - Code examples
@@ -14,18 +15,21 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 
 **Problem:** Skills don't activate automatically by default.
 
-**Solution:** This showcase includes the hooks + configuration to make them activate.
+**Solution:** This showcase includes the hooks + configuration to make them
+activate.
 
 ---
 
 ## Available Skills
 
 ### skill-developer (Meta-Skill)
+
 **Purpose:** Creating and managing Claude Code skills
 
 **Files:** 7 resource files (426 lines total)
 
 **Use when:**
+
 - Creating new skills
 - Understanding skill structure
 - Working with skill-rules.json
@@ -38,11 +42,13 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 ---
 
 ### backend-dev-guidelines
+
 **Purpose:** Node.js/Express/TypeScript development patterns
 
 **Files:** 12 resource files (304 lines main + resources)
 
 **Covers:**
+
 - Layered architecture (Routes → Controllers → Services → Repositories)
 - BaseController pattern
 - Prisma database access
@@ -53,19 +59,22 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 - Testing strategies
 
 **Use when:**
+
 - Creating/modifying API routes
 - Building controllers or services
 - Database operations with Prisma
 - Setting up error tracking
 
-**Customization:** ⚠️ Update `pathPatterns` in skill-rules.json to match your backend directories
+**Customization:** ⚠️ Update `pathPatterns` in skill-rules.json to match your
+backend directories
 
 **Example pathPatterns:**
+
 ```json
 {
   "pathPatterns": [
-    "src/api/**/*.ts",       // Single app with src/api
-    "backend/**/*.ts",       // Backend directory
+    "src/api/**/*.ts", // Single app with src/api
+    "backend/**/*.ts", // Backend directory
     "services/*/src/**/*.ts" // Multi-service monorepo
   ]
 }
@@ -76,11 +85,13 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 ---
 
 ### frontend-dev-guidelines
+
 **Purpose:** React/TypeScript/MUI v7 development patterns
 
 **Files:** 11 resource files (398 lines main + resources)
 
 **Covers:**
+
 - Modern React patterns (Suspense, lazy loading)
 - useSuspenseQuery for data fetching
 - MUI v7 styling (Grid with `size={{}}` prop)
@@ -90,6 +101,7 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 - TypeScript best practices
 
 **Use when:**
+
 - Creating React components
 - Fetching data with TanStack Query
 - Styling with MUI v7
@@ -98,28 +110,32 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 **Customization:** ⚠️ Update `pathPatterns` + verify you use React/MUI
 
 **Example pathPatterns:**
+
 ```json
 {
   "pathPatterns": [
-    "src/**/*.tsx",          // Single React app
+    "src/**/*.tsx", // Single React app
     "frontend/src/**/*.tsx", // Frontend directory
-    "apps/web/**/*.tsx"      // Monorepo web app
+    "apps/web/**/*.tsx" // Monorepo web app
   ]
 }
 ```
 
-**Note:** This skill is configured as a **guardrail** (enforcement: "block") to prevent MUI v6→v7 incompatibilities.
+**Note:** This skill is configured as a **guardrail** (enforcement: "block") to
+prevent MUI v6→v7 incompatibilities.
 
 **[View Skill →](frontend-dev-guidelines/)**
 
 ---
 
 ### route-tester
+
 **Purpose:** Testing authenticated API routes with JWT cookie auth
 
 **Files:** 1 main file (389 lines)
 
 **Covers:**
+
 - JWT cookie-based authentication testing
 - test-auth-route.js script patterns
 - cURL with cookie authentication
@@ -127,6 +143,7 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 - Testing POST/PUT/DELETE operations
 
 **Use when:**
+
 - Testing API endpoints
 - Debugging authentication
 - Validating route functionality
@@ -134,6 +151,7 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 **Customization:** ⚠️ Requires JWT cookie auth setup
 
 **Ask first:** "Do you use JWT cookie-based authentication?"
+
 - If YES: Copy and customize service URLs
 - If NO: Skip or adapt for your auth method
 
@@ -142,11 +160,13 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 ---
 
 ### error-tracking
+
 **Purpose:** Sentry error tracking and monitoring patterns
 
 **Files:** 1 main file (~250 lines)
 
 **Covers:**
+
 - Sentry v8 initialization
 - Error capture patterns
 - Breadcrumbs and user context
@@ -154,6 +174,7 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 - Integration with Express and React
 
 **Use when:**
+
 - Setting up error tracking
 - Capturing exceptions
 - Adding error context
@@ -165,11 +186,39 @@ Skills are modular knowledge bases that Claude loads when needed. They provide:
 
 ---
 
+### code-retrieval
+
+**Purpose:** Code retrieval funnel for intelligent code search and editing
+
+**Files:** 5 resource files (SKILL.md + 4 resources)
+
+**Covers:**
+
+- Retrieval funnel: semantic search → symbol index → SWE grep → edits
+- `code.symbol_search`: Find functions/methods by intent
+- `code.swe_grep`: Extract high-signal code snippets
+- `edit.apply_patch` vs `edit.apply_structured_diff`: Tool selection
+- Guardrails and anti-patterns for each tool
+
+**Use when:**
+
+- Searching for code to understand or modify
+- Finding functions by intent, not exact name
+- Extracting code context before editing
+- Planning complex refactors
+
+**Customization:** ✅ None - agentctl-specific patterns
+
+**[View Skill →](code-retrieval/)**
+
+---
+
 ## How to Add a Skill to Your Project
 
 ### Quick Integration
 
 **For Claude Code:**
+
 ```
 User: "Add the backend-dev-guidelines skill to my project"
 
@@ -180,11 +229,13 @@ Claude should:
 4. Verify integration
 ```
 
-See [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for complete instructions.
+See [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for
+complete instructions.
 
 ### Manual Integration
 
 **Step 1: Copy the skill directory**
+
 ```bash
 cp -r claude-code-infrastructure-showcase/.claude/skills/backend-dev-guidelines \\
       your-project/.claude/skills/
@@ -193,19 +244,21 @@ cp -r claude-code-infrastructure-showcase/.claude/skills/backend-dev-guidelines 
 **Step 2: Update skill-rules.json**
 
 If you don't have one, create it:
+
 ```bash
 cp claude-code-infrastructure-showcase/.claude/skills/skill-rules.json \\
    your-project/.claude/skills/
 ```
 
 Then customize the `pathPatterns` for your project:
+
 ```json
 {
   "skills": {
     "backend-dev-guidelines": {
       "fileTriggers": {
         "pathPatterns": [
-          "YOUR_BACKEND_PATH/**/*.ts"  // ← Update this!
+          "YOUR_BACKEND_PATH/**/*.ts" // ← Update this!
         ]
       }
     }
@@ -214,6 +267,7 @@ Then customize the `pathPatterns` for your project:
 ```
 
 **Step 3: Test**
+
 - Edit a file in your backend directory
 - The skill should activate automatically
 
@@ -224,6 +278,7 @@ Then customize the `pathPatterns` for your project:
 ### What It Does
 
 Defines when skills should activate based on:
+
 - **Keywords** in user prompts ("backend", "API", "route")
 - **Intent patterns** (regex matching user intent)
 - **File path patterns** (editing backend files)
@@ -255,11 +310,13 @@ Defines when skills should activate based on:
 - **block**: Must use skill before proceeding (guardrail)
 
 **Use "block" for:**
+
 - Preventing breaking changes (MUI v6→v7)
 - Critical database operations
 - Security-sensitive code
 
 **Use "suggest" for:**
+
 - General best practices
 - Domain guidance
 - Code organization
@@ -269,12 +326,14 @@ Defines when skills should activate based on:
 ## Creating Your Own Skills
 
 See the **skill-developer** skill for complete guide on:
+
 - Skill YAML frontmatter structure
 - Resource file organization
 - Trigger pattern design
 - Testing skill activation
 
 **Quick template:**
+
 ```markdown
 ---
 name: my-skill
@@ -284,15 +343,19 @@ description: What this skill does
 # My Skill Title
 
 ## Purpose
+
 [Why this skill exists]
 
 ## When to Use This Skill
+
 [Auto-activation scenarios]
 
 ## Quick Reference
+
 [Key patterns and examples]
 
 ## Resource Files
+
 - [topic-1.md](resources/topic-1.md)
 - [topic-2.md](resources/topic-2.md)
 ```
@@ -304,6 +367,7 @@ description: What this skill does
 ### Skill isn't activating
 
 **Check:**
+
 1. Is skill directory in `.claude/skills/`?
 2. Is skill listed in `skill-rules.json`?
 3. Do `pathPatterns` match your files?
@@ -311,6 +375,7 @@ description: What this skill does
 5. Is settings.json configured correctly?
 
 **Debug:**
+
 ```bash
 # Check skill exists
 ls -la .claude/skills/
@@ -328,6 +393,7 @@ ls -la .claude/hooks/*.sh
 ### Skill activates too often
 
 Update skill-rules.json:
+
 - Make keywords more specific
 - Narrow `pathPatterns`
 - Increase specificity of `intentPatterns`
@@ -335,6 +401,7 @@ Update skill-rules.json:
 ### Skill never activates
 
 Update skill-rules.json:
+
 - Add more keywords
 - Broaden `pathPatterns`
 - Add more `intentPatterns`
@@ -345,13 +412,15 @@ Update skill-rules.json:
 
 **When integrating a skill for a user:**
 
-1. **Read [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md)** first
+1. **Read [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md)**
+   first
 2. Ask about their project structure
 3. Customize `pathPatterns` in skill-rules.json
 4. Verify the skill file has no hardcoded paths
 5. Test activation after integration
 
 **Common mistakes:**
+
 - Keeping example paths (blog-api/, frontend/)
 - Not asking about monorepo vs single-app
 - Copying skill-rules.json without customization
@@ -365,4 +434,6 @@ Update skill-rules.json:
 3. **Add more:** Once first skill works, add others
 4. **Customize:** Adjust triggers based on your workflow
 
-**Questions?** See [CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for comprehensive integration instructions.
+**Questions?** See
+[CLAUDE_INTEGRATION_GUIDE.md](../../CLAUDE_INTEGRATION_GUIDE.md) for
+comprehensive integration instructions.
