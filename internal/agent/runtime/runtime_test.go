@@ -198,3 +198,92 @@ func TestCoderSignature_ToolCategories(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildAgentSignature_ReviewerRole(t *testing.T) {
+	cfg := types.AgentConfig{
+		Role:        types.RoleReviewer,
+		ActorID:     "test-reviewer",
+		WorkspaceID: "test-ws",
+	}
+
+	sig := buildAgentSignature(cfg)
+	if sig == nil {
+		t.Fatal("expected non-nil signature")
+	}
+
+	instruction := sig.Instruction
+
+	// Verify reviewer has retrieval tools (read/inspect)
+	retrievalTools := []string{
+		"code.symbol_search",
+		"code.swe_grep",
+		"code.search",
+		"fs.read_file",
+		"fs.list_dir",
+	}
+	for _, tool := range retrievalTools {
+		if !strings.Contains(instruction, tool) {
+			t.Errorf("Reviewer signature should mention %q for inspection", tool)
+		}
+	}
+
+	// Verify reviewer has validation and coordination tools
+	otherTools := []string{
+		"tests.run",
+		"mail.send",
+		"todo.add",
+	}
+	for _, tool := range otherTools {
+		if !strings.Contains(instruction, tool) {
+			t.Errorf("Reviewer signature should mention %q", tool)
+		}
+	}
+
+	// Verify reviewer does NOT have edit tools
+	editTools := []string{
+		"edit.create_file",
+		"edit.apply_patch",
+		"edit.apply_structured_diff",
+	}
+	for _, tool := range editTools {
+		if strings.Contains(instruction, tool) {
+			t.Errorf("Reviewer signature should NOT mention %q (read-only role)", tool)
+		}
+	}
+
+	// Verify reviewer identity
+	if !strings.Contains(instruction, "code review agent") {
+		t.Error("Reviewer signature should identify as 'code review agent'")
+	}
+
+	// Verify reviewer guidance about not applying edits
+	if !strings.Contains(instruction, "do not directly apply edits") {
+		t.Error("Reviewer signature should explicitly state it does not apply edits")
+	}
+}
+
+func TestReviewerSignature_ToolCategories(t *testing.T) {
+	cfg := types.AgentConfig{
+		Role:        types.RoleReviewer,
+		ActorID:     "test-reviewer",
+		WorkspaceID: "test-ws",
+	}
+
+	sig := buildAgentSignature(cfg)
+	instruction := sig.Instruction
+
+	// Verify the instruction has categorized sections
+	categories := []string{
+		"Code Search & Retrieval Tools",
+		"File Operations",
+		"Validation:",
+		"Coordination:",
+		"Workflow:",
+	}
+
+	for _, cat := range categories {
+		if !strings.Contains(instruction, cat) {
+			t.Errorf("Reviewer signature should have category section %q", cat)
+		}
+	}
+}
