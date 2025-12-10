@@ -556,16 +556,25 @@ func TestTelemetry_RecordsNewToolNames(t *testing.T) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 
-	// Call code.symbol_search via the wrapped function
+	// Call via the tool registry to test telemetry wrapper
+	tool, err := registry.GetRegistry().Get("code.symbol_search")
+	if err != nil {
+		t.Fatalf("Get tool: %v", err)
+	}
+
 	symbolSearchArgs := map[string]any{
 		"workspace_id": "test-ws",
 		"question":     "test query",
 	}
-	_, _ = registry.codeSymbolSearch(context.Background(), symbolSearchArgs)
+	_, _ = tool.Execute(context.Background(), symbolSearchArgs)
 
-	// The direct method call doesn't go through telemetry wrapper.
-	// We need to call via the tool registry to test telemetry.
-	// This test documents that wrapWithTelemetry is used for all Phase 6 tools.
+	// Verify telemetry was recorded
+	if len(recorder.calls) == 0 {
+		t.Error("expected telemetry to record tool call")
+	}
+	if len(recorder.calls) > 0 && recorder.calls[0] != "code.symbol_search" {
+		t.Errorf("expected tool name %q, got %q", "code.symbol_search", recorder.calls[0])
+	}
 
 	// Verify the registry has the expected tools registered
 	tools := registry.List()

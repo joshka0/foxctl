@@ -794,7 +794,11 @@ func readFileWithLimit(ctx context.Context, path string, maxBytes int) ([]byte, 
 
 // fail emits an error envelope and exits.
 func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
+	hint := map[string]string{
+		"suggestion": "check input arguments, file permissions, and ensure candidate files exist",
+		"command":    Command,
+	}
+	env := envelope.Error(Command, code, err.Error(), hint)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit "+Command+" failure")
 	os.Exit(1)
 }

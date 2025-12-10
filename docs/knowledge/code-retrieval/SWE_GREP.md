@@ -89,7 +89,7 @@ context before making edits.
 
 ## Workflow: Symbol Search → SWE Grep
 
-```
+```text
 1. code.symbol_search → get candidate files with symbol IDs
 2. code.swe_grep → extract relevant snippets from candidates
 3. fs.read_file → read full file if needed for broader context

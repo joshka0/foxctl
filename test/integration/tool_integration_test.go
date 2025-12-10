@@ -164,15 +164,15 @@ func TestToolIntegration_StructuredDiffWorkflow(t *testing.T) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 
-	// Apply a structured diff (line 7 is the comment in test file)
+	// Apply a structured diff (line 8 is the comment in test file)
 	_, err = callTool(t, registry, "edit.apply_structured_diff", map[string]any{
 		"path": "auth/login.go",
 		"diff_json": map[string]any{
 			"hunks": []any{
 				map[string]any{
-					"old_start": 7,
+					"old_start": 8,
 					"old_lines": 1,
-					"new_start": 7,
+					"new_start": 8,
 					"new_lines": 2,
 					"lines": []any{
 						" // Login handles user authentication.",
@@ -235,16 +235,16 @@ func TestToolIntegration_DryRunMode(t *testing.T) {
 		t.Fatalf("read original file: %v", err)
 	}
 
-	// Apply diff in dry-run mode (line 7 is the comment in test file)
+	// Apply diff in dry-run mode (line 8 is the comment in test file)
 	_, err = callTool(t, registry, "edit.apply_structured_diff", map[string]any{
 		"path":    "auth/login.go",
 		"dry_run": true,
 		"diff_json": map[string]any{
 			"hunks": []any{
 				map[string]any{
-					"old_start": 7,
+					"old_start": 8,
 					"old_lines": 1,
-					"new_start": 7,
+					"new_start": 8,
 					"new_lines": 1,
 					"lines": []any{
 						"-// Login handles user authentication.",
@@ -278,6 +278,7 @@ func setupTestWorkspace(t *testing.T, dir string) {
 
 import (
 	"context"
+	"fmt"
 )
 
 // Login handles user authentication.

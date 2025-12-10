@@ -143,8 +143,15 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 	var artifact string
 	switch manifest.Distribution.Type {
 	case "exec":
+		// Check candidates in priority order:
+		// 1. Built artifact in bin/ subdirectory (dist/skills/<name>/bin/)
+		// 2. Source-tree skill directory itself (skills/<name>/ with main.go)
 		candidates := []string{
 			filepath.Join(dir, "bin"),
+		}
+		// For source-tree skills, check if main.go exists (Go skill)
+		if _, err := os.Stat(filepath.Join(dir, "main.go")); err == nil {
+			candidates = append(candidates, dir)
 		}
 		for _, c := range candidates {
 			if _, err := os.Stat(c); err == nil {
@@ -166,7 +173,7 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 		return SkillHandle{}, fmt.Errorf("unsupported distribution %q", manifest.Distribution.Type)
 	}
 	if artifact == "" {
-		return SkillHandle{}, fmt.Errorf("skill artifacts missing under %s", dir)
+		return SkillHandle{}, fmt.Errorf("skill artifacts missing under %s; run 'make skills-build' to compile skills", dir)
 	}
 	return SkillHandle{
 		Manifest:     manifest,
