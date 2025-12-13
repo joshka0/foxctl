@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -377,14 +378,14 @@ func TestReadFileWithLimit(t *testing.T) {
 	// Create a small file
 	smallContent := []byte("hello world")
 	smallPath := filepath.Join(tmpDir, "small.txt")
-	if err := os.WriteFile(smallPath, smallContent, 0644); err != nil {
+	if err := os.WriteFile(smallPath, smallContent, 0o644); err != nil {
 		t.Fatalf("failed to create small file: %v", err)
 	}
 
 	// Create a large file (100 bytes)
 	largeContent := bytes.Repeat([]byte("x"), 100)
 	largePath := filepath.Join(tmpDir, "large.txt")
-	if err := os.WriteFile(largePath, largeContent, 0644); err != nil {
+	if err := os.WriteFile(largePath, largeContent, 0o644); err != nil {
 		t.Fatalf("failed to create large file: %v", err)
 	}
 
@@ -451,7 +452,7 @@ func TestReadFileWithLimit(t *testing.T) {
 func TestReadFileWithLimitCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("hello"), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte("hello"), 0o644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 
@@ -463,7 +464,7 @@ func TestReadFileWithLimitCancellation(t *testing.T) {
 	if err == nil {
 		t.Error("expected error with cancelled context, got nil")
 	}
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }

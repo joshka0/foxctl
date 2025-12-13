@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -14,7 +16,14 @@ type Config struct {
 }
 
 // Load reads configuration from environment variables.
-func Load() *Config {
+
+func Load(ctx context.Context) (*Config, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	cfg := &Config{
 		Port:     8080,
 		Host:     "localhost",
@@ -23,9 +32,16 @@ func Load() *Config {
 	}
 
 	if port := os.Getenv("PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			cfg.Port = p
+		p, err := strconv.Atoi(port)
+		if err != nil {
+			return nil, &ConfigError{
+				Code:    "EARG",
+				Field:   "port",
+				Message: fmt.Sprintf("invalid PORT value %q", port),
+				Hint:    "PORT must be set to a numeric value between 1 and 65535",
+			}
 		}
+		cfg.Port = p
 	}
 
 	if host := os.Getenv("HOST"); host != "" {
@@ -40,24 +56,38 @@ func Load() *Config {
 		cfg.LogLevel = level
 	}
 
-	return cfg
+	return cfg, nil
 }
 
 // Validate checks if the configuration is valid.
-func (c *Config) Validate() error {
+
+func (c *Config) Validate(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	if c.Port < 1 || c.Port > 65535 {
 		return ErrInvalidPort
 	}
 	return nil
 }
 
-var ErrInvalidPort = &ConfigError{Field: "port", Message: "must be between 1 and 65535"}
+var ErrInvalidPort = &ConfigError{
+	Code:    "EARG",
+	Field:   "port",
+	Message: "must be between 1 and 65535",
+	Hint:    "PORT must be set to a value between 1 and 65535",
+}
 
 type ConfigError struct {
+	Code    string
 	Field   string
 	Message string
+	Hint    string
 }
 
 func (e *ConfigError) Error() string {
-	return e.Field + ": " + e.Message
+	return e.Code + ": " + e.Field + ": " + e.Message
 }

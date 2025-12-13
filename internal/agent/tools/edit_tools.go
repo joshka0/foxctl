@@ -176,7 +176,7 @@ func (r *Registry) applyPatch(_ context.Context, args map[string]any) (*models.C
 	newContent := strings.Replace(contentStr, oldText, newText, 1)
 
 	// Write back
-	if err := os.WriteFile(absPath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(absPath, []byte(newContent), 0o644); err != nil {
 		return errorResult(fmt.Sprintf("write file: %v", err)), nil
 	}
 
@@ -211,12 +211,12 @@ func (r *Registry) createFile(_ context.Context, args map[string]any) (*models.C
 
 	// Create parent directories if needed
 	dir := filepath.Dir(absPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return errorResult(fmt.Sprintf("create directories: %v", err)), nil
 	}
 
 	// Write file
-	if err := os.WriteFile(absPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(absPath, []byte(content), 0o644); err != nil {
 		return errorResult(fmt.Sprintf("write file: %v", err)), nil
 	}
 
@@ -304,7 +304,7 @@ func (r *Registry) applyStructuredDiff(ctx context.Context, args map[string]any)
 		newContent += "\n"
 	}
 
-	if err := os.WriteFile(absPath, []byte(newContent), 0644); err != nil {
+	if err := os.WriteFile(absPath, []byte(newContent), 0o644); err != nil {
 		return errorResult(fmt.Sprintf("write file: %v", err)), nil
 	}
 
@@ -459,7 +459,7 @@ func applyHunk(lines []string, hunk DiffHunk) ([]string, error) {
 	oldIdx := startIdx
 	expectedOldLines := 0
 
-	for _, line := range hunk.Lines {
+	for lineIdx, line := range hunk.Lines {
 		if len(line) == 0 {
 			// Empty line - treat as context
 			if oldIdx < len(lines) {
@@ -502,12 +502,7 @@ func applyHunk(lines []string, hunk DiffHunk) ([]string, error) {
 		case '+': // Added line
 			newSection = append(newSection, content)
 		default:
-			// Treat as context if no recognized prefix
-			if oldIdx < len(lines) {
-				newSection = append(newSection, lines[oldIdx])
-				oldIdx++
-			}
-			expectedOldLines++
+			return nil, fmt.Errorf("unsupported diff line prefix %q at hunk line %d", prefix, lineIdx+1)
 		}
 	}
 
