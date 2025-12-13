@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 	"github.com/oklog/ulid/v2"
@@ -155,20 +156,25 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 				"epic_id": dspyEpicID,
 				"role":    dspyRole,
 			}
-			inBytes, _ := json.Marshal(in)
-			c, err := trajectorycapture.Start(ctx, trajectorycapture.StartOptions{
-				StorageRoot:     cfg.Storage.Root,
-				WorkspaceID:     workspace,
-				Actor:           "actor:human:cli",
-				Source:          trajectory.SourceCLI,
-				CLICommand:      cmd.CommandPath(),
-				ProtocolCommand: "dspy-agent/spawn",
-				CorrelationID:   corr,
-				AgentRole:       dspyRole,
-				Input:           inBytes,
-			})
-			if err == nil {
-				capture = c
+			inBytes, err := json.Marshal(in)
+			if err != nil {
+				logger := logging.FromContext(ctx)
+				logger.Warn().Err(err).Msg("dspy-agent/spawn: failed to marshal trajectory capture input; skipping trajectory capture")
+			} else {
+				c, err := trajectorycapture.Start(ctx, trajectorycapture.StartOptions{
+					StorageRoot:     cfg.Storage.Root,
+					WorkspaceID:     workspace,
+					Actor:           "actor:human:cli",
+					Source:          trajectory.SourceCLI,
+					CLICommand:      cmd.CommandPath(),
+					ProtocolCommand: "dspy-agent/spawn",
+					CorrelationID:   corr,
+					AgentRole:       dspyRole,
+					Input:           inBytes,
+				})
+				if err == nil {
+					capture = c
+				}
 			}
 		}
 	}
