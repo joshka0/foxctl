@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -37,6 +39,23 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 }
 
 func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags, input []byte) (runservice.RunOptions, error) {
+	correlationID := ""
+	cliCommand := ""
+	if len(input) > 0 {
+		var m map[string]any
+		if err := json.Unmarshal(input, &m); err == nil {
+			if s, ok := m["correlation_id"].(string); ok {
+				correlationID = strings.TrimSpace(s)
+			}
+			if s, ok := m["cli_command"].(string); ok {
+				cliCommand = strings.TrimSpace(s)
+			}
+		}
+	}
+	if correlationID == "" {
+		correlationID = ulid.Make().String()
+	}
+
 	ws := workspace.Normalize(flags.Workspace)
 	if ws == "" && cfg.Memory.AutoLoadWorkspace {
 		ws = workspace.Detect("")
@@ -53,6 +72,8 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 
 	opts := runservice.RunOptions{
 		SkillName:       skillName,
+		CLICommand:      cliCommand,
+		CorrelationID:   correlationID,
 		Input:           input,
 		Async:           flags.Async,
 		Dedupe:          flags.Dedupe,

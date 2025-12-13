@@ -5,6 +5,8 @@ import (
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
+	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 )
 
 func (e *Executor) ensureJobStore() error {
@@ -32,6 +34,31 @@ func (e *Executor) PrepareJob(input []byte) (jobs.Job, bool, error) {
 		if err := e.jobStore.SetWorkspace(e.ctx, job.ID, e.options.Workspace); err != nil {
 			if _, warnErr := fmt.Fprintf(e.stderr, "warn: unable to persist workspace for job %s: %v\n", job.ID, err); warnErr != nil {
 				errs.Ignore(warnErr, "runservice: warn workspace persist failure")
+			}
+		}
+	}
+	if e.trajCapture == nil {
+		corr := e.options.CorrelationID
+		if corr == "" {
+			corr = job.ID
+			e.options.CorrelationID = corr
+		}
+		if e.cfg.Storage.Root != "" && e.options.Workspace != "" {
+			capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+				StorageRoot:     e.cfg.Storage.Root,
+				WorkspaceID:     e.options.Workspace,
+				Actor:           "actor:human:cli",
+				Source:          trajectory.SourceCLI,
+				CLICommand:      e.options.CLICommand,
+				ProtocolCommand: e.handle.Manifest.Metadata.Name,
+				JobID:           job.ID,
+				CorrelationID:   corr,
+				Input:           input,
+			})
+			if capErr == nil {
+				e.trajCapture = capture
+			} else {
+				errs.Ignore(capErr, "trajectory capture start")
 			}
 		}
 	}

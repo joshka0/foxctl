@@ -23,6 +23,11 @@ func (e *Executor) HandleResult(jobID string, result []byte) error {
 		}
 	}
 	annotated := protocol.AnnotateRunBytes(result, e.options.Workspace, e.handle.Manifest.Metadata.Version)
+	annotated = annotateCorrelationAndJob(annotated, jobID, e.options.CorrelationID)
+	if e.trajCapture != nil {
+		capErr := e.trajCapture.CaptureResult(e.ctx, annotated, jobID, e.options.CorrelationID)
+		errs.Ignore(capErr, "trajectory capture result")
+	}
 	if err := e.PersistCache(annotated); err != nil {
 		if _, warnErr := fmt.Fprintf(e.stderr, "cache put failed: %v\n", err); warnErr != nil {
 			errs.Ignore(warnErr, "runservice: warn cache persist failure")

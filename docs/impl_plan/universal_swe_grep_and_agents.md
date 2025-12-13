@@ -22,7 +22,8 @@ Related impl plan docs:
 
 - `docs/impl_plan/universal_swe_grep_and_agents_specs_phase1_review_gate_todo.md`
 - `docs/impl_plan/universal_swe_grep_and_agents_specs_phase2_post_review_harness_todo.md`
-- `docs/impl_plan/universal_swe_grep_and_agents_deferred.md` – deferred work tracker
+- `docs/impl_plan/universal_swe_grep_and_agents_deferred.md` – deferred work
+  tracker
 - `docs/impl_plan/universal_swe_grep_and_agents_codemap.md`
 
 ---
@@ -63,7 +64,7 @@ Dependencies: none.
 
 - [x] Extend `todo/manage` operations:
   - `review_request`, `complete`, `review_status` as per spec.
-- [ ] Implement review artifact storage + CAS logs.
+- [x] Implement review artifact storage + CAS logs.
 - [x] Implement `hooks/task_guard` dirtying behavior:
   - When a task is `ready_for_review` or `completed` and a write occurs under
     its scope:
@@ -89,7 +90,9 @@ Dependencies: Phase 0.
 - [x] Implement overseer post-review handler:
   - Triggered when a review artifact transitions to `ok` and diff is applied.
   - Collects
-    `(workspace_id, files[{path, digest, change_kind}], task_id, review_id)`.
+    `(workspace_id, task_id, review_id, files[{path, digest, change_kind}])`.
+    - Note: `files` is currently empty until the diff application layer is wired
+      (see `universal_swe_grep_and_agents_deferred.md` D1).
 - [x] Implement configuration for `indexing.post_review.indexers` as in
       `semantic_file_index.md` §8.2.
 - [x] Emit a single internal event/command consumed by downstream indexers
@@ -116,8 +119,8 @@ Dependencies: Phase 1.
     data/behavior from §6.
 - [x] Wire to post-review handler:
   - Subscribe to Phase 2 output and reindex touched files.
-- [ ] Implement optional CLI (`agentctl semantic-index ...`).
-- [ ] Add tests + golden outputs for:
+- [x] Implement optional CLI (`agentctl semantic-index ...`).
+- [x] Add tests + golden outputs for:
   - No chunking.
   - Chunking and config changes.
   - Error codes in §11.
@@ -130,23 +133,21 @@ Dependencies: Phase 2.
 
 **Goals**
 
-- Implement symbol index storage and a Go-only indexer using Tree-sitter, with
-  per-symbol incremental updates.
+- Implement symbol index storage and a Go-only indexer (Go AST), with per-symbol
+  incremental updates.
 
 **Tasks**
 
-- [ ] Define SQLite schema (or equivalent) for `symbols`, `calls`, `file_meta`
-      per §3.
-- [ ] Integrate Tree-sitter for Go:
-  - Parse files, extract symbols, compute `body_digest` and `content_hash`.
-- [ ] Implement `code_symbol_index.update_files` job:
-  - Takes the same input envelope shape as semantic index jobs.
-  - Performs per-symbol incremental updates as in §4.3.
-- [ ] Wire to post-review handler + optional git-commit heuristics.
-- [ ] Add tests for:
-  - Basic indexing.
-  - Renames and large files.
-  - Incremental stability when only some symbols change.
+- [x] Implement named-memory-backed storage for `symbols` and `file_meta` per
+      §3.
+- [x] Implement a Go-first extractor using the standard library (`go/ast`) and
+      compute `body_digest` / `content_hash`.
+- [x] Implement `code_symbol_index.init_files` /
+      `code_symbol_index.update_files` job entrypoints and per-symbol
+      incremental updates per §4.3.
+- [x] Wire to post-review handler.
+- [x] Add tests for basic indexing, large-file handling, and incremental
+      stability when only some symbols change.
 
 Dependencies: Phase 2 (and Phase 3 for shared patterns, but not strictly).
 
@@ -161,16 +162,16 @@ Dependencies: Phase 2 (and Phase 3 for shared patterns, but not strictly).
 
 **Tasks**
 
-- [ ] Implement `code/swe_grep` binary/skill:
+- [x] Implement `code/swe_grep` binary/skill:
   - Input / output contracts per §5.
   - Live reads via `PathValidator` and `AGENTCTL_WORKSPACE`.
   - CAS artifact emission for large results.
-- [ ] Start with a simple scoring heuristic or very small LM stub; keep the
+- [x] Start with a simple scoring heuristic or very small LM stub; keep the
       contract stable so we can later swap the model.
-- [ ] Add tests covering:
-  - Path validation and guard violations.
-  - Small vs large result sets (inline vs CAS).
-  - Error codes: `E_SWE_GREP_NO_CANDIDATES`, `E_FILE_NOT_FOUND`, etc.
+- [ ] Follow-ups (spec/impl drift):
+  - Align error codes (`E_SWE_GREP_NO_CANDIDATES`, `E_FILE_NOT_FOUND`,
+    `E_GUARD_VIOLATION`) and artifactization policy (inline thresholding).
+  - Add goldens that cover inline vs CAS threshold behavior.
 
 Dependencies: Phase 4 (for best candidates) but can be prototyped earlier with
 semantic index + grep candidates.
@@ -189,13 +190,13 @@ semantic index + grep candidates.
 - [ ] Implement `code.symbol_search` tool:
   - Go helper over the symbol index per `code_symbol_index_and_swe_grep.md`
     §6.1.
-- [ ] Implement `code.swe_grep` tool:
+- [x] Implement `code.swe_grep` tool:
   - Thin wrapper that calls the `code/swe_grep` skill.
-- [ ] Align `edit.apply_patch` with `code_diff`:
+- [x] Align `edit.apply_patch` with `code_diff`:
   - Ensure tool input uses the JSON diff emitted by the `code_diff` skill.
   - Add tests for round-tripping (`code_diff` → agent edit →
     `edit.apply_patch`).
-- [ ] Update dspy-go agent configs to include the new tools in Coding/Review
+- [x] Update dspy-go agent configs to include the new tools in Coding/Review
       agent signatures.
 
 Dependencies: Phases 3–5.

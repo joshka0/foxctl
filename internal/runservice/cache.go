@@ -1,11 +1,15 @@
 package runservice
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 )
 
 // TryServeCache attempts to serve the response from cache based on the provided input.
@@ -56,6 +60,29 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+		hit = annotateCorrelationAndJob(hit, "", e.options.CorrelationID)
+		if e.trajCapture == nil && e.cfg.Storage.Root != "" && strings.TrimSpace(e.options.Workspace) != "" {
+			capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+				StorageRoot:     e.cfg.Storage.Root,
+				WorkspaceID:     e.options.Workspace,
+				Actor:           "actor:human:cli",
+				Source:          trajectory.SourceCLI,
+				CLICommand:      e.options.CLICommand,
+				ProtocolCommand: e.handle.Manifest.Metadata.Name,
+				JobID:           "",
+				CorrelationID:   e.options.CorrelationID,
+				Input:           input,
+			})
+			if capErr == nil {
+				e.trajCapture = capture
+			} else {
+				errs.Ignore(capErr, "trajectory capture start")
+			}
+		}
+		if e.trajCapture != nil {
+			capErr := e.trajCapture.CaptureResult(e.ctx, hit, "", e.options.CorrelationID)
+			errs.Ignore(capErr, "trajectory capture cache hit")
+		}
 		if _, warnErr := fmt.Fprintf(e.stderr, "cache hit %s\n", entry.CacheKey); warnErr != nil {
 			errs.Ignore(warnErr, "runservice: warn cache hit")
 		}
@@ -85,6 +112,30 @@ func (e *Executor) writeCacheMissError() (bool, error) {
 		protocol.WithSkillVersion(e.handle.Manifest.Metadata.Version),
 		protocol.WithCacheKey(e.cacheKey),
 	)
+	env.Meta.CorrelID = e.options.CorrelationID
+	if e.trajCapture == nil && e.cfg.Storage.Root != "" && strings.TrimSpace(e.options.Workspace) != "" {
+		capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+			StorageRoot:     e.cfg.Storage.Root,
+			WorkspaceID:     e.options.Workspace,
+			Actor:           "actor:human:cli",
+			Source:          trajectory.SourceCLI,
+			CLICommand:      e.options.CLICommand,
+			ProtocolCommand: e.handle.Manifest.Metadata.Name,
+			JobID:           "",
+			CorrelationID:   e.options.CorrelationID,
+			Input:           e.options.Input,
+		})
+		if capErr == nil {
+			e.trajCapture = capture
+		} else {
+			errs.Ignore(capErr, "trajectory capture start")
+		}
+	}
+	if e.trajCapture != nil {
+		raw, _ := json.Marshal(env)
+		capErr := e.trajCapture.CaptureResult(e.ctx, raw, "", e.options.CorrelationID)
+		errs.Ignore(capErr, "trajectory capture cache miss")
+	}
 	if err := protocol.Write(e.stdout, env); err != nil {
 		return true, err
 	}
@@ -107,6 +158,30 @@ func (e *Executor) writeCacheError(code protocol.ErrorCode, message string, caus
 		protocol.WithWorkspace(e.options.Workspace),
 		protocol.WithSkillVersion(e.handle.Manifest.Metadata.Version),
 	)
+	env.Meta.CorrelID = e.options.CorrelationID
+	if e.trajCapture == nil && e.cfg.Storage.Root != "" && strings.TrimSpace(e.options.Workspace) != "" {
+		capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+			StorageRoot:     e.cfg.Storage.Root,
+			WorkspaceID:     e.options.Workspace,
+			Actor:           "actor:human:cli",
+			Source:          trajectory.SourceCLI,
+			CLICommand:      e.options.CLICommand,
+			ProtocolCommand: e.handle.Manifest.Metadata.Name,
+			JobID:           "",
+			CorrelationID:   e.options.CorrelationID,
+			Input:           e.options.Input,
+		})
+		if capErr == nil {
+			e.trajCapture = capture
+		} else {
+			errs.Ignore(capErr, "trajectory capture start")
+		}
+	}
+	if e.trajCapture != nil {
+		raw, _ := json.Marshal(env)
+		capErr := e.trajCapture.CaptureResult(e.ctx, raw, "", e.options.CorrelationID)
+		errs.Ignore(capErr, "trajectory capture cache error")
+	}
 	if err := protocol.Write(e.stdout, env); err != nil {
 		return true, err
 	}

@@ -9,7 +9,9 @@ import (
 // RunOptions captures the configurable behavior for a run invocation.
 type RunOptions struct {
 	// SkillName is the name of the skill to execute.
-	SkillName string
+	SkillName     string
+	CLICommand    string
+	CorrelationID string
 
 	// Input is the raw input data to pass to the skill.
 	Input []byte

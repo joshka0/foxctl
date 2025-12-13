@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -13,6 +14,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/jkatigb/agentctl/internal/trajectorycapture"
+	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -130,10 +135,7 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 func runDspySpawn(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
-	rt, err := getOrCreateRuntime(ctx)
-	if err != nil {
-		return writeDspyErrorEnvelope(cmd, "dspy-agent/spawn", "ERUNTIME", fmt.Sprintf("failed to create runtime: %v", err))
-	}
+	corr := ulid.Make().String()
 
 	// Determine workspace
 	workspace := dspyWorkspaceID
@@ -143,6 +145,42 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 			return writeDspyErrorEnvelope(cmd, "dspy-agent/spawn", "EARG", fmt.Sprintf("failed to get working directory: %v", err))
 		}
 		workspace = wd
+	}
+
+	var capture *trajectorycapture.RunCapture
+	if cfg, ok := config.FromContext(ctx); ok {
+		if cfg.Storage.Root != "" {
+			in := map[string]any{
+				"task_id": dspyTaskID,
+				"epic_id": dspyEpicID,
+				"role":    dspyRole,
+			}
+			inBytes, _ := json.Marshal(in)
+			c, err := trajectorycapture.Start(ctx, trajectorycapture.StartOptions{
+				StorageRoot:     cfg.Storage.Root,
+				WorkspaceID:     workspace,
+				Actor:           "actor:human:cli",
+				Source:          trajectory.SourceCLI,
+				CLICommand:      cmd.CommandPath(),
+				ProtocolCommand: "dspy-agent/spawn",
+				CorrelationID:   corr,
+				AgentRole:       dspyRole,
+				Input:           inBytes,
+			})
+			if err == nil {
+				capture = c
+			}
+		}
+	}
+	defer func() {
+		if capture != nil {
+			errspkg.Ignore(capture.Close(), "close dspy trajectory capture")
+		}
+	}()
+
+	rt, err := getOrCreateRuntime(ctx)
+	if err != nil {
+		return writeDspyErrorEnvelope(cmd, "dspy-agent/spawn", "ERUNTIME", fmt.Sprintf("failed to create runtime: %v", err))
 	}
 
 	// Parse role
@@ -186,7 +224,13 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 
 	env := envelope.OK("dspy-agent/spawn", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
 		m.Source = "run"
+		m.CorrelID = corr
 	}))
+	if capture != nil {
+		if raw, err := json.Marshal(env); err == nil {
+			errspkg.Ignore(capture.CaptureResult(ctx, raw, "", corr), "trajectory capture dspy spawn")
+		}
+	}
 
 	if err := envelope.Write(os.Stdout, env); err != nil {
 		return fmt.Errorf("write envelope: %w", err)

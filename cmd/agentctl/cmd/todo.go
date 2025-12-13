@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -296,6 +297,18 @@ func runTodoSkill(cmd *cobra.Command, payload map[string]any) error {
 	input, err := json.Marshal(payload)
 	if err != nil {
 		return err
+	}
+	if payload != nil {
+		if _, ok := payload["correlation_id"]; !ok {
+			payload["correlation_id"] = ulid.Make().String()
+		}
+		if _, ok := payload["cli_command"]; !ok {
+			payload["cli_command"] = cmd.CommandPath()
+		}
+		input, err = json.Marshal(payload)
+		if err != nil {
+			return err
+		}
 	}
 	runCmd := newRunCommand()
 	runCmd.SetContext(cmd.Context())
