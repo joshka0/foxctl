@@ -9,14 +9,17 @@ exporting dspy-ready episodes via jobs, envelopes, and CAS.
   envelope/jobs/CAS infrastructure.
 
 > **Cross-refs**
+>
 > - Impl plan: `docs/impl_plan/universal_swe_grep_and_agents.md` (Phase 7)
-> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md` (Phase 7)
+> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md`
+>   (Phase 7)
 > - Specs:
 >   - `docs/spec/dspy_trajectory_capture.md`
 >   - `docs/spec/code_symbol_index_and_swe_grep.md` (§7 trajectory integration)
 >   - `docs/spec/dspy_go_agents.md`
 >   - `docs/spec/core_profile_v1.md`
-> - Skills/Jobs spec: `docs/spec/skills_spec/README.md` (§5.1 `trajectory.export`)
+> - Skills/Jobs spec: `docs/spec/skills_spec/README.md` (§5.1
+>   `trajectory.export`)
 > - Codemaps for this phase (from `universal_swe_grep_and_agents_codemap.md`):
 >   - CM3 – agentctl Envelope Protocol & CLI Pipeline.
 >   - CM5 / CM12 – CAS storage, integrity, and integration.
@@ -29,23 +32,24 @@ exporting dspy-ready episodes via jobs, envelopes, and CAS.
 
 ## A. Data Model & Capture Points
 
-Goal: define a **concrete, implementation-backed mapping** from existing
-systems (envelopes, jobs, reviews, tasks) into `Trajectory`,
-`UserRequestCapture`, and `TrajectoryEvent` concepts.
+Goal: define a **concrete, implementation-backed mapping** from existing systems
+(envelopes, jobs, reviews, tasks) into `Trajectory`, `UserRequestCapture`, and
+`TrajectoryEvent` concepts.
 
 ### A1. Trajectory index representation
 
 - [ ] Decide on storage representation for trajectory index records:
-  - Option A: SQLite tables `trajectories`, `user_requests`, `trajectory_events`.
+  - Option A: SQLite tables `trajectories`, `user_requests`,
+    `trajectory_events`.
   - Option B: named memory entries with types `"trajectory"`, `"user_request"`,
     `"trajectory_event"` plus minimal SQLite indices.
   - The choice MUST preserve:
     - Queryability by `workspace_id`, time range.
     - Joinability via `trajectory_id`, `job_id`, `trace_id`.
 - [ ] Define Go types mirroring the conceptual fields in
-  `dspy_trajectory_capture.md` §3:
-  - `Trajectory` (id, workspace_id, root_request_id, task_ids, epic_id, agent_role,
-    job_id, trace_id, status, summary, artifact_digest, timestamps).
+      `dspy_trajectory_capture.md` §3:
+  - `Trajectory` (id, workspace_id, root_request_id, task_ids, epic_id,
+    agent_role, job_id, trace_id, status, summary, artifact_digest, timestamps).
   - `UserRequestCapture` (id, actor, source, text, command_context, task_hints).
   - `TrajectoryEvent` (id, trajectory_id, ts, kind, actor, command, status,
     data_inline, data_artifact, meta fields).
@@ -66,7 +70,8 @@ systems (envelopes, jobs, reviews, tasks) into `Trajectory`,
     `"review_result"`, `"task_transition"`, `"graph_search"`, `"swe_grep"`).
   - Which fields are derived from envelopes vs jobs vs tasks.
 - [ ] Ensure **meta correlation fields** are consistently populated:
-  - `meta.trace_id` present and stable for all trajectory-related envelopes.
+  - `meta.correlation_id` present and stable for all trajectory-related
+    envelopes.
   - `meta.task_id`, `meta.epic_id`, `meta.job_id` attached where applicable.
   - No changes to the wire contract; only stronger conventions for how meta is
     used and interpreted.
@@ -74,14 +79,14 @@ systems (envelopes, jobs, reviews, tasks) into `Trajectory`,
 ### A3. Retrieval-specific events
 
 - [ ] Map `code.symbol_search` and `code.swe_grep` tool calls to
-  `TrajectoryEvent` kinds per impl plan Phase 7 + `code_symbol_index_and_swe_grep.md` §7:
-  - Tool call envelopes → `TrajectoryEvent(kind="tool_call")` with
-    optional subkind `"graph_search"` / `"swe_grep"` in `meta` or
-    `data_inline`.
+      `TrajectoryEvent` kinds per impl plan Phase 7 +
+      `code_symbol_index_and_swe_grep.md` §7:
+  - Tool call envelopes → `TrajectoryEvent(kind="tool_call")` with optional
+    subkind `"graph_search"` / `"swe_grep"` in `meta` or `data_inline`.
   - Tool results → `TrajectoryEvent(kind="tool_result")` referencing CAS
     artifacts where appropriate.
 - [ ] Confirm that retrieval events include enough context for downstream
-  analysis:
+      analysis:
   - Inputs: question, candidate files/symbols (summarized, not full text).
   - Outputs: snippet counts, CAS digests, basic metrics.
 
@@ -89,8 +94,8 @@ systems (envelopes, jobs, reviews, tasks) into `Trajectory`,
 
 ## B. Jobs, Export Operations, and CAS
 
-Goal: implement the **`trajectory.export` job** and any supporting helpers
-using the existing job system, CAS, and envelope pipeline.
+Goal: implement the **`trajectory.export` job** and any supporting helpers using
+the existing job system, CAS, and envelope pipeline.
 
 ### B1. Internal exporter library
 
@@ -101,15 +106,15 @@ using the existing job system, CAS, and envelope pipeline.
   - Produces in-memory `TrajectoryEpisode` objects per
     `dspy_trajectory_capture.md` §6.
 - [ ] Ensure the exporter controls inline vs CAS payload size:
-  - Respect `trajectory_capture.max_inline_bytes` and/or
-    `inline_output_kb` from Core Profile v1.
+  - Respect `trajectory_capture.max_inline_bytes` and/or `inline_output_kb` from
+    Core Profile v1.
   - If episodes would exceed the inline threshold, write NDJSON episodes to CAS
     and return digests instead.
 
 ### B2. `trajectory.export` job/skill
 
 - [ ] Implement a `trajectory.export` operation per skills spec README §5.1 and
-  `dspy_trajectory_capture.md` §7:
+      `dspy_trajectory_capture.md` §7:
   - Inputs (conceptual): `workspace_id`, filters (`task_id`, `epic_id`, time
     range, `agent_role`, `status`), `format` (`"ndjson"`), `include_raw_traces`.
   - Behavior:
@@ -129,7 +134,8 @@ using the existing job system, CAS, and envelope pipeline.
 ### B3. Envelope, CAS, and Core Profile invariants
 
 - [ ] Reuse the Core Profile v1 envelope rules for `trajectory.export` outputs:
-  - All outputs as Protocol v1 envelopes (`status: "ok" | "error" | "progress"`).
+  - All outputs as Protocol v1 envelopes
+    (`status: "ok" | "error" | "progress"`).
   - Use `meta.cas_digest` whenever `data.artifact` is present.
   - Validate envelopes via `protocol.Validate` and existing golden tests.
 - [ ] Apply CAS integration per CM5/CM12:
@@ -137,10 +143,8 @@ using the existing job system, CAS, and envelope pipeline.
   - Pin exported artifacts when appropriate to prevent GC during training and
     export workflows.
 - [ ] Align error codes with `dspy_trajectory_capture.md` §5.3.2:
-  - `trajectory.capture.invalid_request`,
-    `trajectory.capture.storage_error`,
-    `trajectory.export.access_denied`,
-    `trajectory.invalid_schema`,
+  - `trajectory.capture.invalid_request`, `trajectory.capture.storage_error`,
+    `trajectory.export.access_denied`, `trajectory.invalid_schema`,
     `trajectory_event.missing_trace_id`.
 
 ---
@@ -152,17 +156,18 @@ be safely exported and used for training.
 
 ### C1. Knowledge-aware capture
 
-- [ ] Decide how (or whether) to relate trajectories to the Knowledge system (CM10):
+- [ ] Decide how (or whether) to relate trajectories to the Knowledge system
+      (CM10):
   - Optionally link trajectories to knowledge items or factory droids via
     metadata (e.g. which droids/knowledge packs were active).
   - Keep this linkage internal; no new wire fields.
 - [ ] If implemented, document how knowledge usage (e.g. recommendations from
-  the knowledge router) is reflected in `TrajectoryEvent` records.
+      the knowledge router) is reflected in `TrajectoryEvent` records.
 
 ### C2. Configuration flags
 
-- [ ] Implement configuration keys consistent with
-  `dspy_trajectory_capture.md` §8:
+- [ ] Implement configuration keys consistent with `dspy_trajectory_capture.md`
+      §8:
   - `trajectory_capture.enabled` (bool).
   - `trajectory_capture.capture_user_requests` / `capture_agent_runs` /
     `capture_reviews` (bools).
@@ -170,7 +175,7 @@ be safely exported and used for training.
   - `trajectory_capture.redact_patterns` (additional redaction rules).
   - `trajectory_export.enabled` (bool).
 - [ ] Surface these via existing config mechanisms (workspace config, YAML),
-  without changing the config wire contract.
+      without changing the config wire contract.
 
 ### C3. Privacy, safety, and access control
 
@@ -191,12 +196,12 @@ spec, and everything obeys envelope/Jobs/CAS invariants**.
 ### D1. Mapping tests (envelopes → TrajectoryEvents)
 
 - [ ] Add unit tests for mapping envelopes to `TrajectoryEvent` per
-  `universal_swe_grep_and_agents_testing.md` (Phase 7):
+      `universal_swe_grep_and_agents_testing.md` (Phase 7):
   - Ensure tool calls for `code.symbol_search` / `code.swe_grep` are correctly
-    labeled and correlated via `meta.trace_id`, `meta.task_id`.
+    labeled and correlated via `meta.correlation_id`, `meta.task_id`.
   - Cover review results, task transitions, and agent runs.
-- [ ] Add tests that validate required meta fields (e.g. trace_id presence) for
-  trajectory-related envelopes.
+- [ ] Add tests that validate required meta fields (e.g. correlation_id
+      presence) for trajectory-related envelopes.
 
 ### D2. Export tests (`trajectory.export`)
 
@@ -216,7 +221,8 @@ spec, and everything obeys envelope/Jobs/CAS invariants**.
 
 ### D4. Job system and CLI integration tests
 
-- [ ] Add tests ensuring that **long-running exports use the job system** (CM7/CM8):
+- [ ] Add tests ensuring that **long-running exports use the job system**
+      (CM7/CM8):
   - `agentctl trajectory export` (or equivalent) creates jobs with expected
     states (`queued → running → ok/error`).
   - WFQ scheduling honors existing policies when exports are queued.
@@ -236,8 +242,8 @@ spec, and everything obeys envelope/Jobs/CAS invariants**.
 
 ## Open Questions / To Discuss
 
-- Should the trajectory index be implemented via dedicated SQLite tables,
-  named memory types, or a hybrid? What migration story is acceptable for v1?
+- Should the trajectory index be implemented via dedicated SQLite tables, named
+  memory types, or a hybrid? What migration story is acceptable for v1?
 - Which trajectories are in-scope for v1 export (only Coding/Planning/Review
   agents, or also other tools/jobs)?
 - How aggressive should default redaction be, and should there be presets for

@@ -291,8 +291,9 @@ func TestSeedBuiltinKnowledge(t *testing.T) {
 	}
 
 	// Should include both Factory droids and core agents
-	droids, _ := ListFactoryDroids()
-	agents, _ := ListCoreAgents()
+	// These functions return embedded data; errors indicate programmer error.
+	droids, _ := ListFactoryDroids() //nolint:errcheck
+	agents, _ := ListCoreAgents()    //nolint:errcheck
 	expectedCount := len(droids) + len(agents)
 
 	if count != expectedCount {

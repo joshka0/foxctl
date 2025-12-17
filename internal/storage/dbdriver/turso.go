@@ -43,7 +43,8 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 		libsql.WithAuthToken(cfg.AuthToken),
 	)
 	if err != nil {
-		_ = os.RemoveAll(tmpDir)
+		// Cleanup temp dir on connector creation failure; error is not actionable.
+		_ = os.RemoveAll(tmpDir) //nolint:errcheck
 		return nil, fmt.Errorf("failed to create turso connector: %w", err)
 	}
 
@@ -52,9 +53,10 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 
 	// Helper to cleanup resources on error
 	cleanup := func() {
-		_ = db.Close()
-		_ = connector.Close()
-		_ = os.RemoveAll(tmpDir)
+		// Cleanup on error path; errors are not actionable.
+		_ = db.Close()           //nolint:errcheck
+		_ = connector.Close()    //nolint:errcheck
+		_ = os.RemoveAll(tmpDir) //nolint:errcheck
 	}
 
 	// Test the connection

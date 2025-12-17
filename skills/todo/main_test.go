@@ -296,7 +296,10 @@ func (env *todoTestEnv) setTaskStatus(t *testing.T, taskID, status string) {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	task, err := store.Get(env.ctx, taskID)
 	if err != nil {
@@ -315,7 +318,10 @@ func (env *todoTestEnv) setTaskReview(t *testing.T, taskID, reviewStatus, review
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	task, err := store.Get(env.ctx, taskID)
 	if err != nil {

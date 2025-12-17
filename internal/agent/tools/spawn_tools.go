@@ -193,7 +193,8 @@ func (r *Registry) executeSpawn(ctx context.Context, args map[string]any, cfg Sp
 
 	// Parse response
 	var spawnResp types.SpawnResponse
-	respBytes, _ := json.Marshal(response)
+	// Marshal error is nil for map[string]any from valid response.
+	respBytes, _ := json.Marshal(response) //nolint:errcheck
 	if err := json.Unmarshal(respBytes, &spawnResp); err != nil {
 		// Return raw response if not parseable
 		return successResult(map[string]any{

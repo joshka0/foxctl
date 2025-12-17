@@ -27,7 +27,8 @@ func TestGoldenEnvelopes(t *testing.T) {
 		}
 		if strings.HasSuffix(d.Name(), ".json") {
 			// Skip non-envelope fixtures
-			if d.Name() == "post_review_event.json" {
+			switch d.Name() {
+			case "post_review_event.json", "fixture.golden.json":
 				return nil
 			}
 			files = append(files, path)

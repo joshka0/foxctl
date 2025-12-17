@@ -44,6 +44,9 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 	if err != nil {
 		return writeRunValidationError(cmd, skillName, err)
 	}
+	if opts.CLICommand == "" {
+		opts.CLICommand = fmt.Sprintf("%s %s", cmd.CommandPath(), skillName)
+	}
 
 	executor := runservice.NewExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 	executor.SetAsyncRunner(defaultAsyncRunner)

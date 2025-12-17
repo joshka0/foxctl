@@ -426,13 +426,19 @@ func setupTestStore(t *testing.T) Store {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = os.RemoveAll(dir) //nolint:errcheck
+	})
 
 	store, err := Open(context.Background(), filepath.Join(dir, "storage"))
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	})
 
 	return store
 }

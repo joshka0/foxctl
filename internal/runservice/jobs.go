@@ -2,9 +2,12 @@ package runservice
 
 import (
 	"fmt"
+	"strings"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
+	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 )
 
 func (e *Executor) ensureJobStore() error {
@@ -34,6 +37,36 @@ func (e *Executor) PrepareJob(input []byte) (jobs.Job, bool, error) {
 				errs.Ignore(warnErr, "runservice: warn workspace persist failure")
 			}
 		}
+	}
+	// Ensure correlation ID is set for every job, not just when initializing trajectory capture.
+	corr := e.options.CorrelationID
+	if corr == "" {
+		corr = job.ID
+		e.options.CorrelationID = corr
+	}
+	if e.trajCapture == nil {
+		if e.cfg.Storage.Root != "" && e.options.Workspace != "" {
+			capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+				StorageRoot:     e.cfg.Storage.Root,
+				WorkspaceID:     e.options.Workspace,
+				Actor:           "actor:human:cli",
+				Source:          trajectory.SourceCLI,
+				CLICommand:      e.options.CLICommand,
+				ProtocolCommand: e.handle.Manifest.Metadata.Name,
+				JobID:           job.ID,
+				CorrelationID:   corr,
+				Input:           input,
+			})
+			if capErr == nil {
+				e.trajCapture = capture
+			} else {
+				errs.Ignore(capErr, "trajectory capture start")
+			}
+		}
+	}
+	if e.trajCapture != nil && strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
+		capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, input, job.ID, e.options.CorrelationID)
+		errs.Ignore(capErr, "trajectory capture hook call")
 	}
 	return job, dup, nil
 }

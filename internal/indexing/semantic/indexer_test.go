@@ -21,7 +21,7 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 	storageDir := filepath.Join(tmpDir, "storage")
 	casDir := filepath.Join(tmpDir, "cas")
 
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -31,7 +31,10 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	})
 
 	// Create indexer with no-op provider
 	provider := NewNoOpProvider("test-model", 384)
@@ -45,10 +48,10 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 func createTestFile(t *testing.T, dir, path, content string) {
 	t.Helper()
 	fullPath := filepath.Join(dir, path)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

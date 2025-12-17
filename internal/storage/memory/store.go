@@ -274,7 +274,8 @@ func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix st
 	for rows.Next() {
 		var digests string
 		if err := rows.Scan(&digests); err != nil {
-			_ = rows.Close()
+			// Close rows on error; error is not actionable.
+			_ = rows.Close() //nolint:errcheck
 			return 0, fmt.Errorf("memory: scan delete prefix digests: %w", err)
 		}
 		var arr []string
@@ -300,7 +301,8 @@ func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix st
 		return 0, fmt.Errorf("memory: delete prefix: %w", err)
 	}
 
-	count, _ := result.RowsAffected()
+	// RowsAffected error is nil for SQLite.
+	count, _ := result.RowsAffected() //nolint:errcheck
 
 	// Unpin collected digests
 	s.unpin(ctx, allDigests)

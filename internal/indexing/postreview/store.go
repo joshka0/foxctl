@@ -167,7 +167,8 @@ func (s *sqlStore) List(ctx context.Context, workspaceID string, limit int) ([]i
 		return nil, fmt.Errorf("postreview: list: %w", err)
 	}
 	defer func() {
-		_ = rows.Close()
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
 	}()
 
 	// Initialize to empty slice so JSON serializes as [] not null

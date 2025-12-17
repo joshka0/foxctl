@@ -19,7 +19,8 @@ func TestBoardStore_SendAndInbox(t *testing.T) {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
 	defer func() {
-		_ = store.Close()
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 		if err := os.RemoveAll(dir); err != nil {
 			t.Logf("RemoveAll: %v", err)
 		}
@@ -68,7 +69,8 @@ func TestBoardStore_BroadcastMessage(t *testing.T) {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
 	defer func() {
-		_ = store.Close()
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 	}()
 
 	// Send broadcast message
@@ -106,7 +108,10 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Send message
 	msg := agent.BoardMessage{
@@ -121,7 +126,10 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	}
 
 	// Get message ID
-	messages, _ := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"})
+	messages, err := store.Inbox(ctx, agent.InboxFilter{WorkspaceID: "ws1", ActorID: "actor:agent:coder"})
+	if err != nil {
+		t.Fatalf("Inbox: %v", err)
+	}
 	if len(messages) == 0 {
 		t.Fatal("no messages found")
 	}
@@ -144,7 +152,10 @@ func TestBoardStore_ReserveAndRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Reserve a file
 	res := agent.FileReservation{
@@ -177,7 +188,10 @@ func TestBoardStore_ReserveAndRelease(t *testing.T) {
 	}
 
 	// Should be empty now
-	reservations, _ = store.ListReservations(ctx, "ws1")
+	reservations, err = store.ListReservations(ctx, "ws1")
+	if err != nil {
+		t.Fatalf("ListReservations: %v", err)
+	}
 	if len(reservations) != 0 {
 		t.Errorf("expected 0 reservations after release, got %d", len(reservations))
 	}
@@ -191,7 +205,10 @@ func TestBoardStore_ReservationConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// First actor reserves exclusively
 	res := agent.FileReservation{
@@ -227,7 +244,10 @@ func TestBoardStore_SharedReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// First actor reserves shared
 	res1 := agent.FileReservation{
@@ -260,7 +280,10 @@ func TestBoardStore_ExpiredReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Create already-expired reservation
 	res := agent.FileReservation{
@@ -275,13 +298,19 @@ func TestBoardStore_ExpiredReservations(t *testing.T) {
 	}
 
 	// Should not appear in active reservations
-	reservations, _ := store.ListReservations(ctx, "ws1")
+	reservations, err := store.ListReservations(ctx, "ws1")
+	if err != nil {
+		t.Fatalf("ListReservations: %v", err)
+	}
 	if len(reservations) != 0 {
 		t.Errorf("expected 0 active reservations (expired), got %d", len(reservations))
 	}
 
 	// Should not conflict
-	conflicts, _ := store.CheckConflicts(ctx, "ws1", []string{"src/main.go"}, "actor:agent:coder2", agent.ReservationModeExclusive)
+	conflicts, err := store.CheckConflicts(ctx, "ws1", []string{"src/main.go"}, "actor:agent:coder2", agent.ReservationModeExclusive)
+	if err != nil {
+		t.Fatalf("CheckConflicts: %v", err)
+	}
 	if len(conflicts) != 0 {
 		t.Errorf("expected 0 conflicts (expired), got %d", len(conflicts))
 	}
@@ -295,7 +324,10 @@ func TestBoardStore_PriorityOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Send messages with different priorities (out of order)
 	msgs := []agent.BoardMessage{
@@ -333,9 +365,10 @@ func TestMain(m *testing.M) {
 	// Ensure temp directories are cleaned up
 	code := m.Run()
 	// Clean up any leftover test databases
-	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "board_test_*"))
+	// Test cleanup; errors are not actionable.
+	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "board_test_*")) //nolint:errcheck
 	for _, match := range matches {
-		_ = os.RemoveAll(match)
+		_ = os.RemoveAll(match) //nolint:errcheck
 	}
 	os.Exit(code)
 }

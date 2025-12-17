@@ -68,8 +68,8 @@ Fields (conceptual):
 - `epic_id` (string, optional).
 - `agent_role` (string, optional) – `coder`, `planner`, `reviewer`, etc.
 - `job_id` (string, optional) – jobs entry for the main agent run.
-- `trace_id` (string, optional) – Protocol v1 `meta.trace_id` linking all
-  envelopes.
+- `trace_id` (string, optional) – Protocol v1 `meta.correlation_id` linking all
+  envelopes (stored as `trace_id` in trajectory records).
 - `status` (string) – `"ok" | "error" | "aborted" | "partial"`.
 - `summary` (string) – human-readable description.
 - `created_at` / `updated_at` (timestamps).
@@ -95,7 +95,7 @@ Fields (conceptual):
   - `protocol_command` (string, optional) – e.g. `"agent/spawn"` or
     `"todo/manage"`.
   - `job_id` (string, optional).
-  - `trace_id` (string, optional) – from `meta.trace_id`.
+  - `trace_id` (string, optional) – from `meta.correlation_id`.
 - `task_hints` (object, optional):
   - `task_id` (string, optional).
   - `epic_id` (string, optional).
@@ -118,7 +118,7 @@ Fields (conceptual):
 - `kind` (string):
   - `"user_request"`, `"agent_thought"`, `"tool_call"`, `"tool_result"`,
     `"review_request"`, `"review_result"`, `"task_transition"`,
-    `"graph_search"`, `"swe_grep"`, etc.
+    `"graph_search"`, `"swe_grep"`, `"hook_call"`, `"hook_result"`, etc.
 - `actor` (string) – e.g. `actor:agent:dspy:<slug>`, `actor:system:overseer`.
 - `command` (string, optional) – Protocol v1 `command` when applicable.
 - `status` (string, optional) – derived from `env.status` or review status.
@@ -128,24 +128,27 @@ Fields (conceptual):
 
 #### 3.3.1 Meta Field Reference (Conceptual)
 
-Trajectory events reuse the Protocol v1 `meta.*` namespace for correlation. The
-following keys are recognized for trajectory-related envelopes and index rows:
+Trajectory events persist a `meta` object that mirrors selected Protocol v1
+`meta.*` fields for correlation and joins. In v1, the correlation value is
+sourced from envelope `meta.correlation_id` and stored as `trace_id` in
+trajectory records/events. The following keys are recognized for trajectory-
+related envelopes and index rows:
 
-| Field                     | Type   | Required | Scope / Uniqueness                                                             | Usage Notes                                                                         |
-| ------------------------- | ------ | -------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `trace_id`                | string | yes      | Unique per trajectory (UUID/ULID/hex); reused by all envelopes in the same run | Primary correlation id; MUST be set on all trajectory-related envelopes and events. |
-| `job_id`                  | string | optional | ULID; unique per job in a workspace                                            | Set when events originate from a `jobs/*` command.                                  |
-| `task_id`                 | string | optional | Task identifier; unique per tasks store                                        | Set for task-scoped events.                                                         |
-| `epic_id`                 | string | optional | Epic identifier                                                                | Set when an event relates to an epic-level plan.                                    |
-| `review_id`               | string | optional | Review artifact identifier                                                     | Set on `review_result` events and related envelopes.                                |
-| `review_request_id`       | string | optional | ID of review request message or job                                            | Use when linking events back to a specific review request.                          |
-| `review_result_id`        | string | optional | ID of review result message or job                                             | Use when capturing async review completions.                                        |
-| `actor_id` / `agent_id`   | string | optional | Mailbox/agent actor id (e.g. `actor:agent:dspy:<slug>`)                        | Set for agent-initiated events and tool calls.                                      |
-| `task_run_id` / `run_id`  | string | optional | Unique id per execution attempt of a given task                                | Useful for distinguishing retries of the same task.                                 |
-| `trace_parent`            | string | optional | Parent trace id                                                                | Set when a trajectory is spawned from another trajectory/trace.                     |
-| `job_attempt` / `attempt` | int    | optional | Non-negative integer; monotonic per `job_id`                                   | Incremented on each retry of the same job.                                          |
-| `created_by`              | string | optional | Service or user identifier                                                     | E.g. `agentctl`, `actor:system:overseer`, `actor:human:<id>`.                       |
-| `cas_digest`              | string | optional | `sha256:<hex>`; MUST match any referenced CAS artifact                         | Set whenever `data_artifact` / `data.artifact` is present.                          |
+| Field                     | Type   | Required | Scope / Uniqueness                                                             | Usage Notes                                                                          |
+| ------------------------- | ------ | -------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `trace_id`                | string | yes      | Unique per trajectory (UUID/ULID/hex); reused by all envelopes in the same run | Primary correlation id; sourced from `meta.correlation_id` and stored as `trace_id`. |
+| `job_id`                  | string | optional | ULID; unique per job in a workspace                                            | Set when events originate from a `jobs/*` command.                                   |
+| `task_id`                 | string | optional | Task identifier; unique per tasks store                                        | Set for task-scoped events.                                                          |
+| `epic_id`                 | string | optional | Epic identifier                                                                | Set when an event relates to an epic-level plan.                                     |
+| `review_id`               | string | optional | Review artifact identifier                                                     | Set on `review_result` events and related envelopes.                                 |
+| `review_request_id`       | string | optional | ID of review request message or job                                            | Use when linking events back to a specific review request.                           |
+| `review_result_id`        | string | optional | ID of review result message or job                                             | Use when capturing async review completions.                                         |
+| `actor_id` / `agent_id`   | string | optional | Mailbox/agent actor id (e.g. `actor:agent:dspy:<slug>`)                        | Set for agent-initiated events and tool calls.                                       |
+| `task_run_id` / `run_id`  | string | optional | Unique id per execution attempt of a given task                                | Useful for distinguishing retries of the same task.                                  |
+| `trace_parent`            | string | optional | Parent trace id                                                                | Set when a trajectory is spawned from another trajectory/trace.                      |
+| `job_attempt` / `attempt` | int    | optional | Non-negative integer; monotonic per `job_id`                                   | Incremented on each retry of the same job.                                           |
+| `created_by`              | string | optional | Service or user identifier                                                     | E.g. `agentctl`, `actor:system:overseer`, `actor:human:<id>`.                        |
+| `cas_digest`              | string | optional | `sha256:<hex>`; MUST match any referenced CAS artifact                         | Set whenever `data_artifact` / `data.artifact` is present.                           |
 
 Unless otherwise specified, optional fields are omitted when not applicable;
 they have no implicit default meaning.
@@ -267,8 +270,8 @@ specializes a few rules for trajectories.
   - `UserRequestCapture.id` MUST be unique per `(workspace_id, id)` pair.
   - `TrajectoryEvent.id` SHOULD be globally unique (ULID) or, at minimum, unique
     per `trajectory_id`.
-  - `meta.trace_id` MUST be present on all trajectory-related envelopes and
-    SHOULD uniquely identify a single logical run within a workspace.
+  - `meta.correlation_id` MUST be present on all trajectory-related envelopes
+    and SHOULD uniquely identify a single logical run within a workspace.
 - **Ordering guarantees**
   - Within a given `trajectory_id`, events MUST be ordered by `ts` when
     presented to callers.
@@ -280,13 +283,13 @@ specializes a few rules for trajectories.
 Trajectory-related commands (capture/export jobs, indexers) SHOULD use the
 following error codes in addition to the base catalog in `protocol_v1.md` §5:
 
-| Code                                 | Recommended HTTP status | Meaning                                                                   |
-| ------------------------------------ | ----------------------- | ------------------------------------------------------------------------- |
-| `trajectory.capture.invalid_request` | 400                     | Malformed or missing required fields when capturing a trajectory or event |
-| `trajectory.capture.storage_error`   | 500                     | Failure persisting trajectory/index rows or CAS artifacts                 |
-| `trajectory.export.access_denied`    | 403                     | Export attempted without sufficient permissions or workspace-level opt-in |
-| `trajectory.invalid_schema`          | 400                     | Envelope or episode shape does not conform to this spec                   |
-| `trajectory_event.missing_trace_id`  | 400                     | Event missing `meta.trace_id` where it is required                        |
+| Code                                 | Recommended HTTP status | Meaning                                                                            |
+| ------------------------------------ | ----------------------- | ---------------------------------------------------------------------------------- |
+| `trajectory.capture.invalid_request` | 400                     | Malformed or missing required fields when capturing a trajectory or event          |
+| `trajectory.capture.storage_error`   | 500                     | Failure persisting trajectory/index rows or CAS artifacts                          |
+| `trajectory.export.access_denied`    | 403                     | Export attempted without sufficient permissions or workspace-level opt-in          |
+| `trajectory.invalid_schema`          | 400                     | Envelope or episode shape does not conform to this spec                            |
+| `trajectory_event.missing_trace_id`  | 400                     | Event missing `trace_id` (sourced from `meta.correlation_id`) where it is required |
 
 These codes MUST appear in `error.code` when `status: "error"` and MAY be
 augmented with additional context in `error.details` (e.g., offending

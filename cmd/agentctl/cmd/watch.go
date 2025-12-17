@@ -85,7 +85,10 @@ Modes:
 			if err != nil {
 				return fmt.Errorf("open test watch store: %w", err)
 			}
-			defer func() { _ = store.Close() }()
+			defer func() {
+				// Cleanup in defer; error is not actionable.
+				_ = store.Close() //nolint:errcheck
+			}()
 
 			// Handle --status-only
 			if statusOnly {
@@ -133,7 +136,10 @@ Modes:
 			if err != nil {
 				return fmt.Errorf("create file watcher: %w", err)
 			}
-			defer func() { _ = watcher.Close() }()
+			defer func() {
+				// Watcher cleanup in defer; error is not actionable.
+				_ = watcher.Close() //nolint:errcheck
+			}()
 
 			// Add workspace to watcher (recursive)
 			if err := addRecursive(watcher, workspaceDir); err != nil {
@@ -175,7 +181,8 @@ Modes:
 					// Handle new directories
 					if event.Op&fsnotify.Create != 0 {
 						if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
-							_ = addRecursive(watcher, event.Name)
+							// Best-effort add directory to watcher.
+							_ = addRecursive(watcher, event.Name) //nolint:errcheck
 						}
 					}
 

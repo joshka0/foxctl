@@ -48,7 +48,10 @@ func newFileGuardTestEnv(t *testing.T) *fileGuardTestEnv {
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
-	t.Cleanup(func() { _ = rc.Close() })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = rc.Close() //nolint:errcheck
+	})
 
 	return &fileGuardTestEnv{
 		ctx:           ctx,
@@ -109,14 +112,17 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 		Description: "Editing main.go",
 	})
 	if err != nil {
-		_ = store.Close()
+		// Cleanup on error; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 		t.Fatal(err)
 	}
 	if _, err := store.SetActive(ctx, env.workspaceRoot, task.ID); err != nil {
-		_ = store.Close()
+		// Cleanup on error; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	// Test setup complete; error is not actionable.
+	_ = store.Close() //nolint:errcheck
 
 	// Prepare a write operation for a file inside the workspace.
 	filePath := filepath.Join(env.workspaceRoot, "main.go")
@@ -162,7 +168,10 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open board store: %v", err)
 	}
-	defer func() { _ = board.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = board.Close() //nolint:errcheck
+	}()
 
 	reservations, err := board.ListReservations(env.ctx, env.workspaceRoot)
 	if err != nil {
@@ -192,7 +201,10 @@ func TestFileGuard_StrictMode_BlocksOnConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open board store: %v", err)
 	}
-	defer func() { _ = board.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = board.Close() //nolint:errcheck
+	}()
 
 	conflict := &agent.FileReservation{
 		WorkspaceID: env.workspaceRoot,

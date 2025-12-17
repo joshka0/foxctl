@@ -83,7 +83,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		output.Reason = "test watch store not initialized"
 		return emitOutput(rc, output, nil)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Derive workspace ID from workspace root
 	workspaceID := deriveWorkspaceID(in.WorkspaceRoot)
@@ -145,6 +148,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	return emitOutput(rc, output, meta)
 }
 
+//nolint:revive // strings.Builder.WriteString never returns an error for in-memory writes.
 func buildContextString(watchers []WatcherFeedback, cfg FeedbackConfig) string {
 	var sb strings.Builder
 

@@ -84,7 +84,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		output.Reason = "knowledge store not initialized"
 		return emitOutput(rc, output, nil, routerCfg)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Extract search context from input
 	prompt := extractPrompt(in)

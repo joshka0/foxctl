@@ -663,7 +663,8 @@ func githubGET(client *http.Client, token, url string, v any) error {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		// Error body read; error is not actionable in error path.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) //nolint:errcheck
 		return fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
@@ -679,6 +680,7 @@ func sortCommentsByTime(comments []Comment) {
 	})
 }
 
+//nolint:revive // bytes.Buffer.Write/fmt.Fprintf never returns an error for in-memory writes.
 func buildMarkdownReport(prInfo *PRInfo, owner, repo string, prNum int, comments []Comment, checkRuns []CheckRun, conflictingFiles []string, client *http.Client, token string, withContext, errorsOnly bool) (string, TaskSummary) {
 	var buf bytes.Buffer
 
@@ -860,13 +862,14 @@ func displayJobDetailsTaskFormat(buf *bytes.Buffer, job *JobDetails, client *htt
 		}
 	}
 	if failedStep != nil {
-		fmt.Fprintf(buf, "**Failed step:** %s\n", failedStep.Name)
-		fmt.Fprintf(buf, "**URL:** %s\n\n", job.HTMLURL)
+		// Buffer writes; errors are not actionable for in-memory buffer.
+		_, _ = fmt.Fprintf(buf, "**Failed step:** %s\n", failedStep.Name) //nolint:errcheck
+		_, _ = fmt.Fprintf(buf, "**URL:** %s\n\n", job.HTMLURL)           //nolint:errcheck
 		output, err := getJobErrorOutput(client, token, owner, repo, job.ID, failedStep.Name)
 		if err != nil {
 			log.Printf("warning: failed to get job error output: %v", err)
 		} else if output != "" {
-			fmt.Fprintf(buf, "**Error output:**\n\n```\n%s\n```\n\n", output)
+			_, _ = fmt.Fprintf(buf, "**Error output:**\n\n```\n%s\n```\n\n", output) //nolint:errcheck
 		}
 	}
 }

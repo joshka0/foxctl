@@ -16,7 +16,20 @@ import (
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/storage"
 )
+
+var traceIDContextKey = struct{ Name string }{Name: "agentctl.trace_id"}
+
+func traceIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(traceIDContextKey).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // Runtime manages agent sessions and lifecycle.
 type Runtime struct {
@@ -55,6 +68,13 @@ type Config struct {
 	// MaxConcurrentAgents is the maximum number of concurrent agent sessions.
 	// If > 0, Spawn() atomically enforces this limit to avoid TOCTOU races.
 	MaxConcurrentAgents int
+
+	// OpenMemoryStore provides access to named memory for retrieval tools like code.symbol_search.
+	// When nil, tools requiring named memory return empty results.
+	OpenMemoryStore func(context.Context) (storage.MemoryStore, error)
+
+	// TrajectoryStorageRoot enables agent tool call capture when set.
+	TrajectoryStorageRoot string
 }
 
 // SpawnHandler processes spawn requests from agents.
@@ -130,12 +150,28 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		cfg.RootActorID = cfg.ActorID
 	}
 
+	traceID := traceIDFromContext(ctx)
+	if traceID == "" {
+		traceID = ulid.Make().String()
+	}
+
 	// Create tools registry with telemetry recorder
 	recorder := &sessionRecorder{sessionID: sessionID}
 	toolsCfg := agenttools.Config{
-		WorkspaceRoot: r.config.WorkspaceRoot,
-		WorkspaceID:   cfg.WorkspaceID,
-		ActorID:       cfg.ActorID,
+		WorkspaceRoot:         r.config.WorkspaceRoot,
+		WorkspaceID:           cfg.WorkspaceID,
+		ActorID:               cfg.ActorID,
+		TaskID:                cfg.TaskID,
+		EpicID:                cfg.EpicID,
+		AgentRole:             string(cfg.Role),
+		TraceID:               traceID,
+		TrajectoryStorageRoot: r.config.TrajectoryStorageRoot,
+		OpenMemoryStore: func(ctx context.Context) (storage.MemoryStore, error) {
+			if r.config.OpenMemoryStore == nil {
+				return nil, fmt.Errorf("named memory store not configured")
+			}
+			return r.config.OpenMemoryStore(ctx)
+		},
 	}
 	toolsRegistry, err := agenttools.NewRegistry(toolsCfg, recorder)
 	if err != nil {
@@ -297,15 +333,26 @@ func buildAgentSignature(cfg types.AgentConfig) *core.Signature {
 	switch cfg.Role {
 	case types.RoleCoder:
 		instruction = `You are a coding agent. You have access to file system tools to read and write code.
-Available tools:
+
+Code Search & Retrieval Tools:
+- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
+- code.swe_grep: Extract high-signal code snippets from candidate files (use after symbol_search)
+- code.search: Search code using ripgrep patterns
+
+File Operations:
 - fs.read_file: Read file contents
 - fs.list_dir: List directory contents
+
+Edit Tools:
 - edit.create_file: Create new files
-- edit.apply_patch: Modify existing files
-- code.search: Search code using ripgrep
+- edit.apply_patch: Modify existing files with simple text replacement
+- edit.apply_structured_diff: Apply structured diffs from code/diff skill (for complex multi-hunk changes)
+
+Testing:
 - tests.run: Run tests
 
-Use these tools to complete coding tasks. Always create or modify files as needed.`
+Workflow: Use code.symbol_search to find relevant symbols, then code.swe_grep to get detailed context.
+Apply changes with edit.apply_patch for simple edits or edit.apply_structured_diff for complex refactors.`
 	case types.RolePlanner:
 		instruction = `You are a planning agent. You analyze tasks and create structured plans.
 Available tools:
@@ -315,6 +362,32 @@ Available tools:
 - mail.send: Send messages to other agents
 
 Use these tools to plan and coordinate work.`
+	case types.RoleReviewer:
+		instruction = `You are a code review agent. Your job is to understand proposed changes,
+evaluate their impact, and suggest improvements. You do not directly apply edits yourself.
+
+Code Search & Retrieval Tools (read/inspect):
+- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
+- code.swe_grep: Extract high-signal code snippets from candidate files (use after symbol_search)
+- code.search: Search code using ripgrep patterns
+
+File Operations (read-only):
+- fs.read_file: Read file contents for review
+- fs.list_dir: Inspect project structure
+
+Validation:
+- tests.run: Run tests to validate changes
+
+Coordination:
+- mail.send: Communicate findings and requests to other agents
+- todo.add: Create follow-up tasks from review findings
+
+Workflow:
+1. Use code.symbol_search and code.swe_grep to understand the relevant code paths.
+2. Use fs.read_file to inspect surrounding context.
+3. Use tests.run to verify behavior and check for regressions.
+4. Suggest concrete patches or improvements in your output, but leave edits to Coder.
+5. Use mail.send to communicate review feedback or todo.add to track follow-ups.`
 	default:
 		instruction = `You are a helpful agent. Complete the given task using available tools.`
 	}

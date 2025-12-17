@@ -110,11 +110,13 @@ func (r *Runner) matchesWatcher(relPath string, cfg testwatch.WatcherConfig) boo
 
 	// Check include patterns
 	for _, pattern := range cfg.Include {
-		matched, _ := doublestar.Match(pattern, relPath)
+		// Pattern match errors are treated as non-matches.
+		matched, _ := doublestar.Match(pattern, relPath) //nolint:errcheck
 		if matched {
 			// Check exclude patterns
 			for _, excl := range cfg.Exclude {
-				excluded, _ := doublestar.Match(excl, relPath)
+				// Pattern match errors are treated as non-matches.
+				excluded, _ := doublestar.Match(excl, relPath) //nolint:errcheck
 				if excluded {
 					return false
 				}
@@ -309,8 +311,10 @@ func parseTestOutput(watcherID, output string, status testwatch.Status) ([]testw
 	return failures, summary
 }
 
-var goFailPattern = regexp.MustCompile(`--- FAIL: (\S+)`)
-var goFileLinePattern = regexp.MustCompile(`(\S+\.go):(\d+)`)
+var (
+	goFailPattern     = regexp.MustCompile(`--- FAIL: (\S+)`)
+	goFileLinePattern = regexp.MustCompile(`(\S+\.go):(\d+)`)
+)
 
 func parseGoTestOutput(lines []string) ([]testwatch.Failure, string) {
 	var failures []testwatch.Failure
@@ -328,7 +332,8 @@ func parseGoTestOutput(lines []string) ([]testwatch.Failure, string) {
 				}
 				if flMatch := goFileLinePattern.FindStringSubmatch(nextLine); flMatch != nil {
 					f.File = flMatch[1]
-					_, _ = fmt.Sscanf(flMatch[2], "%d", &f.Line)
+					// Best-effort line number parsing; errors leave default 0.
+					_, _ = fmt.Sscanf(flMatch[2], "%d", &f.Line) //nolint:errcheck
 				}
 				if strings.Contains(nextLine, "Error") || strings.Contains(nextLine, "expected") ||
 					strings.Contains(nextLine, "got") {
@@ -389,8 +394,10 @@ func parsePytestOutput(lines []string) ([]testwatch.Failure, string) {
 	return failures, summary
 }
 
-var jestFailPattern = regexp.MustCompile(`✕\s+(.+)`)
-var jestFileLinePattern = regexp.MustCompile(`at\s+.+\((.+):(\d+):\d+\)`)
+var (
+	jestFailPattern     = regexp.MustCompile(`✕\s+(.+)`)
+	jestFileLinePattern = regexp.MustCompile(`at\s+.+\((.+):(\d+):\d+\)`)
+)
 
 func parseJestOutput(lines []string) ([]testwatch.Failure, string) {
 	var failures []testwatch.Failure
@@ -404,7 +411,8 @@ func parseJestOutput(lines []string) ([]testwatch.Failure, string) {
 			for j := i + 1; j < len(lines) && j < i+5; j++ {
 				if flMatch := jestFileLinePattern.FindStringSubmatch(lines[j]); flMatch != nil {
 					f.File = flMatch[1]
-					_, _ = fmt.Sscanf(flMatch[2], "%d", &f.Line)
+					// Best-effort line number parsing; errors leave default 0.
+					_, _ = fmt.Sscanf(flMatch[2], "%d", &f.Line) //nolint:errcheck
 					break
 				}
 			}

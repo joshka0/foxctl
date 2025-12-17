@@ -1,11 +1,15 @@
 package runservice
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/jkatigb/agentctl/internal/storage/trajectory"
+	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 )
 
 // TryServeCache attempts to serve the response from cache based on the provided input.
@@ -29,7 +33,7 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 				return false, nil
 			}
 			// In only mode, emit error envelope
-			return e.writeCacheError(protocol.ErrorCodeECacheUnavailable, "cache storage unavailable", err)
+			return e.writeCacheError(input, protocol.ErrorCodeECacheUnavailable, "cache storage unavailable", err)
 		}
 		key, err := cache.BuildKey(e.handle.Manifest, input, nil)
 		if err != nil {
@@ -49,12 +53,39 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 			return false, nil
 		}
 		// In only mode, emit error envelope
-		return e.writeCacheError(protocol.ErrorCodeECacheUnavailable, "cache lookup failed", err)
+		return e.writeCacheError(input, protocol.ErrorCodeECacheUnavailable, "cache lookup failed", err)
 	}
 	if ok {
 		hit, err := cache.AnnotateHitBytes(entry.Result, entry.CacheKey, e.options.Workspace, e.handle.Manifest.Metadata.Version)
 		if err != nil {
 			return false, err
+		}
+		hit = annotateCorrelationAndJob(hit, "", e.options.CorrelationID)
+		if e.trajCapture == nil && e.cfg.Storage.Root != "" && strings.TrimSpace(e.options.Workspace) != "" {
+			capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+				StorageRoot:     e.cfg.Storage.Root,
+				WorkspaceID:     e.options.Workspace,
+				Actor:           "actor:human:cli",
+				Source:          trajectory.SourceCLI,
+				CLICommand:      e.options.CLICommand,
+				ProtocolCommand: e.handle.Manifest.Metadata.Name,
+				JobID:           "",
+				CorrelationID:   e.options.CorrelationID,
+				Input:           input,
+			})
+			if capErr == nil {
+				e.trajCapture = capture
+			} else {
+				errs.Ignore(capErr, "trajectory capture start")
+			}
+		}
+		if e.trajCapture != nil {
+			if strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
+				capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, input, "", e.options.CorrelationID)
+				errs.Ignore(capErr, "trajectory capture hook call")
+			}
+			capErr := e.trajCapture.CaptureResult(e.ctx, hit, "", e.options.CorrelationID)
+			errs.Ignore(capErr, "trajectory capture cache hit")
 		}
 		if _, warnErr := fmt.Fprintf(e.stderr, "cache hit %s\n", entry.CacheKey); warnErr != nil {
 			errs.Ignore(warnErr, "runservice: warn cache hit")
@@ -65,13 +96,13 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 		return true, nil
 	}
 	if e.options.CacheMode == cache.ModeOnly {
-		return e.writeCacheMissError()
+		return e.writeCacheMissError(input)
 	}
 	return false, nil
 }
 
 // writeCacheMissError emits an ECACHE_MISS error envelope for cache-only mode.
-func (e *Executor) writeCacheMissError() (bool, error) {
+func (e *Executor) writeCacheMissError(input []byte) (bool, error) {
 	data := map[string]any{
 		"cache_key": e.cacheKey,
 		"hint":      "No cached result exists. Run with --cache=auto to execute the skill and populate the cache.",
@@ -85,6 +116,39 @@ func (e *Executor) writeCacheMissError() (bool, error) {
 		protocol.WithSkillVersion(e.handle.Manifest.Metadata.Version),
 		protocol.WithCacheKey(e.cacheKey),
 	)
+	env.Meta.CorrelID = e.options.CorrelationID
+	if e.trajCapture == nil && e.cfg.Storage.Root != "" && strings.TrimSpace(e.options.Workspace) != "" {
+		capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+			StorageRoot:     e.cfg.Storage.Root,
+			WorkspaceID:     e.options.Workspace,
+			Actor:           "actor:human:cli",
+			Source:          trajectory.SourceCLI,
+			CLICommand:      e.options.CLICommand,
+			ProtocolCommand: e.handle.Manifest.Metadata.Name,
+			JobID:           "",
+			CorrelationID:   e.options.CorrelationID,
+			Input:           e.options.Input,
+		})
+		if capErr == nil {
+			e.trajCapture = capture
+		} else {
+			errs.Ignore(capErr, "trajectory capture start")
+		}
+	}
+	if e.trajCapture != nil {
+		if strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
+			rawIn := input
+			if len(rawIn) == 0 {
+				rawIn = e.options.Input
+			}
+			capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, rawIn, "", e.options.CorrelationID)
+			errs.Ignore(capErr, "trajectory capture hook call")
+		}
+		// Envelope marshalling; error is nil for valid envelope structs.
+		raw, _ := json.Marshal(env) //nolint:errcheck
+		capErr := e.trajCapture.CaptureResult(e.ctx, raw, "", e.options.CorrelationID)
+		errs.Ignore(capErr, "trajectory capture cache miss")
+	}
 	if err := protocol.Write(e.stdout, env); err != nil {
 		return true, err
 	}
@@ -92,7 +156,7 @@ func (e *Executor) writeCacheMissError() (bool, error) {
 }
 
 // writeCacheError emits a cache error envelope for cache-only mode.
-func (e *Executor) writeCacheError(code protocol.ErrorCode, message string, cause error) (bool, error) {
+func (e *Executor) writeCacheError(input []byte, code protocol.ErrorCode, message string, cause error) (bool, error) {
 	data := map[string]any{
 		"hint": "Cache storage is unavailable. Check cache configuration and storage path.",
 	}
@@ -107,6 +171,39 @@ func (e *Executor) writeCacheError(code protocol.ErrorCode, message string, caus
 		protocol.WithWorkspace(e.options.Workspace),
 		protocol.WithSkillVersion(e.handle.Manifest.Metadata.Version),
 	)
+	env.Meta.CorrelID = e.options.CorrelationID
+	if e.trajCapture == nil && e.cfg.Storage.Root != "" && strings.TrimSpace(e.options.Workspace) != "" {
+		capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
+			StorageRoot:     e.cfg.Storage.Root,
+			WorkspaceID:     e.options.Workspace,
+			Actor:           "actor:human:cli",
+			Source:          trajectory.SourceCLI,
+			CLICommand:      e.options.CLICommand,
+			ProtocolCommand: e.handle.Manifest.Metadata.Name,
+			JobID:           "",
+			CorrelationID:   e.options.CorrelationID,
+			Input:           e.options.Input,
+		})
+		if capErr == nil {
+			e.trajCapture = capture
+		} else {
+			errs.Ignore(capErr, "trajectory capture start")
+		}
+	}
+	if e.trajCapture != nil {
+		if strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
+			rawIn := input
+			if len(rawIn) == 0 {
+				rawIn = e.options.Input
+			}
+			capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, rawIn, "", e.options.CorrelationID)
+			errs.Ignore(capErr, "trajectory capture hook call")
+		}
+		// Envelope marshalling; error is nil for valid envelope structs.
+		raw, _ := json.Marshal(env) //nolint:errcheck
+		capErr := e.trajCapture.CaptureResult(e.ctx, raw, "", e.options.CorrelationID)
+		errs.Ignore(capErr, "trajectory capture cache error")
+	}
 	if err := protocol.Write(e.stdout, env); err != nil {
 		return true, err
 	}

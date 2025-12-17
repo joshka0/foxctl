@@ -314,27 +314,28 @@ func createTodoFromCITask(cmd *cobra.Command, tm map[string]any, storePath strin
 		title = fmt.Sprintf("[%s] %s", kind, summary)
 	}
 	// Build a description with metadata, but strip backticks to satisfy todo validation.
+	// strings.Builder.WriteString never returns an error for in-memory writes.
 	var b strings.Builder
-	b.WriteString("Imported from ci/prcomments tasks_list.\n")
+	b.WriteString("Imported from ci/prcomments tasks_list.\n") //nolint:revive
 	if source != "" {
-		b.WriteString(fmt.Sprintf("Source: %s\n", source))
+		b.WriteString(fmt.Sprintf("Source: %s\n", source)) //nolint:revive
 	}
 	if severity != "" {
-		b.WriteString(fmt.Sprintf("Severity: %s\n", severity))
+		b.WriteString(fmt.Sprintf("Severity: %s\n", severity)) //nolint:revive
 	}
 	if file != "" {
 		if lineStr != "" {
-			b.WriteString(fmt.Sprintf("Location: %s:%s\n", file, lineStr))
+			b.WriteString(fmt.Sprintf("Location: %s:%s\n", file, lineStr)) //nolint:revive
 		} else {
-			b.WriteString(fmt.Sprintf("Location: %s\n", file))
+			b.WriteString(fmt.Sprintf("Location: %s\n", file)) //nolint:revive
 		}
 	}
 	if commentAuthor != "" {
-		b.WriteString(fmt.Sprintf("Reviewer: %s\n", commentAuthor))
+		b.WriteString(fmt.Sprintf("Reviewer: %s\n", commentAuthor)) //nolint:revive
 	}
 	if commentBody != "" {
-		b.WriteString("\nOriginal comment:\n")
-		b.WriteString(commentBody)
+		b.WriteString("\nOriginal comment:\n") //nolint:revive
+		b.WriteString(commentBody)             //nolint:revive
 	}
 	desc := b.String()
 	desc = strings.ReplaceAll(desc, "`", "'")

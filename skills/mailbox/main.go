@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/teams"
 )
 
 type input struct {
@@ -93,12 +95,16 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	if err != nil {
 		return fmt.Errorf("open board store: %w", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	op := strings.ToLower(strings.TrimSpace(in.Operation))
 	workspaceID := in.WorkspaceID
 	if workspaceID == "" {
-		workspaceID, _ = os.Getwd()
+		// Fallback to current directory; error is not actionable.
+		workspaceID, _ = os.Getwd() //nolint:errcheck
 	}
 
 	var data map[string]any
@@ -118,34 +124,90 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			return fmt.Errorf("subject is required")
 		}
 
-		msg := agent.BoardMessage{
+		base := agent.BoardMessage{
 			WorkspaceID: workspaceID,
 			TaskID:      in.Send.TaskID,
 			Stream:      in.Send.Stream,
 			Sender:      in.Send.Sender,
-			Recipient:   in.Send.Recipient,
+			Recipient:   strings.TrimSpace(in.Send.Recipient),
 			Kind:        agent.BoardMessageKind(in.Send.Kind),
 			Priority:    in.Send.Priority,
 			AckRequired: in.Send.AckRequired,
 			Subject:     in.Send.Subject,
 			Body:        in.Send.Body,
 		}
-		if msg.Stream == "" {
-			msg.Stream = agent.DefaultStream
+		if base.Stream == "" {
+			base.Stream = agent.DefaultStream
 		}
-		if msg.Kind == "" {
-			msg.Kind = agent.BoardMessageKindInfo
+		if base.Kind == "" {
+			base.Kind = agent.BoardMessageKindInfo
 		}
-		if msg.Priority == 0 {
-			msg.Priority = agent.DefaultPriority
+		if base.Priority == 0 {
+			base.Priority = agent.DefaultPriority
 		}
 
+		if strings.HasPrefix(base.Recipient, "team:") {
+			teamStore, err := teams.Open(ctx, cfg.Storage.Root)
+			if err != nil {
+				return fmt.Errorf("open teams store: %w", err)
+			}
+			defer func() {
+				// Store cleanup in defer; error is not actionable.
+				_ = teamStore.Close() //nolint:errcheck
+			}()
+
+			if _, err := teamStore.GetTeam(ctx, workspaceID, base.Recipient); err != nil {
+				if errors.Is(err, teams.ErrNotFound) {
+					return fmt.Errorf("team not found: %s", base.Recipient)
+				}
+				return err
+			}
+
+			members, err := teamStore.ListMembers(ctx, workspaceID, base.Recipient, 1000)
+			if err != nil {
+				return err
+			}
+			if len(members) == 0 {
+				return fmt.Errorf("team has no members: %s", base.Recipient)
+			}
+
+			messageIDs := make([]string, 0, len(members))
+			var failedMembers []string
+			for _, m := range members {
+				msg := base
+				msg.Recipient = m.ActorID
+				if err := store.SendMessage(ctx, &msg); err != nil {
+					failedMembers = append(failedMembers, m.ActorID)
+					continue
+				}
+				messageIDs = append(messageIDs, msg.ID)
+			}
+
+			// If all deliveries failed, return an error.
+			if len(messageIDs) == 0 {
+				return fmt.Errorf("failed to deliver message to any team member")
+			}
+
+			data = map[string]any{
+				"message_id":      messageIDs[0],
+				"message_ids":     messageIDs,
+				"delivered_count": len(messageIDs),
+				"failed_count":    len(failedMembers),
+				"failed_members":  failedMembers,
+				"summary":         fmt.Sprintf("sent message to %s (%d recipients): %s", base.Recipient, len(messageIDs), base.Subject),
+			}
+			break
+		}
+
+		msg := base
 		if err := store.SendMessage(ctx, &msg); err != nil {
 			return err
 		}
 		data = map[string]any{
-			"message_id": msg.ID,
-			"summary":    fmt.Sprintf("sent message to %s: %s", msg.Recipient, msg.Subject),
+			"message_id":      msg.ID,
+			"message_ids":     []string{msg.ID},
+			"delivered_count": 1,
+			"summary":         fmt.Sprintf("sent message to %s: %s", msg.Recipient, msg.Subject),
 		}
 
 	case "inbox":
@@ -176,7 +238,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			for i, m := range messages {
 				ids[i] = m.ID
 			}
-			_, _ = store.MarkRead(ctx, workspaceID, in.Inbox.ActorID, ids)
+			// Best-effort mark as read; error is not actionable.
+			_, _ = store.MarkRead(ctx, workspaceID, in.Inbox.ActorID, ids) //nolint:errcheck
 		}
 
 		data = map[string]any{

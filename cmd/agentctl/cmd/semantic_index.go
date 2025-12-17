@@ -256,7 +256,10 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		return nil, nil, fmt.Errorf("open memory store: %w", err)
 	}
 
-	cleanup := func() { _ = store.Close() }
+	cleanup := func() {
+		// Cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}
 
 	// Create embedding provider
 	var provider semantic.EmbeddingProvider

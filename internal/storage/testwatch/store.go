@@ -175,7 +175,10 @@ ORDER BY watcher_id
 	if err != nil {
 		return nil, fmt.Errorf("testwatch: list by workspace: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 
 	var results []TestStatus
 	for rows.Next() {
@@ -233,7 +236,8 @@ func scanTestStatus(row *sql.Row) (TestStatus, error) {
 		ts.FinishedAt = parseTimePtr(finishedAt.String)
 	}
 	if failuresJSON.Valid && failuresJSON.String != "" {
-		_ = json.Unmarshal([]byte(failuresJSON.String), &ts.Failures)
+		// Optional JSON field; parse errors leave default empty slice.
+		_ = json.Unmarshal([]byte(failuresJSON.String), &ts.Failures) //nolint:errcheck
 	}
 
 	return ts, nil
@@ -259,7 +263,8 @@ func scanTestStatusRows(rows *sql.Rows) (TestStatus, error) {
 		ts.FinishedAt = parseTimePtr(finishedAt.String)
 	}
 	if failuresJSON.Valid && failuresJSON.String != "" {
-		_ = json.Unmarshal([]byte(failuresJSON.String), &ts.Failures)
+		// Optional JSON field; parse errors leave default empty slice.
+		_ = json.Unmarshal([]byte(failuresJSON.String), &ts.Failures) //nolint:errcheck
 	}
 
 	return ts, nil

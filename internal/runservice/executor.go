@@ -7,6 +7,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 )
 
 // AsyncRunner schedules asynchronous job execution.
@@ -27,6 +28,8 @@ type Executor struct {
 	cacheKey   string
 
 	jobStore storage.JobStore
+
+	trajCapture *trajectorycapture.RunCapture
 
 	asyncRunner AsyncRunner
 }
@@ -57,5 +60,9 @@ func (e *Executor) Close() {
 	if e.jobStore != nil {
 		errs.Ignore(e.jobStore.Close(), "close job store")
 		e.jobStore = nil
+	}
+	if e.trajCapture != nil {
+		errs.Ignore(e.trajCapture.Close(), "close trajectory capture")
+		e.trajCapture = nil
 	}
 }

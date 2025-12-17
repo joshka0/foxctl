@@ -1,0 +1,64 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: trajectory/export
+  version: 0.1.0
+  description: "Export stored trajectories as dspy-ready episodes"
+  tags: ["trajectory", "export", "dspy"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/trajectory_export/trajectory_export
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: trajectory.export
+  parameters:
+    - name: workspace_id
+      type: string
+      required: true
+      description: "Workspace identifier"
+    - name: task_id
+      type: string
+      required: false
+    - name: epic_id
+      type: string
+      required: false
+    - name: agent_role
+      type: string
+      required: false
+    - name: trace_id
+      type: string
+      required: false
+    - name: status
+      type: string
+      required: false
+    - name: since
+      type: string
+      required: false
+    - name: until
+      type: string
+      required: false
+    - name: limit
+      type: integer
+      required: false
+    - name: include_raw_traces
+      type: boolean
+      required: false
+    - name: pin
+      type: boolean
+      required: false
+    - name: dry_run
+      type: boolean
+      required: false
+  returns:
+    - name: summary
+      type: object
+    - name: artifact
+      type: string
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

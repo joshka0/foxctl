@@ -228,7 +228,10 @@ FROM knowledge_items WHERE kind = ? ORDER BY name`, string(kind))
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: list items: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 	return scanItems(rows)
 }
 
@@ -240,7 +243,10 @@ FROM knowledge_items ORDER BY kind, name`)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: list all items: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 	return scanItems(rows)
 }
 
@@ -275,7 +281,10 @@ FROM knowledge_triggers WHERE item_id = ?`, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: list triggers: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 	return scanTriggers(rows)
 }
 
@@ -287,7 +296,10 @@ FROM knowledge_triggers`)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: list all triggers: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 	return scanTriggers(rows)
 }
 
@@ -333,7 +345,10 @@ FROM knowledge_documents WHERE item_id = ?`, itemID)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: list documents: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 	return scanDocuments(rows)
 }
 
@@ -372,7 +387,10 @@ WHERE t.trigger_kind = 'keyword' AND LOWER(t.pattern) IN (`
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: match by keyword: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 	return scanItems(rows)
 }
 
@@ -388,7 +406,10 @@ ORDER BY i.priority DESC, i.name`, path)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: match by path: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 	return scanItems(rows)
 }
 

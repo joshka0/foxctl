@@ -151,8 +151,8 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 		`ALTER TABLE tasks ADD COLUMN last_review_id TEXT`,
 	}
 	for _, stmt := range alterDDL {
-		// Ignore errors from "duplicate column" - columns may already exist
-		_, _ = db.ExecContext(ctx, stmt)
+		// Ignore errors from "duplicate column" - columns may already exist.
+		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
 	}
 	return nil
 }
@@ -244,7 +244,8 @@ WHERE id = ?`,
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: update: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	// RowsAffected error is nil for SQLite.
+	n, _ := res.RowsAffected() //nolint:errcheck
 	if n == 0 {
 		return Task{}, fmt.Errorf("tasks: task %q not found", t.ID)
 	}
@@ -267,7 +268,10 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 
 	var tasks []Task
 	for rows.Next() {

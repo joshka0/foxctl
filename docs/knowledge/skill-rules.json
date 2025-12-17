@@ -218,6 +218,52 @@
                     "captureMessage"
                 ]
             }
+        },
+        "code-retrieval": {
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Code retrieval funnel for symbol search, SWE grep, and structured diffs",
+            "promptTriggers": {
+                "keywords": [
+                    "symbol search",
+                    "code search",
+                    "find function",
+                    "find method",
+                    "search code",
+                    "grep code",
+                    "swe grep",
+                    "code retrieval",
+                    "structured diff",
+                    "apply diff",
+                    "apply patch",
+                    "edit code",
+                    "refactor",
+                    "code context",
+                    "code snippets"
+                ],
+                "intentPatterns": [
+                    "(find|search|locate).*?(function|method|class|symbol|code)",
+                    "(how to|how do I).*?(search|find|grep).*?code",
+                    "(apply|use).*?(diff|patch|edit)",
+                    "(extract|get).*?(snippet|context|code)",
+                    "retrieval.*?(funnel|pipeline|workflow)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "internal/agent/tools/**/*.go",
+                    "skills/code_*/**/*.go",
+                    "skills/code_*/**/*.yaml"
+                ],
+                "contentPatterns": [
+                    "code\\.symbol_search",
+                    "code\\.swe_grep",
+                    "edit\\.apply_structured_diff",
+                    "SymbolCandidate",
+                    "SweGrepInput"
+                ]
+            }
         }
     },
     "notes": {

@@ -539,8 +539,8 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 			}
 
 			if err := idx.saveChunkEntry(ctx, args.WorkspaceID, file.Path, chunkID, configHash, chunkResult); err != nil {
-				// Cleanup on failure
-				_ = idx.deleteFileEmbedding(ctx, args.WorkspaceID, file.Path)
+				// Cleanup on failure; error is not actionable.
+				_ = idx.deleteFileEmbedding(ctx, args.WorkspaceID, file.Path) //nolint:errcheck
 				return 0, err
 			}
 		}
@@ -759,7 +759,10 @@ func (idx *Indexer) readFileContent(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// File cleanup in defer; error is not actionable.
+		_ = f.Close() //nolint:errcheck
+	}()
 
 	// Use LimitReader as additional safety even though we checked size
 	return io.ReadAll(io.LimitReader(f, maxReadFileSize))

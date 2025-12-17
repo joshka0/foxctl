@@ -211,7 +211,7 @@ func initWorkspace(workspaceDir string, agents []builtin.Asset, force, dryRun bo
 
 	// Create directories
 	if !dryRun {
-		if err := os.MkdirAll(agentsDir, 0755); err != nil {
+		if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create agents directory: %w", err)
 		}
 	}
@@ -235,7 +235,7 @@ func initWorkspace(workspaceDir string, agents []builtin.Asset, force, dryRun bo
 		}
 
 		// Write file
-		if err := os.WriteFile(destPath, []byte(agent.Body), 0644); err != nil {
+		if err := os.WriteFile(destPath, []byte(agent.Body), 0o644); err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", filename, err))
 			continue
 		}

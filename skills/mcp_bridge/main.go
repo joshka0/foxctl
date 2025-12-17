@@ -124,8 +124,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 	defer func() {
 		if err := mcpClient.Close(); err != nil {
-			// Log close error but don't fail the operation
-			fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err)
+			// Log close error but don't fail the operation.
+			// Warning output to stderr; error is not actionable.
+			_, _ = fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err) //nolint:errcheck
 		}
 	}()
 

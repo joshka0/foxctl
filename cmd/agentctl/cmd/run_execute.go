@@ -25,7 +25,8 @@ func defaultAsyncRunner(ctx context.Context, jobID, manifestPath, artifactPath s
 	// Wait for the process in a goroutine to prevent zombie processes
 	// The context cancellation will terminate the process if needed
 	go func() {
-		_ = worker.Wait()
+		// Wait error is not actionable in background cleanup.
+		_ = worker.Wait() //nolint:errcheck
 	}()
 
 	return nil

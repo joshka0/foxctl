@@ -19,7 +19,7 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 	storageDir := filepath.Join(tmpDir, "storage")
 	casDir := filepath.Join(tmpDir, "cas")
 
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -28,7 +28,10 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	})
 
 	logger := zerolog.Nop()
 	idx := NewIndexer(cfg, store, nil, workspaceDir, logger)
@@ -39,10 +42,10 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 func createTestFile(t *testing.T, dir, path, content string) {
 	t.Helper()
 	fullPath := filepath.Join(dir, path)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -285,7 +288,10 @@ func TestIndexer_Index_IncrementalUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get meta failed: %v", err)
 	}
-	firstMeta, _ := UnmarshalFileMeta(metaEntry.Result)
+	firstMeta, err := UnmarshalFileMeta(metaEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal file meta: %v", err)
+	}
 
 	// Update without changing content - should skip
 	event.Files[0].ChangeKind = indexing.ChangeKindModified
@@ -307,7 +313,10 @@ func TestIndexer_Index_IncrementalUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get updated meta failed: %v", err)
 	}
-	secondMeta, _ := UnmarshalFileMeta(metaEntry.Result)
+	secondMeta, err := UnmarshalFileMeta(metaEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal file meta: %v", err)
+	}
 
 	if firstMeta.ContentHash == secondMeta.ContentHash {
 		t.Error("content hash should have changed")
@@ -433,6 +442,244 @@ type Handler interface {
 	}
 	if handlerSym.Kind != KindInterface {
 		t.Errorf("expected kind 'interface', got %q", handlerSym.Kind)
+	}
+}
+
+// =============================================================================
+// D1: Explicit call extraction tests
+// =============================================================================
+
+// TestGoExtractor_ExtractCalls_SimpleCalls tests that ExtractCalls identifies
+// direct function calls within a function body.
+func TestGoExtractor_ExtractCalls_SimpleCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+func helper() {}
+
+func doSomething() string {
+	return "done"
+}
+
+func main() {
+	helper()
+	result := doSomething()
+	_ = result
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "calls.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	// Find main function
+	var mainSym *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "main" {
+			mainSym = &symbols[i]
+			break
+		}
+	}
+	if mainSym == nil {
+		t.Fatal("main function not found")
+	}
+
+	// Extract calls from main
+	calls, err := extractor.ExtractCalls(ctx, *mainSym, content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	// Should find helper and doSomething
+	callSet := make(map[string]bool)
+	for _, c := range calls {
+		callSet[c] = true
+	}
+
+	if !callSet["helper"] {
+		t.Error("expected call to 'helper'")
+	}
+	if !callSet["doSomething"] {
+		t.Error("expected call to 'doSomething'")
+	}
+}
+
+// TestGoExtractor_ExtractCalls_QualifiedCalls tests that ExtractCalls identifies
+// qualified calls like pkg.Func or receiver.Method.
+func TestGoExtractor_ExtractCalls_QualifiedCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+import "fmt"
+
+type Service struct{}
+
+func (s *Service) Run() {}
+
+func process(svc *Service) {
+	fmt.Println("processing")
+	svc.Run()
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "qualified.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	// Find process function
+	var processSym *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "process" {
+			processSym = &symbols[i]
+			break
+		}
+	}
+	if processSym == nil {
+		t.Fatal("process function not found")
+	}
+
+	// Extract calls from process
+	calls, err := extractor.ExtractCalls(ctx, *processSym, content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	callSet := make(map[string]bool)
+	for _, c := range calls {
+		callSet[c] = true
+	}
+
+	// Should find fmt.Println and svc.Run (or just Run depending on impl)
+	if !callSet["fmt.Println"] {
+		t.Error("expected call to 'fmt.Println'")
+	}
+	if !callSet["svc.Run"] && !callSet["Run"] {
+		t.Error("expected call to 'svc.Run' or 'Run'")
+	}
+}
+
+// TestGoExtractor_ExtractCalls_NoCalls tests that ExtractCalls returns empty
+// for functions with no calls.
+func TestGoExtractor_ExtractCalls_NoCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+func returnValue() int {
+	return 42
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "nocalls.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	if len(symbols) == 0 {
+		t.Fatal("expected at least one symbol")
+	}
+
+	calls, err := extractor.ExtractCalls(ctx, symbols[0], content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	if len(calls) != 0 {
+		t.Errorf("expected 0 calls, got %d: %v", len(calls), calls)
+	}
+}
+
+// TestGoExtractor_ExtractCalls_NestedCalls tests that ExtractCalls identifies
+// calls within nested expressions and closures.
+func TestGoExtractor_ExtractCalls_NestedCalls(t *testing.T) {
+	extractor := NewGoExtractor()
+
+	content := []byte(`package test
+
+func outer() {}
+func inner() int { return 1 }
+func wrapper() int { return 2 }
+
+func complex() {
+	if inner() > 0 {
+		outer()
+	}
+	fn := func() {
+		wrapper()
+	}
+	fn()
+}
+`)
+
+	ctx := context.Background()
+	symbols, err := extractor.Extract(ctx, "nested.go", content)
+	if err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	// Find complex function
+	var complexSym *Symbol
+	for i := range symbols {
+		if symbols[i].Name == "complex" {
+			complexSym = &symbols[i]
+			break
+		}
+	}
+	if complexSym == nil {
+		t.Fatal("complex function not found")
+	}
+
+	calls, err := extractor.ExtractCalls(ctx, *complexSym, content)
+	if err != nil {
+		t.Fatalf("ExtractCalls failed: %v", err)
+	}
+
+	callSet := make(map[string]bool)
+	for _, c := range calls {
+		callSet[c] = true
+	}
+
+	// Should find inner, outer, wrapper (from closure), and fn
+	if !callSet["inner"] {
+		t.Error("expected call to 'inner'")
+	}
+	if !callSet["outer"] {
+		t.Error("expected call to 'outer'")
+	}
+	if !callSet["wrapper"] {
+		t.Error("expected call to 'wrapper'")
+	}
+}
+
+// TestGoExtractor_ExtractCalls_InvalidBounds tests that ExtractCalls handles
+// invalid symbol bounds gracefully.
+func TestGoExtractor_ExtractCalls_InvalidBounds(t *testing.T) {
+	extractor := NewGoExtractor()
+	ctx := context.Background()
+	content := []byte("package test\nfunc foo() {}")
+
+	// Symbol with invalid bounds
+	invalidSym := Symbol{
+		ID:        "test.go:invalid",
+		FilePath:  "test.go",
+		Name:      "invalid",
+		StartByte: -1,
+		EndByte:   100,
+	}
+
+	calls, err := extractor.ExtractCalls(ctx, invalidSym, content)
+	if err != nil {
+		t.Errorf("ExtractCalls should not error on invalid bounds: %v", err)
+	}
+	if len(calls) > 0 {
+		t.Errorf("expected empty calls for invalid bounds, got %v", calls)
 	}
 }
 
@@ -595,4 +842,217 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// TestIndexer_PerSymbolIncrementality tests that only changed symbols are re-indexed
+// per spec §4.3.
+func TestIndexer_PerSymbolIncrementality(t *testing.T) {
+	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	// Initial content with two functions
+	initialContent := `package main
+
+func First() string {
+	return "first"
+}
+
+func Second() string {
+	return "second"
+}
+`
+	createTestFile(t, workspaceDir, "funcs.go", initialContent)
+
+	ctx := context.Background()
+	event := indexing.PostReviewEvent{
+		WorkspaceID: "ws-persymbol",
+		Files: []indexing.FileChange{
+			{Path: "funcs.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
+		},
+	}
+
+	// First index
+	result1, err := idx.Index(ctx, event)
+	if err != nil {
+		t.Fatalf("First index failed: %v", err)
+	}
+	if result1.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed, got %d", result1.FilesIndexed)
+	}
+
+	// Get initial digests from file meta
+	metaName := FileMetaEntryName("ws-persymbol", "funcs.go")
+	metaEntry, err := store.Get(ctx, metaName, "ws-persymbol")
+	if err != nil {
+		t.Fatalf("Get meta failed: %v", err)
+	}
+	meta1, err := UnmarshalFileMeta(metaEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal file meta: %v", err)
+	}
+	if len(meta1.SymbolDigests) < 2 {
+		t.Fatalf("expected at least 2 symbol digests, got %d", len(meta1.SymbolDigests))
+	}
+
+	// Get First function's entry
+	firstEntry1, err := store.Get(ctx, EntryName("ws-persymbol", "funcs.go", "First"), "ws-persymbol")
+	if err != nil {
+		t.Fatalf("Get First failed: %v", err)
+	}
+	firstResult1, err := UnmarshalResult(firstEntry1.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+	firstDigest1 := firstResult1.Symbol.BodyDigest
+
+	// Modify ONLY Second function
+	modifiedContent := `package main
+
+func First() string {
+	return "first"
+}
+
+func Second() string {
+	return "modified second"
+}
+`
+	createTestFile(t, workspaceDir, "funcs.go", modifiedContent)
+	event.Files[0].ChangeKind = indexing.ChangeKindModified
+
+	// Second index
+	result2, err := idx.Index(ctx, event)
+	if err != nil {
+		t.Fatalf("Second index failed: %v", err)
+	}
+	if result2.FilesIndexed != 1 {
+		t.Errorf("expected 1 file indexed, got %d", result2.FilesIndexed)
+	}
+
+	// Verify First function was NOT re-saved (same body_digest)
+	firstEntry2, err := store.Get(ctx, EntryName("ws-persymbol", "funcs.go", "First"), "ws-persymbol")
+	if err != nil {
+		t.Fatalf("Get First after update failed: %v", err)
+	}
+	firstResult2, err := UnmarshalResult(firstEntry2.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	// The body digest should be the same
+	if firstResult2.Symbol.BodyDigest != firstDigest1 {
+		t.Error("First function's body_digest changed when it shouldn't have")
+	}
+
+	// Verify Second function WAS updated
+	secondEntry, err := store.Get(ctx, EntryName("ws-persymbol", "funcs.go", "Second"), "ws-persymbol")
+	if err != nil {
+		t.Fatalf("Get Second failed: %v", err)
+	}
+	secondResult, err := UnmarshalResult(secondEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
+
+	// The body should contain "modified"
+	if secondResult.Symbol.BodyDigest == meta1.SymbolDigests["funcs.go:Second"] {
+		t.Error("Second function's body_digest should have changed")
+	}
+}
+
+// TestIndexer_SymbolDeletion tests that removed symbols are deleted from the index
+// per spec §4.3.
+func TestIndexer_SymbolDeletion(t *testing.T) {
+	idx, store, workspaceDir := setupTestIndexer(t, Config{Enabled: true})
+
+	// Initial content with two functions
+	initialContent := `package main
+
+func KeepMe() {}
+func DeleteMe() {}
+`
+	createTestFile(t, workspaceDir, "deletion.go", initialContent)
+
+	ctx := context.Background()
+	event := indexing.PostReviewEvent{
+		WorkspaceID: "ws-deletion",
+		Files: []indexing.FileChange{
+			{Path: "deletion.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
+		},
+	}
+
+	// First index
+	_, err := idx.Index(ctx, event)
+	if err != nil {
+		t.Fatalf("First index failed: %v", err)
+	}
+
+	// Verify both symbols exist
+	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "KeepMe"), "ws-deletion")
+	if err != nil {
+		t.Fatalf("KeepMe should exist: %v", err)
+	}
+	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "DeleteMe"), "ws-deletion")
+	if err != nil {
+		t.Fatalf("DeleteMe should exist: %v", err)
+	}
+
+	// Remove DeleteMe function
+	modifiedContent := `package main
+
+func KeepMe() {}
+`
+	createTestFile(t, workspaceDir, "deletion.go", modifiedContent)
+	event.Files[0].ChangeKind = indexing.ChangeKindModified
+
+	// Second index
+	_, err = idx.Index(ctx, event)
+	if err != nil {
+		t.Fatalf("Second index failed: %v", err)
+	}
+
+	// Verify KeepMe still exists
+	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "KeepMe"), "ws-deletion")
+	if err != nil {
+		t.Fatalf("KeepMe should still exist: %v", err)
+	}
+
+	// Verify DeleteMe is gone
+	_, err = store.Get(ctx, EntryName("ws-deletion", "deletion.go", "DeleteMe"), "ws-deletion")
+	if err == nil {
+		t.Error("DeleteMe should have been deleted")
+	}
+}
+
+// TestIndexer_LargeFileThreshold tests that files exceeding MaxFileKB are skipped
+// per spec §4.2.
+func TestIndexer_LargeFileThreshold(t *testing.T) {
+	// Set a small MaxFileKB for testing
+	idx, _, workspaceDir := setupTestIndexer(t, Config{
+		Enabled:   true,
+		MaxFileKB: 1, // 1KB limit
+	})
+
+	// Create a file larger than 1KB
+	largeContent := "package main\n\n" + string(make([]byte, 2*1024)) // ~2KB
+	createTestFile(t, workspaceDir, "large.go", largeContent)
+
+	event := indexing.PostReviewEvent{
+		WorkspaceID: "ws-large",
+		Files: []indexing.FileChange{
+			{Path: "large.go", ChangeKind: indexing.ChangeKindAdded, Language: "go"},
+		},
+	}
+
+	result, err := idx.Index(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Index failed: %v", err)
+	}
+
+	// File should be skipped due to size and counted as skipped (not indexed).
+	if result.FilesIndexed != 0 {
+		t.Errorf("expected 0 files indexed for large file, got %d", result.FilesIndexed)
+	}
+	if result.FilesSkipped != 1 {
+		t.Errorf("expected 1 file skipped for large file, got indexed=%d skipped=%d failed=%d",
+			result.FilesIndexed, result.FilesSkipped, result.FilesFailed)
+	}
 }

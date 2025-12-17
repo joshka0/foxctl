@@ -95,8 +95,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	defer func() {
 		if err := mcpClient.Close(); err != nil {
-			// Log close error but don't fail the operation
-			fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err)
+			// Log close error but don't fail the operation.
+			_, _ = fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err) //nolint:errcheck
 		}
 	}()
 
@@ -145,13 +145,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	for _, tool := range toolsResult.Tools {
 
 		if err := generateSkill(validDir, tool, in); err != nil {
-
-			// Warn but continue?
-
-			fmt.Fprintf(os.Stderr, "failed to generate skill for %s: %v\n", tool.Name, err)
-
+			// Warn but continue.
+			_, _ = fmt.Fprintf(os.Stderr, "failed to generate skill for %s: %v\n", tool.Name, err) //nolint:errcheck
 			continue
-
 		}
 
 		installed = append(installed, tool.Name)

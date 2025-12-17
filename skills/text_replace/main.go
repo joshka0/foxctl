@@ -471,7 +471,8 @@ func isBinaryFile(path string) (bool, error) {
 		return false, err
 	}
 	defer func() {
-		_ = f.Close()
+		// File cleanup in defer; error is not actionable.
+		_ = f.Close() //nolint:errcheck
 	}()
 
 	// Read first 512 bytes
@@ -669,25 +670,29 @@ func writeFileAtomic(path string, data []byte) error {
 
 	// Write data
 	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
+		// Cleanup on error path; errors are not actionable.
+		_ = tmpFile.Close()    //nolint:errcheck
+		_ = os.Remove(tmpPath) //nolint:errcheck
 		return fmt.Errorf("write temp file: %w", err)
 	}
 
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath)
+		// Cleanup on error path; errors are not actionable.
+		_ = os.Remove(tmpPath) //nolint:errcheck
 		return fmt.Errorf("close temp file: %w", err)
 	}
 
 	// Preserve permissions
 	if err := os.Chmod(tmpPath, info.Mode()); err != nil {
-		_ = os.Remove(tmpPath)
+		// Cleanup on error path; errors are not actionable.
+		_ = os.Remove(tmpPath) //nolint:errcheck
 		return fmt.Errorf("chmod: %w", err)
 	}
 
 	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
+		// Cleanup on error path; errors are not actionable.
+		_ = os.Remove(tmpPath) //nolint:errcheck
 		return fmt.Errorf("rename: %w", err)
 	}
 

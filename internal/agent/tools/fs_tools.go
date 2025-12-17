@@ -193,8 +193,9 @@ func (r *Registry) listDir(_ context.Context, args map[string]any) (*models.Call
 			}
 		}
 
-		// Build relative path from workspace
-		relFromWorkspace, _ := filepath.Rel(r.config.WorkspaceRoot, walkPath)
+		// Build relative path from workspace.
+		// Rel error is safe to ignore when both paths are absolute from same root.
+		relFromWorkspace, _ := filepath.Rel(r.config.WorkspaceRoot, walkPath) //nolint:errcheck
 
 		entries = append(entries, DirEntry{
 			Name:  d.Name(),
@@ -205,7 +206,6 @@ func (r *Registry) listDir(_ context.Context, args map[string]any) (*models.Call
 
 		return nil
 	})
-
 	if err != nil {
 		return errorResult(fmt.Sprintf("walk directory: %v", err)), nil
 	}

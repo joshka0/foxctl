@@ -11,7 +11,47 @@ import (
 )
 
 // GoExtractor extracts symbols from Go source code using the standard AST parser.
-// This implementation does not require CGO and works with CGO_ENABLED=0.
+//
+// This is the v1 "Go-first" reference implementation per code_symbol_index_and_swe_grep.md
+// §4.1. It uses go/ast instead of Tree-sitter, producing the same data model without
+// requiring CGO (works with CGO_ENABLED=0).
+//
+// # Extracted Symbol Kinds
+//
+// The extractor identifies the following symbol kinds:
+//   - [KindFunction]: Package-level functions (func Foo())
+//   - [KindMethod]: Methods with receivers (func (r *Receiver) Method())
+//   - [KindStruct]: Struct type declarations
+//   - [KindInterface]: Interface type declarations
+//   - [KindType]: Other type declarations (type aliases, etc.)
+//   - [KindVariable]: Package-level var declarations
+//   - [KindConstant]: Package-level const declarations
+//
+// # Symbol Naming
+//
+// For methods, the symbol name includes the receiver type: "ReceiverType.MethodName".
+// This ensures unique IDs when the same method name exists on different types.
+//
+// # Body Digest
+//
+// The [Symbol.BodyDigest] is computed over the full declaration body (from Pos to End),
+// which includes the signature and implementation. This means signature-only changes
+// (e.g. adding a parameter) will trigger re-embedding even if the body is unchanged.
+//
+// # Call Extraction
+//
+// [ExtractCalls] identifies function/method calls within a symbol's body by parsing
+// call expressions. It extracts:
+//   - Direct function calls: "FunctionName"
+//   - Method calls: "pkg.Function" or "receiver.Method"
+//
+// Call extraction is best-effort; resolution is name-based and may produce
+// false positives for shadowed names or dynamic calls.
+//
+// # Error Handling
+//
+// Unparseable files return nil symbols and nil error (not an error) to avoid
+// blocking the indexing pipeline. This follows the [Extractor] contract.
 type GoExtractor struct{}
 
 // NewGoExtractor creates a new Go symbol extractor.
@@ -115,6 +155,8 @@ func (e *GoExtractor) extractReceiverType(expr ast.Expr) string {
 }
 
 // extractFuncSignature extracts a function signature string.
+//
+//nolint:revive // bytes.Buffer.WriteString never returns an error for in-memory writes.
 func (e *GoExtractor) extractFuncSignature(fn *ast.FuncDecl, _ []byte) string {
 	// Find the signature up to the opening brace
 	var buf bytes.Buffer

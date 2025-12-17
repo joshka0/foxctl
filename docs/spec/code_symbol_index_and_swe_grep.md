@@ -109,6 +109,50 @@ Conceptual fields for a `symbol` row:
 Implementations MAY add additional columns (e.g. tags or documentation snippets)
 so long as the fields above remain meaningful.
 
+#### 3.1.1 ID Stability and Renames (v1 Behavior)
+
+In v1, symbol IDs are derived from `(file_path, symbol_name)` using the format
+`"<file_path>:<symbol_name>"`. This has the following implications:
+
+- **File path changes:** If a file is renamed or moved, all symbol IDs in that
+  file change. This is a known limitation of v1. Future versions MAY detect
+  renames via `content_hash` matching and remap IDs to preserve embeddings.
+
+- **Symbol renames:** Renaming a symbol (e.g. `Login` → `Authenticate`) is
+  treated as a deletion of the old ID plus creation of a new ID. Embeddings are
+  not preserved across renames in v1.
+
+- **Symbol modifications:** Changing a symbol's body while keeping its name
+  preserves the ID. The indexer uses `body_digest` to detect whether
+  re-embedding is needed (see §4.3).
+
+- **Symbol deletions:** Removing a symbol from a file causes its ID (and any
+  call edges referencing it) to be removed from the index.
+
+These semantics ensure that unchanged symbols at the same path retain stable IDs
+across re-indexing, satisfying the MUST requirement above for the common case.
+
+#### 3.1.2 Symbol Embeddings (Optional, Future Work)
+
+The `embedding` column for `symbols` is populated by a **separate embedding
+process**, not by the core symbol indexer described in §4. In v1, this section
+is **non-normative**: implementations MAY adopt the pattern below, but symbol
+embeddings are not required for a conforming Code Symbol Index.
+
+- Embeddings are produced by dedicated jobs (conceptually
+  `symbol_index.init_symbols` / `symbol_index.update_symbols`) that:
+  - Read existing `symbols` rows and construct an embedding text per symbol
+    (e.g. signature + documentation, optionally a truncated body slice).
+  - Call a configured embedding provider (see `semantic_file_index.md` §5.2 for
+    the provider shape) to generate vectors.
+  - Store vectors in the `embedding` column keyed by `symbols.id`.
+- Jobs SHOULD reuse `body_digest` and the provider model identifier to avoid
+  unnecessary re-embeds:
+  - If `(id, body_digest, provider_model)` is unchanged, implementations MAY
+    skip re-embedding that symbol.
+- Absence of symbol embeddings MUST NOT break callers; retrieval components
+  SHOULD gracefully fall back to metadata-only symbol index behavior.
+
 ### 3.2 Calls (Edges)
 
 The call graph is modeled as directed edges between symbols.
@@ -142,6 +186,47 @@ Conceptual fields:
 
 Indexers MUST consult `file_meta` to avoid unnecessary work, but MAY still force
 re-indexing under certain conditions (e.g. configuration changes).
+
+### 3.4 Named Memory Storage Mapping
+
+The code symbol index uses `named_memory` entries (as defined in
+`core_profile_v1.md` §12) to persist symbols, call edges, and file metadata.
+This mirrors the approach used by `semantic_file_index.md` §3.1 for file
+embeddings.
+
+**Type mapping:**
+
+| Conceptual Table | Memory Entry Type         | Entry Name Format                                |
+| ---------------- | ------------------------- | ------------------------------------------------ |
+| `symbols`        | `"code_symbol"`           | `symbol://<workspace>/<file_path>:<symbol_name>` |
+| `calls`          | `"code_symbol_call"`      | `call://<workspace>/<source_id>-><target_id>`    |
+| `file_meta`      | `"code_symbol_file_meta"` | `symbol-meta://<workspace>/<file_path>`          |
+
+**Symbol entries (`type="code_symbol"`):**
+
+- `Entry.Name` follows the `symbol://` format above, providing a unique key per
+  symbol per workspace.
+- `Entry.Result` contains a JSON blob with the `Symbol` struct fields, plus
+  optional `Source` provenance (task_id, review_id, reason).
+- `Entry.Embedding` (when vector support is enabled) holds the symbol embedding
+  vector. When vector support is disabled, this column is `NULL` and the index
+  operates in metadata-only mode.
+
+**Call edge entries (`type="code_symbol_call"`):**
+
+- Each `(source_id, target_id)` pair is stored as a separate entry.
+- `Entry.Result` contains the `CallEdge` struct (source_id, target_id, count).
+- No embedding column is used for call edges.
+
+**File meta entries (`type="code_symbol_file_meta"`):**
+
+- Keyed by file path (not symbol), as file_meta tracks per-file freshness.
+- `Entry.Result` contains the `FileMeta` struct (file_path, content_hash,
+  last_mod_time, and optionally symbol_count for diagnostics).
+
+This storage model ensures that symbol index data follows the same lifecycle and
+garbage collection semantics as other named memory entries, and can participate
+in the same search and retrieval APIs.
 
 ---
 
@@ -425,7 +510,8 @@ When SWE Grep and symbol search are used by agents, trajectory capture
 Events SHOULD include:
 
 - `command` set to the Protocol v1 `command` (e.g. `"code/swe_grep"`).
-- `meta.trace_id`, `meta.task_id`, and other fields per the trajectory spec.
+- `meta.correlation_id`, `meta.task_id`, and other fields per the trajectory
+  spec.
 - `data_artifact` referencing CAS digests for large result sets, when present.
 
 ### 7.2 Relation to Semantic File Index
