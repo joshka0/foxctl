@@ -96,10 +96,10 @@ func TestSemanticIndexUpdate_Flags(t *testing.T) {
 func TestSemanticIndexInit_DryRun(t *testing.T) {
 	// Create temp workspace with test files
 	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "utils.go"), []byte("package main"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "utils.go"), []byte("package main"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -182,7 +182,7 @@ func TestFindFilesMatchingGlob(t *testing.T) {
 
 	// Create test files
 	subDir := filepath.Join(tmpDir, "pkg")
-	if err := os.MkdirAll(subDir, 0755); err != nil {
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -195,7 +195,7 @@ func TestFindFilesMatchingGlob(t *testing.T) {
 
 	for _, f := range testFiles {
 		path := filepath.Join(tmpDir, f)
-		if err := os.WriteFile(path, []byte("content"), 0644); err != nil {
+		if err := os.WriteFile(path, []byte("content"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -226,13 +226,13 @@ func TestFindFilesMatchingGlob_SimplePattern(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create files
-	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("a"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("b"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "b.txt"), []byte("b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "c.go"), []byte("c"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "c.go"), []byte("c"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

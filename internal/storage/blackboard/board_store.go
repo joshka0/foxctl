@@ -163,7 +163,8 @@ func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, mes
 	if err != nil {
 		return 0, fmt.Errorf("board: mark read: %w", err)
 	}
-	affected, _ := res.RowsAffected()
+	// RowsAffected error is nil for SQLite.
+	affected, _ := res.RowsAffected() //nolint:errcheck
 	return int(affected), nil
 }
 
@@ -192,7 +193,8 @@ func (s *boardSQLStore) AckMessages(ctx context.Context, workspaceID, _ string, 
 	if err != nil {
 		return 0, fmt.Errorf("board: ack messages: %w", err)
 	}
-	affected, _ := res.RowsAffected()
+	// RowsAffected error is nil for SQLite.
+	affected, _ := res.RowsAffected() //nolint:errcheck
 	return int(affected), nil
 }
 
@@ -227,7 +229,8 @@ func (s *boardSQLStore) CheckConflicts(ctx context.Context, workspaceID string, 
 
 	// Clean up expired reservations first
 	now := time.Now().UTC().Unix()
-	_, _ = s.db.ExecContext(ctx, `DELETE FROM file_reservations WHERE expires_at < ?`, now)
+	// Best-effort cleanup of expired reservations.
+	_, _ = s.db.ExecContext(ctx, `DELETE FROM file_reservations WHERE expires_at < ?`, now) //nolint:errcheck
 
 	// Build query for conflicting reservations
 	placeholders := "?"
@@ -303,7 +306,8 @@ func (s *boardSQLStore) Release(ctx context.Context, workspaceID, actorID string
 	if err != nil {
 		return 0, fmt.Errorf("board: release: %w", err)
 	}
-	affected, _ := res.RowsAffected()
+	// RowsAffected error is nil for SQLite.
+	affected, _ := res.RowsAffected() //nolint:errcheck
 	return int(affected), nil
 }
 
@@ -329,7 +333,8 @@ func (s *boardSQLStore) ReleaseByID(ctx context.Context, reservationIDs []string
 	if err != nil {
 		return 0, fmt.Errorf("board: release by id: %w", err)
 	}
-	affected, _ := res.RowsAffected()
+	// RowsAffected error is nil for SQLite.
+	affected, _ := res.RowsAffected() //nolint:errcheck
 	return int(affected), nil
 }
 

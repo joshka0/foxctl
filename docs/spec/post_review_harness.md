@@ -1,24 +1,28 @@
 # Spec: Post‑Review Pipeline Harness (Phase 2)
 
-**Status:** Draft  
-**Related impl plan:** [docs/impl_plan/universal_swe_grep_and_agents.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/impl_plan/universal_swe_grep_and_agents.md:0:0-0:0) (Phase 2)  
-**Related todo specs:**  
-- `..._specs_phase1_review_gate_todo.md`  
-- `..._specs_phase2_post_review_harness_todo.md`  
+**Status:** Draft\
+**Related impl plan:**
+[docs/impl_plan/universal_swe_grep_and_agents.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/impl_plan/universal_swe_grep_and_agents.md:0:0-0:0)
+(Phase 2)\
+**Related todo specs:**
+
+- `..._specs_phase1_review_gate_todo.md`
+- `..._specs_phase2_post_review_harness_todo.md`
 
 **Related specs:**
 
-- `docs/spec/review_gate.md`  
-- `docs/spec/semantic_file_index.md`  
-- `docs/spec/code_symbol_index_and_swe_grep.md`  
-- `docs/spec/dspy_go_agents.md`  
-- `docs/spec/dspy_trajectory_capture.md`  
-- `docs/spec/core_profile_v1.md`  
-- [docs/spec/review_semantic_trajectory_specs.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/spec/review_semantic_trajectory_specs.md:0:0-0:0)  
+- `docs/spec/review_gate.md`
+- `docs/spec/semantic_file_index.md`
+- `docs/spec/code_symbol_index_and_swe_grep.md`
+- `docs/spec/dspy_go_agents.md`
+- `docs/spec/dspy_trajectory_capture.md`
+- `docs/spec/core_profile_v1.md`
+- [docs/spec/review_semantic_trajectory_specs.md](cci:7://file:///Users/jkatigbak/repos/personal/agentctl/docs/spec/review_semantic_trajectory_specs.md:0:0-0:0)
 
 ## 1. Problem Statement & Goals
 
-When a task’s review transitions to `ok` and the corresponding diff is applied, we need a **single, canonical post‑review harness** that:
+When a task’s review transitions to `ok` and the corresponding diff is applied,
+we need a **single, canonical post‑review harness** that:
 
 - Emits a **normalized post‑review event** capturing:
   - Workspace, task, review, and file set (paths + digests + change kinds).
@@ -38,23 +42,28 @@ When a task’s review transitions to `ok` and the corresponding diff is applied
   - Enqueues indexing work as **jobs** where appropriate.
 - Implement a **configurable fanout** to named indexers:
   - At least semantic + symbol indexers (even if symbol is stubbed).
-- Provide **observability** (logs, metrics, trace hooks) so we can debug and tune indexing.
+- Provide **observability** (logs, metrics, trace hooks) so we can debug and
+  tune indexing.
 
 **Non-goals (Phase 2):**
 
-- Full fidelity **trajectory integration** (that’s later phases).  
-- End‑user UI flows for managing indexers or reviewing indexing status.  
+- Full fidelity **trajectory integration** (that’s later phases).
+- End‑user UI flows for managing indexers or reviewing indexing status.
 - Multi‑repo/monorepo cross‑workspace indexing semantics.
 
 ---
 
 ## 2. Terminology
 
-- **ReviewArtifact:** Domain record for a review (from Phase 1), persisted in CAS + DB.
+- **ReviewArtifact:** Domain record for a review (from Phase 1), persisted in
+  CAS + DB.
 - **PostReviewEvent:** Canonical event representing “review OK + diff applied”.
-- **Indexer:** A consumer of `PostReviewEvent` that updates some index (semantic, symbol, etc.).
-- **Harness:** The overseer‑owned component that produces events and fans them out.
-- **Job:** A record in `internal/storage/jobs` representing deferred indexing work.
+- **Indexer:** A consumer of `PostReviewEvent` that updates some index
+  (semantic, symbol, etc.).
+- **Harness:** The overseer‑owned component that produces events and fans them
+  out.
+- **Job:** A record in `internal/storage/jobs` representing deferred indexing
+  work.
 
 ---
 
@@ -98,7 +107,8 @@ flowchart TD
 New internal type (Go struct + JSON schema):
 
 - `id: string` – ULID or `sha256:` digest; unique per event.
-- `workspace_id: string` – workspace identifier (same semantics as tasks/skills).
+- `workspace_id: string` – workspace identifier (same semantics as
+  tasks/skills).
 - `task_id: string`
 - `review_id: string` – matches `ReviewArtifact.ID`.
 - `review_kind: string` – `auto|human|mixed`.
@@ -113,7 +123,8 @@ New internal type (Go struct + JSON schema):
   - Commit ID / branch.
   - Reviewer identity (redacted / non‑PII).
 - `created_at: time`
-- `sequence: int` – monotonic per `(workspace, task)` if we support multiple reviews.
+- `sequence: int` – monotonic per `(workspace, task)` if we support multiple
+  reviews.
 
 **Invariants:**
 
@@ -126,7 +137,8 @@ New internal type (Go struct + JSON schema):
 
   - **CAS‑backed payload** for large file sets:
     - Inline JSON for small payloads.
-    - For large: JSON → CAS → `data.artifact` + `meta.cas_digest` per Core Profile.
+    - For large: JSON → CAS → `data.artifact` + `meta.cas_digest` per Core
+      Profile.
 
 - Index key(s):
   - `(workspace_id, task_id, review_id)` unique index.
@@ -142,7 +154,8 @@ The harness emits a `PostReviewEvent` when all hold:
 
 - A `ReviewArtifact` transitions from `pending|failed|stale` → `ok`.
 - The associated **diff is successfully applied** to the workspace.
-- Task record is updated to reflect review outcome (`LastReviewStatus=ok`, `LastReviewID=review_id`).
+- Task record is updated to reflect review outcome (`LastReviewStatus=ok`,
+  `LastReviewID=review_id`).
 - File list & digests are available from the diff application layer or job.
 
 ### 5.2 Idempotence
@@ -198,7 +211,8 @@ Two modes (configurable, but spec should define v1 default):
 
 Spec should define:
 
-- Default: **job mode** for semantic and symbol indexers once job flow is stable.
+- Default: **job mode** for semantic and symbol indexers once job flow is
+  stable.
 - Inline mode allowed for early experiments, behind clear config.
 
 ---
@@ -216,7 +230,7 @@ indexing:
     # Which indexers to invoke
     indexers:
       - name: "semantic"
-        kind: "job"      # "job" | "inline"
+        kind: "job" # "job" | "inline"
         job_queue: "semantic"
         enabled: true
       - name: "symbol"
@@ -247,7 +261,7 @@ For **job mode**:
 - Job input is an envelope:
 
   - `version: 1`
-  - `command: "indexing.post_review.<indexer>"`  
+  - `command: "indexing.post_review.<indexer>"`
   - `data.event`: inline event or `data.artifact` with CAS digest.
   - `meta`: includes `workspace_id`, `task_id`, `review_id`.
 
@@ -262,7 +276,8 @@ For **job mode**:
 Define explicit behavior:
 
 - **Event creation failure**:
-  - Overseer handler returns error; review remains `ok` but indexing is not triggered.
+  - Overseer handler returns error; review remains `ok` but indexing is not
+    triggered.
   - Error logged with `workspace_id`, `task_id`, `review_id`.
   - Optional: overseer can enqueue a “recovery” job.
 
@@ -271,7 +286,8 @@ Define explicit behavior:
     - Handler logs failure.
     - Options:
       - Fail the handler (no other indexers run).
-      - Or mark failure but continue to others (spec chooses one; default: “best-effort with per‑indexer logging”).
+      - Or mark failure but continue to others (spec chooses one; default:
+        “best-effort with per‑indexer logging”).
 
 - **Indexer failures (job mode)**:
   - Monitor jobs via job store & metrics.
@@ -285,7 +301,8 @@ Define explicit behavior:
 
 - **Logging:**
   - Structured logs from harness:
-    - `event_id`, `workspace_id`, `task_id`, `review_id`, `num_files`, `indexers`.
+    - `event_id`, `workspace_id`, `task_id`, `review_id`, `num_files`,
+      `indexers`.
   - Structured logs per indexer job:
     - `indexer_name`, `job_id`, `state`, `duration`, `error`.
 
@@ -299,7 +316,8 @@ Define explicit behavior:
     - Backlog size per indexer job queue.
 
 - **Tracing (optional):**
-  - Reuse existing job/runner trace IDs; propagate `meta.trace_id` from review.
+  - Reuse existing job/runner trace IDs; propagate `meta.correlation_id` from
+    review.
 
 ---
 
@@ -369,8 +387,10 @@ Define explicit behavior:
 
 ## 14. Open Questions
 
-- Should we **always** use jobs mode for production, or allow inline in small workspaces?
+- Should we **always** use jobs mode for production, or allow inline in small
+  workspaces?
 - Do we need **per‑indexer concurrency caps** distinct from WFQ worker counts?
-- When do we integrate **trajectory capture** directly into post‑review events (or is that strictly a later phase)?
+- When do we integrate **trajectory capture** directly into post‑review events
+  (or is that strictly a later phase)?
 
 ---

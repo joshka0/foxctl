@@ -41,6 +41,8 @@ type Planner interface {
 }
 
 // buildPrompt creates the planning prompt for the LLM.
+//
+//nolint:revive // strings.Builder.WriteString never returns an error for in-memory writes.
 func buildPrompt(req PlanRequest) string {
 	var sb strings.Builder
 

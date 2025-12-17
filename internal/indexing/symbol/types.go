@@ -260,6 +260,10 @@ func FileMetaEntryName(workspace, filePath string) string {
 	return fmt.Sprintf("symbol-meta://%s/%s", workspace, filePath)
 }
 
+func callEdgeEntryName(workspace, sourceID, targetID string) string {
+	return fmt.Sprintf("call://%s/%s->%s", workspace, sourceID, targetID)
+}
+
 // ComputeDigest computes a sha256 digest of content.
 func ComputeDigest(content []byte) string {
 	hash := sha256.Sum256(content)

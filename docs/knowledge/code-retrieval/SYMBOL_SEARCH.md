@@ -87,7 +87,7 @@ language query. Returns ranked candidates with file paths and symbol metadata.
 
 - Known exact pattern → use `code.search` (ripgrep)
 - Need full file content → use `fs.read_file`
-- Index not available → falls back to stub response
+- Symbol index unavailable → use `code.search` (ripgrep)
 
 ## Best Practices
 

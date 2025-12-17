@@ -510,7 +510,8 @@ When SWE Grep and symbol search are used by agents, trajectory capture
 Events SHOULD include:
 
 - `command` set to the Protocol v1 `command` (e.g. `"code/swe_grep"`).
-- `meta.trace_id`, `meta.task_id`, and other fields per the trajectory spec.
+- `meta.correlation_id`, `meta.task_id`, and other fields per the trajectory
+  spec.
 - `data_artifact` referencing CAS digests for large result sets, when present.
 
 ### 7.2 Relation to Semantic File Index

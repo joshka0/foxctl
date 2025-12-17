@@ -93,7 +93,7 @@ func init() {
 	if err := mailboxSendCmd.MarkFlagRequired("from"); err != nil {
 		// This should never happen unless there's a programmer error (flag doesn't exist)
 		// Log to stderr and exit gracefully rather than panicking
-		fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'from' flag as required: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'from' flag as required: %v\n", err) //nolint:errcheck
 		os.Exit(1)
 	}
 

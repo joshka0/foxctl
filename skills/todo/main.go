@@ -197,7 +197,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	op := strings.ToLower(strings.TrimSpace(in.Operation))
 	if op == "" {
@@ -206,8 +209,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 
 	workspaceID := in.WorkspaceID
 	if workspaceID == "" {
-		// Default to current working directory as workspace ID
-		workspaceID, _ = os.Getwd()
+		// Default to current working directory as workspace ID.
+		// Fallback to current directory; error is not actionable.
+		workspaceID, _ = os.Getwd() //nolint:errcheck
 	}
 
 	var data map[string]any
@@ -338,10 +342,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		if in.Recommend != nil && in.Recommend.Limit > 0 {
 			limit = in.Recommend.Limit
 		}
-		// Open board store for mailbox integration (optional)
-		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+		// Open board store for mailbox integration (optional).
+		// Best-effort open; error is ignored for optional integration.
+		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root) //nolint:errcheck
 		if boardStore != nil {
-			defer func() { _ = boardStore.Close() }()
+			defer func() {
+				// Store cleanup in defer; error is not actionable.
+				_ = boardStore.Close() //nolint:errcheck
+			}()
 		}
 		scorer := overseer.NewScorer(store, boardStore)
 		rec, err := scorer.Recommend(ctx, workspaceID, limit)
@@ -358,10 +366,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		}
 
 	case "plan":
-		// Open board store for plan event emission
-		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+		// Open board store for plan event emission.
+		// Best-effort open; error is ignored for optional integration.
+		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root) //nolint:errcheck
 		if boardStore != nil {
-			defer func() { _ = boardStore.Close() }()
+			defer func() {
+				// Store cleanup in defer; error is not actionable.
+				_ = boardStore.Close() //nolint:errcheck
+			}()
 		}
 		planResult, err := handlePlan(ctx, store, boardStore, workspaceID, in.Plan)
 		if err != nil {
@@ -757,10 +769,12 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Strategy:    req.Strategy,
 			})
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warning: LLM planning failed, falling back to simple epic: %v\n", err)
+				// Warning output to stderr; error is not actionable.
+				_, _ = fmt.Fprintf(os.Stderr, "warning: LLM planning failed, falling back to simple epic: %v\n", err) //nolint:errcheck
 			} else {
 				// Convert LLM tasks to internal tasks
-				fmt.Fprintf(os.Stderr, "info: LLM planning generated %d tasks using %s\n", len(llmResult.Tasks), llmResult.ModelUsed)
+				// Info output to stderr; error is not actionable.
+				_, _ = fmt.Fprintf(os.Stderr, "info: LLM planning generated %d tasks using %s\n", len(llmResult.Tasks), llmResult.ModelUsed) //nolint:errcheck
 				titleToID := make(map[string]string)
 				for i, pt := range llmResult.Tasks {
 					scopePath := pt.ScopePath
@@ -855,8 +869,9 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Body:        fmt.Sprintf("Plan for %q: created %d tasks", req.Goal, len(createdTasks)),
 			}
 			if err := boardStore.SendMessage(ctx, &msg); err != nil {
-				// Log but don't fail the operation
-				fmt.Fprintf(os.Stderr, "warning: failed to send plan event: %v\n", err)
+				// Log but don't fail the operation.
+				// Warning output to stderr; error is not actionable.
+				_, _ = fmt.Fprintf(os.Stderr, "warning: failed to send plan event: %v\n", err) //nolint:errcheck
 			}
 		}
 	} else {

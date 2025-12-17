@@ -97,7 +97,8 @@ func debugf(format string, args ...any) {
 	if !debugContextFilter {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "context/filter: "+format+"\n", args...)
+	// Debug output to stderr; error is not actionable.
+	_, _ = fmt.Fprintf(os.Stderr, "context/filter: "+format+"\n", args...) //nolint:errcheck
 }
 
 func main() {
@@ -334,6 +335,7 @@ func callLLMForSelection(ctx context.Context, in input, candidates []candidateCh
 	return sel, usage, nil
 }
 
+//nolint:revive // strings.Builder.Write/WriteString never returns an error for in-memory writes.
 func buildLLMPrompt(userPrompt, scope string, candidates []candidateChunk, budget budgetInput) string {
 	// Prepare a compact JSON description of candidates with truncated text
 	type candidateView struct {
@@ -353,7 +355,8 @@ func buildLLMPrompt(userPrompt, scope string, candidates []candidateChunk, budge
 			Metadata: c.Metadata,
 		})
 	}
-	candJSON, _ := json.Marshal(views)
+	// Marshal error is nil for valid struct slices.
+	candJSON, _ := json.Marshal(views) //nolint:errcheck
 
 	var b strings.Builder
 	b.WriteString("You are a retrieval assistant. Given a user prompt and a list of candidate text chunks, " +
@@ -517,7 +520,8 @@ func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (str
 	debugf("provider=%s status=%d", llm.Provider, resp.StatusCode)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		// Error body read; error is not actionable in error path.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048)) //nolint:errcheck
 		return "", nil, fmt.Errorf("provider %s returned status %d: %s", llm.Provider, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
@@ -600,7 +604,8 @@ func callAnthropic(ctx context.Context, llm llmInput, prompt string) (string, ma
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		// Error body read; error is not actionable in error path.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048)) //nolint:errcheck
 		return "", nil, fmt.Errorf("provider anthropic returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
@@ -680,7 +685,8 @@ func callGemini(ctx context.Context, llm llmInput, prompt string) (string, map[s
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		// Error body read; error is not actionable in error path.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048)) //nolint:errcheck
 		return "", nil, fmt.Errorf("provider gemini returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 

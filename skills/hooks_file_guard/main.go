@@ -79,7 +79,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// Get workspace ID
 	workspaceID := in.WorkspaceRoot
 	if workspaceID == "" {
-		workspaceID, _ = os.Getwd()
+		// Fallback to current directory; error is not actionable.
+		workspaceID, _ = os.Getwd() //nolint:errcheck
 	}
 
 	// Get actor ID from environment
@@ -115,7 +116,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			Context:  "**Warning:** File reservation system unavailable. Proceeding without conflict checking.",
 		})
 	}
-	defer func() { _ = boardStore.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = boardStore.Close() //nolint:errcheck
+	}()
 
 	// Check for conflicts
 	conflicts, err := boardStore.CheckConflicts(ctx, workspaceID, []string{relPath}, actorID, agent.ReservationModeExclusive)
@@ -208,7 +212,10 @@ func getTaskContext(ctx context.Context, cfg config.Config, workspaceID, toolNam
 		// Fallback to tool-based reason
 		return "", fmt.Sprintf("%s on %s", toolName, filepath.Base(filePath))
 	}
-	defer func() { _ = taskStore.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = taskStore.Close() //nolint:errcheck
+	}()
 
 	task, found, err := taskStore.GetActive(ctx, workspaceID)
 	if err != nil || !found {
@@ -245,6 +252,8 @@ func extractFilePath(toolInput json.RawMessage) string {
 }
 
 // formatConflicts creates a warning message for conflicts with context about the other agent's work.
+//
+//nolint:revive // strings.Builder.WriteString never returns an error for in-memory writes.
 func formatConflicts(conflicts []agent.ReservationConflict) string {
 	var sb strings.Builder
 	sb.WriteString("## File Reservation Conflict\n\n")

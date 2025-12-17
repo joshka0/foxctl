@@ -83,7 +83,10 @@ func TestWriteEvent_Enabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open events file: %v", err)
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = f.Close() //nolint:errcheck
+	}()
 
 	scanner := bufio.NewScanner(f)
 	lines := 0
@@ -110,9 +113,10 @@ func TestWriteEvent_InvalidName(t *testing.T) {
 	ctx := context.Background()
 
 	// These should silently ignore (no file created)
-	_ = WriteEvent(ctx, "../escape", map[string]string{})
-	_ = WriteEvent(ctx, "path/with/slashes", map[string]string{})
-	_ = WriteEvent(ctx, `path\with\backslashes`, map[string]string{})
+	// Testing invalid paths; errors are expected and ignored.
+	_ = WriteEvent(ctx, "../escape", map[string]string{})             //nolint:errcheck
+	_ = WriteEvent(ctx, "path/with/slashes", map[string]string{})     //nolint:errcheck
+	_ = WriteEvent(ctx, `path\with\backslashes`, map[string]string{}) //nolint:errcheck
 
 	// Verify no files created
 	eventsDir := filepath.Join(tmpDir, "events")

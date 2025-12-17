@@ -22,6 +22,8 @@ emits high-signal snippets via Protocol v1 envelopes and CAS.
 >   - `docs/spec/core_profile_v1.md`
 >   - `docs/spec/review_gate.md`, `docs/spec/semantic_file_index.md`,
 >     `docs/spec/code_symbol_index_and_swe_grep.md` (funnel context)
+> - Follow-ups:
+>   - `docs/specs/2025-12-13_universal_swe_grep_followups.md`
 > - Runners & CAS:
 >   - Exec/WASI runners: see execution runner codemap.
 >   - CAS & envelopes: see CAS codemaps and `core_profile_v1`.
@@ -35,14 +37,14 @@ output contracts, manifest, and CLI surface.
 
 ### A1. Skill manifest and wiring
 
-- [ ] Add a new exec skill under `skills/code_swe_grep/` (or equivalent):
+- [x] Add a new exec skill under `skills/code_swe_grep/` (or equivalent):
   - `skills/code_swe_grep/main.go` – skill implementation.
   - `skills/code_swe_grep/skill.yaml` – manifest with:
     - `metadata.name: "code/swe_grep"`.
     - `distribution.type: "exec"`.
     - `capabilities.network: "none"` (no network required).
     - `capabilities.filesystem: [ { type: "workdir" } ]`.
-- [ ] Ensure manifest passes existing policy checks:
+- [x] Ensure manifest passes existing policy checks:
   - WASI not used (exec only); no changes to WASI rules.
   - Filesystem capabilities limited to workspace via `workdir`.
 - [ ] Add basic docs snippet in `docs/start/` referencing this Phase 5 spec and
@@ -50,11 +52,11 @@ output contracts, manifest, and CLI surface.
 
 ### A2. CLI/runner integration
 
-- [ ] Ensure `agentctl run code/swe_grep` works end-to-end:
+- [x] Ensure `agentctl run code/swe_grep` works end-to-end:
   - Discovery via existing skill resolver (`skills_run.go` +
     `skill_helpers.go`).
   - Execution via exec runner with `AGENTCTL_WORKSPACE` correctly set.
-- [ ] Decide whether any dedicated CLI aliases (e.g. `agentctl code swe-grep`)
+- [x] Decide whether any dedicated CLI aliases (e.g. `agentctl code swe-grep`)
       are needed for developer UX; if added, they MUST be thin wrappers around
       the existing `run` path and reuse Protocol v1 envelopes.
 
@@ -67,7 +69,7 @@ reusing existing path validation and CAS rules.
 
 ### B1. Input validation
 
-- [ ] Implement input decoding in `main.go` consistent with
+- [x] Implement input decoding in `main.go` consistent with
       `code_symbol_index_and_swe_grep.md` §5.2:
   - Required: `workspace_id`, `question`, `candidates[]`.
   - Each candidate: `path` (required), optional `symbol_id`, optional
@@ -80,7 +82,7 @@ reusing existing path validation and CAS rules.
 
 ### B2. Path validation and live reads
 
-- [ ] Use `skillslib.RunnerContext` + `policy.PathValidator` for all filesystem
+- [x] Use `skillslib.RunnerContext` + `policy.PathValidator` for all filesystem
       access:
   - Derive workspace from `AGENTCTL_WORKSPACE` (runner environment).
   - Validate each candidate `path` before opening files.
@@ -88,24 +90,28 @@ reusing existing path validation and CAS rules.
   - Path escapes or blocked by `task_guard` / `file_guard` →
     `E_GUARD_VIOLATION`.
   - File missing after validation → `E_FILE_NOT_FOUND`.
-- [ ] Ensure SWE Grep **always** reads from live workspace files (never from
+- [x] Ensure SWE Grep **always** reads from live workspace files (never from
       symbol/semantic index storage) to honor the freshness guarantees in §4.5.
 
 ### B3. Output envelope and CAS behavior
 
-- [ ] Implement output shape per §5.3 of the spec:
+- [x] Implement output shape per §5.3 of the spec:
   - `data.summary` with `files_considered`, `files_relevant`,
     `snippets_emitted`.
   - `data.snippets_inline[]` when total output is small enough.
   - Optional `data.artifact`, `data.artifact_kind`, `data.artifact_size_bytes`
     when results are large (NDJSON in CAS).
-- [ ] Use `skillslib.RunnerContext.Emit()` to ensure:
+- [x] Use `skillslib.RunnerContext.Emit()` to ensure:
   - `data.artifact` is a `sha256:<hex>` digest.
   - `meta.cas_digest` is auto-populated and matches `data.artifact`.
   - Envelopes pass `protocol.Validate` and existing golden CAS rules.
 - [ ] Document NDJSON artifact format (without introducing new wire types):
   - One snippet per line with `file`, optional `symbol_id`, `start_line`,
     `end_line`, and full `text`.
+
+Follow-up: the current implementation always emits a CAS artifact when snippets
+exist; the desired policy is inline-threshold artifactization per
+`code_symbol_index_and_swe_grep.md` §5.3.
 
 ---
 
@@ -125,7 +131,7 @@ scoring and limits that can be upgraded later without breaking contracts.
     (see `code_symbol_index_and_swe_grep.md` §3.1.2) to rank and filter
     candidate symbols more precisely. SWE Grep itself remains embedding-
     agnostic and operates purely on the candidate set it is given.
-- [ ] Use a cheap **LLM-based snippet extractor** per candidate:
+- [x] Use a cheap snippet extractor per candidate:
   - For each candidate file/symbol, call a small model (or a deterministic stub
     in tests/CI) to decide which spans are relevant to `question`.
   - Keep this LLM strictly inside the kernel-owned skill; the wire contract
@@ -138,11 +144,11 @@ scoring and limits that can be upgraded later without breaking contracts.
 
 ### C2. Limits and performance
 
-- [ ] Implement and enforce `limits` from input:
+- [x] Implement and enforce `limits` from input:
   - `max_files`: upper bound on candidate files to inspect.
   - `max_snippets`: global cap on emitted snippets.
   - `max_bytes_per_file`: cap on bytes read per file.
-- [ ] Add internal defaults for limits if not supplied, documented in the spec
+- [x] Add internal defaults for limits if not supplied, documented in the spec
       or skill README.
 - [ ] Ensure the skill remains fast enough for interactive use; document any
       cases where long-running behavior suggests using jobs or batched calls
@@ -157,7 +163,7 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
 
 ### D1. Unit / behavior tests
 
-- [ ] Add unit-style tests around `main.go` logic using small fixture files:
+- [x] Add unit-style tests around `main.go` logic using small fixture files:
   - Given a small fixture and candidates, assert:
     - `summary.files_considered`, `files_relevant`, `snippets_emitted` are
       correct.
@@ -166,7 +172,7 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
 
 ### D2. Error tests
 
-- [ ] Add tests for failure modes and error codes per spec §5.4:
+- [ ] Add/adjust tests for failure modes and error codes per spec §5.4:
   - Path validation failures → `E_GUARD_VIOLATION`.
   - Non-existent candidate file → `E_FILE_NOT_FOUND`.
   - Empty / unusable candidates → `E_SWE_GREP_NO_CANDIDATES`.
@@ -189,7 +195,7 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
 
 ### D4. Integration tests (query → candidates → SWE Grep)
 
-- [ ] Add an integration-style test that wires a simple candidate generator to
+- [x] Add an integration-style test that wires a simple candidate generator to
       SWE Grep:
   - Use a small fixture repo.
   - Generate candidates (e.g. via a trivial grep or hard-coded list).
@@ -199,7 +205,7 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
 
 ### D5. Logging and metrics
 
-- [ ] Decide on minimal logging fields for SWE Grep:
+- [x] Decide on minimal logging fields for SWE Grep:
   - workspace id, question hash (not full text), number of candidates,
     files_considered, files_relevant, snippets_emitted, CAS artifact presence.
 - [ ] Add metrics hooks (aligned with existing infra) to capture:

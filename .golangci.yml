@@ -10,57 +10,57 @@ linters:
     - staticcheck
     - revive
     - errcheck
-  disable:
-    - depguard # Disabled due to overly restrictive default "Main" list in v2
+  # depguard enabled with custom rules below
+
+  settings:
+    errcheck:
+      # Check blank assignments for unchecked errors
+      check-blank: true
+      # Ignore error checks in test cleanup defer statements
+      exclude-functions:
+        - (io.Closer).Close # Allow _ = closer.Close() in defer for test cleanup
+
+    revive:
+      rules:
+        - name: package-comments
+          disabled: true
+        - name: exported
+          disabled: true
+        - name: var-naming
+          disabled: true # Allow package names like "types"
+        - name: unhandled-error
+          severity: warning
+          disabled: false
+          arguments:
+            - "fmt.Printf"
+            - "fmt.Println"
+
+    # Enforce layered architecture - prevent layer violations
+    depguard:
+      rules:
+        # Domain layer restrictions
+        domain-no-deps:
+          list-mode: strict
+          files:
+            - "**/internal/domain/**/*.go"
+          deny:
+            - pkg: "github.com/jkatigb/agentctl/internal/storage"
+              desc: "domain layer must not depend on storage"
+            - pkg: "github.com/jkatigb/agentctl/internal/execution"
+              desc: "domain layer must not depend on execution"
+            - pkg: "github.com/jkatigb/agentctl/internal/platform"
+              desc: "domain layer must not depend on platform"
+            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+              desc: "domain layer must not depend on adapters"
+
+        # Execution layer restrictions
+        execution-limited-deps:
+          list-mode: strict
+          files:
+            - "**/internal/execution/**/*.go"
+          deny:
+            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+              desc: "execution layer should not depend on adapters"
 
 issues:
   exclude-use-default: false
-
-linters-settings:
-  errcheck:
-    # Check blank assignments for unchecked errors
-    check-blank: true
-    # Ignore error checks in test cleanup defer statements
-    exclude-functions:
-      - (io.Closer).Close # Allow _ = closer.Close() in defer for test cleanup
-  revive:
-    rules:
-      - name: package-comments
-        disabled: true
-      - name: exported
-        disabled: true
-      - name: var-naming
-        disabled: true # Allow package names like "types"
-      - name: unhandled-error
-        severity: warning
-        disabled: false
-        arguments:
-          - "fmt.Printf"
-          - "fmt.Println"
-
-  # Enforce layered architecture - prevent layer violations
-  depguard:
-    rules:
-      # Domain layer restrictions
-      domain-no-deps:
-        list-mode: strict
-        files:
-          - "**/internal/domain/**/*.go"
-        deny:
-          - pkg: "github.com/jkatigb/agentctl/internal/storage"
-            desc: "domain layer must not depend on storage"
-          - pkg: "github.com/jkatigb/agentctl/internal/execution"
-            desc: "domain layer must not depend on execution"
-          - pkg: "github.com/jkatigb/agentctl/internal/platform"
-            desc: "domain layer must not depend on platform"
-          - pkg: "github.com/jkatigb/agentctl/internal/adapters"
-            desc: "domain layer must not depend on adapters"
-
-      # Execution layer restrictions
-      execution-limited-deps:
-        list-mode: strict
-        files:
-          - "**/internal/execution/**/*.go"
-        deny:
-          - pkg: "github.com/jkatigb/agentctl/internal/adapters"
-            desc: "execution layer should not depend on adapters"

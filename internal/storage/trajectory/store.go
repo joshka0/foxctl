@@ -239,7 +239,10 @@ WHERE workspace_id = ? AND id = ?
 	if err != nil {
 		return fmt.Errorf("trajectory: update: %w", err)
 	}
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("trajectory: rows affected: %w", raErr)
+	}
 	if rowsAffected == 0 {
 		return ErrNotFound
 	}
@@ -297,7 +300,10 @@ WHERE workspace_id = ?`
 	if err != nil {
 		return nil, fmt.Errorf("trajectory: list: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 
 	trajectories := make([]Trajectory, 0)
 	for rows.Next() {
@@ -321,7 +327,10 @@ DELETE FROM trajectories WHERE workspace_id = ? AND id = ?
 	if err != nil {
 		return fmt.Errorf("trajectory: delete: %w", err)
 	}
-	rowsAffected, _ := result.RowsAffected()
+	rowsAffected, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("trajectory: rows affected: %w", raErr)
+	}
 	if rowsAffected == 0 {
 		return ErrNotFound
 	}
@@ -402,7 +411,10 @@ LIMIT ?
 	if err != nil {
 		return nil, fmt.Errorf("trajectory: list user_requests: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 
 	requests := make([]UserRequestCapture, 0)
 	for rows.Next() {
@@ -478,7 +490,10 @@ func (s *sqlStore) InsertEvents(ctx context.Context, events []Event) error {
 	if err != nil {
 		return fmt.Errorf("trajectory: begin tx: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		// Rollback is a no-op after successful commit; error is intentionally ignored.
+		_ = tx.Rollback() //nolint:errcheck
+	}()
 
 	stmt, err := tx.PrepareContext(ctx, `
 INSERT INTO trajectory_events (id, trajectory_id, workspace_id, ts, kind, actor, command, status, data_inline_json, data_artifact, meta_json)
@@ -487,7 +502,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	if err != nil {
 		return fmt.Errorf("trajectory: prepare: %w", err)
 	}
-	defer func() { _ = stmt.Close() }()
+	defer func() {
+		// Statement cleanup in defer; error is not actionable.
+		_ = stmt.Close() //nolint:errcheck
+	}()
 
 	now := timeutil.NowUTC()
 
@@ -579,7 +597,10 @@ WHERE trajectory_id = ?`
 	if err != nil {
 		return nil, fmt.Errorf("trajectory: list events: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 
 	events := make([]Event, 0)
 	for rows.Next() {
@@ -607,7 +628,10 @@ LIMIT 1000
 	if err != nil {
 		return nil, fmt.Errorf("trajectory: get events by trace_id: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() {
+		// Rows cleanup in defer; error is not actionable after iteration.
+		_ = rows.Close() //nolint:errcheck
+	}()
 
 	events := make([]Event, 0)
 	for rows.Next() {
@@ -651,11 +675,13 @@ func scanTrajectory(row *sql.Row) (Trajectory, error) {
 	t.ArtifactDigest = artifactDigest.String
 
 	if taskIDsJSON.Valid && taskIDsJSON.String != "" {
-		_ = sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs)
+		// Optional JSON field; parse errors leave default empty slice.
+		_ = sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs) //nolint:errcheck
 	}
 
-	t.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-	t.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+	// Timestamp parsing for required fields; format is controlled by our writes.
+	t.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt) //nolint:errcheck
+	t.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt) //nolint:errcheck
 
 	return t, nil
 }
@@ -685,11 +711,13 @@ func scanTrajectoryRows(rows *sql.Rows) (Trajectory, error) {
 	t.ArtifactDigest = artifactDigest.String
 
 	if taskIDsJSON.Valid && taskIDsJSON.String != "" {
-		_ = sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs)
+		// Optional JSON field; parse errors leave default empty slice.
+		_ = sqlutil.ScanJSON(taskIDsJSON.String, &t.TaskIDs) //nolint:errcheck
 	}
 
-	t.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
-	t.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+	// Timestamp parsing for required fields; format is controlled by our writes.
+	t.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt) //nolint:errcheck
+	t.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt) //nolint:errcheck
 
 	return t, nil
 }
@@ -709,15 +737,18 @@ func scanUserRequest(row *sql.Row) (UserRequestCapture, error) {
 	}
 
 	ur.Source = Source(source)
-	ur.TS, _ = sqlutil.ScanTimestamp(ts)
+	// Timestamp parsing; format is controlled by our writes.
+	ur.TS, _ = sqlutil.ScanTimestamp(ts) //nolint:errcheck
 
 	if cmdCtxJSON.Valid && cmdCtxJSON.String != "" {
 		ur.CommandContext = &CommandContext{}
-		_ = sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext)
+		// Optional JSON field; parse errors leave default empty struct.
+		_ = sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext) //nolint:errcheck
 	}
 	if taskHintsJSON.Valid && taskHintsJSON.String != "" {
 		ur.TaskHints = &TaskHints{}
-		_ = sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints)
+		// Optional JSON field; parse errors leave default empty struct.
+		_ = sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints) //nolint:errcheck
 	}
 
 	return ur, nil
@@ -738,15 +769,18 @@ func scanUserRequestRows(rows *sql.Rows) (UserRequestCapture, error) {
 	}
 
 	ur.Source = Source(source)
-	ur.TS, _ = sqlutil.ScanTimestamp(ts)
+	// Timestamp parsing; format is controlled by our writes.
+	ur.TS, _ = sqlutil.ScanTimestamp(ts) //nolint:errcheck
 
 	if cmdCtxJSON.Valid && cmdCtxJSON.String != "" {
 		ur.CommandContext = &CommandContext{}
-		_ = sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext)
+		// Optional JSON field; parse errors leave default empty struct.
+		_ = sqlutil.ScanJSON(cmdCtxJSON.String, ur.CommandContext) //nolint:errcheck
 	}
 	if taskHintsJSON.Valid && taskHintsJSON.String != "" {
 		ur.TaskHints = &TaskHints{}
-		_ = sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints)
+		// Optional JSON field; parse errors leave default empty struct.
+		_ = sqlutil.ScanJSON(taskHintsJSON.String, ur.TaskHints) //nolint:errcheck
 	}
 
 	return ur, nil
@@ -771,15 +805,18 @@ func scanEventRows(rows *sql.Rows) (Event, error) {
 	e.Command = command.String
 	e.Status = status.String
 	e.DataArtifact = dataArtifact.String
-	e.TS, _ = sqlutil.ScanTimestamp(ts)
+	// Timestamp parsing; format is controlled by our writes.
+	e.TS, _ = sqlutil.ScanTimestamp(ts) //nolint:errcheck
 
 	if dataInlineJSON.Valid && dataInlineJSON.String != "" {
 		e.DataInline = make(map[string]any)
-		_ = sqlutil.ScanJSON(dataInlineJSON.String, &e.DataInline)
+		// Optional JSON field; parse errors leave default empty map.
+		_ = sqlutil.ScanJSON(dataInlineJSON.String, &e.DataInline) //nolint:errcheck
 	}
 	if metaJSON.Valid && metaJSON.String != "" {
 		e.Meta = &EventMeta{}
-		_ = sqlutil.ScanJSON(metaJSON.String, e.Meta)
+		// Optional JSON field; parse errors leave default empty struct.
+		_ = sqlutil.ScanJSON(metaJSON.String, e.Meta) //nolint:errcheck
 	}
 
 	return e, nil

@@ -33,11 +33,13 @@ const Command = "code/swe_grep"
 
 // Error codes per Core Profile v1 §13.
 const (
-	ErrCodeArg      = "EARG"      // Invalid arguments
-	ErrCodeRuntime  = "ERUNTIME"  // Skill process error/crash
-	ErrCodePolicy   = "EPOLICY"   // Capability/policy violation (path escape)
-	ErrCodeNotFound = "ENOTFOUND" // Resource not found (file missing)
-	ErrCodeIO       = "EIO"       // Filesystem or I/O error
+	ErrCodeArg              = "EARG"      // Invalid arguments
+	ErrCodeRuntime          = "ERUNTIME"  // Skill process error/crash
+	ErrCodePolicy           = "EPOLICY"   // Capability/policy violation (path escape)
+	ErrCodeNotFound         = "ENOTFOUND" // Resource not found (file missing)
+	ErrCodeIO               = "EIO"       // Filesystem or I/O error
+	ErrCodeNoCandidates     = "ENOTFOUND" // No matching candidates found
+	ErrCodeCapabilityPolicy = "EPOLICY"
 )
 
 // ValidationError wraps an error with a specific error code for the envelope.
@@ -151,6 +153,9 @@ func main() {
 	}
 
 	if err := run(ctx, rc, in); err != nil {
+		if ve, ok := err.(*ValidationError); ok {
+			fail(ve.Code, err)
+		}
 		fail(ErrCodeRuntime, err)
 	}
 }
@@ -179,7 +184,7 @@ func parseInput(r io.Reader) (Input, error) {
 	}
 	if usable == 0 {
 		return Input{}, &ValidationError{
-			Code:    ErrCodeArg,
+			Code:    ErrCodeNoCandidates,
 			Message: "no usable candidates (all paths empty)",
 		}
 	}
@@ -207,6 +212,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 
 	// Process candidates: validate paths and read files
 	fileResults := processFiles(ctx, rc, in.Candidates, limits)
+	if err := fatalErrorForFileResults(fileResults); err != nil {
+		return err
+	}
 
 	// Count stats
 	filesConsidered := 0
@@ -234,16 +242,28 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		"snippets_inline": previews,
 	}
 
-	// Persist full snippets to CAS if we have any
 	if len(snippets) > 0 {
-		artifact, err := persistSnippetsArtifact(ctx, rc, snippets)
+		thresholdBytes := inlineThresholdBytes(rc)
+		inlineSizeBytes, err := json.Marshal(data)
 		if err != nil {
-			return fmt.Errorf("persist snippets artifact: %w", err)
+			return fmt.Errorf("measure inline payload: %w", err)
 		}
-		if artifact.Digest != "" {
-			data["artifact"] = artifact.Digest
-			data["artifact_kind"] = artifact.Kind
-			data["artifact_size_bytes"] = artifact.Size
+		if thresholdBytes > 0 && len(inlineSizeBytes) > thresholdBytes {
+			artifact, err := persistSnippetsArtifact(ctx, rc, snippets)
+			if err != nil {
+				return fmt.Errorf("persist snippets artifact: %w", err)
+			}
+			if artifact.Digest != "" {
+				data["artifact"] = artifact.Digest
+				data["artifact_kind"] = artifact.Kind
+				data["artifact_size_bytes"] = artifact.Size
+			}
+
+			if thresholdBytes > 0 {
+				if trimmed, err := trimPreviewsToFit(data, previews, thresholdBytes); err == nil {
+					data["snippets_inline"] = trimmed
+				}
+			}
 		}
 	}
 
@@ -271,12 +291,44 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		durationMS,
 		"run",
 	)
-	_ = observability.WriteSweGrepEvent(ctx, ev) // best-effort
+	// Best-effort event logging; error is not actionable.
+	_ = observability.WriteSweGrepEvent(ctx, ev) //nolint:errcheck
 
 	return rc.Emit(Command, data, "application/json", envelope.Meta{
 		Source: "run",
 		Runner: "exec",
 	})
+}
+
+func fatalErrorForFileResults(results []FileResult) *ValidationError {
+	for _, fr := range results {
+		if !fr.Skipped {
+			return nil
+		}
+	}
+
+	// Deterministic precedence:
+	// 1) Guard violations
+	// 2) File not found
+	// 3) Any other I/O error
+	// 4) Fall back to EARG
+	for _, fr := range results {
+		if fr.ErrCode == ErrCodePolicy {
+			return &ValidationError{Code: ErrCodePolicy, Message: fr.SkipErr}
+		}
+	}
+	for _, fr := range results {
+		if fr.ErrCode == ErrCodeNotFound {
+			return &ValidationError{Code: ErrCodeNotFound, Message: fr.SkipErr}
+		}
+	}
+	for _, fr := range results {
+		if fr.ErrCode != "" {
+			return &ValidationError{Code: fr.ErrCode, Message: fr.SkipErr}
+		}
+	}
+
+	return &ValidationError{Code: ErrCodeArg, Message: "no readable candidate files"}
 }
 
 // logSummary writes a structured log entry to stderr with summary stats.
@@ -541,6 +593,33 @@ func makeInlinePreviews(snippets []Snippet) []SnippetPreview {
 }
 
 // persistSnippetsArtifact writes full snippets as NDJSON to CAS.
+
+func inlineThresholdBytes(rc *runner.RunnerContext) int {
+	if rc == nil {
+		return DefaultInlineKB * 1024
+	}
+	if rc.InlineKB > 0 {
+		return rc.InlineKB * 1024
+	}
+	return DefaultInlineKB * 1024
+}
+
+func trimPreviewsToFit(data map[string]any, previews []SnippetPreview, thresholdBytes int) ([]SnippetPreview, error) {
+	tmp := make([]SnippetPreview, 0, len(previews))
+	for _, p := range previews {
+		tmp = append(tmp, p)
+		data["snippets_inline"] = tmp
+		b, err := json.Marshal(data)
+		if err != nil {
+			return nil, err
+		}
+		if len(b) > thresholdBytes {
+			return tmp[:len(tmp)-1], nil
+		}
+	}
+	return tmp, nil
+}
+
 func persistSnippetsArtifact(ctx context.Context, rc *runner.RunnerContext, snippets []Snippet) (runner.Artifact, error) {
 	if len(snippets) == 0 {
 		return runner.Artifact{}, nil
@@ -553,7 +632,6 @@ func persistSnippetsArtifact(ctx context.Context, rc *runner.RunnerContext, snip
 			return runner.Artifact{}, fmt.Errorf("encode snippet: %w", err)
 		}
 	}
-
 	return runner.PersistBuffer(ctx, rc, buf, ArtifactKind, "code_swe_grep")
 }
 
@@ -728,7 +806,7 @@ func classifyFileError(err error) (string, string) {
 		return "file not found", ErrCodeNotFound
 	}
 	if os.IsPermission(err) {
-		return "permission denied", ErrCodePolicy
+		return "permission denied", ErrCodeCapabilityPolicy
 	}
 	return fmt.Sprintf("read error: %v", err), ErrCodeIO
 }

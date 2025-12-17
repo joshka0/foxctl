@@ -81,7 +81,8 @@ func Start(ctx context.Context, opts StartOptions) (*RunCapture, error) {
 	}
 	ur, err = store.InsertUserRequest(ctx, ur)
 	if err != nil {
-		_ = store.Close()
+		// Cleanup on error; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 		return nil, err
 	}
 
@@ -108,7 +109,8 @@ func Start(ctx context.Context, opts StartOptions) (*RunCapture, error) {
 
 	traj, err = store.InsertTrajectory(ctx, traj)
 	if err != nil {
-		_ = store.Close()
+		// Cleanup on error; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 		return nil, err
 	}
 
@@ -145,7 +147,8 @@ func Start(ctx context.Context, opts StartOptions) (*RunCapture, error) {
 		Meta:         meta,
 	})
 	if err != nil {
-		_ = store.Close()
+		// Cleanup on error; error is not actionable.
+		_ = store.Close() //nolint:errcheck
 		return nil, err
 	}
 
@@ -178,6 +181,77 @@ func (c *RunCapture) SetJobID(ctx context.Context, jobID string) error {
 	return c.store.UpdateTrajectory(ctx, c.traj)
 }
 
+// CaptureHookCall persists a hook call event for hooks/* runs.
+func (c *RunCapture) CaptureHookCall(ctx context.Context, command string, input []byte, jobID string, correlationID string) error {
+	if c == nil {
+		return nil
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil
+	}
+
+	dataInline := map[string]any{
+		"summary": secrets.Redact(fmt.Sprintf("hook call: %s", command)),
+	}
+	preview := map[string]any{}
+	var m map[string]any
+	if err := json.Unmarshal(input, &m); err == nil && m != nil {
+		for _, k := range []string{"event", "workspace_root", "session_id", "transcript_path", "tool_name"} {
+			if v, ok := m[k].(string); ok {
+				v = strings.TrimSpace(v)
+				if v != "" {
+					preview[k] = v
+				}
+			}
+		}
+		if _, ok := m["tool_input"]; ok {
+			preview["tool_input_present"] = true
+		}
+		if _, ok := m["tool_response"]; ok {
+			preview["tool_response_present"] = true
+		}
+	} else if len(input) > 0 {
+		preview["input_bytes"] = len(input)
+	}
+	if len(preview) > 0 {
+		dataInline["hook_input"] = preview
+	}
+	dataInline = secrets.RedactMap(dataInline)
+
+	traceID := strings.TrimSpace(correlationID)
+	if traceID == "" {
+		traceID = strings.TrimSpace(c.traj.TraceID)
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		jobID = strings.TrimSpace(c.traj.JobID)
+	}
+
+	meta := &trajectory.EventMeta{
+		TraceID:   traceID,
+		JobID:     jobID,
+		CreatedBy: "agentctl",
+		CASDigest: "",
+	}
+	if c.taskHint != nil {
+		meta.TaskID = strings.TrimSpace(c.taskHint.TaskID)
+		meta.EpicID = strings.TrimSpace(c.taskHint.EpicID)
+	}
+
+	_, err := c.store.InsertEvent(ctx, trajectory.Event{
+		TrajectoryID: c.traj.ID,
+		Kind:         trajectory.EventKindHookCall,
+		Actor:        strings.TrimSpace(c.request.Actor),
+		Command:      command,
+		Status:       "ok",
+		DataInline:   dataInline,
+		DataArtifact: "",
+		Meta:         meta,
+	})
+	return err
+}
+
 // CaptureResult persists a result envelope as an event and updates trajectory status.
 func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID string, correlationID string) error {
 	if c == nil {
@@ -189,6 +263,9 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 	}
 
 	kind := trajectory.EventKindToolResult
+	if strings.HasPrefix(env.Command, "hooks/") {
+		kind = trajectory.EventKindHookResult
+	}
 	if env.Command == "todo/manage" {
 		switch c.todoOp {
 		case "add", "complete", "set_active", "ensure_active", "clear_active", "get_active", "plan":

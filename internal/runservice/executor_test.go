@@ -17,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
 func TestExecutorTryServeCacheHit(t *testing.T) {
@@ -98,6 +99,169 @@ func TestExecutorTryServeCacheHit(t *testing.T) {
 	}
 	if got := stderr.String(); !strings.Contains(got, "cache hit") {
 		t.Fatalf("expected cache hit log, got %q", got)
+	}
+}
+
+func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+
+	cfg := config.Config{
+		Paths: config.Paths{
+			Cache: filepath.Join(tmp, "cache"),
+			CAS:   filepath.Join(tmp, "cas"),
+			Jobs:  filepath.Join(tmp, "jobs"),
+		},
+		Storage: config.StorageSettings{Root: filepath.Join(tmp, "storage")},
+		Memory:  config.MemorySettings{AutoCacheTTL: time.Hour},
+	}
+	for _, dir := range []string{cfg.Paths.Cache, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Storage.Root} {
+		if err := ensureDir(dir); err != nil {
+			t.Fatalf("ensure dir: %v", err)
+		}
+	}
+
+	handle := SkillHandle{
+		Manifest: skill.Manifest{
+			Metadata: skill.Metadata{Name: "hooks/file_guard", Version: "1.0.0"},
+		},
+		ManifestPath: "unused",
+		ArtifactPath: "unused",
+	}
+
+	input := []byte(`{"event":"PreToolUse","session_id":"s1","tool_name":"fs.read_file","tool_input":{"path":"/secret"}}`)
+	resultEnv := envelope.OK("hooks/file_guard", map[string]any{"hook_output": map[string]any{"decision": "approve"}})
+	resultBytes, err := json.Marshal(resultEnv)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
+
+	// Prepare + execute once (cache populate happens in HandleResult).
+	stdout1 := &bytes.Buffer{}
+	stderr1 := &bytes.Buffer{}
+	executor1 := NewExecutor(ctx, cfg, handle, stdout1, stderr1, RunOptions{
+		CacheMode:     cache.ModeAuto,
+		Workspace:     "ws",
+		CorrelationID: "trace-1",
+		CLICommand:    "agentctl run hooks/file_guard",
+		Input:         input,
+	})
+	defer executor1.Close()
+
+	job, dup, err := executor1.PrepareJob(input)
+	if err != nil {
+		t.Fatalf("PrepareJob: %v", err)
+	}
+	if dup {
+		t.Fatalf("unexpected duplicate")
+	}
+	if served, err := executor1.TryServeCache(input); err != nil {
+		t.Fatalf("TryServeCache (expected miss): %v", err)
+	} else if served {
+		t.Fatalf("expected miss before first execution")
+	}
+
+	executor1.jobStore = &stubJobStore{result: resultBytes}
+	if err := executor1.ExecuteSync(job); err != nil {
+		t.Fatalf("ExecuteSync: %v", err)
+	}
+
+	store, err := trajectory.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		t.Fatalf("open trajectory store: %v", err)
+	}
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	})
+
+	trajectories, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatalf("list trajectories: %v", err)
+	}
+	if len(trajectories) != 1 {
+		t.Fatalf("expected 1 trajectory, got %d", len(trajectories))
+	}
+	tr := trajectories[0]
+
+	events, err := store.ListEvents(ctx, trajectory.EventFilter{TrajectoryID: tr.ID})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+
+	foundCall := false
+	foundResult := false
+	for _, ev := range events {
+		switch ev.Kind {
+		case trajectory.EventKindHookCall:
+			foundCall = true
+		case trajectory.EventKindHookResult:
+			foundResult = true
+		}
+	}
+	if !foundCall {
+		t.Fatalf("expected hook_call event")
+	}
+	if !foundResult {
+		t.Fatalf("expected hook_result event")
+	}
+
+	// Now run a fresh executor that should serve the cached result and still emit hook_call + hook_result.
+	stdout2 := &bytes.Buffer{}
+	stderr2 := &bytes.Buffer{}
+	executor2 := NewExecutor(ctx, cfg, handle, stdout2, stderr2, RunOptions{
+		CacheMode:     cache.ModeAuto,
+		Workspace:     "ws",
+		CorrelationID: "trace-2",
+		CLICommand:    "agentctl run hooks/file_guard",
+		Input:         input,
+	})
+	defer executor2.Close()
+
+	served, err := executor2.TryServeCache(input)
+	if err != nil {
+		t.Fatalf("TryServeCache: %v", err)
+	}
+	if !served {
+		t.Fatalf("expected cache hit")
+	}
+
+	trajectories2, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: "ws"})
+	if err != nil {
+		t.Fatalf("list trajectories2: %v", err)
+	}
+	if len(trajectories2) != 2 {
+		t.Fatalf("expected 2 trajectories, got %d", len(trajectories2))
+	}
+	var tr2 trajectory.Trajectory
+	for _, cand := range trajectories2 {
+		if cand.TraceID == "trace-2" {
+			tr2 = cand
+		}
+	}
+	if tr2.ID == "" {
+		t.Fatalf("expected trajectory for trace-2")
+	}
+
+	events2, err := store.ListEvents(ctx, trajectory.EventFilter{TrajectoryID: tr2.ID})
+	if err != nil {
+		t.Fatalf("list events2: %v", err)
+	}
+	foundCall = false
+	foundResult = false
+	for _, ev := range events2 {
+		switch ev.Kind {
+		case trajectory.EventKindHookCall:
+			foundCall = true
+		case trajectory.EventKindHookResult:
+			foundResult = true
+		}
+	}
+	if !foundCall {
+		t.Fatalf("expected hook_call event for cache hit")
+	}
+	if !foundResult {
+		t.Fatalf("expected hook_result event for cache hit")
 	}
 }
 
@@ -346,4 +510,40 @@ func ensureDir(path string) error {
 		return nil
 	}
 	return os.MkdirAll(path, 0o755)
+}
+
+type stubJobStore struct{ result []byte }
+
+func (s *stubJobStore) Close() error { return nil }
+
+func (s *stubJobStore) SubmitEcho(_ context.Context, _ string) (jobs.Job, error) {
+	return jobs.Job{}, nil
+}
+
+func (s *stubJobStore) List(_ context.Context, _ int) ([]jobs.Job, error) { return nil, nil }
+
+func (s *stubJobStore) Get(_ context.Context, _ string) (jobs.Job, error) { return jobs.Job{}, nil }
+
+func (s *stubJobStore) Result(_ context.Context, _ string) ([]byte, error) { return s.result, nil }
+
+func (s *stubJobStore) Cancel(_ context.Context, _ string) error { return nil }
+
+func (s *stubJobStore) Delete(_ context.Context, _ string) error { return nil }
+
+func (s *stubJobStore) FindOrPrepareSkillJob(_ context.Context, _ string, _ []byte, _ bool) (jobs.Job, bool, error) {
+	return jobs.Job{}, false, nil
+}
+
+func (s *stubJobStore) SetWorkspace(_ context.Context, _ string, _ string) error { return nil }
+
+func (s *stubJobStore) WaitForCompletion(_ context.Context, _ string, _ time.Duration) (jobs.Job, error) {
+	return jobs.Job{}, nil
+}
+
+func (s *stubJobStore) TailProgress(_ context.Context, _ string, _ bool, _ io.Writer) error {
+	return nil
+}
+
+func (s *stubJobStore) ExecutePreparedSkill(_ context.Context, _ string, _ string, _ string) ([]byte, error) {
+	return s.result, nil
 }

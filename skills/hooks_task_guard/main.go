@@ -67,8 +67,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// Resolve workspace ID from WorkspaceRoot
 	workspaceID := in.WorkspaceRoot
 	if workspaceID == "" {
-		// Fallback to current working directory
-		workspaceID, _ = os.Getwd()
+		var wdErr error
+		workspaceID, wdErr = os.Getwd()
+		if wdErr != nil {
+			return fmt.Errorf("failed to determine workspace directory: %w", wdErr)
+		}
 	}
 
 	// Open task store
@@ -76,7 +79,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Generate default title from tool + file path
 	defaultTitle := deriveTaskTitle(in)

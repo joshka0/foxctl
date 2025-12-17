@@ -3,10 +3,14 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/storage"
+	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
 // extractResultContent parses the JSON content from a CallToolResult.
@@ -27,9 +31,14 @@ func extractResultContent(t *testing.T, result *models.CallToolResult) map[strin
 }
 
 func TestCodeSymbolSearch_ValidInput(t *testing.T) {
+	openStore, workspaceID := seedSymbolSearchStore(t)
+
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
+		OpenMemoryStore: func(_ context.Context) (storage.MemoryStore, error) {
+			return openStore(context.Background())
+		},
 	}
 	registry, err := NewRegistry(cfg, nil)
 	if err != nil {
@@ -37,7 +46,7 @@ func TestCodeSymbolSearch_ValidInput(t *testing.T) {
 	}
 
 	args := map[string]any{
-		"workspace_id": "test-ws",
+		"workspace_id": workspaceID,
 		"question":     "How does login work?",
 	}
 
@@ -50,13 +59,10 @@ func TestCodeSymbolSearch_ValidInput(t *testing.T) {
 		t.Errorf("expected success, got error: %v", result.Content)
 	}
 
-	// The stub returns empty candidates with a message
+	// Expect we find at least one candidate from the seeded symbol index.
 	content := extractResultContent(t, result)
-	if content["count"] != float64(0) {
-		t.Errorf("count = %v, want 0 (stub returns no results)", content["count"])
-	}
-	if content["message"] == nil {
-		t.Error("expected message field in stub response")
+	if content["count"] == float64(0) {
+		t.Fatalf("expected non-empty candidates, got: %v", content)
 	}
 }
 
@@ -135,9 +141,14 @@ func TestCodeSymbolSearch_InvalidMode(t *testing.T) {
 }
 
 func TestCodeSymbolSearch_ValidModes(t *testing.T) {
+	openStore, workspaceID := seedSymbolSearchStore(t)
+
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
+		OpenMemoryStore: func(_ context.Context) (storage.MemoryStore, error) {
+			return openStore(context.Background())
+		},
 	}
 	registry, err := NewRegistry(cfg, nil)
 	if err != nil {
@@ -148,7 +159,7 @@ func TestCodeSymbolSearch_ValidModes(t *testing.T) {
 	for _, mode := range modes {
 		t.Run(mode, func(t *testing.T) {
 			args := map[string]any{
-				"workspace_id": "test-ws",
+				"workspace_id": workspaceID,
 				"question":     "How does login work?",
 				"mode":         mode,
 			}
@@ -160,6 +171,16 @@ func TestCodeSymbolSearch_ValidModes(t *testing.T) {
 
 			if result.IsError {
 				t.Errorf("expected success for mode %q, got error", mode)
+			}
+			content := extractResultContent(t, result)
+			if mode == "search" {
+				if content["count"] == float64(0) {
+					t.Fatalf("expected non-empty search results, got %v", content)
+				}
+				return
+			}
+			if content["count"] == float64(0) {
+				t.Fatalf("expected non-empty results for mode %q (call edges seeded), got %v", mode, content)
 			}
 		})
 	}
@@ -443,9 +464,14 @@ func TestSweGrepSnippetType(t *testing.T) {
 // D1 Tests: Enhanced tool unit tests per PR5 spec
 
 func TestCodeSymbolSearch_MaxResults(t *testing.T) {
+	openStore, workspaceID := seedSymbolSearchStore(t)
+
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
+		OpenMemoryStore: func(_ context.Context) (storage.MemoryStore, error) {
+			return openStore(context.Background())
+		},
 	}
 	registry, err := NewRegistry(cfg, nil)
 	if err != nil {
@@ -454,7 +480,7 @@ func TestCodeSymbolSearch_MaxResults(t *testing.T) {
 
 	// Test with custom max_results
 	args := map[string]any{
-		"workspace_id": "test-ws",
+		"workspace_id": workspaceID,
 		"question":     "How does login work?",
 		"max_results":  5,
 	}
@@ -468,17 +494,22 @@ func TestCodeSymbolSearch_MaxResults(t *testing.T) {
 		t.Errorf("expected success, got error: %v", result.Content)
 	}
 
-	// Verify max_results is respected (stub returns empty, but validates input)
+	// Verify max_results is respected.
 	content := extractResultContent(t, result)
-	if content["count"] != float64(0) {
-		t.Errorf("count = %v, want 0 (stub returns no results)", content["count"])
+	if content["count"].(float64) > 5 {
+		t.Fatalf("expected count <= 5, got %v", content["count"])
 	}
 }
 
 func TestCodeSymbolSearch_SymbolHint(t *testing.T) {
+	openStore, workspaceID := seedSymbolSearchStore(t)
+
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
+		OpenMemoryStore: func(_ context.Context) (storage.MemoryStore, error) {
+			return openStore(context.Background())
+		},
 	}
 	registry, err := NewRegistry(cfg, nil)
 	if err != nil {
@@ -486,7 +517,7 @@ func TestCodeSymbolSearch_SymbolHint(t *testing.T) {
 	}
 
 	args := map[string]any{
-		"workspace_id": "test-ws",
+		"workspace_id": workspaceID,
 		"question":     "token validation",
 		"symbol_hint":  "ValidateToken",
 	}
@@ -499,6 +530,105 @@ func TestCodeSymbolSearch_SymbolHint(t *testing.T) {
 	if result.IsError {
 		t.Errorf("expected success with symbol_hint, got error: %v", result.Content)
 	}
+	content := extractResultContent(t, result)
+	candidates, ok := content["candidates"].([]any)
+	if !ok || len(candidates) == 0 {
+		t.Fatalf("expected candidates, got %v", content)
+	}
+	first, ok := candidates[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first candidate object, got %T", candidates[0])
+	}
+	if first["name"] != "ValidateToken" {
+		t.Fatalf("expected ValidateToken to rank first with symbol_hint, got %v", first["name"])
+	}
+}
+
+func seedSymbolSearchStore(t *testing.T) (func(context.Context) (storage.MemoryStore, error), string) {
+	t.Helper()
+	ctx := context.Background()
+	cacheRoot := t.TempDir()
+	casRoot := filepath.Join(cacheRoot, "cas")
+	store, err := memstore.Open(ctx, cacheRoot, casRoot)
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
+	workspaceID := "ws-symbol-search"
+
+	seed := func(filePath, name string, kind symbol.Kind, signature, summary string) {
+		entryName := symbol.EntryName(workspaceID, filePath, name)
+		res := symbol.Result{
+			Symbol: symbol.Symbol{
+				ID:            symbol.ID(filePath, name),
+				FilePath:      filePath,
+				Name:          name,
+				Language:      "go",
+				Kind:          kind,
+				StartByte:     0,
+				EndByte:       0,
+				StartLine:     1,
+				EndLine:       1,
+				Signature:     signature,
+				BodyDigest:    "sha256:deadbeef",
+				FileDigest:    "",
+				Documentation: "",
+			},
+			Source: nil,
+			Calls:  nil,
+		}
+		b, merr := symbol.MarshalResult(res)
+		if merr != nil {
+			t.Fatalf("marshal symbol result: %v", merr)
+		}
+		if _, serr := store.Save(ctx, storage.NamedEntry{
+			Name:      entryName,
+			Type:      symbol.SymbolType,
+			Workspace: workspaceID,
+			Summary:   summary,
+			Result:    b,
+		}); serr != nil {
+			t.Fatalf("save named entry: %v", serr)
+		}
+	}
+
+	seed("auth/login.go", "Login", symbol.KindFunction, "func Login(ctx context.Context, in Input) error", "function Login in auth/login.go")
+	seed("auth/token.go", "ValidateToken", symbol.KindFunction, "func ValidateToken(token string) error", "function ValidateToken in auth/token.go")
+	seed("config/config.go", "Load", symbol.KindFunction, "func Load(path string) (Config, error)", "function Load in config/config.go")
+	seed("auth/session.go", "Session", symbol.KindStruct, "type Session struct", "struct Session in auth/session.go")
+
+	// Seed call edges so callers/callees mode can return results.
+	seedEdge := func(sourceID, targetID string) {
+		edge := symbol.CallEdge{SourceID: sourceID, TargetID: targetID, Count: 1}
+		b, merr := symbol.MarshalResult(edge)
+		if merr != nil {
+			t.Fatalf("marshal call edge: %v", merr)
+		}
+		name := "call://" + workspaceID + "/" + sourceID + "->" + targetID
+		if _, serr := store.Save(ctx, storage.NamedEntry{
+			Name:      name,
+			Type:      symbol.CallEdgeType,
+			Workspace: workspaceID,
+			Summary:   "call edge",
+			Result:    b,
+		}); serr != nil {
+			t.Fatalf("save call edge: %v", serr)
+		}
+	}
+
+	loginID := symbol.ID("auth/login.go", "Login")
+	sessionID := symbol.ID("auth/session.go", "Session")
+	validateID := symbol.ID("auth/token.go", "ValidateToken")
+	seedEdge(loginID, sessionID)
+	seedEdge(loginID, validateID)
+	seedEdge(validateID, loginID)
+
+	return func(ctx context.Context) (storage.MemoryStore, error) {
+		return memstore.Open(ctx, cacheRoot, casRoot)
+	}, workspaceID
 }
 
 func TestCodeSweGrep_WithPriority(t *testing.T) {
@@ -566,7 +696,8 @@ func TestTelemetry_RecordsNewToolNames(t *testing.T) {
 		"workspace_id": "test-ws",
 		"question":     "test query",
 	}
-	_, _ = tool.Execute(context.Background(), symbolSearchArgs)
+	// Execute may fail (no memory store); we only care that telemetry was recorded.
+	_, _ = tool.Execute(context.Background(), symbolSearchArgs) //nolint:errcheck
 
 	// Verify telemetry was recorded
 	if len(recorder.calls) == 0 {

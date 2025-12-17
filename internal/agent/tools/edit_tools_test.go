@@ -38,7 +38,7 @@ func main() {
 	println("hello")
 }
 `
-	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(original), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func goodbye() {
 	println("bye")
 }
 `
-	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(original), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestApplyStructuredDiff_AddLines(t *testing.T) {
 func main() {
 }
 `
-	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(original), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -285,7 +285,7 @@ func main() {
 	println("keep this")
 }
 `
-	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(original), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -355,7 +355,7 @@ func main() {
 	println("hello")
 }
 `
-	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(original), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestApplyStructuredDiff_NestedDiffObject(t *testing.T) {
 
 	original := `package main
 `
-	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(original), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 
@@ -603,7 +603,7 @@ func main() {
 	println("hello")
 }
 `
-	if err := os.WriteFile(testFile, []byte(original), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(original), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 

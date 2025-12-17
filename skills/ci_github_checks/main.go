@@ -441,7 +441,8 @@ func githubGET(client *http.Client, token, url string, v any) error {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		// Error body read; error is not actionable in error path.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) //nolint:errcheck
 		return fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 

@@ -147,9 +147,9 @@ func TestHierarchySpawn(t *testing.T) {
 		t.Logf("Correctly denied: %s", resp2.DeniedAgents[0].Reason)
 	}
 
-	// Kill all sessions
-	_ = rt.Kill(session.ID)
-	_ = rt.Kill(childAgent.SessionID)
+	// Kill all sessions - cleanup errors are not actionable.
+	_ = rt.Kill(session.ID)           //nolint:errcheck
+	_ = rt.Kill(childAgent.SessionID) //nolint:errcheck
 
 	t.Log("Hierarchy spawn test completed successfully")
 }
@@ -187,7 +187,10 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to spawn overseer: %v", err)
 	}
-	defer func() { _ = rt.Kill(session.ID) }()
+	defer func() {
+		// Cleanup error is not actionable.
+		_ = rt.Kill(session.ID) //nolint:errcheck
+	}()
 
 	// Spawn first child (counts as 2)
 	req1 := types.SpawnRequest{
@@ -201,11 +204,17 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 		},
 	}
 
-	resp1, _ := overseer.HandleSpawnRequest(ctx, req1)
+	resp1, err := overseer.HandleSpawnRequest(ctx, req1)
+	if err != nil {
+		t.Fatalf("HandleSpawnRequest: %v", err)
+	}
 	if !resp1.Accepted {
 		t.Fatalf("First spawn should succeed: %s", resp1.Reason)
 	}
-	defer func() { _ = rt.Kill(resp1.SpawnedAgents[0].SessionID) }()
+	defer func() {
+		// Cleanup error is not actionable.
+		_ = rt.Kill(resp1.SpawnedAgents[0].SessionID) //nolint:errcheck
+	}()
 
 	// Try to spawn another (should hit limit)
 	req2 := types.SpawnRequest{
@@ -219,11 +228,15 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 		},
 	}
 
-	resp2, _ := overseer.HandleSpawnRequest(ctx, req2)
+	resp2, err := overseer.HandleSpawnRequest(ctx, req2)
+	if err != nil {
+		t.Fatalf("HandleSpawnRequest: %v", err)
+	}
 	if resp2.Accepted {
 		t.Error("Second spawn should be denied due to concurrency limit")
 		if len(resp2.SpawnedAgents) > 0 {
-			_ = rt.Kill(resp2.SpawnedAgents[0].SessionID)
+			// Cleanup error is not actionable.
+			_ = rt.Kill(resp2.SpawnedAgents[0].SessionID) //nolint:errcheck
 		}
 	} else {
 		t.Logf("Correctly denied due to concurrency: %s", resp2.Reason)

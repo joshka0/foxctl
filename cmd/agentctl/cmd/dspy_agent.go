@@ -16,11 +16,19 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
+	"github.com/jkatigb/agentctl/internal/storage"
+	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
+
+// ctxKey is the type for context keys to avoid collisions.
+type ctxKey string
+
+// traceIDKey is the context key for storing the trace ID.
+var traceIDKey = ctxKey("agentctl.trace_id")
 
 // Global dspy-go agent runtime (singleton for the process)
 var (
@@ -98,7 +106,7 @@ func init() {
 
 // getOrCreateRuntime returns the global dspy-go runtime, creating it if necessary.
 func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
-	_ = config.MustFromContext(ctx) // Validate context has config
+	cfg := config.MustFromContext(ctx) // Validate context has config
 
 	globalDspyRuntimeOnce.Do(func() {
 		// Get workspace root
@@ -115,12 +123,16 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 		}
 
 		runtimeCfg := runtime.Config{
-			DefaultMaxIterations: 10,
-			DefaultTimeout:       30 * time.Minute,
-			LLMProvider:          os.Getenv("AGENTCTL_LLM_PROVIDER"),
-			LLMModel:             os.Getenv("AGENTCTL_LLM_MODEL"),
-			LLMAPIKey:            apiKey,
-			WorkspaceRoot:        workspaceRoot,
+			DefaultMaxIterations:  10,
+			DefaultTimeout:        30 * time.Minute,
+			LLMProvider:           os.Getenv("AGENTCTL_LLM_PROVIDER"),
+			LLMModel:              os.Getenv("AGENTCTL_LLM_MODEL"),
+			LLMAPIKey:             apiKey,
+			WorkspaceRoot:         workspaceRoot,
+			TrajectoryStorageRoot: cfg.Storage.Root,
+			OpenMemoryStore: func(ctx context.Context) (storage.MemoryStore, error) {
+				return memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+			},
 		}
 
 		globalDspyRuntime = runtime.NewRuntime(runtimeCfg)
@@ -213,6 +225,7 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Spawn the agent
+	ctx = context.WithValue(ctx, traceIDKey, corr)
 	session, err := rt.Spawn(ctx, agentCfg)
 	if err != nil {
 		return writeDspyErrorEnvelope(cmd, "dspy-agent/spawn", "ERUNTIME", fmt.Sprintf("failed to spawn agent: %v", err))
@@ -274,10 +287,11 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 
 	// Also print a human-readable table to stderr
 	w := tabwriter.NewWriter(os.Stderr, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "SESSION ID\tROLE\tSTATUS\tITERATIONS\tSTARTED")
+	// Table output to stderr; errors are not actionable.
+	_, _ = fmt.Fprintln(w, "SESSION ID\tROLE\tSTATUS\tITERATIONS\tSTARTED") //nolint:errcheck
 	for _, s := range sessions {
 		sess := s.GetSession()
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n", //nolint:errcheck
 			sess.ID[:8]+"...",
 			sess.Config.Role,
 			sess.Status,
@@ -285,7 +299,7 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 			sess.StartedAt.Format("15:04:05"),
 		)
 	}
-	_ = w.Flush()
+	_ = w.Flush() //nolint:errcheck
 
 	// Write success envelope
 	env := envelope.OK("dspy-agent/list", map[string]interface{}{

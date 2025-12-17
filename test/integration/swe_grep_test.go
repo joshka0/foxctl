@@ -10,11 +10,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestSWEGrep_CandidatesToSnippets tests the full candidates → SWE Grep flow.
 // This is a D4 integration test per Phase 5 spec.
 func TestSWEGrep_CandidatesToSnippets(t *testing.T) {
+	repoRoot := repoRootFromCWD(t)
+	runRoot := t.TempDir()
+	prepareSweGrepDist(t, repoRoot, runRoot)
+	// Ensure we don't accidentally use globally installed skills.
+	t.Setenv("HOME", t.TempDir())
+
 	// Skip if agentctl binary not available
 	binPath := findAgentctlBinary(t)
 	if binPath == "" {
@@ -117,7 +124,7 @@ func Load() *Config {
 			},
 		}
 
-		envelope := runSWEGrep(t, binPath, workspaceDir, input)
+		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input)
 
 		// Verify envelope structure
 		assertEnvelopeOK(t, envelope)
@@ -170,7 +177,7 @@ func Load() *Config {
 			},
 		}
 
-		envelope := runSWEGrep(t, binPath, workspaceDir, input)
+		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input)
 		assertEnvelopeOK(t, envelope)
 
 		data := getMap(t, envelope, "data")
@@ -213,7 +220,7 @@ func Load() *Config {
 			},
 		}
 
-		envelope := runSWEGrep(t, binPath, workspaceDir, input)
+		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input)
 		assertEnvelopeOK(t, envelope)
 
 		data := getMap(t, envelope, "data")
@@ -226,16 +233,20 @@ func Load() *Config {
 	})
 
 	t.Run("cas_artifact_present", func(t *testing.T) {
+		candidates := make([]map[string]any, 0, 12)
+		for i := 0; i < 6; i++ {
+			candidates = append(candidates,
+				map[string]any{"path": "auth/login.go"},
+				map[string]any{"path": "auth/logout.go"},
+			)
+		}
 		input := map[string]any{
 			"workspace_id": "test-ws",
 			"question":     "login",
-			"candidates": []map[string]any{
-				{"path": "auth/login.go"},
-				{"path": "auth/logout.go"},
-			},
+			"candidates":   candidates,
 		}
 
-		envelope := runSWEGrep(t, binPath, workspaceDir, input)
+		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input, "AGENTCTL_INLINE_OUTPUT_KB=1")
 		assertEnvelopeOK(t, envelope)
 
 		data := getMap(t, envelope, "data")
@@ -261,10 +272,41 @@ func Load() *Config {
 			t.Errorf("meta.cas_digest = %q, want %q", casDigest, artifact)
 		}
 	})
+
+	t.Run("cas_artifact_omitted_when_inline_small", func(t *testing.T) {
+		input := map[string]any{
+			"workspace_id": "test-ws",
+			"question":     "login",
+			"candidates": []map[string]any{
+				{"path": "auth/login.go"},
+			},
+		}
+
+		envelope := runSWEGrep(t, binPath, runRoot, workspaceDir, input, "AGENTCTL_INLINE_OUTPUT_KB=128")
+		assertEnvelopeOK(t, envelope)
+
+		data := getMap(t, envelope, "data")
+		if _, ok := data["artifact"]; ok {
+			t.Fatalf("expected artifact to be omitted for small output")
+		}
+		if _, ok := data["artifact_kind"]; ok {
+			t.Fatalf("expected artifact_kind to be omitted for small output")
+		}
+		if _, ok := data["artifact_size_bytes"]; ok {
+			t.Fatalf("expected artifact_size_bytes to be omitted for small output")
+		}
+
+		meta := getMap(t, envelope, "meta")
+		if v, ok := meta["cas_digest"]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				t.Fatalf("expected meta.cas_digest to be omitted/empty for small output, got %q", s)
+			}
+		}
+	})
 }
 
 // runSWEGrep invokes the code/swe_grep skill and returns the parsed envelope.
-func runSWEGrep(t *testing.T, binPath, workspaceDir string, input map[string]any) map[string]any {
+func runSWEGrep(t *testing.T, binPath, runRoot, workspaceDir string, input map[string]any, extraEnv ...string) map[string]any {
 	t.Helper()
 
 	inputJSON, err := json.Marshal(input)
@@ -272,12 +314,26 @@ func runSWEGrep(t *testing.T, binPath, workspaceDir string, input map[string]any
 		t.Fatalf("marshal input: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*1e9) // 30s
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binPath, "run", "code/swe_grep", "--cache=off", "--input", string(inputJSON))
-	cmd.Dir = workspaceDir
-	cmd.Env = append(os.Environ(), "AGENTCTL_WORKSPACE="+workspaceDir)
+	cmd := exec.CommandContext(ctx, binPath, "run", "code/swe_grep", "--cache=off", "--workspace", workspaceDir, "--input", string(inputJSON))
+	cmd.Dir = runRoot
+	cmd.Env = os.Environ()
+	for _, kv := range extraEnv {
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		prefix := parts[0] + "="
+		filtered := cmd.Env[:0]
+		for _, existing := range cmd.Env {
+			if !strings.HasPrefix(existing, prefix) {
+				filtered = append(filtered, existing)
+			}
+		}
+		cmd.Env = append(filtered, kv)
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -301,6 +357,42 @@ func runSWEGrep(t *testing.T, binPath, workspaceDir string, input map[string]any
 	}
 
 	return envelope
+}
+
+func repoRootFromCWD(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	return filepath.Clean(filepath.Join(wd, "../.."))
+}
+
+func prepareSweGrepDist(t *testing.T, repoRoot, runRoot string) {
+	t.Helper()
+	outDir := filepath.Join(runRoot, "dist", "skills", "code_swe_grep")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir swe_grep dist: %v", err)
+	}
+
+	manifestSrc := filepath.Join(repoRoot, "skills", "code_swe_grep", "skill.yaml")
+	manifestDst := filepath.Join(outDir, "skill.yaml")
+	data, err := os.ReadFile(manifestSrc)
+	if err != nil {
+		t.Fatalf("read swe_grep manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestDst, data, 0o644); err != nil {
+		t.Fatalf("write swe_grep manifest: %v", err)
+	}
+
+	binOut := filepath.Join(outDir, "bin")
+	cmd := exec.Command("go", "build", "-o", binOut, "./skills/code_swe_grep")
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build swe_grep skill: %v\n%s", err, string(output))
+	}
 }
 
 // assertEnvelopeOK verifies the envelope has status "ok" and version 1.
@@ -382,7 +474,8 @@ func findAgentctlBinary(t *testing.T) string {
 			continue
 		}
 		if _, err := os.Stat(path); err == nil {
-			absPath, _ := filepath.Abs(path)
+			// filepath.Abs error is safe to ignore for existing paths.
+			absPath, _ := filepath.Abs(path) //nolint:errcheck
 			return absPath
 		}
 	}

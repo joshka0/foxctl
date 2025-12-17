@@ -155,6 +155,8 @@ func (e *GoExtractor) extractReceiverType(expr ast.Expr) string {
 }
 
 // extractFuncSignature extracts a function signature string.
+//
+//nolint:revive // bytes.Buffer.WriteString never returns an error for in-memory writes.
 func (e *GoExtractor) extractFuncSignature(fn *ast.FuncDecl, _ []byte) string {
 	// Find the signature up to the opening brace
 	var buf bytes.Buffer

@@ -9,8 +9,10 @@ steps focused on **end-to-end flows, examples, and CI hardening**.
   via examples, E2E tests, and CI wiring.
 
 > **Cross-refs**
+>
 > - Impl plan: `docs/impl_plan/universal_swe_grep_and_agents.md` (Phase 9)
-> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md` (Phase 9)
+> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md`
+>   (Phase 9)
 > - Specs:
 >   - `docs/spec/review_gate.md`
 >   - `docs/spec/semantic_file_index.md`
@@ -22,7 +24,8 @@ steps focused on **end-to-end flows, examples, and CI hardening**.
 >   - CM3 – agentctl Envelope Protocol & CLI Pipeline.
 >   - CM13 – Core Profile v1: End-to-End Envelope, Jobs & CAS Flow.
 >   - CM14 – Test Infrastructure: Test-Watch, Feedback Hooks, CI Targets.
->   - CM17 – Test Infrastructure & CI Pipeline: Test Watcher, Makefile Targets, Coverage.
+>   - CM17 – Test Infrastructure & CI Pipeline: Test Watcher, Makefile Targets,
+>     Coverage.
 
 ---
 
@@ -33,8 +36,8 @@ small workspace.
 
 ### A1. Example repos and fixtures
 
-- [ ] Select or create one or two small fixture workspaces under `tests/fixtures/`
-  or `docs/examples/` that exercise:
+- [ ] Select or create one or two small fixture workspaces under
+      `tests/fixtures/` or `docs/examples/` that exercise:
   - Tasks and review gate behavior.
   - Post-review indexing (semantic + symbol).
   - SWE Grep and tools (`code.symbol_search`, `code.swe_grep`).
@@ -76,7 +79,7 @@ invariants from previous phases.
   - Post-review triggers both semantic and symbol indexers once per review.
   - Semantic + symbol index entries exist and are consistent with diffs.
   - Retrieval events (`code.symbol_search`, `code.swe_grep`) show up in
-    trajectories with correct `meta.trace_id` and `task_id`.
+    trajectories with correct `meta.correlation_id` and `task_id`.
 
 ### B2. Golden envelopes and artifacts
 
@@ -120,7 +123,7 @@ reasonable performance, using existing infra (CM14, CM17).
 ### C3. Test watcher and feedback hooks
 
 - [ ] Ensure existing `test_watch` / `hooks/test_feedback` integrations (CM14)
-  remain compatible with new tests:
+      remain compatible with new tests:
   - Confirm they run the relevant subsets for changed packages.
   - Optionally extend them to highlight retrieval/indexing/trajectory failures
     clearly.
@@ -147,12 +150,12 @@ pipeline and adopt it safely.
 ### D2. Phase docs cross-linking
 
 - [ ] Ensure each phase-specific todo spec and the main impl/testing plans link
-  to each other where appropriate:
+      to each other where appropriate:
   - From `universal_swe_grep_and_agents.md` Phase 1–9 to their corresponding
     `*_todo.md` specs.
   - From testing plan sections back to both specs and impl plan.
 - [ ] Optionally add a short `docs/start/` entry summarizing the phases and
-  where to start when hacking on this pipeline.
+      where to start when hacking on this pipeline.
 
 ---
 
@@ -160,7 +163,7 @@ pipeline and adopt it safely.
 
 - What is the minimal, stable set of E2E scenarios we want to lock in as
   blocking tests vs optional/nightly ones?
-- How aggressively should CI enforce golden stability (e.g. all goldens vs
-  only envelope/trajectory-related ones)?
+- How aggressively should CI enforce golden stability (e.g. all goldens vs only
+  envelope/trajectory-related ones)?
 - Are there additional high-value examples we should include beyond the ones
   described in the impl plan (e.g. failure-mode walkthroughs, demo scripts)?

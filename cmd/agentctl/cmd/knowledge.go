@@ -71,7 +71,10 @@ Triggers are extracted from:
 			if err != nil {
 				return fmt.Errorf("open knowledge store: %w", err)
 			}
-			defer func() { _ = store.Close() }()
+			defer func() {
+				// Cleanup in defer; error is not actionable.
+				_ = store.Close() //nolint:errcheck
+			}()
 
 			var result *knowledge.SyncResult
 			var builtinSeeded int
@@ -139,7 +142,10 @@ func newKnowledgeListCommand() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("open knowledge store: %w", err)
 			}
-			defer func() { _ = store.Close() }()
+			defer func() {
+				// Cleanup in defer; error is not actionable.
+				_ = store.Close() //nolint:errcheck
+			}()
 
 			var items []knowledge.Item
 			if kindFilter != "" {
@@ -218,7 +224,10 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("open knowledge store: %w", err)
 			}
-			defer func() { _ = store.Close() }()
+			defer func() {
+				// Cleanup in defer; error is not actionable.
+				_ = store.Close() //nolint:errcheck
+			}()
 
 			var items []knowledge.Item
 

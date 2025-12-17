@@ -53,7 +53,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// Get workspace ID
 	workspaceID := in.WorkspaceRoot
 	if workspaceID == "" {
-		workspaceID, _ = os.Getwd()
+		// Fallback to current directory; error is not actionable.
+		workspaceID, _ = os.Getwd() //nolint:errcheck
 	}
 
 	// Get actor ID from environment or derive from session
@@ -66,8 +67,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	taskID := ""
 	taskStore, err := tasks.Open(ctx, cfg.Storage.Root)
 	if err == nil {
-		defer func() { _ = taskStore.Close() }()
-		if task, found, _ := taskStore.GetActive(ctx, workspaceID); found {
+		defer func() {
+			// Store cleanup in defer; error is not actionable.
+			_ = taskStore.Close() //nolint:errcheck
+		}()
+		// Best-effort active task lookup; errors are ignored.
+		if task, found, _ := taskStore.GetActive(ctx, workspaceID); found { //nolint:errcheck
 			taskID = task.ID
 		}
 	}
@@ -81,7 +86,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			Reason:   "mail_router: could not open board store",
 		})
 	}
-	defer func() { _ = boardStore.Close() }()
+	defer func() {
+		// Store cleanup in defer; error is not actionable.
+		_ = boardStore.Close() //nolint:errcheck
+	}()
 
 	// Query inbox for relevant messages
 	filter := agent.InboxFilter{
@@ -119,7 +127,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			}
 			ids = append(ids, m.ID)
 		}
-		_, _ = boardStore.MarkRead(ctx, workspaceID, actorID, ids)
+		// Best-effort mark as read; error is not actionable.
+		_, _ = boardStore.MarkRead(ctx, workspaceID, actorID, ids) //nolint:errcheck
 	}
 
 	return emitOutput(rc, hook.Output{
@@ -136,6 +145,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 }
 
 // buildMailContext creates a formatted context string from messages.
+//
+//nolint:revive // strings.Builder.WriteString never returns an error for in-memory writes.
 func buildMailContext(messages []agent.BoardMessage) string {
 	if len(messages) == 0 {
 		return ""

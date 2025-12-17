@@ -33,7 +33,7 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 				return false, nil
 			}
 			// In only mode, emit error envelope
-			return e.writeCacheError(protocol.ErrorCodeECacheUnavailable, "cache storage unavailable", err)
+			return e.writeCacheError(input, protocol.ErrorCodeECacheUnavailable, "cache storage unavailable", err)
 		}
 		key, err := cache.BuildKey(e.handle.Manifest, input, nil)
 		if err != nil {
@@ -53,7 +53,7 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 			return false, nil
 		}
 		// In only mode, emit error envelope
-		return e.writeCacheError(protocol.ErrorCodeECacheUnavailable, "cache lookup failed", err)
+		return e.writeCacheError(input, protocol.ErrorCodeECacheUnavailable, "cache lookup failed", err)
 	}
 	if ok {
 		hit, err := cache.AnnotateHitBytes(entry.Result, entry.CacheKey, e.options.Workspace, e.handle.Manifest.Metadata.Version)
@@ -80,6 +80,10 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 			}
 		}
 		if e.trajCapture != nil {
+			if strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
+				capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, input, "", e.options.CorrelationID)
+				errs.Ignore(capErr, "trajectory capture hook call")
+			}
 			capErr := e.trajCapture.CaptureResult(e.ctx, hit, "", e.options.CorrelationID)
 			errs.Ignore(capErr, "trajectory capture cache hit")
 		}
@@ -92,13 +96,13 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 		return true, nil
 	}
 	if e.options.CacheMode == cache.ModeOnly {
-		return e.writeCacheMissError()
+		return e.writeCacheMissError(input)
 	}
 	return false, nil
 }
 
 // writeCacheMissError emits an ECACHE_MISS error envelope for cache-only mode.
-func (e *Executor) writeCacheMissError() (bool, error) {
+func (e *Executor) writeCacheMissError(input []byte) (bool, error) {
 	data := map[string]any{
 		"cache_key": e.cacheKey,
 		"hint":      "No cached result exists. Run with --cache=auto to execute the skill and populate the cache.",
@@ -132,7 +136,16 @@ func (e *Executor) writeCacheMissError() (bool, error) {
 		}
 	}
 	if e.trajCapture != nil {
-		raw, _ := json.Marshal(env)
+		if strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
+			rawIn := input
+			if len(rawIn) == 0 {
+				rawIn = e.options.Input
+			}
+			capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, rawIn, "", e.options.CorrelationID)
+			errs.Ignore(capErr, "trajectory capture hook call")
+		}
+		// Envelope marshalling; error is nil for valid envelope structs.
+		raw, _ := json.Marshal(env) //nolint:errcheck
 		capErr := e.trajCapture.CaptureResult(e.ctx, raw, "", e.options.CorrelationID)
 		errs.Ignore(capErr, "trajectory capture cache miss")
 	}
@@ -143,7 +156,7 @@ func (e *Executor) writeCacheMissError() (bool, error) {
 }
 
 // writeCacheError emits a cache error envelope for cache-only mode.
-func (e *Executor) writeCacheError(code protocol.ErrorCode, message string, cause error) (bool, error) {
+func (e *Executor) writeCacheError(input []byte, code protocol.ErrorCode, message string, cause error) (bool, error) {
 	data := map[string]any{
 		"hint": "Cache storage is unavailable. Check cache configuration and storage path.",
 	}
@@ -178,7 +191,16 @@ func (e *Executor) writeCacheError(code protocol.ErrorCode, message string, caus
 		}
 	}
 	if e.trajCapture != nil {
-		raw, _ := json.Marshal(env)
+		if strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
+			rawIn := input
+			if len(rawIn) == 0 {
+				rawIn = e.options.Input
+			}
+			capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, rawIn, "", e.options.CorrelationID)
+			errs.Ignore(capErr, "trajectory capture hook call")
+		}
+		// Envelope marshalling; error is nil for valid envelope structs.
+		raw, _ := json.Marshal(env) //nolint:errcheck
 		capErr := e.trajCapture.CaptureResult(e.ctx, raw, "", e.options.CorrelationID)
 		errs.Ignore(capErr, "trajectory capture cache error")
 	}

@@ -18,7 +18,10 @@ func TestStore_UpsertAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	now := time.Now().Truncate(time.Second)
 	ts := testwatch.TestStatus{
@@ -107,7 +110,10 @@ func TestStore_ListByWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Add multiple watchers for same workspace
 	for _, id := range []string{"go", "js", "python"} {
@@ -160,7 +166,10 @@ func TestStore_Delete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	ts := testwatch.TestStatus{
 		WorkspaceID: "ws-del",
@@ -195,7 +204,10 @@ func TestStore_DeleteByWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	// Add multiple watchers
 	for _, id := range []string{"go", "js"} {

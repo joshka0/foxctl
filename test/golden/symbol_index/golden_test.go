@@ -60,8 +60,8 @@ func TestGoldenSymbolIndex(t *testing.T) {
 	}
 
 	for _, sym := range symbols {
-		// Extract calls for this symbol
-		calls, _ := extractor.ExtractCalls(ctx, sym, content)
+		// Extract calls for this symbol - errors are non-fatal for golden generation.
+		calls, _ := extractor.ExtractCalls(ctx, sym, content) //nolint:errcheck
 
 		gs := GoldenSymbol{
 			ID:            sym.ID,

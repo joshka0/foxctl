@@ -117,9 +117,9 @@ are gated by workspace-level opt-in and optional role checks.
       steps).
     - Review outcomes and task state transitions.
   - At each capture point:
-    - Ensure `meta.trace_id`, `meta.job_id`, `meta.task_id`, and `meta.epic_id`
-      are consistently populated using existing meta fields (no new meta fields
-      added).
+    - Ensure `meta.correlation_id`, `meta.job_id`, `meta.task_id`, and
+      `meta.epic_id` are consistently populated using existing meta fields (no
+      new meta fields added).
     - Construct and persist `Trajectory` and `TrajectoryEvent` records:
       - `kind` values such as `"user_request"`, `"tool_call"`, `"tool_result"`,
         `"review_result"`, `"task_transition"`, `"graph_search"`, `"swe_grep"`

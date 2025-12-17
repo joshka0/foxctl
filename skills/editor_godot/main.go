@@ -528,7 +528,8 @@ func callPlugin(ctx context.Context, host string, port int, timeout time.Duratio
 	}()
 
 	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 1024))
+		// Error body read; error is not actionable in error path.
+		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 1024)) //nolint:errcheck
 		return nil, &bridgeError{
 			code:    "EBRIDGE_HTTP",
 			message: fmt.Sprintf("plugin returned HTTP %d", httpResp.StatusCode),

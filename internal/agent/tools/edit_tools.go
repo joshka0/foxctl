@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -266,12 +267,18 @@ func (r *Registry) applyStructuredDiff(ctx context.Context, args map[string]any)
 		return errorResult(err.Error()), nil
 	}
 
-	// Read existing file
-	content, err := os.ReadFile(absPath)
+	// Open file for read/write to prevent TOCTOU race
+	f, err := os.OpenFile(absPath, os.O_RDWR, 0)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return errorResult(fmt.Sprintf("file not found: %s", path)), nil
 		}
+		return errorResult(fmt.Sprintf("open file: %v", err)), nil
+	}
+	defer f.Close() //nolint:errcheck // Deferred close; error is not actionable after write
+
+	content, err := io.ReadAll(f)
+	if err != nil {
 		return errorResult(fmt.Sprintf("read file: %v", err)), nil
 	}
 
@@ -297,14 +304,20 @@ func (r *Registry) applyStructuredDiff(ctx context.Context, args map[string]any)
 		}), nil
 	}
 
-	// Write back
+	// Write back using same file handle
 	newContent := strings.Join(newLines, "\n")
 	// Preserve trailing newline if original had one
 	if len(content) > 0 && content[len(content)-1] == '\n' {
 		newContent += "\n"
 	}
 
-	if err := os.WriteFile(absPath, []byte(newContent), 0o644); err != nil {
+	if err := f.Truncate(0); err != nil {
+		return errorResult(fmt.Sprintf("truncate file: %v", err)), nil
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return errorResult(fmt.Sprintf("seek file: %v", err)), nil
+	}
+	if _, err := f.WriteString(newContent); err != nil {
 		return errorResult(fmt.Sprintf("write file: %v", err)), nil
 	}
 

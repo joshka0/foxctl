@@ -32,6 +32,8 @@ const (
 	EventKindTaskTransition EventKind = "task_transition"
 	EventKindGraphSearch    EventKind = "graph_search"
 	EventKindSWEGrep        EventKind = "swe_grep"
+	EventKindHookCall       EventKind = "hook_call"
+	EventKindHookResult     EventKind = "hook_result"
 )
 
 // Source indicates where a user request originated.

@@ -17,6 +17,7 @@ Related specs:
 - `docs/spec/dspy_trajectory_capture.md`
 - `docs/spec/task_graph_insights.md`
 - `docs/spec/skills_spec/README.md`
+- `docs/specs/2025-12-13_universal_swe_grep_followups.md`
 
 Related impl plan docs:
 
@@ -187,15 +188,15 @@ semantic index + grep candidates.
 
 **Tasks**
 
-- [ ] Implement `code.symbol_search` tool:
+- [x] Implement `code.symbol_search` tool:
   - Go helper over the symbol index per `code_symbol_index_and_swe_grep.md`
     §6.1.
 - [x] Implement `code.swe_grep` tool:
   - Thin wrapper that calls the `code/swe_grep` skill.
-- [x] Align `edit.apply_patch` with `code_diff`:
-  - Ensure tool input uses the JSON diff emitted by the `code_diff` skill.
-  - Add tests for round-tripping (`code_diff` → agent edit →
-    `edit.apply_patch`).
+- [x] Align edit tools with `code/diff`:
+  - Use `edit.apply_structured_diff` to consume the structured JSON diff from
+    the `code/diff` skill.
+  - Keep `edit.apply_patch` as a simple text-replacement helper.
 - [x] Update dspy-go agent configs to include the new tools in Coding/Review
       agent signatures.
 
@@ -212,12 +213,17 @@ Dependencies: Phases 3–5.
 
 **Tasks**
 
-- [ ] Map `code.symbol_search` and `code.swe_grep` to `TrajectoryEvent` kinds
-      (`tool_call`/`tool_result` plus optional `graph_search` / `swe_grep`).
+- [x] Implement initial trajectory store + capture hooks for `agentctl run`:
+  - Capture `user_request` and `tool_result` events.
+  - Use `meta.correlation_id` as the correlation source for capture (stored as
+    `trace_id` in trajectory records).
+- [ ] Map agent tool calls (including `code.symbol_search` and `code.swe_grep`)
+      to `TrajectoryEvent` kinds (`tool_call`/`tool_result` plus optional
+      `graph_search` / `swe_grep`).
 - [ ] Implement `trajectory.export` job/skill per `dspy_trajectory_capture.md`
       §7.
 - [ ] Add tests to verify:
-  - Correlation via `meta.trace_id`, `meta.task_id`, `meta.cas_digest`.
+  - Correlation via correlation id / trace id, `task_id`, `cas_digest`.
   - Presence of review artifacts and retrieval events in exported episodes.
 
 Dependencies: Phases 1, 3–6.
@@ -233,13 +239,14 @@ Dependencies: Phases 1, 3–6.
 
 **Tasks**
 
-- [ ] Implement SQLite tables `teams` and `team_members` per `dspy_go_agents.md`
+- [x] Implement SQLite tables `teams` and `team_members` per `dspy_go_agents.md`
       §4.3.
 - [ ] Optionally implement `teams/manage.*` skills from
       `docs/spec/skills_spec/README.md`:
   - `teams/manage.list`, `.describe`, `.upsert`, `.add_member`,
     `.remove_member`.
-- [ ] Integrate with mailbox routing and overseer planning where helpful.
+- [x] Integrate mailbox routing for `team:<slug>` recipients.
+- [ ] Integrate teams into overseer planning where helpful.
 
 Dependencies: Phases 0–2; independent of retrieval, but more useful after agents
 and graph insights exist.

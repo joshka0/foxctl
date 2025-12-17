@@ -209,8 +209,8 @@ suppresses stack traces while preserving Core Profile v1 behavior.
 - **Integration**
   - Call `DetectDebugger` early in `cmd/agentctl/main.go` before CLI dispatch.
   - On detection:
-    - Emit a clearly‑typed error (log and/or envelope) with a code such as
-      `EDEBUGGER`.
+    - Emit a clearly‑typed error (log and/or envelope) with error code `EPOLICY`
+      (debugger attachment is a policy violation per Core Profile v1 §13).
     - Exit with a non‑zero status.
 
 - **Validation**

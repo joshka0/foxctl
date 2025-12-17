@@ -29,7 +29,7 @@ supports routing and dashboards, consistent with `dspy_go_agents.md` §4.3.
 
 ### A1. `teams` and `team_members` tables
 
-- [ ] Implement SQLite tables for teams and memberships per `dspy_go_agents.md`:
+- [x] Implement SQLite tables for teams and memberships per `dspy_go_agents.md`:
   - `teams` (conceptual fields):
     - `team_id` (PK, string) – e.g. `team:backend`, unique per workspace.
     - `workspace_id` (string).
@@ -42,19 +42,19 @@ supports routing and dashboards, consistent with `dspy_go_agents.md` §4.3.
     - `actor_id` (string) – `actor:agent:dspy:<slug>` or `actor:human:<id>`.
     - `role` (string) – `coder`, `reviewer`, `planner`, etc.
     - Optional metadata: skills, capacity, tags.
-- [ ] Decide representation for multi-valued fields (`primary_epics`, `tags`):
+- [x] Decide representation for multi-valued fields (`primary_epics`, `tags`):
   - Prefer normalized tables where possible; otherwise JSON with clear
     conventions.
 
 ### A2. Go types and access layer
 
-- [ ] Add Go types mirroring the tables (e.g. `Team`, `TeamMember`) in a
+- [x] Add Go types mirroring the tables (e.g. `Team`, `TeamMember`) in a
   dedicated internal package (e.g. `internal/storage/teams`):
   - CRUD methods: `Create/UpsertTeam`, `GetTeam`, `ListTeams`,
     `AddMember`, `RemoveMember`, `ListMembers`.
   - Idempotent upserts for teams and members (no duplicate members per
     `(team_id, actor_id)`).
-- [ ] Ensure the access layer:
+- [x] Ensure the access layer:
   - Accepts `workspace_id` explicitly for all queries.
   - Plays nicely with existing SQLite helpers and migrations (CM13).
 
@@ -104,13 +104,13 @@ understand team ownership, without changing the core wire contracts.
 
 ### C1. Mailbox routing to `team:<slug>`
 
-- [ ] Implement or refine mailbox support for `team:<slug>` recipients:
+- [x] Implement or refine mailbox support for `team:<slug>` recipients:
   - When a message is addressed to `team:<slug>`, fan out to current members or
     surface in a shared team inbox, per `dspy_go_agents.md` §4.3.
   - Ensure routing is backed by the teams store, not config-only.
-- [ ] Update or add integration tests (per Phase 8 testing plan):
+- [x] Update or add integration tests (per Phase 8 testing plan):
   - `team:<slug>` recipients correctly resolve to memberships.
-  - Viewer-level queries can list mail/messages per team.
+- [ ] Viewer-level queries can list mail/messages per team.
 
 ### C2. Overseer planning and assignments
 
@@ -139,7 +139,7 @@ integration, and possibly golden tests.
 
 ### D1. Unit tests (storage)
 
-- [ ] Add unit tests over the teams storage layer:
+- [x] Add unit tests over the teams storage layer:
   - CRUD over `teams` and `team_members`.
   - Idempotent upserts and membership updates.
   - Workspace scoping and basic constraints (no duplicate members).
@@ -153,16 +153,16 @@ integration, and possibly golden tests.
 
 ### D3. Integration tests (routing & viewer-level queries)
 
-- [ ] Add integration tests that:
+- [x] Add integration tests that:
   - Create teams and members in the store.
   - Send/route messages to `team:<slug>`.
-  - Query from a viewer perspective to join tasks/agents with teams.
+- [ ] Query from a viewer perspective to join tasks/agents with teams.
 - [ ] Ensure these tests tie back to overseer + runtime where necessary (CM6,
   CM9), without expanding scope beyond basic routing.
 
 ### D4. CI & test infra
 
-- [ ] Wire new tests into existing CI targets (CM14):
+- [x] Wire new tests into existing CI targets (CM14):
   - Ensure they run in standard `go test ./...` and/or `make` targets.
   - Keep fixtures small and deterministic.
 

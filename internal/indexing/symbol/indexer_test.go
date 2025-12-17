@@ -28,7 +28,10 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	})
 
 	logger := zerolog.Nop()
 	idx := NewIndexer(cfg, store, nil, workspaceDir, logger)
@@ -285,7 +288,10 @@ func TestIndexer_Index_IncrementalUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get meta failed: %v", err)
 	}
-	firstMeta, _ := UnmarshalFileMeta(metaEntry.Result)
+	firstMeta, err := UnmarshalFileMeta(metaEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal file meta: %v", err)
+	}
 
 	// Update without changing content - should skip
 	event.Files[0].ChangeKind = indexing.ChangeKindModified
@@ -307,7 +313,10 @@ func TestIndexer_Index_IncrementalUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get updated meta failed: %v", err)
 	}
-	secondMeta, _ := UnmarshalFileMeta(metaEntry.Result)
+	secondMeta, err := UnmarshalFileMeta(metaEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal file meta: %v", err)
+	}
 
 	if firstMeta.ContentHash == secondMeta.ContentHash {
 		t.Error("content hash should have changed")
@@ -876,7 +885,10 @@ func Second() string {
 	if err != nil {
 		t.Fatalf("Get meta failed: %v", err)
 	}
-	meta1, _ := UnmarshalFileMeta(metaEntry.Result)
+	meta1, err := UnmarshalFileMeta(metaEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal file meta: %v", err)
+	}
 	if len(meta1.SymbolDigests) < 2 {
 		t.Fatalf("expected at least 2 symbol digests, got %d", len(meta1.SymbolDigests))
 	}
@@ -886,7 +898,10 @@ func Second() string {
 	if err != nil {
 		t.Fatalf("Get First failed: %v", err)
 	}
-	firstResult1, _ := UnmarshalResult(firstEntry1.Result)
+	firstResult1, err := UnmarshalResult(firstEntry1.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
 	firstDigest1 := firstResult1.Symbol.BodyDigest
 
 	// Modify ONLY Second function
@@ -917,7 +932,10 @@ func Second() string {
 	if err != nil {
 		t.Fatalf("Get First after update failed: %v", err)
 	}
-	firstResult2, _ := UnmarshalResult(firstEntry2.Result)
+	firstResult2, err := UnmarshalResult(firstEntry2.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
 
 	// The body digest should be the same
 	if firstResult2.Symbol.BodyDigest != firstDigest1 {
@@ -929,7 +947,10 @@ func Second() string {
 	if err != nil {
 		t.Fatalf("Get Second failed: %v", err)
 	}
-	secondResult, _ := UnmarshalResult(secondEntry.Result)
+	secondResult, err := UnmarshalResult(secondEntry.Result)
+	if err != nil {
+		t.Fatalf("failed to unmarshal result: %v", err)
+	}
 
 	// The body should contain "modified"
 	if secondResult.Symbol.BodyDigest == meta1.SymbolDigests["funcs.go:Second"] {

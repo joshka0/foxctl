@@ -218,7 +218,8 @@ func (h *PostReviewHandler) shouldIncludeFile(file FileChange, cfg IndexerConfig
 	if len(cfg.IncludeGlobs) > 0 {
 		matched := false
 		for _, pattern := range cfg.IncludeGlobs {
-			if m, _ := filepath.Match(pattern, file.Path); m {
+			// filepath.Match error is safe to ignore for validated patterns.
+			if m, _ := filepath.Match(pattern, file.Path); m { //nolint:errcheck
 				matched = true
 				break
 			}
@@ -235,7 +236,8 @@ func (h *PostReviewHandler) shouldIncludeFile(file FileChange, cfg IndexerConfig
 
 	// Check exclude globs (if any match, exclude the file)
 	for _, pattern := range cfg.ExcludeGlobs {
-		if m, _ := filepath.Match(pattern, file.Path); m {
+		// filepath.Match error is safe to ignore for validated patterns.
+		if m, _ := filepath.Match(pattern, file.Path); m { //nolint:errcheck
 			return false
 		}
 		if matchDoubleGlob(pattern, file.Path) {
@@ -259,7 +261,8 @@ func matchDoubleGlob(pattern, path string) bool {
 	if strings.HasPrefix(pattern, "**/") {
 		suffix := pattern[3:]
 		// Match any path ending with suffix
-		if m, _ := filepath.Match(suffix, filepath.Base(path)); m {
+		// filepath.Match error is safe to ignore for validated patterns.
+		if m, _ := filepath.Match(suffix, filepath.Base(path)); m { //nolint:errcheck
 			return true
 		}
 	}

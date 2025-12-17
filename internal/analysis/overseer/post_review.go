@@ -4,10 +4,12 @@ package overseer
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/indexing/postreview"
+	"github.com/jkatigb/agentctl/internal/trajectorycapture"
 	"github.com/rs/zerolog"
 )
 
@@ -20,6 +22,7 @@ type PostReviewHandler struct {
 	indexerHandler *indexing.PostReviewHandler
 	config         indexing.PostReviewConfig
 	logger         zerolog.Logger
+	storageRoot    string
 
 	// hooks for testing
 	onEventProduced func(indexing.PostReviewEvent)
@@ -29,6 +32,8 @@ type PostReviewHandler struct {
 type PostReviewHandlerConfig struct {
 	// EventStore is the store for PostReviewEvents.
 	EventStore postreview.Store
+
+	TrajectoryStorageRoot string
 
 	// IndexerHandler is the handler that fans out to indexers.
 	IndexerHandler *indexing.PostReviewHandler
@@ -47,6 +52,7 @@ func NewPostReviewHandler(cfg PostReviewHandlerConfig) *PostReviewHandler {
 		indexerHandler: cfg.IndexerHandler,
 		config:         cfg.Config,
 		logger:         cfg.Logger.With().Str("component", "overseer.post_review").Logger(),
+		storageRoot:    strings.TrimSpace(cfg.TrajectoryStorageRoot),
 	}
 }
 
@@ -89,6 +95,16 @@ func (h *PostReviewHandler) HandleReviewApproved(
 	h.logger.Debug().
 		Str("event_id", event.ID).
 		Msg("post-review event produced")
+
+	if h.storageRoot != "" {
+		if err := trajectorycapture.CaptureReviewOutcome(ctx, h.storageRoot, artifact, event.ID); err != nil {
+			h.logger.Error().Err(err).
+				Str("workspace_id", artifact.WorkspaceID).
+				Str("task_id", artifact.TaskID).
+				Str("review_id", artifact.ID).
+				Msg("failed to capture review outcome")
+		}
+	}
 
 	// Invoke test hook if set
 	if h.onEventProduced != nil {

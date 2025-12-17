@@ -73,7 +73,8 @@ func TestTaskGuard_AutoMode_UsesExistingTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	// Test setup complete; error is not actionable.
+	_ = store.Close() //nolint:errcheck
 
 	// Write operation should use existing task
 	in := hook.Input{
@@ -139,7 +140,8 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	// Test setup complete; error is not actionable.
+	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve
 	in := hook.Input{
@@ -176,7 +178,8 @@ func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	// Test setup complete; error is not actionable.
+	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve and dirty the task
 	in := hook.Input{
@@ -202,7 +205,10 @@ func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = store.Close() }()
+	defer func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	}()
 
 	updated, err := store.Get(ctx, task.ID)
 	if err != nil {
@@ -241,7 +247,8 @@ func TestTaskGuard_StrictMode_DirtiesCompletedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	// Test setup complete; error is not actionable.
+	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve and dirty the task
 	in := hook.Input{
@@ -283,7 +290,8 @@ func TestTaskGuard_AutoMode_DoesNotDirtyInProgressTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = store.Close()
+	// Test setup complete; error is not actionable.
+	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve but NOT dirty the task
 	in := hook.Input{
@@ -331,7 +339,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
-	t.Cleanup(func() { _ = rc.Close() })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = rc.Close() //nolint:errcheck
+	})
 
 	return &testEnv{
 		ctx:           ctx,

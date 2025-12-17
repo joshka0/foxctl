@@ -29,8 +29,9 @@ internal SQLite trajectory store (`internal/storage/trajectory`).
 
 ## Correlation Strategy (v1)
 
-The trajectory schema references a `trace_id` conceptually, but Core Profile v1
-envelopes in this repo do **not** currently expose `meta.trace_id`.
+The trajectory schema references a `trace_id` conceptually; in this repo,
+correlation is sourced from `meta.correlation_id` and stored as `trace_id`
+internally.
 
 For PR2 we map correlation as follows (no wire changes):
 

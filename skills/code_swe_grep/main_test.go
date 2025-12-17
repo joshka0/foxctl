@@ -241,8 +241,8 @@ func TestValidationErrorCode(t *testing.T) {
 		t.Fatalf("expected *ValidationError, got %T", err)
 	}
 
-	if ve.Code != ErrCodeArg {
-		t.Errorf("ValidationError.Code = %q, want %q", ve.Code, ErrCodeArg)
+	if ve.Code != ErrCodeNoCandidates {
+		t.Errorf("ValidationError.Code = %q, want %q", ve.Code, ErrCodeNoCandidates)
 	}
 }
 
@@ -354,7 +354,7 @@ func TestClassifyFileError(t *testing.T) {
 			name:     "permission denied",
 			err:      os.ErrPermission,
 			wantMsg:  "permission denied",
-			wantCode: ErrCodePolicy,
+			wantCode: ErrCodeCapabilityPolicy,
 		},
 	}
 

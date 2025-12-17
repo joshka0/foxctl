@@ -629,7 +629,7 @@ Conceptually:
     "ts": "...",              // Core v1 timestamp
     "workspace": "...",      // Workspace path or id
     "job_id": "01H...",      // Job representing the agent session (if any)
-    "trace_id": "...",       // Correlates all envelopes for this run
+    "correlation_id": "...", // Correlates all envelopes for this run
     "source": "run|cache",   // As per Core v1
     "profiles": ["core/v1", "agent/v1"]
   },
@@ -641,7 +641,8 @@ Implementations MAY wrap agent signatures in different specific commands
 (`agent/spawn`, `jobs/submit`, etc.), but MUST preserve:
 
 - `data.kind` and `data.input` matching the signatures in §6.
-- A stable `meta.trace_id` shared across all envelopes for a given agent run.
+- A stable `meta.correlation_id` shared across all envelopes for a given agent
+  run.
 - A `meta.workspace` and (when applicable) `meta.job_id` so trajectories and
   jobs can be joined.
 
@@ -657,7 +658,7 @@ events, the following metadata MUST be available, either via Protocol v1
   - Logical workspace identifier (may be derived from `meta.workspace`).
 - `meta.task_id` (string, required for task-scoped calls)
   - The primary task the tool call is associated with.
-- `meta.trace_id` (string, required)
+- `meta.correlation_id` (string, required)
   - Correlation id linking all envelopes for a given agent step/run.
 - `meta.epic_id` (string, optional)
   - Epic/plan root, when available.
@@ -717,7 +718,7 @@ Agent runs are typically represented as jobs (see `jobs/*` commands in
   - `data.kind` = `"agent_session"` (or similar profile-specific marker).
   - `data.agent_role` = `"coder" | "planner" | "reviewer"`.
   - `data.input` = Coding/Planning/ReviewInput from §6.
-  - `meta.trace_id` and `meta.workspace`.
+  - `meta.correlation_id` and `meta.workspace`.
 - The **terminal job envelope** (`jobs/tail` final event or `jobs/info`):
   - Uses `status: "ok"` when the agent completes without unhandled errors.
   - Uses `status: "error"` when the session aborts due to an unhandled tool or
@@ -769,7 +770,7 @@ following conventions are recommended:
     "workspace": "/Users/example/repos/agentctl",
     "workspace_id": "ws-123", // conceptual field for telemetry/join
     "job_id": "01HF...",
-    "trace_id": "4f8a...",
+    "correlation_id": "4f8a...",
     "actor_id": "actor:agent:dspy:coder-main"
   },
   "error": {
@@ -794,7 +795,7 @@ following conventions are recommended:
     "workspace": "/Users/example/repos/agentctl",
     "workspace_id": "ws-123",
     "job_id": "01HF...",
-    "trace_id": "4f8a...",
+    "correlation_id": "4f8a...",
     "actor_id": "actor:agent:dspy:coder-main"
   },
   "error": {

@@ -9,9 +9,11 @@ memory, driven by post-review events and embedding jobs.
   (`file_embedding` + `file_embedding_chunk`) with stable names and chunking.
 
 > **Cross-refs**
+>
 > - Impl plan: `docs/impl_plan/universal_swe_grep_and_agents.md` (Phase 3)
 > - Codemap: `docs/impl_plan/universal_swe_grep_and_agents_codemap.md` (Phase 3)
-> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md` (Phase 3)
+> - Testing plan: `docs/impl_plan/universal_swe_grep_and_agents_testing.md`
+>   (Phase 3)
 > - Specs: `docs/spec/semantic_file_index.md`,
 >   `docs/spec/review_semantic_trajectory_specs.md`,
 >   `docs/spec/core_profile_v1.md`
@@ -36,8 +38,8 @@ explicit and stable across re-runs and config changes.
   - Cross-check fields (`path`, `digest`, `language`, `embedding`,
     `chunk_count`, `chunking_config_hash`, `source`, etc.) against
     `docs/spec/semantic_file_index.md`.
-  - Add or refine Go docstrings where needed (without inventing new
-    wire contracts).
+  - Add or refine Go docstrings where needed (without inventing new wire
+    contracts).
 - [ ] Define and document invariants:
   - `file_embedding` entries exist for all indexed files (chunked or not).
   - `file_embedding_chunk` entries only for chunked files.
@@ -51,12 +53,13 @@ explicit and stable across re-runs and config changes.
   - `ChunkEmbeddingName(workspace, path, chunkID, cfgHash)` →
     `file://<workspace>/<path>#chunk-<id>?cfg=<hash>`.
   - Implemented in `internal/indexing/semantic/types.go`.
-- [x] Implement `ChunkingConfigHash()` on `semantic.Config` to detect when
-  chunk boundaries must be recomputed.
+- [x] Implement `ChunkingConfigHash()` on `semantic.Config` to detect when chunk
+      boundaries must be recomputed.
 - [ ] Document naming + hashing behavior in the spec and/or README:
-  - Explain how `chunking_config_hash` participates in deduping and invalidation.
-  - Call out compatibility expectations when config changes (e.g. new chunks
-    use new hash; old entries may be left or marked deprecated).
+  - Explain how `chunking_config_hash` participates in deduping and
+    invalidation.
+  - Call out compatibility expectations when config changes (e.g. new chunks use
+    new hash; old entries may be left or marked deprecated).
 
 ---
 
@@ -67,14 +70,14 @@ semantic index.
 
 ### B1. Job contracts (`semantic_index.*`)
 
-- [ ] Confirm and document job entry points in `semantic_file_index.md` and
-  code (e.g. `semantic_index.init_files`, `semantic_index.update_files`):
+- [ ] Confirm and document job entry points in `semantic_file_index.md` and code
+      (e.g. `semantic_index.init_files`, `semantic_index.update_files`):
   - Inputs: workspace id, file set (paths / glob), chunking config, provider.
   - Outputs: summary of files indexed/updated, error list, CAS artifacts.
 - [ ] Ensure job argument structs and result structs live in a small, focused
-  package and are used consistently by CLI + jobs + tests.
+      package and are used consistently by CLI + jobs + tests.
 - [ ] Align job naming and error codes with `code_symbol_index_and_swe_grep.md`
-  so future phases see consistent behavior.
+      so future phases see consistent behavior.
 
 ### B2. Idempotence, retries, and error handling
 
@@ -83,11 +86,11 @@ semantic index.
     duplicate named entries.
   - Jobs should be safe to retry after transient failures.
 - [ ] Define error taxonomy for semantic jobs (per spec §11):
-  - Distinguish configuration errors vs. embedding provider failures vs.
-    storage errors.
+  - Distinguish configuration errors vs. embedding provider failures vs. storage
+    errors.
   - Map to canonical error codes used by the CLI + envelopes.
-- [ ] Ensure job implementation wraps errors with enough context
-  (workspace, path, job id) and never panics in normal operation.
+- [ ] Ensure job implementation wraps errors with enough context (workspace,
+      path, job id) and never panics in normal operation.
 
 ---
 
@@ -111,16 +114,16 @@ and explicit CLI entrypoints.
 
 ### C2. Optional CLI (`agentctl semantic-index ...`)
 
-- [ ] Design and implement a CLI entrypoint for semantic indexing:
+- [x] Design and implement a CLI entrypoint for semantic indexing:
   - `agentctl semantic-index init` – run init job(s) over a workspace subset.
   - `agentctl semantic-index update` – reindex changed files.
   - Flags for chunking config, include/exclude globs, dry-run.
-- [ ] Ensure CLI emits envelopes aligned with `core_profile_v1` and reuses
-  existing job primitives (no new wire contracts):
+- [x] Ensure CLI emits envelopes aligned with `core_profile_v1` and reuses
+      existing job primitives (no new wire contracts):
   - Jobs submitted via existing job store + WFQ scheduler (when applicable).
   - Envelopes validated with existing golden harness.
 - [ ] Add minimal UX docs under `docs/start/` (indexing quickstart), pointing
-  back to this Phase 3 spec and `semantic_file_index.md`.
+      back to this Phase 3 spec and `semantic_file_index.md`.
 
 ---
 
@@ -131,21 +134,21 @@ fixtures, so later phases can build on a stable base.
 
 ### D1. Unit tests (naming + chunking)
 
-- [ ] Add unit tests for naming and chunk stability:
+- [x] Add unit tests for naming and chunk stability:
   - For a given `(workspace, path, chunk_bytes, overlap, cfg hash)`,
     `FileEmbeddingName` / `ChunkEmbeddingName` are stable across re-runs.
   - `ChunkingConfigHash` changes only when relevant config fields change.
-- [ ] Add unit tests for config-change behavior:
+- [x] Add unit tests for config-change behavior:
   - New `chunking_config_hash` yields new chunk entries.
   - Old entries are deprecated or cleaned up per spec (document behavior).
 
 ### D2. Job tests (init/update behavior)
 
-- [ ] For `semantic_index.init_files` and `semantic_index.update_files`, add
-  small fixture-based tests that assert:
+- [x] For `semantic_index.init_files` and `semantic_index.update_files`, add
+      small fixture-based tests that assert:
   - Correct number of `file_embedding` / `file_embedding_chunk` entries.
   - `result.digest` (if present) matches CAS contents or file snapshot.
-- [ ] Add update-behavior tests:
+- [x] Add update-behavior tests:
   - Editing a non-chunked file reuses the same named entry, updates digest and
     embedding.
   - Editing a chunked file reuses `chunk.id` and spans, but updates embeddings
@@ -153,8 +156,8 @@ fixtures, so later phases can build on a stable base.
 
 ### D3. Golden job results
 
-- [ ] Add golden job result envelopes for semantic index jobs:
-  - Store under `test/golden/envelopes/semantic_index_*.jsonc`.
+- [x] Add golden job result envelopes for semantic index jobs:
+  - Store under `test/golden/envelopes/semantic-index-*.json`.
   - Include summary + CAS artifact metadata, not full embeddings.
 - [ ] Extend `test/golden/golden_test.go` (or a sibling) to validate:
   - Envelope structure against `core_profile_v1`.
@@ -163,14 +166,14 @@ fixtures, so later phases can build on a stable base.
 ### D4. Logging and metrics
 
 - [ ] Decide on minimal logging fields for semantic indexing:
-  - workspace / task / review ids, file path, chunking config hash,
-    files indexed/failed, provider model.
+  - workspace / task / review ids, file path, chunking config hash, files
+    indexed/failed, provider model.
 - [ ] Add metrics hooks (compatible with existing metrics infra) to track:
   - Counters: `semantic_index_files_indexed_total`,
     `semantic_index_files_failed_total`.
   - Histograms: `semantic_index_job_duration_seconds`.
-- [ ] Ensure logs and metrics are wired into the same observability story as
-  the post-review harness so regressions are easy to spot.
+- [ ] Ensure logs and metrics are wired into the same observability story as the
+      post-review harness so regressions are easy to spot.
 
 ---
 

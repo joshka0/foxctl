@@ -97,18 +97,19 @@ func TestAutoPlanner_NoAPIKey(t *testing.T) {
 	groqKey := os.Getenv("GROQ_API_KEY")
 	openaiKey := os.Getenv("OPENAI_API_KEY")
 	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
-	_ = os.Unsetenv("GROQ_API_KEY")
-	_ = os.Unsetenv("OPENAI_API_KEY")
-	_ = os.Unsetenv("OPENROUTER_API_KEY")
+	// Test env manipulation; errors are not actionable.
+	_ = os.Unsetenv("GROQ_API_KEY")       //nolint:errcheck
+	_ = os.Unsetenv("OPENAI_API_KEY")     //nolint:errcheck
+	_ = os.Unsetenv("OPENROUTER_API_KEY") //nolint:errcheck
 	defer func() {
 		if groqKey != "" {
-			_ = os.Setenv("GROQ_API_KEY", groqKey)
+			_ = os.Setenv("GROQ_API_KEY", groqKey) //nolint:errcheck
 		}
 		if openaiKey != "" {
-			_ = os.Setenv("OPENAI_API_KEY", openaiKey)
+			_ = os.Setenv("OPENAI_API_KEY", openaiKey) //nolint:errcheck
 		}
 		if openrouterKey != "" {
-			_ = os.Setenv("OPENROUTER_API_KEY", openrouterKey)
+			_ = os.Setenv("OPENROUTER_API_KEY", openrouterKey) //nolint:errcheck
 		}
 	}()
 

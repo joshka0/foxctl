@@ -105,7 +105,8 @@ Gate: no new features until this is solid.
         `test/golden/envelopes/` and assert their shape does not change
         accidentally.
     - `test/golden/envelopes/post_review_event.json` – canonical event shape.
-    - `test/golden/golden_test.go` `TestGoldenPostReviewEvent` – shape validation.
+    - `test/golden/golden_test.go` `TestGoldenPostReviewEvent` – shape
+      validation.
 
 Gate: post-review handler must be stable before semantic/symbol index jobs rely
 on it.
@@ -117,29 +118,29 @@ on it.
 **Focus:** stable naming, chunking, and embedding jobs.
 
 - **Unit tests**
-  - [ ] Naming + chunk ID stability:
+  - [x] Naming + chunk ID stability:
     - For a given `(workspace, path, chunk_bytes, overlap, cfg hash)`, ensure
       `file_embedding` / `file_embedding_chunk` names and spans are stable
       across re-runs.
-  - [ ] Behavior when config changes:
+  - [x] Behavior when config changes:
     - New `chunking_config_hash` produces a new set of chunk entries.
     - Old entries are marked deprecated or removed per spec.
 
 - **Job tests** (`semantic_index.init_files`, `semantic_index.update_files`)
-  - [ ] Given small fixture files, assert:
+  - [x] Given small fixture files, assert:
     - Correct number of `file_embedding` / `file_embedding_chunk` rows.
     - `result.digest` matches CAS contents or file snapshot.
-  - [ ] Update behavior:
+  - [x] Update behavior:
     - Editing a file with no chunking reuses the same `name`, updates `digest`
       and `embedding`.
     - Editing a chunked file reuses `chunk.id` and spans.
 
 - **Golden tests**
-  - [ ] Store example job result envelopes (summary + CAS artifact metadata) in
-        `test/golden/envelopes/semantic_index_*.jsonc`.
+  - [x] Store example job result envelopes (summary + CAS artifact metadata) in
+        `test/golden/envelopes/semantic-index-*.json`.
 
 - **Integration tests**
-  - [ ] Post-review → semantic index:
+  - [x] Post-review → semantic index:
     - Simulate a review, run post-review handler, assert semantic index job runs
       and produces expected entries.
 
@@ -150,26 +151,24 @@ on it.
 **Focus:** per-symbol parsing, call graph, and incremental updates.
 
 - **Unit tests**
-  - [ ] Tree-sitter extraction for Go fixtures:
+  - [x] Go extractor extraction for Go fixtures:
     - Symbols: ids, kinds, byte ranges.
     - Calls: edges between caller and callee.
-  - [ ] `file_meta` behavior:
+  - [x] `file_meta` behavior:
     - Unchanged file content → indexer skips work.
     - Changed file content → only affected symbols re-embedded.
 
 - **Incrementality tests**
-  - [ ] Add a new function to a file:
+  - [x] Add a new function to a file:
     - Only the new symbol gets an embedding.
-  - [ ] Modify one function in a “God file”:
+  - [x] Modify one function in a “God file”:
     - Unchanged symbols keep their embeddings.
 
 - **Golden tests**
-  - [ ] Store canonical `symbols` and `calls` table dumps for fixtures in
-        `test/golden/openapi/` or a new directory under
-        `test/golden/symbol_index/`.
+  - [x] Store canonical fixture dumps under `test/golden/symbol_index/`.
 
 - **Integration tests**
-  - [ ] Post-review triggered symbol index job:
+  - [x] Post-review triggered symbol index job:
     - Given a review touching multiple files, ensure only changed files are
       parsed and updated.
 
@@ -180,22 +179,27 @@ on it.
 **Focus:** live reads, snippet extraction, and CAS behavior.
 
 - **Unit/behavior tests**
-  - [ ] Given a small fixture file and candidates, assert:
+  - [x] Given a small fixture file and candidates, assert:
     - Correct `summary` counts.
     - Snippets cover expected lines.
-  - [ ] Limits behavior (`max_files`, `max_snippets`, `max_bytes_per_file`).
+  - [x] Limits behavior (`max_files`, `max_snippets`, `max_bytes_per_file`).
 
 - **Error tests**
-  - [ ] Path validation failures → `E_GUARD_VIOLATION` or `E_FILE_NOT_FOUND`.
-  - [ ] No usable candidates → `E_SWE_GREP_NO_CANDIDATES`.
+  - [ ] Align error codes to spec:
+    - Path validation failures → `E_GUARD_VIOLATION`.
+    - Missing candidate file → `E_FILE_NOT_FOUND`.
+    - No usable candidates → `E_SWE_GREP_NO_CANDIDATES`.
 
 - **Golden / CAS tests**
   - [ ] NDJSON artifact shape for multi-snippet results.
   - [ ] `meta.cas_digest` equals `data.artifact` digest.
 
 - **Integration tests**
-  - [ ] Combine with simple candidate generator (e.g. grep-based) and ensure a
-        full query → candidates → SWE Grep flow behaves as expected on fixtures.
+  - [x] Combine with simple candidate generator (e.g. hard-coded candidates) and
+        ensure a full query → candidates → SWE Grep flow behaves as expected on
+        fixtures.
+  - [ ] Add an inline-threshold test case where `artifact` is omitted when the
+        output fits inline limits.
 
 ---
 
@@ -204,16 +208,16 @@ on it.
 **Focus:** tools surface, patch format, and funnel behavior from agents.
 
 - **Tool unit tests**
-  - [ ] `code.symbol_search`:
+  - [x] `code.symbol_search`:
     - Given symbol index data, returns ranked candidates with expected fields.
-  - [ ] `code.swe_grep` tool:
+  - [x] `code.swe_grep` tool:
     - Correctly maps inputs to `code/swe_grep` and unwraps results.
 
 - **Patch round-trip tests**
-  - [ ] `code_diff` → `edit.apply_patch`:
+  - [x] `code/diff` → `edit.apply_structured_diff`:
     - Run `code_diff` on a fixture change to produce JSON diff.
-    - Feed that diff into `edit.apply_patch` and assert the resulting file
-      matches the expected content.
+    - Feed that diff into `edit.apply_structured_diff` and assert the resulting
+      file matches the expected content.
 
 - **Agent integration tests** (non-LLM or stubbed LLM)
   - [ ] A stub dspy-go Coding agent that calls:
@@ -227,9 +231,12 @@ on it.
 **Focus:** correctness of recorded events and exported episodes.
 
 - **Unit tests**
-  - [ ] Mapping from envelopes to `TrajectoryEvent`:
+  - [x] Capture hooks for `agentctl run`:
+    - Ensure `user_request` + `tool_result` events are persisted and correlated.
+    - Correlation uses `meta.correlation_id` (stored as `trace_id` internally).
+  - [ ] Mapping from agent tool calls to `TrajectoryEvent`:
     - Ensure tool calls for `code.symbol_search` / `code.swe_grep` are correctly
-      labeled and correlated via `meta.trace_id`, `meta.task_id`.
+      labeled and correlated.
 
 - **Export tests**
   - [ ] `trajectory.export` job:
@@ -247,15 +254,15 @@ on it.
 **Focus:** team storage and basic skills (if implemented).
 
 - **Unit tests**
-  - [ ] CRUD over `teams` and `team_members` tables.
+  - [x] CRUD over `teams` and `team_members` tables.
 
 - **Skill tests** (if `teams/manage.*` is implemented)
   - [ ] `teams/manage.list`, `.describe`, `.upsert`, `.add_member`,
         `.remove_member`.
 
 - **Integration tests**
-  - [ ] Mailbox routing to `team:<slug>` recipients and viewer-level queries
-        that join tasks/agents with teams.
+  - [x] Mailbox routing to `team:<slug>` recipients.
+  - [ ] Viewer-level queries that join tasks/agents with teams.
 
 ---
 

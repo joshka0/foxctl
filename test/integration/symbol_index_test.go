@@ -25,7 +25,10 @@ func setupMemoryStore(t *testing.T) *memory.Store {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = store.Close() //nolint:errcheck
+	})
 	return store
 }
 

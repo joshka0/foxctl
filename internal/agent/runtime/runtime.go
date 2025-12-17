@@ -16,7 +16,20 @@ import (
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/storage"
 )
+
+var traceIDContextKey = struct{ Name string }{Name: "agentctl.trace_id"}
+
+func traceIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(traceIDContextKey).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // Runtime manages agent sessions and lifecycle.
 type Runtime struct {
@@ -55,6 +68,13 @@ type Config struct {
 	// MaxConcurrentAgents is the maximum number of concurrent agent sessions.
 	// If > 0, Spawn() atomically enforces this limit to avoid TOCTOU races.
 	MaxConcurrentAgents int
+
+	// OpenMemoryStore provides access to named memory for retrieval tools like code.symbol_search.
+	// When nil, tools requiring named memory return empty results.
+	OpenMemoryStore func(context.Context) (storage.MemoryStore, error)
+
+	// TrajectoryStorageRoot enables agent tool call capture when set.
+	TrajectoryStorageRoot string
 }
 
 // SpawnHandler processes spawn requests from agents.
@@ -130,12 +150,28 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		cfg.RootActorID = cfg.ActorID
 	}
 
+	traceID := traceIDFromContext(ctx)
+	if traceID == "" {
+		traceID = ulid.Make().String()
+	}
+
 	// Create tools registry with telemetry recorder
 	recorder := &sessionRecorder{sessionID: sessionID}
 	toolsCfg := agenttools.Config{
-		WorkspaceRoot: r.config.WorkspaceRoot,
-		WorkspaceID:   cfg.WorkspaceID,
-		ActorID:       cfg.ActorID,
+		WorkspaceRoot:         r.config.WorkspaceRoot,
+		WorkspaceID:           cfg.WorkspaceID,
+		ActorID:               cfg.ActorID,
+		TaskID:                cfg.TaskID,
+		EpicID:                cfg.EpicID,
+		AgentRole:             string(cfg.Role),
+		TraceID:               traceID,
+		TrajectoryStorageRoot: r.config.TrajectoryStorageRoot,
+		OpenMemoryStore: func(ctx context.Context) (storage.MemoryStore, error) {
+			if r.config.OpenMemoryStore == nil {
+				return nil, fmt.Errorf("named memory store not configured")
+			}
+			return r.config.OpenMemoryStore(ctx)
+		},
 	}
 	toolsRegistry, err := agenttools.NewRegistry(toolsCfg, recorder)
 	if err != nil {

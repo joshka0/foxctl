@@ -8,6 +8,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/indexing/postreview"
+	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/rs/zerolog"
 )
 
@@ -68,6 +69,89 @@ func TestPostReviewHandler_HandleReviewApproved(t *testing.T) {
 	}
 	if result.Reason != "no_indexer_handler" {
 		t.Errorf("Reason = %q, want no_indexer_handler", result.Reason)
+	}
+}
+
+func TestPostReviewHandler_HandleReviewApproved_CapturesTrajectoryReviewResult(t *testing.T) {
+	ctx := context.Background()
+	store, cleanup := openTestEventStore(t)
+	defer cleanup()
+
+	trajRoot := t.TempDir()
+	trajStore, err := trajectory.Open(ctx, trajRoot)
+	if err != nil {
+		t.Fatalf("open trajectory store: %v", err)
+	}
+	t.Cleanup(func() {
+		// Test cleanup; error is not actionable.
+		_ = trajStore.Close() //nolint:errcheck
+	})
+
+	ur, err := trajStore.InsertUserRequest(ctx, trajectory.UserRequestCapture{ID: "req-1", WorkspaceID: "ws-1", Actor: "actor:human:test", Source: trajectory.SourceCLI, TS: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), Text: "do thing"})
+	if err != nil {
+		t.Fatalf("insert user request: %v", err)
+	}
+	_, err = trajStore.InsertTrajectory(ctx, trajectory.Trajectory{ID: "traj-1", WorkspaceID: "ws-1", RootRequestID: ur.ID, TaskIDs: []string{"task-1"}, TraceID: "trace-1", Status: trajectory.StatusPartial, CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatalf("insert trajectory: %v", err)
+	}
+
+	h := NewPostReviewHandler(PostReviewHandlerConfig{
+		EventStore:            store,
+		TrajectoryStorageRoot: trajRoot,
+		IndexerHandler:        nil,
+		Config:                indexing.DefaultPostReviewConfig(),
+		Logger:                zerolog.Nop(),
+	})
+
+	review := agent.ReviewArtifact{
+		ID:          "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+		WorkspaceID: "ws-1",
+		TaskID:      "task-1",
+		Kind:        "auto",
+		Status:      "ok",
+		Summary:     "looks good",
+	}
+
+	first, err := h.HandleReviewApproved(ctx, review, nil)
+	if err != nil {
+		t.Fatalf("HandleReviewApproved error: %v", err)
+	}
+	second, err := h.HandleReviewApproved(ctx, review, nil)
+	if err != nil {
+		t.Fatalf("HandleReviewApproved second error: %v", err)
+	}
+	if first.Event.ID != second.Event.ID {
+		t.Fatalf("expected handler to be idempotent")
+	}
+
+	events, err := trajStore.ListEvents(ctx, trajectory.EventFilter{TrajectoryID: "traj-1", Kind: trajectory.EventKindReviewResult})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 review_result event got %d", len(events))
+	}
+	if events[0].Meta == nil {
+		t.Fatalf("expected meta to be set")
+	}
+	if events[0].Meta.ReviewID != review.ID {
+		t.Fatalf("review_id = %q, want %q", events[0].Meta.ReviewID, review.ID)
+	}
+	if events[0].Meta.TaskID != "task-1" {
+		t.Fatalf("task_id = %q, want task-1", events[0].Meta.TaskID)
+	}
+	if events[0].Meta.TraceID != "trace-1" {
+		t.Fatalf("trace_id = %q, want trace-1", events[0].Meta.TraceID)
+	}
+	if events[0].DataArtifact != review.ID {
+		t.Fatalf("data_artifact = %q, want %q", events[0].DataArtifact, review.ID)
+	}
+	if events[0].Meta.CASDigest != review.ID {
+		t.Fatalf("meta.cas_digest = %q, want %q", events[0].Meta.CASDigest, review.ID)
+	}
+	if s, ok := events[0].DataInline["post_review_event_id"].(string); !ok || s != first.Event.ID {
+		t.Fatalf("post_review_event_id = %v, want %q", events[0].DataInline["post_review_event_id"], first.Event.ID)
 	}
 }
 

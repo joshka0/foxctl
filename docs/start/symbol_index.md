@@ -1,7 +1,7 @@
 # Code Symbol Index
 
 The code symbol index stores extracted symbols (functions, methods, types) and
-their call graph relationships in named memory. It refreshes automatically after
+their call relationships in named memory. It refreshes automatically after
 accepted reviews via the post-review pipeline.
 
 ## Post-Review Integration Flow
@@ -18,6 +18,7 @@ PostReviewHandler (internal/indexing/handler.go)
       ├── Emits PostReviewEvent with:
       │     workspace_id, task_id, review_id, reason
       │     files[{path, digest, change_kind, language, size_bytes}]
+      │     (note: files may be empty until the diff application layer is wired)
       │
       ▼
 Symbol Indexer (internal/indexing/symbol/indexer.go)
@@ -32,8 +33,11 @@ Symbol Indexer (internal/indexing/symbol/indexer.go)
       ▼
 Named Memory entries:
   - type="code_symbol"       → symbol definitions
-  - type="code_symbol_call"  → call graph edges
   - type="code_symbol_file_meta" → file freshness tracking
+
+Call relationships are currently recorded inside the `code_symbol` entry result
+as a `calls[]` list. Persisting call edges as separate `code_symbol_call` entries
+is tracked as a follow-up.
 ```
 
 ## Source Provenance

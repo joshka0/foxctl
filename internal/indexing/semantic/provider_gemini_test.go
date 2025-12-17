@@ -72,7 +72,8 @@ func TestGeminiProvider_Embed(t *testing.T) {
 		resp.Embedding.Values[1] = 0.2
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		// Mock server response; error would panic the test anyway.
+		_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -116,7 +117,8 @@ func TestGeminiProvider_EmbedBatch(t *testing.T) {
 		resp.Embeddings[2].Values[0] = 0.3
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
+		// Mock server response; error would panic the test anyway.
+		_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}))
 	defer server.Close()
 
@@ -161,7 +163,8 @@ func TestGeminiProvider_Embed_APIError(t *testing.T) {
 				Status:  "INVALID_ARGUMENT",
 			},
 		}
-		_ = json.NewEncoder(w).Encode(resp)
+		// Mock server response; error would panic the test anyway.
+		_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}))
 	defer server.Close()
 

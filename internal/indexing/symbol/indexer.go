@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/indexing"
@@ -207,6 +208,10 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	// Track new symbol digests and IDs
 	newDigests := make(map[string]string)
 	newSymbolIDs := make(map[string]bool)
+	nameToID := make(map[string]string)
+	for _, sym := range symbols {
+		nameToID[sym.Name] = sym.ID
+	}
 
 	var savedCount, skippedCount int
 
@@ -234,7 +239,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 				Str("path", file.Path).
 				Msg("failed to extract calls, proceeding without call graph")
 		} else {
-			calls = extractedCalls
+			calls = idx.resolveCallTargets(ctx, event.WorkspaceID, extractedCalls, nameToID)
 		}
 
 		if err := idx.saveSymbol(ctx, event, sym, calls); err != nil {
@@ -276,6 +281,67 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 	return nil
 }
 
+func (idx *Indexer) resolveCallTargets(ctx context.Context, workspace string, callNames []string, nameToID map[string]string) []string {
+	if len(callNames) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, callName := range callNames {
+		callName = strings.TrimSpace(callName)
+		if callName == "" {
+			continue
+		}
+		if id, ok := nameToID[callName]; ok {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+			continue
+		}
+
+		// Best-effort cross-file resolution by symbol name.
+		results, err := idx.memoryStore.Search(ctx, workspace, ":"+callName, 20)
+		if err != nil {
+			continue
+		}
+		type candidate struct {
+			id       string
+			filePath string
+		}
+		var candidates []candidate
+		for _, scored := range results {
+			entry := scored.Entry
+			if entry.Type != SymbolType {
+				continue
+			}
+			res, parseErr := UnmarshalResult(entry.Result)
+			if parseErr != nil {
+				continue
+			}
+			if res.Symbol.Name != callName {
+				continue
+			}
+			candidates = append(candidates, candidate{id: res.Symbol.ID, filePath: res.Symbol.FilePath})
+		}
+		if len(candidates) == 0 {
+			continue
+		}
+		sort.Slice(candidates, func(i, j int) bool {
+			if candidates[i].filePath != candidates[j].filePath {
+				return candidates[i].filePath < candidates[j].filePath
+			}
+			return candidates[i].id < candidates[j].id
+		})
+		chosen := candidates[0].id
+		if chosen != "" && !seen[chosen] {
+			seen[chosen] = true
+			out = append(out, chosen)
+		}
+	}
+	return out
+}
+
 // countLines counts the number of lines in content.
 func countLines(content []byte) int {
 	if len(content) == 0 {
@@ -315,11 +381,18 @@ func (idx *Indexer) deleteSymbol(ctx context.Context, workspace, filePath, symbo
 	symbolName := parts[1]
 
 	name := EntryName(workspace, filePath, symbolName)
-	return idx.memoryStore.Delete(ctx, name, workspace)
+	if err := idx.memoryStore.Delete(ctx, name, workspace); err != nil {
+		return err
+	}
+	return idx.deleteOutgoingCallEdges(ctx, workspace, symbolID)
 }
 
 // saveSymbol saves a symbol to the memory store.
 func (idx *Indexer) saveSymbol(ctx context.Context, event indexing.PostReviewEvent, sym Symbol, calls []string) error {
+	if err := idx.saveCallEdges(ctx, event.WorkspaceID, sym.ID, calls); err != nil {
+		return fmt.Errorf("save call edges: %w", err)
+	}
+
 	result := Result{
 		Symbol: sym,
 		Source: &Source{
@@ -350,6 +423,52 @@ func (idx *Indexer) saveSymbol(ctx context.Context, event indexing.PostReviewEve
 	}
 
 	return nil
+}
+
+func (idx *Indexer) saveCallEdges(ctx context.Context, workspace, sourceID string, targets []string) error {
+	if err := idx.deleteOutgoingCallEdges(ctx, workspace, sourceID); err != nil {
+		return err
+	}
+
+	seen := make(map[string]bool)
+	for _, targetID := range targets {
+		targetID = strings.TrimSpace(targetID)
+		if targetID == "" {
+			continue
+		}
+		if seen[targetID] {
+			continue
+		}
+		seen[targetID] = true
+
+		edge := CallEdge{
+			SourceID: sourceID,
+			TargetID: targetID,
+			Count:    1,
+		}
+		b, err := MarshalResult(edge)
+		if err != nil {
+			return err
+		}
+		name := callEdgeEntryName(workspace, sourceID, targetID)
+		_, err = idx.memoryStore.Save(ctx, storage.NamedEntry{
+			Name:      name,
+			Type:      CallEdgeType,
+			Workspace: workspace,
+			Summary:   fmt.Sprintf("call edge %s -> %s", sourceID, targetID),
+			Result:    b,
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (idx *Indexer) deleteOutgoingCallEdges(ctx context.Context, workspace, sourceID string) error {
+	prefix := fmt.Sprintf("call://%s/%s->", workspace, sourceID)
+	_, err := idx.memoryStore.DeleteByNamePrefix(ctx, workspace, prefix)
+	return err
 }
 
 // updateFileMetaFull updates the file meta entry with full symbol digest tracking.
@@ -512,7 +631,10 @@ func (idx *Indexer) readFileContent(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		// File cleanup in defer; error is not actionable.
+		_ = f.Close() //nolint:errcheck
+	}()
 
 	// Use LimitReader as additional safety even though we checked size
 	return io.ReadAll(io.LimitReader(f, maxReadFileSize))
