@@ -283,7 +283,7 @@ func (idx *Indexer) indexFile(ctx context.Context, event indexing.PostReviewEven
 
 func (idx *Indexer) resolveCallTargets(ctx context.Context, workspace string, callNames []string, nameToID map[string]string) []string {
 	if len(callNames) == 0 {
-		return nil
+		return []string{}
 	}
 	seen := make(map[string]bool)
 	var out []string
@@ -303,6 +303,11 @@ func (idx *Indexer) resolveCallTargets(ctx context.Context, workspace string, ca
 		// Best-effort cross-file resolution by symbol name.
 		results, err := idx.memoryStore.Search(ctx, workspace, ":"+callName, 20)
 		if err != nil {
+			idx.logger.Debug().
+				Err(err).
+				Str("workspace", workspace).
+				Str("call_name", callName).
+				Msg("failed to search for call target, proceeding without resolution")
 			continue
 		}
 		type candidate struct {
@@ -338,6 +343,9 @@ func (idx *Indexer) resolveCallTargets(ctx context.Context, workspace string, ca
 			seen[chosen] = true
 			out = append(out, chosen)
 		}
+	}
+	if out == nil {
+		return []string{}
 	}
 	return out
 }

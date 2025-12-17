@@ -61,7 +61,7 @@ func (s *sqlStore) Close() error {
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
-	dll := `
+	ddl := `
 CREATE TABLE IF NOT EXISTS teams (
 	workspace_id   TEXT NOT NULL,
 	team_id        TEXT NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS team_members (
 CREATE INDEX IF NOT EXISTS idx_team_members_workspace_team ON team_members(workspace_id, team_id);
 CREATE INDEX IF NOT EXISTS idx_team_members_workspace_actor ON team_members(workspace_id, actor_id);
 `
-	if _, err := db.ExecContext(ctx, dll); err != nil {
+	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("teams: migrate: %w", err)
 	}
 	return nil
@@ -207,7 +207,7 @@ LIMIT ?
 		_ = rows.Close() //nolint:errcheck
 	}()
 
-	var out []Team
+	out := make([]Team, 0)
 	for rows.Next() {
 		t, err := scanTeamRow(rows)
 		if err != nil {
@@ -310,7 +310,7 @@ LIMIT ?
 		_ = rows.Close() //nolint:errcheck
 	}()
 
-	var out []TeamMember
+	out := make([]TeamMember, 0)
 	for rows.Next() {
 		m, err := scanTeamMemberRow(rows)
 		if err != nil {
