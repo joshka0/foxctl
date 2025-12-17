@@ -96,35 +96,44 @@ func (r *Runner) OnFileChange(ctx context.Context, path string) {
 	}
 
 	for id, state := range r.watchers {
-		if r.matchesWatcher(relPath, state.cfg) {
+		matched, err := r.matchesWatcher(relPath, state.cfg)
+		if err != nil {
+			r.log.Warn().Err(err).Str("path", relPath).Str("watcher", id).Msg("pattern match error")
+			continue
+		}
+		if matched {
 			r.scheduleWatcher(ctx, id, state)
 		}
 	}
 }
 
-func (r *Runner) matchesWatcher(relPath string, cfg testwatch.WatcherConfig) bool {
+func (r *Runner) matchesWatcher(relPath string, cfg testwatch.WatcherConfig) (bool, error) {
 	// If no include patterns, match everything
 	if len(cfg.Include) == 0 {
-		return true
+		return true, nil
 	}
 
 	// Check include patterns
 	for _, pattern := range cfg.Include {
-		// Pattern match errors are treated as non-matches.
-		matched, _ := doublestar.Match(pattern, relPath) //nolint:errcheck
+		matched, err := doublestar.Match(pattern, relPath)
+		if err != nil {
+			return false, fmt.Errorf("match pattern %q for %q: %w", pattern, relPath, err)
+		}
 		if matched {
 			// Check exclude patterns
 			for _, excl := range cfg.Exclude {
-				// Pattern match errors are treated as non-matches.
-				excluded, _ := doublestar.Match(excl, relPath) //nolint:errcheck
+				excluded, err := doublestar.Match(excl, relPath)
+				if err != nil {
+					return false, fmt.Errorf("match exclude pattern %q for %q: %w", excl, relPath, err)
+				}
 				if excluded {
-					return false
+					return false, nil
 				}
 			}
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func (r *Runner) scheduleWatcher(ctx context.Context, id string, state *watcherState) {

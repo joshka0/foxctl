@@ -117,6 +117,13 @@ func (e *Executor) writeCacheMissError(input []byte) (bool, error) {
 		protocol.WithCacheKey(e.cacheKey),
 	)
 	env.Meta.CorrelID = e.options.CorrelationID
+
+	// Resolve input consistently: prefer passed input, fall back to options.Input
+	resolvedInput := input
+	if len(resolvedInput) == 0 {
+		resolvedInput = e.options.Input
+	}
+
 	if e.trajCapture == nil && e.cfg.Storage.Root != "" && strings.TrimSpace(e.options.Workspace) != "" {
 		capture, capErr := trajectorycapture.Start(e.ctx, trajectorycapture.StartOptions{
 			StorageRoot:     e.cfg.Storage.Root,
@@ -127,7 +134,7 @@ func (e *Executor) writeCacheMissError(input []byte) (bool, error) {
 			ProtocolCommand: e.handle.Manifest.Metadata.Name,
 			JobID:           "",
 			CorrelationID:   e.options.CorrelationID,
-			Input:           e.options.Input,
+			Input:           resolvedInput,
 		})
 		if capErr == nil {
 			e.trajCapture = capture
@@ -137,11 +144,7 @@ func (e *Executor) writeCacheMissError(input []byte) (bool, error) {
 	}
 	if e.trajCapture != nil {
 		if strings.HasPrefix(e.handle.Manifest.Metadata.Name, "hooks/") {
-			rawIn := input
-			if len(rawIn) == 0 {
-				rawIn = e.options.Input
-			}
-			capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, rawIn, "", e.options.CorrelationID)
+			capErr := e.trajCapture.CaptureHookCall(e.ctx, e.handle.Manifest.Metadata.Name, resolvedInput, "", e.options.CorrelationID)
 			errs.Ignore(capErr, "trajectory capture hook call")
 		}
 		// Envelope marshalling; error is nil for valid envelope structs.

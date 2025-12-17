@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -92,6 +93,13 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 		}
 		cfg.WorkspaceRoot = wd
 	}
+
+	// Ensure workspace root is absolute for reliable filepath.Rel calls
+	absWorkspace, err := filepath.Abs(cfg.WorkspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve absolute workspace path: %w", err)
+	}
+	cfg.WorkspaceRoot = absWorkspace
 
 	if cfg.MaxFileSize <= 0 {
 		cfg.MaxFileSize = 1024 * 1024 // 1MB default
