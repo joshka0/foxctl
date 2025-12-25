@@ -194,3 +194,296 @@ func TestRemovePinnedRequiresUnpin(t *testing.T) {
 		t.Fatalf("remove after unpin: %v", err)
 	}
 }
+
+func TestListEmpty(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	objects, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(objects) != 0 {
+		t.Fatalf("expected empty list, got %d objects", len(objects))
+	}
+}
+
+func TestListMultiple(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	// Add multiple objects
+	contents := []string{"object1", "object2", "object3"}
+	digests := make([]string, len(contents))
+	for i, content := range contents {
+		obj, err := store.Put(ctx, bytes.NewBufferString(content), "text/plain", nil)
+		if err != nil {
+			t.Fatalf("put %d: %v", i, err)
+		}
+		digests[i] = obj.Digest
+	}
+
+	objects, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(objects) != 3 {
+		t.Fatalf("expected 3 objects, got %d", len(objects))
+	}
+}
+
+func TestAddTags(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	obj, err := store.Put(ctx, bytes.NewBufferString("tagged content"), "text/plain", []string{"initial"})
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Verify initial tags
+	head, err := store.Head(ctx, obj.Digest)
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	if len(head.Tags) != 1 || head.Tags[0] != "initial" {
+		t.Fatalf("expected initial tags, got %v", head.Tags)
+	}
+
+	// Add more tags
+	err = store.AddTags(ctx, obj.Digest, []string{"tag2", "tag3"})
+	if err != nil {
+		t.Fatalf("add tags: %v", err)
+	}
+
+	// Verify all tags
+	head, err = store.Head(ctx, obj.Digest)
+	if err != nil {
+		t.Fatalf("head after add: %v", err)
+	}
+	if len(head.Tags) != 3 {
+		t.Fatalf("expected 3 tags, got %d: %v", len(head.Tags), head.Tags)
+	}
+}
+
+func TestAddTagsDeduplicate(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	obj, err := store.Put(ctx, bytes.NewBufferString("content"), "text/plain", []string{"tag1"})
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Add duplicate tag
+	err = store.AddTags(ctx, obj.Digest, []string{"tag1", "tag2"})
+	if err != nil {
+		t.Fatalf("add tags: %v", err)
+	}
+
+	head, err := store.Head(ctx, obj.Digest)
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	// Should have 2 unique tags
+	if len(head.Tags) != 2 {
+		t.Fatalf("expected 2 tags (deduplicated), got %d: %v", len(head.Tags), head.Tags)
+	}
+}
+
+func TestClose(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	err = store.Close()
+	if err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+func TestDuplicatePut(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	content := "duplicate content"
+	obj1, err := store.Put(ctx, bytes.NewBufferString(content), "text/plain", []string{"first"})
+	if err != nil {
+		t.Fatalf("first put: %v", err)
+	}
+
+	obj2, err := store.Put(ctx, bytes.NewBufferString(content), "text/plain", []string{"second"})
+	if err != nil {
+		t.Fatalf("second put: %v", err)
+	}
+
+	// Should have same digest
+	if obj1.Digest != obj2.Digest {
+		t.Fatalf("expected same digest, got %s and %s", obj1.Digest, obj2.Digest)
+	}
+
+	// Tags should be merged
+	head, err := store.Head(ctx, obj1.Digest)
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	if len(head.Tags) != 2 {
+		t.Fatalf("expected 2 tags after dup put, got %d: %v", len(head.Tags), head.Tags)
+	}
+}
+
+func TestGetNotFound(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	_, _, err = store.Get(ctx, "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+	if err == nil {
+		t.Fatal("expected error for nonexistent digest")
+	}
+}
+
+func TestHeadNotFound(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	_, err = store.Head(ctx, "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+	if err == nil {
+		t.Fatal("expected error for nonexistent digest")
+	}
+}
+
+func TestRemoveNotFound(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	err = store.Remove(ctx, "sha256:0000000000000000000000000000000000000000000000000000000000000000")
+	// Should either error or be a no-op
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		t.Logf("remove nonexistent returned: %v", err)
+	}
+}
+
+func TestPinUnpinNotFound(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	fakeDigest := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+	// Pin nonexistent should error
+	err = store.Pin(ctx, fakeDigest)
+	if err == nil {
+		t.Log("pin nonexistent: no error (may be ok)")
+	}
+
+	// Unpin nonexistent should be safe
+	err = store.Unpin(ctx, fakeDigest)
+	if err != nil {
+		t.Logf("unpin nonexistent: %v", err)
+	}
+}
+
+func TestAddTagsNotFound(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	err = store.AddTags(ctx, "sha256:0000000000000000000000000000000000000000000000000000000000000000", []string{"tag"})
+	if err == nil {
+		t.Fatal("expected error adding tags to nonexistent object")
+	}
+}
+
+func TestPutEmptyContent(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	obj, err := store.Put(ctx, bytes.NewBufferString(""), "text/plain", nil)
+	if err != nil {
+		t.Fatalf("put empty: %v", err)
+	}
+
+	if obj.Size != 0 {
+		t.Fatalf("expected size 0, got %d", obj.Size)
+	}
+
+	// Should be retrievable
+	rc, _, err := store.Get(ctx, obj.Digest)
+	if err != nil {
+		t.Fatalf("get empty: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	if len(data) != 0 {
+		t.Fatalf("expected empty data, got %d bytes", len(data))
+	}
+}
+
+func TestMetadataKind(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	store, err := NewStore(root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+
+	kinds := []string{"application/json", "image/png", "text/markdown"}
+	for _, kind := range kinds {
+		obj, err := store.Put(ctx, bytes.NewBufferString("content-"+kind), kind, nil)
+		if err != nil {
+			t.Fatalf("put %s: %v", kind, err)
+		}
+
+		head, err := store.Head(ctx, obj.Digest)
+		if err != nil {
+			t.Fatalf("head %s: %v", kind, err)
+		}
+		if head.Kind != kind {
+			t.Errorf("expected kind %q, got %q", kind, head.Kind)
+		}
+	}
+}

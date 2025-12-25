@@ -1,0 +1,304 @@
+package agent
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+)
+
+func TestBoardMessageKind_Constants(t *testing.T) {
+	tests := []struct {
+		kind BoardMessageKind
+		want string
+	}{
+		{BoardMessageKindInstruction, "instruction"},
+		{BoardMessageKindInfo, "info"},
+		{BoardMessageKindAlert, "alert"},
+		{BoardMessageKindReviewRequest, "review_request"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			if string(tt.kind) != tt.want {
+				t.Errorf("BoardMessageKind = %q, want %q", tt.kind, tt.want)
+			}
+		})
+	}
+}
+
+func TestBoardMessageStatus_Constants(t *testing.T) {
+	tests := []struct {
+		status BoardMessageStatus
+		want   string
+	}{
+		{BoardMessageStatusUnread, "unread"},
+		{BoardMessageStatusRead, "read"},
+		{BoardMessageStatusAcked, "acked"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.status), func(t *testing.T) {
+			if string(tt.status) != tt.want {
+				t.Errorf("BoardMessageStatus = %q, want %q", tt.status, tt.want)
+			}
+		})
+	}
+}
+
+func TestReservationMode_Constants(t *testing.T) {
+	tests := []struct {
+		mode ReservationMode
+		want string
+	}{
+		{ReservationModeExclusive, "exclusive"},
+		{ReservationModeShared, "shared"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.mode), func(t *testing.T) {
+			if string(tt.mode) != tt.want {
+				t.Errorf("ReservationMode = %q, want %q", tt.mode, tt.want)
+			}
+		})
+	}
+}
+
+func TestFileReservation_IsExpired(t *testing.T) {
+	now := time.Now().UTC()
+
+	tests := []struct {
+		name        string
+		reservation FileReservation
+		want        bool
+	}{
+		{
+			name: "not expired",
+			reservation: FileReservation{
+				ExpiresAt: now.Add(1 * time.Hour),
+			},
+			want: false,
+		},
+		{
+			name: "expired",
+			reservation: FileReservation{
+				ExpiresAt: now.Add(-1 * time.Hour),
+			},
+			want: true,
+		},
+		{
+			name: "just expired",
+			reservation: FileReservation{
+				ExpiresAt: now.Add(-1 * time.Second),
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.reservation.IsExpired()
+			if got != tt.want {
+				t.Errorf("IsExpired() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAdminSender(t *testing.T) {
+	tests := []struct {
+		sender string
+		want   bool
+	}{
+		{"admin", true},
+		{"actor:admin:user", true},
+		{"actor:admin:test123", true},
+		{"user", false},
+		{"actor:user:test", false},
+		{"admin_user", false},
+		{"", false},
+		{"actor:admin", false}, // Too short to have prefix "actor:admin:"
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.sender, func(t *testing.T) {
+			got := IsAdminSender(tt.sender)
+			if got != tt.want {
+				t.Errorf("IsAdminSender(%q) = %v, want %v", tt.sender, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsOverseerSender(t *testing.T) {
+	tests := []struct {
+		sender string
+		want   bool
+	}{
+		{"actor:system:overseer", true},
+		{"overseer", false},
+		{"actor:overseer", false},
+		{"actor:system:other", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.sender, func(t *testing.T) {
+			got := IsOverseerSender(tt.sender)
+			if got != tt.want {
+				t.Errorf("IsOverseerSender(%q) = %v, want %v", tt.sender, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBoardMessage_JSONSerialization(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	msg := BoardMessage{
+		ID:          "msg-123",
+		WorkspaceID: "ws-456",
+		TaskID:      "task-789",
+		Stream:      "coordination",
+		Sender:      "actor:system:overseer",
+		Recipient:   "*",
+		Kind:        BoardMessageKindInstruction,
+		Priority:    1,
+		AckRequired: true,
+		Status:      BoardMessageStatusUnread,
+		Subject:     "Task Assignment",
+		Body:        "Please review PR #42",
+		CreatedAt:   now,
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got BoardMessage
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.ID != msg.ID {
+		t.Errorf("ID = %q, want %q", got.ID, msg.ID)
+	}
+	if got.Kind != msg.Kind {
+		t.Errorf("Kind = %v, want %v", got.Kind, msg.Kind)
+	}
+	if got.Priority != msg.Priority {
+		t.Errorf("Priority = %d, want %d", got.Priority, msg.Priority)
+	}
+	if got.AckRequired != msg.AckRequired {
+		t.Errorf("AckRequired = %v, want %v", got.AckRequired, msg.AckRequired)
+	}
+}
+
+func TestFileReservation_JSONSerialization(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	res := FileReservation{
+		ID:          "res-123",
+		WorkspaceID: "ws-456",
+		TaskID:      "task-789",
+		Path:        "src/main.go",
+		Holder:      "agent-abc",
+		Mode:        ReservationModeExclusive,
+		Reason:      "Refactoring main function",
+		ExpiresAt:   now.Add(10 * time.Minute),
+		CreatedAt:   now,
+	}
+
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got FileReservation
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.ID != res.ID {
+		t.Errorf("ID = %q, want %q", got.ID, res.ID)
+	}
+	if got.Mode != res.Mode {
+		t.Errorf("Mode = %v, want %v", got.Mode, res.Mode)
+	}
+	if got.Path != res.Path {
+		t.Errorf("Path = %q, want %q", got.Path, res.Path)
+	}
+}
+
+func TestReservationConflict_JSONSerialization(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	conflict := ReservationConflict{
+		Path:      "src/utils.go",
+		Holder:    "agent-xyz",
+		Mode:      "exclusive",
+		TaskID:    "task-101",
+		Reason:    "Adding new utility functions",
+		ExpiresAt: now.Add(5 * time.Minute),
+	}
+
+	data, err := json.Marshal(conflict)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got ReservationConflict
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.Path != conflict.Path {
+		t.Errorf("Path = %q, want %q", got.Path, conflict.Path)
+	}
+	if got.Holder != conflict.Holder {
+		t.Errorf("Holder = %q, want %q", got.Holder, conflict.Holder)
+	}
+}
+
+func TestInboxFilter_JSONSerialization(t *testing.T) {
+	filter := InboxFilter{
+		WorkspaceID: "ws-123",
+		ActorID:     "agent-456",
+		TaskID:      "task-789",
+		Stream:      "coordination",
+		OnlyUnread:  true,
+		Limit:       50,
+	}
+
+	data, err := json.Marshal(filter)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var got InboxFilter
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if got.WorkspaceID != filter.WorkspaceID {
+		t.Errorf("WorkspaceID = %q, want %q", got.WorkspaceID, filter.WorkspaceID)
+	}
+	if got.OnlyUnread != filter.OnlyUnread {
+		t.Errorf("OnlyUnread = %v, want %v", got.OnlyUnread, filter.OnlyUnread)
+	}
+	if got.Limit != filter.Limit {
+		t.Errorf("Limit = %d, want %d", got.Limit, filter.Limit)
+	}
+}
+
+func TestConstants(t *testing.T) {
+	if DefaultStream != "coordination" {
+		t.Errorf("DefaultStream = %q, want %q", DefaultStream, "coordination")
+	}
+	if DefaultPriority != 3 {
+		t.Errorf("DefaultPriority = %d, want %d", DefaultPriority, 3)
+	}
+	if DefaultReservationTTL != 10*time.Minute {
+		t.Errorf("DefaultReservationTTL = %v, want %v", DefaultReservationTTL, 10*time.Minute)
+	}
+	if BroadcastRecipient != "*" {
+		t.Errorf("BroadcastRecipient = %q, want %q", BroadcastRecipient, "*")
+	}
+}
