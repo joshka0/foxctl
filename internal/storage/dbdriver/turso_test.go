@@ -339,4 +339,3 @@ func TestConfigFromPlatformSettings(t *testing.T) {
 		t.Errorf("Expected 768 dimensions, got %d", cfg.LibSQL.VectorDimensions)
 	}
 }
-

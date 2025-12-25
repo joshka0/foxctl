@@ -51,8 +51,8 @@ const (
 	NetworkSolanaDevnet  = "solana-devnet"
 
 	// USDC contract addresses
-	USDCBaseMainnet  = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
-	USDCBaseSepolia  = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+	USDCBaseMainnet = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+	USDCBaseSepolia = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 
 	// RPC endpoints
 	RPCBaseMainnet = "https://mainnet.base.org"
@@ -611,13 +611,13 @@ func initLocalWallet(ctx context.Context, rc *runner.RunnerContext, network, key
 
 		// Save generated key
 		keyDir := filepath.Join(os.Getenv("HOME"), ".agentctl", "keys")
-		if err := os.MkdirAll(keyDir, 0700); err != nil {
+		if err := os.MkdirAll(keyDir, 0o700); err != nil {
 			return nil, fmt.Errorf("create key directory: %w", err)
 		}
 
 		keyPath = filepath.Join(keyDir, fmt.Sprintf("x402_%s.key", network))
 		keyHex := hex.EncodeToString(privateKey.D.Bytes())
-		if err := os.WriteFile(keyPath, []byte(keyHex), 0600); err != nil {
+		if err := os.WriteFile(keyPath, []byte(keyHex), 0o600); err != nil {
 			return nil, fmt.Errorf("save key file: %w", err)
 		}
 	}
@@ -657,11 +657,11 @@ func saveWalletConfig(rc *runner.RunnerContext, wallet *WalletInfo, keyPath stri
 	}
 
 	configPath := walletConfigPath(rc)
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0600)
+	return os.WriteFile(configPath, data, 0o600)
 }
 
 func loadWalletConfig(rc *runner.RunnerContext) (*WalletConfig, error) {

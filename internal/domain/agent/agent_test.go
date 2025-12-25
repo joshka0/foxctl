@@ -34,8 +34,8 @@ func TestMarshalPolicyJSON(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "empty policy",
-			policy: Policy{},
+			name:    "empty policy",
+			policy:  Policy{},
 			wantErr: false,
 		},
 		{

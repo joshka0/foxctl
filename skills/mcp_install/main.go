@@ -17,10 +17,10 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/rs/zerolog"
 
+	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"gopkg.in/yaml.v3"
 )
 

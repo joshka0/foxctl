@@ -32,14 +32,14 @@ type Input struct {
 
 // Output defines the skill output.
 type Output struct {
-	SessionID     string       `json:"session_id"`
-	ArchivePath   string       `json:"archive_path,omitempty"`
-	OriginalSize  int64        `json:"original_size"`
+	SessionID      string      `json:"session_id"`
+	ArchivePath    string      `json:"archive_path,omitempty"`
+	OriginalSize   int64       `json:"original_size"`
 	CompressedSize int64       `json:"compressed_size,omitempty"`
-	ChunkCount    int          `json:"chunk_count"`
-	Chunks        []ChunkInfo  `json:"chunks,omitempty"`
-	Status        string       `json:"status"`
-	Message       string       `json:"message"`
+	ChunkCount     int         `json:"chunk_count"`
+	Chunks         []ChunkInfo `json:"chunks,omitempty"`
+	Status         string      `json:"status"`
+	Message        string      `json:"message"`
 }
 
 // ChunkInfo provides info about a created chunk.
@@ -55,13 +55,13 @@ type ChunkInfo struct {
 
 // JSONLMessage represents a message in the Claude Code JSONL format.
 type JSONLMessage struct {
-	Type         string          `json:"type"`
-	Role         string          `json:"role,omitempty"`
-	Message      json.RawMessage `json:"message,omitempty"`
-	Content      json.RawMessage `json:"content,omitempty"`
-	ToolUse      *ToolUseInfo    `json:"tool_use,omitempty"`
-	ToolResult   *ToolResultInfo `json:"tool_result,omitempty"`
-	Timestamp    string          `json:"timestamp,omitempty"`
+	Type       string          `json:"type"`
+	Role       string          `json:"role,omitempty"`
+	Message    json.RawMessage `json:"message,omitempty"`
+	Content    json.RawMessage `json:"content,omitempty"`
+	ToolUse    *ToolUseInfo    `json:"tool_use,omitempty"`
+	ToolResult *ToolResultInfo `json:"tool_result,omitempty"`
+	Timestamp  string          `json:"timestamp,omitempty"`
 }
 
 // ToolUseInfo represents tool use in a message.
@@ -78,9 +78,9 @@ type ToolResultInfo struct {
 }
 
 const (
-	command            = "session/archive"
-	defaultMaxChunk    = 4000 // tokens approximation
-	maxPreviewLen      = 200
+	command         = "session/archive"
+	defaultMaxChunk = 4000 // tokens approximation
+	maxPreviewLen   = 200
 )
 
 func main() {
@@ -181,7 +181,7 @@ func main() {
 
 	// Create archives directory
 	archiveDir := filepath.Join(agentctlHome, "archives")
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
 		fail("DIR_ERROR", fmt.Errorf("create archives dir: %w", err))
 	}
 

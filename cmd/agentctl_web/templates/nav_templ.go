@@ -5,8 +5,10 @@ package templates
 
 //lint:file-ignore SA4006 This context is only used if a nested component is present.
 
-import "github.com/a-h/templ"
-import templruntime "github.com/a-h/templ/runtime"
+import (
+	"github.com/a-h/templ"
+	templruntime "github.com/a-h/templ/runtime"
+)
 
 type navItem struct {
 	Path  string
@@ -51,7 +53,7 @@ func Nav(currentPath string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		for _, item := range navItems {
-			var templ_7745c5c3_Var2 = []any{"nav-item", templ.KV("active", currentPath == item.Path)}
+			templ_7745c5c3_Var2 := []any{"nav-item", templ.KV("active", currentPath == item.Path)}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var2...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err

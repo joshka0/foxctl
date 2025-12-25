@@ -1528,8 +1528,8 @@ func TestErrorMessages(t *testing.T) {
 	ctx := context.Background()
 
 	errors := []struct {
-		name    string
-		fn      func() error
+		name     string
+		fn       func() error
 		contains string
 	}{
 		{

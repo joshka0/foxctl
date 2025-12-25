@@ -63,11 +63,11 @@ type Signature struct {
 
 // Parameter defines a single input or output field.
 type Parameter struct {
-	Name        string      `yaml:"name" json:"name"`
-	Type        string      `yaml:"type" json:"type"`
-	Required    bool        `yaml:"required" json:"required"`
-	Description string      `yaml:"description" json:"description"`
-	Default     any `yaml:"default" json:"default"`
+	Name        string `yaml:"name" json:"name"`
+	Type        string `yaml:"type" json:"type"`
+	Required    bool   `yaml:"required" json:"required"`
+	Description string `yaml:"description" json:"description"`
+	Default     any    `yaml:"default" json:"default"`
 }
 
 // Help describes skill-level help and example workflows.

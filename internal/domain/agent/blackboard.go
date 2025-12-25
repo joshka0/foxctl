@@ -31,9 +31,9 @@ type BlackboardFilter struct {
 
 // BlackboardItem represents the payload structure for blackboard posts.
 type BlackboardItem struct {
-	TaskID   string                 `json:"task_id,omitempty"`
-	Priority int                    `json:"priority,omitempty"`
-	Tags     []string               `json:"tags,omitempty"`
+	TaskID   string         `json:"task_id,omitempty"`
+	Priority int            `json:"priority,omitempty"`
+	Tags     []string       `json:"tags,omitempty"`
 	Data     map[string]any `json:"data,omitempty"`
 }
 

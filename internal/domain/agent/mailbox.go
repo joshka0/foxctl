@@ -34,32 +34,32 @@ type Message struct {
 
 // AskData represents the data payload for an agent.ask message.
 type AskData struct {
-	AskID     string                 `json:"ask_id"`
-	Kind      string                 `json:"kind"` // context|secret|approval|toolhint|other
-	Question  string                 `json:"question"`
-	NeedsByMS int64                  `json:"needs_by_ms,omitempty"`
+	AskID     string         `json:"ask_id"`
+	Kind      string         `json:"kind"` // context|secret|approval|toolhint|other
+	Question  string         `json:"question"`
+	NeedsByMS int64          `json:"needs_by_ms,omitempty"`
 	Context   map[string]any `json:"context,omitempty"`
 }
 
 // ReplyData represents the data payload for an agent.reply message.
 type ReplyData struct {
-	AskID  string                 `json:"ask_id"`
+	AskID  string         `json:"ask_id"`
 	Answer map[string]any `json:"answer"`
 }
 
 // CmdData represents the data payload for an agent.cmd message.
 type CmdData struct {
-	CmdID  string                 `json:"cmd_id"`
-	Action string                 `json:"action"`
-	Skill  string                 `json:"skill,omitempty"`
+	CmdID  string         `json:"cmd_id"`
+	Action string         `json:"action"`
+	Skill  string         `json:"skill,omitempty"`
 	Args   map[string]any `json:"args,omitempty"`
 }
 
 // EventData represents the data payload for an agent.event message.
 type EventData struct {
-	EventID   string                 `json:"event_id"`
-	Kind      string                 `json:"kind"` // heartbeat|liveness-failed|etc
-	JobCount  int                    `json:"job_count,omitempty"`
-	CacheHits int                    `json:"cache_hits,omitempty"`
+	EventID   string         `json:"event_id"`
+	Kind      string         `json:"kind"` // heartbeat|liveness-failed|etc
+	JobCount  int            `json:"job_count,omitempty"`
+	CacheHits int            `json:"cache_hits,omitempty"`
 	Custom    map[string]any `json:"custom,omitempty"`
 }

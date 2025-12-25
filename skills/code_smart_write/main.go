@@ -133,7 +133,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Write file unless dry_run
 	edited := false
 	if !in.DryRun && original != modified {
-		if err := os.WriteFile(absPath, []byte(modified), 0644); err != nil {
+		if err := os.WriteFile(absPath, []byte(modified), 0o644); err != nil {
 			return fmt.Errorf("write file: %w", err)
 		}
 		edited = true

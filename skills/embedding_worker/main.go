@@ -46,14 +46,14 @@ type Input struct {
 
 // Output is the skill output.
 type Output struct {
-	Processed   int            `json:"processed"`
-	Errors      int            `json:"errors"`
-	Remaining   int            `json:"remaining"`
-	Status      string         `json:"status"` // "completed", "timeout", "no_jobs", "error"
-	DurationMs  int64          `json:"duration_ms"`
-	LastError   string         `json:"last_error,omitempty"`
-	Stats       *QueueSnapshot `json:"stats,omitempty"`
-	Message     string         `json:"message"`
+	Processed  int            `json:"processed"`
+	Errors     int            `json:"errors"`
+	Remaining  int            `json:"remaining"`
+	Status     string         `json:"status"` // "completed", "timeout", "no_jobs", "error"
+	DurationMs int64          `json:"duration_ms"`
+	LastError  string         `json:"last_error,omitempty"`
+	Stats      *QueueSnapshot `json:"stats,omitempty"`
+	Message    string         `json:"message"`
 }
 
 // QueueSnapshot is a summary of queue state after processing.
