@@ -107,3 +107,4 @@ steps:
       - CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
     depends_on:
       - cgo-build-and-tests
+# Woodpecker CI enabled
