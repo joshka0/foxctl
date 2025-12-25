@@ -1,0 +1,32 @@
+# Build CI Image - Woodpecker
+# Mirrors GitHub Actions ci-image workflow
+
+when:
+  - event: push
+    branch: main
+    path:
+      - "Dockerfile.ci"
+      - ".woodpecker/ci-image.yml"
+      - "go.mod"
+      - "go.sum"
+  - event: manual
+
+steps:
+  build-and-push:
+    image: woodpeckerci/plugin-docker-buildx
+    pull: false
+    privileged: true
+    settings:
+      registry: ghcr.io
+      username:
+        from_secret: docker_username
+      password:
+        from_secret: docker_password
+      repo: ghcr.io/jkatigb/agentctl-ci
+      dockerfile: Dockerfile.ci
+      context: .
+      platforms: linux/amd64
+      tags:
+        - go1.24
+        - latest
+        - "build-${CI_PIPELINE_NUMBER}"
