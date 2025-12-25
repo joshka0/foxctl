@@ -71,9 +71,7 @@ func complex(x int) int {
 
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout, work)
-	defer func() {
-		_ = rc.Close() //nolint:errcheck
-	}()
+	defer rc.Close()
 
 	in := input{
 		Path:         "main.go",
@@ -137,9 +135,7 @@ func TestAnalyzeDirectory(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout, work)
-	defer func() {
-		_ = rc.Close() //nolint:errcheck
-	}()
+	defer rc.Close()
 
 	in := input{
 		Path:         ".",

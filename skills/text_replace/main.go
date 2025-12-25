@@ -50,6 +50,7 @@ type input struct {
 	Operations          []operation `json:"operations"`
 	Backup              bool        `json:"backup"`
 	BackupSuffix        string      `json:"backup_suffix"`
+	CASBackup           bool        `json:"cas_backup"`
 	ValidateSyntax      bool        `json:"validate_syntax"`
 	SkipBinary          *bool       `json:"skip_binary"`
 	PreserveLineEndings *bool       `json:"preserve_line_endings"`
@@ -70,6 +71,7 @@ type fileChange struct {
 	Replacements int      `json:"replacements"`
 	Changes      []change `json:"changes,omitempty"`
 	BackupPath   string   `json:"backup_path,omitempty"`
+	CASDigest    string   `json:"cas_digest,omitempty"`
 	Skipped      bool     `json:"skipped,omitempty"`
 	SkipReason   string   `json:"skip_reason,omitempty"`
 	Validated    bool     `json:"validated,omitempty"`
@@ -114,7 +116,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("text/replace", "ECONFIG", err)
+		fail("text/replace", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -228,6 +230,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		}
 
 		fileChanges, err := processFile(
+			ctx,
+			rc,
 			entry.Path,
 			workspace,
 			replacers,
@@ -237,6 +241,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 			in.DryRun,
 			in.Backup,
 			in.BackupSuffix,
+			in.CASBackup,
 			*in.PreserveLineEndings,
 			in.ShowDiff,
 		)
@@ -287,6 +292,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"files_processed":    len(entries),
 		"operations_count":   len(ops),
 		"backup_enabled":     in.Backup,
+		"cas_backup_enabled": in.CASBackup,
 		"validation_enabled": in.ValidateSyntax,
 	}
 
@@ -296,8 +302,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
-		data["artifact_kind"] = artifact.Kind
-		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("text/replace", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
@@ -470,10 +474,7 @@ func isBinaryFile(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer func() {
-		// File cleanup in defer; error is not actionable.
-		_ = f.Close() //nolint:errcheck
-	}()
+	defer f.Close()
 
 	// Read first 512 bytes
 	buf := make([]byte, 512)
@@ -501,12 +502,15 @@ func detectLineEnding(content string) string {
 }
 
 func processFile(
+	ctx context.Context,
+	rc *runner.RunnerContext,
 	path, workspace string,
 	replacers []replacer,
 	lineRange *lineRange,
 	rangeStartRe, rangeEndRe *regexp.Regexp,
 	dryRun, backup bool,
 	backupSuffix string,
+	casBackup bool,
 	preserveLineEndings, showDiff bool,
 ) (fileChange, error) {
 	// Read file
@@ -587,13 +591,24 @@ func processFile(
 
 	// Write back if not dry run and changes were made
 	if !dryRun && modified {
-		// Create backup if requested
+		// Create file backup if requested
 		if backup {
 			backupPath := path + backupSuffix
 			if err := os.WriteFile(backupPath, content, 0o644); err != nil {
 				return fileChange{}, fmt.Errorf("create backup %s: %w", backupPath, err)
 			}
 			result.BackupPath = relativeTo(workspace, backupPath)
+		}
+
+		// Store in CAS for undo if requested
+		if casBackup && rc.CASStore != nil {
+			obj, err := rc.CASStore.Put(ctx, bytes.NewReader(content), "text/plain", []string{
+				"backup", "text/replace", fmt.Sprintf("path:%s", relativeTo(workspace, path)),
+			})
+			if err != nil {
+				return fileChange{}, fmt.Errorf("CAS backup %s: %w", path, err)
+			}
+			result.CASDigest = obj.Digest
 		}
 
 		// Write modified content with original line endings

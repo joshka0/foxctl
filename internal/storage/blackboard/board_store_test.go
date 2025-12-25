@@ -68,10 +68,7 @@ func TestBoardStore_BroadcastMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Send broadcast message
 	msg := agent.BoardMessage{
@@ -108,10 +105,7 @@ func TestBoardStore_AckMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Send message
 	msg := agent.BoardMessage{
@@ -152,10 +146,7 @@ func TestBoardStore_ReserveAndRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Reserve a file
 	res := agent.FileReservation{
@@ -205,10 +196,7 @@ func TestBoardStore_ReservationConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// First actor reserves exclusively
 	res := agent.FileReservation{
@@ -244,10 +232,7 @@ func TestBoardStore_SharedReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// First actor reserves shared
 	res1 := agent.FileReservation{
@@ -280,10 +265,7 @@ func TestBoardStore_ExpiredReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create already-expired reservation
 	res := agent.FileReservation{
@@ -324,10 +306,7 @@ func TestBoardStore_PriorityOrdering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Send messages with different priorities (out of order)
 	msgs := []agent.BoardMessage{

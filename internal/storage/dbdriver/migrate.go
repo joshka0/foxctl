@@ -262,13 +262,13 @@ func (m *Migrator) migrateTableData(ctx context.Context, tableName string, colum
 	)
 
 	// Migrate in batches
-	batch := make([][]interface{}, 0, m.options.BatchSize)
+	batch := make([][]any, 0, m.options.BatchSize)
 	totalRows := int64(0)
 
 	for rows.Next() {
 		// Create slice to hold column values
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
@@ -314,12 +314,12 @@ func (m *Migrator) migrateTableData(ctx context.Context, tableName string, colum
 }
 
 // insertBatch inserts a batch of rows
-func (m *Migrator) insertBatch(ctx context.Context, insertQuery string, batch [][]interface{}) error {
+func (m *Migrator) insertBatch(ctx context.Context, insertQuery string, batch [][]any) error {
 	tx, err := m.target.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }() //nolint:errcheck
+	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx, insertQuery)
 	if err != nil {
@@ -382,8 +382,8 @@ func (m *Migrator) ExportToSQL(ctx context.Context, writer io.Writer) error {
 		}
 
 		for rows.Next() {
-			values := make([]interface{}, len(columns))
-			valuePtrs := make([]interface{}, len(columns))
+			values := make([]any, len(columns))
+			valuePtrs := make([]any, len(columns))
 			for i := range values {
 				valuePtrs[i] = &values[i]
 			}

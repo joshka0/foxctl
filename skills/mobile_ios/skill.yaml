@@ -1,0 +1,122 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: mobile/ios
+  version: 0.1.0
+  description: |
+    iOS Simulator automation via Facebook IDB.
+    Supports device management, app lifecycle, UI interaction,
+    accessibility inspection, and debugging.
+
+    Includes Expo-specific operations for mobile development workflows.
+  tags: [mobile, ios, simulator, idb, testing, expo]
+distribution:
+  type: exec
+  exec:
+    entry: skills/mobile_ios/mobile_ios
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: mobile/ios
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      enum: [list_devices, device_info, boot, install, launch, terminate,
+             screenshot, tap, swipe, type_text, button, ui_tree, describe_point,
+             logs, open_url, set_location, approve_permissions, record_start,
+             record_stop, crash_logs, add_media, clear_keychain, focus,
+             shake, expo_deep_link, expo_reload]
+      description: Operation to perform
+    - name: udid
+      type: string
+      required: false
+      description: Device UDID (optional if only one simulator running)
+    - name: app
+      type: string
+      required: false
+      description: App path (.ipa/.app) or bundle ID
+    - name: x
+      type: integer
+      required: false
+      description: X coordinate for tap/swipe/describe_point
+    - name: y
+      type: integer
+      required: false
+      description: Y coordinate for tap/swipe/describe_point
+    - name: x2
+      type: integer
+      required: false
+      description: End X coordinate for swipe
+    - name: y2
+      type: integer
+      required: false
+      description: End Y coordinate for swipe
+    - name: text
+      type: string
+      required: false
+      description: Text for type_text operation
+    - name: url
+      type: string
+      required: false
+      description: URL for open_url operation
+    - name: button
+      type: string
+      required: false
+      enum: [HOME, LOCK, SIRI, APPLE_PAY, SIDE_BUTTON]
+      description: Button for button operation
+    - name: permissions
+      type: array
+      required: false
+      description: Permissions to approve [photos, camera, contacts, location, microphone, notifications]
+    - name: lat
+      type: number
+      required: false
+      description: Latitude for set_location
+    - name: long
+      type: number
+      required: false
+      description: Longitude for set_location
+    - name: output
+      type: string
+      required: false
+      description: Output path for screenshot/record_start
+    - name: expo_url
+      type: string
+      required: false
+      description: Expo deep link URL (e.g., exp://192.168.1.1:8081)
+    - name: media_path
+      type: string
+      required: false
+      description: Path to media file for add_media operation
+  returns:
+    - name: devices
+      type: array
+      description: List of devices (for list_devices)
+    - name: device
+      type: object
+      description: Device info (for device_info)
+    - name: elements
+      type: array
+      description: UI elements (for ui_tree)
+    - name: element
+      type: object
+      description: Single UI element (for describe_point)
+    - name: screenshot
+      type: string
+      description: Screenshot artifact digest
+    - name: logs
+      type: string
+      description: Log output or artifact digest
+    - name: success
+      type: boolean
+      description: Operation success status
+    - name: message
+      type: string
+      description: Status message
+capabilities:
+  network: none
+  filesystem:
+    - type: workdir
+  pure: false

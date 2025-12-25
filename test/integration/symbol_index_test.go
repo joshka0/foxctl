@@ -1,4 +1,7 @@
+//go:build integration
+
 // Package integration contains integration tests for agentctl subsystems.
+// These tests require the "integration" build tag to run.
 package integration
 
 import (
@@ -25,10 +28,7 @@ func setupMemoryStore(t *testing.T) *memory.Store {
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { store.Close() })
 	return store
 }
 

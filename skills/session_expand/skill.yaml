@@ -1,0 +1,71 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/expand
+  version: 0.1.0
+  description: "Retrieve turns for a session to view conversation flow"
+  tags: ["session", "memory", "turns", "conversation"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_expand/session_expand
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: session/expand
+  parameters:
+    - name: session_id
+      type: string
+      required: true
+      description: "The session ID to expand"
+    - name: errors_only
+      type: boolean
+      required: false
+      description: "Only return turns with errors (default: false)"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of turns to return (default: 100)"
+returns:
+  - name: session_id
+    type: string
+    description: "The session ID"
+  - name: session
+    type: object
+    description: "Session metadata (project, summary, decisions, etc.)"
+  - name: turns
+    type: array
+    description: "List of conversation turns with metadata"
+  - name: total_turns
+    type: integer
+    description: "Total number of turns returned"
+  - name: error_count
+    type: integer
+    description: "Number of turns that had errors"
+  - name: status
+    type: string
+    description: "Status of the expand operation"
+  - name: message
+    type: string
+    description: "Human-readable status message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+examples:
+  - name: "Expand a session"
+    input:
+      session_id: "01HXYZ..."
+    description: "Get all turns for a specific session"
+  - name: "View only errors"
+    input:
+      session_id: "01HXYZ..."
+      errors_only: true
+    description: "Get only turns that had errors for debugging"
+  - name: "Limited expansion"
+    input:
+      session_id: "01HXYZ..."
+      limit: 20
+    description: "Get the first 20 turns of a session"

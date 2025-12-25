@@ -7,6 +7,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/scheduler"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
 
@@ -68,15 +69,15 @@ func init() {
 	if err := schedulerSetWeightCmd.MarkFlagRequired("weight"); err != nil {
 		// This should never happen unless there's a programmer error (flag doesn't exist)
 		// Log to stderr and exit gracefully rather than panicking
-		_, _ = fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'weight' flag as required: %v\n", err) //nolint:errcheck
-		os.Exit(1)
+		logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+		logger.Fatal().Err(err).Str("flag", "weight").Msg("Failed to mark flag as required")
 	}
 }
 
 func runSchedulerStats(_ *cobra.Command, _ []string) error {
 	stats := globalScheduler.Stats()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"virtual_time":     stats.VirtualTime,
 		"queued_jobs":      stats.QueuedJobs,
 		"namespace_queues": stats.NamespaceQueues,
@@ -104,7 +105,7 @@ func runSchedulerSetWeight(cmd *cobra.Command, args []string) error {
 
 	globalScheduler.SetWeight(namespace, schedulerWeight)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"namespace": namespace,
 		"weight":    schedulerWeight,
 		"action":    "set",
@@ -127,7 +128,7 @@ func runSchedulerGetWeight(_ *cobra.Command, args []string) error {
 
 	weight := globalScheduler.GetWeight(namespace)
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"namespace": namespace,
 		"weight":    weight,
 	}

@@ -41,7 +41,7 @@ func StoreReviewArtifact(ctx context.Context, cfg config.Config, art agent.Revie
 	if err != nil {
 		return art, fmt.Errorf("open cas store: %w", err)
 	}
-	defer errs.Ignore(store.Close(), "close cas store")
+	defer func() { errs.Ignore(store.Close(), "close cas store") }()
 
 	// Optionally store a large body payload first.
 	if len(body) > 0 {

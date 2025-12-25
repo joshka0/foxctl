@@ -286,10 +286,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	if err != nil {
 		return err
 	}
-	defer func() {
-		// Store cleanup in defer; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	filter := trajectory.ListFilter{
 		WorkspaceID: in.WorkspaceID,
@@ -320,7 +317,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		return rc.Emit("trajectory.export", secrets.RedactMap(data), "application/json", envelope.Meta{Runner: "exec"})
 	}
 
-	count, digest, sizeBytes, err := writeEpisodesToCAS(ctx, exp, filter, rc.CASStore)
+	count, digest, err := writeEpisodesToCAS(ctx, exp, filter, rc.CASStore)
 	if err != nil {
 		return err
 	}
@@ -335,9 +332,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"count":  count,
 			"format": "ndjson",
 		},
-		"artifact":            digest,
-		"artifact_kind":       "application/x-ndjson",
-		"artifact_size_bytes": sizeBytes,
+		"artifact": digest,
 	}
 
 	return rc.Emit("trajectory.export", secrets.RedactMap(data), "application/json", envelope.Meta{Runner: "exec"})
@@ -394,7 +389,8 @@ func estimateEpisodesBytes(ctx context.Context, exp exporter, filter trajectory.
 
 func writeEpisodesToCAS(ctx context.Context, exp exporter, filter trajectory.ListFilter, store interface {
 	Put(ctx context.Context, r io.Reader, kind string, tags []string) (storage.CASObject, error)
-}) (int, string, int64, error) {
+},
+) (int, string, error) {
 	pr, pw := io.Pipe()
 	type result struct {
 		count int
@@ -413,22 +409,20 @@ func writeEpisodesToCAS(ctx context.Context, exp exporter, filter trajectory.Lis
 			resCh <- result{count: count, err: err}
 			return
 		}
-		// Pipe close in goroutine; error is not actionable.
-		_ = pw.Close() //nolint:errcheck
+		pw.Close()
 		resCh <- result{count: count, err: nil}
 	}()
 
 	obj, err := store.Put(ctx, pr, "application/x-ndjson", []string{"trajectory.export"})
-	// Pipe close; error is not actionable.
-	_ = pr.Close() //nolint:errcheck
+	pr.Close()
 	res := <-resCh
 	if err != nil {
-		return res.count, "", 0, err
+		return res.count, "", err
 	}
 	if res.err != nil {
-		return res.count, "", 0, res.err
+		return res.count, "", res.err
 	}
-	return res.count, obj.Digest, obj.Size, nil
+	return res.count, obj.Digest, nil
 }
 
 func fail(command string, code string, err error) {

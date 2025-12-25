@@ -30,10 +30,7 @@ func TestSemanticIndexerWithPostReviewHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	logger := zerolog.Nop()
 

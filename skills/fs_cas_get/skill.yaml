@@ -1,0 +1,44 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: fs/cas_get
+  version: 0.1.0
+  description: "Retrieve content from CAS by digest"
+  tags: ["fs", "cas", "get", "artifact"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/fs_cas_get/fs_cas_get
+io:
+  format: JSON
+  inline_output_kb: 4
+signature:
+  command: fs/cas_get
+  parameters:
+    - name: digest
+      type: string
+      required: true
+      description: "CAS digest (sha256:...)"
+    - name: output
+      type: string
+      required: false
+      description: "Optional output path (defaults to temp file)"
+returns:
+  - name: path
+    type: string
+    description: "Path where content was written"
+  - name: digest
+    type: string
+    description: "CAS digest of the content"
+  - name: size
+    type: integer
+    description: "Size in bytes"
+  - name: kind
+    type: string
+    description: "Content type"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+    - type: tmp
+  pure: false

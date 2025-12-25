@@ -1,0 +1,45 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: optimize/reflect
+  version: 0.1.0
+  description: "Generate reflections and insights from trajectory data"
+  tags: ["optimize", "reflect", "insights", "analysis"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/optimize_reflect/reflect
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: optimize/reflect
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root path"
+    - name: role
+      type: string
+      required: true
+      description: "Agent role to reflect on"
+    - name: trajectory_id
+      type: string
+      required: false
+      description: "Specific trajectory ID to reflect on"
+returns:
+  - name: reflection
+    type: object
+    description: "Reflection on specific trajectory"
+  - name: summary
+    type: object
+    description: "Summary of reflections across trajectories"
+  - name: improvements
+    type: array
+    description: "Suggested improvements"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+    - type: workdir
+  pure: false

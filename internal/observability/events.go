@@ -157,7 +157,6 @@ type SweGrepEvent struct {
 	FilesRelevant   int       `json:"files_relevant"`
 	SnippetsEmitted int       `json:"snippets_emitted"`
 	HasArtifact     bool      `json:"has_artifact"`
-	ArtifactKind    string    `json:"artifact_kind,omitempty"`
 	DurationMS      int64     `json:"duration_ms,omitempty"`
 	Source          string    `json:"source"` // "run" | "cache" | "job"
 }
@@ -167,7 +166,6 @@ func NewSweGrepEvent(
 	workspaceID, question string,
 	candidates, filesConsidered, filesRelevant, snippetsEmitted int,
 	hasArtifact bool,
-	artifactKind string,
 	durationMS int64,
 	source string,
 ) SweGrepEvent {
@@ -181,7 +179,6 @@ func NewSweGrepEvent(
 		FilesRelevant:   filesRelevant,
 		SnippetsEmitted: snippetsEmitted,
 		HasArtifact:     hasArtifact,
-		ArtifactKind:    artifactKind,
 		DurationMS:      durationMS,
 		Source:          source,
 	}

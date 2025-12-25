@@ -7,6 +7,8 @@ import (
 
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
+	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 // registerMailTools registers mailbox/communication tools.
@@ -104,28 +106,68 @@ func (r *Registry) registerMailTools() error {
 		return fmt.Errorf("register mail.ack: %w", err)
 	}
 
+	// mail.reserve - reserve files
+	reserveTool := dstools.NewFuncTool(
+		"mail.reserve",
+		"Reserve files for exclusive or shared access.",
+		models.InputSchema{
+			Type: "object",
+			Properties: map[string]models.ParameterSchema{
+				"paths": {
+					Type:        "array",
+					Description: "List of file paths to reserve",
+					Required:    true,
+				},
+				"mode": {
+					Type:        "string",
+					Description: "Reservation mode: exclusive, shared (default exclusive)",
+				},
+				"ttl_seconds": {
+					Type:        "integer",
+					Description: "Time-to-live in seconds (default 600)",
+				},
+				"reason": {
+					Type:        "string",
+					Description: "Reason for reservation (defaults to active task title)",
+				},
+			},
+		},
+		r.wrapWithTelemetry("mail.reserve", r.mailReserve),
+	)
+	if err := r.tools.Register(reserveTool); err != nil {
+		return fmt.Errorf("register mail.reserve: %w", err)
+	}
+
+	// mail.release - release reservations
+	releaseTool := dstools.NewFuncTool(
+		"mail.release",
+		"Release file reservations.",
+		models.InputSchema{
+			Type: "object",
+			Properties: map[string]models.ParameterSchema{
+				"paths": {
+					Type:        "array",
+					Description: "List of file paths to release (optional if reservation_ids provided)",
+				},
+				"reservation_ids": {
+					Type:        "array",
+					Description: "List of reservation IDs to release (optional if paths provided)",
+				},
+			},
+		},
+		r.wrapWithTelemetry("mail.release", r.mailRelease),
+	)
+	if err := r.tools.Register(releaseTool); err != nil {
+		return fmt.Errorf("register mail.release: %w", err)
+	}
+
 	return nil
 }
 
-// MailMessage represents a message in the mailbox.
-type MailMessage struct {
-	ID          string    `json:"id"`
-	From        string    `json:"from"`
-	To          string    `json:"to"`
-	Subject     string    `json:"subject"`
-	Body        string    `json:"body"`
-	Kind        string    `json:"kind"`
-	Priority    int       `json:"priority"`
-	AckRequired bool      `json:"ack_required"`
-	Read        bool      `json:"read"`
-	Timestamp   time.Time `json:"timestamp"`
-}
-
 // mailSend implements the mail.send tool.
-// Note: This is a stub - in production it would use the agentctl mailbox.
 func (r *Registry) mailSend(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	if err := ctx.Err(); err != nil {
-		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
+	if r.openBoardStore == nil {
+		return errorResult("board store not configured"), nil
 	}
 
 	recipient, ok := args["recipient"].(string)
@@ -143,12 +185,12 @@ func (r *Registry) mailSend(ctx context.Context, args map[string]any) (*models.C
 		return errorResult("body is required"), nil
 	}
 
-	kind := "info"
-	if k, ok := args["kind"].(string); ok {
-		kind = k
+	kind := agent.BoardMessageKindInfo
+	if k, ok := args["kind"].(string); ok && k != "" {
+		kind = agent.BoardMessageKind(k)
 	}
 
-	priority := 2
+	priority := agent.DefaultPriority
 	if p, ok := args["priority"].(float64); ok {
 		priority = int(p)
 	}
@@ -158,33 +200,40 @@ func (r *Registry) mailSend(ctx context.Context, args map[string]any) (*models.C
 		ackRequired = a
 	}
 
-	// Stub implementation - would send via agentctl mailbox
-	message := MailMessage{
-		ID:          fmt.Sprintf("msg_%d", time.Now().UnixNano()),
-		From:        r.config.ActorID,
-		To:          recipient,
-		Subject:     subject,
-		Body:        body,
+	store, err := r.openBoardStore(ctx)
+	if err != nil {
+		return errorResult(fmt.Sprintf("open board store: %v", err)), nil
+	}
+	defer func() { errspkg.Ignore(store.Close(), "close board store") }()
+
+	msg := &agent.BoardMessage{
+		WorkspaceID: r.config.WorkspaceID,
+		TaskID:      r.config.TaskID,
+		Stream:      agent.DefaultStream,
+		Sender:      r.config.ActorID,
+		Recipient:   recipient,
 		Kind:        kind,
 		Priority:    priority,
 		AckRequired: ackRequired,
-		Read:        false,
-		Timestamp:   time.Now(),
+		Subject:     subject,
+		Body:        body,
+	}
+
+	if err := store.SendMessage(ctx, msg); err != nil {
+		return errorResult(fmt.Sprintf("send message: %v", err)), nil
 	}
 
 	return successResult(map[string]any{
-		"message_id": message.ID,
+		"message_id": msg.ID,
 		"sent_to":    recipient,
 		"success":    true,
-		"note":       "Stub implementation - connect to agentctl mailbox for real delivery",
 	}), nil
 }
 
 // mailInbox implements the mail.inbox tool.
-// Note: This is a stub - in production it would read from the agentctl mailbox.
 func (r *Registry) mailInbox(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	if err := ctx.Err(); err != nil {
-		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
+	if r.openBoardStore == nil {
+		return errorResult("board store not configured"), nil
 	}
 
 	unreadOnly := true
@@ -197,37 +246,36 @@ func (r *Registry) mailInbox(ctx context.Context, args map[string]any) (*models.
 		limit = int(l)
 	}
 
-	_ = unreadOnly
-	_ = limit
+	store, err := r.openBoardStore(ctx)
+	if err != nil {
+		return errorResult(fmt.Sprintf("open board store: %v", err)), nil
+	}
+	defer func() { errspkg.Ignore(store.Close(), "close board store") }()
 
-	// Stub implementation - returns placeholder data
-	messages := []MailMessage{
-		{
-			ID:          "msg_example_001",
-			From:        "overseer",
-			To:          r.config.ActorID,
-			Subject:     "Welcome",
-			Body:        "Welcome to the agent system. This is a placeholder message.",
-			Kind:        "info",
-			Priority:    2,
-			AckRequired: false,
-			Read:        false,
-			Timestamp:   time.Now().Add(-1 * time.Hour),
-		},
+	filter := agent.InboxFilter{
+		WorkspaceID: r.config.WorkspaceID,
+		ActorID:     r.config.ActorID,
+		OnlyUnread:  unreadOnly,
+		Limit:       limit,
+	}
+	// Note: We could filter by kind if InboxFilter supported it, but it doesn't currently.
+	// We'll rely on client-side filtering if needed, or update filter spec.
+
+	messages, err := store.Inbox(ctx, filter)
+	if err != nil {
+		return errorResult(fmt.Sprintf("fetch inbox: %v", err)), nil
 	}
 
 	return successResult(map[string]any{
 		"messages": messages,
 		"count":    len(messages),
-		"note":     "Stub implementation - connect to agentctl mailbox for real messages",
 	}), nil
 }
 
 // mailAck implements the mail.ack tool.
-// Note: This is a stub - in production it would update the agentctl mailbox.
 func (r *Registry) mailAck(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
-	if err := ctx.Err(); err != nil {
-		return errorResult(fmt.Sprintf("context cancelled: %v", err)), nil
+	if r.openBoardStore == nil {
+		return errorResult("board store not configured"), nil
 	}
 
 	messageID, ok := args["message_id"].(string)
@@ -235,17 +283,167 @@ func (r *Registry) mailAck(ctx context.Context, args map[string]any) (*models.Ca
 		return errorResult("message_id is required"), nil
 	}
 
-	response := ""
-	if r, ok := args["response"].(string); ok {
-		response = r
+	store, err := r.openBoardStore(ctx)
+	if err != nil {
+		return errorResult(fmt.Sprintf("open board store: %v", err)), nil
 	}
+	defer func() { errspkg.Ignore(store.Close(), "close board store") }()
 
-	_ = response
+	count, err := store.AckMessages(ctx, r.config.WorkspaceID, r.config.ActorID, []string{messageID})
+	if err != nil {
+		return errorResult(fmt.Sprintf("ack message: %v", err)), nil
+	}
 
 	return successResult(map[string]any{
 		"message_id":   messageID,
 		"acknowledged": true,
+		"count":        count,
 		"success":      true,
-		"note":         "Stub implementation - connect to agentctl mailbox for real acknowledgment",
+	}), nil
+}
+
+// mailReserve implements the mail.reserve tool.
+func (r *Registry) mailReserve(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	if r.openBoardStore == nil {
+		return errorResult("board store not configured"), nil
+	}
+
+	pathsRaw, ok := args["paths"].([]any)
+	if !ok {
+		return errorResult("paths must be an array"), nil
+	}
+	var paths []string
+	for _, p := range pathsRaw {
+		if ps, ok := p.(string); ok {
+			resolved, err := r.resolvePath(ps)
+			if err != nil {
+				return errorResult(fmt.Sprintf("invalid path %q: %v", ps, err)), nil
+			}
+			paths = append(paths, resolved)
+		}
+	}
+	if len(paths) == 0 {
+		return errorResult("paths cannot be empty"), nil
+	}
+
+	mode := agent.ReservationModeExclusive
+	if m, ok := args["mode"].(string); ok && m != "" {
+		mode = agent.ReservationMode(m)
+	}
+
+	ttlSeconds := 600
+	if t, ok := args["ttl_seconds"].(float64); ok && t > 0 {
+		ttlSeconds = int(t)
+	}
+
+	reason := ""
+	if s, ok := args["reason"].(string); ok {
+		reason = s
+	}
+
+	store, err := r.openBoardStore(ctx)
+	if err != nil {
+		return errorResult(fmt.Sprintf("open board store: %v", err)), nil
+	}
+	defer func() { errspkg.Ignore(store.Close(), "close board store") }()
+
+	// Check conflicts
+	conflicts, err := store.CheckConflicts(ctx, r.config.WorkspaceID, paths, r.config.ActorID, mode)
+	if err != nil {
+		return errorResult(fmt.Sprintf("check conflicts: %v", err)), nil
+	}
+	if len(conflicts) > 0 {
+		return successResult(map[string]any{
+			"success":   false,
+			"conflicts": conflicts,
+			"error":     "reservation conflict",
+		}), nil
+	}
+
+	expiresAt := time.Now().UTC().Add(time.Duration(ttlSeconds) * time.Second)
+	var reserved []string
+
+	for _, p := range paths {
+		res := &agent.FileReservation{
+			WorkspaceID: r.config.WorkspaceID,
+			TaskID:      r.config.TaskID,
+			Path:        p,
+			Holder:      r.config.ActorID,
+			Mode:        mode,
+			Reason:      reason,
+			ExpiresAt:   expiresAt,
+		}
+		if err := store.Reserve(ctx, res); err != nil {
+			return errorResult(fmt.Sprintf("reserve %q: %v", p, err)), nil
+		}
+		reserved = append(reserved, p)
+	}
+
+	return successResult(map[string]any{
+		"reserved":   reserved,
+		"expires_at": expiresAt,
+		"success":    true,
+	}), nil
+}
+
+// mailRelease implements the mail.release tool.
+func (r *Registry) mailRelease(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+	if r.openBoardStore == nil {
+		return errorResult("board store not configured"), nil
+	}
+
+	var paths []string
+	if pRaw, ok := args["paths"].([]any); ok {
+		for _, p := range pRaw {
+			if ps, ok := p.(string); ok {
+				resolved, err := r.resolvePath(ps)
+				if err != nil {
+					return errorResult(fmt.Sprintf("invalid path %q: %v", ps, err)), nil
+				}
+				paths = append(paths, resolved)
+			}
+		}
+	}
+
+	var reservationIDs []string
+	if idsRaw, ok := args["reservation_ids"].([]any); ok {
+		for _, id := range idsRaw {
+			if ids, ok := id.(string); ok {
+				reservationIDs = append(reservationIDs, ids)
+			}
+		}
+	}
+
+	if len(paths) == 0 && len(reservationIDs) == 0 {
+		return errorResult("paths or reservation_ids required"), nil
+	}
+
+	store, err := r.openBoardStore(ctx)
+	if err != nil {
+		return errorResult(fmt.Sprintf("open board store: %v", err)), nil
+	}
+	defer func() { errspkg.Ignore(store.Close(), "close board store") }()
+
+	totalReleased := 0
+
+	if len(paths) > 0 {
+		count, err := store.Release(ctx, r.config.WorkspaceID, r.config.ActorID, paths)
+		if err != nil {
+			return errorResult(fmt.Sprintf("release by paths: %v", err)), nil
+		}
+		totalReleased += count
+	}
+
+	if len(reservationIDs) > 0 {
+		count, err := store.ReleaseByID(ctx, reservationIDs)
+		if err != nil {
+			return errorResult(fmt.Sprintf("release by ids: %v", err)), nil
+		}
+		totalReleased += count
+	}
+
+	return successResult(map[string]any{
+		"released_count": totalReleased,
+		"success":        true,
 	}), nil
 }

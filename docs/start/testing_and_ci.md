@@ -1,7 +1,7 @@
 # Start Here: Testing & CI Expectations for agentctl
 
-This document expands on the brief testing notes in `AGENTS.md`. It explains
-how tests, coverage, and CI fit together so agents and humans can reason about
+This document expands on the brief testing notes in `AGENTS.md`. It explains how
+tests, coverage, and CI fit together so agents and humans can reason about
 "done" correctly.
 
 ---
@@ -24,10 +24,17 @@ These are the core commands you should assume exist when proposing or verifying
 changes. See `Makefile` for the authoritative definitions.
 
 - `make test` – unit tests (no network), all packages.
+- `make test-short` – unit tests with `-short` flag (fastest feedback loop).
 - `make test-race` – unit tests with `-race`, excluding the vector storage
   package which requires special handling.
+- `make test-cgo-short` – unit tests with CGO enabled and `-tags=libsqlite3`.
+- `make test-integration` – integration tests in `test/integration/...` (may
+  require network/LLM APIs; gated with `//go:build integration`).
+- `make test-integration-cmd` – cmd integration tests in `cmd/agentctl/cmd/...`
+  (requires `make skills-build` first; gated with `//go:build integration`).
 - `make lint` – `golangci-lint` + `staticcheck` + `govet`.
 - `make fmt` – `gofumpt` formatting.
+- `make build-cgo` – build the CGO-enabled CLI with `-tags=libsqlite3`.
 - `make check-coverage` – run tests with coverage and enforce **local**
   thresholds:
   - Lines: **≥ 85%**
@@ -36,6 +43,28 @@ changes. See `Makefile` for the authoritative definitions.
 
 > CI enforces a lower coverage floor (currently 40%) but local development
 > should aim for the stricter `check-coverage` target.
+
+---
+
+## CGO builds (libsql/Turso)
+
+Some subsystems (notably libSQL/Turso drivers) require CGO.
+
+When CGO is enabled, agentctl's dependency graph can include both
+`github.com/tursodatabase/go-libsql` and `github.com/mattn/go-sqlite3`. Both can
+embed SQLite, which causes linker errors like `duplicate symbol '_sqlite3_*'`.
+
+To avoid that, CGO builds/tests should include the `libsqlite3` build tag so
+`go-sqlite3` links against the system SQLite library instead of embedding its
+own:
+
+```bash
+make build-cgo
+make test-cgo-short
+```
+
+On CI (Debian/Ubuntu) this requires `libsqlite3-dev`. On macOS, install Homebrew
+SQLite so the expected headers/libs exist under `/opt/homebrew/opt/sqlite`.
 
 ---
 
@@ -54,9 +83,38 @@ To avoid linker conflicts:
 CGO_ENABLED=1 go test -race -tags vector ./internal/storage/vector/...
 ```
 
-Under `-race` or `-tags vector`, libSQL/Turso drivers are compiled out via
-build tags and replaced with clear runtime errors instead of linking embedded
-SQLite twice.
+Under `-race` or `-tags vector`, libSQL/Turso drivers are compiled out via build
+tags and replaced with clear runtime errors instead of linking embedded SQLite
+twice.
+
+---
+
+## Integration Tests
+
+Integration tests live in two places, both gated with `//go:build integration`:
+
+1. **`test/integration/`** – Full integration tests that may require network
+   access, LLM API keys (e.g., `AGENTCTL_LLM_API_KEY`, `GEMINI_API_KEY`), or
+   external binaries. These test end-to-end workflows like agent spawning,
+   symbol indexing, and the SWE Grep pipeline.
+
+2. **`cmd/agentctl/cmd/`** – Command integration tests that verify CLI behavior
+   with real skill binaries. Requires `make skills-build` before running.
+
+Run them via:
+
+```bash
+make test-integration       # test/integration/... (may need API keys)
+make test-integration-cmd   # cmd/agentctl/cmd/... (needs skills-build)
+```
+
+### CGO Inheritance Gotcha
+
+When running tests with `CGO_ENABLED=1` (e.g., `make test-cgo-short`), be aware
+that subprocess builds inherit the CGO setting. Skills are pure Go and don't
+require CGO, so test helpers that build skills should explicitly set
+`CGO_ENABLED=0` to avoid CGO toolchain errors. See `cmd/agentctl/cmd/run_test.go`
+for an example of the correct pattern.
 
 ---
 
@@ -67,7 +125,8 @@ these kinds:
 
 - **Envelope & protocol:**
   - Valid/invalid envelopes
-  - Large-output → CAS wrapper (summary + artifact + `meta.cas_digest`)
+  - Large-output → CAS wrapper (summary + artifact + optional `meta.cas_digest`
+    matching it)
   - Error envelopes with actionable `error.code` + `data.hint`
 - **CAS:**
   - Integrity failures (digest mismatch)
@@ -96,9 +155,8 @@ Live integration tests (e.g. real OpenAPI calls, live LLM providers) should be
 The test infrastructure is designed to give fast, local feedback and surface it
 back to agents:
 
-- `agentctl watch tests` – daemon that watches the workspace and runs
-  configured test commands (see `cmd/agentctl/cmd/watch.go` and
-  `internal/testwatch/`).
+- `agentctl watch tests` – daemon that watches the workspace and runs configured
+  test commands (see `cmd/agentctl/cmd/watch.go` and `internal/testwatch/`).
 - Status is persisted in SQLite (`~/.agentctl/storage/test_watch.db`) via the
   `testwatch` store.
 - The `hooks/test_feedback` skill reads this store and returns a summary of
@@ -123,8 +181,8 @@ using a pre-warmed Go image built from `Dockerfile.ci`. Key jobs:
   floor (currently 40%).
 - **race/tests/coverage** – additional jobs for race detection and coverage
   reporting, aligned with local `make` targets.
-- **LLM planner integration** – gated on env vars and secrets; only runs when
-  an OpenRouter API key is configured.
+- **LLM planner integration** – gated on env vars and secrets; only runs when an
+  OpenRouter API key is configured.
 
 Agents proposing CI changes should:
 
@@ -137,8 +195,8 @@ Agents proposing CI changes should:
 ## Related Documents
 
 - `AGENTS.md` – high-level expectations and guardrails for agents.
-- `docs/spec/core_profile_v1.md` – canonical Core Profile spec (envelopes,
-  CAS, jobs, memory, OpenAPI skill).
+- `docs/spec/core_profile_v1.md` – canonical Core Profile spec (envelopes, CAS,
+  jobs, memory, OpenAPI skill).
 - `docs/impl_plan/universal_swe_grep_and_agents_testing.md` – phase-by-phase
   test plan for the SWE Grep, symbol/semantic index, and agents work.
 - `docs/ci/github_checks.md`, `docs/ci/prcomments.md` – CI-related skills and

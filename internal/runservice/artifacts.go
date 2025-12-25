@@ -15,11 +15,11 @@ import (
 )
 
 func (e *Executor) handleArtifacts(jobID string, result []byte) error {
-	casStore, err := cas.NewStore(e.cfg.Paths.CAS)
+	casStore, err := cas.OpenDefault(e.ctx, e.cfg.Home)
 	if err != nil {
 		return err
 	}
-	defer errs.Ignore(casStore.Close(), "close cas store")
+	defer func() { errs.Ignore(casStore.Close(), "close cas store") }()
 
 	mgr := artifacts.NewManager(casStore)
 	digests, err := mgr.PinFromEnvelope(e.ctx, result)
@@ -71,7 +71,7 @@ func ReleaseArtifacts(ctx context.Context, cfgPaths config.Paths, jobID string) 
 	if err != nil {
 		return err
 	}
-	defer errs.Ignore(casStore.Close(), "close cas store")
+	defer func() { errs.Ignore(casStore.Close(), "close cas store") }()
 
 	mgr := artifacts.NewManager(casStore)
 	if err := mgr.Unpin(ctx, meta.Digests...); err != nil {

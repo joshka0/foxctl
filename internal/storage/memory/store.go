@@ -4,6 +4,7 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -408,6 +409,22 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 		}
 	}
 
+	// Create embedding_metadata table to track provider/model/dimensions per workspace
+	// This enables detection of dimension mismatches if embedding models change
+	metadataDDL := `
+CREATE TABLE IF NOT EXISTS embedding_metadata (
+	workspace TEXT PRIMARY KEY,
+	provider TEXT NOT NULL,
+	model TEXT NOT NULL,
+	dimensions INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
+`
+	if _, err := db.ExecContext(ctx, metadataDDL); err != nil {
+		return fmt.Errorf("memory: create embedding_metadata: %w", err)
+	}
+
 	return nil
 }
 
@@ -474,6 +491,136 @@ func (s *Store) Update(ctx context.Context, name, workspace string, summary, typ
 	return entry, nil
 }
 
+// UpdateEmbedding stores an embedding vector for a named memory entry.
+// The embedding is stored as a JSON-encoded float32 array in the embedding BLOB column.
+func (s *Store) UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error {
+	// Verify entry exists
+	_, err := s.Get(ctx, name, workspace)
+	if err != nil {
+		return err
+	}
+
+	// Marshal embedding to JSON
+	embeddingJSON, err := json.Marshal(embedding)
+	if err != nil {
+		return fmt.Errorf("memory: marshal embedding: %w", err)
+	}
+
+	// Update embedding column
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE named_memory
+		SET embedding = ?, updated_at = ?
+		WHERE name = ? AND workspace = ?
+	`, embeddingJSON, sqlutil.FormatTimestamp(timeutil.NowUTC()), name, workspace); err != nil {
+		return fmt.Errorf("memory: update embedding: %w", err)
+	}
+
+	return nil
+}
+
+// GetEmbedding retrieves the embedding vector for a named memory entry.
+// Returns nil if no embedding is stored.
+func (s *Store) GetEmbedding(ctx context.Context, name, workspace string) ([]float32, error) {
+	var embeddingJSON []byte
+	err := s.db.QueryRowContext(ctx, `
+		SELECT embedding FROM named_memory WHERE name = ? AND workspace = ?
+	`, name, workspace).Scan(&embeddingJSON)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("memory: get embedding: %w", err)
+	}
+
+	if len(embeddingJSON) == 0 {
+		return nil, nil
+	}
+
+	var embedding []float32
+	if err := json.Unmarshal(embeddingJSON, &embedding); err != nil {
+		return nil, fmt.Errorf("memory: unmarshal embedding: %w", err)
+	}
+
+	return embedding, nil
+}
+
+// EmbeddingMetadata tracks embedding configuration per workspace.
+type EmbeddingMetadata struct {
+	Workspace  string    `json:"workspace"`
+	Provider   string    `json:"provider"`
+	Model      string    `json:"model"`
+	Dimensions int       `json:"dimensions"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// GetEmbeddingMetadata retrieves embedding metadata for a workspace.
+// Returns nil if no metadata exists.
+func (s *Store) GetEmbeddingMetadata(ctx context.Context, workspace string) (*EmbeddingMetadata, error) {
+	var meta EmbeddingMetadata
+	var createdAt, updatedAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT workspace, provider, model, dimensions, created_at, updated_at
+		FROM embedding_metadata WHERE workspace = ?
+	`, workspace).Scan(&meta.Workspace, &meta.Provider, &meta.Model, &meta.Dimensions, &createdAt, &updatedAt)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("memory: get embedding metadata: %w", err)
+	}
+	meta.CreatedAt, err = sqlutil.ScanTimestamp(createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("memory: scan created_at: %w", err)
+	}
+	meta.UpdatedAt, err = sqlutil.ScanTimestamp(updatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("memory: scan updated_at: %w", err)
+	}
+	return &meta, nil
+}
+
+// SetEmbeddingMetadata stores or updates embedding metadata for a workspace.
+func (s *Store) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata) error {
+	now := timeutil.NowUTC()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.UpdatedAt = now
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO embedding_metadata (workspace, provider, model, dimensions, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace) DO UPDATE SET
+			provider = excluded.provider,
+			model = excluded.model,
+			dimensions = excluded.dimensions,
+			updated_at = excluded.updated_at
+	`, meta.Workspace, meta.Provider, meta.Model, meta.Dimensions,
+		sqlutil.FormatTimestamp(meta.CreatedAt), sqlutil.FormatTimestamp(meta.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("memory: set embedding metadata: %w", err)
+	}
+	return nil
+}
+
+// ValidateEmbeddingDimensions checks if embedding dimensions match stored metadata.
+// Returns an error if there's a dimension mismatch. Returns nil if no metadata exists.
+func (s *Store) ValidateEmbeddingDimensions(ctx context.Context, workspace string, dimensions int) error {
+	meta, err := s.GetEmbeddingMetadata(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		return nil // No metadata, allow any dimensions
+	}
+	if meta.Dimensions != dimensions {
+		return fmt.Errorf("memory: embedding dimension mismatch: workspace %q expects %d dimensions (model: %s), got %d",
+			workspace, meta.Dimensions, meta.Model, dimensions)
+	}
+	return nil
+}
+
 // Relevant ranks entries by recency/access frequency.
 func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]ScoredEntry, error) {
 	if limit <= 0 {
@@ -515,6 +662,114 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 		scored = scored[:limit]
 	}
 	return scored, nil
+}
+
+// SearchSimilar finds entries similar to the given embedding using in-memory cosine similarity.
+// This is a fallback for SQLite which doesn't support native vector search.
+// For better performance with large datasets, use Turso with native vector search.
+func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedding []float32, limit int) ([]ScoredEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	// Load entries with embeddings from this workspace
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, embedding
+		FROM named_memory
+		WHERE workspace = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+		LIMIT 1000
+	`, workspace)
+	if err != nil {
+		return nil, fmt.Errorf("memory: search similar: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close search similar rows") }()
+
+	type entryWithEmbedding struct {
+		entry     NamedEntry
+		embedding []float32
+	}
+
+	var candidates []entryWithEmbedding
+	for rows.Next() {
+		var entry NamedEntry
+		var digests string
+		var created, updated, last string
+		var embeddingJSON []byte
+
+		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result,
+			&digests, &created, &updated, &last, &entry.AccessCount, &embeddingJSON); err != nil {
+			continue
+		}
+
+		_ = sqlutil.ScanJSON(digests, &entry.Digests)
+		entry.CreatedAt, _ = sqlutil.ScanTimestamp(created)
+		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
+		entry.LastAccess, _ = sqlutil.ScanTimestamp(last)
+
+		if len(embeddingJSON) == 0 {
+			continue
+		}
+
+		var embedding []float32
+		if err := json.Unmarshal(embeddingJSON, &embedding); err != nil {
+			continue
+		}
+
+		// Skip entries with mismatched dimensions
+		if len(embedding) != len(queryEmbedding) {
+			continue
+		}
+
+		candidates = append(candidates, entryWithEmbedding{entry: entry, embedding: embedding})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: search similar rows: %w", err)
+	}
+
+	// Compute cosine similarity for each candidate
+	results := make([]ScoredEntry, 0, len(candidates))
+	for _, c := range candidates {
+		similarity := cosineSimilarity(queryEmbedding, c.embedding)
+		if similarity > 0.5 { // Filter low-similarity results
+			results = append(results, ScoredEntry{
+				Entry: c.entry,
+				Score: similarity,
+			})
+		}
+	}
+
+	// Sort by similarity (highest first)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	// Apply limit
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
+// cosineSimilarity computes the cosine similarity between two vectors.
+func cosineSimilarity(a, b []float32) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+
+	var dotProduct, normA, normB float64
+	for i := range a {
+		dotProduct += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 func scanEntries(rows *sql.Rows) ([]NamedEntry, error) {

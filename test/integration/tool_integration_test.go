@@ -1,4 +1,7 @@
+//go:build integration
+
 // Package integration contains integration tests for agentctl subsystems.
+// These tests require the "integration" build tag to run.
 package integration
 
 import (
@@ -313,10 +316,10 @@ type Config struct {
 
 	for path, content := range files {
 		fullPath := filepath.Join(dir, path)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", filepath.Dir(fullPath), err)
 		}
-		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}

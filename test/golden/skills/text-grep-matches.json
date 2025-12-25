@@ -26,15 +26,12 @@
       { "file": "cmd/agentctl/main.go", "matches": 20 }
     ],
     "max_matches": 200,
-    "artifact": "sha256:0b8b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f",
-    "artifact_kind": "application/x-ndjson",
-    "artifact_size_bytes": 16384
+    "artifact": "sha256:0b8b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f"
   },
   "meta": {
     "ts": "2025-11-12T10:30:10Z",
     "source": "run",
-    "runner": "exec",
-    "cas_digest": "sha256:0b8b1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f"
+    "runner": "exec"
   },
   "error": {}
 }

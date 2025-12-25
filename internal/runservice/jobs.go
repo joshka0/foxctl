@@ -18,6 +18,14 @@ func (e *Executor) ensureJobStore() error {
 	if err != nil {
 		return err
 	}
+	// NOTE: We intentionally do NOT call RecoverOrphanedJobs here because it
+	// causes race conditions when multiple agentctl processes run concurrently
+	// (e.g., parallel Claude Code hooks). A concurrent process would mark another
+	// process's "running" job as "error", then the original process would fail
+	// trying to transition error→ok.
+	//
+	// Orphaned job recovery should happen on explicit command only:
+	//   agentctl jobs recover
 	e.jobStore = store
 	return nil
 }
@@ -118,7 +126,7 @@ func (e *Executor) SubmitAsync(job jobs.Job) error {
 // ExecuteSync runs the skill synchronously and applies persistence side effects.
 func (e *Executor) ExecuteSync(job jobs.Job) error {
 	result, runErr := e.jobStore.ExecutePreparedSkill(e.ctx, job.ID, e.handle.ManifestPath, e.handle.ArtifactPath)
-	latest, getErr := e.jobStore.Get(e.ctx, job.ID)
+	_, getErr := e.jobStore.Get(e.ctx, job.ID)
 	if getErr != nil {
 		if _, warnErr := fmt.Fprintf(e.stderr, "warning: failed to fetch job %s after execution: %v\n", job.ID, getErr); warnErr != nil {
 			errs.Ignore(warnErr, "runservice: warn fetch job failure")
@@ -133,10 +141,6 @@ func (e *Executor) ExecuteSync(job jobs.Job) error {
 	if err := e.HandleResult(job.ID, result); err != nil {
 		return err
 	}
-	if getErr == nil {
-		if _, warnErr := fmt.Fprintf(e.stderr, "job %s state %s\n", latest.ID, latest.State); warnErr != nil {
-			errs.Ignore(warnErr, "runservice: warn final state")
-		}
-	}
+	// Job info is in envelope metadata (meta.job_id, status)
 	return nil
 }

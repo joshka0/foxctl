@@ -1,0 +1,79 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/archive
+  version: 0.1.0
+  description: "Archive and chunk JSONL session files for deep retrieval"
+  tags: ["session", "memory", "archive", "jsonl", "chunking"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_archive/session_archive
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: session/archive
+  parameters:
+    - name: session_id
+      type: string
+      required: true
+      description: "The session ID to archive"
+    - name: jsonl_path
+      type: string
+      required: false
+      description: "Path to the JSONL file (auto-detected if not specified)"
+    - name: max_chunk_size
+      type: integer
+      required: false
+      description: "Maximum chunk size in tokens (default: 4000)"
+    - name: dry_run
+      type: boolean
+      required: false
+      description: "Preview chunks without saving (default: false)"
+returns:
+  - name: session_id
+    type: string
+    description: "The session ID"
+  - name: archive_path
+    type: string
+    description: "Path to the compressed archive"
+  - name: original_size
+    type: integer
+    description: "Original file size in bytes"
+  - name: compressed_size
+    type: integer
+    description: "Compressed file size in bytes"
+  - name: chunk_count
+    type: integer
+    description: "Number of chunks created"
+  - name: chunks
+    type: array
+    description: "Info about each chunk (in dry_run mode)"
+  - name: status
+    type: string
+    description: "Status of the archive operation"
+  - name: message
+    type: string
+    description: "Human-readable status message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+    - type: home
+  pure: false
+examples:
+  - name: "Archive a session"
+    input:
+      session_id: "01HXYZ..."
+    description: "Archive a session's JSONL file with auto-detection"
+  - name: "Archive with explicit path"
+    input:
+      session_id: "01HXYZ..."
+      jsonl_path: "~/.claude/projects/myproject/sessions/01HXYZ.jsonl"
+    description: "Archive a session specifying the JSONL path"
+  - name: "Dry run"
+    input:
+      session_id: "01HXYZ..."
+      dry_run: true
+    description: "Preview chunks without creating the archive"

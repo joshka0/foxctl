@@ -1,0 +1,13 @@
+# Task list command
+description = "Show current tasks from agentctl"
+
+prompt = """Show current tasks:
+
+```bash
+!{agentctl todo list}
+```
+
+Summarize:
+- Active tasks and their status
+- Blocked or pending items
+- Suggested next actions"""

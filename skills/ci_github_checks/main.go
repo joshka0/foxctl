@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,7 +18,7 @@ import (
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/errors"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 type input struct {
@@ -82,14 +83,14 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("ci/github_checks", "ECONFIG", err)
+		fail("ci/github_checks", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
 		fail("ci/github_checks", "ERUNTIME", err)
 	}
 	defer func() {
-		errors.Ignore(rc.Close(), "runner context close")
+		errs.Ignore(rc.Close(), "runner context close")
 	}()
 
 	var in input
@@ -104,7 +105,7 @@ func main() {
 func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	prRef := strings.TrimSpace(in.PR)
 	if prRef == "" {
-		return fmt.Errorf("pr is required")
+		return errors.New("pr is required")
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(in.Mode))
@@ -255,7 +256,7 @@ func detectRepo(ctx context.Context) (string, string, error) {
 	}
 	url := strings.TrimSpace(string(out))
 	if url == "" {
-		return "", "", fmt.Errorf("empty remote url")
+		return "", "", errors.New("empty remote url")
 	}
 
 	if strings.HasPrefix(url, "git@") {
@@ -345,7 +346,7 @@ func getCheckRuns(client *http.Client, token, owner, repo, sha string) ([]CheckR
 func getJobDetails(client *http.Client, token, owner, repo, jobURL string) (*JobDetails, error) {
 	parts := strings.Split(jobURL, "/")
 	if len(parts) < 8 {
-		return nil, fmt.Errorf("invalid job URL format")
+		return nil, errors.New("invalid job URL format")
 	}
 	jobID := parts[len(parts)-1]
 
@@ -436,9 +437,7 @@ func githubGET(client *http.Client, token, url string, v any) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		// Error body read; error is not actionable in error path.
@@ -454,6 +453,6 @@ func githubGET(client *http.Client, token, url string, v any) error {
 
 func fail(command, code string, err error) {
 	env := envelope.Error(command, code, err.Error(), nil)
-	errors.Ignore(envelope.Write(os.Stdout, env), "emit ci/github_checks failure")
+	errs.Ignore(envelope.Write(os.Stdout, env), "emit ci/github_checks failure")
 	os.Exit(1)
 }

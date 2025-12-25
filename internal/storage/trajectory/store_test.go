@@ -19,10 +19,7 @@ func TestOpenAndClose(t *testing.T) {
 func TestTrajectory_InsertAndGet(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	traj := trajectory.Trajectory{
 		WorkspaceID:   "ws-123",
@@ -68,10 +65,7 @@ func TestTrajectory_InsertAndGet(t *testing.T) {
 func TestTrajectory_Update(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	traj := trajectory.Trajectory{
 		WorkspaceID: "ws-123",
@@ -110,10 +104,7 @@ func TestTrajectory_Update(t *testing.T) {
 func TestTrajectory_List(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Insert multiple trajectories.
 	for i := 0; i < 3; i++ {
@@ -162,10 +153,7 @@ func TestTrajectory_List(t *testing.T) {
 func TestTrajectory_Delete(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	traj := trajectory.Trajectory{
 		WorkspaceID: "ws-delete",
@@ -189,10 +177,7 @@ func TestTrajectory_Delete(t *testing.T) {
 func TestTrajectory_List_TaskIDExactMatch(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	_, err := store.InsertTrajectory(ctx, trajectory.Trajectory{
 		WorkspaceID: "ws-task-filter",
@@ -229,10 +214,7 @@ func TestTrajectory_List_TaskIDExactMatch(t *testing.T) {
 func TestListReturnsEmptySlices(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	trajectories, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: "ws-empty"})
 	if err != nil {
@@ -290,10 +272,7 @@ func TestListReturnsEmptySlices(t *testing.T) {
 func TestUserRequest_InsertAndGet(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	ur := trajectory.UserRequestCapture{
 		WorkspaceID: "ws-123",
@@ -352,10 +331,7 @@ func TestUserRequest_InsertAndGet(t *testing.T) {
 func TestUserRequest_List(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	for i := 0; i < 5; i++ {
 		ur := trajectory.UserRequestCapture{
@@ -381,10 +357,7 @@ func TestUserRequest_List(t *testing.T) {
 func TestEvent_InsertAndList(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create a trajectory first.
 	traj := trajectory.Trajectory{
@@ -457,10 +430,7 @@ func TestEvent_InsertAndList(t *testing.T) {
 func TestEvent_InsertBatch(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create trajectory.
 	traj := trajectory.Trajectory{
@@ -495,10 +465,7 @@ func TestEvent_InsertBatch(t *testing.T) {
 func TestEvent_FilterByKind(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create trajectory.
 	traj := trajectory.Trajectory{
@@ -537,10 +504,7 @@ func TestEvent_FilterByKind(t *testing.T) {
 func TestTrajectory_CascadeDelete(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create trajectory with events.
 	traj := trajectory.Trajectory{
@@ -578,10 +542,7 @@ func TestTrajectory_CascadeDelete(t *testing.T) {
 func TestTrajectory_TimeFilter(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	now := time.Now().UTC()
 

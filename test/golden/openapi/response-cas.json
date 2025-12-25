@@ -28,16 +28,13 @@
         }
       }
     },
-    "artifact": "sha256:def4567890abcdefdef4567890abcdefdef4567890abcdefdef4567890abcdef",
-    "kind": "application/json",
-    "size_bytes": 1048576
+    "artifact": "sha256:def4567890abcdefdef4567890abcdefdef4567890abcdefdef4567890abcdef"
   },
   "meta": {
     "ts": "2025-11-12T10:30:00Z",
     "duration_ms": 2145,
     "source": "run",
     "runner": "exec",
-    "cas_digest": "sha256:def4567890abcdefdef4567890abcdefdef4567890abcdefdef4567890abcdef",
     "job_id": "01HQXYABCDE123FGHIJ"
   },
   "error": {}

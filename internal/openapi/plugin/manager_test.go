@@ -26,7 +26,11 @@ func TestManagerInvokeAuthSuccess(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
+	mgr := NewManager(cfg,
+		WithSearchPaths([]string{tmp}),
+		WithHandshakeTimeout(5*time.Second),
+		WithRuntimeLimits(RuntimeLimits{WallTimeout: 2 * time.Second}),
+	)
 
 	payload := AuthRequestPayload{
 		Request: HTTPRequest{
@@ -61,7 +65,11 @@ func TestManagerInvokeAuthPluginError(t *testing.T) {
 	buildPluginBinary(t, tmp, "auth-hmac")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
+	mgr := NewManager(cfg,
+		WithSearchPaths([]string{tmp}),
+		WithHandshakeTimeout(5*time.Second),
+		WithRuntimeLimits(RuntimeLimits{WallTimeout: 2 * time.Second}),
+	)
 
 	payload := AuthRequestPayload{
 		Request: HTTPRequest{Method: "GET", URL: "https://example.com"},
@@ -125,7 +133,11 @@ func TestManagerInvokePagination(t *testing.T) {
 	buildPluginBinary(t, tmp, "paging-custom")
 
 	cfg := config.Config{Home: tmp}
-	mgr := NewManager(cfg, WithSearchPaths([]string{tmp}), WithHandshakeTimeout(5*time.Second))
+	mgr := NewManager(cfg,
+		WithSearchPaths([]string{tmp}),
+		WithHandshakeTimeout(5*time.Second),
+		WithRuntimeLimits(RuntimeLimits{WallTimeout: 2 * time.Second}),
+	)
 
 	body := map[string]any{
 		"items": []any{1, 2, 3},

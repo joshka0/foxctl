@@ -1,0 +1,64 @@
+apiVersion: agentctl/v1
+kind: Workflow
+metadata:
+  name: code-review
+  version: 0.1.0
+  description: "Automated code review workflow - checks complexity, finds issues, generates report"
+  tags: ["review", "quality", "linting"]
+
+inputs:
+  - name: path
+    type: string
+    required: true
+    description: "Path to review"
+  - name: lang
+    type: string
+    default: "go"
+    description: "Language to analyze"
+
+steps:
+  # Step 1: Find source files
+  - id: find
+    skill: fs/find
+    input:
+      path: "{{.inputs.path}}"
+      pattern: "*.{{.inputs.lang}}"
+
+  # Step 2: Run complexity analysis
+  # Note: Uses threshold 10 (stricter than complexity-warning hook's 15)
+  # to surface more potential issues during code review.
+  - id: complexity
+    skill: code/complexity
+    input:
+      path: "{{.inputs.path}}"
+      threshold: 10
+      recursive: true
+    depends_on: [find]
+
+  # Step 3: Extract symbols for documentation check
+  - id: symbols
+    skill: code/symbols
+    input:
+      path: "{{.inputs.path}}"
+      lang: "{{.inputs.lang}}"
+    depends_on: [find]
+
+  # Step 4: Search for common issues
+  - id: todo_check
+    skill: text/ripgrep
+    input:
+      pattern: "TODO|FIXME|XXX|HACK"
+      path: "{{.inputs.path}}"
+    on_error: continue
+
+outputs:
+  - name: files_analyzed
+    description: "Number of files analyzed"
+    value: "{{len .find.data.files}}"
+  - name: high_complexity_count
+    description: "Number of functions with complexity > 10"
+    value: "{{len (filter .complexity.data.functions \"score > 10\")}}"
+  - name: todo_count
+    description: "Number of TODO/FIXME/XXX/HACK comments found"
+    valueFrom:
+      expression: "{{if .todo_check.data.matches}}{{len .todo_check.data.matches}}{{else}}0{{end}}"

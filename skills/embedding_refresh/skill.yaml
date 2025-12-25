@@ -1,0 +1,100 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: embedding/refresh
+  description: Refresh embeddings for memory, symbol, or session entries
+  version: 0.1.0
+  author: agentctl
+  tags: [embedding, refresh, memory, semantic, phase4]
+distribution:
+  type: exec
+  exec:
+    entry: skills/embedding_refresh/embedding_refresh
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: embedding/refresh
+  parameters:
+    - name: scope
+      type: string
+      required: true
+      description: "Type of item to refresh: memory, symbol, or session"
+    - name: name
+      type: string
+      required: true
+      description: "Identifier for the item (memory name, symbol ID, or session ID)"
+    - name: workspace
+      type: string
+      required: false
+      default: "default"
+      description: "Workspace context"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Generate embedding but don't store it"
+  returns:
+    - name: scope
+      type: string
+      description: "Scope that was refreshed"
+    - name: name
+      type: string
+      description: "Name that was refreshed"
+    - name: status
+      type: string
+      description: "Result status: refreshed, not_found, no_content, error, dry_run"
+    - name: dimensions
+      type: integer
+      description: "Number of embedding dimensions (when refreshed)"
+    - name: duration_ms
+      type: integer
+      description: "Operation duration in milliseconds"
+    - name: message
+      type: string
+      description: "Human-readable result message"
+    - name: hint
+      type: string
+      description: "Hint for resolving issues (when applicable)"
+  help:
+    short: "Refresh embedding for a memory, symbol, or session"
+    long: |
+      embedding/refresh generates or updates the embedding vector for a specified
+      item. This is part of the automatic embedding update system (Phase 4).
+
+      Scopes:
+      - memory: Named memory entries in the memory store
+      - symbol: Code symbols (delegates to embedding/queue pipeline)
+      - session: Session summaries (delegates to session/summarize)
+
+      For memory entries, the embedding is generated from the summary field and
+      stored in the embedding BLOB column of named_memory.
+
+      Environment Variables:
+      - GEMINI_API_KEY: Required for embedding generation
+      - EMBEDDING_MODEL: Model name (default: "gemini-embedding-001")
+
+      Integration:
+      - Called by memory-embed.sh hook when memories are updated
+      - Can be called manually to refresh stale embeddings
+      - Supports dry_run mode to test without storing
+    workflows:
+      - id: refresh-memory
+        description: "Refresh embedding for a named memory"
+        example_input:
+          scope: memory
+          name: "session:abc123"
+          workspace: "myproject"
+      - id: dry-run-check
+        description: "Check if embedding can be generated"
+        example_input:
+          scope: memory
+          name: "cache:symbols"
+          dry_run: true
+capabilities:
+  network: "egress"  # For Gemini API calls
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

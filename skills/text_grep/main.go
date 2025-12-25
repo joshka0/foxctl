@@ -42,7 +42,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("text/grep", "ECONFIG", err)
+		fail("text/grep", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -121,8 +121,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
-		data["artifact_kind"] = artifact.Kind
-		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("text/grep", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})

@@ -31,10 +31,7 @@ func setupTestIndexer(t *testing.T, cfg Config) (*Indexer, *memory.Store, string
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { store.Close() })
 
 	// Create indexer with no-op provider
 	provider := NewNoOpProvider("test-model", 384)

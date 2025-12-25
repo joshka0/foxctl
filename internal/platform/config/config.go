@@ -3,6 +3,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,16 +23,18 @@ const (
 
 // Config represents the fully materialized runtime configuration.
 type Config struct {
-	Home           string           `mapstructure:"home" json:"home"`
-	InlineOutputKB int              `mapstructure:"inline_output_kb" json:"inline_output_kb"`
-	MaxCaptureKB   int              `mapstructure:"max_capture_kb" json:"max_capture_kb"`
-	Paths          Paths            `mapstructure:"paths" json:"paths"`
-	Storage        StorageSettings  `mapstructure:"storage" json:"storage"`
-	Memory         MemorySettings   `mapstructure:"memory" json:"memory"`
-	Cache          CacheSettings    `mapstructure:"cache" json:"cache"`
-	Logging        LoggingSettings  `mapstructure:"logging" json:"logging"`
-	OpenAPI        OpenAPISettings  `mapstructure:"openapi" json:"openapi"`
-	Indexing       IndexingSettings `mapstructure:"indexing" json:"indexing"`
+	Home           string            `mapstructure:"home" json:"home"`
+	InlineOutputKB int               `mapstructure:"inline_output_kb" json:"inline_output_kb"`
+	MaxCaptureKB   int               `mapstructure:"max_capture_kb" json:"max_capture_kb"`
+	Paths          Paths             `mapstructure:"paths" json:"paths"`
+	Storage        StorageSettings   `mapstructure:"storage" json:"storage"`
+	Memory         MemorySettings    `mapstructure:"memory" json:"memory"`
+	Cache          CacheSettings     `mapstructure:"cache" json:"cache"`
+	Logging        LoggingSettings   `mapstructure:"logging" json:"logging"`
+	OpenAPI        OpenAPISettings   `mapstructure:"openapi" json:"openapi"`
+	Embedding      EmbeddingSettings `mapstructure:"embedding" json:"embedding"`
+	Indexing       IndexingSettings  `mapstructure:"indexing" json:"indexing"`
+	Database       DatabaseSettings  `mapstructure:"database" json:"database"`
 }
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
@@ -63,6 +66,55 @@ type CacheSettings struct {
 type LoggingSettings struct {
 	Level  string `mapstructure:"level" json:"level"`
 	Format string `mapstructure:"format" json:"format"`
+}
+
+// EmbeddingSettings configure embedding provider defaults.
+type EmbeddingSettings struct {
+	Provider   string `mapstructure:"provider" json:"provider"`
+	Model      string `mapstructure:"model" json:"model"`
+	Dimensions int    `mapstructure:"dimensions" json:"dimensions"`
+}
+
+// DatabaseSettings configure database driver and connection.
+type DatabaseSettings struct {
+	// Driver specifies which database driver to use: "sqlite" (default), "libsql", or "turso"
+	Driver string `mapstructure:"driver" json:"driver"`
+
+	// Turso holds Turso-specific configuration (when driver is "turso")
+	Turso TursoSettings `mapstructure:"turso" json:"turso"`
+
+	// Vector configures native vector search capabilities
+	Vector VectorSettings `mapstructure:"vector" json:"vector"`
+}
+
+// TursoSettings holds Turso cloud database configuration.
+type TursoSettings struct {
+	// URL is the Turso database URL (e.g., libsql://your-database.turso.io)
+	// Can also be set via TURSO_DATABASE_URL environment variable
+	URL string `mapstructure:"url" json:"url"`
+
+	// AuthToken is the authentication token for Turso
+	// Can also be set via TURSO_AUTH_TOKEN environment variable
+	AuthToken string `mapstructure:"auth_token" json:"auth_token"`
+}
+
+// MarshalJSON implements json.Marshaler to redact the AuthToken field.
+func (t TursoSettings) MarshalJSON() ([]byte, error) {
+	type Alias TursoSettings
+	redacted := Alias(t)
+	if redacted.AuthToken != "" {
+		redacted.AuthToken = "[REDACTED]"
+	}
+	return json.Marshal(redacted)
+}
+
+// VectorSettings configure native vector search capabilities.
+type VectorSettings struct {
+	// Enabled controls whether native vector search is active (requires Turso/libsql)
+	Enabled bool `mapstructure:"enabled" json:"enabled"`
+
+	// Dimensions specifies the embedding vector dimensions (default: 3072 for Gemini)
+	Dimensions int `mapstructure:"dimensions" json:"dimensions"`
 }
 
 // OpenAPISettings hold configuration for the generic http/openapi skill.
@@ -186,10 +238,19 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("cache.default_mode", "auto")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
+	v.SetDefault("embedding.provider", "gemini")
+	v.SetDefault("embedding.model", "gemini-embedding-001")
+	v.SetDefault("embedding.dimensions", 3072)
 	v.SetDefault("openapi.plugin_path", filepath.Join(defaultHome, "plugins"))
 	v.SetDefault("indexing.post_review.enabled", false)
 	v.SetDefault("indexing.post_review.async", true)
 	v.SetDefault("indexing.post_review.indexers", []map[string]any{})
+	// Database defaults - SQLite by default, Turso/libsql for vector search
+	v.SetDefault("database.driver", "sqlite")
+	v.SetDefault("database.turso.url", "")
+	v.SetDefault("database.turso.auth_token", "")
+	v.SetDefault("database.vector.enabled", false)
+	v.SetDefault("database.vector.dimensions", 3072) // Match Gemini embedding dimensions
 }
 
 func configureConfigFile(v *viper.Viper, l *loader, defaultHome string) {
@@ -256,6 +317,23 @@ func finalizeConfig(cfg Config, home string) Config {
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = "text"
 	}
+
+	// Database/Turso: Allow standard Turso env vars as overrides
+	if url := os.Getenv("TURSO_DATABASE_URL"); url != "" && cfg.Database.Turso.URL == "" {
+		cfg.Database.Turso.URL = url
+	}
+	if token := os.Getenv("TURSO_AUTH_TOKEN"); token != "" && cfg.Database.Turso.AuthToken == "" {
+		cfg.Database.Turso.AuthToken = token
+	}
+	// Auto-detect driver from URL if not explicitly set
+	if cfg.Database.Driver == "sqlite" && cfg.Database.Turso.URL != "" {
+		cfg.Database.Driver = "turso"
+	}
+	// Default vector dimensions from embedding config if not set
+	if cfg.Database.Vector.Dimensions == 0 {
+		cfg.Database.Vector.Dimensions = cfg.Embedding.Dimensions
+	}
+
 	return cfg
 }
 

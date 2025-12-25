@@ -1,0 +1,106 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: mobile/unified
+  version: 0.1.0
+  description: |
+    Unified mobile automation interface for iOS and Android.
+    Dispatches to mobile/ios or mobile/android based on platform.
+
+    Auto mode: list_devices returns devices from both platforms.
+    Other operations require explicit platform selection.
+
+    Use mobile/ios or mobile/android directly for platform-specific operations.
+  tags: [mobile, ios, android, automation, testing]
+distribution:
+  type: exec
+  exec:
+    entry: skills/mobile/mobile
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: mobile/unified
+  parameters:
+    - name: platform
+      type: string
+      required: false
+      default: auto
+      enum: [ios, android, auto]
+      description: |
+        Target platform.
+        - auto: Only works for list_devices (returns both platforms)
+        - ios: Route to mobile/ios
+        - android: Route to mobile/android
+    - name: operation
+      type: string
+      required: true
+      enum: [list_devices, device_info, install, launch, terminate,
+             screenshot, tap, swipe, type_text, ui_tree, logs, open_url]
+      description: Operation to perform (common operations only)
+    - name: device
+      type: string
+      required: false
+      description: Device identifier (UDID for iOS, serial for Android)
+    - name: app
+      type: string
+      required: false
+      description: App path or bundle ID (iOS) / APK or package name (Android)
+    - name: x
+      type: integer
+      required: false
+      description: X coordinate for tap/swipe
+    - name: y
+      type: integer
+      required: false
+      description: Y coordinate for tap/swipe
+    - name: x2
+      type: integer
+      required: false
+      description: End X coordinate for swipe
+    - name: y2
+      type: integer
+      required: false
+      description: End Y coordinate for swipe
+    - name: text
+      type: string
+      required: false
+      description: Text for type_text operation
+    - name: url
+      type: string
+      required: false
+      description: URL for open_url operation
+    - name: output
+      type: string
+      required: false
+      description: Output path for screenshot
+  returns:
+    - name: platform
+      type: string
+      description: Platform used (ios, android, or both for auto list_devices)
+    - name: devices
+      type: array
+      description: List of devices (for list_devices)
+    - name: device
+      type: object
+      description: Device info (for device_info)
+    - name: elements
+      type: array
+      description: UI elements (for ui_tree)
+    - name: screenshot
+      type: string
+      description: Screenshot artifact digest
+    - name: logs
+      type: string
+      description: Log output or artifact digest
+    - name: success
+      type: boolean
+      description: Operation success status
+    - name: message
+      type: string
+      description: Status message
+capabilities:
+  network: none
+  filesystem:
+    - type: workdir
+  pure: false

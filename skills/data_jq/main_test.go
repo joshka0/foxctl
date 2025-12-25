@@ -39,9 +39,7 @@ func TestRunDataJq(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout)
-	defer func() {
-		_ = rc.Close() //nolint:errcheck
-	}()
+	defer rc.Close()
 
 	in := input{
 		Input: `{"a": 1}`,

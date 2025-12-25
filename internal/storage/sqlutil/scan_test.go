@@ -11,8 +11,8 @@ func TestScanJSON(t *testing.T) {
 	tests := []struct {
 		name    string
 		src     string
-		dest    interface{}
-		want    interface{}
+		dest    any
+		want    any
 		wantErr bool
 	}{
 		{
@@ -183,7 +183,7 @@ func TestFormatTimestamp(t *testing.T) {
 func TestFormatJSON(t *testing.T) {
 	tests := []struct {
 		name    string
-		v       interface{}
+		v       any
 		want    string
 		wantErr bool
 	}{

@@ -48,10 +48,7 @@ func newFileGuardTestEnv(t *testing.T) *fileGuardTestEnv {
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = rc.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { rc.Close() })
 
 	return &fileGuardTestEnv{
 		ctx:           ctx,
@@ -168,10 +165,7 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open board store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = board.Close() //nolint:errcheck
-	}()
+	defer board.Close()
 
 	reservations, err := board.ListReservations(env.ctx, env.workspaceRoot)
 	if err != nil {
@@ -201,10 +195,7 @@ func TestFileGuard_StrictMode_BlocksOnConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open board store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = board.Close() //nolint:errcheck
-	}()
+	defer board.Close()
 
 	conflict := &agent.FileReservation{
 		WorkspaceID: env.workspaceRoot,

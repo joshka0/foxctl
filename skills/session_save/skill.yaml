@@ -1,0 +1,48 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/save
+  version: 0.2.0
+  description: "Capture session state (tasks, plans, gotchas) before compaction for continuity"
+  tags: ["session", "continuity", "hooks", "pre-compact", "plans"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_save/session_save
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: session/save
+  parameters:
+    - name: trigger
+      type: string
+      required: false
+      description: "Trigger source: pre_compact, manual, session_end"
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path"
+    - name: session_id
+      type: string
+      required: false
+      description: "Optional session ID for tracking"
+    - name: summary
+      type: string
+      required: false
+      description: "Optional user-provided session summary"
+returns:
+  - name: snapshot_id
+    type: string
+    description: "ID of the created snapshot"
+  - name: items_captured
+    type: object
+    description: "Count of captured items by type"
+  - name: message
+    type: string
+    description: "Human-readable result message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

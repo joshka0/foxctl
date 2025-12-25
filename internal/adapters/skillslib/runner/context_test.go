@@ -13,7 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 )
 
-func TestEmitSetsMetaCasDigestWhenArtifactPresent(t *testing.T) {
+func TestEmitDoesNotSetMetaCasDigestWhenArtifactPresent(t *testing.T) {
 	buf := &bytes.Buffer{}
 	c := &RunnerContext{Stdout: buf}
 
@@ -29,8 +29,8 @@ func TestEmitSetsMetaCasDigestWhenArtifactPresent(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if env.Meta.CASDigest != "sha256:abc123" {
-		t.Fatalf("expected cas_digest set, got %q", env.Meta.CASDigest)
+	if env.Meta.CASDigest != "" {
+		t.Fatalf("expected cas_digest omitted, got %q", env.Meta.CASDigest)
 	}
 }
 
@@ -38,8 +38,10 @@ func TestEmitPreservesExistingCasDigest(t *testing.T) {
 	buf := &bytes.Buffer{}
 	c := &RunnerContext{Stdout: buf}
 
-	meta := envelope.Meta{Source: "run", CASDigest: "sha256:existing"}
-	if err := c.Emit("demo", map[string]any{}, "application/json", meta); err != nil {
+	digest := "sha256:existing"
+	meta := envelope.Meta{Source: "run", CASDigest: digest}
+	data := map[string]any{"artifact": digest}
+	if err := c.Emit("demo", data, "application/json", meta); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 
@@ -47,7 +49,7 @@ func TestEmitPreservesExistingCasDigest(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if env.Meta.CASDigest != "sha256:existing" {
+	if env.Meta.CASDigest != digest {
 		t.Fatalf("expected cas digest preserved, got %q", env.Meta.CASDigest)
 	}
 }

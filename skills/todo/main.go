@@ -3,10 +3,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -17,16 +19,20 @@ import (
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/planning/llm"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 const (
-	statusPending = "pending"
-	statusDone    = "completed"
+	statusPending    = "pending"
+	statusInProgress = "in_progress"
+	statusBlocked    = "blocked"
+	statusDone       = "completed"
 )
 
 // isReviewGateEnabled reports whether the review gate is enabled for this
@@ -46,6 +52,7 @@ type input struct {
 	Operation     string            `json:"operation"`
 	WorkspaceID   string            `json:"workspace_id"`
 	Add           *addRequest       `json:"add"`
+	Update        *updateRequest    `json:"update"`
 	Complete      *completeRequest  `json:"complete"`
 	SetActive     *setActiveReq     `json:"set_active"`
 	EnsureActive  *ensureActiveReq  `json:"ensure_active"`
@@ -54,6 +61,14 @@ type input struct {
 	Plan          *planReq          `json:"plan"`
 	ReviewRequest *reviewRequestReq `json:"review_request"`
 	ReviewStatus  *reviewStatusReq  `json:"review_status"`
+	Search        *searchReq        `json:"search"`
+}
+
+// searchReq defines the input for semantic task search.
+type searchReq struct {
+	Query         string  `json:"query"`          // Natural language search query
+	Limit         int     `json:"limit"`          // Max results to return (default: 10)
+	MinSimilarity float64 `json:"min_similarity"` // Minimum similarity threshold (default: 0.3)
 }
 
 type addRequest struct {
@@ -68,6 +83,15 @@ type completeRequest struct {
 	ID      string `json:"id"`
 	Notes   string `json:"notes"`
 	Gotchas string `json:"gotchas"`
+}
+
+type updateRequest struct {
+	ID          string `json:"id"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Notes       string `json:"notes,omitempty"`
+	Gotchas     string `json:"gotchas,omitempty"`
+	Status      string `json:"status,omitempty"` // pending, in_progress, blocked
 }
 
 // reviewRequestReq defines the input for the review_request operation.
@@ -172,11 +196,11 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("todo/manage", "ECONFIG", err)
+		fail("todo/manage", "ERUNTIME", err, "Check AGENTCTL_HOME is set and accessible")
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
-		fail("todo/manage", "ERUNTIME", err)
+		fail("todo/manage", "ERUNTIME", err, "Check storage directory permissions")
 	}
 	defer func() {
 		errs.Ignore(rc.Close(), "runner context close")
@@ -184,10 +208,10 @@ func main() {
 
 	var in input
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("todo/manage", "EARG", fmt.Errorf("decode input: %w", err))
+		fail("todo/manage", "EPARSE", fmt.Errorf("decode input: %w", err), "Ensure valid JSON on stdin")
 	}
 	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("todo/manage", "ERUNTIME", err)
+		fail("todo/manage", "ERUNTIME", err, "")
 	}
 }
 
@@ -197,10 +221,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer func() {
-		// Store cleanup in defer; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	op := strings.ToLower(strings.TrimSpace(in.Operation))
 	if op == "" {
@@ -208,6 +229,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	}
 
 	workspaceID := in.WorkspaceID
+	if workspaceID == "" {
+		// Check AGENTCTL_WORKSPACE env var (set by runner when executing skills)
+		workspaceID = os.Getenv("AGENTCTL_WORKSPACE")
+	}
 	if workspaceID == "" {
 		// Default to current working directory as workspace ID.
 		// Fallback to current directory; error is not actionable.
@@ -227,6 +252,18 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"total_tasks":   len(allTasks),
 			"pending_tasks": countPending(allTasks),
 			"summary":       fmt.Sprintf("added task %s", task.ID),
+		}
+
+	case "update":
+		task, allTasks, err := handleUpdate(ctx, store, workspaceID, in.Update)
+		if err != nil {
+			return err
+		}
+		data = map[string]any{
+			"task":          task,
+			"total_tasks":   len(allTasks),
+			"pending_tasks": countPending(allTasks),
+			"summary":       fmt.Sprintf("updated task %s", task.ID),
 		}
 
 	case "complete":
@@ -346,10 +383,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		// Best-effort open; error is ignored for optional integration.
 		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root) //nolint:errcheck
 		if boardStore != nil {
-			defer func() {
-				// Store cleanup in defer; error is not actionable.
-				_ = boardStore.Close() //nolint:errcheck
-			}()
+			defer boardStore.Close()
 		}
 		scorer := overseer.NewScorer(store, boardStore)
 		rec, err := scorer.Recommend(ctx, workspaceID, limit)
@@ -370,10 +404,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		// Best-effort open; error is ignored for optional integration.
 		boardStore, _ := blackboard.OpenBoardStore(ctx, cfg.Storage.Root) //nolint:errcheck
 		if boardStore != nil {
-			defer func() {
-				// Store cleanup in defer; error is not actionable.
-				_ = boardStore.Close() //nolint:errcheck
-			}()
+			defer boardStore.Close()
 		}
 		planResult, err := handlePlan(ctx, store, boardStore, workspaceID, in.Plan)
 		if err != nil {
@@ -418,8 +449,20 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"summary":            fmt.Sprintf("review status for task %s: %s", task.ID, task.LastReviewStatus),
 		}
 
+	case "search":
+		results, err := handleSearch(ctx, store, cfg, workspaceID, in.Search)
+		if err != nil {
+			return err
+		}
+		data = map[string]any{
+			"results":     results.Tasks,
+			"total_found": results.TotalFound,
+			"query":       results.Query,
+			"summary":     fmt.Sprintf("found %d tasks matching %q", results.TotalFound, results.Query),
+		}
+
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status)", op)
+		return fmt.Errorf("unknown operation %q (expected add|update|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status|search)", op)
 	}
 
 	return rc.Emit("todo/manage", data, "application/json", envelope.Meta{
@@ -495,6 +538,80 @@ func handleAdd(ctx context.Context, store tasks.Store, workspaceID string, req *
 	return toOutput(added), allTasks, nil
 }
 
+func handleUpdate(ctx context.Context, store tasks.Store, workspaceID string, req *updateRequest) (*taskOutput, []tasks.Task, error) {
+	if req == nil {
+		return nil, nil, fmt.Errorf("update payload is required")
+	}
+	if req.ID == "" {
+		return nil, nil, fmt.Errorf("update.id is required")
+	}
+	if err := validateText("title", req.Title); err != nil {
+		return nil, nil, err
+	}
+	if err := validateText("description", req.Description); err != nil {
+		return nil, nil, err
+	}
+	if err := validateText("notes", req.Notes); err != nil {
+		return nil, nil, err
+	}
+	if err := validateText("gotchas", req.Gotchas); err != nil {
+		return nil, nil, err
+	}
+
+	task, err := store.Get(ctx, req.ID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("task %s not found", req.ID)
+		}
+		return nil, nil, fmt.Errorf("get task %s: %w", req.ID, err)
+	}
+
+	// Verify workspace ownership
+	if task.WorkspaceID != workspaceID {
+		return nil, nil, fmt.Errorf("task %s belongs to a different workspace", req.ID)
+	}
+
+	// Don't allow updating completed tasks
+	if task.Status == statusDone {
+		return nil, nil, fmt.Errorf("cannot update completed task %s", req.ID)
+	}
+
+	// Apply updates (only if non-empty)
+	if req.Title != "" {
+		task.Title = req.Title
+	}
+	if req.Description != "" {
+		task.Description = req.Description
+	}
+	if req.Notes != "" {
+		task.Notes = req.Notes
+	}
+	if req.Gotchas != "" {
+		task.Gotchas = req.Gotchas
+	}
+	if req.Status != "" {
+		// Only allow certain status transitions
+		switch req.Status {
+		case statusPending, statusInProgress, statusBlocked:
+			task.Status = req.Status
+		default:
+			return nil, nil, fmt.Errorf("invalid status %q (use complete action for completing tasks)", req.Status)
+		}
+	}
+
+	updated, err := store.Update(ctx, task)
+	if err != nil {
+		return nil, nil, fmt.Errorf("update task: %w", err)
+	}
+
+	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return toOutput(updated), allTasks, nil
+}
+
 func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, req *completeRequest) (*taskOutput, []tasks.Task, error) {
 	if req == nil {
 		return nil, nil, fmt.Errorf("complete payload is required")
@@ -511,8 +628,17 @@ func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, 
 
 	task, err := store.Get(ctx, req.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("task %s not found", req.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, fmt.Errorf("task %s not found", req.ID)
+		}
+		return nil, nil, fmt.Errorf("get task %s: %w", req.ID, err)
 	}
+
+	// Verify workspace ownership
+	if task.WorkspaceID != workspaceID {
+		return nil, nil, fmt.Errorf("task %s belongs to a different workspace", req.ID)
+	}
+
 	if task.Status == statusDone {
 		return nil, nil, fmt.Errorf("task %s already completed", req.ID)
 	}
@@ -577,7 +703,15 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 
 	task, err := store.Get(ctx, req.TaskID)
 	if err != nil {
-		return nil, fmt.Errorf("task %s not found", req.TaskID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("task %s not found", req.TaskID)
+		}
+		return nil, fmt.Errorf("get task %s: %w", req.TaskID, err)
+	}
+
+	// Verify workspace ownership
+	if task.WorkspaceID != workspaceID {
+		return nil, fmt.Errorf("task %s belongs to a different workspace", req.TaskID)
 	}
 
 	// Validate task state: only in_progress or ready_for_review can be reviewed
@@ -632,7 +766,7 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 
 // handleReviewStatus returns the review status fields for a task.
 // This is a cheap status probe that does not touch CAS or jobs.
-func handleReviewStatus(ctx context.Context, store tasks.Store, _ string, req *reviewStatusReq) (tasks.Task, error) {
+func handleReviewStatus(ctx context.Context, store tasks.Store, workspaceID string, req *reviewStatusReq) (tasks.Task, error) {
 	if req == nil {
 		return tasks.Task{}, fmt.Errorf("review_status payload is required")
 	}
@@ -642,10 +776,189 @@ func handleReviewStatus(ctx context.Context, store tasks.Store, _ string, req *r
 
 	task, err := store.Get(ctx, req.TaskID)
 	if err != nil {
-		return tasks.Task{}, fmt.Errorf("task %s not found", req.TaskID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return tasks.Task{}, fmt.Errorf("task %s not found", req.TaskID)
+		}
+		return tasks.Task{}, fmt.Errorf("get task %s: %w", req.TaskID, err)
+	}
+
+	// Verify workspace ownership
+	if task.WorkspaceID != workspaceID {
+		return tasks.Task{}, fmt.Errorf("task %s belongs to a different workspace", req.TaskID)
 	}
 
 	return task, nil
+}
+
+// searchOutput is the result of a semantic task search.
+type searchOutput struct {
+	Query      string              `json:"query"`
+	TotalFound int                 `json:"total_found"`
+	Tasks      []*searchTaskResult `json:"tasks"`
+}
+
+// searchTaskResult pairs a task with its similarity score.
+type searchTaskResult struct {
+	Task       *taskOutput `json:"task"`
+	Similarity float64     `json:"similarity"`
+}
+
+// handleSearch performs semantic search over task embeddings.
+func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID string, req *searchReq) (*searchOutput, error) {
+	if req == nil {
+		return nil, fmt.Errorf("search payload is required")
+	}
+	if req.Query == "" {
+		return nil, fmt.Errorf("search.query is required")
+	}
+
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	minSimilarity := req.MinSimilarity
+	if minSimilarity <= 0 {
+		minSimilarity = 0.3
+	}
+
+	output := &searchOutput{
+		Query: req.Query,
+	}
+
+	// Check for API key
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	if geminiKey == "" && voyageKey == "" {
+		return nil, fmt.Errorf("no embedding API key set (GEMINI_API_KEY or VOYAGE_API_KEY)")
+	}
+
+	// Initialize embedding provider (prefer Gemini for consistency with task embeddings)
+	// Task embeddings are created with Gemini (3072-dim), so query must use same provider
+	var provider interface {
+		Embed(ctx context.Context, text string) ([]float32, error)
+	}
+
+	if geminiKey != "" {
+		gp, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
+			APIKey:        geminiKey,
+			RateLimitWait: boolPtr(true),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("gemini provider: %w", err)
+		}
+		provider = gp
+	} else {
+		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey:        voyageKey,
+			RateLimitWait: boolPtr(true),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("voyage provider: %w", err)
+		}
+		provider = vp
+	}
+
+	// Generate query embedding
+	queryEmbedding, err := provider.Embed(ctx, req.Query)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+
+	// Open memory store for vector search
+	memStore, err := memory.Open(ctx, cfg.Storage.Root, filepath.Join(cfg.Storage.Root, "cas"))
+	if err != nil {
+		return nil, fmt.Errorf("open memory store: %w", err)
+	}
+	defer memStore.Close() //nolint:errcheck
+
+	// Search for similar entries using in-memory cosine similarity
+	// This searches all embeddings in the workspace
+	entries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2) // Fetch more to allow filtering
+	if err != nil {
+		// Fall back to listing all tasks if similarity search fails
+		// Warning output to stderr; error is not actionable.
+		fmt.Fprintf(os.Stderr, "warning: similarity search failed, falling back to text match: %v\n", err)
+
+		// Simple fallback: text-based search over all tasks
+		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks: %w", err)
+		}
+
+		queryLower := strings.ToLower(req.Query)
+		for _, t := range allTasks {
+			// Simple text matching on title/description
+			titleMatch := strings.Contains(strings.ToLower(t.Title), queryLower)
+			descMatch := strings.Contains(strings.ToLower(t.Description), queryLower)
+			notesMatch := strings.Contains(strings.ToLower(t.Notes), queryLower)
+
+			if titleMatch || descMatch || notesMatch {
+				output.Tasks = append(output.Tasks, &searchTaskResult{
+					Task:       toOutput(t),
+					Similarity: 0.5, // Placeholder similarity for text match
+				})
+				if len(output.Tasks) >= limit {
+					break
+				}
+			}
+		}
+		output.TotalFound = len(output.Tasks)
+		return output, nil
+	}
+
+	// Filter entries to only task embeddings (type='task_embedding')
+	var taskIDs []string
+	scoreByID := make(map[string]float64)
+
+	for _, entry := range entries {
+		if entry.Entry.Type != "task_embedding" {
+			continue
+		}
+		// Extract task ID from name: "task://<task_id>"
+		if !strings.HasPrefix(entry.Entry.Name, "task://") {
+			continue
+		}
+		taskID := strings.TrimPrefix(entry.Entry.Name, "task://")
+
+		// Check similarity threshold
+		if entry.Score < minSimilarity {
+			continue
+		}
+
+		taskIDs = append(taskIDs, taskID)
+		scoreByID[taskID] = entry.Score
+
+		if len(taskIDs) >= limit {
+			break
+		}
+	}
+
+	// Fetch task details for matching IDs
+	for _, taskID := range taskIDs {
+		task, err := store.Get(ctx, taskID)
+		if err != nil {
+			// Task may have been deleted after embedding was created
+			continue
+		}
+
+		// Verify workspace ownership
+		if task.WorkspaceID != workspaceID {
+			continue
+		}
+
+		output.Tasks = append(output.Tasks, &searchTaskResult{
+			Task:       toOutput(task),
+			Similarity: scoreByID[taskID],
+		})
+	}
+
+	output.TotalFound = len(output.Tasks)
+	return output, nil
+}
+
+// boolPtr returns a pointer to a bool value.
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 // formatTime safely formats a *time.Time for JSON output.
@@ -770,11 +1083,11 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 			})
 			if err != nil {
 				// Warning output to stderr; error is not actionable.
-				_, _ = fmt.Fprintf(os.Stderr, "warning: LLM planning failed, falling back to simple epic: %v\n", err) //nolint:errcheck
+				fmt.Fprintf(os.Stderr, "warning: LLM planning failed, falling back to simple epic: %v\n", err)
 			} else {
 				// Convert LLM tasks to internal tasks
 				// Info output to stderr; error is not actionable.
-				_, _ = fmt.Fprintf(os.Stderr, "info: LLM planning generated %d tasks using %s\n", len(llmResult.Tasks), llmResult.ModelUsed) //nolint:errcheck
+				fmt.Fprintf(os.Stderr, "info: LLM planning generated %d tasks using %s\n", len(llmResult.Tasks), llmResult.ModelUsed)
 				titleToID := make(map[string]string)
 				for i, pt := range llmResult.Tasks {
 					scopePath := pt.ScopePath
@@ -871,7 +1184,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 			if err := boardStore.SendMessage(ctx, &msg); err != nil {
 				// Log but don't fail the operation.
 				// Warning output to stderr; error is not actionable.
-				_, _ = fmt.Fprintf(os.Stderr, "warning: failed to send plan event: %v\n", err) //nolint:errcheck
+				fmt.Fprintf(os.Stderr, "warning: failed to send plan event: %v\n", err)
 			}
 		}
 	} else {
@@ -1033,8 +1346,12 @@ func toOutputList(taskList []tasks.Task) []*taskOutput {
 	return out
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
+func fail(command, code string, err error, hint string) {
+	var data map[string]any
+	if hint != "" {
+		data = map[string]any{"hint": hint}
+	}
+	env := envelope.Error(command, code, err.Error(), data)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit todo failure")
 	os.Exit(1)
 }

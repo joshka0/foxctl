@@ -55,7 +55,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("fs/tree", "ECONFIG", err)
+		fail("fs/tree", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -130,8 +130,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
-		data["artifact_kind"] = artifact.Kind
-		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("fs/tree", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
@@ -250,7 +248,7 @@ func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) st
 
 	// Build current line
 	if node.Level == 0 {
-		_, _ = builder.WriteString(node.Name)
+		builder.WriteString(node.Name)
 	} else {
 		var connector string
 		if isLast {
@@ -259,22 +257,22 @@ func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) st
 			connector = "├── "
 		}
 
-		_, _ = builder.WriteString(prefix)
-		_, _ = builder.WriteString(connector)
-		_, _ = builder.WriteString(node.Name)
+		builder.WriteString(prefix)
+		builder.WriteString(connector)
+		builder.WriteString(node.Name)
 	}
 
 	// Add size if requested and it's a file
 	if includeSize && !node.IsDir && node.Size > 0 {
-		_, _ = builder.WriteString(fmt.Sprintf(" (%s)", formatSize(node.Size)))
+		builder.WriteString(fmt.Sprintf(" (%s)", formatSize(node.Size)))
 	}
 
 	// Add directory indicator
 	if node.IsDir && len(node.Children) > 0 {
-		_, _ = builder.WriteString("/")
+		builder.WriteString("/")
 	}
 
-	_, _ = builder.WriteString("\n")
+	builder.WriteString("\n")
 
 	// Render children
 	if node.IsDir && len(node.Children) > 0 {
@@ -289,7 +287,7 @@ func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) st
 
 		for i, child := range node.Children {
 			isChildLast := i == len(node.Children)-1
-			_, _ = builder.WriteString(renderTree(child, newPrefix, isChildLast, includeSize))
+			builder.WriteString(renderTree(child, newPrefix, isChildLast, includeSize))
 		}
 	}
 

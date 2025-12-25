@@ -1,0 +1,91 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/llm_search
+  description: Multi-provider LLM search for ranking code candidates
+  version: 0.1.0
+  author: agentctl
+  tags: [code, search, llm, ranking, retrieval]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_llm_search/code_llm_search
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/llm_search
+  parameters:
+    - name: workspace_id
+      type: string
+      required: false
+      default: "default"
+      description: Workspace identifier
+    - name: question
+      type: string
+      required: true
+      description: The search query/question
+    - name: candidates
+      type: array
+      required: true
+      description: List of candidates to rank (objects with path, symbol_id, snippet, priority)
+    - name: providers
+      type: array
+      required: false
+      description: LLM providers to use (anthropic, openai, gemini, cerebras)
+    - name: limits
+      type: object
+      required: false
+      description: Limits for max_candidates (default 50) and timeout_ms (default 30000)
+  returns:
+    - name: summary
+      type: object
+      description: Summary with candidates_ranked, providers_used, provider_latencies_ms, duration_ms
+    - name: ranked_candidates
+      type: array
+      description: Ranked candidates with path, symbol_id, score, rank, explanation, by_provider
+    - name: provider_results
+      type: object
+      description: Raw results from each provider
+  help:
+    short: "Rank code candidates using multiple LLM providers"
+    long: |
+      code/llm_search uses multiple LLM providers to rank code candidates based on
+      relevance to a natural language question. This enables semantic code search
+      that goes beyond keyword matching.
+
+      Providers are auto-detected based on available API keys:
+      - CEREBRAS_API_KEY (fastest, recommended)
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+      - GEMINI_API_KEY or GOOGLE_API_KEY
+
+      Multiple providers can run in parallel for consensus ranking.
+    workflows:
+      - id: basic-search
+        description: "Rank candidates with auto-detected providers"
+        example_input:
+          question: "Where is error handling implemented?"
+          candidates:
+            - path: "internal/errors/handler.go"
+              snippet: "func HandleError(err error) {...}"
+            - path: "internal/middleware/recovery.go"
+              snippet: "func RecoveryMiddleware(...) {...}"
+      - id: single-provider
+        description: "Use specific fast provider"
+        example_input:
+          question: "How does authentication work?"
+          candidates:
+            - path: "internal/auth/jwt.go"
+            - path: "internal/auth/middleware.go"
+          providers: ["cerebras"]
+          limits:
+            max_candidates: 20
+            timeout_ms: 15000
+capabilities:
+  network: "external"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

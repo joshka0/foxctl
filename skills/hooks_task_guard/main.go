@@ -32,7 +32,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("hooks/task_guard", "ECONFIG", err)
+		fail("hooks/task_guard", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -79,10 +79,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer func() {
-		// Store cleanup in defer; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Generate default title from tool + file path
 	defaultTitle := deriveTaskTitle(in)

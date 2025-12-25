@@ -1,20 +1,27 @@
 # Protocol Package
 
-The `protocol` package centralizes wire-level protocol semantics for agentctl, providing a single source of truth for envelope construction, validation, and error codes according to the Core Profile v1 specification.
+The `protocol` package centralizes wire-level protocol semantics for agentctl,
+providing a single source of truth for envelope construction, validation, and
+error codes according to the Core Profile v1 specification.
 
 ## Overview
 
 This package wraps `internal/domain/envelope` and provides:
 
-1. **Canonical error codes** - All error codes from Core Profile v1 (EARG, EOPENAPI, EAUTH, etc.)
+1. **Canonical error codes** - All error codes from Core Profile v1 (EARG,
+   EOPENAPI, EAUTH, etc.)
 2. **Helper functions** - Simplified API for building and writing envelopes
-3. **Extended validation** - Protocol-level checks for CAS digests, cache metadata, and status codes
-4. **Typed error helpers** - Specialized constructors for common error scenarios (HTTP, validation, auth, etc.)
-5. **Annotation helpers** - Functions for annotating envelopes with run/cache metadata
+3. **Extended validation** - Protocol-level checks for CAS digests, cache
+   metadata, and status codes
+4. **Typed error helpers** - Specialized constructors for common error scenarios
+   (HTTP, validation, auth, etc.)
+5. **Annotation helpers** - Functions for annotating envelopes with run/cache
+   metadata
 
 ## Error Codes
 
-The package defines typed error codes matching the Core Profile v1 specification:
+The package defines typed error codes matching the Core Profile v1
+specification:
 
 ```go
 const (
@@ -127,7 +134,8 @@ env := protocol.OK("cmd", data,
 
 ## Typed Error Helpers
 
-The protocol package provides specialized error envelope constructors with typed data payloads for common error scenarios:
+The protocol package provides specialized error envelope constructors with typed
+data payloads for common error scenarios:
 
 ### Validation Errors
 
@@ -200,7 +208,8 @@ env := protocol.ErrorWithData("op.fail", protocol.ErrorCodeEIO, "I/O error", pro
 
 ## Validation
 
-The protocol package extends base envelope validation with protocol-level checks:
+The protocol package extends base envelope validation with protocol-level
+checks:
 
 ### Base Validation
 
@@ -219,9 +228,17 @@ protocol.MustValidate(env)
 The `Validate` function performs these protocol-level checks:
 
 #### 1. CAS Digest Matching
-- If `data.artifact` exists, `meta.cas_digest` must match
+
+- `meta.cas_digest` is optional; if set it MUST match `data.artifact` and MUST
+  be omitted when `data.artifact` is absent
 - Artifact field must use `sha256:` prefix
+
 ```go
+// Valid
+env := protocol.OK("cmd", map[string]any{
+    "artifact": "sha256:abc123",
+})
+
 // Valid
 env := protocol.OK("cmd", map[string]any{
     "artifact": "sha256:abc123",
@@ -234,7 +251,9 @@ env := protocol.OK("cmd", map[string]any{
 ```
 
 #### 2. Cache Metadata Consistency
+
 - If `meta.source == "cache"`, `meta.cache_key` must be set
+
 ```go
 // Valid
 env := protocol.OK("cmd", nil,
@@ -247,7 +266,10 @@ env := protocol.OK("cmd", nil, protocol.WithSource("cache"))
 ```
 
 #### 3. Error Status Code Validation
-- Error envelopes with `data.summary.status_code` must have codes in 400-599 range
+
+- Error envelopes with `data.summary.status_code` must have codes in 400-599
+  range
+
 ```go
 // Valid
 env := protocol.Error("cmd", protocol.ErrorCodeERuntime, "error", map[string]any{

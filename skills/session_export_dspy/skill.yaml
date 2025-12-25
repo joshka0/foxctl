@@ -1,0 +1,88 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/export-dspy
+  version: 0.1.0
+  description: "Export sessions as DSPy training examples for fine-tuning"
+  tags: ["session", "memory", "export", "dspy", "training", "ml"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_export_dspy/session_export_dspy
+io:
+  format: JSON
+  inline_output_kb: 256
+signature:
+  command: session/export-dspy
+  parameters:
+    - name: session_ids
+      type: array
+      required: false
+      description: "Specific session IDs to export"
+    - name: project
+      type: string
+      required: false
+      description: "Export all sessions for a project"
+    - name: include_tools
+      type: boolean
+      required: false
+      description: "Include tools used in output (default: false)"
+    - name: include_files
+      type: boolean
+      required: false
+      description: "Include files edited in output (default: false)"
+    - name: output_file
+      type: string
+      required: false
+      description: "Path to write output file (returns inline if not set)"
+    - name: format
+      type: string
+      required: false
+      description: "Output format: dspy (JSON array), jsonl, or csv (default: dspy)"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of examples to export (default: 1000)"
+returns:
+  - name: examples_count
+    type: integer
+    description: "Number of examples exported"
+  - name: sessions_used
+    type: integer
+    description: "Number of sessions used"
+  - name: output_file
+    type: string
+    description: "Path to output file (if specified)"
+  - name: examples
+    type: array
+    description: "Exported examples (if no output_file specified)"
+  - name: status
+    type: string
+    description: "Status of the export"
+  - name: message
+    type: string
+    description: "Human-readable status message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+    - type: home
+  pure: false
+examples:
+  - name: "Export project sessions"
+    input:
+      project: "agentctl"
+      format: "jsonl"
+      output_file: "/tmp/training.jsonl"
+    description: "Export all agentctl sessions as JSONL"
+  - name: "Export specific sessions"
+    input:
+      session_ids: ["01HXYZ...", "01HABC..."]
+      include_tools: true
+    description: "Export specific sessions with tool usage info"
+  - name: "Export with files"
+    input:
+      project: "myproject"
+      include_files: true
+      limit: 100
+    description: "Export with file context for RAG training"

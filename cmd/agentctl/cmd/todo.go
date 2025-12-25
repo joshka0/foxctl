@@ -23,6 +23,7 @@ func newTodoCommand() *cobra.Command {
 		newTodoInsightsCommand(),
 		newTodoRecommendCommand(),
 		newTodoPlanCommand(),
+		newTodoSearchCommand(),
 	)
 	return cmd
 }
@@ -282,6 +283,52 @@ Examples:
 	if err := cmd.MarkFlagRequired("goal"); err != nil {
 		panic(err)
 	}
+	return cmd
+}
+
+func newTodoSearchCommand() *cobra.Command {
+	var workspaceID string
+	var limit int
+	var minSimilarity float64
+
+	cmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Semantic search over tasks using embeddings",
+		Long: `Search tasks using semantic similarity.
+
+Requires task embeddings to be generated first using:
+  agentctl run embedding/tasks --input '{"scope": "all"}'
+
+Examples:
+  # Search for tasks related to authentication
+  agentctl todo search "user authentication"
+
+  # Search with a higher result limit
+  agentctl todo search "database optimization" --limit 20
+
+  # Search with a higher similarity threshold
+  agentctl todo search "API endpoints" --min-similarity 0.5`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			query := args[0]
+			payload := map[string]any{
+				"operation": "search",
+				"search": map[string]any{
+					"query":          query,
+					"limit":          limit,
+					"min_similarity": minSimilarity,
+				},
+			}
+			if workspaceID != "" {
+				payload["workspace_id"] = workspaceID
+			}
+			return runTodoSkill(cmd, payload)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
+	cmd.Flags().IntVar(&limit, "limit", 10, "Max results to return")
+	cmd.Flags().Float64Var(&minSimilarity, "min-similarity", 0.3, "Minimum similarity threshold (0.0-1.0)")
 	return cmd
 }
 

@@ -190,9 +190,7 @@ func (c *Client) Execute(ctx context.Context, req *http.Request) (*Response, err
 	if err != nil {
 		return nil, classifyNetworkError(err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 
 	body, err := c.readBody(resp.Body)
 	if err != nil {

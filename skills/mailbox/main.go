@@ -71,7 +71,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("mailbox/manage", "ECONFIG", err)
+		fail("mailbox/manage", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -95,10 +95,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	if err != nil {
 		return fmt.Errorf("open board store: %w", err)
 	}
-	defer func() {
-		// Store cleanup in defer; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	op := strings.ToLower(strings.TrimSpace(in.Operation))
 	workspaceID := in.WorkspaceID
@@ -151,10 +148,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			if err != nil {
 				return fmt.Errorf("open teams store: %w", err)
 			}
-			defer func() {
-				// Store cleanup in defer; error is not actionable.
-				_ = teamStore.Close() //nolint:errcheck
-			}()
+			defer teamStore.Close()
 
 			if _, err := teamStore.GetTeam(ctx, workspaceID, base.Recipient); err != nil {
 				if errors.Is(err, teams.ErrNotFound) {

@@ -100,7 +100,8 @@ On **success**, `status="ok"`, `command="http/openapi"`, and:
   - `paging` metadata (e.g. `has_more`, `next_cursor`, `page_count`)
 - `data.body` (optional) — inline JSON body when "small enough".
 - `data.artifact` (optional) — CAS digest for large responses.
-- `meta.cas_digest` MUST equal `data.artifact` when present.
+- `meta.cas_digest` is optional; if set it MUST match `data.artifact` and MUST
+  be omitted when `data.artifact` is absent.
 
 On **validation or runtime errors**, follow `openapi_skill.md` §12 plus Core
 Profile §13:
@@ -270,8 +271,8 @@ When `dry_run=true`:
   the body or store as CAS artifact.
 - For large responses:
   - Write full body to CAS.
-  - Return wrapper envelope with `data.summary`, `data.artifact`, and
-    `meta.cas_digest`.
+  - Return wrapper envelope with `data.summary` and `data.artifact` (and
+    optionally `meta.cas_digest`).
 
 ### 10.2 Summaries
 

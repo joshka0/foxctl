@@ -1,0 +1,45 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: optimize/analyze
+  version: 0.1.0
+  description: "Analyze trajectory data for optimization insights"
+  tags: ["optimize", "analyze", "statistics"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/optimize_analyze/analyze
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: optimize/analyze
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root path"
+    - name: role
+      type: string
+      required: true
+      description: "Agent role to analyze"
+    - name: days
+      type: integer
+      required: false
+      description: "Number of days to analyze (default: 30)"
+returns:
+  - name: stats
+    type: object
+    description: "Aggregate statistics"
+  - name: tool_usage
+    type: array
+    description: "Tool usage statistics"
+  - name: recommendations
+    type: array
+    description: "Optimization recommendations"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+    - type: workdir
+  pure: false

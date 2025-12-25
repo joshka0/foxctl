@@ -44,7 +44,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("hooks/test_feedback", "ECONFIG", err)
+		fail("hooks/test_feedback", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -83,10 +83,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		output.Reason = "test watch store not initialized"
 		return emitOutput(rc, output, nil)
 	}
-	defer func() {
-		// Store cleanup in defer; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Derive workspace ID from workspace root
 	workspaceID := deriveWorkspaceID(in.WorkspaceRoot)

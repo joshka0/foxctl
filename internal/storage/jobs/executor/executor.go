@@ -265,25 +265,34 @@ func (e *Executor) runSkill(ctx context.Context, manifest skill.Manifest, artifa
 	})
 }
 
-func (e *Executor) handleFailure(ctx context.Context, jobID string, stdout, stderr []byte, runErr error, pw *progressWriter) ([]byte, error) {
+func (e *Executor) handleFailure(_ context.Context, jobID string, stdout, stderr []byte, runErr error, pw *progressWriter) ([]byte, error) {
 	err := augmentError(runErr, stdout, stderr)
 	if pw != nil {
 		if pwErr := pw.WriteMessage(fmt.Sprintf("skill failed: %s", err)); pwErr != nil {
 			e.warnProgress(jobID, "execution_error", pwErr)
 		}
 	}
-	if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
+	// Use background context for final state update to ensure it completes
+	// even if the CLI's context was cancelled (e.g., timeout).
+	stateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if stateErr := e.persist.UpdateState(stateCtx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
 		return stdout, fmt.Errorf("skill run failed: %w (state update also failed: %v)", err, stateErr)
 	}
 	return stdout, fmt.Errorf("skill run failed: %w", err)
 }
 
-func (e *Executor) handleSuccess(ctx context.Context, jobID string, stdout []byte, pw *progressWriter) ([]byte, error) {
+func (e *Executor) handleSuccess(_ context.Context, jobID string, stdout []byte, pw *progressWriter) ([]byte, error) {
+	// Use background context for final state updates to ensure they complete
+	// even if the CLI's context was cancelled (e.g., timeout).
+	stateCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var resultEnv envelope.Envelope
 	if unmarshalErr := json.Unmarshal(stdout, &resultEnv); unmarshalErr != nil {
 		validationErr := fmt.Errorf("invalid result envelope: %w", unmarshalErr)
 		e.recordProgressFailure(jobID, pw, "decode_error", validationErr)
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, validationErr.Error(), ""); stateErr != nil {
+		if stateErr := e.persist.UpdateState(stateCtx, jobID, types.StateError, validationErr.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", validationErr, stateErr)
 		}
 		return nil, validationErr
@@ -292,7 +301,7 @@ func (e *Executor) handleSuccess(ctx context.Context, jobID string, stdout []byt
 	if validationErr := envelope.Validate(resultEnv); validationErr != nil {
 		wrapped := fmt.Errorf("envelope validation failed: %w", validationErr)
 		e.recordProgressFailure(jobID, pw, "validation_error", wrapped)
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, wrapped.Error(), ""); stateErr != nil {
+		if stateErr := e.persist.UpdateState(stateCtx, jobID, types.StateError, wrapped.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("%w (state update also failed: %v)", wrapped, stateErr)
 		}
 		return nil, wrapped
@@ -301,13 +310,13 @@ func (e *Executor) handleSuccess(ctx context.Context, jobID string, stdout []byt
 	resultPath := filepath.Join(e.jobDir(jobID), "result.json")
 	if err := os.WriteFile(resultPath, stdout, 0o644); err != nil {
 		e.recordProgressFailure(jobID, pw, "result_error", fmt.Errorf("skill failed to write result: %w", err))
-		if stateErr := e.persist.UpdateState(ctx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
+		if stateErr := e.persist.UpdateState(stateCtx, jobID, types.StateError, err.Error(), ""); stateErr != nil {
 			return nil, fmt.Errorf("jobs: write result: %w (state update also failed: %v)", err, stateErr)
 		}
 		return nil, fmt.Errorf("jobs: write result: %w", err)
 	}
 
-	if err := e.persist.UpdateState(ctx, jobID, types.StateOK, "", resultPath); err != nil {
+	if err := e.persist.UpdateState(stateCtx, jobID, types.StateOK, "", resultPath); err != nil {
 		return nil, err
 	}
 

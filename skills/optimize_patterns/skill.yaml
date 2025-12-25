@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: optimize/patterns
+  version: 0.1.0
+  description: "Manage learned tool usage patterns for agent optimization"
+  tags: ["optimize", "patterns", "learning"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/optimize_patterns/patterns
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: optimize/patterns
+  parameters:
+    - name: action
+      type: string
+      required: true
+      description: "Action: list, clear, hints"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root path"
+    - name: role
+      type: string
+      required: false
+      description: "Agent role to filter by"
+    - name: context
+      type: string
+      required: false
+      description: "Task context for hints"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of results"
+returns:
+  - name: patterns
+    type: array
+    description: "List of patterns (for list action)"
+  - name: hints
+    type: array
+    description: "Tool hints (for hints action)"
+  - name: cleared
+    type: integer
+    description: "Number of patterns cleared (for clear action)"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+    - type: workdir
+  pure: false

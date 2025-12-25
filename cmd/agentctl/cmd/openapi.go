@@ -219,7 +219,7 @@ func newOpenAPIDescribeCommand() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					defer errs.Ignore(casStore.Close(), "close openapi describe cas store")
+					defer func() { errs.Ignore(casStore.Close(), "close openapi describe cas store") }()
 
 					httpClient := &http.Client{Timeout: defaultHTTPTimeout}
 					l := loader.New(casStore, mem, loader.WithWorkspace(ws), loader.WithHTTPClient(httpClient))
@@ -308,7 +308,7 @@ func newOpenAPIValidateCommand() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					defer errs.Ignore(casStore.Close(), "close openapi validate cas store")
+					defer func() { errs.Ignore(casStore.Close(), "close openapi validate cas store") }()
 
 					httpClient := &http.Client{Timeout: defaultHTTPTimeout}
 					l := loader.New(casStore, mem, loader.WithWorkspace(ws), loader.WithStrictValidation(strict), loader.WithHTTPClient(httpClient))

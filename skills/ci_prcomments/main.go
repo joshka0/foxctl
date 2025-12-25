@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,7 +22,11 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/rs/zerolog"
 )
+
+// logger is the package-level structured logger that writes JSON to stderr.
+var logger = zerolog.New(os.Stderr).With().Str("component", "ci_prcomments").Timestamp().Logger()
 
 type input struct {
 	PR          string `json:"pr"`
@@ -116,7 +119,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("ci/prcomments", "ECONFIG", err)
+		fail("ci/prcomments", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -176,7 +179,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 				repo = detectedRepo
 			}
 		} else {
-			log.Printf("warning: could not auto-detect repository: %v", err)
+			logger.Warn().Err(err).Str("operation", "auto-detect-repo").Msg("could not auto-detect repository")
 		}
 	}
 
@@ -208,17 +211,17 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	issueComments, err := getIssueComments(client, token, owner, repo, prNum)
 	if err != nil {
-		log.Printf("warning: failed to get issue comments: %v", err)
+		logger.Warn().Err(err).Str("operation", "get-issue-comments").Int("pr", prNum).Msg("failed to get issue comments")
 	}
 
 	reviewComments, err := getReviewComments(client, token, owner, repo, prNum)
 	if err != nil {
-		log.Printf("warning: failed to get review comments: %v", err)
+		logger.Warn().Err(err).Str("operation", "get-review-comments").Int("pr", prNum).Msg("failed to get review comments")
 	}
 
 	checkRuns, err := getCheckRuns(client, token, owner, repo, prNum)
 	if err != nil {
-		log.Printf("warning: failed to get CI check runs: %v", err)
+		logger.Warn().Err(err).Str("operation", "get-check-runs").Int("pr", prNum).Msg("failed to get CI check runs")
 	}
 
 	allComments := append(issueComments, reviewComments...)
@@ -277,8 +280,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		artifact, err := runner.PersistBuffer(ctx, rc, buf, "text/markdown", "ci_prcomments")
 		if err == nil && artifact.Digest != "" {
 			data["markdown_artifact"] = artifact.Digest
-			data["artifact_kind"] = artifact.Kind
-			data["artifact_size_bytes"] = artifact.Size
 		}
 	}
 
@@ -472,9 +473,7 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
 		location := resp.Header.Get("Location")
@@ -487,9 +486,7 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 			if err != nil {
 				return "", err
 			}
-			defer func() {
-				_ = redirectResp.Body.Close()
-			}()
+			defer redirectResp.Body.Close()
 			resp = redirectResp
 		}
 	}
@@ -658,9 +655,7 @@ func githubGET(client *http.Client, token, url string, v any) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		// Error body read; error is not actionable in error path.
@@ -791,8 +786,8 @@ func getChangedFilesForPR(client *http.Client, token, owner, repo string, prNum 
 		Status   string `json:"status"`
 	}
 	if err := githubGET(client, token, url, &files); err != nil {
-		log.Printf("warning: failed to get PR files: %v", err)
-		return nil
+		logger.Warn().Err(err).Str("operation", "get-pr-files").Int("pr", prNum).Msg("failed to get PR files")
+		return []string{}
 	}
 	var conflicting []string
 	for _, f := range files {
@@ -863,13 +858,13 @@ func displayJobDetailsTaskFormat(buf *bytes.Buffer, job *JobDetails, client *htt
 	}
 	if failedStep != nil {
 		// Buffer writes; errors are not actionable for in-memory buffer.
-		_, _ = fmt.Fprintf(buf, "**Failed step:** %s\n", failedStep.Name) //nolint:errcheck
-		_, _ = fmt.Fprintf(buf, "**URL:** %s\n\n", job.HTMLURL)           //nolint:errcheck
+		fmt.Fprintf(buf, "**Failed step:** %s\n", failedStep.Name)
+		fmt.Fprintf(buf, "**URL:** %s\n\n", job.HTMLURL)
 		output, err := getJobErrorOutput(client, token, owner, repo, job.ID, failedStep.Name)
 		if err != nil {
-			log.Printf("warning: failed to get job error output: %v", err)
+			logger.Warn().Err(err).Str("operation", "get-job-error-output").Int("job_id", job.ID).Str("step", failedStep.Name).Msg("failed to get job error output")
 		} else if output != "" {
-			_, _ = fmt.Fprintf(buf, "**Error output:**\n\n```\n%s\n```\n\n", output) //nolint:errcheck
+			fmt.Fprintf(buf, "**Error output:**\n\n```\n%s\n```\n\n", output)
 		}
 	}
 }

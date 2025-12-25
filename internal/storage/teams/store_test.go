@@ -253,9 +253,6 @@ func setupTestStore(t *testing.T) Store {
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { store.Close() })
 	return store
 }

@@ -157,9 +157,7 @@ func (p *OpenAIPlanner) Plan(ctx context.Context, req PlanRequest) (*PlanResult,
 	if err != nil {
 		return nil, fmt.Errorf("API request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

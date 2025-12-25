@@ -1,0 +1,120 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/semantic_search
+  description: Unified semantic search across symbols, sessions, and memories with BM25 fallback
+  version: 0.2.0
+  author: agentctl
+  tags: [search, semantic, embedding, symbols, sessions, memories]
+distribution:
+  type: exec
+  exec:
+    entry: code_semantic_search
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/semantic_search
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: Natural language query to search for
+    - name: scope
+      type: array
+      required: false
+      default: ["symbols", "sessions", "memories"]
+      description: Sources to search (symbols, sessions, memories)
+    - name: workspace
+      type: string
+      required: false
+      description: Workspace path (defaults to current directory)
+    - name: limit
+      type: integer
+      required: false
+      default: 20
+      description: Maximum number of results to return
+    - name: min_similarity
+      type: number
+      required: false
+      default: 0.3
+      description: Minimum similarity threshold (0-1)
+    - name: include_context
+      type: boolean
+      required: false
+      default: true
+      description: Include context hints from session matches
+  returns:
+    - name: query
+      type: string
+      description: The search query
+    - name: results
+      type: array
+      description: Ranked search results from all sources
+    - name: context_hints
+      type: array
+      description: Context hints from related sessions
+    - name: stats
+      type: object
+      description: Search statistics (counts, latencies, missing sources)
+  help:
+    short: "Search code, sessions, and memories with semantic understanding"
+    long: |
+      code/semantic_search performs unified semantic search across multiple
+      knowledge sources using BM25 text search, vector similarity, and ripgrep,
+      combining results with Reciprocal Rank Fusion (RRF).
+
+      Sources:
+      - symbols: Code symbols via retrieval.Generator (BM25 + vector + ripgrep)
+      - sessions: Past Claude Code sessions with summaries/gotchas (vector search)
+      - memories: Named memories with semantic content (BM25 text search)
+
+      The search:
+      1. Generates query embedding once (reused across sources)
+      2. Symbols: Uses retrieval.Generator for hybrid search (BM25 + semantic + ripgrep)
+      3. Sessions: Performs vector similarity search on session embeddings
+      4. Memories: Performs BM25 text search on named memories
+      5. Combines results using Reciprocal Rank Fusion (RRF)
+      6. Extracts context hints from matching sessions
+
+      Environment Variables:
+      - GEMINI_API_KEY: Enables vector search (sessions require it; symbols enhanced)
+      - EMBEDDING_PROVIDER: Provider name (default: "gemini")
+      - EMBEDDING_MODEL: Model name (default: "gemini-embedding-001")
+
+      Without an API key:
+      - Symbol search works via BM25 text matching and ripgrep fallback
+      - Session search gracefully skipped (hint provided)
+      - Memory search works via BM25 text matching
+
+      Timeouts:
+      - Per-source: 500ms
+      - Total: 2s
+
+      Context hints surface relevant past solutions, gotchas, and decisions
+      from sessions that solved similar problems.
+    workflows:
+      - id: search-all
+        description: "Search all sources for a question"
+        example_input:
+          query: "How does error handling work?"
+          include_context: true
+      - id: search-symbols
+        description: "Search only code symbols"
+        example_input:
+          query: "authentication middleware"
+          scope: ["symbols"]
+          limit: 10
+      - id: search-sessions
+        description: "Find relevant past sessions"
+        example_input:
+          query: "database migration issues"
+          scope: ["sessions"]
+          include_context: true
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

@@ -1,0 +1,139 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: mobile/android
+  version: 0.1.0
+  description: |
+    Android Emulator automation via ADB.
+    Supports device management, app lifecycle, UI interaction,
+    accessibility inspection, and debugging.
+  tags: [mobile, android, emulator, adb, testing]
+distribution:
+  type: exec
+  exec:
+    entry: skills/mobile_android/mobile_android
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: mobile/android
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      enum: [list_devices, device_info, install, launch, terminate,
+             screenshot, tap, swipe, type_text, press_key, ui_tree,
+             logs, logcat_filter, logcat_app, logcat_crash, logcat_clear,
+             open_url, grant_permission,
+             record_screen, record_stop, dumpsys, pull_file, push_file]
+      description: Operation to perform
+    - name: serial
+      type: string
+      required: false
+      description: Device serial (optional if only one emulator running)
+    - name: app
+      type: string
+      required: false
+      description: APK path or package name
+    - name: activity
+      type: string
+      required: false
+      description: Activity name for launch (e.g., .MainActivity)
+    - name: x
+      type: integer
+      required: false
+      description: X coordinate for tap/swipe
+    - name: y
+      type: integer
+      required: false
+      description: Y coordinate for tap/swipe
+    - name: x2
+      type: integer
+      required: false
+      description: End X coordinate for swipe
+    - name: y2
+      type: integer
+      required: false
+      description: End Y coordinate for swipe
+    - name: text
+      type: string
+      required: false
+      description: Text for type_text operation
+    - name: url
+      type: string
+      required: false
+      description: URL for open_url operation
+    - name: keycode
+      type: string
+      required: false
+      description: Android keycode (e.g., KEYCODE_HOME, KEYCODE_BACK, KEYCODE_MENU)
+    - name: permission
+      type: string
+      required: false
+      description: Permission to grant (e.g., android.permission.CAMERA)
+    - name: tag
+      type: string
+      required: false
+      description: Logcat tag filter
+    - name: level
+      type: string
+      required: false
+      enum: [V, D, I, W, E, F]
+      description: Logcat level filter (V=Verbose, D=Debug, I=Info, W=Warn, E=Error, F=Fatal)
+    - name: count
+      type: integer
+      required: false
+      default: 500
+      description: Number of log lines to fetch (for logs, logcat_filter, logcat_app, logcat_crash)
+    - name: pattern
+      type: string
+      required: false
+      description: Regex pattern to filter log lines (case-insensitive)
+    - name: service
+      type: string
+      required: false
+      enum: [activity, window, battery, meminfo, package, cpuinfo, diskstats]
+      description: Service for dumpsys
+    - name: remote_path
+      type: string
+      required: false
+      description: Remote path on device for pull_file/push_file
+    - name: local_path
+      type: string
+      required: false
+      description: Local path for pull_file/push_file
+    - name: output
+      type: string
+      required: false
+      description: Output path for screenshot/record_screen
+    - name: duration
+      type: integer
+      required: false
+      description: Duration in milliseconds for swipe
+  returns:
+    - name: devices
+      type: array
+      description: List of devices (for list_devices)
+    - name: device
+      type: object
+      description: Device info (for device_info)
+    - name: elements
+      type: array
+      description: UI elements (for ui_tree)
+    - name: screenshot
+      type: string
+      description: Screenshot artifact digest
+    - name: logs
+      type: string
+      description: Log output or artifact digest
+    - name: success
+      type: boolean
+      description: Operation success status
+    - name: message
+      type: string
+      description: Status message
+capabilities:
+  network: none
+  filesystem:
+    - type: workdir
+  pure: false

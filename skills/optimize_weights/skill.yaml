@@ -1,0 +1,38 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: optimize/weights
+  version: 0.1.0
+  description: "Manage learnable scorer weights for task prioritization"
+  tags: ["optimize", "weights", "scorer", "learning"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/optimize_weights/weights
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: optimize/weights
+  parameters:
+    - name: action
+      type: string
+      required: true
+      description: "Action: show, learn"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root path"
+returns:
+  - name: weights
+    type: object
+    description: "Current scorer weights"
+  - name: update
+    type: object
+    description: "Learning update result"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+    - type: workdir
+  pure: false

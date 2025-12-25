@@ -1,0 +1,478 @@
+package templates
+
+import "fmt"
+
+templ JobsList(jobs []JobSummary) {
+	@Layout("Jobs", "/jobs") {
+		<div class="page-header">
+			<h1 class="page-title">Jobs</h1>
+			<div>
+				<select 
+					class="select" 
+					name="state"
+					hx-get="/jobs" 
+					hx-target="#jobs-content" 
+					hx-include="[name='state']"
+				>
+					<option value="">All States</option>
+					<option value="ok">✓ OK</option>
+					<option value="error">✗ Error</option>
+					<option value="running">⟳ Running</option>
+					<option value="queued">⏳ Queued</option>
+				</select>
+			</div>
+		</div>
+		<div id="jobs-content" sse-swap="jobs-update" hx-swap="innerHTML">
+			@JobsTable(jobs)
+		</div>
+	}
+}
+
+templ JobsTable(jobs []JobSummary) {
+	if len(jobs) == 0 {
+		<div class="empty-state">
+			<p>No jobs found</p>
+			<p class="text-muted">Run some skills with 'agentctl run &lt;skill&gt;'</p>
+		</div>
+	} else {
+		<div class="card" style="padding: 0; overflow: hidden;">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>ID</th>
+						<th>Type</th>
+						<th>Category</th>
+						<th>Skill</th>
+						<th>State</th>
+						<th>Created</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, job := range jobs {
+						<tr 
+							hx-get={ "/jobs/" + job.ID } 
+							hx-target=".main" 
+							hx-push-url="true"
+						>
+							<td class="mono">{ truncateID(job.ID) }</td>
+							<td>
+								<span class="chip chip-default" style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;">{ job.Type }</span>
+							</td>
+							<td class="text-secondary">{ job.Category }</td>
+							<td style="font-weight: 500;">{ job.Skill }</td>
+							<td>
+								@StateChip(job.State)
+							</td>
+							<td class="text-muted" style="white-space: nowrap;">{ formatTime(job.CreatedAt) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ StateChip(state string) {
+	switch state {
+		case "ok":
+			<span class="chip chip-success">✓ OK</span>
+		case "error":
+			<span class="chip chip-error">✗ Error</span>
+		case "running":
+			<span class="chip chip-info">⟳ Running</span>
+		case "queued":
+			<span class="chip chip-warning">⏳ Queued</span>
+		default:
+			<span class="chip chip-default">{ state }</span>
+	}
+}
+
+templ JobDetailView(detail *JobDetail) {
+	@Layout("Job " + truncateID(detail.ID), "/jobs") {
+		@JobDetailViewContent(detail)
+	}
+}
+
+templ JobDetailViewContent(detail *JobDetail) {
+	<div class="breadcrumb">
+		<a href="/jobs" hx-boost="true">Jobs</a>
+		<span>/</span>
+		<span>{ truncateID(detail.ID) }</span>
+	</div>
+	
+	<!-- Header with command and state -->
+	<div class="page-header">
+		<div style="display: flex; align-items: baseline; gap: 0.75rem;">
+			<h1 class="page-title">{ detail.Skill }</h1>
+			<span class="text-muted" style="font-size: 1.125rem;">in { detail.Category }</span>
+		</div>
+		@StateChip(detail.State)
+	</div>
+	
+	<!-- Key Info Cards -->
+	<div class="grid-4 mb-4">
+		<div class="stat-card">
+			<div class="stat-label">Type</div>
+			<div style="margin-top: 0.25rem;">
+				<span class="chip chip-default" style="text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem;">{ detail.Type }</span>
+			</div>
+		</div>
+		<div class="stat-card">
+			<div class="stat-label">Job ID</div>
+			<div class="mono" style="font-size: 0.75rem; margin-top: 0.25rem; word-break: break-all;">{ detail.ID }</div>
+		</div>
+		<div class="stat-card">
+			<div class="stat-label">Created</div>
+			<div style="margin-top: 0.25rem;">{ formatRelativeTime(detail.CreatedAt) }</div>
+			<div class="text-muted" style="font-size: 0.75rem;">{ detail.CreatedAt }</div>
+		</div>
+		<div class="stat-card">
+			<div class="stat-label">Command</div>
+			<div class="mono" style="font-size: 0.75rem; margin-top: 0.25rem; color: var(--accent);">{ detail.Command }</div>
+		</div>
+	</div>
+	
+	<!-- Error section (prominent) -->
+	if detail.Error != "" {
+		<div class="card" style="border-color: var(--error); margin-bottom: 1rem;">
+			<h3 style="color: var(--error); margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem;">
+				<span>⚠️</span> Error
+			</h3>
+			<pre style="background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 0.5rem; overflow-x: auto;"><code style="color: var(--error);">{ detail.Error }</code></pre>
+		</div>
+	}
+	
+	<!-- Result Data - Enhanced View -->
+	if detail.ResultData != nil {
+			<!-- Result Data - Enhanced View -->
+			if IsSearchData(detail.ResultData) {
+				@SearchPreview(detail.ResultData)
+			} else if IsFileData(detail.ResultData) {
+				@FilePreview(detail.ResultData)
+			} else if IsSymbolData(detail.ResultData) {
+				@SymbolPreview(detail.ResultData)
+			} else if IsTableData(detail.ResultData) {
+				@DataTable(detail.ResultData.([]any))
+			} else {
+				<!-- Key-Value Summary -->
+				@ResultSummary(detail.ResultData)
+			}
+			
+			<!-- Collapsible Raw JSON -->
+			if hasNestedData(detail.ResultData) {
+				<details style="margin-top: 1rem;">
+					<summary style="cursor: pointer; color: var(--accent); font-size: 0.875rem; padding: 0.5rem 0;">
+						View full JSON data
+					</summary>
+					<div style="margin-top: 0.5rem;">
+						@RawJSON(detail.ResultData)
+					</div>
+				</details>
+			}
+	}
+	
+	<!-- Stderr section -->
+	if detail.Stderr != "" {
+		<details class="card" style="margin-bottom: 1rem;">
+			<summary style="cursor: pointer; font-weight: 600;">
+				Stderr Output
+			</summary>
+			<pre style="margin-top: 1rem; background: var(--bg-tertiary); padding: 1rem; border-radius: 0.5rem; overflow-x: auto;"><code class="text-muted">{ detail.Stderr }</code></pre>
+		</details>
+	}
+	
+	<!-- Artifacts section -->
+	if len(detail.Artifacts) > 0 {
+		<div class="card">
+			<h3 style="margin-bottom: 1rem;">Artifacts</h3>
+			<div style="display: flex; flex-direction: column; gap: 0.5rem;">
+				for _, artifact := range detail.Artifacts {
+					<div style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem; background: var(--bg-tertiary); border-radius: 0.25rem;">
+						<span>📄</span>
+						<code class="mono" style="font-size: 0.875rem;">{ artifact }</code>
+					</div>
+				}
+			</div>
+		</div>
+	}
+}
+
+// SearchPreview displays search matches with snippets
+templ SearchPreview(data any) {
+	if m, ok := data.(map[string]any); ok {
+		<div style="margin-bottom: 1rem;">
+			<h3 style="margin: 0 0 1rem 0;">Search Results</h3>
+			<div class="grid-3 mb-4">
+				<div class="stat-card">
+					<div class="stat-label">Matches</div>
+					<div class="stat-value" style="color: var(--success);">{ fmt.Sprintf("%v", m["match_count"]) }</div>
+				</div>
+				<div class="stat-card">
+					<div class="stat-label">Files</div>
+					<div class="stat-value">{ fmt.Sprintf("%v", m["files_touched"]) }</div>
+				</div>
+				<div class="stat-card">
+					<div class="stat-label">Pattern</div>
+					<div class="mono" style="font-size: 0.875rem; margin-top: 0.5rem; word-break: break-all;">{ fmt.Sprintf("%v", m["pattern"]) }</div>
+				</div>
+			</div>
+
+			if preview, ok := m["preview"].([]any); ok && len(preview) > 0 {
+				<div style="display: flex; flex-direction: column; gap: 0.75rem;">
+					for _, p := range preview {
+						if item, ok := p.(map[string]any); ok {
+							<div class="card" style="padding: 0; background: var(--bg-tertiary); overflow: hidden; border-color: var(--border);">
+								<div style="padding: 0.5rem 1rem; background: var(--border); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+									<code class="mono" style="color: var(--accent);">{ fmt.Sprintf("%v", item["file"]) }:{ fmt.Sprintf("%v", item["line_no"]) }</code>
+								</div>
+								<div style="padding: 1rem; overflow-x: auto;">
+									<pre style="padding: 0; background: transparent;"><code class="mono">{ fmt.Sprintf("%v", item["snippet"]) }</code></pre>
+								</div>
+							</div>
+						}
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+// FilePreview displays a list of files/directories
+templ FilePreview(data any) {
+	if m, ok := data.(map[string]any); ok {
+		<div style="margin-bottom: 1rem;">
+			<h3 style="margin: 1.5rem 0 1rem 0;">File Listing</h3>
+			<div class="grid-3 mb-4">
+				if count, ok := m["entry_count"]; ok {
+					<div class="stat-card">
+						<div class="stat-label">Entries</div>
+						<div class="stat-value">{ fmt.Sprintf("%v", count) }</div>
+					</div>
+				}
+				if dirs, ok := m["directories"]; ok {
+					<div class="stat-card">
+						<div class="stat-label">Directories</div>
+						<div class="stat-value">{ fmt.Sprintf("%v", dirs) }</div>
+					</div>
+				}
+				if size, ok := m["total_size"]; ok {
+					if s, ok := size.(float64); ok {
+						<div class="stat-card">
+							<div class="stat-label">Total Size</div>
+							<div class="stat-value">{ formatSizeBytes(int64(s)) }</div>
+						</div>
+					}
+				}
+			</div>
+
+			if preview, ok := m["preview"].([]any); ok && len(preview) > 0 {
+				<div class="card" style="padding: 0; overflow: hidden; border-color: var(--border);">
+					<table class="table">
+						<thead>
+							<tr>
+								<th>Name</th>
+								<th style="width: 100px;">Mode</th>
+								<th style="width: 100px;">Size</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, p := range preview {
+								if item, ok := p.(map[string]any); ok {
+									<tr>
+										<td>
+											<div style="display: flex; align-items: center; gap: 0.5rem;">
+												if isDir, _ := item["is_dir"].(bool); isDir {
+													<span>📁</span>
+												} else {
+													<span>📄</span>
+												}
+												<span class="mono">{ fmt.Sprintf("%v", item["name"]) }</span>
+											</div>
+										</td>
+										<td class="text-muted mono">{ fmt.Sprintf("%v", item["mode"]) }</td>
+										<td class="text-muted">
+											if s, ok := item["size_bytes"].(float64); ok && s > 0 {
+												{ formatSizeBytes(int64(s)) }
+											} else {
+												-
+											}
+										</td>
+									</tr>
+								}
+							}
+						</tbody>
+					</table>
+				</div>
+			}
+		</div>
+	}
+}
+
+// DataTable renders an array of objects as a table
+templ DataTable(rows []any) {
+	if len(rows) > 0 {
+		if first, ok := rows[0].(map[string]any); ok {
+			<div style="margin-bottom: 1rem;">
+				<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+					<h3 style="margin: 0;">Results Table</h3>
+					<span class="chip chip-default">{ fmt.Sprintf("%d items", len(rows)) }</span>
+				</div>
+				<div class="card" style="padding: 0; overflow-x: auto; border-color: var(--border);">
+					<table class="table">
+						<thead>
+							<tr>
+								for _, key := range GetKeys(first) {
+									<th>{ formatKeyName(key) }</th>
+								}
+							</tr>
+						</thead>
+						<tbody>
+							for _, r := range rows {
+								if row, ok := r.(map[string]any); ok {
+									<tr style="cursor: default;">
+										for _, key := range GetKeys(first) {
+											<td>
+												<span style="font-size: 0.875rem;">{ fmt.Sprintf("%v", row[key]) }</span>
+											</td>
+										}
+									</tr>
+								}
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		}
+	}
+}
+
+// ResultSummary displays key-value pairs from result data in a readable format
+templ ResultSummary(data any) {
+	<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+		<h3 style="margin: 0;">Result Summary</h3>
+		if countDataItems(data) > 0 {
+			<span class="chip chip-default">{ countDataItems(data) } items</span>
+		}
+	</div>
+	
+	if pairs := extractKeyValues(data); len(pairs) > 0 {
+		<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.75rem;">
+			for _, pair := range pairs {
+				<div style="display: flex; justify-content: space-between; padding: 0.5rem 0.75rem; background: var(--bg-tertiary); border-radius: 0.375rem;">
+					<span class="text-muted" style="font-size: 0.875rem;">{ formatKeyName(pair.Key) }</span>
+					switch pair.ValueType {
+						case "path":
+							<code class="mono" style="font-size: 0.875rem; color: var(--accent);">{ pair.Value }</code>
+						case "number":
+							<span style="font-weight: 600; color: var(--success);">{ pair.Value }</span>
+						case "boolean":
+							if pair.Value == "true" {
+								<span class="chip chip-success" style="font-size: 0.75rem;">✓ true</span>
+							} else {
+								<span class="chip chip-default" style="font-size: 0.75rem;">✗ false</span>
+							}
+						default:
+							<span style="font-size: 0.875rem;">{ pair.Value }</span>
+					}
+				</div>
+			}
+		</div>
+	} else {
+		// If no key-values extracted, show simple formatted view
+		@RawJSON(data)
+	}
+}
+
+// SymbolPreview displays code symbols with signatures and types
+templ SymbolPreview(data any) {
+	if m, ok := data.(map[string]any); ok {
+		<div style="margin-bottom: 1rem;">
+			<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+				<h3 style="margin: 0;">Code Symbols</h3>
+				if count, ok := m["symbol_count"]; ok {
+					<span class="chip chip-info">{ fmt.Sprintf("%v symbols", count) }</span>
+				}
+			</div>
+
+			<!-- Type Breakdown -->
+			if counts, ok := m["type_counts"].(map[string]any); ok && len(counts) > 0 {
+				<div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+					for t, c := range counts {
+						<span class="chip chip-default" style="font-size: 0.75rem;">
+							<span style="opacity: 0.7; margin-right: 0.25rem;">{ t }:</span>
+							<b>{ fmt.Sprintf("%v", c) }</b>
+						</span>
+					}
+				</div>
+			}
+
+			if preview, ok := m["preview"].([]any); ok && len(preview) > 0 {
+				<div style="display: flex; flex-direction: column; gap: 0.75rem;">
+					for _, item := range preview {
+						if sym, ok := item.(map[string]any); ok {
+							<div class="card" style="padding: 0.75rem 1rem; background: var(--bg-secondary); border-color: var(--border);">
+								<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+									<div style="display: flex; align-items: center; gap: 0.5rem;">
+										@SymbolIcon(fmt.Sprintf("%v", sym["type"]))
+										<span style="font-weight: 600;">{ fmt.Sprintf("%v", sym["name"]) }</span>
+										if exp, ok := sym["exported"].(bool); ok && exp {
+											<span style="color: var(--success); font-size: 0.7rem; font-weight: 700; border: 1px solid var(--success); padding: 0 0.25rem; border-radius: 2px;">EXP</span>
+										}
+									</div>
+									<div class="text-muted mono" style="font-size: 0.75rem;">
+										{ fmt.Sprintf("%v", sym["file"]) }:{ fmt.Sprintf("%v", sym["line"]) }
+									</div>
+								</div>
+								<div class="mono" style="font-size: 0.8125rem; color: var(--text-secondary); padding: 0.5rem; background: var(--bg-tertiary); border-radius: 0.25rem; overflow-x: auto;">
+									{ fmt.Sprintf("%v", sym["signature"]) }
+								</div>
+								
+								<!-- Fields / Params -->
+								if fields, ok := sym["fields"].([]any); ok && len(fields) > 0 {
+									<div style="margin-top: 0.5rem; padding-left: 0.5rem; border-left: 2px solid var(--border);">
+										<div class="text-muted" style="font-size: 0.7rem; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.05em;">Fields</div>
+										<div class="grid-3">
+											for _, f := range fields {
+												<div class="mono" style="font-size: 0.75rem; color: var(--text-muted);">{ fmt.Sprintf("%v", f) }</div>
+											}
+										</div>
+									</div>
+								}
+								if params, ok := sym["parameters"].([]any); ok && len(params) > 0 {
+									<div style="margin-top: 0.5rem; padding-left: 0.5rem; border-left: 2px solid var(--border);">
+										<div class="text-muted" style="font-size: 0.7rem; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.05em;">Parameters</div>
+										<div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+											for _, p := range params {
+												<span class="mono" style="font-size: 0.75rem; color: var(--text-muted); background: var(--bg-tertiary); padding: 0.125rem 0.375rem; border-radius: 4px;">{ fmt.Sprintf("%v", p) }</span>
+											}
+										</div>
+									</div>
+								}
+							</div>
+						}
+					}
+				</div>
+			}
+		</div>
+	}
+}
+
+templ SymbolIcon(typ string) {
+	switch typ {
+		case "struct", "class", "interface":
+			<span title={ typ } style="color: var(--warning);">◈</span>
+		case "function", "method":
+			<span title={ typ } style="color: var(--accent);">ƒ</span>
+		case "const", "var", "field":
+			<span title={ typ } style="color: var(--success);">•</span>
+		default:
+			<span title={ typ } style="color: var(--text-muted);">○</span>
+	}
+}
+
+// RawJSON displays syntax-highlighted JSON
+templ RawJSON(data any) {
+	<pre class="json-view"><code>
+		@templ.Raw(formatJSONSyntaxHighlighted(data))
+	</code></pre>
+}

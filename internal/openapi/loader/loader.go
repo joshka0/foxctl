@@ -214,7 +214,7 @@ func (l *Loader) fetch(ctx context.Context, ref string, opts loadOptions) ([]byt
 		if err != nil {
 			return nil, "", "", fmt.Errorf("load cas %s: %w", ref, err)
 		}
-		defer func() { _ = reader.Close() }() // explicitly ignore error
+		defer reader.Close()
 		data, err := io.ReadAll(reader)
 		if err != nil {
 			return nil, "", "", fmt.Errorf("read cas %s: %w", ref, err)
@@ -247,7 +247,7 @@ func (l *Loader) fetch(ctx context.Context, ref string, opts loadOptions) ([]byt
 		if err != nil {
 			return nil, "", "", fmt.Errorf("memory %s (%s): load cas %s: %w", name, ws, digest, err)
 		}
-		defer func() { _ = reader.Close() }()
+		defer reader.Close()
 		data, err := io.ReadAll(reader)
 		if err != nil {
 			return nil, "", "", fmt.Errorf("memory %s (%s): read cas %s: %w", name, ws, digest, err)
@@ -262,7 +262,7 @@ func (l *Loader) fetch(ctx context.Context, ref string, opts loadOptions) ([]byt
 		if err != nil {
 			return nil, "", "", fmt.Errorf("download %s: %w", ref, err)
 		}
-		defer func() { _ = resp.Body.Close() }()
+		defer resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, "", "", fmt.Errorf("download %s: unexpected status %s", ref, resp.Status)
 		}

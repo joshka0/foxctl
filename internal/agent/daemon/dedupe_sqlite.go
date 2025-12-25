@@ -1,0 +1,84 @@
+package daemon
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"path/filepath"
+	"time"
+
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+)
+
+// SQLiteDedupeStore implements DedupeStore using SQLite persistence.
+type SQLiteDedupeStore struct {
+	db *sql.DB
+}
+
+// OpenSQLiteDedupeStore opens or creates the dedupe database.
+func OpenSQLiteDedupeStore(ctx context.Context, storageRoot string) (*SQLiteDedupeStore, error) {
+	dbPath := filepath.Join(storageRoot, "daemon_dedupe.db")
+	db, err := sqliteutil.OpenDB(ctx, dbPath, migrateDedupe)
+	if err != nil {
+		return nil, fmt.Errorf("open dedupe db: %w", err)
+	}
+
+	return &SQLiteDedupeStore{db: db}, nil
+}
+
+func migrateDedupe(ctx context.Context, db *sql.DB) error {
+	schema := `
+       CREATE TABLE IF NOT EXISTS daemon_dedupe (
+           agent_id     TEXT NOT NULL,
+           message_id   TEXT NOT NULL,
+           processed_at INTEGER NOT NULL,
+           PRIMARY KEY (agent_id, message_id)
+       );
+       CREATE INDEX IF NOT EXISTS idx_dedupe_processed_at ON daemon_dedupe(processed_at);
+       `
+	_, err := db.ExecContext(ctx, schema)
+	return err
+}
+
+// IsProcessed checks if a message has already been processed.
+func (s *SQLiteDedupeStore) IsProcessed(ctx context.Context, agentID, messageID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM daemon_dedupe WHERE agent_id = ? AND message_id = ?`,
+		agentID, messageID,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check processed: %w", err)
+	}
+	return count > 0, nil
+}
+
+// MarkProcessed marks a message as processed.
+func (s *SQLiteDedupeStore) MarkProcessed(ctx context.Context, agentID, messageID string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR IGNORE INTO daemon_dedupe (agent_id, message_id, processed_at) VALUES (?, ?, ?)`,
+		agentID, messageID, time.Now().Unix(),
+	)
+	if err != nil {
+		return fmt.Errorf("mark processed: %w", err)
+	}
+	return nil
+}
+
+// Cleanup removes dedupe records older than the given duration.
+func (s *SQLiteDedupeStore) Cleanup(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().Add(-olderThan).Unix()
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM daemon_dedupe WHERE processed_at < ?`,
+		cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup dedupe: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Close closes the database connection.
+func (s *SQLiteDedupeStore) Close() error {
+	return s.db.Close()
+}

@@ -18,6 +18,37 @@ const (
 	StatusPartial Status = "partial"
 )
 
+// Outcome captures the final result of a trajectory for optimization.
+// This data is used by the optimization system to learn from past executions.
+type Outcome struct {
+	// Success indicates whether the trajectory achieved its goal.
+	Success bool `json:"success"`
+
+	// TasksCompleted is the number of tasks completed during the trajectory.
+	TasksCompleted int `json:"tasks_completed"`
+
+	// ToolCallCount is the total number of tool calls made.
+	ToolCallCount int `json:"tool_call_count"`
+
+	// ErrorCount is the number of errors encountered.
+	ErrorCount int `json:"error_count"`
+
+	// DurationMS is the total execution time in milliseconds.
+	DurationMS int64 `json:"duration_ms"`
+
+	// HumanRating is an optional human-provided rating (1-5 scale).
+	HumanRating *int `json:"human_rating,omitempty"`
+
+	// Feedback is optional human-provided feedback text.
+	Feedback string `json:"feedback,omitempty"`
+
+	// Metrics holds arbitrary optimization metrics.
+	Metrics map[string]float64 `json:"metrics,omitempty"`
+
+	// RecordedAt is when the outcome was recorded.
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
+}
+
 // EventKind represents the type of trajectory event.
 type EventKind string
 
@@ -83,6 +114,9 @@ type Trajectory struct {
 
 	// ArtifactDigest is a CAS digest for the full trajectory payload if large.
 	ArtifactDigest string `json:"artifact_digest,omitempty"`
+
+	// Outcome captures the final result for optimization purposes.
+	Outcome *Outcome `json:"outcome,omitempty"`
 
 	// CreatedAt records when the trajectory was created.
 	CreatedAt time.Time `json:"created_at"`
@@ -250,6 +284,36 @@ type ListFilter struct {
 	Since time.Time
 
 	// Until filters to trajectories created before this time.
+	Until time.Time
+
+	// Limit caps the number of results (default 100).
+	Limit int
+}
+
+// OutcomeFilter specifies filtering options for listing trajectories by outcome.
+type OutcomeFilter struct {
+	// WorkspaceID scopes the query (required).
+	WorkspaceID string
+
+	// AgentRole filters by agent role.
+	AgentRole string
+
+	// Success filters by success status (nil = any).
+	Success *bool
+
+	// MinRating filters to trajectories with human rating >= this value.
+	MinRating *int
+
+	// MaxRating filters to trajectories with human rating <= this value.
+	MaxRating *int
+
+	// HasFeedback filters to trajectories that have human feedback.
+	HasFeedback *bool
+
+	// Since filters to trajectories with outcomes recorded after this time.
+	Since time.Time
+
+	// Until filters to trajectories with outcomes recorded before this time.
 	Until time.Time
 
 	// Limit caps the number of results (default 100).

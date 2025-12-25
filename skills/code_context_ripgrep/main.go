@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -203,8 +204,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
-		data["artifact_kind"] = artifact.Kind
-		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("code/context_ripgrep", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
@@ -216,7 +215,7 @@ func parseInput(r io.Reader) (input, error) {
 		return input{}, fmt.Errorf("decode input: %w", err)
 	}
 	if strings.TrimSpace(in.Pattern) == "" {
-		return input{}, fmt.Errorf("pattern is required")
+		return input{}, errors.New("pattern is required")
 	}
 	if in.MaxMatches <= 0 {
 		in.MaxMatches = 10000

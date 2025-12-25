@@ -177,7 +177,7 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate JSON
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(dataBytes, &payload); err != nil {
 		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON data: %v", err))
 	}
@@ -187,7 +187,7 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer errs.Ignore(bbStore.Close(), "close blackboard store")
+	defer func() { errs.Ignore(bbStore.Close(), "close blackboard store") }()
 
 	// Create blackboard record
 	now := time.Now().UTC().Unix()
@@ -207,7 +207,7 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"item_id":    record.ID,
 		"topic":      record.Topic,
 		"created_at": time.Unix(record.TS, 0).UTC().Format(time.RFC3339),
@@ -235,7 +235,7 @@ func runBBSearch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/search", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer errs.Ignore(bbStore.Close(), "close blackboard store")
+	defer func() { errs.Ignore(bbStore.Close(), "close blackboard store") }()
 
 	// Search blackboard
 	records, err := bbStore.Search(ctx, bbSearchNS, topic, bbSearchLimit)
@@ -244,7 +244,7 @@ func runBBSearch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("bb/search", map[string]interface{}{
+	env := envelope.OK("bb/search", map[string]any{
 		"results": records,
 		"count":   len(records),
 	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
@@ -269,7 +269,7 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer errs.Ignore(bbStore.Close(), "close blackboard store")
+	defer func() { errs.Ignore(bbStore.Close(), "close blackboard store") }()
 
 	// Claim item
 	leaseDuration := time.Duration(bbClaimDuration) * time.Second
@@ -289,7 +289,7 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 		return writeErrorEnvelope(cmd, "bb/claim", string(protocol.ErrorCodeERuntime), "claim succeeded but lease not set")
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"item_id":          record.ID,
 		"lease_id":         record.Lease.Holder + "-" + fmt.Sprintf("%d", record.Lease.Until),
 		"item":             json.RawMessage(record.Payload),
@@ -318,7 +318,7 @@ func runBBRelease(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/release", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer errs.Ignore(bbStore.Close(), "close blackboard store")
+	defer func() { errs.Ignore(bbStore.Close(), "close blackboard store") }()
 
 	// Release item
 	if err := bbStore.Release(ctx, itemID); err != nil {
@@ -329,7 +329,7 @@ func runBBRelease(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"item_id":  itemID,
 		"released": true,
 	}
@@ -356,7 +356,7 @@ func runBBList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer errs.Ignore(bbStore.Close(), "close blackboard store")
+	defer func() { errs.Ignore(bbStore.Close(), "close blackboard store") }()
 
 	// List items by topic
 	records, err := bbStore.ListByTopic(ctx, bbListNS, topic, bbListLimit)
@@ -365,7 +365,7 @@ func runBBList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("bb/list", map[string]interface{}{
+	env := envelope.OK("bb/list", map[string]any{
 		"items": records,
 		"count": len(records),
 	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
@@ -390,7 +390,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "bb/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open blackboard store: %v", err))
 	}
-	defer errs.Ignore(bbStore.Close(), "close blackboard store")
+	defer func() { errs.Ignore(bbStore.Close(), "close blackboard store") }()
 
 	// Determine start timestamp
 	fromTS := bbWatchFromTS
@@ -413,7 +413,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 		case <-ctx.Done():
 			// Write final envelope
 			finalBool := true
-			env := envelope.OK("bb/watch", map[string]interface{}{
+			env := envelope.OK("bb/watch", map[string]any{
 				"status": "stopped",
 			}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 				m.Source = "run"
@@ -436,7 +436,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 			if !ok {
 				// Channel closed
 				finalBool := true
-				env := envelope.OK("bb/watch", map[string]interface{}{
+				env := envelope.OK("bb/watch", map[string]any{
 					"status": "completed",
 				}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 					m.Source = "run"
@@ -453,7 +453,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 			// Write progress envelope with record
 			seq++
 			finalBool := false
-			data := map[string]interface{}{
+			data := map[string]any{
 				"event":   "blackboard_update",
 				"topic":   record.Topic,
 				"item_id": record.ID,

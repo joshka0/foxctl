@@ -595,6 +595,13 @@ func (idx *Indexer) saveFileEntry(ctx context.Context, workspace, path string, r
 		return fmt.Errorf("save entry: %w", err)
 	}
 
+	// Store embedding in dedicated column for vector similarity search
+	if len(result.Embedding) > 0 {
+		if err := idx.memoryStore.UpdateEmbedding(ctx, name, workspace, result.Embedding); err != nil {
+			return fmt.Errorf("update embedding: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -616,6 +623,13 @@ func (idx *Indexer) saveChunkEntry(ctx context.Context, workspace, path, chunkID
 
 	if _, err := idx.memoryStore.Save(ctx, entry); err != nil {
 		return fmt.Errorf("save chunk entry: %w", err)
+	}
+
+	// Store embedding in dedicated column for vector similarity search
+	if len(result.Embedding) > 0 {
+		if err := idx.memoryStore.UpdateEmbedding(ctx, name, workspace, result.Embedding); err != nil {
+			return fmt.Errorf("update chunk embedding: %w", err)
+		}
 	}
 
 	return nil

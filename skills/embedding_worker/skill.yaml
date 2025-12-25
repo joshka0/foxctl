@@ -1,0 +1,99 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: embedding/worker
+  description: Background worker that processes queued embedding jobs
+  version: 0.1.0
+  author: agentctl
+  tags: [embedding, worker, background, async]
+distribution:
+  type: exec
+  exec:
+    entry: skills/embedding_worker/embedding_worker
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: embedding/worker
+  parameters:
+    - name: batch_size
+      type: integer
+      required: false
+      default: 10
+      description: Number of jobs to process per invocation
+    - name: max_duration
+      type: integer
+      required: false
+      default: 300
+      description: Maximum processing time in seconds
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: Claim jobs but skip actual embedding API calls
+  returns:
+    - name: processed
+      type: integer
+      description: Number of embeddings successfully generated
+    - name: errors
+      type: integer
+      description: Number of jobs that failed
+    - name: remaining
+      type: integer
+      description: Jobs still in queue after processing
+    - name: status
+      type: string
+      description: "Result status: completed, timeout, no_jobs, error"
+    - name: duration_ms
+      type: integer
+      description: Total processing time in milliseconds
+    - name: last_error
+      type: string
+      description: Last error message if any failures occurred
+    - name: stats
+      type: object
+      description: Queue snapshot after processing (queued, running, completed, failed, embeddings)
+    - name: message
+      type: string
+      description: Human-readable summary
+  help:
+    short: "Process queued embedding jobs using Gemini API"
+    long: |
+      embedding/worker processes jobs from the embedding queue, generating
+      embeddings using the Gemini embedding API. It runs in batches with
+      configurable size and timeout.
+
+      The worker:
+      - Claims pending jobs atomically
+      - Generates embeddings via Gemini API
+      - Stores results in the embedding database
+      - Handles retries with exponential backoff
+      - Respects rate limits
+
+      Requires GEMINI_API_KEY environment variable.
+
+      Typically invoked by the embedding-flush.sh Stop hook to process
+      accumulated jobs at session end.
+    workflows:
+      - id: process-batch
+        description: "Process a batch of queued embeddings"
+        example_input:
+          batch_size: 20
+          max_duration: 120
+      - id: drain-queue
+        description: "Process all remaining jobs (large batch, long timeout)"
+        example_input:
+          batch_size: 100
+          max_duration: 600
+      - id: dry-run
+        description: "Test job claiming without calling API"
+        example_input:
+          batch_size: 5
+          dry_run: true
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

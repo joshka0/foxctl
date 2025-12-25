@@ -88,6 +88,7 @@ func addGodotFlags(cmd *cobra.Command, f *godotFlags) {
 	cmd.Flags().IntVar(&f.timeoutMS, "timeout", 10000, "Request timeout in milliseconds")
 	cmd.Flags().BoolVar(&f.dataOnly, "data-only", false, "Print only {status,data} from envelope")
 	cmd.Flags().BoolVar(&f.skipCache, "skip-cache", false, "Bypass result cache")
+	cmd.Flags().BoolVar(&f.skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 }
 
 func addGodotMutatingFlags(cmd *cobra.Command, f *godotFlags) {

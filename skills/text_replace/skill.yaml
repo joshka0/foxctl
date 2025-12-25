@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: text/replace
-  version: 0.2.0
+  version: 0.3.0
   description: "Advanced search and replace with backups, multi-line support, line ranges, and validation - more powerful than sed"
   tags: ["text", "replace", "search", "files", "regex", "sed", "refactor"]
 distribution:
@@ -84,6 +84,11 @@ signature:
       required: false
       default: ".bak"
       description: "Suffix for backup files"
+    - name: cas_backup
+      type: boolean
+      required: false
+      default: false
+      description: "Store original content in CAS for undo capability (use fs/write with digest to restore)"
     - name: validate_syntax
       type: boolean
       required: false

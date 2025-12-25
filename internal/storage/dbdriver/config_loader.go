@@ -120,9 +120,9 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
 	}
 
-	// Get vector dimensions
+	// Get vector dimensions (default: 3072 for Gemini gemini-embedding-001)
 	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
-	vectorDims := 384 // default
+	vectorDims := 3072 // default: Gemini gemini-embedding-001
 	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
 			vectorDims = dims
@@ -164,9 +164,9 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, dbName string) Config {
 		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
 	}
 
-	// Get vector dimensions
+	// Get vector dimensions (default: 3072 for Gemini gemini-embedding-001)
 	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
-	vectorDims := 384 // default
+	vectorDims := 3072 // default: Gemini gemini-embedding-001
 	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
 			vectorDims = dims
@@ -197,6 +197,62 @@ func GetConfigSummary(cfg Config) string {
 	}
 }
 
+// PlatformDatabaseSettings represents the database settings from platform config.
+// This is a simplified interface to avoid import cycles with platform/config.
+type PlatformDatabaseSettings struct {
+	Driver           string
+	TursoURL         string
+	TursoAuthToken   string
+	VectorEnabled    bool
+	VectorDimensions int
+}
+
+// ConfigFromPlatformSettings creates a dbdriver.Config from platform config settings.
+// This is the preferred way to configure database connections when using the full
+// platform config system rather than environment variables.
+func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSettings, dbName string) Config {
+	driver := DriverType(strings.ToLower(settings.Driver))
+	if driver == "" {
+		driver = DriverSQLite
+	}
+
+	switch driver {
+	case DriverTurso:
+		dims := settings.VectorDimensions
+		if dims == 0 {
+			dims = 3072 // Default for Gemini
+		}
+		return Config{
+			Driver: DriverTurso,
+			Turso: TursoConfig{
+				URL:                settings.TursoURL,
+				AuthToken:          settings.TursoAuthToken,
+				DatabaseName:       dbName,
+				EnableVectorSearch: settings.VectorEnabled,
+				VectorDimensions:   dims,
+			},
+		}
+
+	case DriverLibSQL:
+		dims := settings.VectorDimensions
+		if dims == 0 {
+			dims = 3072
+		}
+		return Config{
+			Driver: DriverLibSQL,
+			LibSQL: LibSQLConfig{
+				Path:               filepath.Join(cl.rootDir, dbName+".db"),
+				EnableVectorSearch: settings.VectorEnabled,
+				VectorDimensions:   dims,
+			},
+		}
+
+	default:
+		// SQLite (default)
+		return DefaultSQLiteConfig(filepath.Join(cl.rootDir, dbName+".db"))
+	}
+}
+
 // Environment variable documentation:
 //
 // For SQLite databases:
@@ -214,6 +270,6 @@ func GetConfigSummary(cfg Config) string {
 //
 // For vector search (memory database only):
 //   AGENTCTL_MEMORY_VECTOR_SEARCH=true   # Enable vector search
-//   AGENTCTL_MEMORY_VECTOR_DIMS=384      # Vector dimensions (default: 384)
+//   AGENTCTL_MEMORY_VECTOR_DIMS=3072     # Vector dimensions (default: 3072 for Gemini)
 //
 // Where <DB> is one of: CACHE, JOBS, or MEMORY

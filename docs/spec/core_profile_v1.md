@@ -120,7 +120,7 @@ Stable JSON wrapper for all I/O (see §2).
     "runner": "wasi", // "wasi" | "exec"
     "seq": 0, // streaming only
     "final": false, // streaming only
-    "cas_digest": null, // sha256:... when data.artifact present
+    "cas_digest": null, // optional; if set MUST match data.artifact
     "memory": null, // {name,type,workspace} when source=="memory"
     "job_id": null, // RECOMMENDED (jobs)
     "skill_version": null, // RECOMMENDED
@@ -139,7 +139,8 @@ Stable JSON wrapper for all I/O (see §2).
 - `meta.ts` **MUST** be RFC3339 UTC; `meta.duration_ms` **MUST** be integer ≥ 0.
 - `error.code` + `error.message` **MUST** exist; for `status:"ok"` they
   **SHOULD** be `null`.
-- If `data.artifact` exists, `meta.cas_digest` **MUST** equal it.
+- If `meta.cas_digest` is set, it **MUST** equal `data.artifact`, and **MUST**
+  be omitted when `data.artifact` is absent.
 - No binary blobs inline; large outputs **MUST** use CAS (see §4).
 - Error envelopes **MAY** include partials and **SHOULD** set
   `meta.partial:true`.
@@ -365,7 +366,8 @@ call.
 
 1. Write the **full result** to CAS.
 2. Return a wrapper with **mandatory `summary`** and `artifact`.
-3. Set `meta.cas_digest` to that digest.
+3. Optionally set `meta.cas_digest` to that digest (if set MUST match
+   `data.artifact`).
 4. Optionally set `data.kind` and `data.size_bytes`.
 
 **HTTP responses:** summary **SHOULD** add `status_code`, selected headers
@@ -992,16 +994,13 @@ agentctl run http/openapi \
       "record_count": 247,
       "preview": { "first_keys": ["id", "name", "created_at", "private"] }
     },
-    "artifact": "sha256:abc123...",
-    "kind": "application/json",
-    "size_bytes": 1048576
+    "artifact": "sha256:abc123..."
   },
   "meta": {
     "ts": "...",
     "duration_ms": 1210,
     "source": "run",
-    "runner": "exec",
-    "cas_digest": "sha256:abc123..."
+    "runner": "exec"
   },
   "error": { "code": null, "message": null }
 }

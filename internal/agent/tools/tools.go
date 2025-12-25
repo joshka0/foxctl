@@ -2,6 +2,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,21 +15,31 @@ import (
 
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/secrets"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
 // Registry holds all registered agent tools.
 type Registry struct {
-	tools         *dstools.InMemoryToolRegistry
-	recorder      TelemetryRecorder
-	config        Config
-	pathValidator *policy.PathValidator
-	openMemory    func(context.Context) (storage.MemoryStore, error)
+	tools               *dstools.InMemoryToolRegistry
+	recorder            TelemetryRecorder
+	config              Config
+	pathValidator       *policy.PathValidator
+	openMemory          func(context.Context) (storage.MemoryStore, error)
+	openBoardStore      func(context.Context) (blackboard.BoardStore, error)
+	openTasksStore      func(context.Context) (tasks.Store, error)
+	openBlackboardStore func(context.Context) (blackboard.Store, error)
+	openMailboxStore    func(context.Context) (mailbox.Store, error)
+	openCASStore        func(context.Context) (storage.CASStore, error)
 
 	trajMu sync.Mutex
 	trajID string
@@ -69,9 +80,34 @@ type Config struct {
 	// AllowedRoots are additional directories outside workspace that paths can resolve to.
 	AllowedRoots []string
 
+	// FilesystemPolicy configures allowed roots ("workspace", "home", "tmp", "all").
+	FilesystemPolicy string
+
+	// MaxOutputSize limits tool output size in bytes. Larger outputs use CAS.
+	// If 0, defaults to config.DefaultInlineOutputKB * 1024.
+	MaxOutputSize int
+
+	// Allowlist filters available tools. If non-empty, only tools in this list are registered.
+	Allowlist []string
+
 	// OpenMemoryStore provides access to named memory for retrieval tools like code.symbol_search.
 	// When nil, tools that require named memory should return empty results with a helpful message.
 	OpenMemoryStore func(context.Context) (storage.MemoryStore, error)
+
+	// OpenCASStore provides access to the content-addressable store for large outputs.
+	OpenCASStore func(context.Context) (storage.CASStore, error)
+
+	// OpenBoardStore provides access to the blackboard board store.
+	OpenBoardStore func(context.Context) (blackboard.BoardStore, error)
+
+	// OpenTasksStore provides access to the tasks store.
+	OpenTasksStore func(context.Context) (tasks.Store, error)
+
+	// OpenBlackboardStore provides access to the blackboard topic store.
+	OpenBlackboardStore func(context.Context) (blackboard.Store, error)
+
+	// OpenMailboxStore provides access to the mailbox store.
+	OpenMailboxStore func(context.Context) (mailbox.Store, error)
 }
 
 // TelemetryRecorder records tool usage for observability.
@@ -109,8 +145,29 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 		cfg.MaxSearchResults = 50
 	}
 
+	if cfg.MaxOutputSize <= 0 {
+		cfg.MaxOutputSize = sysconfig.DefaultInlineOutputKB * 1024
+	}
+
 	if recorder == nil {
 		recorder = noopRecorder{}
+	}
+
+	// Configure allowed roots based on policy
+	switch cfg.FilesystemPolicy {
+	case "home":
+		if home, err := os.UserHomeDir(); err == nil {
+			cfg.AllowedRoots = append(cfg.AllowedRoots, home)
+		}
+	case "tmp":
+		cfg.AllowedRoots = append(cfg.AllowedRoots, os.TempDir())
+	case "all":
+		if home, err := os.UserHomeDir(); err == nil {
+			cfg.AllowedRoots = append(cfg.AllowedRoots, home)
+		}
+		cfg.AllowedRoots = append(cfg.AllowedRoots, os.TempDir())
+	case "workspace", "":
+		// Default: only workspace + explicitly allowed roots
 	}
 
 	// Initialize PathValidator for secure path resolution
@@ -120,14 +177,22 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	}
 
 	r := &Registry{
-		tools:         dstools.NewInMemoryToolRegistry(),
-		recorder:      recorder,
-		config:        cfg,
-		pathValidator: pathValidator,
-		openMemory:    cfg.OpenMemoryStore,
+		tools:               dstools.NewInMemoryToolRegistry(),
+		recorder:            recorder,
+		config:              cfg,
+		pathValidator:       pathValidator,
+		openMemory:          cfg.OpenMemoryStore,
+		openBoardStore:      cfg.OpenBoardStore,
+		openTasksStore:      cfg.OpenTasksStore,
+		openBlackboardStore: cfg.OpenBlackboardStore,
+		openMailboxStore:    cfg.OpenMailboxStore,
+		openCASStore:        cfg.OpenCASStore,
 	}
 
 	// Register all V1 tools
+	if err := r.registerAgentTools(); err != nil {
+		return nil, err
+	}
 	if err := r.registerFSTools(); err != nil {
 		return nil, err
 	}
@@ -145,6 +210,16 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	}
 	if err := r.registerMailTools(); err != nil {
 		return nil, err
+	}
+	if err := r.registerBBTools(); err != nil {
+		return nil, err
+	}
+
+	// Apply allowlist filtering if configured
+	if len(cfg.Allowlist) > 0 {
+		if err := r.filterByAllowlist(cfg.Allowlist); err != nil {
+			return nil, err
+		}
 	}
 
 	return r, nil
@@ -197,6 +272,14 @@ func (r *Registry) wrapWithTelemetry(
 		} else if result != nil && result.IsError {
 			status = "error"
 		}
+
+		// Check output size and use CAS if needed (only for successful results)
+		if status == "ok" && result != nil && r.config.MaxOutputSize > 0 && r.config.OpenCASStore != nil {
+			if err := r.checkAndOffloadToCAS(ctx, result); err != nil {
+				errspkg.Ignore(err, "tool output CAS offload failed")
+			}
+		}
+
 		dataInline, artifact := summarizeToolResult(name, args, result, err)
 		r.captureToolEvent(ctx, trajectory.EventKindToolResult, name, status, dataInline, artifact)
 
@@ -478,6 +561,79 @@ func parseCallToolResult(result *models.CallToolResult) map[string]any {
 		return nil
 	}
 	return parsed
+}
+
+// filterByAllowlist restricts registered tools to those in the allowlist.
+func (r *Registry) filterByAllowlist(allowlist []string) error {
+	allowed := make(map[string]bool)
+	for _, name := range allowlist {
+		allowed[name] = true
+	}
+
+	filteredRegistry := dstools.NewInMemoryToolRegistry()
+	for _, tool := range r.tools.List() {
+		if allowed[tool.Name()] {
+			if err := filteredRegistry.Register(tool); err != nil {
+				return fmt.Errorf("register tool %s: %w", tool.Name(), err)
+			}
+		}
+	}
+	r.tools = filteredRegistry
+	return nil
+}
+
+// checkAndOffloadToCAS checks if the result is too large and moves it to CAS.
+func (r *Registry) checkAndOffloadToCAS(ctx context.Context, result *models.CallToolResult) error {
+	if len(result.Content) == 0 {
+		return nil
+	}
+
+	// Calculate size (only TextContent for now)
+	var totalSize int
+	for _, item := range result.Content {
+		if tc, ok := item.(models.TextContent); ok {
+			totalSize += len(tc.Text)
+		}
+	}
+
+	if totalSize <= r.config.MaxOutputSize {
+		return nil
+	}
+
+	casStore, err := r.config.OpenCASStore(ctx)
+	if err != nil {
+		return fmt.Errorf("open cas store: %w", err)
+	}
+
+	// Marshal content to JSON for storage
+	data, err := json.Marshal(result.Content)
+	if err != nil {
+		return fmt.Errorf("marshal content: %w", err)
+	}
+
+	// Store in CAS
+	obj, err := casStore.Put(ctx, bytes.NewReader(data), "application/json", []string{"tool-output", r.config.TraceID})
+	if err != nil {
+		return fmt.Errorf("cas put: %w", err)
+	}
+
+	summaryMap := map[string]any{
+		"summary":  fmt.Sprintf("Output too large (%d bytes). Stored as artifact.", totalSize),
+		"artifact": obj.Digest,
+	}
+	summaryJSON, err := json.Marshal(summaryMap)
+	if err != nil {
+		return fmt.Errorf("marshal summary: %w", err)
+	}
+
+	result.Content = []models.Content{
+		models.TextContent{
+			Type: "text",
+			Text: string(summaryJSON),
+		},
+	}
+
+	return nil
 }
 
 // resolvePath resolves a user-provided path using the PathValidator.

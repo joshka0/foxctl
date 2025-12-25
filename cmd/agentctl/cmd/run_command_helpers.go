@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
@@ -21,9 +22,11 @@ type runCommandFlags struct {
 	Dedupe          bool
 	CacheMode       string
 	Workspace       string
+	WorkspaceSet    bool
 	RememberName    string
 	RememberType    string
 	RememberSummary string
+	Timeout         time.Duration
 }
 
 func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
@@ -36,6 +39,7 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 	cmd.Flags().StringVar(&flags.RememberName, "remember", "", "Save successful result as named memory")
 	cmd.Flags().StringVar(&flags.RememberType, "remember-type", "result", "Memory type for --remember")
 	cmd.Flags().StringVar(&flags.RememberSummary, "remember-summary", "", "Summary to record for remembered result")
+	cmd.Flags().DurationVar(&flags.Timeout, "timeout", runservice.DefaultTimeout, "Maximum execution time (e.g., 30s, 2m, 5m)")
 }
 
 func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags, input []byte) (runservice.RunOptions, error) {
@@ -57,11 +61,14 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 	}
 
 	ws := workspace.Normalize(flags.Workspace)
-	if ws == "" && cfg.Memory.AutoLoadWorkspace {
-		ws = workspace.Detect("")
-	} else if ws == "" {
-		if cwd, err := os.Getwd(); err == nil {
-			ws = cwd
+	// If the user explicitly provided --workspace (even as empty string), do not auto-detect.
+	if !flags.WorkspaceSet {
+		if ws == "" && cfg.Memory.AutoLoadWorkspace {
+			ws = workspace.Detect("")
+		} else if ws == "" {
+			if cwd, err := os.Getwd(); err == nil {
+				ws = cwd
+			}
 		}
 	}
 
@@ -82,6 +89,7 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 		RememberName:    flags.RememberName,
 		RememberType:    flags.RememberType,
 		RememberSummary: flags.RememberSummary,
+		Timeout:         flags.Timeout,
 	}
 	if err := opts.Validate(); err != nil {
 		return runservice.RunOptions{}, err

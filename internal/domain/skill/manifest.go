@@ -67,7 +67,7 @@ type Parameter struct {
 	Type        string      `yaml:"type" json:"type"`
 	Required    bool        `yaml:"required" json:"required"`
 	Description string      `yaml:"description" json:"description"`
-	Default     interface{} `yaml:"default" json:"default"`
+	Default     any `yaml:"default" json:"default"`
 }
 
 // Help describes skill-level help and example workflows.
@@ -90,6 +90,7 @@ type Capabilities struct {
 	EgressAllow []string     `yaml:"egressAllow,omitempty" json:"egressAllow,omitempty"`
 	Filesystem  []FileAccess `yaml:"filesystem" json:"filesystem"`
 	Pure        bool         `yaml:"pure" json:"pure"`
+	Cacheable   *bool        `yaml:"cacheable,omitempty" json:"cacheable,omitempty"` // nil=cacheable, false=skip cache
 }
 
 // FileAccess grants access to specific filesystem roots.

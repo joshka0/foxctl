@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: optimize/bootstrap
+  version: 0.1.0
+  description: "Generate few-shot examples from successful trajectories"
+  tags: ["optimize", "bootstrap", "few-shot", "learning"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/optimize_bootstrap/bootstrap
+io:
+  format: JSON
+  inline_output_kb: 128
+signature:
+  command: optimize/bootstrap
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root path"
+    - name: role
+      type: string
+      required: true
+      description: "Agent role to generate examples for"
+    - name: max_examples
+      type: integer
+      required: false
+      description: "Maximum number of examples to generate"
+    - name: min_success_rate
+      type: number
+      required: false
+      description: "Minimum success rate threshold (0.0-1.0)"
+    - name: format
+      type: string
+      required: false
+      description: "Output format: json, prompt"
+returns:
+  - name: examples
+    type: array
+    description: "Generated few-shot examples"
+  - name: formatted
+    type: string
+    description: "Examples formatted for prompt injection"
+  - name: stats
+    type: object
+    description: "Statistics about available examples"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+    - type: workdir
+  pure: false

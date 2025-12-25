@@ -2,7 +2,7 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: editor/godot
-  version: 0.1.0
+  version: 0.2.0
   description: "Interact with a running Godot Editor via the GodotAIBridge plugin"
   tags: ["editor", "godot", "game", "scene"]
 distribution:
@@ -18,7 +18,47 @@ signature:
     - name: action
       type: string
       required: true
-      description: "Operation: ping|scene_tree|node_inspect|node_create|node_set_prop|node_attach_script|signal_connect|run_game|errors"
+      description: |
+        Operation to perform. Available actions:
+
+        Core: ping, scene_tree, node_inspect, node_create, node_delete, node_rename,
+              node_reparent, node_set_prop, node_attach_script, signal_connect,
+              class_info, ensure_node, search_nodes, focus_node, selection_state,
+              run_game, run_scene, stop_game, errors
+
+        Resources: scene_save, scene_list, scene_open, scene_instance, resource_list,
+                   search_resources, resource_references, camera_save, camera_restore,
+                   camera_list
+
+        Scripts: script_create, script_read, script_edit
+
+        Groups: group_add, group_remove, group_list
+
+        Console: console_output
+
+        Settings: project_setting_get, project_setting_set
+
+        Build: build
+
+        Animation: animation_list, animation_play, animation_stop
+
+        Audio: audio_play, audio_stop
+
+        Input: input_action_list, input_action_add, input_action_remove
+
+        Autoload: autoload_list, autoload_add, autoload_remove
+
+        Plugins: plugin_list, plugin_enable, plugin_disable
+
+        Theme: theme_get, theme_set
+
+        Shader: shader_create, shader_edit
+
+        TileMap: tilemap_get_cell, tilemap_set_cell
+
+        Physics: physics_layer_get, physics_layer_set
+
+        Debug: debug_draw_enable, debug_draw_disable
     - name: host
       type: string
       required: false
@@ -41,7 +81,7 @@ signature:
     - name: parent_path
       type: string
       required: false
-      description: "Parent node path for node_create"
+      description: "Parent node path for node_create, scene_instance"
     - name: node_type
       type: string
       required: false
@@ -53,7 +93,7 @@ signature:
     - name: property
       type: string
       required: false
-      description: "Property name for node_set_prop"
+      description: "Property name for node_set_prop, search_nodes"
     - name: value
       type: string
       required: false
@@ -61,7 +101,7 @@ signature:
     - name: script_path
       type: string
       required: false
-      description: "Script path for node_attach_script (e.g., res://player.gd)"
+      description: "Script path for node_attach_script, script_read, script_edit (e.g., res://player.gd)"
     - name: signal_name
       type: string
       required: false
@@ -84,11 +124,60 @@ signature:
       required: false
       default: 500
       description: "Max nodes to return in scene_tree"
+    - name: max_results
+      type: integer
+      required: false
+      default: 50
+      description: "Max results for search operations"
     - name: error_limit
       type: integer
       required: false
       default: 50
       description: "Max errors to return"
+    - name: group_name
+      type: string
+      required: false
+      description: "Group name for group_add, group_remove"
+    - name: setting_name
+      type: string
+      required: false
+      description: "Setting name for project_setting_get/set"
+    - name: preset_name
+      type: string
+      required: false
+      description: "Export preset name for build action"
+    - name: animation_name
+      type: string
+      required: false
+      description: "Animation name for animation_play, animation_stop"
+    - name: autoload_name
+      type: string
+      required: false
+      description: "Autoload name for autoload_add, autoload_remove"
+    - name: plugin_name
+      type: string
+      required: false
+      description: "Plugin name for plugin_enable, plugin_disable"
+    - name: shader_type
+      type: string
+      required: false
+      description: "Shader type for shader_create (spatial, canvas_item, particles, sky, fog)"
+    - name: theme_type
+      type: string
+      required: false
+      description: "Theme data type for theme_get/set (color, constant, font, icon, stylebox)"
+    - name: layer
+      type: integer
+      required: false
+      description: "Layer index for physics_layer_get/set, tilemap operations"
+    - name: dimension
+      type: string
+      required: false
+      description: "Physics dimension (2d or 3d) for physics_layer operations"
+    - name: debug_mode
+      type: string
+      required: false
+      description: "Debug draw mode for debug_draw_enable (wireframe, overdraw, unshaded, etc.)"
   returns:
     - name: result
       type: object
@@ -101,11 +190,30 @@ signature:
     long: |
       This skill communicates with a running Godot Editor that has the GodotAIBridge
       plugin enabled. It allows inspection and manipulation of the current scene.
-      
+
       Prerequisites:
       1. Godot Editor must be running with your project open
       2. GodotAIBridge plugin must be installed and enabled
       3. Plugin listens on localhost:7777 by default
+
+      Action Categories:
+      - Core: Node operations, scene tree, class info, game execution
+      - Resources: Scene/resource management, camera bookmarks
+      - Scripts: Create, read, edit GDScript files
+      - Groups: Node group management
+      - Console: Console output retrieval
+      - Settings: ProjectSettings access
+      - Build: Export/build operations
+      - Animation: AnimationPlayer control
+      - Audio: AudioStreamPlayer control
+      - Input: Input action management
+      - Autoload: Autoload/singleton management
+      - Plugins: Editor plugin management
+      - Theme: Theme resource manipulation
+      - Shader: Shader creation and editing
+      - TileMap: TileMap cell operations
+      - Physics: Physics layer configuration
+      - Debug: Debug visualization modes
     workflows:
       - id: inspect-scene
         description: "Get the current scene tree structure"
@@ -130,6 +238,24 @@ signature:
           node_path: "/root/Main/Player"
           property: "position"
           value: "Vector2(100, 200)"
+      - id: create-script
+        description: "Create a new GDScript file"
+        example_input:
+          action: "script_create"
+          script_path: "res://scripts/player.gd"
+          extends: "CharacterBody2D"
+      - id: manage-groups
+        description: "Add a node to a group"
+        example_input:
+          action: "group_add"
+          node_path: "/root/Main/Enemy"
+          group_name: "enemies"
+      - id: play-animation
+        description: "Play an animation on a node"
+        example_input:
+          action: "animation_play"
+          node_path: "/root/Main/Player/AnimationPlayer"
+          animation_name: "walk"
 capabilities:
   network: "egress"
   egressAllow:

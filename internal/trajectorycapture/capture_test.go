@@ -41,10 +41,7 @@ func TestStartAndCaptureResult_TodoReviewRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = capture.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { capture.Close() })
 
 	data := map[string]any{
 		"task": map[string]any{
@@ -117,10 +114,7 @@ func TestStart_RedactsSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = capture.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { capture.Close() })
 
 	ur, err := capture.store.GetUserRequest(ctx, "ws-1", capture.request.ID)
 	if err != nil {

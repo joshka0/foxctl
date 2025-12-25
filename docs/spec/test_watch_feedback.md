@@ -362,7 +362,7 @@ included in each failure:
 - **Wrapper:** A standard Claude hook wrapper under `.claude/hooks/`, similar to
   `task-guard.sh` and `knowledge-router.sh`, that:
   - Reads hook payload JSON from stdin.
-  - Invokes `agentctl run hooks/test_feedback --input -`.
+  - Invokes `agentctl run hooks/test_feedback --input-file -`.
   - Emits `data.hook_output` as the hook’s JSON output.
 
 - **Settings:** The harness example SHOULD wire this hook for `PostToolUse`

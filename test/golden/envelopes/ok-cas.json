@@ -25,10 +25,7 @@
         }
       }
     },
-    "artifact": "sha256:2f62d6b4c828c1c1fef205f75c1ad7b5b8d65f5cbe9eb1bbde1234567890abcd",
-    "artifact_kind": "application/json",
-    "artifact_size_bytes": 1048576,
-    "kind": "application/json"
+    "artifact": "sha256:2f62d6b4c828c1c1fef205f75c1ad7b5b8d65f5cbe9eb1bbde1234567890abcd"
   },
   "meta": {
     "ts": "2025-11-12T10:30:05Z",
@@ -36,7 +33,6 @@
     "source": "run",
     "runner": "exec",
     "workspace": "/home/user/project",
-    "cas_digest": "sha256:2f62d6b4c828c1c1fef205f75c1ad7b5b8d65f5cbe9eb1bbde1234567890abcd",
     "cache_key": "sha256:7b3fd908c3d245b179a86bd27ab88fe12bb600f0a6e4cbf772e032a3f54d18e9"
   },
   "error": {}

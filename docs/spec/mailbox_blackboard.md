@@ -11,6 +11,113 @@ email; it is an in-repo coordination layer that:
 - Exposes advisory file reservations to reduce edit conflicts.
 - Integrates with hooks so new messages and reservations show up in context.
 
+## Coordination surfaces (important)
+
+`agentctl` has two distinct mailbox-style subsystems that should not be
+conflated:
+
+1. **Daemon mailbox queue** (`internal/storage/mailbox`)
+   - Addressed by **namespace** (`from_ns`, `to_ns`).
+   - Message types: `agent.ask`, `agent.reply`, `agent.cmd`, `agent.event`.
+   - Used by: the agent daemon (`agentctl agent run`) and CLI ask/wait.
+2. **Board mailbox + reservations** (`internal/storage/blackboard/board_store`)
+   - Addressed by **workspace + actor_id**.
+   - Message kinds: `instruction`, `info`, `alert`, `review_request`, etc.
+   - Supports advisory file reservations.
+   - Used by: `mail.*` agent tools and hooks (mail router / file guard).
+
+The blackboard topic bus is a separate coordination surface
+(`internal/storage/blackboard/store`).
+
+## Daemon mailbox queue (agent.ask/reply/cmd/event)
+
+This mailbox is a per-namespace queue intended for daemon dispatch.
+
+### Stored message shape
+
+`ts` and `visible_at` are **epoch seconds**. `ttl_ms` is **milliseconds**.
+
+```json
+{
+  "id": "01HMB7…",
+  "from_ns": "cli:01J…",
+  "to_ns": "org/proj/main/child-01J…",
+  "type": "agent.ask",
+  "ttl_ms": 300000,
+  "headers": { "correlation": "01HASK…" },
+  "payload": {
+    "version": 1,
+    "status": "ok",
+    "command": "agent.ask",
+    "data": {
+      "ask_id": "01HASK…",
+      "kind": "context",
+      "question": "Which package should I target for unit tests?"
+    },
+    "meta": { "ts": "2025-01-01T00:00:00Z" },
+    "error": {}
+  },
+  "visible_at": 1730973600,
+  "attempt": 0,
+  "ts": 1730973610
+}
+```
+
+### Poll / lease / ack semantics
+
+- **Poll** selects messages where `to_ns == <ns>` and `visible_at <= now`.
+- Returned messages are leased by updating `visible_at` (default +30s) and
+  incrementing `attempt`.
+- **Ack** deletes the message.
+- **Nack** updates `visible_at = now + visibility_timeout`.
+
+### TTL expiry
+
+Dispatchers should treat a message as expired when:
+
+`ttl_ms > 0` and `(ts * 1000) + ttl_ms < now_ms`
+
+Expired messages should be acked without processing.
+
+### Ask/reply correlation
+
+- `headers.correlation` links an `agent.ask` to its `agent.reply`.
+- Convention: set `headers.correlation = ask_id`.
+
+### Example payload envelopes
+
+```json
+// agent.reply
+{
+  "version": 1,
+  "status": "ok",
+  "command": "agent.reply",
+  "data": { "ask_id": "01HASK…", "answer": { "response": "..." } },
+  "meta": { "ts": "2025-01-01T00:00:01Z" },
+  "error": {}
+}
+
+// agent.cmd
+{
+  "version": 1,
+  "status": "ok",
+  "command": "agent.cmd",
+  "data": { "cmd_id": "01HCMD…", "action": "run_turn", "args": { "topic": "..." } },
+  "meta": { "ts": "2025-01-01T00:00:02Z" },
+  "error": {}
+}
+
+// agent.event
+{
+  "version": 1,
+  "status": "ok",
+  "command": "agent.event",
+  "data": { "event_id": "01HEVT…", "kind": "heartbeat" },
+  "meta": { "ts": "2025-01-01T00:00:03Z" },
+  "error": {}
+}
+```
+
 ## Goals
 
 - Give every actor (agent or human) a simple, queryable mailbox within a

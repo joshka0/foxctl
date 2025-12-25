@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: lsp/pylsp
+  version: 0.1.0
+  description: "Python language server operations via python-lsp-server (pylsp)"
+  tags: ["lsp", "python", "pylsp", "navigation", "references"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/lsp_pylsp/lsp_pylsp
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: lsp/pylsp
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      enum: ["definition", "references", "symbols", "workspace_symbol", "hover", "diagnostics"]
+      description: "LSP operation to perform"
+    - name: file
+      type: string
+      required: false
+      description: "File path (required for most operations)"
+    - name: line
+      type: integer
+      required: false
+      description: "Line number (1-based, for position-based operations)"
+    - name: column
+      type: integer
+      required: false
+      description: "Column number (1-based, for position-based operations)"
+    - name: query
+      type: string
+      required: false
+      description: "Search query (for workspace_symbol operation)"
+    - name: max_results
+      type: integer
+      required: false
+      default: 50
+      description: "Maximum number of results to return"
+returns:
+  - name: results
+    type: array
+    description: "LSP operation results"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
+  cacheable: false

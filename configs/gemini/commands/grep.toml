@@ -1,0 +1,13 @@
+# Smart code search command
+description = "Search codebase with agentctl"
+
+prompt = """Search the codebase for: {{args}}
+
+```bash
+!{agentctl run text/ripgrep --input '{"pattern": "{{args}}", "path": "."}'}
+```
+
+Summarize the findings:
+- Group results by file/component
+- Identify the most relevant matches
+- Suggest next steps based on what was found"""

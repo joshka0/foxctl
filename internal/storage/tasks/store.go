@@ -27,6 +27,8 @@ type Store interface {
 	Get(ctx context.Context, id string) (Task, error)
 	// ListByWorkspace returns tasks scoped to a workspace.
 	ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error)
+	// ListByPlanFile returns tasks linked to a specific plan file.
+	ListByPlanFile(ctx context.Context, planFile string) ([]Task, error)
 
 	// GetActive returns the active task for a workspace, if any.
 	GetActive(ctx context.Context, workspaceID string) (Task, bool, error)
@@ -63,6 +65,10 @@ type Task struct {
 	LastReviewStatus string     // "ok", "failed", "pending", or empty
 	LastReviewAt     *time.Time // timestamp of last review
 	LastReviewID     string     // ID of most recent review artifact
+
+	// Plan integration fields (links task to ~/.claude/plans/)
+	PlanFile    string // Path to the Claude Code plan file this task is linked to
+	PlanSection string // Section path within the plan (e.g., "Phase 1 > Step 1.1")
 }
 
 // Task status constants per review_gate.md
@@ -130,9 +136,12 @@ CREATE TABLE IF NOT EXISTS tasks (
 	gotchas TEXT,
 	last_review_status TEXT,
 	last_review_at TEXT,
-	last_review_id TEXT
+	last_review_id TEXT,
+	plan_file TEXT,
+	plan_section TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace_created ON tasks(workspace_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_plan_file ON tasks(plan_file);
 
 CREATE TABLE IF NOT EXISTS active_tasks (
 	workspace_id TEXT PRIMARY KEY,
@@ -144,16 +153,22 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 		return fmt.Errorf("tasks: migrate: %w", err)
 	}
 
-	// Add review columns to existing tables (idempotent migration)
+	// Add columns to existing tables (idempotent migration)
 	alterDDL := []string{
 		`ALTER TABLE tasks ADD COLUMN last_review_status TEXT`,
 		`ALTER TABLE tasks ADD COLUMN last_review_at TEXT`,
 		`ALTER TABLE tasks ADD COLUMN last_review_id TEXT`,
+		`ALTER TABLE tasks ADD COLUMN plan_file TEXT`,
+		`ALTER TABLE tasks ADD COLUMN plan_section TEXT`,
 	}
 	for _, stmt := range alterDDL {
 		// Ignore errors from "duplicate column" - columns may already exist.
 		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
 	}
+
+	// Create plan_file index if missing (idempotent)
+	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_plan_file ON tasks(plan_file)`) //nolint:errcheck
+
 	return nil
 }
 
@@ -197,12 +212,12 @@ func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.WorkspaceID, t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status,
 		timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.Notes, t.Gotchas,
-		t.LastReviewStatus, lastReviewAt, t.LastReviewID)
+		t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.PlanFile, t.PlanSection)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
 	}
@@ -236,11 +251,13 @@ func (s *sqlStore) Update(ctx context.Context, t Task) (Task, error) {
 UPDATE tasks SET
 	title = ?, description = ?, scope_path = ?, parent_id = ?,
 	children = ?, depends_on = ?, status = ?, completed_at = ?,
-	notes = ?, gotchas = ?, last_review_status = ?, last_review_at = ?, last_review_id = ?
+	notes = ?, gotchas = ?, last_review_status = ?, last_review_at = ?, last_review_id = ?,
+	plan_file = ?, plan_section = ?
 WHERE id = ?`,
 		t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status, completedAt,
-		t.Notes, t.Gotchas, t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.ID)
+		t.Notes, t.Gotchas, t.LastReviewStatus, lastReviewAt, t.LastReviewID,
+		t.PlanFile, t.PlanSection, t.ID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: update: %w", err)
 	}
@@ -255,7 +272,7 @@ WHERE id = ?`,
 // Get returns a task by ID.
 func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section
 FROM tasks WHERE id = ?`, id)
 	return scanTask(row)
 }
@@ -263,7 +280,7 @@ FROM tasks WHERE id = ?`, id)
 // ListByWorkspace returns tasks scoped to a workspace.
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section
 FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
@@ -284,10 +301,31 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	return tasks, rows.Err()
 }
 
+// ListByPlanFile returns tasks linked to a specific plan file.
+func (s *sqlStore) ListByPlanFile(ctx context.Context, planFile string) ([]Task, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section
+FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list by plan: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
 // GetActive returns the active task for a workspace, if any.
 func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id
+SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section
 FROM tasks t
 JOIN active_tasks a ON t.id = a.task_id
 WHERE a.workspace_id = ?`, workspaceID)
@@ -397,11 +435,13 @@ func scanTask(row *sql.Row) (Task, error) {
 	var completedAtStr sql.NullString
 	var description, scopePath, parentID, notes, gotchas sql.NullString
 	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
+	var planFile, planSection sql.NullString
 
 	err := row.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
-		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID)
+		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
+		&planFile, &planSection)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return Task{}, err
@@ -416,6 +456,8 @@ func scanTask(row *sql.Row) (Task, error) {
 	t.Gotchas = gotchas.String
 	t.LastReviewStatus = lastReviewStatus.String
 	t.LastReviewID = lastReviewID.String
+	t.PlanFile = planFile.String
+	t.PlanSection = planSection.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
@@ -441,11 +483,13 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	var completedAtStr sql.NullString
 	var description, scopePath, parentID, notes, gotchas sql.NullString
 	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
+	var planFile, planSection sql.NullString
 
 	err := rows.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
-		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID)
+		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
+		&planFile, &planSection)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
 	}
@@ -457,6 +501,8 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.Gotchas = gotchas.String
 	t.LastReviewStatus = lastReviewStatus.String
 	t.LastReviewID = lastReviewID.String
+	t.PlanFile = planFile.String
+	t.PlanSection = planSection.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {

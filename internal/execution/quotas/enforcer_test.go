@@ -17,7 +17,7 @@ func TestEnforcerJobSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	enforcer := NewEnforcer(store)
 	ns := "org/team/project"
@@ -130,7 +130,7 @@ func TestEnforcerNoQuotas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	enforcer := NewEnforcer(store)
 	ns := "org/unlimited"
@@ -152,7 +152,7 @@ func TestEnforcerLLMCalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	enforcer := NewEnforcer(store)
 	ns := "org/llm"
@@ -248,7 +248,7 @@ func TestEnforcerEgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	enforcer := NewEnforcer(store)
 	ns := "org/network"
@@ -308,7 +308,7 @@ func TestEnforcerZeroLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	enforcer := NewEnforcer(store)
 	ns := "org/unlimited"

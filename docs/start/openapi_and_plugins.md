@@ -1,7 +1,7 @@
 # Start Here: OpenAPI Skill & Plugins
 
-This document expands the brief OpenAPI + plugin notes in `AGENTS.md` and
-points to the canonical specs.
+This document expands the brief OpenAPI + plugin notes in `AGENTS.md` and points
+to the canonical specs.
 
 ---
 
@@ -27,7 +27,8 @@ Key behavior (see `docs/spec/core_profile_v1.md` §3 and
   - `dry_run` – emit request plan only, no network call
 - Output:
   - JSON envelope with response summary
-  - Large bodies CAS-wrapped with `data.artifact` + `meta.cas_digest`
+  - Large bodies CAS-wrapped with `data.artifact` (and optional
+    `meta.cas_digest` matching it)
 
 **Dry-run:**
 
@@ -99,8 +100,8 @@ communicate via JSON envelopes on stdin/stdout.
 Canonical spec: `docs/spec/plugin_protocol.md`.
 
 - **Auth plugin command:** `plugin/auth`
-  - Input `data` includes the HTTP request (method, URL, headers, body) and
-    spec context.
+  - Input `data` includes the HTTP request (method, URL, headers, body) and spec
+    context.
   - Output returns adjusted headers and optional signed body.
 - **Pagination plugin command:** `plugin/pagination`
   - Input includes the last HTTP response and pagination limits.
@@ -117,8 +118,8 @@ The following examples show the **shape** of typical plugins. They mirror the
 (now-simplified) code examples that used to live directly in `AGENTS.md`.
 
 > These are illustrative; prefer the real types and helpers in
-> `docs/spec/plugin_protocol.md` and `internal/openapi/plugin` when
-> implementing production plugins.
+> `docs/spec/plugin_protocol.md` and `internal/openapi/plugin` when implementing
+> production plugins.
 
 ### Auth Plugin (pseudo-code)
 

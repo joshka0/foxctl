@@ -12,7 +12,7 @@ import (
 type JSONSlice []string
 
 // Scan implements sql.Scanner for reading from database.
-func (j *JSONSlice) Scan(src interface{}) error {
+func (j *JSONSlice) Scan(src any) error {
 	if src == nil {
 		*j = nil
 		return nil
@@ -51,7 +51,7 @@ type Timestamp struct {
 }
 
 // Scan implements sql.Scanner for reading from database.
-func (t *Timestamp) Scan(src interface{}) error {
+func (t *Timestamp) Scan(src any) error {
 	if src == nil {
 		t.Time = time.Time{}
 		return nil

@@ -40,7 +40,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("test/run", "ECONFIG", err)
+		fail("test/run", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -113,8 +113,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		artifact, err := runner.PersistBuffer(ctx, rc, &stdout, "text/plain", "test_output")
 		if err == nil && artifact.Digest != "" {
 			data["artifact"] = artifact.Digest
-			data["artifact_kind"] = artifact.Kind
-			data["artifact_size_bytes"] = artifact.Size
 		}
 	} else if stdout.Len() > 0 {
 		data["output_preview"] = truncate(stdout.String(), 1000)

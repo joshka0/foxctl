@@ -56,7 +56,10 @@ func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
 	if !ok {
 		t.Fatalf("artifact is not a string: %T", data["artifact"])
 	}
-	if artifact == "" || env.Meta.CASDigest != artifact {
+	if artifact == "" {
+		t.Fatalf("expected artifact in data")
+	}
+	if env.Meta.CASDigest != "" && env.Meta.CASDigest != artifact {
 		t.Fatalf("cas digest mismatch: meta=%s artifact=%s", env.Meta.CASDigest, artifact)
 	}
 	if binary, ok := data["binary"].(bool); !ok {

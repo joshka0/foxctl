@@ -34,6 +34,9 @@ type SpawnRequest struct {
 	SkillsAllow []string
 	Policy      agent.Policy
 	ShareBB     string // all|scoped|none
+	LLMProvider string // Per-agent LLM provider override
+	LLMModel    string // Per-agent LLM model override
+	LLMAPIKey   string // Per-agent LLM API key override
 }
 
 // SpawnResponse contains the result of spawning an agent.
@@ -86,6 +89,9 @@ func (m *Manager) Spawn(ctx context.Context, req SpawnRequest) (SpawnResponse, e
 		State:       agent.StateStarting,
 		CreatedAt:   now,
 		HeartbeatAt: now,
+		LLMProvider: req.LLMProvider,
+		LLMModel:    req.LLMModel,
+		LLMAPIKey:   req.LLMAPIKey,
 	}
 
 	if err := m.agentStore.Create(ctx, a); err != nil {

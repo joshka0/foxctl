@@ -90,7 +90,7 @@ invariants from previous phases.
     example goldens where shapes are important.
 - [ ] Add or refine tests that:
   - Validate golden envelopes with `protocol.Validate`.
-  - Check `meta.cas_digest == data.artifact` where applicable.
+  - If `meta.cas_digest` is set, it matches `data.artifact`.
   - Fail fast when shapes drift unexpectedly.
 
 ---

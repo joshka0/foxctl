@@ -255,6 +255,45 @@ func TestWriteOK(t *testing.T) {
 	}
 }
 
+func TestAnnotateRunBytesPreservesEmptySlices(t *testing.T) {
+	type recallOutput struct {
+		Matches []string `json:"matches"`
+		Status  string   `json:"status"`
+	}
+
+	env := envelope.OK("session/recall", recallOutput{
+		Matches: []string{},
+		Status:  "ok",
+	})
+
+	raw, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal env: %v", err)
+	}
+
+	annotated := AnnotateRunBytes(raw, "/workspace/path", "1.2.3")
+
+	var decoded struct {
+		Data recallOutput `json:"data"`
+		Meta struct {
+			Workspace string `json:"workspace"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(annotated, &decoded); err != nil {
+		t.Fatalf("unmarshal annotated: %v", err)
+	}
+
+	if decoded.Data.Matches == nil {
+		t.Fatal("expected matches to be empty slice, got nil")
+	}
+	if len(decoded.Data.Matches) != 0 {
+		t.Fatalf("expected zero matches, got %d", len(decoded.Data.Matches))
+	}
+	if decoded.Meta.Workspace != "/workspace/path" {
+		t.Fatalf("expected workspace annotation, got %q", decoded.Meta.Workspace)
+	}
+}
+
 func TestWriteError(t *testing.T) {
 	buf := &bytes.Buffer{}
 
@@ -506,8 +545,8 @@ func TestWithMetaMutatorOption(t *testing.T) {
 	env := OK("test", nil, WithMetaMutator(func(m *envelope.Meta) {
 		m.Source = "custom"
 		m.DurationMS = 999
-		m.Seq = new(int)
-		*m.Seq = 5
+		seq := 5
+		m.Seq = &seq
 	}))
 
 	if env.Meta.Source != "custom" {
@@ -687,8 +726,8 @@ func TestValidateCASDigest(t *testing.T) {
 			"artifact": "sha256:abc123",
 		})
 
-		if err := Validate(env); err == nil {
-			t.Fatal("validation should fail when artifact exists but cas_digest is missing")
+		if err := Validate(env); err != nil {
+			t.Fatalf("validation should pass when artifact exists without cas_digest: %v", err)
 		}
 	})
 

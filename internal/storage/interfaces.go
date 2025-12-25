@@ -168,4 +168,156 @@ type MemoryStore interface {
 	Update(ctx context.Context, name, workspace string, summary, typ *string) (NamedEntry, error)
 	Relevant(ctx context.Context, workspace string, limit int) ([]ScoredEntry, error)
 	Stats(ctx context.Context) (MemoryStats, error)
+	// UpdateEmbedding stores an embedding vector for a named memory entry.
+	UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error
+	// SearchSimilar finds entries similar to the given embedding using vector similarity.
+	SearchSimilar(ctx context.Context, workspace string, embedding []float32, limit int) ([]ScoredEntry, error)
+}
+
+// Session represents a captured Claude Code conversation session.
+type Session struct {
+	ID              string    `json:"id"`
+	WorkspacePath   string    `json:"workspace_path"`
+	ProjectName     string    `json:"project_name"`
+	GitBranch       string    `json:"git_branch"`
+	ClaudeVersion   string    `json:"claude_version"`
+	StartedAt       time.Time `json:"started_at"`
+	EndedAt         time.Time `json:"ended_at"`
+	Summary         string    `json:"summary"`
+	Accomplished    []string  `json:"accomplished"`
+	Decisions       []string  `json:"decisions"`
+	Gotchas         []string  `json:"gotchas"`
+	UserInsights    []string  `json:"user_insights,omitempty"`
+	Tags            []string  `json:"tags"`
+	KeyFiles        []string  `json:"key_files"`
+	ToolsPattern    string    `json:"tools_pattern"`
+	MessageCount    int       `json:"message_count"`
+	UserTurns       int       `json:"user_turns"`
+	ToolInvocations int       `json:"tool_invocations"`
+	TotalTokens     int       `json:"total_tokens"`
+	RawJSONLPath    string    `json:"raw_jsonl_path"`
+	Embedding       []byte    `json:"embedding,omitempty"`
+	EmbeddingModel  string    `json:"embedding_model,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// SessionStats summarizes session store metadata.
+type SessionStats struct {
+	Count int64
+	Path  string
+}
+
+// SessionListOptions configures session listing.
+type SessionListOptions struct {
+	WorkspacePath string
+	ProjectName   string
+	Tags          []string
+	Limit         int
+	Offset        int
+}
+
+// SimilarSession represents a session with similarity score.
+type SimilarSession struct {
+	Session    Session `json:"session"`
+	Similarity float64 `json:"similarity"`
+}
+
+// SessionTurn represents a single turn in a conversation session.
+type SessionTurn struct {
+	ID             string     `json:"id"`
+	SessionID      string     `json:"session_id"`
+	TurnIndex      int        `json:"turn_index"`
+	Role           string     `json:"role"` // 'user', 'assistant', 'system'
+	ContentPreview string     `json:"content_preview,omitempty"`
+	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
+	FilesTouched   []string   `json:"files_touched,omitempty"`
+	HasError       bool       `json:"has_error"`
+	ErrorType      string     `json:"error_type,omitempty"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	Resolution     string     `json:"resolution,omitempty"`
+	TokensUsed     int        `json:"tokens_used"`
+	Timestamp      time.Time  `json:"timestamp"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+// ToolCall represents a tool invocation within a turn.
+type ToolCall struct {
+	Name    string `json:"name"`
+	Success bool   `json:"success"`
+}
+
+// SessionTurnListOptions configures turn listing.
+type SessionTurnListOptions struct {
+	SessionID  string
+	ErrorsOnly bool
+	Role       string
+	Limit      int
+	Offset     int
+}
+
+// SessionStore persists Claude Code conversation sessions.
+type SessionStore interface {
+	Store
+	Save(ctx context.Context, session Session) (Session, error)
+	Get(ctx context.Context, id string) (Session, error)
+	List(ctx context.Context, opts SessionListOptions) ([]Session, error)
+	Delete(ctx context.Context, id string) error
+	Search(ctx context.Context, query string, limit int) ([]Session, error)
+	SearchSimilar(ctx context.Context, embedding []float32, limit int) ([]SimilarSession, error)
+	UpdateSummary(ctx context.Context, id string, summary string, accomplished, decisions, gotchas, userInsights, tags, keyFiles []string, toolsPattern string) error
+	SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error
+	Stats(ctx context.Context) (SessionStats, error)
+
+	// Turn operations
+	SaveTurn(ctx context.Context, turn SessionTurn) (SessionTurn, error)
+	SaveTurns(ctx context.Context, turns []SessionTurn) error
+	GetTurns(ctx context.Context, sessionID string, opts SessionTurnListOptions) ([]SessionTurn, error)
+	GetTurnsWithErrors(ctx context.Context, sessionID string) ([]SessionTurn, error)
+	SearchTurns(ctx context.Context, query string, limit int) ([]SessionTurn, error)
+	DeleteTurns(ctx context.Context, sessionID string) error
+
+	// Chunk operations (for JSONL archive deep retrieval)
+	SaveChunk(ctx context.Context, chunk SessionChunk) (SessionChunk, error)
+	SaveChunks(ctx context.Context, chunks []SessionChunk) error
+	GetChunks(ctx context.Context, sessionID string, limit int) ([]SessionChunk, error)
+	GetChunk(ctx context.Context, sessionID string, chunkIndex int) (SessionChunk, error)
+	SearchChunks(ctx context.Context, embedding []float32, limit int) ([]ScoredChunk, error)
+	DeleteChunks(ctx context.Context, sessionID string) error
+	SetArchivePath(ctx context.Context, sessionID, archivePath string) error
+	GetArchivePath(ctx context.Context, sessionID string) (string, error)
+}
+
+// SessionChunk represents a chunk of a session for deep retrieval.
+type SessionChunk struct {
+	ID             string    `json:"id"`
+	SessionID      string    `json:"session_id"`
+	ChunkIndex     int       `json:"chunk_index"`
+	ChunkType      string    `json:"chunk_type"` // 'user_request', 'assistant_response', 'tool_output', 'error'
+	ContentHash    string    `json:"content_hash"`
+	ContentPreview string    `json:"content_preview,omitempty"`
+	ByteOffset     int64     `json:"byte_offset"`
+	ByteLength     int64     `json:"byte_length"`
+	ToolsUsed      []string  `json:"tools_used,omitempty"`
+	FilesTouched   []string  `json:"files_touched,omitempty"`
+	HasError       bool      `json:"has_error"`
+	ErrorType      string    `json:"error_type,omitempty"`
+	Embedding      []byte    `json:"embedding,omitempty"`
+	EmbeddingModel string    `json:"embedding_model,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ScoredChunk couples a chunk with a relevance score.
+type ScoredChunk struct {
+	Chunk      SessionChunk `json:"chunk"`
+	Similarity float64      `json:"similarity"`
+}
+
+// ChunkListOptions configures chunk listing.
+type ChunkListOptions struct {
+	SessionID  string
+	ChunkType  string
+	ErrorsOnly bool
+	Limit      int
+	Offset     int
 }

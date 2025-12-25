@@ -47,7 +47,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("git/status", "ECONFIG", err)
+		fail("git/status", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -214,8 +214,6 @@ func getDiff(ctx context.Context, rc *runner.RunnerContext, repoPath string, in 
 		artifact, err := runner.PersistBuffer(ctx, rc, buf, "text/plain", "git_diff")
 		if err == nil && artifact.Digest != "" {
 			data["artifact"] = artifact.Digest
-			data["artifact_kind"] = artifact.Kind
-			data["artifact_size_bytes"] = artifact.Size
 		}
 	}
 

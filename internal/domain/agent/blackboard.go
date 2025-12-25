@@ -34,7 +34,7 @@ type BlackboardItem struct {
 	TaskID   string                 `json:"task_id,omitempty"`
 	Priority int                    `json:"priority,omitempty"`
 	Tags     []string               `json:"tags,omitempty"`
-	Data     map[string]interface{} `json:"data,omitempty"`
+	Data     map[string]any `json:"data,omitempty"`
 }
 
 // BlackboardMetadata contains additional metadata for blackboard entries.

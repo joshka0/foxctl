@@ -171,10 +171,7 @@ func (env *mailboxTestEnv) upsertTeam(t *testing.T, team teams.Team) {
 	if err != nil {
 		t.Fatalf("open teams store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	if _, err := store.UpsertTeam(env.ctx, team); err != nil {
 		t.Fatalf("upsert team: %v", err)
@@ -187,10 +184,7 @@ func (env *mailboxTestEnv) addMember(t *testing.T, member teams.TeamMember) {
 	if err != nil {
 		t.Fatalf("open teams store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	if err := store.AddMember(env.ctx, member); err != nil {
 		t.Fatalf("add member: %v", err)
@@ -203,10 +197,7 @@ func (env *mailboxTestEnv) inboxMessages(t *testing.T, actorID string) []agent.B
 	if err != nil {
 		t.Fatalf("open board store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	msgs, err := store.Inbox(env.ctx, agent.InboxFilter{
 		WorkspaceID: env.workspaceID,

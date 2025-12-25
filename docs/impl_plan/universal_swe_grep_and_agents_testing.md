@@ -192,7 +192,7 @@ on it.
 
 - **Golden / CAS tests**
   - [ ] NDJSON artifact shape for multi-snippet results.
-  - [ ] `meta.cas_digest` equals `data.artifact` digest.
+  - [ ] If `meta.cas_digest` is set, it matches the `data.artifact` digest.
 
 - **Integration tests**
   - [x] Combine with simple candidate generator (e.g. hard-coded candidates) and

@@ -95,7 +95,7 @@ func runQuotasShow(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/show", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer errs.Ignore(quotasStore.Close(), "close quotas store")
+	defer func() { errs.Ignore(quotasStore.Close(), "close quotas store") }()
 
 	// Get quotas
 	q, err := quotasStore.Get(ctx, ns)
@@ -113,7 +113,7 @@ func runQuotasShow(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"namespace":   ns,
 		"quotas":      q,
 		"consumption": consumption,
@@ -141,7 +141,7 @@ func runQuotasSet(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/set", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer errs.Ignore(quotasStore.Close(), "close quotas store")
+	defer func() { errs.Ignore(quotasStore.Close(), "close quotas store") }()
 
 	// Create quotas
 	q := agent.Quotas{
@@ -167,7 +167,7 @@ func runQuotasSet(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"namespace": ns,
 		"quotas":    q,
 		"action":    "set",
@@ -195,7 +195,7 @@ func runQuotasDelete(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/delete", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer errs.Ignore(quotasStore.Close(), "close quotas store")
+	defer func() { errs.Ignore(quotasStore.Close(), "close quotas store") }()
 
 	// Delete quotas
 	if err := quotasStore.Delete(ctx, ns); err != nil {
@@ -206,7 +206,7 @@ func runQuotasDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"namespace": ns,
 		"deleted":   true,
 	}
@@ -232,7 +232,7 @@ func runQuotasList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer errs.Ignore(quotasStore.Close(), "close quotas store")
+	defer func() { errs.Ignore(quotasStore.Close(), "close quotas store") }()
 
 	// List all quotas
 	allQuotas, err := quotasStore.ListAll(ctx)
@@ -241,7 +241,7 @@ func runQuotasList(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"quotas": allQuotas,
 		"count":  len(allQuotas),
 	}
@@ -268,7 +268,7 @@ func runQuotasConsumption(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "quotas/consumption", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open quotas store: %v", err))
 	}
-	defer errs.Ignore(quotasStore.Close(), "close quotas store")
+	defer func() { errs.Ignore(quotasStore.Close(), "close quotas store") }()
 
 	// Get consumption
 	consumption, err := quotasStore.GetConsumption(ctx, ns)
@@ -277,7 +277,7 @@ func runQuotasConsumption(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"namespace":   ns,
 		"consumption": consumption,
 	}

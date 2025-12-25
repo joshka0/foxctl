@@ -1,0 +1,14 @@
+# Code review command
+description = "Review code for issues and improvements"
+
+prompt = """Review the specified code for:
+
+1. **Bugs**: Logic errors, edge cases, null checks
+2. **Security**: Injection, auth issues, data exposure
+3. **Performance**: N+1 queries, unnecessary allocations
+4. **Style**: Naming, formatting, idioms
+5. **Architecture**: Coupling, cohesion, patterns
+
+Target: {{args}}
+
+Prioritize findings by severity. Include line references."""

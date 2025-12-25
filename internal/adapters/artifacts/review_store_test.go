@@ -71,7 +71,7 @@ func TestStoreReviewArtifact_StoresJSONInCAS(t *testing.T) {
 	}
 
 	var decoded agent.ReviewArtifact
-	buf := new(bytes.Buffer)
+	buf := &bytes.Buffer{}
 	if _, err := buf.ReadFrom(rc); err != nil {
 		t.Fatalf("read artifact body: %v", err)
 	}

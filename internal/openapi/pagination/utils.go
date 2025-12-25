@@ -56,12 +56,10 @@ func splitLinkHeader(header string) []string {
 	return parts
 }
 
-// appendRune appends a rune to a strings.Builder, ignoring errors.
+// appendRune appends a rune to a strings.Builder.
 func appendRune(b *strings.Builder, r rune) {
-	// WriteRune on strings.Builder only fails in catastrophic memory scenarios
-	// In practice, this should never happen, so we ignore the error
-	// rather than panicking which would crash the entire application
-	_, _ = b.WriteRune(r)
+	// WriteRune on strings.Builder never returns an error
+	b.WriteRune(r)
 }
 
 // parseLinkPart parses a single Link header part into URL and rel values.

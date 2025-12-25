@@ -14,7 +14,7 @@ type ProgressEvent struct {
 	Timestamp time.Time              `json:"ts"`
 	Message   string                 `json:"message,omitempty"`
 	Percent   float64                `json:"percent,omitempty"`
-	Meta      map[string]interface{} `json:"meta,omitempty"`
+	Meta      map[string]any `json:"meta,omitempty"`
 }
 
 type progressWriter struct {

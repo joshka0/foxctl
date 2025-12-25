@@ -93,7 +93,7 @@ func init() {
 	if err := mailboxSendCmd.MarkFlagRequired("from"); err != nil {
 		// This should never happen unless there's a programmer error (flag doesn't exist)
 		// Log to stderr and exit gracefully rather than panicking
-		_, _ = fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'from' flag as required: %v\n", err) //nolint:errcheck
+		fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'from' flag as required: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -125,7 +125,7 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate JSON
-	var payload map[string]interface{}
+	var payload map[string]any
 	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON payload: %v", err))
 	}
@@ -144,7 +144,7 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer errs.Ignore(mbStore.Close(), "close mailbox store")
+	defer func() { errs.Ignore(mbStore.Close(), "close mailbox store") }()
 
 	// Create message
 	now := time.Now().Unix()
@@ -172,7 +172,7 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"message_id": msg.ID,
 		"to":         msg.ToNS,
 		"from":       msg.FromNS,
@@ -205,7 +205,7 @@ func runMailboxPoll(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/poll", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer errs.Ignore(mbStore.Close(), "close mailbox store")
+	defer func() { errs.Ignore(mbStore.Close(), "close mailbox store") }()
 
 	// Poll messages
 	timeout := time.Duration(mailboxPollTimeout) * time.Second
@@ -215,7 +215,7 @@ func runMailboxPoll(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("mailbox/poll", map[string]interface{}{
+	env := envelope.OK("mailbox/poll", map[string]any{
 		"messages": messages,
 		"count":    len(messages),
 	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
@@ -240,7 +240,7 @@ func runMailboxAck(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/ack", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer errs.Ignore(mbStore.Close(), "close mailbox store")
+	defer func() { errs.Ignore(mbStore.Close(), "close mailbox store") }()
 
 	// Acknowledge message
 	if err := mbStore.Ack(ctx, messageID); err != nil {
@@ -251,7 +251,7 @@ func runMailboxAck(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"message_id":   messageID,
 		"acknowledged": true,
 	}
@@ -278,7 +278,7 @@ func runMailboxList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer errs.Ignore(mbStore.Close(), "close mailbox store")
+	defer func() { errs.Ignore(mbStore.Close(), "close mailbox store") }()
 
 	// List messages
 	messages, err := mbStore.List(ctx, agentNS, mailboxListLimit)
@@ -287,7 +287,7 @@ func runMailboxList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("mailbox/list", map[string]interface{}{
+	env := envelope.OK("mailbox/list", map[string]any{
 		"messages": messages,
 		"count":    len(messages),
 	}, envelope.WithMetaMutator(func(m *envelope.Meta) {

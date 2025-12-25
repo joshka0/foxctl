@@ -326,7 +326,7 @@ func (pq priorityQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 }
 
-func (pq *priorityQueue) Push(x interface{}) {
+func (pq *priorityQueue) Push(x any) {
 	job, ok := x.(*Job)
 	if !ok {
 		// Should never happen with correct usage, but handle gracefully
@@ -335,7 +335,7 @@ func (pq *priorityQueue) Push(x interface{}) {
 	*pq = append(*pq, job)
 }
 
-func (pq *priorityQueue) Pop() interface{} {
+func (pq *priorityQueue) Pop() any {
 	old := *pq
 	n := len(old)
 	item := old[n-1]

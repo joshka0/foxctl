@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -20,7 +19,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	h := newCASHarness(t)
 
 	t.Run("text-grep cache lifecycle", func(t *testing.T) {
-		env, stderr := withRunExecutor(h.ctx, t, []string{
+		env, _ := withRunExecutor(h.ctx, t, []string{
 			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
 			"--remember", "grep-first",
 			"--workspace", h.workdir,
@@ -28,7 +27,7 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 			"text/grep",
 		})
 		h.assertCASArtifact(t, env)
-		jobID := extractJobID(t, stderr.String())
+		jobID := extractJobID(t, env)
 		h.saveJobAsMemory(t, jobID, "grep-job")
 
 		stdout := h.execMemoryCommand(t, newMemoryGetCommand(), "--workspace", h.workdir, "grep-job")
@@ -44,14 +43,14 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	})
 
 	t.Run("openapi memory relevance", func(t *testing.T) {
-		env, stderr := withRunExecutor(h.ctx, t, []string{
+		env, _ := withRunExecutor(h.ctx, t, []string{
 			"--input", h.openapiInput,
 			"--remember", "openapi-plan",
 			"--workspace", h.workdir,
 			"http/openapi",
 		})
 		assertCommand(t, env, "http/openapi")
-		h.saveJobAsMemory(t, extractJobID(t, stderr.String()), "openapi-plan")
+		h.saveJobAsMemory(t, extractJobID(t, env), "openapi-plan")
 
 		relevant := h.execMemoryCommand(t, newMemoryRelevantCommand(), "--workspace", h.workdir, "--limit", "5")
 		h.assertRelevantContains(t, relevant.Bytes(), "openapi-plan")
@@ -171,13 +170,22 @@ func (h *casHarness) execMemoryCommand(t *testing.T, cmd *cobra.Command, args ..
 
 func (h *casHarness) assertCASArtifact(t *testing.T, env envelope.Envelope) {
 	t.Helper()
-	if env.Meta.CASDigest == "" {
-		t.Fatalf("expected CAS digest on first run")
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected data to be an object, got %T", env.Data)
 	}
-	if !strings.HasPrefix(env.Meta.CASDigest, "sha256:") {
-		t.Fatalf("expected sha256: prefix in CAS digest, got: %s", env.Meta.CASDigest)
+	artifact, _ := data["artifact"].(string)
+	artifact = strings.TrimSpace(artifact)
+	if artifact == "" {
+		t.Fatalf("expected data.artifact to be set")
 	}
-	casPath := filepath.Join(h.cfg.Paths.CAS, "sha256", env.Meta.CASDigest[len("sha256:"):])
+	if !strings.HasPrefix(artifact, "sha256:") {
+		t.Fatalf("expected sha256: prefix in artifact, got: %s", artifact)
+	}
+	if env.Meta.CASDigest != "" && env.Meta.CASDigest != artifact {
+		t.Fatalf("meta.cas_digest %q does not match artifact %q", env.Meta.CASDigest, artifact)
+	}
+	casPath := filepath.Join(h.cfg.Paths.CAS, "sha256", artifact[len("sha256:"):])
 	if _, err := os.Stat(casPath); err != nil {
 		t.Fatalf("cas artifact missing: %v", err)
 	}
@@ -235,12 +243,10 @@ func assertCommand(t *testing.T, env envelope.Envelope, command string) {
 	}
 }
 
-func extractJobID(t *testing.T, stderr string) string {
+func extractJobID(t *testing.T, env envelope.Envelope) string {
 	t.Helper()
-	re := regexp.MustCompile(`job ([0-9A-Z]{26}) state`)
-	m := re.FindStringSubmatch(stderr)
-	if len(m) != 2 {
-		t.Fatalf("failed to parse job id from stderr: %s", stderr)
+	if env.Meta.JobID == "" {
+		t.Fatalf("expected job_id in envelope meta, got empty")
 	}
-	return m[1]
+	return env.Meta.JobID
 }

@@ -24,9 +24,8 @@ The `code/swe_grep` skill must use **inline-threshold artifactization**:
 
 - Keep all snippet results in `data.snippets_inline` when the overall output
   fits within configured inline thresholds.
-- Only emit a CAS artifact (`data.artifact`, `data.artifact_kind`,
-  `data.artifact_size_bytes` + matching `meta.cas_digest`) when the output would
-  exceed inline limits.
+- Only emit a CAS artifact (`data.artifact`, and optionally `meta.cas_digest`
+  matching it) when the output would exceed inline limits.
 
 Inline thresholds must be derived from existing configuration
 (`inline_output_kb`) and/or the skill manifest’s `io.inline_output_kb`.
@@ -101,8 +100,8 @@ Implement threshold-based behavior per
   - Omit `data.artifact*` fields.
 - If results exceed inline:
   - Persist NDJSON to CAS.
-  - Populate `data.artifact`, `data.artifact_kind`, `data.artifact_size_bytes`.
-  - Ensure `meta.cas_digest == data.artifact`.
+  - Populate `data.artifact`.
+  - `meta.cas_digest` is optional; if set it MUST match `data.artifact`.
 
 #### A3. Tests + goldens
 

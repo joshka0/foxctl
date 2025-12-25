@@ -12,7 +12,7 @@ import (
 
 // ScanJSON unmarshals a JSON string column into a Go value.
 // If src is empty, the dest is left unchanged (representing NULL).
-func ScanJSON(src string, dest interface{}) error {
+func ScanJSON(src string, dest any) error {
 	if src == "" {
 		return nil // Empty string = null
 	}
@@ -55,7 +55,7 @@ func FormatTimestamp(t time.Time) string {
 
 // FormatJSON marshals a value to JSON for SQL storage.
 // If v is nil, returns empty string (representing NULL).
-func FormatJSON(v interface{}) (string, error) {
+func FormatJSON(v any) (string, error) {
 	if v == nil {
 		return "", nil
 	}
@@ -75,7 +75,7 @@ type ScanRow struct {
 
 // Scan wraps row.Scan with error accumulation.
 // If a previous scan failed, this is a no-op.
-func (s *ScanRow) Scan(dest ...interface{}) *ScanRow {
+func (s *ScanRow) Scan(dest ...any) *ScanRow {
 	if s.err != nil {
 		return s
 	}

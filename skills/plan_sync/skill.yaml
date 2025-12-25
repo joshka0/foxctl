@@ -1,0 +1,61 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: plan/sync
+  version: 0.1.0
+  description: "Sync Claude Code plans from ~/.claude/plans/ and optionally import as tasks"
+  tags: ["plan", "sync", "tasks", "claude-code"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/plan_sync/plan_sync
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: plan/sync
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path (defaults to cwd)"
+    - name: plan_file
+      type: string
+      required: false
+      description: "Specific plan file to sync (optional, syncs all if omitted)"
+    - name: import_tasks
+      type: boolean
+      required: false
+      description: "Create agentctl tasks from plan steps"
+    - name: dry_run
+      type: boolean
+      required: false
+      description: "Preview changes without applying them"
+    - name: force
+      type: boolean
+      required: false
+      description: "Re-sync even if content hash unchanged"
+returns:
+  - name: plans_processed
+    type: integer
+    description: "Number of plans processed"
+  - name: plans_changed
+    type: integer
+    description: "Number of plans with changes"
+  - name: tasks_created
+    type: integer
+    description: "Number of tasks created"
+  - name: dry_run
+    type: boolean
+    description: "Whether this was a dry run"
+  - name: results
+    type: array
+    description: "Per-plan sync results"
+  - name: message
+    type: string
+    description: "Human-readable summary"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

@@ -54,7 +54,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("code/diff", "ECONFIG", err)
+		fail("code/diff", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -165,8 +165,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
-		data["artifact_kind"] = artifact.Kind
-		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("code/diff", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
@@ -369,13 +367,13 @@ func computeStats(hunks []diffHunk, oldTotal, newTotal int) diffStats {
 func generateUnifiedDiff(oldFile, newFile string, hunks []diffHunk) string {
 	var builder strings.Builder
 
-	_, _ = builder.WriteString(fmt.Sprintf("--- %s\n", oldFile))
-	_, _ = builder.WriteString(fmt.Sprintf("+++ %s\n", newFile))
+	builder.WriteString(fmt.Sprintf("--- %s\n", oldFile))
+	builder.WriteString(fmt.Sprintf("+++ %s\n", newFile))
 
 	for _, hunk := range hunks {
-		_, _ = builder.WriteString(hunk.Header + "\n")
+		builder.WriteString(hunk.Header + "\n")
 		for _, line := range hunk.Lines {
-			_, _ = builder.WriteString(line + "\n")
+			builder.WriteString(line + "\n")
 		}
 	}
 

@@ -72,18 +72,17 @@ Each line is a JSON object with the following fields:
 
 ```jsonc
 {
-	"ts": "2025-12-03T17:19:11Z", // RFC3339 UTC timestamp
-	"command": "code/swe_grep", // envelope command
-	"workspace_id": "test-ws", // logical workspace id from input
-	"question_hash": "a1b2c3d4", // SHA-256(question) hex, truncated
-	"candidates": 3, // len(input.candidates)
-	"files_considered": 3, // files attempted after validation
-	"files_relevant": 2, // files that produced >= 1 snippet
-	"snippets_emitted": 5, // total snippets across all files
-	"has_artifact": true, // true if CAS artifact present
-	"artifact_kind": "application/x-swe-grep-snippets+ndjson",
-	"duration_ms": 187, // optional wall-clock duration
-	"source": "run" // "run" | "cache" | "job" | ...
+  "ts": "2025-12-03T17:19:11Z", // RFC3339 UTC timestamp
+  "command": "code/swe_grep", // envelope command
+  "workspace_id": "test-ws", // logical workspace id from input
+  "question_hash": "a1b2c3d4", // SHA-256(question) hex, truncated
+  "candidates": 3, // len(input.candidates)
+  "files_considered": 3, // files attempted after validation
+  "files_relevant": 2, // files that produced >= 1 snippet
+  "snippets_emitted": 5, // total snippets across all files
+  "has_artifact": true, // true if CAS artifact present
+  "duration_ms": 187, // optional wall-clock duration
+  "source": "run" // "run" | "cache" | "job" | ...
 }
 ```
 
@@ -97,10 +96,8 @@ Notes:
     only carries aggregate counts and booleans.
 - **Consistency:**
   - `command` MUST always be `"code/swe_grep"` for this file.
-  - `has_artifact` MUST be `true` when the envelope includes `data.artifact` /
-    `meta.cas_digest`, and `false` otherwise.
-  - When `has_artifact == false`, `artifact_kind` SHOULD be omitted (`null` or
-    missing).
+  - `has_artifact` MUST be `true` when the envelope includes `data.artifact`,
+    and `false` otherwise.
 
 ### 3.2 Suggested Go struct (non-normative)
 
@@ -118,7 +115,6 @@ type SweGrepEvent struct {
     FilesRelevant   int       `json:"files_relevant"`
     SnippetsEmitted int       `json:"snippets_emitted"`
     HasArtifact     bool      `json:"has_artifact"`
-    ArtifactKind    string    `json:"artifact_kind,omitempty"`
     DurationMS      int64     `json:"duration_ms,omitempty"`
     Source          string    `json:"source"`           // "run" | "cache" | ...
 }

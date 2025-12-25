@@ -420,6 +420,105 @@ func TestStore_ReviewFields(t *testing.T) {
 	}
 }
 
+func TestStore_PlanFields(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	// Create a task linked to a plan
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Implement feature X",
+		PlanFile:    "/home/user/.claude/plans/feature-x.md",
+		PlanSection: "Phase 1 > Step 1.1",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Verify plan fields are persisted
+	got, err := store.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.PlanFile != "/home/user/.claude/plans/feature-x.md" {
+		t.Errorf("expected plan_file %q, got %q", "/home/user/.claude/plans/feature-x.md", got.PlanFile)
+	}
+	if got.PlanSection != "Phase 1 > Step 1.1" {
+		t.Errorf("expected plan_section %q, got %q", "Phase 1 > Step 1.1", got.PlanSection)
+	}
+
+	// Test update of plan fields
+	got.PlanSection = "Phase 1 > Step 1.2"
+	updated, err := store.Update(ctx, got)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if updated.PlanSection != "Phase 1 > Step 1.2" {
+		t.Errorf("expected plan_section %q, got %q", "Phase 1 > Step 1.2", updated.PlanSection)
+	}
+}
+
+func TestStore_ListByPlanFile(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	planFile := "/home/user/.claude/plans/feature-x.md"
+
+	// Create multiple tasks linked to the same plan
+	_, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Step 1",
+		PlanFile:    planFile,
+		PlanSection: "Phase 1 > Step 1",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	_, err = store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Step 2",
+		PlanFile:    planFile,
+		PlanSection: "Phase 1 > Step 2",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Create a task not linked to any plan
+	_, err = store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Unlinked task",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// Create a task linked to a different plan
+	_, err = store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Other plan task",
+		PlanFile:    "/home/user/.claude/plans/other.md",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	// List tasks by plan file
+	tasks, err := store.ListByPlanFile(ctx, planFile)
+	if err != nil {
+		t.Fatalf("ListByPlanFile failed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Errorf("expected 2 tasks, got %d", len(tasks))
+	}
+
+	// Verify tasks are sorted by created_at ASC
+	if len(tasks) >= 2 && tasks[0].Title != "Step 1" {
+		t.Errorf("expected first task to be 'Step 1', got %q", tasks[0].Title)
+	}
+}
+
 func setupTestStore(t *testing.T) Store {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "tasks-test-*")
@@ -435,10 +534,7 @@ func setupTestStore(t *testing.T) Store {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { store.Close() })
 
 	return store
 }

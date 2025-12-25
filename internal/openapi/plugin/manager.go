@@ -658,7 +658,7 @@ func isExecutableFile(path string) bool {
 }
 
 func writeAndClose(w io.WriteCloser, data []byte) error {
-	defer func() { _ = w.Close() }()
+	defer w.Close()
 	if len(data) == 0 {
 		return nil
 	}

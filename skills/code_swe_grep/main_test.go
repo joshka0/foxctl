@@ -999,3 +999,715 @@ func generateSequence(start, end int) []int {
 	}
 	return seq
 }
+
+// TestParseSymbolName tests symbol ID parsing.
+func TestParseSymbolName(t *testing.T) {
+	tests := []struct {
+		name     string
+		symbolID string
+		want     string
+	}{
+		{"valid symbol ID", "pkg/auth/login.go:Login", "Login"},
+		{"nested path", "internal/services/auth/handler.go:HandleAuth", "HandleAuth"},
+		{"no colon", "invalid", ""},
+		{"trailing colon", "path:", ""},
+		{"multiple colons", "path/file.go:Foo:Bar", "Bar"},
+		{"empty string", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSymbolName(tt.symbolID)
+			if got != tt.want {
+				t.Errorf("parseSymbolName(%q) = %q, want %q", tt.symbolID, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDetectLanguage tests language detection from file paths.
+func TestDetectLanguage(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"main.go", "go"},
+		{"script.py", "python"},
+		{"app.ts", "typescript"},
+		{"app.tsx", "typescript"},
+		{"app.js", "javascript"},
+		{"app.jsx", "javascript"},
+		{"player.gd", "gdscript"},
+		{"lib.rs", "rust"},
+		{"Main.java", "java"},
+		{"main.c", "c"},
+		{"main.cpp", "cpp"},
+		{"main.hpp", "cpp"},
+		{"unknown.xyz", ""},
+		{"pkg/auth/login.go", "go"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := detectLanguage(tt.path)
+			if got != tt.want {
+				t.Errorf("detectLanguage(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFindSymbolDefinition tests symbol definition finding.
+func TestFindSymbolDefinition(t *testing.T) {
+	tests := []struct {
+		name     string
+		lines    []string
+		symbol   string
+		lang     string
+		wantLine int
+	}{
+		{
+			name: "go function",
+			lines: []string{
+				"package main",
+				"",
+				"func Login(ctx context.Context) error {",
+				"    return nil",
+				"}",
+			},
+			symbol:   "Login",
+			lang:     "go",
+			wantLine: 2,
+		},
+		{
+			name: "go method",
+			lines: []string{
+				"package main",
+				"",
+				"func (s *Service) HandleAuth(r *Request) error {",
+				"    return nil",
+				"}",
+			},
+			symbol:   "HandleAuth",
+			lang:     "go",
+			wantLine: 2,
+		},
+		{
+			name: "python function",
+			lines: []string{
+				"import os",
+				"",
+				"def login(username, password):",
+				"    return True",
+			},
+			symbol:   "login",
+			lang:     "python",
+			wantLine: 2,
+		},
+		{
+			name: "python class",
+			lines: []string{
+				"class AuthService:",
+				"    def __init__(self):",
+				"        pass",
+			},
+			symbol:   "AuthService",
+			lang:     "python",
+			wantLine: 0,
+		},
+		{
+			name: "not found",
+			lines: []string{
+				"package main",
+				"func Other() {}",
+			},
+			symbol:   "NotFound",
+			lang:     "go",
+			wantLine: -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findSymbolDefinition(tt.lines, tt.symbol, tt.lang)
+			if got != tt.wantLine {
+				t.Errorf("findSymbolDefinition() = %d, want %d", got, tt.wantLine)
+			}
+		})
+	}
+}
+
+// TestFindBraceEnd tests brace-based block end finding.
+func TestFindBraceEnd(t *testing.T) {
+	tests := []struct {
+		name      string
+		lines     []string
+		startLine int
+		wantLine  int
+	}{
+		{
+			name: "simple function",
+			lines: []string{
+				"func Foo() {",
+				"    return 1",
+				"}",
+			},
+			startLine: 0,
+			wantLine:  2,
+		},
+		{
+			name: "nested braces",
+			lines: []string{
+				"func Foo() {",
+				"    if true {",
+				"        x := 1",
+				"    }",
+				"    return 1",
+				"}",
+			},
+			startLine: 0,
+			wantLine:  5,
+		},
+		{
+			name: "braces on same line",
+			lines: []string{
+				"func Foo() { return 1 }",
+			},
+			startLine: 0,
+			wantLine:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findBraceEnd(tt.lines, tt.startLine)
+			if got != tt.wantLine {
+				t.Errorf("findBraceEnd() = %d, want %d", got, tt.wantLine)
+			}
+		})
+	}
+}
+
+// TestFindIndentationEnd tests indentation-based block end finding.
+func TestFindIndentationEnd(t *testing.T) {
+	tests := []struct {
+		name      string
+		lines     []string
+		startLine int
+		wantLine  int
+	}{
+		{
+			name: "simple python function",
+			lines: []string{
+				"def foo():",
+				"    x = 1",
+				"    return x",
+				"",
+				"def bar():",
+			},
+			startLine: 0,
+			wantLine:  2,
+		},
+		{
+			name: "nested blocks",
+			lines: []string{
+				"def foo():",
+				"    if True:",
+				"        x = 1",
+				"    return x",
+				"def bar():",
+			},
+			startLine: 0,
+			wantLine:  3,
+		},
+		{
+			name: "with blank lines",
+			lines: []string{
+				"def foo():",
+				"    x = 1",
+				"",
+				"    return x",
+				"",
+				"def bar():",
+			},
+			startLine: 0,
+			wantLine:  3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findIndentationEnd(tt.lines, tt.startLine)
+			if got != tt.wantLine {
+				t.Errorf("findIndentationEnd() = %d, want %d", got, tt.wantLine)
+			}
+		})
+	}
+}
+
+// TestCountLeadingWhitespace tests whitespace counting.
+func TestCountLeadingWhitespace(t *testing.T) {
+	tests := []struct {
+		line string
+		want int
+	}{
+		{"no indent", 0},
+		{"  two spaces", 2},
+		{"    four spaces", 4},
+		{"\ttab", 4},
+		{"\t\ttwo tabs", 8},
+		{"  \tmixed", 6},
+		{"", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.line, func(t *testing.T) {
+			got := countLeadingWhitespace(tt.line)
+			if got != tt.want {
+				t.Errorf("countLeadingWhitespace(%q) = %d, want %d", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExtractSymbolBody tests complete symbol extraction.
+func TestExtractSymbolBody(t *testing.T) {
+	tests := []struct {
+		name    string
+		fr      FileResult
+		lines   []string
+		want    *Snippet
+		wantNil bool
+	}{
+		{
+			name: "go function extraction",
+			fr: FileResult{
+				Path:     "main.go",
+				SymbolID: "main.go:Login",
+				Priority: 0.9,
+			},
+			lines: []string{
+				"package main",
+				"",
+				"func Login(ctx context.Context) error {",
+				"    return nil",
+				"}",
+				"",
+				"func Other() {}",
+			},
+			want: &Snippet{
+				File:      "main.go",
+				SymbolID:  "main.go:Login",
+				StartLine: 3, // 1-indexed
+				EndLine:   5, // 1-indexed
+				Priority:  0.9,
+			},
+		},
+		{
+			name: "python function extraction",
+			fr: FileResult{
+				Path:     "main.py",
+				SymbolID: "main.py:process",
+				Priority: 0.8,
+			},
+			lines: []string{
+				"def process(data):",
+				"    x = data + 1",
+				"    return x",
+				"",
+				"def other():",
+				"    pass",
+			},
+			want: &Snippet{
+				File:      "main.py",
+				SymbolID:  "main.py:process",
+				StartLine: 1,
+				EndLine:   3,
+				Priority:  0.8,
+			},
+		},
+		{
+			name: "symbol not found",
+			fr: FileResult{
+				Path:     "main.go",
+				SymbolID: "main.go:NotFound",
+			},
+			lines: []string{
+				"func Other() {}",
+			},
+			wantNil: true,
+		},
+		{
+			name: "empty symbol ID",
+			fr: FileResult{
+				Path:     "main.go",
+				SymbolID: "",
+			},
+			lines: []string{
+				"func Foo() {}",
+			},
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractSymbolBody(tt.fr, tt.lines)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("extractSymbolBody() = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("extractSymbolBody() = nil, want non-nil")
+			}
+			if got.File != tt.want.File {
+				t.Errorf("File = %q, want %q", got.File, tt.want.File)
+			}
+			if got.SymbolID != tt.want.SymbolID {
+				t.Errorf("SymbolID = %q, want %q", got.SymbolID, tt.want.SymbolID)
+			}
+			if got.StartLine != tt.want.StartLine {
+				t.Errorf("StartLine = %d, want %d", got.StartLine, tt.want.StartLine)
+			}
+			if got.EndLine != tt.want.EndLine {
+				t.Errorf("EndLine = %d, want %d", got.EndLine, tt.want.EndLine)
+			}
+			if got.Priority != tt.want.Priority {
+				t.Errorf("Priority = %f, want %f", got.Priority, tt.want.Priority)
+			}
+		})
+	}
+}
+
+// TestExtractSnippetsPriorityOrdering tests that snippets are sorted by priority.
+func TestExtractSnippetsPriorityOrdering(t *testing.T) {
+	// Create file results with different priorities
+	results := []FileResult{
+		{
+			Path:     "low.go",
+			Content:  []byte("func Low() { return }"),
+			Priority: 0.3,
+		},
+		{
+			Path:     "high.go",
+			Content:  []byte("func High() { return }"),
+			Priority: 0.9,
+		},
+		{
+			Path:     "mid.go",
+			Content:  []byte("func Mid() { return }"),
+			Priority: 0.6,
+		},
+	}
+
+	snippets := extractSnippets(results, "func", 10)
+
+	if len(snippets) != 3 {
+		t.Fatalf("expected 3 snippets, got %d", len(snippets))
+	}
+
+	// Check snippets are sorted by priority (highest first)
+	if snippets[0].Priority != 0.9 {
+		t.Errorf("first snippet priority = %f, want 0.9", snippets[0].Priority)
+	}
+	if snippets[1].Priority != 0.6 {
+		t.Errorf("second snippet priority = %f, want 0.6", snippets[1].Priority)
+	}
+	if snippets[2].Priority != 0.3 {
+		t.Errorf("third snippet priority = %f, want 0.3", snippets[2].Priority)
+	}
+}
+
+// TestExtractGoSymbolBody tests AST-based Go symbol extraction.
+func TestExtractGoSymbolBody(t *testing.T) {
+	tests := []struct {
+		name       string
+		fr         FileResult
+		symbolName string
+		wantStart  int
+		wantEnd    int
+		wantNil    bool
+	}{
+		{
+			name: "function extraction",
+			fr: FileResult{
+				Path:     "test.go",
+				SymbolID: "test.go:Hello",
+				Priority: 0.9,
+				Content: []byte(`package main
+
+func Hello() string {
+	return "hello"
+}
+
+func Other() {}
+`),
+			},
+			symbolName: "Hello",
+			wantStart:  3,
+			wantEnd:    5,
+		},
+		{
+			name: "method extraction",
+			fr: FileResult{
+				Path:     "service.go",
+				SymbolID: "service.go:Process",
+				Priority: 0.8,
+				Content: []byte(`package main
+
+type Service struct{}
+
+func (s *Service) Process(data string) error {
+	if data == "" {
+		return nil
+	}
+	return nil
+}
+
+func (s *Service) Other() {}
+`),
+			},
+			symbolName: "Process",
+			wantStart:  5,
+			wantEnd:    10,
+		},
+		{
+			name: "method matched by full name",
+			fr: FileResult{
+				Path:     "service.go",
+				SymbolID: "service.go:Service.Process",
+				Priority: 0.7,
+				Content: []byte(`package main
+
+type Service struct{}
+
+func (s *Service) Process(data string) error {
+	return nil
+}
+`),
+			},
+			symbolName: "Service.Process",
+			wantStart:  5,
+			wantEnd:    7,
+		},
+		{
+			name: "struct extraction",
+			fr: FileResult{
+				Path:     "types.go",
+				SymbolID: "types.go:Config",
+				Priority: 0.6,
+				Content: []byte(`package main
+
+type Config struct {
+	Name    string
+	Timeout int
+}
+`),
+			},
+			symbolName: "Config",
+			wantStart:  3,
+			wantEnd:    6,
+		},
+		{
+			name: "symbol not found",
+			fr: FileResult{
+				Path:     "test.go",
+				SymbolID: "test.go:NotFound",
+				Content:  []byte(`package main\n\nfunc Other() {}`),
+			},
+			symbolName: "NotFound",
+			wantNil:    true,
+		},
+		{
+			name: "invalid go syntax",
+			fr: FileResult{
+				Path:     "bad.go",
+				SymbolID: "bad.go:Foo",
+				Content:  []byte(`this is not valid go code {{{`),
+			},
+			symbolName: "Foo",
+			wantNil:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := splitLines(tt.fr.Content)
+			got := extractGoSymbolBody(tt.fr, lines, tt.symbolName)
+
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("extractGoSymbolBody() = %+v, want nil", got)
+				}
+				return
+			}
+
+			if got == nil {
+				t.Fatal("extractGoSymbolBody() = nil, want non-nil")
+			}
+			if got.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", got.StartLine, tt.wantStart)
+			}
+			if got.EndLine != tt.wantEnd {
+				t.Errorf("EndLine = %d, want %d", got.EndLine, tt.wantEnd)
+			}
+			if got.File != tt.fr.Path {
+				t.Errorf("File = %q, want %q", got.File, tt.fr.Path)
+			}
+			if got.Priority != tt.fr.Priority {
+				t.Errorf("Priority = %f, want %f", got.Priority, tt.fr.Priority)
+			}
+		})
+	}
+}
+
+// TestExtractSymbolBodyMultiLanguage tests heuristic-based extraction for non-Go languages.
+func TestExtractSymbolBodyMultiLanguage(t *testing.T) {
+	tests := []struct {
+		name      string
+		fr        FileResult
+		wantStart int
+		wantEnd   int
+		wantNil   bool
+	}{
+		{
+			name: "typescript function",
+			fr: FileResult{
+				Path:     "utils.ts",
+				SymbolID: "utils.ts:fetchData",
+				Priority: 0.9,
+				Content: []byte(`import axios from 'axios';
+
+function fetchData(url: string): Promise<any> {
+    return axios.get(url)
+        .then(res => res.data);
+}
+
+export const other = () => {};
+`),
+			},
+			wantStart: 3,
+			wantEnd:   6, // Line 6 is the closing brace
+		},
+		{
+			name: "typescript arrow function",
+			fr: FileResult{
+				Path:     "app.ts",
+				SymbolID: "app.ts:handleClick",
+				Priority: 0.8,
+				Content: []byte(`const handleClick = (e: Event) => {
+    console.log(e);
+    return true;
+};
+`),
+			},
+			wantStart: 1,
+			wantEnd:   4,
+		},
+		{
+			name: "javascript class",
+			fr: FileResult{
+				Path:     "service.js",
+				SymbolID: "service.js:UserService",
+				Priority: 0.7,
+				Content: []byte(`class UserService {
+    constructor() {
+        this.users = [];
+    }
+
+    getUser(id) {
+        return this.users.find(u => u.id === id);
+    }
+}
+`),
+			},
+			wantStart: 1,
+			wantEnd:   9,
+		},
+		{
+			name: "python with decorator",
+			fr: FileResult{
+				Path:     "views.py",
+				SymbolID: "views.py:login",
+				Priority: 0.6,
+				Content: []byte(`from flask import request
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    return {'status': 'ok'}
+
+def logout():
+    pass
+`),
+			},
+			wantStart: 4,
+			wantEnd:   6,
+		},
+		{
+			name: "python class",
+			fr: FileResult{
+				Path:     "models.py",
+				SymbolID: "models.py:User",
+				Priority: 0.5,
+				Content: []byte(`class User:
+    def __init__(self, name):
+        self.name = name
+
+    def greet(self):
+        return f"Hello, {self.name}"
+
+class Other:
+    pass
+`),
+			},
+			wantStart: 1,
+			wantEnd:   6,
+		},
+		{
+			name: "rust function",
+			fr: FileResult{
+				Path:     "lib.rs",
+				SymbolID: "lib.rs:process",
+				Priority: 0.9,
+				Content: []byte(`use std::io;
+
+fn process(data: &str) -> Result<(), io::Error> {
+    println!("{}", data);
+    Ok(())
+}
+
+fn other() {}
+`),
+			},
+			wantStart: 3,
+			wantEnd:   6,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := splitLines(tt.fr.Content)
+			got := extractSymbolBody(tt.fr, lines)
+
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("extractSymbolBody() = %+v, want nil", got)
+				}
+				return
+			}
+
+			if got == nil {
+				t.Fatal("extractSymbolBody() = nil, want non-nil")
+			}
+			if got.StartLine != tt.wantStart {
+				t.Errorf("StartLine = %d, want %d", got.StartLine, tt.wantStart)
+			}
+			if got.EndLine != tt.wantEnd {
+				t.Errorf("EndLine = %d, want %d", got.EndLine, tt.wantEnd)
+			}
+		})
+	}
+}

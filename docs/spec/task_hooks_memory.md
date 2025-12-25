@@ -148,7 +148,7 @@ Claude Code hooks are configured to call small bash scripts under
 - Each script:
   - Reads hook payload JSON from `stdin`.
   - Optionally takes the hook event as `$1`.
-  - Calls `agentctl run <hook-skill> --input -`.
+  - Calls `agentctl run <hook-skill> --input-file -`.
   - Extracts `data.hook_output` from the resulting envelope and emits it as the
     hook's stdout JSON.
 
@@ -163,7 +163,7 @@ AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
 
 payload="$(cat)"
 
-result="$(printf '%s' "$payload" | "$AGENTCTL_BIN" run hooks/task_guard --input -)"
+result="$(printf '%s' "$payload" | "$AGENTCTL_BIN" run hooks/task_guard --input-file -)"
 
 hook_json="$(printf '%s' "$result" | jq -c '.data.hook_output // {}')"
 

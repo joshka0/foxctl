@@ -35,10 +35,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tasks.Open: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = taskStore.Close() //nolint:errcheck
-	}()
+	defer taskStore.Close()
 
 	// Create a task graph: A -> B -> C (A depends on B, B depends on C)
 	taskC, err := taskStore.Add(ctx, tasks.Task{
@@ -129,10 +126,7 @@ func TestMultiAgentWorkflow_FullCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	// Admin sends directive to coder agent about Task C
 	err = boardStore.SendMessage(ctx, &agent.BoardMessage{
@@ -301,10 +295,7 @@ func TestMultiAgentWorkflow_CyclicDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tasks.Open: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = taskStore.Close() //nolint:errcheck
-	}()
+	defer taskStore.Close()
 
 	// Create cyclic dependencies: A -> B -> C -> A
 	// First create all tasks without dependencies
@@ -363,10 +354,7 @@ func TestMultiAgentWorkflow_CyclicDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	scorer := overseer.NewScorer(taskStore, boardStore)
 	rec, err := scorer.Recommend(ctx, testWorkspaceID, 10)
@@ -387,19 +375,13 @@ func TestMultiAgentWorkflow_MessagePrioritization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tasks.Open: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = taskStore.Close() //nolint:errcheck
-	}()
+	defer taskStore.Close()
 
 	boardStore, err := blackboard.OpenBoardStore(ctx, dir)
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	// Create two identical tasks
 	task1, err := taskStore.Add(ctx, tasks.Task{
@@ -470,10 +452,7 @@ func TestMultiAgentWorkflow_FileGuardConflictResolution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	// Agent 1 reserves multiple files
 	files := []string{"src/main.go", "src/config.go", "src/utils.go"}
@@ -533,10 +512,7 @@ func TestMultiAgentWorkflow_SharedReservations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	// Agent 1 creates a shared reservation
 	err = boardStore.Reserve(ctx, &agent.FileReservation{
@@ -593,10 +569,7 @@ func TestMultiAgentWorkflow_BroadcastMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBoardStore: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	// Admin broadcasts to all agents
 	err = boardStore.SendMessage(ctx, &agent.BoardMessage{
@@ -651,20 +624,14 @@ func TestMultiAgentWorkflow_PlanOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open task store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = taskStore.Close() //nolint:errcheck
-	}()
+	defer taskStore.Close()
 
 	// Open board store for mailbox
 	boardStore, err := blackboard.OpenBoardStore(ctx, tmpDir)
 	if err != nil {
 		t.Fatalf("Failed to open board store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	t.Log("Phase 1: Testing draft mode (no persistence)")
 

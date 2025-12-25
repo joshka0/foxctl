@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -79,6 +81,60 @@ func TestNewRegistry_CodeToolsPresent(t *testing.T) {
 		if !found {
 			t.Errorf("Phase 6 tool %q not registered", name)
 		}
+	}
+}
+
+func TestNewRegistry_Allowlist(t *testing.T) {
+	cfg := Config{
+		WorkspaceRoot: t.TempDir(),
+		Allowlist:     []string{"fs.read_file", "code.search"},
+	}
+	registry, err := NewRegistry(cfg, nil)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	tools := registry.List()
+	if len(tools) != 2 {
+		t.Errorf("expected 2 tools, got %d", len(tools))
+	}
+
+	for _, tool := range tools {
+		name := tool.Name()
+		if name != "fs.read_file" && name != "code.search" {
+			t.Errorf("unexpected tool %q", name)
+		}
+	}
+}
+
+func TestNewRegistry_FilesystemPolicy_Tmp(t *testing.T) {
+	cfg := Config{
+		WorkspaceRoot:    t.TempDir(),
+		FilesystemPolicy: "tmp",
+	}
+	registry, err := NewRegistry(cfg, nil)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	roots := registry.pathValidator.AllowedRoots()
+	found := false
+	tmpDir := os.TempDir()
+	// Canonicalize tmpDir because AllowedRoots are canonicalized
+	evalTmp, err := filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		evalTmp = tmpDir
+	}
+	evalTmp = filepath.Clean(evalTmp)
+
+	for _, r := range roots {
+		if r == evalTmp {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected tmp dir %q (eval: %q) in allowed roots %v", tmpDir, evalTmp, roots)
 	}
 }
 

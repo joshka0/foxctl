@@ -205,10 +205,7 @@ func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	updated, err := store.Get(ctx, task.ID)
 	if err != nil {
@@ -339,10 +336,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = rc.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { rc.Close() })
 
 	return &testEnv{
 		ctx:           ctx,

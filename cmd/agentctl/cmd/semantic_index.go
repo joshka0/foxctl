@@ -37,34 +37,40 @@ func newSemanticIndexCommand() *cobra.Command {
 func newSemanticIndexInitCommand() *cobra.Command {
 	var workspace string
 	var glob string
+	var exclude []string
 	var dryRun bool
 	var taskID string
 	var chunkBytes int
 	var chunkOverlap int
 	var model string
+	var provider string
 
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize semantic index for workspace files",
 		Long:  "Initialize the semantic file index by generating embeddings for all matching files in the workspace.",
-		Example: "  # Index all Go files in current directory\n" +
+		Example: "  # Index all Go files with Voyage (default, 200M free tokens)\n" +
 			"  agentctl semantic-index init --workspace . --glob '**/*.go'\n\n" +
-			"  # Index with custom chunking config\n" +
-			"  agentctl semantic-index init --workspace . --chunk-bytes 2048 --chunk-overlap 256\n\n" +
+			"  # Index Go source files, excluding tests\n" +
+			"  agentctl semantic-index init --workspace . --glob '**/*.go' --exclude '*_test.go'\n\n" +
+			"  # Use Gemini instead of Voyage\n" +
+			"  agentctl semantic-index init --workspace . --provider gemini\n\n" +
 			"  # Dry run to see what would be indexed\n" +
 			"  agentctl semantic-index init --workspace . --glob '**/*.go' --dry-run",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSemanticIndexInit(cmd, workspace, glob, dryRun, taskID, chunkBytes, chunkOverlap, model)
+			return runSemanticIndexInit(cmd, workspace, glob, exclude, dryRun, taskID, chunkBytes, chunkOverlap, model, provider)
 		},
 	}
 
 	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
 	cmd.Flags().StringVar(&glob, "glob", "**/*.go", "Glob pattern to match files")
+	cmd.Flags().StringSliceVar(&exclude, "exclude", nil, "Glob patterns to exclude (comma-separated, e.g., '*_test.go,vendor/**')")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be indexed without making changes")
 	cmd.Flags().StringVar(&taskID, "task-id", "", "Task ID for provenance tracking")
 	cmd.Flags().IntVar(&chunkBytes, "chunk-bytes", 0, "Chunk size in bytes (0 = no chunking)")
 	cmd.Flags().IntVar(&chunkOverlap, "chunk-overlap", 0, "Chunk overlap in bytes")
-	cmd.Flags().StringVar(&model, "model", "", "Embedding model name")
+	cmd.Flags().StringVar(&model, "model", "", "Embedding model name (default: voyage-code-3 or gemini-embedding-001)")
+	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider: voyage (default), gemini, or noop")
 
 	return cmd
 }
@@ -79,6 +85,7 @@ func newSemanticIndexUpdateCommand() *cobra.Command {
 	var chunkBytes int
 	var chunkOverlap int
 	var model string
+	var provider string
 
 	cmd := &cobra.Command{
 		Use:   "update",
@@ -91,7 +98,7 @@ func newSemanticIndexUpdateCommand() *cobra.Command {
 			"  # Update with provenance\n" +
 			"  agentctl semantic-index update --workspace . --files main.go --task-id task-123 --review-id review-456",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSemanticIndexUpdate(cmd, workspace, files, deleted, dryRun, taskID, reviewID, chunkBytes, chunkOverlap, model)
+			return runSemanticIndexUpdate(cmd, workspace, files, deleted, dryRun, taskID, reviewID, chunkBytes, chunkOverlap, model, provider)
 		},
 	}
 
@@ -103,12 +110,13 @@ func newSemanticIndexUpdateCommand() *cobra.Command {
 	cmd.Flags().StringVar(&reviewID, "review-id", "", "Review ID for provenance tracking")
 	cmd.Flags().IntVar(&chunkBytes, "chunk-bytes", 0, "Chunk size in bytes (0 = no chunking)")
 	cmd.Flags().IntVar(&chunkOverlap, "chunk-overlap", 0, "Chunk overlap in bytes")
-	cmd.Flags().StringVar(&model, "model", "", "Embedding model name")
+	cmd.Flags().StringVar(&model, "model", "", "Embedding model name (default: voyage-code-3 or gemini-embedding-001)")
+	cmd.Flags().StringVar(&provider, "provider", "", "Embedding provider: voyage (default), gemini, or noop")
 
 	return cmd
 }
 
-func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, dryRun bool, taskID string, chunkBytes, chunkOverlap int, model string) error {
+func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, exclude []string, dryRun bool, taskID string, chunkBytes, chunkOverlap int, model, providerName string) error {
 	start := time.Now()
 	ctx := cmd.Context()
 
@@ -129,8 +137,8 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, dryRun boo
 		return writeSemanticError(cmd, "EARG", fmt.Sprintf("workspace %q is not a directory", absWorkspace))
 	}
 
-	// Find files matching glob
-	files, err := findFilesMatchingGlob(absWorkspace, glob)
+	// Find files matching glob, excluding specified patterns
+	files, err := findFilesMatchingGlob(absWorkspace, glob, exclude)
 	if err != nil {
 		return writeSemanticError(cmd, semantic.ErrCodeCASResolveError, fmt.Sprintf("find files: %v", err))
 	}
@@ -157,7 +165,7 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, dryRun boo
 	}
 
 	// Create indexer and run
-	indexer, cleanup, err := createSemanticIndexer(ctx, absWorkspace, chunkBytes, chunkOverlap, model)
+	indexer, cleanup, err := createSemanticIndexer(ctx, absWorkspace, chunkBytes, chunkOverlap, model, providerName)
 	if err != nil {
 		return writeSemanticError(cmd, semantic.ErrCodeProviderConfigInvalid, err.Error())
 	}
@@ -171,7 +179,7 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, dryRun boo
 	return writeSemanticResult(cmd, semantic.JobTypeInitFiles, result, absWorkspace, start)
 }
 
-func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted []string, dryRun bool, taskID, reviewID string, chunkBytes, chunkOverlap int, model string) error {
+func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted []string, dryRun bool, taskID, reviewID string, chunkBytes, chunkOverlap int, model, providerName string) error {
 	start := time.Now()
 	ctx := cmd.Context()
 
@@ -224,7 +232,7 @@ func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted
 	}
 
 	// Create indexer and run
-	indexer, cleanup, err := createSemanticIndexer(ctx, absWorkspace, chunkBytes, chunkOverlap, model)
+	indexer, cleanup, err := createSemanticIndexer(ctx, absWorkspace, chunkBytes, chunkOverlap, model, providerName)
 	if err != nil {
 		return writeSemanticError(cmd, semantic.ErrCodeProviderConfigInvalid, err.Error())
 	}
@@ -238,7 +246,7 @@ func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted
 	return writeSemanticResult(cmd, semantic.JobTypeUpdateFiles, result, absWorkspace, start)
 }
 
-func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, chunkOverlap int, model string) (*semantic.Indexer, func(), error) {
+func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, chunkOverlap int, model, providerName string) (*semantic.Indexer, func(), error) {
 	// Load config
 	cfg, err := config.Load(ctx)
 	if err != nil {
@@ -246,7 +254,7 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 	}
 
 	// Open memory store
-	storageDir := filepath.Join(cfg.Home, "memory")
+	storageDir := filepath.Join(cfg.Home, "storage")
 	casDir := cfg.Paths.CAS
 	if casDir == "" {
 		casDir = filepath.Join(cfg.Home, "cas")
@@ -261,26 +269,75 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		_ = store.Close() //nolint:errcheck
 	}
 
-	// Create embedding provider
+	// Create embedding provider based on preference
+	// Priority: explicit --provider flag > VOYAGE_API_KEY > GEMINI_API_KEY > noop
 	var provider semantic.EmbeddingProvider
 
-	// Try to create Gemini provider if API key is available
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey != "" {
-		if model == "" {
-			model = "text-embedding-004"
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+
+	// Determine provider to use
+	if providerName == "" {
+		// Auto-detect based on available API keys
+		if voyageKey != "" {
+			providerName = "voyage"
+		} else if geminiKey != "" {
+			providerName = "gemini"
+		} else {
+			providerName = "noop"
 		}
-		provider, err = semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey: apiKey,
-			Model:  model,
+	}
+
+	switch providerName {
+	case "voyage":
+		if voyageKey == "" {
+			cleanup()
+			return nil, nil, fmt.Errorf("voyage provider requires VOYAGE_API_KEY environment variable")
+		}
+		if model == "" {
+			model = "voyage-code-3" // Best for code (1024 dims, 200M free tokens)
+		}
+		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey:        voyageKey,
+			Model:         model,
+			RateLimitWait: boolPtr(true), // Wait when rate limited (3 RPM free tier)
 		})
 		if err != nil {
 			cleanup()
-			return nil, nil, fmt.Errorf("create embedding provider: %w", err)
+			return nil, nil, fmt.Errorf("create voyage provider: %w", err)
 		}
-	} else {
-		// Fall back to no-op provider for testing/development
-		provider = semantic.NewNoOpProvider(model, 384)
+		fmt.Fprintf(os.Stderr, "Using Voyage AI %s (1024 dims)\n", model)
+
+	case "gemini":
+		if geminiKey == "" {
+			cleanup()
+			return nil, nil, fmt.Errorf("gemini provider requires GEMINI_API_KEY environment variable")
+		}
+		if model == "" {
+			model = "gemini-embedding-001" // 3072 dims
+		}
+		provider, err = semantic.NewGeminiProvider(semantic.GeminiConfig{
+			APIKey:        geminiKey,
+			Model:         model,
+			RateLimitWait: boolPtr(true), // Wait when rate limited (5 RPM free tier)
+		})
+		if err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("create gemini provider: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Using Gemini %s (3072 dims)\n", model)
+
+	case "noop":
+		dims := 1024 // Default to Voyage dimensions
+		if model != "" && (model == "gemini-embedding-001" || model == "text-embedding-004") {
+			dims = 3072
+		}
+		provider = semantic.NewNoOpProvider(model, dims)
+		fmt.Fprintf(os.Stderr, "Using no-op provider (%d dims) - embeddings will be zero vectors\n", dims)
+
+	default:
+		cleanup()
+		return nil, nil, fmt.Errorf("unknown provider %q: use voyage, gemini, or noop", providerName)
 	}
 
 	// Build indexer config
@@ -297,7 +354,7 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 	return indexer, cleanup, nil
 }
 
-func findFilesMatchingGlob(root, pattern string) ([]string, error) {
+func findFilesMatchingGlob(root, pattern string, excludePatterns []string) ([]string, error) {
 	var files []string
 
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -313,13 +370,29 @@ func findFilesMatchingGlob(root, pattern string) ([]string, error) {
 			return fmt.Errorf("rel %s: %w", path, err)
 		}
 
-		matched, err := doublestar.Match(pattern, filepath.ToSlash(rel))
+		relSlash := filepath.ToSlash(rel)
+
+		// Check include pattern
+		matched, err := doublestar.Match(pattern, relSlash)
 		if err != nil {
 			return fmt.Errorf("match pattern %q for %q: %w", pattern, rel, err)
 		}
-		if matched {
-			files = append(files, rel)
+		if !matched {
+			return nil
 		}
+
+		// Check exclude patterns
+		for _, excl := range excludePatterns {
+			excluded, err := doublestar.Match(excl, relSlash)
+			if err != nil {
+				return fmt.Errorf("match exclude pattern %q for %q: %w", excl, rel, err)
+			}
+			if excluded {
+				return nil
+			}
+		}
+
+		files = append(files, rel)
 		return nil
 	})
 	if walkErr != nil {
@@ -367,6 +440,11 @@ func writeSemanticError(cmd *cobra.Command, code, message string) error {
 		return fmt.Errorf("write error envelope: %w", err)
 	}
 	return fmt.Errorf("%s: %s", code, message)
+}
+
+// boolPtr returns a pointer to a bool value.
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 func init() {

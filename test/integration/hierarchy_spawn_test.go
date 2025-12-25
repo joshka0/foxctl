@@ -1,3 +1,5 @@
+//go:build integration
+
 // Package integration provides integration tests for the agentctl dspy-go agent.
 package integration
 

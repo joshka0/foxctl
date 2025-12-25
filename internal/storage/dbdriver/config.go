@@ -52,7 +52,7 @@ type LibSQLConfig struct {
 	// EnableVectorSearch enables vector search capabilities
 	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
 
-	// VectorDimensions specifies the dimension of vector embeddings (default: 384)
+	// VectorDimensions specifies the dimension of vector embeddings (default: 3072 for Gemini)
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 }
 
@@ -67,11 +67,16 @@ type TursoConfig struct {
 	// DatabaseName is the logical name of the database (cache, jobs, or memory)
 	DatabaseName string `json:"database_name,omitempty" yaml:"database_name,omitempty"`
 
+	// ReplicaPath is the local path for the embedded replica (if empty, uses temp dir).
+	// When set, the replica persists across restarts for faster sync; otherwise
+	// a temp directory is created and cleaned up on Close().
+	ReplicaPath string `json:"replica_path,omitempty" yaml:"replica_path,omitempty"`
+
 	// EnableVectorSearch enables vector search capabilities (only for memory database)
 	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
 
-	// VectorDimensions specifies the dimension of vector embeddings (default: 384)
-	// Common sizes: 384 (all-MiniLM-L6-v2), 768 (BERT), 1536 (OpenAI ada-002)
+	// VectorDimensions specifies the dimension of vector embeddings (default: 3072 for Gemini)
+	// Common sizes: 384 (all-MiniLM-L6-v2), 768 (BERT), 1536 (OpenAI ada-002), 3072 (Gemini)
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 }
 
@@ -120,7 +125,7 @@ func DefaultLibSQLConfig(path string, enableVectors bool) Config {
 		LibSQL: LibSQLConfig{
 			Path:               path,
 			EnableVectorSearch: enableVectors,
-			VectorDimensions:   384, // Default to all-MiniLM-L6-v2 dimensions
+			VectorDimensions:   3072, // Default to Gemini gemini-embedding-001 dimensions
 		},
 	}
 }
@@ -134,7 +139,7 @@ func DefaultTursoConfig(url, authToken, dbName string) Config {
 			AuthToken:          authToken,
 			DatabaseName:       dbName,
 			EnableVectorSearch: false,
-			VectorDimensions:   384, // Default to all-MiniLM-L6-v2 dimensions
+			VectorDimensions:   3072, // Default to Gemini gemini-embedding-001 dimensions
 		},
 	}
 }

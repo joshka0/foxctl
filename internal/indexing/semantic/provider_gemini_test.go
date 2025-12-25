@@ -26,11 +26,11 @@ func TestNewGeminiProvider_Defaults(t *testing.T) {
 		t.Fatalf("NewGeminiProvider failed: %v", err)
 	}
 
-	if provider.Model() != "text-embedding-004" {
-		t.Errorf("expected model text-embedding-004, got %s", provider.Model())
+	if provider.Model() != "gemini-embedding-001" {
+		t.Errorf("expected model gemini-embedding-001, got %s", provider.Model())
 	}
-	if provider.Dimensions() != 768 {
-		t.Errorf("expected dimensions 768, got %d", provider.Dimensions())
+	if provider.Dimensions() != 3072 {
+		t.Errorf("expected dimensions 3072, got %d", provider.Dimensions())
 	}
 }
 
@@ -64,7 +64,7 @@ func TestGeminiProvider_Embed(t *testing.T) {
 			Embedding: struct {
 				Values []float32 `json:"values"`
 			}{
-				Values: make([]float32, 768),
+				Values: make([]float32, 3072),
 			},
 		}
 		// Set first few values to something identifiable
@@ -90,8 +90,8 @@ func TestGeminiProvider_Embed(t *testing.T) {
 		t.Fatalf("Embed failed: %v", err)
 	}
 
-	if len(embedding) != 768 {
-		t.Errorf("expected embedding length 768, got %d", len(embedding))
+	if len(embedding) != 3072 {
+		t.Errorf("expected embedding length 3072, got %d", len(embedding))
 	}
 	if embedding[0] != 0.1 || embedding[1] != 0.2 {
 		t.Error("embedding values don't match expected")
@@ -106,9 +106,9 @@ func TestGeminiProvider_EmbedBatch(t *testing.T) {
 			Embeddings: []struct {
 				Values []float32 `json:"values"`
 			}{
-				{Values: make([]float32, 768)},
-				{Values: make([]float32, 768)},
-				{Values: make([]float32, 768)},
+				{Values: make([]float32, 3072)},
+				{Values: make([]float32, 3072)},
+				{Values: make([]float32, 3072)},
 			},
 		}
 		// Set identifiable values
@@ -141,8 +141,8 @@ func TestGeminiProvider_EmbedBatch(t *testing.T) {
 
 	// Verify each embedding
 	for i, emb := range embeddings {
-		if len(emb) != 768 {
-			t.Errorf("embedding %d: expected length 768, got %d", i, len(emb))
+		if len(emb) != 3072 {
+			t.Errorf("embedding %d: expected length 3072, got %d", i, len(emb))
 		}
 	}
 

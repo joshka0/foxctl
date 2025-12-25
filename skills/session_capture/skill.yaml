@@ -1,0 +1,64 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/capture
+  version: 0.1.0
+  description: "Capture and extract high-signal content from Claude Code conversation sessions"
+  tags: ["session", "memory", "claude-code", "conversation"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_capture/session_capture
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: session/capture
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path (defaults to cwd)"
+    - name: session_id
+      type: string
+      required: false
+      description: "Specific session ID to capture (optional, captures most recent if omitted)"
+    - name: claude_home
+      type: string
+      required: false
+      description: "Path to Claude Code home directory (defaults to ~/.claude)"
+    - name: summarize
+      type: boolean
+      required: false
+      description: "Run summarization after capture (requires Cerebras API key)"
+    - name: force
+      type: boolean
+      required: false
+      description: "Re-capture even if session already exists"
+returns:
+  - name: session_id
+    type: string
+    description: "Captured session ID"
+  - name: workspace_path
+    type: string
+    description: "Associated workspace path"
+  - name: message_count
+    type: integer
+    description: "Number of messages in the session"
+  - name: user_turns
+    type: integer
+    description: "Number of user messages"
+  - name: tool_invocations
+    type: integer
+    description: "Number of tool calls"
+  - name: status
+    type: string
+    description: "Capture status: captured, exists, error"
+  - name: message
+    type: string
+    description: "Human-readable summary"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

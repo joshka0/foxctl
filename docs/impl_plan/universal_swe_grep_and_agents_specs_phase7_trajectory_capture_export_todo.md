@@ -136,10 +136,10 @@ the existing job system, CAS, and envelope pipeline.
 - [ ] Reuse the Core Profile v1 envelope rules for `trajectory.export` outputs:
   - All outputs as Protocol v1 envelopes
     (`status: "ok" | "error" | "progress"`).
-  - Use `meta.cas_digest` whenever `data.artifact` is present.
+  - `meta.cas_digest` is optional; if set it MUST match `data.artifact`.
   - Validate envelopes via `protocol.Validate` and existing golden tests.
 - [ ] Apply CAS integration per CM5/CM12:
-  - Large exports → NDJSON in CAS with metadata (`artifact_kind`, size).
+  - Large exports → NDJSON in CAS referenced via `data.artifact`.
   - Pin exported artifacts when appropriate to prevent GC during training and
     export workflows.
 - [ ] Align error codes with `dspy_trajectory_capture.md` §5.3.2:

@@ -1,4 +1,4 @@
-//go:build cgo && !race && !vector
+//go:build cgo && !race
 
 package dbdriver
 
@@ -31,20 +31,36 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 		vectorDims = 384 // Default to all-MiniLM-L6-v2 dimensions
 	}
 
-	// Create libSQL connector for remote Turso database
-	// Use a temporary file for the embedded replica since TursoConfig doesn't specify a local path
-	tmpDir, err := os.MkdirTemp("", "turso-replica-*")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir for turso replica: %w", err)
+	// Determine replica path: use configured path or create temp directory
+	var dbPath, tempDir string
+	var useTempDir bool
+
+	if cfg.ReplicaPath != "" {
+		// Use configured persistent replica path
+		dbPath = cfg.ReplicaPath
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+			return nil, fmt.Errorf("failed to create replica directory: %w", err)
+		}
+	} else {
+		// Create temporary directory for replica (will be cleaned on Close)
+		var err error
+		tempDir, err = os.MkdirTemp("", "turso-replica-*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temp dir for turso replica: %w", err)
+		}
+		dbPath = filepath.Join(tempDir, "replica.db")
+		useTempDir = true
 	}
-	dbPath := filepath.Join(tmpDir, "replica.db")
 
 	connector, err := libsql.NewEmbeddedReplicaConnector(dbPath, cfg.URL,
 		libsql.WithAuthToken(cfg.AuthToken),
 	)
 	if err != nil {
 		// Cleanup temp dir on connector creation failure; error is not actionable.
-		_ = os.RemoveAll(tmpDir) //nolint:errcheck
+		if useTempDir {
+			_ = os.RemoveAll(tempDir) //nolint:errcheck
+		}
 		return nil, fmt.Errorf("failed to create turso connector: %w", err)
 	}
 
@@ -54,9 +70,11 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 	// Helper to cleanup resources on error
 	cleanup := func() {
 		// Cleanup on error path; errors are not actionable.
-		_ = db.Close()           //nolint:errcheck
-		_ = connector.Close()    //nolint:errcheck
-		_ = os.RemoveAll(tmpDir) //nolint:errcheck
+		_ = db.Close()        //nolint:errcheck
+		_ = connector.Close() //nolint:errcheck
+		if useTempDir {
+			_ = os.RemoveAll(tempDir) //nolint:errcheck
+		}
 	}
 
 	// Test the connection
@@ -81,10 +99,16 @@ func openTurso(ctx context.Context, cfg TursoConfig, migrate MigrationFunc) (DB,
 		}
 	}
 
+	// Only store tempDir for cleanup if we created a temp directory
+	cleanupDir := ""
+	if useTempDir {
+		cleanupDir = tempDir
+	}
+
 	return &tursoDB{
 		db:                 db,
 		connector:          connector,
-		tempDir:            tmpDir,
+		tempDir:            cleanupDir,
 		enableVectorSearch: cfg.EnableVectorSearch,
 		vectorDimensions:   vectorDims,
 		driverType:         DriverTurso,

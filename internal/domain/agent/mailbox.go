@@ -38,13 +38,13 @@ type AskData struct {
 	Kind      string                 `json:"kind"` // context|secret|approval|toolhint|other
 	Question  string                 `json:"question"`
 	NeedsByMS int64                  `json:"needs_by_ms,omitempty"`
-	Context   map[string]interface{} `json:"context,omitempty"`
+	Context   map[string]any `json:"context,omitempty"`
 }
 
 // ReplyData represents the data payload for an agent.reply message.
 type ReplyData struct {
 	AskID  string                 `json:"ask_id"`
-	Answer map[string]interface{} `json:"answer"`
+	Answer map[string]any `json:"answer"`
 }
 
 // CmdData represents the data payload for an agent.cmd message.
@@ -52,7 +52,7 @@ type CmdData struct {
 	CmdID  string                 `json:"cmd_id"`
 	Action string                 `json:"action"`
 	Skill  string                 `json:"skill,omitempty"`
-	Args   map[string]interface{} `json:"args,omitempty"`
+	Args   map[string]any `json:"args,omitempty"`
 }
 
 // EventData represents the data payload for an agent.event message.
@@ -61,5 +61,5 @@ type EventData struct {
 	Kind      string                 `json:"kind"` // heartbeat|liveness-failed|etc
 	JobCount  int                    `json:"job_count,omitempty"`
 	CacheHits int                    `json:"cache_hits,omitempty"`
-	Custom    map[string]interface{} `json:"custom,omitempty"`
+	Custom    map[string]any `json:"custom,omitempty"`
 }

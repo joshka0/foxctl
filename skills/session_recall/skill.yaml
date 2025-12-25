@@ -1,0 +1,75 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/recall
+  version: 0.1.0
+  description: "Semantic retrieval of relevant past sessions using embeddings"
+  tags: ["session", "memory", "retrieval", "embeddings", "semantic-search"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_recall/session_recall
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: session/recall
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "Natural language query to find relevant sessions"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of sessions to return (default: 5)"
+    - name: min_similarity
+      type: number
+      required: false
+      description: "Minimum cosine similarity threshold (default: 0.3)"
+    - name: workspace
+      type: string
+      required: false
+      description: "Filter by workspace path (optional)"
+    - name: project
+      type: string
+      required: false
+      description: "Filter by project name (optional)"
+returns:
+  - name: query
+    type: string
+    description: "The search query"
+  - name: matches
+    type: array
+    description: "Matching sessions with similarity scores"
+  - name: total_with_embeddings
+    type: integer
+    description: "Total sessions with embeddings available"
+  - name: status
+    type: string
+    description: "Status of the recall operation"
+  - name: message
+    type: string
+    description: "Human-readable status message"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+examples:
+  - name: "Find authentication sessions"
+    input:
+      query: "How did we implement authentication?"
+      limit: 3
+    description: "Find past sessions related to authentication implementation"
+  - name: "Find error handling patterns"
+    input:
+      query: "sessions where we fixed errors or handled exceptions"
+      min_similarity: 0.4
+    description: "Find sessions dealing with error handling"
+  - name: "Project-specific recall"
+    input:
+      query: "database migrations"
+      project: "agentctl"
+      limit: 5
+    description: "Find database migration sessions for a specific project"

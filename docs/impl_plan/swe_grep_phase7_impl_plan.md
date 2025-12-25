@@ -40,8 +40,8 @@ are gated by workspace-level opt-in and optional role checks.
       trajectories (by workspace, task, epic, role, time, status) and exports
       NDJSON episodes inline or via CAS.
     - Strict adherence to Core Profile v1: envelopes validated via
-      `protocol.Validate`, `meta.cas_digest` aligned with `data.artifact`, CAS
-      pinning for exported artifacts.
+      `protocol.Validate`, optional `meta.cas_digest` matching `data.artifact`
+      (when set), CAS pinning for exported artifacts.
   - **Codemaps**:
     - **CAS Storage & Integrity Verification in agentctl** / **agentctl CAS:
       Put, Get, Integrity, Deduplication & Integration**.
@@ -216,8 +216,8 @@ are gated by workspace-level opt-in and optional role checks.
       and results are written under the job directory.
   - Enforce Core Profile v1 invariants:
     - All outputs as validated envelopes (via `protocol.Validate`).
-    - Proper `meta.cas_digest` ↔ `data.artifact` consistency; CAS pinning for
-      exported artifacts where needed.
+    - Proper `data.artifact` reference (and optional `meta.cas_digest` matching
+      it); CAS pinning for exported artifacts where needed.
   - Align typed error codes with `dspy_trajectory_capture.md` §5.3.2:
     - Map internal failures to codes like `trajectory.capture.invalid_request`,
       `trajectory.capture.storage_error`, `trajectory.export.access_denied`,
@@ -318,7 +318,8 @@ are gated by workspace-level opt-in and optional role checks.
   - `trajectory.export` produces NDJSON `TrajectoryEpisode` objects that
     validate against `dspy_trajectory_capture.md`:
     - Filters behave as expected.
-    - Large exports use CAS with correct `meta.cas_digest` and pinning.
+    - Large exports use CAS with correct `data.artifact` (and optional
+      `meta.cas_digest` matching it) and pinning.
 
 - **Privacy & configuration**
   - Redaction removes secrets from both trajectory storage and exports.

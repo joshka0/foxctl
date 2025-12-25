@@ -61,10 +61,11 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agents (id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO agents (id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.ParentID, a.Namespace, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
-		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt))
+		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt),
+		a.LLMProvider, a.LLMModel, a.LLMAPIKey)
 	if err != nil {
 		return fmt.Errorf("agents: create: %w", err)
 	}
@@ -73,13 +74,14 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 
 func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at
+		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
 		FROM agents WHERE id = ?`, id)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
 	var created, heartbeat string
-	if err := row.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat); err != nil {
+	var llmProvider, llmModel, llmAPIKey sql.NullString
+	if err := row.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -109,18 +111,24 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 		}
 	}
 
+	// Set LLM fields
+	a.LLMProvider = llmProvider.String
+	a.LLMModel = llmModel.String
+	a.LLMAPIKey = llmAPIKey.String
+
 	return a, nil
 }
 
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at
+		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
 		FROM agents WHERE ns = ?`, ns)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
 	var created, heartbeat string
-	if err := row.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat); err != nil {
+	var llmProvider, llmModel, llmAPIKey sql.NullString
+	if err := row.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -150,6 +158,11 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 		}
 	}
 
+	// Set LLM fields
+	a.LLMProvider = llmProvider.String
+	a.LLMModel = llmModel.String
+	a.LLMAPIKey = llmAPIKey.String
+
 	return a, nil
 }
 
@@ -158,7 +171,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at
+		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
 		FROM agents
 		ORDER BY created_at DESC
 		LIMIT ?`, limit)
@@ -185,7 +198,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at
+		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
 		FROM agents
 		WHERE parent_id = ?
 		ORDER BY created_at DESC
@@ -268,7 +281,10 @@ CREATE TABLE IF NOT EXISTS agents (
 	share_bb     TEXT NOT NULL CHECK (share_bb IN ('all','scoped','none')),
 	state        TEXT NOT NULL CHECK (state IN ('starting','running','stopped','error')),
 	created_at   TEXT NOT NULL,
-	heartbeat_at TEXT
+	heartbeat_at TEXT,
+	llm_provider TEXT,
+	llm_model    TEXT,
+	llm_api_key  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_agents_ns ON agents(ns);
 CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
@@ -277,6 +293,19 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("agents: migrate: %w", err)
 	}
+
+	// Migration for existing databases: add LLM columns if they don't exist
+	alterStmts := []string{
+		"ALTER TABLE agents ADD COLUMN llm_provider TEXT",
+		"ALTER TABLE agents ADD COLUMN llm_model TEXT",
+		"ALTER TABLE agents ADD COLUMN llm_api_key TEXT",
+	}
+	for _, stmt := range alterStmts {
+		// SQLite will error if column already exists, which is fine
+		_, err := db.ExecContext(ctx, stmt)
+		errs.Ignore(err, "ALTER TABLE may fail if column exists")
+	}
+
 	return nil
 }
 
@@ -284,7 +313,8 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	var a agent.Agent
 	var skillsJSON, policyJSON string
 	var created, heartbeat string
-	if err := rows.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat); err != nil {
+	var llmProvider, llmModel, llmAPIKey sql.NullString
+	if err := rows.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
 
@@ -310,6 +340,11 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
 		}
 	}
+
+	// Set LLM fields
+	a.LLMProvider = llmProvider.String
+	a.LLMModel = llmModel.String
+	a.LLMAPIKey = llmAPIKey.String
 
 	return a, nil
 }

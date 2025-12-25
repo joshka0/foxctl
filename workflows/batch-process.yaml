@@ -1,0 +1,59 @@
+apiVersion: agentctl/v1
+kind: Workflow
+metadata:
+  name: batch-process
+  version: 0.1.0
+  description: "Example workflow showing batch processing with loops and parallel execution"
+  tags: ["example", "batch", "parallel"]
+
+inputs:
+  - name: path
+    type: string
+    required: true
+    description: "Directory to process"
+  - name: pattern
+    type: string
+    default: "*"
+    description: "File pattern"
+  - name: parallel
+    type: int
+    default: 4
+    description: "Max parallel workers"
+
+steps:
+  # Step 1: Discover files
+  - id: discover
+    skill: fs/find
+    input:
+      path: "{{.inputs.path}}"
+      pattern: "{{.inputs.pattern}}"
+
+  # Step 2: Process each file in parallel
+  - id: process
+    skill: code/symbols
+    loop:
+      over: "{{.discover.data.files}}"
+      as: file
+    parallel: "{{.inputs.parallel}}"
+    input:
+      path: "{{.file}}"
+    on_error: continue
+    timeout: "30s"
+    max_retries: 2
+    retry_delay: "1s"
+
+  # Step 3: Aggregate results (runs after all processing is done)
+  - id: aggregate
+    skill: workflow/aggregate
+    depends_on: [process]
+    input:
+      files: "{{.discover.data.files}}"
+      results: "{{.process.data}}"
+
+outputs:
+  - name: processed_count
+    value: "{{len .discover.data.files}}"
+  - name: success_count
+    value: "{{len (filter .process.iterations \"status == 'completed'\")}}"
+  - name: error_count
+    value: "{{len (filter .process.iterations \"status == 'failed'\")}}"

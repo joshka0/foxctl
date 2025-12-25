@@ -82,10 +82,7 @@ func TestPostReviewHandler_HandleReviewApproved_CapturesTrajectoryReviewResult(t
 	if err != nil {
 		t.Fatalf("open trajectory store: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = trajStore.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { trajStore.Close() })
 
 	ur, err := trajStore.InsertUserRequest(ctx, trajectory.UserRequestCapture{ID: "req-1", WorkspaceID: "ws-1", Actor: "actor:human:test", Source: trajectory.SourceCLI, TS: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), Text: "do thing"})
 	if err != nil {

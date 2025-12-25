@@ -620,8 +620,9 @@ v1 contract defined in `protocol_v1.md`:
 - `version` MUST be `1`.
 - `status` MUST be `"ok"` or `"error"` for terminal job envelopes.
 - `error.code` MUST be set for `status: "error"`.
-- `meta.cas_digest` MUST be set when `data.cas_artifact` is present and MUST
-  match the artifact digest.
+- `meta.cas_digest` is optional; if set it MUST match the CAS artifact digest
+  referenced by `data.cas_artifact` (and MUST be omitted when no artifact is
+  referenced).
 
 HTTP or RPC layers integrating with these jobs SHOULD map error codes to
 statuses consistent with Core Profile guidance (e.g. provider configuration

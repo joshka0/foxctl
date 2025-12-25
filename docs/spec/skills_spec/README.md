@@ -126,7 +126,8 @@ These are new skills implied by the symbol index and dspy-go specs.
 - **Outputs (conceptual):**
   - `summary` (files considered/relevant, snippets emitted).
   - `snippets_inline[]` (small previews).
-  - Optional CAS `artifact` (NDJSON snippets) with `meta.cas_digest`.
+  - Optional CAS `artifact` (NDJSON snippets) (with optional `meta.cas_digest`
+    matching `data.artifact`).
 
 ### 4.2 Agent Tools (dspy-go Layer)
 
@@ -208,8 +209,8 @@ Storage expectation:
   index jobs SHOULD treat post-review events as their normative refresh point,
   with optional heuristic triggers (e.g. on commit) layered on top.
 - **CAS and Protocol v1:** All large outputs (e.g. SWE Grep results, trajectory
-  exports) must respect Protocol v1 CAS rules (`meta.cas_digest` matching
-  `data.artifact`).
+  exports) must respect Protocol v1 CAS rules (`meta.cas_digest` is optional; if
+  set it MUST match `data.artifact`).
 
 This index should be updated as new specs introduce additional skills or job
 entry points that we want to implement in parallel.

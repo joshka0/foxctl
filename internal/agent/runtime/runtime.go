@@ -178,30 +178,6 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 		return nil, fmt.Errorf("create tools registry: %w", err)
 	}
 
-	// Register spawn tool with hierarchy config
-	spawnCfg := agenttools.SpawnToolConfig{
-		CallerActorID:       cfg.ActorID,
-		CallerDepth:         cfg.Depth,
-		CallerMaxDepth:      cfg.MaxDepth,
-		CallerLocalMaxDepth: cfg.LocalMaxDepth,
-		EpicID:              cfg.EpicID,
-	}
-
-	// Wire up spawn handler if configured
-	if r.config.SpawnHandler != nil {
-		spawnCfg.MailSender = func(ctx context.Context, _, _ string, body any) (any, error) {
-			req, ok := body.(types.SpawnRequest)
-			if !ok {
-				return nil, fmt.Errorf("invalid spawn request body type")
-			}
-			return r.config.SpawnHandler.HandleSpawnRequest(ctx, req)
-		}
-	}
-
-	if err := toolsRegistry.RegisterSpawnTool(spawnCfg); err != nil {
-		return nil, fmt.Errorf("register spawn tool: %w", err)
-	}
-
 	// Create the dspy-go agent based on role
 	agent, err := r.createAgent(cfg, toolsRegistry)
 	if err != nil {
@@ -302,8 +278,20 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 		llm, err = llms.NewGeminiLLM(apiKey, core.ModelID(model))
 	case "openai":
 		llm, err = llms.NewOpenAILLM(core.ModelID(model), llms.WithAPIKey(apiKey))
+	case "anthropic":
+		// For Claude models via Anthropic API
+		config := core.ProviderConfig{Name: "anthropic", APIKey: apiKey}
+		llm, err = llms.NewAnthropicLLMFromConfig(context.Background(), config, core.ModelID(model))
+	case "groq":
+		// GROQ uses OpenAI-compatible API
+		llm, err = llms.NewOpenAICompatible("groq", core.ModelID(model),
+			"https://api.groq.com/openai/v1", llms.WithAPIKey(apiKey))
+	case "openrouter":
+		// OpenRouter provides access to multiple models via OpenAI-compatible API
+		llm, err = llms.NewOpenAICompatible("openrouter", core.ModelID(model),
+			"https://openrouter.ai/api/v1", llms.WithAPIKey(apiKey))
 	default:
-		return nil, fmt.Errorf("unsupported LLM provider: %q (supported: gemini, openai)", provider)
+		return nil, fmt.Errorf("unsupported LLM provider: %q (supported: gemini, openai, anthropic, groq, openrouter)", provider)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create %s LLM: %w", provider, err)
@@ -409,9 +397,15 @@ func defaultModelForProvider(provider string) string {
 	case "openai":
 		return "gpt-4.1-mini"
 	case "gemini", "":
-		return "gemini-2.5-flash"
+		return "gemini-2.0-flash"
+	case "anthropic":
+		return "claude-haiku-4-5"
+	case "groq":
+		return "llama-3.1-70b-versatile"
+	case "openrouter":
+		return "anthropic/claude-haiku-4-5" // OpenRouter uses provider/model format
 	default:
-		return "gemini-2.5-flash"
+		return "gemini-2.0-flash"
 	}
 }
 
@@ -436,7 +430,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	taskPrompt := buildTaskPrompt(session.Config)
 
 	// Run the agent using Execute
-	input := map[string]interface{}{
+	input := map[string]any{
 		"task": taskPrompt,
 	}
 	resultMap, err := session.Agent.Execute(ctx, input)

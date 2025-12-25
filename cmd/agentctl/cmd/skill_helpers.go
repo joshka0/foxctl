@@ -114,10 +114,17 @@ func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
 
 // createSkillResolver creates a resolver with paths from config.
 func createSkillResolver(cfg config.Config) *skill.Resolver {
-	// Build search paths from config
-	searchPaths := []string{cfg.Paths.Skills}
+	var searchPaths []string
 
-	// Add current directory development paths
+	// Environment override takes highest precedence and supports list format.
+	if env := os.Getenv("AGENTCTL_SKILLS_PATH"); env != "" {
+		searchPaths = append(searchPaths, filepath.SplitList(env)...)
+	}
+
+	// Configured skills path (defaults to ~/.agentctl/skills).
+	searchPaths = append(searchPaths, cfg.Paths.Skills)
+
+	// Development paths near the current working directory.
 	if pwd, err := os.Getwd(); err == nil {
 		searchPaths = append(searchPaths,
 			filepath.Join(pwd, "dist", "skills"),
@@ -125,7 +132,7 @@ func createSkillResolver(cfg config.Config) *skill.Resolver {
 		)
 	}
 
-	return skill.NewResolver(skill.WithSearchPaths(searchPaths...))
+	return skill.NewResolver(skill.WithSearchPaths(dedupeCleanPaths(searchPaths)...))
 }
 
 func loadSkillDir(dir string) (SkillHandle, error) {
@@ -244,6 +251,23 @@ func resolveAlternateSkill(resolver *skill.Resolver, requested string, failed sk
 func normalizeSkillCandidate(name string) string {
 	name = strings.ReplaceAll(name, "/", "_")
 	return strings.ReplaceAll(name, "-", "_")
+}
+
+func dedupeCleanPaths(paths []string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, p := range paths {
+		cleaned := filepath.Clean(strings.TrimSpace(p))
+		if cleaned == "" {
+			continue
+		}
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		out = append(out, cleaned)
+	}
+	return out
 }
 
 func withinDir(root, target string) bool {

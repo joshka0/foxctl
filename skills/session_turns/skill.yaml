@@ -1,0 +1,83 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/turns
+  version: 0.1.0
+  description: "Query turn patterns across all sessions - find errors, tool usage, and patterns"
+  tags: ["session", "memory", "turns", "patterns", "errors", "debugging"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_turns/session_turns
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: session/turns
+  parameters:
+    - name: query
+      type: string
+      required: false
+      description: "Text search query for turn content"
+    - name: error_type
+      type: string
+      required: false
+      description: "Filter by error type (e.g., TypeError, CompileError)"
+    - name: tool_pattern
+      type: string
+      required: false
+      description: "Filter turns that used tools matching this pattern"
+    - name: role
+      type: string
+      required: false
+      description: "Filter by role (user, assistant, system)"
+    - name: errors_only
+      type: boolean
+      required: false
+      description: "Only return turns that had errors"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of turns to return (default: 50)"
+returns:
+  - name: query
+    type: string
+    description: "The search query used"
+  - name: turns
+    type: array
+    description: "Matching turns from across sessions"
+  - name: total_found
+    type: integer
+    description: "Total number of matching turns found"
+  - name: status
+    type: string
+    description: "Status of the query operation"
+  - name: message
+    type: string
+    description: "Human-readable status message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+examples:
+  - name: "Find TypeErrors"
+    input:
+      error_type: "TypeError"
+      limit: 10
+    description: "Find all turns with TypeErrors to see how they were resolved"
+  - name: "Find Edit tool usage"
+    input:
+      tool_pattern: "Edit"
+      limit: 20
+    description: "Find turns where the Edit tool was used"
+  - name: "Search for database errors"
+    input:
+      query: "database connection failed"
+      errors_only: true
+    description: "Search for turns mentioning database issues that had errors"
+  - name: "Find all errors"
+    input:
+      errors_only: true
+      limit: 50
+    description: "Get all turns with errors to analyze failure patterns"

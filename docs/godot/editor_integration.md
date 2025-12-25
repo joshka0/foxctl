@@ -1,7 +1,7 @@
 # Godot Editor Integration Skill — Design Spec
 
-**Version:** 0.1.0  
-**Status:** Draft  
+**Version:** 0.1.0\
+**Status:** Draft\
 **Last Updated:** 2025-11-26
 
 ---
@@ -10,10 +10,12 @@
 
 ### 1.1 Purpose
 
-The `editor/godot` skill enables AI agents to interact with a running Godot Editor instance. It provides:
+The `editor/godot` skill enables AI agents to interact with a running Godot
+Editor instance. It provides:
 
 - **Scene inspection**: Query the current scene tree and node properties.
-- **Scene manipulation**: Create nodes, set properties, attach scripts, connect signals.
+- **Scene manipulation**: Create nodes, set properties, attach scripts, connect
+  signals.
 - **Debugging**: Retrieve editor errors and run the game.
 
 ### 1.2 Architecture
@@ -33,9 +35,12 @@ The `editor/godot` skill enables AI agents to interact with a running Godot Edit
 ### 1.3 Design Goals
 
 - **Token efficiency**: Large scene trees go to CAS with summaries.
-- **Hallucination resistance**: Clear errors with valid alternatives when paths/properties don't exist.
-- **Safety**: All mutations use Undo/Redo; workspace validation prevents cross-project accidents.
-- **Core Profile compliance**: JSON envelopes, exec runner with `network: "egress"`.
+- **Hallucination resistance**: Clear errors with valid alternatives when
+  paths/properties don't exist.
+- **Safety**: All mutations use Undo/Redo; workspace validation prevents
+  cross-project accidents.
+- **Core Profile compliance**: JSON envelopes, exec runner with
+  `network: "egress"`.
 
 ---
 
@@ -50,7 +55,8 @@ The `editor/godot` skill enables AI agents to interact with a running Godot Edit
 
 ### 2.2 WASI Exclusion
 
-Per Core Profile v1, WASI skills must have `network: "none"`. Since this skill requires network access to the Godot plugin, it **must** be an exec skill.
+Per Core Profile v1, WASI skills must have `network: "none"`. Since this skill
+requires network access to the Godot plugin, it **must** be an exec skill.
 
 ---
 
@@ -58,7 +64,8 @@ Per Core Profile v1, WASI skills must have `network: "none"`. Since this skill r
 
 ### 3.1 Transport
 
-HTTP POST to `http://127.0.0.1:7777/` with JSON body. Single request → single JSON response.
+HTTP POST to `http://127.0.0.1:7777/` with JSON body. Single request → single
+JSON response.
 
 ### 3.2 Request Schema
 
@@ -73,6 +80,7 @@ HTTP POST to `http://127.0.0.1:7777/` with JSON body. Single request → single 
 ### 3.3 Response Schema
 
 **Success:**
+
 ```json
 {
   "status": "success",
@@ -82,6 +90,7 @@ HTTP POST to `http://127.0.0.1:7777/` with JSON body. Single request → single 
 ```
 
 **Error:**
+
 ```json
 {
   "status": "error",
@@ -96,34 +105,34 @@ HTTP POST to `http://127.0.0.1:7777/` with JSON body. Single request → single 
 
 ### 3.4 Actions
 
-| Action | Description | Required Params |
-|--------|-------------|-----------------|
-| `ping` | Health check and project info | — |
-| `scene_tree` | Get current scene hierarchy | `max_depth?`, `max_nodes?` |
-| `node_inspect` | Get node details | `node_path` |
-| `node_create` | Create a new node | `parent_path`, `type`, `name` |
-| `node_set_prop` | Set a node property | `node_path`, `property`, `value` |
-| `node_attach_script` | Attach script to node | `node_path`, `script_path` |
-| `signal_connect` | Connect a signal | `source_path`, `signal_name`, `target_path`, `method_name` |
-| `run_game` | Launch the game | — |
-| `errors` | Get recent editor errors | `limit?` |
+| Action               | Description                   | Required Params                                            |
+| -------------------- | ----------------------------- | ---------------------------------------------------------- |
+| `ping`               | Health check and project info | —                                                          |
+| `scene_tree`         | Get current scene hierarchy   | `max_depth?`, `max_nodes?`                                 |
+| `node_inspect`       | Get node details              | `node_path`                                                |
+| `node_create`        | Create a new node             | `parent_path`, `type`, `name`                              |
+| `node_set_prop`      | Set a node property           | `node_path`, `property`, `value`                           |
+| `node_attach_script` | Attach script to node         | `node_path`, `script_path`                                 |
+| `signal_connect`     | Connect a signal              | `source_path`, `signal_name`, `target_path`, `method_name` |
+| `run_game`           | Launch the game               | —                                                          |
+| `errors`             | Get recent editor errors      | `limit?`                                                   |
 
 ---
 
 ## 4. Error Codes
 
-| Code | Meaning |
-|------|---------|
-| `EBRIDGE_UNAVAILABLE` | Cannot connect to Godot plugin |
+| Code                  | Meaning                               |
+| --------------------- | ------------------------------------- |
+| `EBRIDGE_UNAVAILABLE` | Cannot connect to Godot plugin        |
 | `EWORKSPACE_MISMATCH` | Workspace doesn't match Godot project |
-| `EEDITOR_STATE` | No scene open or editor not ready |
-| `ENODE_NOT_FOUND` | Node path doesn't exist |
-| `EPROP_NOT_FOUND` | Property doesn't exist on node |
-| `ETYPE_INVALID` | Invalid Godot class name |
-| `ETYPE_CONVERSION` | Cannot convert value to target type |
-| `ESCRIPT_NOT_FOUND` | Script file doesn't exist |
-| `ESIGNAL_NOT_FOUND` | Signal doesn't exist on node |
-| `EMETHOD_NOT_FOUND` | Method doesn't exist on target |
+| `EEDITOR_STATE`       | No scene open or editor not ready     |
+| `ENODE_NOT_FOUND`     | Node path doesn't exist               |
+| `EPROP_NOT_FOUND`     | Property doesn't exist on node        |
+| `ETYPE_INVALID`       | Invalid Godot class name              |
+| `ETYPE_CONVERSION`    | Cannot convert value to target type   |
+| `ESCRIPT_NOT_FOUND`   | Script file doesn't exist             |
+| `ESIGNAL_NOT_FOUND`   | Signal doesn't exist on node          |
+| `EMETHOD_NOT_FOUND`   | Method doesn't exist on target        |
 
 ---
 
@@ -133,7 +142,8 @@ On every request, the plugin validates:
 
 1. Extract `workspace_root` from request.
 2. Compute `project_root = ProjectSettings.globalize_path("res://")`.
-3. If paths don't match (allowing for subdirectory relationships), return `EWORKSPACE_MISMATCH`.
+3. If paths don't match (allowing for subdirectory relationships), return
+   `EWORKSPACE_MISMATCH`.
 
 This prevents accidentally controlling the wrong Godot project.
 
@@ -147,13 +157,15 @@ When response data exceeds `inline_output_kb` (default 32KB):
 2. Generate summary:
    - `scene_tree`: node count, max depth, first N node paths.
    - `errors`: error count, first/last messages.
-3. Return envelope with `data.summary`, `data.artifact`, `meta.cas_digest`.
+3. Return envelope with `data.summary`, `data.artifact` (and optional
+   `meta.cas_digest` matching it).
 
 ---
 
 ## 7. Undo/Redo Safety
 
-All mutating operations (`node_create`, `node_set_prop`, `node_attach_script`, `signal_connect`) use `EditorUndoRedoManager`:
+All mutating operations (`node_create`, `node_set_prop`, `node_attach_script`,
+`signal_connect`) use `EditorUndoRedoManager`:
 
 ```gdscript
 undo_redo.create_action("AI: Create Node Enemy")
@@ -172,14 +184,14 @@ This allows humans to Ctrl+Z any AI-initiated changes.
 
 The plugin converts string values to Godot types:
 
-| Target Type | Accepted Formats |
-|-------------|------------------|
-| `Vector2` | `"Vector2(10, 20)"`, `"(10, 20)"` |
-| `Vector3` | `"Vector3(1, 2, 3)"`, `"(1, 2, 3)"` |
-| `Color` | `"Color(1, 0, 0)"`, `"#ff0000"`, `"red"` |
-| `int` | `"42"`, `42` |
-| `float` | `"3.14"`, `3.14` |
-| `bool` | `"true"`, `"false"`, `true`, `false` |
+| Target Type | Accepted Formats                         |
+| ----------- | ---------------------------------------- |
+| `Vector2`   | `"Vector2(10, 20)"`, `"(10, 20)"`        |
+| `Vector3`   | `"Vector3(1, 2, 3)"`, `"(1, 2, 3)"`      |
+| `Color`     | `"Color(1, 0, 0)"`, `"#ff0000"`, `"red"` |
+| `int`       | `"42"`, `42`                             |
+| `float`     | `"3.14"`, `3.14`                         |
+| `bool`      | `"true"`, `"false"`, `true`, `false`     |
 
 ---
 

@@ -19,12 +19,88 @@
 *.token
 *.key
 
-# Dev binaries
-mcp_bridge
-mcp_install
-code_swe_grep
+# Dev binaries (root directory)
+/mcp_bridge
+/mcp_install
+/code_swe_grep
+/code_incremental_index
+/code_llm_search
+/code_universal_swe_grep
+/build_godot
+/agentctl_viewer
+/text_replace
+/editor_godot
+
+# Skill binaries (match directory name pattern)
+# Each skill directory contains a binary with the same name as the directory
+skills/build_godot/build_godot
+skills/ci_github_checks/ci_github_checks
+skills/ci_prcomments/ci_prcomments
+skills/code_complexity/code_complexity
+skills/code_context_ripgrep/code_context_ripgrep
+skills/code_diff/code_diff
+skills/code_git/code_git
+skills/code_imports/code_imports
+skills/code_incremental_index/code_incremental_index
+skills/code_llm_search/code_llm_search
+skills/code_security/code_security
+skills/code_stats/code_stats
+skills/code_swe_grep/code_swe_grep
+skills/code_symbols/code_symbols
+skills/code_universal_swe_grep/code_universal_swe_grep
+skills/context_filter/context_filter
+skills/data_jq/data_jq
+skills/editor_godot/editor_godot
+skills/embedding_queue/embedding_queue
+skills/fs_apply_edit/fs_apply_edit
+skills/fs_find/fs_find
+skills/fs_ls/fs_ls
+skills/fs_read/fs_read
+skills/fs_tree/fs_tree
+skills/fs_write/fs_write
+skills/git_status/git_status
+skills/git_worktree/git_worktree
+skills/hooks_file_guard/hooks_file_guard
+skills/hooks_knowledge_router/hooks_knowledge_router
+skills/hooks_mail_router/hooks_mail_router
+skills/hooks_task_guard/hooks_task_guard
+skills/hooks_test_feedback/hooks_test_feedback
+skills/http_openapi/http_openapi
+skills/json_transform/json_transform
+skills/lsp_gopls/lsp_gopls
+skills/lsp_pylsp/lsp_pylsp
+skills/lsp_tsserver/lsp_tsserver
+skills/mailbox/mailbox
+skills/mcp_bridge/mcp_bridge
+skills/mcp_install/mcp_install
+skills/mobile/mobile
+skills/mobile_android/mobile_android
+skills/mobile_ios/mobile_ios
+skills/optimize_analyze/optimize_analyze
+skills/optimize_bootstrap/optimize_bootstrap
+skills/optimize_feedback/optimize_feedback
+skills/optimize_patterns/optimize_patterns
+skills/optimize_reflect/optimize_reflect
+skills/optimize_weights/optimize_weights
+skills/plan_sync/plan_sync
+skills/session_capture/session_capture
+skills/session_restore/session_restore
+skills/session_save/session_save
+skills/session_summarize/session_summarize
+skills/skill_inspect/skill_inspect
+skills/test_run/test_run
+skills/text_grep/text_grep
+skills/text_replace/text_replace
+skills/text_ripgrep/text_ripgrep
+skills/todo/todo
+skills/trajectory_export/trajectory_export
+
+# Temp files
+test_*.go
+coderabbit-todos.txt
 pr*.json
+pr*.txt
 
 # Claude Code local settings
 .claude/settings.local.json.env
-pr*.txt
+.opencode

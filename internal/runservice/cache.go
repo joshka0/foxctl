@@ -19,6 +19,10 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 	if e.options.Async || e.options.CacheMode == cache.ModeOff {
 		return false, nil
 	}
+	// Skip caching for skills marked as non-cacheable
+	if c := e.handle.Manifest.Capabilities.Cacheable; c != nil && !*c {
+		return false, nil
+	}
 	if e.cacheStore == nil {
 		store, err := cache.Open(e.ctx, e.cfg.Paths.Cache, cache.Options{
 			AutoTTL: e.cfg.Memory.AutoCacheTTL,
@@ -87,9 +91,7 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 			capErr := e.trajCapture.CaptureResult(e.ctx, hit, "", e.options.CorrelationID)
 			errs.Ignore(capErr, "trajectory capture cache hit")
 		}
-		if _, warnErr := fmt.Fprintf(e.stderr, "cache hit %s\n", entry.CacheKey); warnErr != nil {
-			errs.Ignore(warnErr, "runservice: warn cache hit")
-		}
+		// Cache info is in envelope metadata (meta.source="cache", meta.cache_key)
 		if err := writeEnvelope(e.stdout, hit); err != nil {
 			return true, err
 		}
@@ -216,6 +218,10 @@ func (e *Executor) writeCacheError(input []byte, code protocol.ErrorCode, messag
 // PersistCache saves the execution result to the cache when cache mode allows it.
 func (e *Executor) PersistCache(result []byte) error {
 	if e.options.CacheMode != cache.ModeAuto || e.cacheStore == nil || e.cacheKey == "" {
+		return nil
+	}
+	// Skip caching for skills marked as non-cacheable
+	if c := e.handle.Manifest.Capabilities.Cacheable; c != nil && !*c {
 		return nil
 	}
 	entry := cache.Entry{

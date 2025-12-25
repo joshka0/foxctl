@@ -1,0 +1,99 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/universal_swe_grep
+  version: 0.1.0
+  description: "Auto-candidate SWE grep: generates candidates from indexes then extracts snippets"
+  tags: ["code", "grep", "snippets", "retrieval", "swe", "universal", "auto"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_universal_swe_grep/code_universal_swe_grep
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/universal_swe_grep
+  parameters:
+    - name: workspace_id
+      type: string
+      required: false
+      default: "default"
+      description: "Workspace identifier for memory store"
+    - name: question
+      type: string
+      required: true
+      description: "Natural-language question guiding candidate generation and snippet extraction"
+    - name: sources
+      type: array
+      required: false
+      items:
+        type: string
+        enum: ["symbols", "semantic", "ripgrep"]
+      default: ["symbols", "ripgrep"]
+      description: "Candidate sources to query (symbols, semantic, ripgrep)"
+    - name: limits
+      type: object
+      required: false
+      properties:
+        max_candidates:
+          type: integer
+          description: "Maximum candidates to generate (default: 50)"
+        max_snippets:
+          type: integer
+          description: "Maximum snippets to return (default: 20)"
+        max_bytes_per_file:
+          type: integer
+          description: "Maximum bytes to read per file (default: 65536)"
+      description: "Optional limits for candidate generation and snippet extraction"
+  returns:
+    - name: summary
+      type: object
+      description: "Stats: candidates_generated, candidates_by_source, files_relevant, snippets_emitted"
+    - name: candidates
+      type: array
+      description: "Generated candidates with path, symbol_id, score, source"
+    - name: snippets_inline
+      type: array
+      description: "Inline snippet previews"
+    - name: artifact
+      type: string
+      description: "CAS digest of full snippets when output exceeds inline threshold"
+  help:
+    short: "Universal SWE Grep with auto-candidate generation from symbol/semantic indexes"
+    long: |
+      Universal SWE Grep combines candidate generation with snippet extraction:
+
+      1. Generates candidates from multiple sources:
+         - Symbol index: BM25 search over indexed code symbols
+         - Semantic index: Embedding-based similarity (when available)
+         - Ripgrep fallback: Keyword grep when indexes are sparse
+
+      2. Merges and ranks candidates by relevance score
+
+      3. Passes candidates to code/swe_grep for live snippet extraction
+
+      This is the recommended entry point for code search when you don't have
+      pre-determined candidate files. For direct snippet extraction from known
+      files, use code/swe_grep directly.
+
+      Example:
+        agentctl run code/universal_swe_grep --input '{
+          "question": "How does user authentication work?",
+          "sources": ["symbols", "ripgrep"],
+          "limits": {"max_candidates": 30, "max_snippets": 15}
+        }'
+    workflows:
+      - id: auto-search
+        description: "Search codebase and extract relevant snippets automatically"
+        example_input:
+          question: "How does the workflow engine process steps?"
+          sources: ["symbols", "ripgrep"]
+          limits:
+            max_candidates: 50
+            max_snippets: 20
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

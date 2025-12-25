@@ -1,0 +1,150 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: fs/apply_edit
+  version: 0.1.0
+  description: "Apply targeted edits to files using fuzzy matching with CAS backup for undo"
+  tags: ["fs", "edit", "fuzzy", "replace", "undo"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/fs_apply_edit/fs_apply_edit
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: fs/apply_edit
+  parameters:
+    - name: path
+      type: string
+      required: true
+      description: "Path to the file to edit (relative or absolute)"
+    - name: edits
+      type: array
+      required: true
+      description: "List of edit operations to apply"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Preview changes without applying them"
+    - name: create_backup
+      type: boolean
+      required: false
+      default: true
+      description: "Store original content in CAS for undo capability"
+  returns:
+    - name: path
+      type: string
+      description: "Path to the edited file"
+    - name: backup_digest
+      type: string
+      description: "CAS digest of original content (for undo)"
+    - name: edits_applied
+      type: integer
+      description: "Number of edit operations successfully applied"
+    - name: replacements_made
+      type: integer
+      description: "Total number of replacements made"
+    - name: diff
+      type: string
+      description: "Unified diff preview of changes"
+    - name: dry_run
+      type: boolean
+      description: "Whether this was a dry run"
+    - name: edit_results
+      type: array
+      description: "Detailed results for each edit operation"
+  help:
+    short: "Apply targeted file edits with fuzzy matching and undo"
+    long: |
+      fs/apply_edit applies targeted edits to a single file using fuzzy matching.
+      Unlike text/replace which works across multiple files with exact patterns,
+      this skill is designed for AI agents that have approximate knowledge of
+      where edits should be made (line hints, surrounding context).
+
+      Each edit can specify:
+      - search: The text to find
+      - replace: The replacement text
+      - match_mode: exact, fuzzy, or regex
+      - line_hint: Approximate line number (for disambiguation)
+      - context_before/after: Expected surrounding content
+      - global: Replace all occurrences (default: first only)
+
+      All edits are backed up to CAS before modification, enabling undo via
+      fs/write with the backup_digest.
+
+      ## Skill Comparison
+
+      | Skill | Scope | Matching | Backup | Use Case |
+      |-------|-------|----------|--------|----------|
+      | fs/apply_edit | Single file | Fuzzy (line hints, context) | CAS | AI agents with approximate edit locations |
+      | text/replace | Multi-file | Exact/regex | CAS + .bak | Refactoring, bulk renames |
+
+      ## Composition: Fuzzy Multi-File Edits
+
+      For fuzzy matching across multiple files, compose these skills via workflow:
+
+      ```yaml
+      # workflow: fuzzy-multi-file.yaml
+      apiVersion: agentctl/v1
+      kind: Workflow
+      metadata:
+        name: fuzzy-multi-file
+      steps:
+        - id: find
+          skill: fs/find
+          input: {path: "{{.inputs.path}}", pattern: "*.go"}
+        - id: edit
+          skill: fs/apply_edit
+          loop: {over: "{{.find.data.files}}", as: file}
+          input:
+            path: "{{.file}}"
+            edits: "{{.inputs.edits}}"
+            dry_run: "{{.inputs.dry_run}}"
+      ```
+
+      This separates concerns: fs/find handles file discovery, fs/apply_edit
+      handles fuzzy single-file edits with full undo capability.
+    workflows:
+      - id: simple-replace
+        description: "Simple function rename"
+        example_input:
+          path: "main.go"
+          edits:
+            - search: "func oldName("
+              replace: "func newName("
+      - id: fuzzy-with-hint
+        description: "Fuzzy match with line hint and context"
+        example_input:
+          path: "handler.go"
+          edits:
+            - search: "return nil"
+              replace: "return fmt.Errorf(\"not implemented\")"
+              match_mode: "fuzzy"
+              line_hint: 45
+              context_before: "func Handler("
+      - id: global-replace
+        description: "Replace all occurrences"
+        example_input:
+          path: "config.yaml"
+          edits:
+            - search: "localhost"
+              replace: "127.0.0.1"
+              global: true
+      - id: dry-run-preview
+        description: "Preview changes without modifying"
+        example_input:
+          path: "api.go"
+          dry_run: true
+          edits:
+            - search: "v1"
+              replace: "v2"
+              global: true
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

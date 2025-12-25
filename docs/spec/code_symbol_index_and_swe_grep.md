@@ -396,12 +396,10 @@ On success (`status: "ok"`), the envelope SHOULD contain:
         "preview": "func Login(...) { ... }" // truncated
       }
     ],
-    "artifact": "sha256:...", // optional when large
-    "artifact_kind": "application/x-swe-grep-snippets+ndjson",
-    "artifact_size_bytes": 12345
+    "artifact": "sha256:..." // optional when large
   },
   "meta": {
-    "cas_digest": "sha256:..." // MUST match data.artifact
+    "cas_digest": "sha256:..." // optional; if set MUST match data.artifact
   }
 }
 ```
@@ -414,8 +412,8 @@ Rules:
 - If snippets would exceed inline limits, the skill MUST:
   - Write NDJSON content to CAS (one snippet per line, including `file`,
     optional `symbol_id`, `start_line`, `end_line`, and full `text`).
-  - Set `data.artifact`, `data.artifact_kind`, and `data.artifact_size_bytes`.
-  - Set `meta.cas_digest` equal to `data.artifact`.
+  - Set `data.artifact` to the CAS digest.
+  - `meta.cas_digest` is optional; if set it MUST equal `data.artifact`.
 
 ### 5.4 Error Semantics
 

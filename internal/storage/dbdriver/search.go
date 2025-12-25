@@ -78,7 +78,7 @@ type SearchResult struct {
 	Score       float64
 	BM25Score   float64
 	VectorScore float64
-	Metadata    map[string]interface{}
+	Metadata    map[string]any
 }
 
 // SearchResults is a collection of search results
@@ -533,7 +533,7 @@ func (f *FullTextSearchHelper) InsertIntoFTS5(
 
 	columns := make([]string, 0, len(values))
 	placeholders := make([]string, 0, len(values))
-	args := make([]interface{}, 0, len(values))
+	args := make([]any, 0, len(values))
 
 	for col, val := range values {
 		// Validate each column name to prevent injection

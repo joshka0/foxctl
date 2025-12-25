@@ -97,9 +97,7 @@ func TestExecutorTryServeCacheHit(t *testing.T) {
 	if env.Meta.Workspace != "ws" {
 		t.Fatalf("expected workspace ws got %s", env.Meta.Workspace)
 	}
-	if got := stderr.String(); !strings.Contains(got, "cache hit") {
-		t.Fatalf("expected cache hit log, got %q", got)
-	}
+	// Cache hit info is in envelope metadata (meta.source="cache", meta.cache_key), not stderr
 }
 
 func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
@@ -170,10 +168,7 @@ func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open trajectory store: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { store.Close() })
 
 	trajectories, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: "ws"})
 	if err != nil {

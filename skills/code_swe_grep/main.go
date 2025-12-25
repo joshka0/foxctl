@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -23,22 +24,25 @@ import (
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
 // Command is the envelope command for this skill.
 const Command = "code/swe_grep"
 
-// Error codes per Core Profile v1 §13.
+// Error codes per Core Profile v1 §13 and spec §5.4.
 const (
-	ErrCodeArg              = "EARG"      // Invalid arguments
-	ErrCodeRuntime          = "ERUNTIME"  // Skill process error/crash
-	ErrCodePolicy           = "EPOLICY"   // Capability/policy violation (path escape)
-	ErrCodeNotFound         = "ENOTFOUND" // Resource not found (file missing)
-	ErrCodeIO               = "EIO"       // Filesystem or I/O error
-	ErrCodeNoCandidates     = "ENOTFOUND" // No matching candidates found
+	ErrCodeArg              = "EARG"                     // Invalid arguments
+	ErrCodeRuntime          = "ERUNTIME"                 // Skill process error/crash
+	ErrCodePolicy           = "EPOLICY"                  // Capability/policy violation (path escape)
+	ErrCodeNotFound         = "ENOTFOUND"                // Resource not found (file missing)
+	ErrCodeIO               = "EIO"                      // Filesystem or I/O error
+	ErrCodeNoCandidates     = "E_SWE_GREP_NO_CANDIDATES" // No usable candidates provided (spec §5.4)
 	ErrCodeCapabilityPolicy = "EPOLICY"
 )
 
@@ -120,6 +124,29 @@ type SnippetPreview struct {
 	Priority  float64 `json:"priority,omitempty"`
 }
 
+// SessionContext provides context from related past sessions.
+// See docs/designs/unified_semantic_search.md Phase 3.
+type SessionContext struct {
+	SessionID string   `json:"session_id"`
+	Summary   string   `json:"summary"`
+	Gotchas   []string `json:"gotchas,omitempty"`
+	Decisions []string `json:"decisions,omitempty"`
+	KeyFiles  []string `json:"key_files,omitempty"`
+}
+
+// MemoryContext provides context from related named memories.
+type MemoryContext struct {
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+	Type    string `json:"type,omitempty"`
+}
+
+// Context search defaults.
+const (
+	DefaultMaxRelatedSessions = 3
+	ContextSearchTimeout      = 500 * time.Millisecond
+)
+
 // Input is the expected JSON input per spec §5.2.
 type Input struct {
 	WorkspaceID string      `json:"workspace_id"`
@@ -152,7 +179,7 @@ func main() {
 		}
 	}
 
-	if err := run(ctx, rc, in); err != nil {
+	if err := run(ctx, cfg, rc, in); err != nil {
 		if ve, ok := err.(*ValidationError); ok {
 			fail(ve.Code, err)
 		}
@@ -204,7 +231,7 @@ func parseInput(r io.Reader) (Input, error) {
 }
 
 // run is the main skill logic.
-func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+func run(ctx context.Context, cfg config.Config, rc *runner.RunnerContext, in Input) error {
 	start := time.Now()
 
 	// Apply default limits
@@ -242,6 +269,15 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		"snippets_inline": previews,
 	}
 
+	// Search for related sessions when embeddings are available
+	// This provides context hints from past sessions that solved similar problems
+	if relatedSessions, hint := searchRelatedSessions(ctx, cfg, in.WorkspaceID, in.Question, DefaultMaxRelatedSessions); len(relatedSessions) > 0 {
+		data["related_sessions"] = relatedSessions
+	} else if hint != "" {
+		// Surface non-fatal hint when session context is unavailable
+		data["related_sessions_hint"] = hint
+	}
+
 	if len(snippets) > 0 {
 		thresholdBytes := inlineThresholdBytes(rc)
 		inlineSizeBytes, err := json.Marshal(data)
@@ -255,8 +291,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 			}
 			if artifact.Digest != "" {
 				data["artifact"] = artifact.Digest
-				data["artifact_kind"] = artifact.Kind
-				data["artifact_size_bytes"] = artifact.Size
 			}
 
 			if thresholdBytes > 0 {
@@ -270,10 +304,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	// Observability: log summary stats (D5)
 	// Question is hashed to avoid leaking sensitive content
 	hasArtifact := data["artifact"] != nil
-	artifactKind := ""
-	if hasArtifact {
-		artifactKind = ArtifactKind
-	}
 	durationMS := time.Since(start).Milliseconds()
 
 	logSummary(in.WorkspaceID, in.Question, len(in.Candidates), filesConsidered, filesRelevant, len(snippets), hasArtifact)
@@ -287,7 +317,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		filesRelevant,
 		len(snippets),
 		hasArtifact,
-		artifactKind,
 		durationMS,
 		"run",
 	)
@@ -349,30 +378,38 @@ func logSummary(workspaceID, question string, numCandidates, filesConsidered, fi
 
 // extractSnippets creates snippets from file results using question-aware matching.
 // It extracts keywords from the question and finds matching blocks in each file.
-// Files are processed in input order (respecting upstream ranking).
+// Snippets are sorted by priority (descending) so highest-value snippets come first.
 func extractSnippets(results []FileResult, question string, maxSnippets int) []Snippet {
 	keywords := extractKeywords(question)
-	snippets := make([]Snippet, 0, len(results))
+	snippets := make([]Snippet, 0, len(results)*2) // Pre-allocate for multiple snippets per file
 
+	// Extract all snippets first (without limiting)
 	for _, fr := range results {
 		if fr.Skipped || len(fr.Content) == 0 {
 			continue
 		}
-		if len(snippets) >= maxSnippets {
-			break
-		}
 
-		// Extract snippets for this file
-		remaining := maxSnippets - len(snippets)
-		fileSnippets := extractSnippetsForFile(fr, keywords, remaining)
+		// Extract snippets for this file (get all, we'll rank and trim later)
+		fileSnippets := extractSnippetsForFile(fr, keywords, maxSnippets)
 		snippets = append(snippets, fileSnippets...)
+	}
+
+	// Sort snippets by priority (highest first)
+	sort.Slice(snippets, func(i, j int) bool {
+		return snippets[i].Priority > snippets[j].Priority
+	})
+
+	// Trim to maxSnippets
+	if len(snippets) > maxSnippets {
+		snippets = snippets[:maxSnippets]
 	}
 
 	return snippets
 }
 
 // extractSnippetsForFile extracts matching snippet blocks from a single file.
-// Returns up to `remaining` snippets based on keyword matches.
+// If a symbol_id is provided, tries to extract the complete symbol body first.
+// Falls back to keyword-based matching otherwise.
 func extractSnippetsForFile(fr FileResult, keywords []string, remaining int) []Snippet {
 	if remaining <= 0 {
 		return nil
@@ -381,6 +418,14 @@ func extractSnippetsForFile(fr FileResult, keywords []string, remaining int) []S
 	lines := splitLines(fr.Content)
 	if len(lines) == 0 {
 		return nil
+	}
+
+	// If symbol_id is provided, try symbol-aware extraction first
+	if fr.SymbolID != "" {
+		if snippet := extractSymbolBody(fr, lines); snippet != nil {
+			return []Snippet{*snippet}
+		}
+		// Fall through to keyword-based extraction if symbol detection fails
 	}
 
 	// Find which lines match any keyword
@@ -413,6 +458,338 @@ func extractSnippetsForFile(fr FileResult, keywords []string, remaining int) []S
 	}
 
 	return snippets
+}
+
+// extractSymbolBody extracts the complete body of a symbol.
+// For Go files, it uses the AST-based GoExtractor for accurate boundaries.
+// For other languages, it falls back to heuristic-based detection.
+// The symbol_id format is "path:name", e.g., "pkg/auth/login.go:Login".
+// Returns nil if the symbol cannot be found or detected.
+func extractSymbolBody(fr FileResult, lines []string) *Snippet {
+	// Parse symbol name from symbol_id (format: path:name)
+	symbolName := parseSymbolName(fr.SymbolID)
+	if symbolName == "" {
+		return nil
+	}
+
+	// Detect language from file extension
+	lang := detectLanguage(fr.Path)
+
+	// For Go files, use AST-based extractor for accurate boundaries
+	if lang == "go" {
+		if snippet := extractGoSymbolBody(fr, lines, symbolName); snippet != nil {
+			return snippet
+		}
+		// Fall through to heuristic if AST extraction fails
+	}
+
+	// For other languages or as fallback, use heuristic-based detection
+	return extractSymbolBodyHeuristic(fr, lines, symbolName, lang)
+}
+
+// extractGoSymbolBody uses the AST-based GoExtractor for accurate symbol boundaries.
+func extractGoSymbolBody(fr FileResult, lines []string, symbolName string) *Snippet {
+	extractor := symbol.NewGoExtractor()
+	symbols, err := extractor.Extract(context.Background(), fr.Path, fr.Content)
+	if err != nil || len(symbols) == 0 {
+		return nil
+	}
+
+	// Find matching symbol by name
+	var matchedSymbol *symbol.Symbol
+	for i := range symbols {
+		s := &symbols[i]
+		// Exact match
+		if s.Name == symbolName {
+			matchedSymbol = s
+			break
+		}
+		// For methods, try matching just the method name
+		// (symbols have format "ReceiverType.MethodName")
+		if idx := strings.LastIndex(s.Name, "."); idx >= 0 {
+			methodName := s.Name[idx+1:]
+			if methodName == symbolName {
+				matchedSymbol = s
+				break
+			}
+		}
+	}
+
+	if matchedSymbol == nil {
+		return nil
+	}
+
+	// Convert to 0-indexed for lines array access
+	startLine := matchedSymbol.StartLine - 1
+	endLine := matchedSymbol.EndLine - 1
+
+	// Bounds check
+	if startLine < 0 || endLine >= len(lines) || startLine > endLine {
+		return nil
+	}
+
+	// Cap at MaxLinesPerSnippet
+	if endLine-startLine+1 > MaxLinesPerSnippet {
+		endLine = startLine + MaxLinesPerSnippet - 1
+	}
+
+	text := joinLines(lines, startLine, endLine)
+	return &Snippet{
+		File:      fr.Path,
+		SymbolID:  fr.SymbolID,
+		StartLine: startLine + 1, // Back to 1-indexed
+		EndLine:   endLine + 1,   // Back to 1-indexed
+		Text:      text,
+		Priority:  fr.Priority,
+	}
+}
+
+// extractSymbolBodyHeuristic uses pattern matching for non-Go languages.
+func extractSymbolBodyHeuristic(fr FileResult, lines []string, symbolName string, lang string) *Snippet {
+	// Find the symbol definition line
+	defLine := findSymbolDefinition(lines, symbolName, lang)
+	if defLine < 0 {
+		return nil
+	}
+
+	// Find the end of the symbol body
+	endLine := findSymbolEnd(lines, defLine, lang)
+	if endLine < defLine {
+		endLine = defLine
+	}
+
+	// Cap at MaxLinesPerSnippet
+	if endLine-defLine+1 > MaxLinesPerSnippet {
+		endLine = defLine + MaxLinesPerSnippet - 1
+	}
+
+	text := joinLines(lines, defLine, endLine)
+	return &Snippet{
+		File:      fr.Path,
+		SymbolID:  fr.SymbolID,
+		StartLine: defLine + 1, // 1-indexed
+		EndLine:   endLine + 1, // 1-indexed
+		Text:      text,
+		Priority:  fr.Priority,
+	}
+}
+
+// parseSymbolName extracts the symbol name from a symbol_id.
+// Format: "path:name" -> "name"
+func parseSymbolName(symbolID string) string {
+	idx := strings.LastIndex(symbolID, ":")
+	if idx < 0 || idx >= len(symbolID)-1 {
+		return ""
+	}
+	return symbolID[idx+1:]
+}
+
+// detectLanguage returns a normalized language identifier from file extension.
+func detectLanguage(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".gd":
+		return "gdscript"
+	case ".rs":
+		return "rust"
+	case ".java":
+		return "java"
+	case ".c", ".h":
+		return "c"
+	case ".cpp", ".hpp", ".cc", ".cxx":
+		return "cpp"
+	default:
+		return ""
+	}
+}
+
+// findSymbolDefinition finds the 0-indexed line where a symbol is defined.
+// Returns -1 if not found.
+func findSymbolDefinition(lines []string, name string, lang string) int {
+	// Build patterns based on language
+	var patterns []string
+	switch lang {
+	case "go":
+		patterns = []string{
+			fmt.Sprintf("func %s(", name),  // function
+			fmt.Sprintf("func (%s", name),  // receiver might match
+			fmt.Sprintf(") %s(", name),     // method
+			fmt.Sprintf("type %s ", name),  // type definition
+			fmt.Sprintf("type %s\t", name), // type definition with tab
+		}
+	case "python":
+		patterns = []string{
+			fmt.Sprintf("def %s(", name),
+			fmt.Sprintf("class %s(", name),
+			fmt.Sprintf("class %s:", name),
+		}
+	case "typescript", "javascript":
+		patterns = []string{
+			fmt.Sprintf("function %s(", name),
+			fmt.Sprintf("function %s (", name),
+			fmt.Sprintf("const %s = ", name),
+			fmt.Sprintf("let %s = ", name),
+			fmt.Sprintf("class %s ", name),
+			fmt.Sprintf(" %s(", name),          // method
+			fmt.Sprintf(" %s: function", name), // object method
+		}
+	case "gdscript":
+		patterns = []string{
+			fmt.Sprintf("func %s(", name),
+			fmt.Sprintf("class_name %s", name),
+		}
+	case "rust":
+		patterns = []string{
+			fmt.Sprintf("fn %s(", name),
+			fmt.Sprintf("fn %s<", name),
+			fmt.Sprintf("struct %s ", name),
+			fmt.Sprintf("struct %s<", name),
+			fmt.Sprintf("impl %s ", name),
+		}
+	case "java", "c", "cpp":
+		patterns = []string{
+			fmt.Sprintf(" %s(", name), // generic function/method match
+		}
+	default:
+		// Generic pattern for unknown languages
+		patterns = []string{
+			fmt.Sprintf(" %s(", name),
+			fmt.Sprintf("\t%s(", name),
+		}
+	}
+
+	for i, line := range lines {
+		for _, pattern := range patterns {
+			if strings.Contains(line, pattern) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// findSymbolEnd finds the 0-indexed line where a symbol body ends.
+// Uses bracket counting for brace-based languages, indentation for Python/GDScript.
+func findSymbolEnd(lines []string, startLine int, lang string) int {
+	if startLine < 0 || startLine >= len(lines) {
+		return startLine
+	}
+
+	switch lang {
+	case "python", "gdscript":
+		return findIndentationEnd(lines, startLine)
+	default:
+		return findBraceEnd(lines, startLine)
+	}
+}
+
+// findBraceEnd finds the end of a brace-delimited block (Go, JS, TS, Rust, etc.)
+// using simple brace counting.
+//
+// LIMITATION: This is a heuristic approach that counts '{' and '}' characters
+// without parsing the actual syntax. It does NOT handle braces inside:
+//   - String literals (e.g., "{ not a block }")
+//   - Comments (e.g., // { or /* { */)
+//   - Character literals (e.g., '{')
+//   - Template literals (e.g., `${ expr }`)
+//
+// For accurate symbol boundary detection, prefer using AST-based extraction
+// (e.g., extractGoSymbolBody for Go files) when available.
+func findBraceEnd(lines []string, startLine int) int {
+	braceCount := 0
+	foundOpen := false
+
+	for i := startLine; i < len(lines); i++ {
+		line := lines[i]
+		for _, ch := range line {
+			switch ch {
+			case '{':
+				braceCount++
+				foundOpen = true
+			case '}':
+				braceCount--
+				if foundOpen && braceCount == 0 {
+					return i
+				}
+			}
+		}
+	}
+
+	// If no closing brace found, return a reasonable limit
+	maxEnd := startLine + MaxLinesPerSnippet - 1
+	if maxEnd >= len(lines) {
+		maxEnd = len(lines) - 1
+	}
+	return maxEnd
+}
+
+// findIndentationEnd finds the end of an indentation-based block (Python, GDScript)
+func findIndentationEnd(lines []string, startLine int) int {
+	if startLine >= len(lines) {
+		return startLine
+	}
+
+	// Get the indentation of the definition line
+	baseIndent := countLeadingWhitespace(lines[startLine])
+
+	// Find the first non-empty line after the definition to get body indentation
+	bodyIndent := -1
+	for i := startLine + 1; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue // Skip empty lines and comments
+		}
+		bodyIndent = countLeadingWhitespace(line)
+		break
+	}
+
+	if bodyIndent <= baseIndent {
+		// No body found, return definition line only
+		return startLine
+	}
+
+	// Find where indentation returns to base level or less
+	lastContentLine := startLine
+	for i := startLine + 1; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue // Skip blank lines
+		}
+		indent := countLeadingWhitespace(line)
+		if indent <= baseIndent && !strings.HasPrefix(trimmed, "#") {
+			// Found a line at the same or less indentation - we're done
+			break
+		}
+		lastContentLine = i
+	}
+
+	return lastContentLine
+}
+
+// countLeadingWhitespace counts leading spaces and tabs (tabs count as 4 spaces)
+func countLeadingWhitespace(s string) int {
+	count := 0
+	for _, ch := range s {
+		switch ch {
+		case ' ':
+			count++
+		case '\t':
+			count += 4
+		default:
+			return count
+		}
+	}
+	return count
 }
 
 // lineBlock represents a contiguous block of lines.
@@ -868,6 +1245,121 @@ func readFileWithLimit(ctx context.Context, path string, maxBytes int) ([]byte, 
 	}
 
 	return readFromFile(ctx, file, info, maxBytes)
+}
+
+// searchRelatedSessions searches for sessions related to the question using embeddings.
+// Returns sessions and a hint when unavailable/non-fatal.
+func searchRelatedSessions(ctx context.Context, cfg config.Config, workspaceID, question string, limit int) ([]SessionContext, string) {
+	provider, hint := createEmbeddingProvider(cfg)
+	if provider == nil {
+		return nil, hint
+	}
+
+	// Generate query embedding with timeout
+	embedCtx, embedCancel := context.WithTimeout(ctx, ContextSearchTimeout)
+	defer embedCancel()
+
+	queryVec, err := provider.Embed(embedCtx, question)
+	if err != nil {
+		return nil, fmt.Sprintf("session context unavailable: embedding failed: %v", err)
+	}
+
+	// Get AGENTCTL_HOME for storage path
+	agentctlHome := os.Getenv("AGENTCTL_HOME")
+	if agentctlHome == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, "session context unavailable: home not resolved"
+		}
+		agentctlHome = filepath.Join(homeDir, ".agentctl")
+	}
+
+	// Open sessions store
+	storageRoot := filepath.Join(agentctlHome, "storage")
+	sessionStore, err := sessions.Open(ctx, storageRoot)
+	if err != nil {
+		return nil, "session context unavailable: open sessions store failed"
+	}
+	defer sessionStore.Close()
+
+	// Search for similar sessions with timeout (fetch extra for workspace filtering)
+	searchCtx, searchCancel := context.WithTimeout(ctx, ContextSearchTimeout)
+	defer searchCancel()
+
+	results, err := sessionStore.SearchSimilar(searchCtx, queryVec, limit*2)
+	if err != nil {
+		return nil, "session context unavailable: search failed"
+	}
+
+	// Convert to SessionContext with workspace scoping
+	contexts := make([]SessionContext, 0, len(results))
+	for _, r := range results {
+		s := r.Session
+		// Filter by workspace if specified
+		if workspaceID != "" && s.WorkspacePath != "" && s.WorkspacePath != workspaceID {
+			continue
+		}
+		sc := SessionContext{
+			SessionID: s.ID,
+			Summary:   s.Summary,
+		}
+		if len(s.Gotchas) > 0 {
+			sc.Gotchas = s.Gotchas
+		}
+		if len(s.Decisions) > 0 {
+			sc.Decisions = s.Decisions
+		}
+		if len(s.KeyFiles) > 0 {
+			sc.KeyFiles = s.KeyFiles
+		}
+		contexts = append(contexts, sc)
+		if len(contexts) >= limit {
+			break
+		}
+	}
+
+	if len(contexts) == 0 {
+		return nil, "no related sessions found for this workspace"
+	}
+	return contexts, ""
+}
+
+// createEmbeddingProvider creates an embedding provider from config/env.
+// Returns provider (or nil) and a hint when unavailable.
+func createEmbeddingProvider(cfg config.Config) (semantic.EmbeddingProvider, string) {
+	providerName := cfg.Embedding.Provider
+	if env := os.Getenv("EMBEDDING_PROVIDER"); env != "" {
+		providerName = env
+	}
+	if providerName == "" {
+		providerName = "gemini"
+	}
+
+	model := cfg.Embedding.Model
+	if env := os.Getenv("EMBEDDING_MODEL"); env != "" {
+		model = env
+	}
+	if model == "" {
+		model = "gemini-embedding-001"
+	}
+
+	switch providerName {
+	case "gemini":
+		apiKey := os.Getenv("GEMINI_API_KEY")
+		if apiKey == "" {
+			return nil, "GEMINI_API_KEY not set; session context disabled (BM25-only)"
+		}
+		provider, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
+			APIKey: apiKey,
+			Model:  model,
+		})
+		if err != nil {
+			return nil, fmt.Sprintf("failed to create embedding provider: %v; session context disabled", err)
+		}
+		return provider, ""
+	default:
+		return nil, fmt.Sprintf("unknown embedding provider: %s; session context disabled", providerName)
+	}
 }
 
 // fail emits an error envelope and exits.

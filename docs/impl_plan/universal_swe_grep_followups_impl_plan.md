@@ -158,7 +158,7 @@ shape.
       configured inline threshold.
     - When artifact is present:
       - Write NDJSON to CAS.
-      - Ensure `meta.cas_digest == data.artifact`.
+      - `meta.cas_digest` is optional; if set it MUST match `data.artifact`.
     - When artifact is omitted:
       - Ensure `data.snippets_inline` is still present and complete.
   - Update `test/integration/swe_grep_test.go`:

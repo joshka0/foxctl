@@ -553,10 +553,7 @@ func seedSymbolSearchStore(t *testing.T) (func(context.Context) (storage.MemoryS
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 	workspaceID := "ws-symbol-search"
 
 	seed := func(filePath, name string, kind symbol.Kind, signature, summary string) {

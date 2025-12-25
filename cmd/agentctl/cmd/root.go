@@ -3,9 +3,12 @@ package cmd
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
+	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -59,4 +62,26 @@ func init() {
 func initConfig() {
 	viper.SetEnvPrefix("agentctl")
 	viper.AutomaticEnv()
+
+	// Load .env files from multiple locations (later files override earlier ones)
+	// 1. ~/.agentctl/.env (global)
+	// 2. Git root .env (found by walking up)
+	// 3. ./.env (current directory)
+	if home, err := os.UserHomeDir(); err == nil {
+		_ = godotenv.Load(filepath.Join(home, ".agentctl", ".env"))
+	}
+
+	// Walk up to find git root and load .env from there
+	if cwd, err := os.Getwd(); err == nil {
+		dir := cwd
+		for dir != "/" && dir != "." {
+			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+				_ = godotenv.Load(filepath.Join(dir, ".env"))
+				break
+			}
+			dir = filepath.Dir(dir)
+		}
+	}
+
+	_ = godotenv.Load() // loads .env from current directory (highest priority)
 }

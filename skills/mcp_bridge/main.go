@@ -63,7 +63,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("mcp/bridge", "ECONFIG", err)
+		fail("mcp/bridge", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -126,7 +126,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		if err := mcpClient.Close(); err != nil {
 			// Log close error but don't fail the operation.
 			// Warning output to stderr; error is not actionable.
-			_, _ = fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err) //nolint:errcheck
+			fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err)
 		}
 	}()
 

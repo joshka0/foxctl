@@ -1,0 +1,54 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: optimize/feedback
+  version: 0.1.0
+  description: "Collect and analyze human feedback for optimization"
+  tags: ["optimize", "feedback", "human-in-the-loop"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/optimize_feedback/feedback
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: optimize/feedback
+  parameters:
+    - name: action
+      type: string
+      required: true
+      description: "Action: add, stats"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace root path"
+    - name: trajectory_id
+      type: string
+      required: false
+      description: "Trajectory ID to add feedback for (required for add)"
+    - name: rating
+      type: integer
+      required: false
+      description: "Rating 1-5 (required for add)"
+    - name: comment
+      type: string
+      required: false
+      description: "Feedback comment"
+    - name: role
+      type: string
+      required: false
+      description: "Agent role for stats"
+returns:
+  - name: feedback
+    type: object
+    description: "Recorded feedback"
+  - name: stats
+    type: object
+    description: "Feedback statistics"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+    - type: workdir
+  pure: false

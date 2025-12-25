@@ -159,7 +159,7 @@ func createSession(ctx context.Context, w http.ResponseWriter, username string) 
 }
 
 // getSession retrieves a session from the cookie.
-func getSession(ctx context.Context, r *http.Request) interface{} {
+func getSession(ctx context.Context, r *http.Request) any {
 	cookie, err := r.Cookie("session_id")
 	if err != nil {
 		return nil
@@ -172,7 +172,7 @@ func getSession(ctx context.Context, r *http.Request) interface{} {
 }
 
 // destroySession removes the session from the in-memory store.
-func destroySession(ctx context.Context, w http.ResponseWriter, session interface{}) {
+func destroySession(ctx context.Context, w http.ResponseWriter, session any) {
 	if s, ok := session.(*testSession); ok {
 		sessionID := "session-" + s.Username
 		delete(sessions, sessionID)
@@ -194,7 +194,7 @@ func createUser(ctx context.Context, username, email, password string) error {
 }
 
 // getSessionCSRFToken retrieves the CSRF token for a session.
-func getSessionCSRFToken(ctx context.Context, session interface{}) string {
+func getSessionCSRFToken(ctx context.Context, session any) string {
 	if s, ok := session.(*testSession); ok {
 		return s.CSRFToken
 	}

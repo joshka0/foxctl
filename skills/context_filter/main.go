@@ -98,14 +98,14 @@ func debugf(format string, args ...any) {
 		return
 	}
 	// Debug output to stderr; error is not actionable.
-	_, _ = fmt.Fprintf(os.Stderr, "context/filter: "+format+"\n", args...) //nolint:errcheck
+	fmt.Fprintf(os.Stderr, "context/filter: "+format+"\n", args...)
 }
 
 func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("context/filter", "ECONFIG", err)
+		fail("context/filter", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)

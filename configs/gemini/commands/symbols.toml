@@ -1,0 +1,13 @@
+# Extract code symbols command
+description = "Extract symbols (functions, types, methods) from code"
+
+prompt = """Extract and analyze code symbols from:
+
+```bash
+!{agentctl run code/symbols --input '{"path": "{{args}}"}'}
+```
+
+Interpret the results:
+- List key functions and their purposes
+- Identify types/interfaces and their relationships
+- Note any patterns or architectural insights"""

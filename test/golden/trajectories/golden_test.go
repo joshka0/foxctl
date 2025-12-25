@@ -91,7 +91,7 @@ func TestGoldenTrajectoryExportEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cas get %s: %v", artifact, err)
 	}
-	defer func() { _ = reader.Close() }()
+	defer reader.Close()
 
 	buf := &bytes.Buffer{}
 	if _, err := buf.ReadFrom(reader); err != nil {
@@ -236,10 +236,7 @@ func seedTrajectoryStore(t *testing.T, ctx context.Context, cfg config.Config, w
 	if err != nil {
 		t.Fatalf("open trajectory store: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 

@@ -232,7 +232,7 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"session_id": session.ID,
 		"role":       string(role),
 		"workspace":  workspace,
@@ -269,10 +269,10 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 	sessions := rt.List()
 
 	// Build session list for envelope
-	sessionData := make([]map[string]interface{}, 0, len(sessions))
+	sessionData := make([]map[string]any, 0, len(sessions))
 	for _, s := range sessions {
 		sess := s.GetSession()
-		data := map[string]interface{}{
+		data := map[string]any{
 			"session_id": sess.ID,
 			"role":       string(sess.Config.Role),
 			"status":     string(sess.Status),
@@ -288,10 +288,10 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 	// Also print a human-readable table to stderr
 	w := tabwriter.NewWriter(os.Stderr, 0, 0, 2, ' ', 0)
 	// Table output to stderr; errors are not actionable.
-	_, _ = fmt.Fprintln(w, "SESSION ID\tROLE\tSTATUS\tITERATIONS\tSTARTED") //nolint:errcheck
+	fmt.Fprintln(w, "SESSION ID\tROLE\tSTATUS\tITERATIONS\tSTARTED")
 	for _, s := range sessions {
 		sess := s.GetSession()
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n", //nolint:errcheck
+		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
 			sess.ID[:8]+"...",
 			sess.Config.Role,
 			sess.Status,
@@ -302,7 +302,7 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 	_ = w.Flush() //nolint:errcheck
 
 	// Write success envelope
-	env := envelope.OK("dspy-agent/list", map[string]interface{}{
+	env := envelope.OK("dspy-agent/list", map[string]any{
 		"sessions": sessionData,
 		"count":    len(sessions),
 	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
@@ -344,7 +344,7 @@ func runDspyKill(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("dspy-agent/kill", map[string]interface{}{
+	env := envelope.OK("dspy-agent/kill", map[string]any{
 		"session_id": matchedID,
 		"status":     "canceled",
 	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
@@ -385,9 +385,9 @@ func runDspyStatus(cmd *cobra.Command, args []string) error {
 	toolCalls := session.GetToolCalls()
 
 	// Build tool call data
-	toolCallData := make([]map[string]interface{}, 0, len(toolCalls))
+	toolCallData := make([]map[string]any, 0, len(toolCalls))
 	for _, tc := range toolCalls {
-		data := map[string]interface{}{
+		data := map[string]any{
 			"tool":      tc.ToolName,
 			"timestamp": tc.Timestamp.Format(time.RFC3339),
 			"duration":  tc.Duration.String(),
@@ -400,7 +400,7 @@ func runDspyStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build session data
-	data := map[string]interface{}{
+	data := map[string]any{
 		"session_id": sess.ID,
 		"role":       string(sess.Config.Role),
 		"status":     string(sess.Status),

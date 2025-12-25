@@ -1,0 +1,79 @@
+apiVersion: agentctl/v1
+kind: Workflow
+metadata:
+  name: lsp-analysis
+  version: 0.1.0
+  description: "Deep semantic analysis using LSP - find references, call hierarchies, and more"
+  tags: ["lsp", "semantic", "analysis", "go"]
+
+inputs:
+  - name: file
+    type: string
+    required: true
+    description: "File to analyze"
+  - name: line
+    type: int
+    required: true
+    description: "Line number of the symbol"
+  - name: column
+    type: int
+    default: 1
+    description: "Column number of the symbol"
+  - name: include_callers
+    type: bool
+    default: true
+    description: "Include call hierarchy analysis"
+
+steps:
+  # Step 1: Get symbols in the file
+  - id: symbols
+    skill: lsp/gopls
+    input:
+      operation: symbols
+      file: "{{.inputs.file}}"
+
+  # Step 2: Find definition of symbol at position
+  - id: definition
+    skill: lsp/gopls
+    input:
+      operation: definition
+      file: "{{.inputs.file}}"
+      line: "{{.inputs.line}}"
+      column: "{{.inputs.column}}"
+
+  # Step 3: Find all references
+  - id: references
+    skill: lsp/gopls
+    input:
+      operation: references
+      file: "{{.inputs.file}}"
+      line: "{{.inputs.line}}"
+      column: "{{.inputs.column}}"
+    depends_on: [definition]
+
+  # Step 4: Get call hierarchy (who calls this, what does it call)
+  - id: call_hierarchy
+    skill: lsp/gopls
+    if: "{{.inputs.include_callers}}"
+    input:
+      operation: call_hierarchy
+      file: "{{.inputs.file}}"
+      line: "{{.inputs.line}}"
+      column: "{{.inputs.column}}"
+    depends_on: [definition]
+
+outputs:
+  - name: file_symbols
+    description: "All symbols in the analyzed file"
+    value: "{{.symbols.data.symbols}}"
+  - name: symbol_name
+    description: "Name of the symbol at the given position"
+    valueFrom:
+      expression: "{{if .definition.data.name}}{{.definition.data.name}}{{else}}unknown{{end}}"
+  - name: reference_count
+    description: "Number of references to the symbol"
+    value: "{{len .references.data.references}}"
+  - name: caller_count
+    description: "Number of callers (if call hierarchy requested)"
+    valueFrom:
+      expression: "{{if .call_hierarchy.data.callers}}{{len .call_hierarchy.data.callers}}{{else}}0{{end}}"

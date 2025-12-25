@@ -105,7 +105,7 @@ func writeEnvelope(env envelope.Envelope) {
 }
 
 func safeStderr(format string, args ...any) {
-	_, _ = fmt.Fprintf(os.Stderr, format, args...)
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func decodePayload(data any, v any) error {

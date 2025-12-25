@@ -18,7 +18,7 @@ GOLANGCI ?= golangci-lint
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 
-.PHONY: fmt lint vet test test-race cover check-coverage build snapshot tidy check skills-build skills-test completions
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo viewer snapshot tidy check skills-build skills-install skills-test completions
 
 fmt:
 	@echo "Running gofumpt"
@@ -27,6 +27,33 @@ fmt:
 lint:
 	@echo "Running golangci-lint"
 	@GOFLAGS=-buildvcs=false $(GOLANGCI) run ./...
+
+# Type-check all packages (faster than gopls per-file, catches type errors)
+# This is essentially what the compiler does during build
+typecheck:
+	@echo "Type-checking all packages..."
+	@$(GO_CMD) build ./...
+	@echo "Type-check passed"
+
+# LSP-based diagnostics using gopls (slower, but catches hints/warnings)
+# Use for specific files: make lsp-check FILES="internal/storage/cas/store.go"
+# Or for a package: make lsp-check FILES="$(find internal/storage -name '*.go')"
+LSP_SEVERITY ?= warning
+LSP_FILES ?= 
+lsp-check:
+	@echo "Running gopls check (severity=$(LSP_SEVERITY))..."
+	@command -v gopls >/dev/null 2>&1 || { echo "gopls not installed. Run: go install golang.org/x/tools/gopls@latest"; exit 1; }
+	@if [ -z "$(LSP_FILES)" ]; then \
+		echo "Usage: make lsp-check LSP_FILES=\"file1.go file2.go\""; \
+		echo "  or:  make lsp-check LSP_FILES=\"\$$(find internal/storage -name '*.go')\""; \
+		echo ""; \
+		echo "Note: For full codebase checks, use 'make lint' (golangci-lint) which is faster."; \
+		echo "      gopls check is best for targeted file-level diagnostics."; \
+		exit 0; \
+	fi
+	@for f in $(LSP_FILES); do \
+		gopls check -severity=$(LSP_SEVERITY) "$$f" || true; \
+	done
 
 vet:
 	@$(GO_CMD) vet ./...
@@ -37,8 +64,20 @@ test:
 test-short:
 	@$(GO_CMD) test -short ./...
 
+test-cgo:
+	@$(GO_CMD_CGO) test -tags=libsqlite3 ./...
+
+test-cgo-short:
+	@$(GO_CMD_CGO) test -short -tags=libsqlite3 ./...
+
 test-race:
-	@$(GO_CMD_CGO) test -race $(RACE_PKGS)
+	@$(GO_CMD_CGO) test -race -short $(RACE_PKGS)
+
+test-integration:
+	@$(GO_CMD) test -tags=integration ./test/integration/... -timeout 15m -v
+
+test-integration-cmd:
+	@$(GO_CMD) test -tags=integration ./cmd/agentctl/cmd/... -timeout 15m -v
 
 cover:
 	@mkdir -p coverage
@@ -103,22 +142,67 @@ build:
 		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Date=$$DATE" \
 		-o bin/$(BINARY) ./cmd/agentctl
 
+build-cgo:
+	@set -euo pipefail; \
+	VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev); \
+	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown); \
+	DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ); \
+	$(GO_CMD_CGO) build -tags=libsqlite3 -trimpath \
+		-ldflags="-s -w \
+		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Version=$$VERSION \
+		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Commit=$$COMMIT \
+		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Date=$$DATE" \
+		-o bin/$(BINARY)-cgo ./cmd/agentctl
+
+viewer:
+	@$(GO_CMD) build -trimpath -o bin/agentctl-viewer ./cmd/agentctl_viewer
+
+# Web UI targets
+web-templ:
+	@command -v templ >/dev/null 2>&1 || { echo "templ not installed. Run: go install github.com/a-h/templ/cmd/templ@latest"; exit 1; }
+	@templ generate ./cmd/agentctl_web/templates/
+
+web-build: web-templ
+	@$(GO_CMD) build -trimpath -o bin/agentctl-web ./cmd/agentctl_web
+
+web-run: web-build
+	@./bin/agentctl-web
+
 skills-build:
-	@mkdir -p dist/skills
-	@for dir in $(SKILL_DIRS); do \
-		name=$$(basename $$dir); \
-		outdir=dist/skills/$$name; \
-		mkdir -p $$outdir; \
-		if ls $$dir/*.go >/dev/null 2>&1; then \
-			$(GO_CMD) build -o $$outdir/bin ./$$dir; \
-		fi; \
-		if [ -f $$dir/module.wasm ]; then \
-			cp $$dir/module.wasm $$outdir/module.wasm; \
-		fi; \
-		if [ -f $$dir/skill.yaml ]; then \
-			cp $$dir/skill.yaml $$outdir/skill.yaml; \
-		fi; \
-	done
+	@set -euo pipefail; \
+		echo "Building skills"; \
+		mkdir -p dist/skills; \
+		for dir in $(SKILL_DIRS); do \
+			name=$$(basename "$$dir"); \
+			outdir="dist/skills/$$name"; \
+			echo " - $$name"; \
+			mkdir -p "$$outdir"; \
+			if ls "$$dir"/*.go >/dev/null 2>&1; then \
+				$(GO_CMD) build -o "$$outdir/bin" "./$$dir"; \
+			fi; \
+			if [ -f "$$dir/module.wasm" ]; then \
+				cp "$$dir/module.wasm" "$$outdir/module.wasm"; \
+			fi; \
+			if [ -f "$$dir/skill.yaml" ]; then \
+				cp "$$dir/skill.yaml" "$$outdir/skill.yaml"; \
+			fi; \
+		done
+
+skills-install: skills-build build
+	@set -euo pipefail; \
+		echo "Installing skills"; \
+		for dir in $(SKILL_DIRS); do \
+			name=$$(basename "$$dir"); \
+			manifest="$$dir/skill.yaml"; \
+			binary="dist/skills/$$name/bin"; \
+			if [ -f "$$manifest" ] && [ -f "$$binary" ]; then \
+				echo " - $$name"; \
+				bin/$(BINARY) skills install --manifest "$$manifest" --binary "$$binary" --force 2>&1 | grep -E '(installed|error|failed)' || true; \
+			elif [ -f "$$manifest" ]; then \
+				echo " - $$name (no binary, skip)"; \
+			fi; \
+		done; \
+		echo "Done. Run 'bin/agentctl skills list' to verify."
 
 skills-test:
 	@for dir in $(SKILL_DIRS); do \

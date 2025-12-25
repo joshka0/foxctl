@@ -41,7 +41,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("fs/ls", "ECONFIG", err)
+		fail("fs/ls", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -106,8 +106,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
-		data["artifact_kind"] = artifact.Kind
-		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("fs/ls", data, "application/json", envelope.Meta{

@@ -1,0 +1,136 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: build/godot
+  version: 0.1.0
+  description: "Build/export Godot projects using the Godot CLI"
+  tags: ["build", "godot", "game", "export"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/build_godot/build_godot
+io:
+  format: JSON
+  inline_output_kb: 32
+  network: none
+signature:
+  command: build/godot
+  parameters:
+    - name: action
+      type: string
+      required: true
+      description: |
+        Operation to perform:
+        - list_presets: List available export presets
+        - export: Export the project using a preset
+        - validate: Validate project can be exported (dry run)
+        - build: Build C# project (dotnet build)
+        - restore: Restore NuGet packages (dotnet restore)
+        - clean: Clean build artifacts (dotnet clean)
+    - name: preset
+      type: string
+      required: false
+      description: "Export preset name (required for export/validate actions)"
+    - name: output_path
+      type: string
+      required: false
+      description: "Output file path (overrides preset default)"
+    - name: debug
+      type: boolean
+      required: false
+      default: false
+      description: "Build debug export instead of release"
+    - name: godot_path
+      type: string
+      required: false
+      default: "godot"
+      description: "Path to Godot executable"
+    - name: pack_only
+      type: boolean
+      required: false
+      default: false
+      description: "Export PCK/ZIP only (no executable)"
+    - name: export_debug
+      type: boolean
+      required: false
+      default: false
+      description: "Use export-debug instead of export-release"
+    - name: configuration
+      type: string
+      required: false
+      default: "Debug"
+      description: "Build configuration for C# (Debug or Release)"
+    - name: verbosity
+      type: string
+      required: false
+      description: "Build verbosity (quiet, minimal, normal, detailed, diagnostic)"
+    - name: target
+      type: string
+      required: false
+      description: "MSBuild target (e.g., Build, Rebuild)"
+    - name: dotnet_path
+      type: string
+      required: false
+      default: "dotnet"
+      description: "Path to dotnet executable"
+  returns:
+    - name: presets
+      type: array
+      required: false
+      description: "List of available export presets (for list_presets)"
+    - name: output_path
+      type: string
+      required: false
+      description: "Path to exported file"
+    - name: exit_code
+      type: integer
+      required: false
+      description: "Godot CLI exit code"
+    - name: stdout
+      type: string
+      required: false
+      description: "Godot CLI stdout"
+    - name: stderr
+      type: string
+      required: false
+      description: "Godot CLI stderr"
+  workflows:
+    - id: list-presets
+      description: "List available export presets"
+      example_input:
+        action: "list_presets"
+    - id: export-release
+      description: "Export release build"
+      example_input:
+        action: "export"
+        preset: "Windows Desktop"
+        output_path: "exports/game.exe"
+    - id: export-debug
+      description: "Export debug build"
+      example_input:
+        action: "export"
+        preset: "Windows Desktop"
+        export_debug: true
+    - id: validate
+      description: "Validate export without building"
+      example_input:
+        action: "validate"
+        preset: "Linux/X11"
+    - id: build-csharp
+      description: "Build C# project"
+      example_input:
+        action: "build"
+        configuration: "Debug"
+    - id: build-csharp-release
+      description: "Build C# project in Release mode"
+      example_input:
+        action: "build"
+        configuration: "Release"
+    - id: restore-packages
+      description: "Restore NuGet packages"
+      example_input:
+        action: "restore"
+    - id: clean-build
+      description: "Clean build artifacts"
+      example_input:
+        action: "clean"

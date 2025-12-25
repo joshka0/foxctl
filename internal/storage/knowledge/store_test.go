@@ -17,10 +17,7 @@ func TestStore_ItemCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create item
 	item := knowledge.Item{
@@ -120,10 +117,7 @@ func TestStore_Triggers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create item first
 	item, err := store.UpsertItem(ctx, knowledge.Item{
@@ -191,10 +185,7 @@ func TestStore_Documents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	// Create item first
 	item, err := store.UpsertItem(ctx, knowledge.Item{
@@ -262,10 +253,7 @@ func TestSync_KnowledgePacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	}()
+	defer store.Close()
 
 	opts := knowledge.DefaultSyncOptions(workspaceRoot)
 	result, err := knowledge.Sync(ctx, store, opts)

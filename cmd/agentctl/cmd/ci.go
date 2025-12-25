@@ -102,6 +102,7 @@ func newCIPRCommentsCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&withContext, "with-context", false, "Include PR description and timestamps in the markdown report")
 	cmd.Flags().BoolVar(&errorsOnly, "errors-only", false, "Only include failing CI and actionable review comments")
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the skill")
+	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Omit raw comments array from data when used with --data-only")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
@@ -156,6 +157,7 @@ func newCIChecksCommand() *cobra.Command {
 	cmd.Flags().StringVar(&mode, "mode", "", "Detail level: summary or detailed (default summary)")
 	cmd.Flags().BoolVar(&errorsOnly, "errors-only", false, "Only include failing/errored/cancelled checks")
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the skill")
+	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
@@ -232,6 +234,7 @@ func newCITodosCommand() *cobra.Command {
 	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name or owner/repo shorthand (optional)")
 	cmd.Flags().StringVar(&storePath, "store", "", "Path to todo store (default: ~/.agentctl/todo/tasks.json)")
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the ci/prcomments skill")
+	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
 }

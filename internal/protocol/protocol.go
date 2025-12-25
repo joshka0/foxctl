@@ -166,6 +166,9 @@ func validateCASDigest(env envelope.Envelope) error {
 		return fmt.Errorf("extract artifact: %w", err)
 	}
 	if !ok {
+		if strings.TrimSpace(env.Meta.CASDigest) != "" {
+			return fmt.Errorf("meta.cas_digest is set but data.artifact is not present")
+		}
 		return nil
 	}
 
@@ -174,8 +177,8 @@ func validateCASDigest(env envelope.Envelope) error {
 		return fmt.Errorf("artifact field must use sha256: prefix, got: %s", artifactStr)
 	}
 
-	if env.Meta.CASDigest == "" {
-		return fmt.Errorf("data.artifact is set but meta.cas_digest is empty")
+	if strings.TrimSpace(env.Meta.CASDigest) == "" {
+		return nil
 	}
 
 	if env.Meta.CASDigest != artifactStr {
@@ -492,19 +495,45 @@ func AnnotateCacheHitBytes(result []byte, cacheKey, workspace, skillVersion stri
 	return data, nil
 }
 
-// AnnotateRunBytes is a convenience function that unmarshals JSON bytes,
-// annotates the envelope for a run, and marshals it back.
+// AnnotateRunBytes is a convenience function that annotates only the meta block
+// while preserving the original data payload bytes verbatim.
+// It avoids round-tripping the entire envelope through generic maps, which can
+// inadvertently change zero/empty slices into nulls when re-encoded.
 func AnnotateRunBytes(result []byte, workspace, skillVersion string) []byte {
-	var env envelope.Envelope
-	if err := json.Unmarshal(result, &env); err != nil {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(result, &top); err != nil {
 		return result
 	}
-	annotated := AnnotateRun(env, workspace, skillVersion)
-	data, err := json.Marshal(annotated)
+
+	// Decode meta (or start fresh) without touching data
+	var meta map[string]any
+	if rawMeta, ok := top["meta"]; ok && len(rawMeta) > 0 {
+		if err := json.Unmarshal(rawMeta, &meta); err != nil {
+			meta = make(map[string]any)
+		}
+	} else {
+		meta = make(map[string]any)
+	}
+
+	meta["source"] = "run"
+	if workspace != "" {
+		meta["workspace"] = workspace
+	}
+	if skillVersion != "" {
+		meta["skill_version"] = skillVersion
+	}
+
+	metaBytes, err := json.Marshal(meta)
 	if err != nil {
 		return result
 	}
-	return data
+	top["meta"] = metaBytes
+
+	out, err := json.Marshal(top)
+	if err != nil {
+		return result
+	}
+	return out
 }
 
 // SummarizeForMemory returns a short string suitable for memory summaries.

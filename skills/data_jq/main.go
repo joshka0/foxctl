@@ -31,7 +31,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("data/jq", "ECONFIG", err)
+		fail("data/jq", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -122,8 +122,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 			artifact, err := runner.PersistBuffer(ctx, rc, buf, contentType, "jq_output")
 			if err == nil && artifact.Digest != "" {
 				result["artifact"] = artifact.Digest
-				result["artifact_kind"] = artifact.Kind
-				result["artifact_size_bytes"] = artifact.Size
 			}
 		}
 	}

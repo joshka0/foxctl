@@ -137,8 +137,8 @@ New internal type (Go struct + JSON schema):
 
   - **CAS‑backed payload** for large file sets:
     - Inline JSON for small payloads.
-    - For large: JSON → CAS → `data.artifact` + `meta.cas_digest` per Core
-      Profile.
+    - For large: JSON → CAS → `data.artifact` (and optional `meta.cas_digest`
+      matching it) per Core Profile.
 
 - Index key(s):
   - `(workspace_id, task_id, review_id)` unique index.

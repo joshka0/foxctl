@@ -51,7 +51,7 @@ func TestDspyAgentFileWrite(t *testing.T) {
 		WorkspaceID:   workspace,
 		TaskID:        "TEST-001",
 		MaxIterations: 5,
-		Timeout:       2 * time.Minute,
+		Timeout:       types.Duration(2 * time.Minute),
 		LLMAPIKey:     apiKey,
 	}
 

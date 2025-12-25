@@ -1,0 +1,14 @@
+# Pre-implementation analysis command
+description = "Analyze codebase before implementing a feature"
+
+prompt = """Before implementing any code, analyze:
+
+1. **Existing Patterns**: Find similar implementations in the codebase
+2. **Dependencies**: Identify modules that will be affected
+3. **Interfaces**: Check existing interfaces/types that should be used
+4. **Tests**: Locate relevant test patterns to follow
+5. **Gotchas**: Flag potential issues or conflicts
+
+Target: {{args}}
+
+Search the codebase thoroughly before suggesting any implementation."""

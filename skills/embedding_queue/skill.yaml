@@ -1,0 +1,138 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: embedding/queue
+  description: Background queue for generating symbol embeddings
+  version: 0.1.0
+  author: agentctl
+  tags: [embedding, queue, indexing, async]
+distribution:
+  type: exec
+  exec:
+    entry: skills/embedding_queue/embedding_queue
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: embedding/queue
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation to perform: enqueue, stats, get, get_by_file, job_status, cleanup"
+    - name: workspace_id
+      type: string
+      required: false
+      default: "default"
+      description: Workspace identifier
+    - name: symbols
+      type: array
+      required: false
+      description: Symbols to enqueue (for enqueue operation) - objects with symbol_id, file_path, symbol_name, content
+    - name: priority
+      type: integer
+      required: false
+      default: 50
+      description: Job priority (0=low, 50=normal, 100=high)
+    - name: deduplicate
+      type: boolean
+      required: false
+      default: true
+      description: Skip symbols with unchanged content
+    - name: symbol_id
+      type: string
+      required: false
+      description: Symbol ID (for get operation)
+    - name: file_path
+      type: string
+      required: false
+      description: File path (for get_by_file operation)
+    - name: job_id
+      type: string
+      required: false
+      description: Job ID (for job_status operation)
+    - name: older_than_hours
+      type: integer
+      required: false
+      default: 24
+      description: Delete jobs older than N hours (for cleanup operation)
+  returns:
+    - name: operation
+      type: string
+      description: Operation that was performed
+    - name: queued
+      type: integer
+      description: Number of jobs enqueued
+    - name: skipped
+      type: integer
+      description: Number of symbols skipped (deduplicated)
+    - name: job_ids
+      type: array
+      description: IDs of created jobs
+    - name: stats
+      type: object
+      description: Queue statistics (queued_count, running_count, completed_count, failed_count, embeddings_count)
+    - name: embedding
+      type: object
+      description: Retrieved embedding result
+    - name: embeddings
+      type: array
+      description: Multiple embedding results
+    - name: job
+      type: object
+      description: Job status details
+    - name: deleted
+      type: integer
+      description: Number of jobs cleaned up
+    - name: message
+      type: string
+      description: Human-readable summary
+  help:
+    short: "Manage background embedding generation queue"
+    long: |
+      embedding/queue manages a background queue for generating symbol embeddings.
+      Integrates with the live-index hook to queue symbols as files are edited.
+
+      Operations:
+      - enqueue: Add symbols to the embedding queue
+      - stats: Get queue statistics
+      - get: Retrieve embedding for a specific symbol
+      - get_by_file: Get all embeddings for a file
+      - job_status: Check status of a specific job
+      - cleanup: Remove old completed jobs
+
+      Enable with AGENTCTL_EMBED_QUEUE=1 during live indexing.
+    workflows:
+      - id: enqueue-symbols
+        description: "Enqueue symbols for embedding"
+        example_input:
+          operation: enqueue
+          workspace_id: myproject
+          symbols:
+            - symbol_id: "main.go:Handler"
+              file_path: "main.go"
+              symbol_name: "Handler"
+              content: "func Handler(w http.ResponseWriter, r *http.Request) { ... }"
+          deduplicate: true
+      - id: check-stats
+        description: "Check queue statistics"
+        example_input:
+          operation: stats
+      - id: get-embedding
+        description: "Get embedding for a symbol"
+        example_input:
+          operation: get
+          workspace_id: myproject
+          symbol_id: "main.go:Handler"
+      - id: cleanup-old
+        description: "Cleanup old completed jobs"
+        example_input:
+          operation: cleanup
+          older_than_hours: 48
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

@@ -332,7 +332,7 @@ CREATE INDEX IF NOT EXISTS idx_bb_ts ON blackboard(ts);
 }
 
 type scanner interface {
-	Scan(dest ...interface{}) error
+	Scan(dest ...any) error
 }
 
 func scanRecord(s scanner) (agent.BlackboardRecord, error) {

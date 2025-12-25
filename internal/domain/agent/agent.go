@@ -33,6 +33,11 @@ type Agent struct {
 	State       State     `json:"state"`
 	CreatedAt   time.Time `json:"created_at"`
 	HeartbeatAt time.Time `json:"heartbeat_at,omitempty"`
+
+	// LLM configuration (per-agent, overrides environment defaults)
+	LLMProvider string `json:"llm_provider,omitempty"` // gemini|openai|anthropic|groq|openrouter
+	LLMModel    string `json:"llm_model,omitempty"`    // Model ID (e.g., claude-haiku-4-5)
+	LLMAPIKey   string `json:"llm_api_key,omitempty"`  // API key (or env var name like $GROQ_API_KEY)
 }
 
 // Policy defines execution constraints and capabilities for an agent.

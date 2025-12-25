@@ -1,0 +1,58 @@
+apiVersion: agentctl/v1
+kind: Workflow
+metadata:
+  name: pre-impl-analysis
+  version: 0.1.0
+  description: "Deep code analysis before implementation - find files, analyze symbols, check complexity"
+  tags: ["analysis", "pre-implementation", "code-review"]
+
+inputs:
+  - name: path
+    type: string
+    required: true
+    description: "Path to analyze (file or directory)"
+  - name: pattern
+    type: string
+    default: "*.go"
+    description: "File pattern to match"
+  - name: complexity_threshold
+    type: int
+    default: 10
+    description: "Complexity threshold for warnings"
+
+steps:
+  # Step 1: Find relevant files
+  - id: find
+    skill: fs/find
+    input:
+      path: "{{.inputs.path}}"
+      pattern: "{{.inputs.pattern}}"
+
+  # Step 2: Extract symbols from each file (parallel)
+  - id: symbols
+    skill: code/symbols
+    loop:
+      over: "{{.find.data.files}}"
+      as: file
+    parallel: 4
+    input:
+      path: "{{.file}}"
+    on_error: continue
+
+  # Step 3: Check complexity for each file (parallel)
+  - id: complexity
+    skill: code/complexity
+    loop:
+      over: "{{.find.data.files}}"
+      as: file
+    parallel: 4
+    input:
+      path: "{{.file}}"
+      threshold: "{{.inputs.complexity_threshold}}"
+    on_error: continue
+
+outputs:
+  - name: file_count
+    value: "{{len .find.data.files}}"
+  - name: total_symbols
+    value: "{{len (flatten (pluck .symbols.iterations \"data\"))}}"

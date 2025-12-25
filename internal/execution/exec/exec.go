@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,8 +29,8 @@ const maxBufferPoolSize = 1 << 20 // 1MB
 //  3. Use buffer for command output
 //  4. Check capacity before returning to pool (prevents memory bloat)
 var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return new(bytes.Buffer)
+	New: func() any {
+		return &bytes.Buffer{}
 	},
 }
 
@@ -113,6 +115,38 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 	if len(env) == 0 {
 		env = os.Environ()
 	}
+
+	// Ensure HOME is available to the skill; some environments may not propagate it.
+	// Read from env slice first for consistency, then fall back to os.UserHomeDir.
+	home := getEnvVar(env, "HOME")
+	if home == "" {
+		if h, err := os.UserHomeDir(); err == nil && h != "" {
+			home = h
+		}
+	}
+	if home == "" {
+		// Last resort: avoid using temp directories as HOME, use root instead
+		fallback := filepath.Dir(workDir)
+		if !strings.HasPrefix(fallback, os.TempDir()) {
+			home = fallback
+		} else {
+			// Temp dir parent is not safe, try harder or use empty
+			if h, err := os.UserHomeDir(); err == nil && h != "" {
+				home = h
+			}
+			// If still empty, leave HOME unset rather than pointing to temp
+		}
+	}
+	if home != "" {
+		env = ensureEnvVar(env, "HOME", home)
+	}
+
+	// Ensure AGENTCTL_HOME is available when not explicitly set.
+	// Read from env slice for consistency.
+	if getEnvVar(env, "AGENTCTL_HOME") == "" && home != "" {
+		env = ensureEnvVar(env, "AGENTCTL_HOME", filepath.Join(home, ".agentctl"))
+	}
+
 	env = append(env, fmt.Sprintf("SKILL_NAME=%s", r.Manifest.Metadata.Name))
 	env = append(env, fmt.Sprintf("SKILL_VERSION=%s", r.Manifest.Metadata.Version))
 	cmd.Env = env
@@ -132,4 +166,32 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		return stdoutBytes, stderrBytes, err
 	}
 	return stdoutBytes, stderrBytes, nil
+}
+
+// getEnvVar reads a value from the env slice, returning empty string if not found.
+func getEnvVar(env []string, key string) string {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return kv[len(prefix):]
+		}
+	}
+	return ""
+}
+
+func ensureEnvVar(env []string, key, value string) []string {
+	if key == "" || value == "" {
+		return env
+	}
+	prefix := key + "="
+	for i, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			// If it's empty, replace; otherwise leave as-is.
+			if len(kv) == len(prefix) {
+				env[i] = prefix + value
+			}
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }

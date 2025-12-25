@@ -172,7 +172,7 @@ func (o *OAuth2) exchangeCredentials(parentCtx context.Context, cfg Config) (str
 	if err != nil {
 		return "", 0, fmt.Errorf("http request: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", 0, fmt.Errorf("token endpoint returned %d", resp.StatusCode)

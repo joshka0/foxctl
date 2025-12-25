@@ -1,0 +1,14 @@
+# Code complexity analysis command
+description = "Analyze code complexity and suggest improvements"
+
+prompt = """Analyze the complexity of the specified code:
+
+1. **Cyclomatic Complexity**: Count decision points
+2. **Cognitive Complexity**: Assess readability/understandability
+3. **Nesting Depth**: Find deeply nested code
+4. **Function Length**: Flag long functions (>50 lines)
+5. **Dependencies**: Count external dependencies
+
+Target: {{args}}
+
+Provide specific refactoring suggestions for high-complexity areas."""

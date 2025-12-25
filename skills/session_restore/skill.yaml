@@ -1,0 +1,43 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/restore
+  version: 0.2.0
+  description: "Restore session state (tasks, plans, gotchas) after compaction with context injection"
+  tags: ["session", "continuity", "hooks", "session-start", "plans"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_restore/session_restore
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: session/restore
+  parameters:
+    - name: trigger
+      type: string
+      required: false
+      description: "Trigger source: compact, resume, startup"
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path"
+returns:
+  - name: hook_output
+    type: object
+    description: "Claude Code hook output with decision, reason, context, and env"
+  - name: snapshot_id
+    type: string
+    description: "ID of the restored snapshot"
+  - name: snapshot_age
+    type: string
+    description: "Human-readable age of the snapshot"
+  - name: items_restored
+    type: integer
+    description: "Number of items restored"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

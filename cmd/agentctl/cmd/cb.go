@@ -74,7 +74,7 @@ func init() {
 func runCBList(_ *cobra.Command, _ []string) error {
 	stats := globalCBManager.ListAll()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"breakers": stats,
 		"count":    len(stats),
 	}
@@ -101,7 +101,7 @@ func runCBShow(cmd *cobra.Command, args []string) error {
 
 	stats := breaker.Stats()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name":              stats.Name,
 		"state":             stats.State,
 		"failures":          stats.Failures,
@@ -131,7 +131,7 @@ func runCBReset(cmd *cobra.Command, args []string) error {
 		return writeErrorEnvelope(cmd, "cb/reset", string(protocol.ErrorCodeENotFound), fmt.Sprintf("circuit breaker not found: %s", name))
 	}
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"name":  name,
 		"reset": true,
 		"state": "closed",
@@ -153,7 +153,7 @@ func runCBResetAll(_ *cobra.Command, _ []string) error {
 	count := globalCBManager.Count()
 	globalCBManager.ResetAll()
 
-	data := map[string]interface{}{
+	data := map[string]any{
 		"reset_count": count,
 		"state":       "all_closed",
 	}

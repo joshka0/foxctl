@@ -28,15 +28,12 @@
     ],
     "truncated": true,
     "limited_entries": 2,
-    "artifact": "sha256:4dfe3b7f1d8f5e5bc2485be7f1f74bb1e3a50f6a82a3a6e5c1f88391c4c2de11",
-    "artifact_kind": "application/json",
-    "artifact_size_bytes": 8192
+    "artifact": "sha256:4dfe3b7f1d8f5e5bc2485be7f1f74bb1e3a50f6a82a3a6e5c1f88391c4c2de11"
   },
   "meta": {
     "ts": "2025-11-12T10:29:30Z",
     "source": "run",
-    "runner": "exec",
-    "cas_digest": "sha256:4dfe3b7f1d8f5e5bc2485be7f1f74bb1e3a50f6a82a3a6e5c1f88391c4c2de11"
+    "runner": "exec"
   },
   "error": {}
 }

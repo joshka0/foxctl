@@ -1,0 +1,95 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: mobile/expo
+  version: 0.1.0
+  description: |
+    Unified Expo development skill for iOS Simulator and Android Emulator.
+    Provides dev menu operations, EAS build/update, and Metro logs.
+
+    Device operations work across platforms with automatic detection.
+    EAS operations require eas-cli to be installed.
+  tags: [mobile, expo, ios, android, development, eas]
+distribution:
+  type: exec
+  exec:
+    entry: skills/expo/expo
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: mobile/expo
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      enum: [shake, reload, deep_link, dev_menu, toggle_inspector,
+             toggle_performance, toggle_remote_debug,
+             build, update, build_status, logs]
+      description: Operation to perform
+    - name: device_id
+      type: string
+      required: false
+      description: Device ID (UDID for iOS, serial for Android). Auto-detects if omitted.
+    - name: platform
+      type: string
+      required: false
+      enum: [ios, android, auto]
+      description: Target platform. Auto-detected from device_id if omitted.
+    - name: url
+      type: string
+      required: false
+      description: Deep link URL for deep_link operation (e.g., exp://192.168.1.1:8081)
+    - name: build_platform
+      type: string
+      required: false
+      enum: [ios, android, all]
+      description: Platform for EAS build (ios, android, or all)
+    - name: profile
+      type: string
+      required: false
+      enum: [development, preview, production]
+      description: EAS build profile (default development)
+    - name: channel
+      type: string
+      required: false
+      description: Update channel for EAS update
+    - name: message
+      type: string
+      required: false
+      description: Update message for EAS update
+    - name: filter
+      type: string
+      required: false
+      description: Filter pattern for logs operation
+    - name: count
+      type: integer
+      required: false
+      description: Number of log lines to retrieve (default 100)
+  returns:
+    - name: operation
+      type: string
+      description: The operation that was performed
+    - name: success
+      type: boolean
+      description: Whether the operation succeeded
+    - name: message
+      type: string
+      description: Status or result message
+    - name: platform
+      type: string
+      description: The platform used (ios or android)
+    - name: build_id
+      type: string
+      description: EAS build ID (for build operation)
+    - name: update_id
+      type: string
+      description: EAS update ID (for update operation)
+    - name: logs
+      type: string
+      description: Log output or artifact digest
+capabilities:
+  network: egress
+  filesystem:
+    - type: workdir
+  pure: false

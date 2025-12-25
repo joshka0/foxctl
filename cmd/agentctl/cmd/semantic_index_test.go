@@ -201,7 +201,7 @@ func TestFindFilesMatchingGlob(t *testing.T) {
 	}
 
 	// Test ** glob
-	files, err := findFilesMatchingGlob(tmpDir, "**/*.go")
+	files, err := findFilesMatchingGlob(tmpDir, "**/*.go", nil)
 	if err != nil {
 		t.Fatalf("findFilesMatchingGlob failed: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestFindFilesMatchingGlob_SimplePattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, err := findFilesMatchingGlob(tmpDir, "*.txt")
+	files, err := findFilesMatchingGlob(tmpDir, "*.txt", nil)
 	if err != nil {
 		t.Fatalf("findFilesMatchingGlob failed: %v", err)
 	}

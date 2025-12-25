@@ -1,0 +1,78 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/deep-dive
+  version: 0.1.0
+  description: "Retrieve raw content from archived session JSONL files"
+  tags: ["session", "memory", "archive", "retrieval", "deep-dive"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_deepdive/session_deepdive
+io:
+  format: JSON
+  inline_output_kb: 256
+signature:
+  command: session/deep-dive
+  parameters:
+    - name: session_id
+      type: string
+      required: true
+      description: "The session ID to retrieve chunks from"
+    - name: chunk_index
+      type: integer
+      required: false
+      description: "Specific chunk index to retrieve"
+    - name: chunk_indices
+      type: array
+      required: false
+      description: "Multiple chunk indices to retrieve"
+    - name: query
+      type: string
+      required: false
+      description: "Search query to find relevant chunks (future: semantic search)"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of chunks to return (default: 10)"
+returns:
+  - name: session_id
+    type: string
+    description: "The session ID"
+  - name: archive_path
+    type: string
+    description: "Path to the archive file"
+  - name: chunks
+    type: array
+    description: "Retrieved chunks with raw content"
+  - name: total_found
+    type: integer
+    description: "Number of chunks retrieved"
+  - name: status
+    type: string
+    description: "Status of the retrieval"
+  - name: message
+    type: string
+    description: "Human-readable status message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+    - type: home
+  pure: false
+examples:
+  - name: "Get specific chunk"
+    input:
+      session_id: "01HXYZ..."
+      chunk_index: 5
+    description: "Retrieve the raw content of chunk 5"
+  - name: "Get multiple chunks"
+    input:
+      session_id: "01HXYZ..."
+      chunk_indices: [0, 1, 2, 10, 15]
+    description: "Retrieve multiple specific chunks"
+  - name: "Get first chunks"
+    input:
+      session_id: "01HXYZ..."
+      limit: 5
+    description: "Retrieve the first 5 chunks of a session"

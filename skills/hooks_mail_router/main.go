@@ -29,7 +29,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("hooks/mail_router", "ECONFIG", err)
+		fail("hooks/mail_router", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -67,10 +67,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	taskID := ""
 	taskStore, err := tasks.Open(ctx, cfg.Storage.Root)
 	if err == nil {
-		defer func() {
-			// Store cleanup in defer; error is not actionable.
-			_ = taskStore.Close() //nolint:errcheck
-		}()
+		defer taskStore.Close()
 		// Best-effort active task lookup; errors are ignored.
 		if task, found, _ := taskStore.GetActive(ctx, workspaceID); found { //nolint:errcheck
 			taskID = task.ID
@@ -86,10 +83,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			Reason:   "mail_router: could not open board store",
 		})
 	}
-	defer func() {
-		// Store cleanup in defer; error is not actionable.
-		_ = boardStore.Close() //nolint:errcheck
-	}()
+	defer boardStore.Close()
 
 	// Query inbox for relevant messages
 	filter := agent.InboxFilter{

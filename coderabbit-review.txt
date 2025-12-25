@@ -1,0 +1,298 @@
+- [ ] In skills/session_summarize/main.go around lines 671-675, the conditional if provider.Name == "openrouter" never matches because provider.Name is set to values like "openrouter:"+model; change the check to detect the prefix (e.g., use strings.HasPrefix(provider.Name, "openrouter:")) so the OpenRouter-specific headers are actually applied, and add the strings import if not already present.
+
+- [ ] In skills/session_summarize/main.go around lines 252 to 258, the error codes used (e.g., "DECODE_ERROR", "INVALID_INPUT", and others elsewhere like "CONFIG_ERROR", "STORE_ERROR", "NOT_FOUND", "LLM_ERROR", "SAVE_ERROR") are non-compliant with the allowed set; replace them with allowed codes (suggested mappings: CONFIG_ERROR -> EARG, STORE_ERROR -> EIO, NOT_FOUND -> ENOTFOUND, LLM_ERROR -> ERUNTIME, SAVE_ERROR -> EIO) and change the local instances in these lines to use the mapped codes (e.g., DECODE_ERROR -> EPARSE, INVALID_INPUT -> EARG), ensuring all fail(...) calls across this file use only the permitted error codes and update any related tests/log messages accordingly.
+
+- [ ] In skills/session_summarize/main.go around lines 293 to 307, the Output struct is populated with slice fields that may be nil which causes JSON to emit null; add a small helper func ensureSlice(s []string) []string { if s==nil { return []string{} } return s } (place near other helpers) and update the Output construction to wrap all slice fields (Accomplished, Decisions, Gotchas, Tags, KeyFiles, and ToolsPattern if it's a []string) with ensureSlice(...) so the JSON always contains empty arrays instead of null.
+
+- [ ] In skills/todo/main.go around lines 244-255 (and update the related message at line 446), the new "update" case was added but the user-facing error/usage message that lists valid operations does not include "update"; modify the error/usage string at line 446 to include "update" in the list of valid operations (e.g., add "update" alongside existing operations) so users see it as an accepted operation.
+
+- [ ] In skills/todo/main.go around lines 542 to 545, the code treats any error from store.Get as "task not found" which masks real errors; update the error handling to first detect a genuine not-found error (e.g., using errors.Is(err, tasks.ErrNotFound) or the store's specific sentinel error) and return the "task %s not found" message only in that case, and for any other err return a wrapped/propagated error (e.g., fmt.Errorf("get task %s: %w", req.ID, err)); also ensure the errors package is imported if needed.
+
+- [ ] In skills/todo/main.go around lines 522 to 550, the code fetches a task by ID but does not verify the task belongs to the provided workspaceID, allowing cross-workspace updates; after retrieving task := store.Get(...), compare task.WorkspaceID (or the appropriate field) to the incoming workspaceID and return a permission/validation error if they differ; apply the same workspace ownership check to handleComplete (around lines ~602-604) and handleReviewRequest (around lines ~668-671) so all operations verify the task belongs to the requesting workspace before proceeding.
+
+- [ ] In skills/editor_godot/godot_plugin/bridge.gd around lines 178 to 263, the routing code calls handler.handle(...) without checking the handler objects for null, which will throw if a handler failed to initialize; add a null-safety guard before each delegation (core, resources, scripts, groups, console, settings, build, animation, audio, input, autoload, plugins, theme, shader, tilemap, physics, debug) that returns a standardized error Dictionary when the handler is null (e.g., {"status":"error","data":null,"error":{"code":"EHANDLER","message":"Handler not available: <handler_name>"}}) and only call handler.handle(action, params) when the handler exists.
+
+- [ ] In skills/editor_godot/godot_plugin/bridge.gd around lines 53 to 70, handler instances are created but not freed; update _exit_tree (after line 78) to explicitly free each handler: for every handler variable (_core_handler, _resources_handler, _scripts_handler, _groups_handler, _console_handler, _settings_handler, _build_handler, _animation_handler, _audio_handler, _input_handler, _autoload_handler, _plugins_handler, _theme_handler, _shader_handler, _tilemap_handler, _physics_handler, _debug_handler) check if it exists and call queue_free() if it's a Node or free() if it's an Object/Reference (or use a safe pattern: if has_method("queue_free") call queue_free() elif has_method("free") call free()), then set the variable to null to release references and prevent leaks.
+
+- [ ] In .claude/hooks/session-capture.sh around lines 51 to 52 the script reads stdin into the variable `payload` which is never used; remove the unused read (delete the payload="$(cat)" line) or if the hook should capture stdin, replace the unused variable with the actual consumer (e.g., pass the captured data into the subsequent capture function/command or write it to a temp file and reference that) so the input is either consumed by downstream logic or not read at all.
+
+- [ ] In .claude/hooks/session-capture.sh around lines 96-97, the session/summarize call is currently run synchronously despite the comment stating "async, don't wait"; make it non-blocking by launching the command in the background and detaching outputs so it won't block or inherit the script's I/O (e.g., run the agentctl command with stdout/stderr redirected to /dev/null and append & or use nohup/disown) to ensure the script continues immediately without waiting for the summarization process.
+
+- [ ] In cmd/agentctl/cmd/run_integration_test.go around lines 85-86, there is a duplicated call to cmd.SetContext(config.WithContext(context.Background(), cfg)); remove the redundant second call (line 86) so SetContext is invoked only once with the configured context to avoid unnecessary duplication and potential side effects.
+
+- [ ] In cmd/agentctl/cmd/run_integration_test.go around lines 34 to 35, there is a duplicate cmd.SetContext(config.WithContext(context.Background(), cfg)) call; remove the redundant second call so the context is only set once (keep a single SetContext invocation with the desired config.WithContext(context.Background(), cfg) and delete the duplicate line).
+
+- [ ] In internal/agent/optimization/pattern_store.go around lines 204-214: the code builds a LIKE pattern using the raw context which breaks when context contains LIKE special characters (% _ \); implement an escapeLikePattern function that escapes backslashes first, then % and _, use "%" + escapeLikePattern(context) + "%" as the query parameter, and add "ESCAPE '\\'" to the SQL WHERE clause so the escaped characters are interpreted literally; ensure strings is imported and use the escaped pattern in the QueryContext call.
+
+- [ ] In internal/agent/optimization/pattern_store.go around lines 148 to 176, the current SELECT followed by UPDATE is vulnerable to a TOCTOU race (concurrent readers can read the same existingCount and overwrite each other); replace the read-modify-write with an atomic upsert or wrap the logic in a transaction with appropriate locking. Preferred fix: add a UNIQUE constraint on (agent_role, tool_sequence) in the patterns table, then perform a single INSERT ... ON CONFLICT (agent_role, tool_sequence) DO UPDATE that increments count and success_count and computes the running average for avg_duration_ms using the existing columns in the UPDATE clause (so the DB updates are atomic). Alternatively, if you cannot change the schema, wrap the SELECT/UPDATE in a serializable transaction or use SELECT ... FOR UPDATE to lock the row before computing/issuing the UPDATE.
+
+- [ ] In internal/agent/optimization/reflection.go around lines 673 to 687, the code divides by summary.TotalTrajectories when computing Frequency which can be zero if no trajectories were found; add a guard before the loops to handle the zero case (either return early or set Frequency to 0 for all PatternFrequency entries) and ensure you avoid division by zero by using a local denom := float64(summary.TotalTrajectories) and if denom == 0 { denom = 1 } or skip computing Frequency and set it to 0; update the loops to use denom (or the early return) so Frequency is never computed with a zero divisor.
+
+- [ ] In internal/agent/optimization/reflection.go around lines 597 to 603, truncateString currently slices by byte index which can break UTF-8; change it to work on runes: convert s to []rune, handle edge cases where maxLen <= 3 (return a string of maxLen dots or an empty string for non-positive maxLen), if len(runes) <= maxLen return original s, otherwise return string(runes[:maxLen-3]) + "..." so truncation counts runes not bytes and avoids splitting multi-byte characters.
+
+- [ ] In internal/agent/runtime/overseer_daemon.go around lines 155 to 164, the call to store.Send is wrapped in errspkg.Ignore which swallows failures and can leave requesters waiting; change this to capture the returned error and at minimum log it at warn/error level (include context like cmd.CmdID, destination msg.FromNS and the error), and optionally consider a retry or metric increment; ensure the new code assigns the error to a variable, checks if err != nil, logs the failure with descriptive fields, and only ignores the error after logging.
+
+- [ ] In internal/agent/runtime/overseer_daemon.go around lines 74 to 78, the Poll error is silently swallowed which hurts observability; modify RunOverseer to log the error using zerolog before continuing — either accept a logger parameter and call logger.Error().Err(err).Str("mailbox","actor:system:overseer").Msg("mailbox poll failed"), or if the context carries a logger use zerolog.Ctx(ctx).Error().Err(err).Str("mailbox","actor:system:overseer").Msg("mailbox poll failed"); keep behavior of continuing on error after logging.
+
+- [ ] internal/agent/tools/mail_tools.go around lines 339 to 342: the short declaration `if r, ok := args["reason"].(string); ok { reason = r }` shadows the method receiver `r *Registry`, causing incorrect behavior; change the inner variable name to avoid shadowing (e.g., `if s, ok := args["reason"].(string); ok { reason = s }` or use `val, ok := ...` and assign `reason = val`) so the receiver remains unshadowed and the reason string is correctly set.
+
+- [] Partial reservation failure leaves orphaned reservations.
+
+If store.Reserve fails for path N, paths 0 through N-1 remain reserved with no rollback. Consider either making this atomic (reserve all or none) or documenting this behavior clearly.
+
++	// First pass: validate all paths can be reserved (conflict check already done above)
++	// Second pass: reserve all
+     for _, p := range paths {
+         res := &agent.FileReservation{
+             WorkspaceID: r.config.WorkspaceID,
+             TaskID:      r.config.TaskID,
+             Path:        p,
+             Holder:      r.config.ActorID,
+             Mode:        mode,
+             Reason:      reason,
+             ExpiresAt:   expiresAt,
+         }
+         if err := store.Reserve(ctx, res); err != nil {
++			// Rollback: release already reserved paths
++			if len(reserved) > 0 {
++				_, _ = store.Release(ctx, r.config.WorkspaceID, r.config.ActorID, reserved)
++			}
+             return errorResult(fmt.Sprintf("reserve %q: %v", p, err)), nil
+         }
+         reserved = append(reserved, p)
+     }
+
+- [] In internal/storage/plans/parser.go around lines 176 to 194, the recursive walk uses currentPath := append(path, sec.Title) which can alias the backing array of path and corrupt sibling iterations; instead make an explicit copy before appending (e.g., newPath := append([]string(nil), path...) then newPath = append(newPath, sec.Title) and use newPath for SectionPath and recursion to avoid slice aliasing.
+
+- [] In internal/storage/plans/parser.go around lines 278 to 282, Detect currently mutates the Detector receiver by assigning opts.PlansDir to d.plansDir; change this to use a local variable (e.g., plansDir := d.plansDir; if opts.PlansDir != "" { plansDir = opts.PlansDir }) and use that local variable for all subsequent logic so the receiver state is not modified by the query method.
+
+- [] In skills/build_godot/main.go around lines 462 to 466, the fail function currently passes nil for the error hint; change fail to accept a hint string parameter and include it when constructing the envelope (replace the nil hint with the provided hint), update all fail(...) call sites in main() to pass appropriate actionable hints (e.g., "Check configuration and try again" for runtime errors, "Verify input JSON format and required fields" for argument/parsing errors), and adjust any other callers to provide contextual hints so error responses include data.hint.
+
+- [] In skills/build_godot/main.go around lines 125-139, the JSON response may emit "presets": null when parseExportPresets returns a nil slice; ensure stable JSON serialization by converting nil to an empty slice before emitting. Fix by checking if presets == nil and replacing it with an empty []ExportPreset{} (or initialize the slice inside parseExportPresets with presets := []ExportPreset{}), then build the result map using that non-nil slice so the emitted JSON contains [] instead of null.
+
+- [] In skills/editor_godot/godot_plugin/handlers/build.gd around lines 31-32 and 45-47, replace the non-standard error codes EEXPORT_NO_PRESETS and EEXPORT_PRESET_NOT_FOUND with the allowed standardized code ENOTFOUND and keep the descriptive messages intact; update both _error_response(...) calls to pass "ENOTFOUND" as the code so they conform to the allowed error-code list and leave the human-readable error strings unchanged.
+
+- [] In skills/editor_godot/godot_plugin/handlers/build.gd around lines 14 to 15, the handler returns an error using the non-allowed code "EACTION"; replace that code with the standardized "EARG" for invalid action/argument errors and ensure the call remains otherwise identical (i.e., _error_response("EARG", "BuildHandler: Unknown action: " + action, "")), updating any nearby comments or tests that reference the old code.
+
+- [] In skills/editor_godot/godot_plugin/handlers/debug.gd around lines 97 to 106, the _handle_debug_draw_disable function silently no-ops and returns success when EditorInterface.get_editor_viewport_3d(0) yields null; mirror the fix applied to the enable function by checking for a missing viewport and returning an error response instead of proceeding — if editor_viewport is null return _error_response({ "ok": false, "error": "No editor viewport available" }) (or the project's standard error payload) and only set debug_draw to Viewport.DEBUG_DRAW_DISABLED and return the success payload when a viewport exists.
+
+- [] In skills/editor_godot/godot_plugin/handlers/debug.gd around lines 85 to 94, the code silently no-ops if EditorInterface.get_editor_viewport_3d(0) returns null; detect the null case and return an error (or at minimum a warning) instead of reporting success. Modify the block to check if editor_viewport is null and then call _error_response(...) (or log a warning and return a response with "ok": false and an explanatory message) so callers know the debug draw was not applied; keep the existing success response only for the true branch where debug_draw is actually set.
+
+- [] In skills/editor_godot/godot_plugin/handlers/groups.gd around lines 38, 74, and 107, replace the nonstandard error code "ENODE_NOT_FOUND" with the standard "ENOTFOUND" in the _error_response calls so they conform to coding guidelines; update each occurrence (line 38, line 74, line 107) to pass "ENOTFOUND" as the first argument while leaving the error message and other parameters unchanged.
+
+- [] In skills/editor_godot/godot_plugin/handlers/groups.gd around line 19, the handler returns an invalid error code "EACTION"; replace it with the allowed code "EARG" for invalid action arguments and keep the existing message and empty payload intact (i.e., return _error_response("EARG", "GroupsHandler: Unknown action: " + action, "")). Ensure no other usages of "EACTION" remain in the file.
+
+- [] In skills/editor_godot/godot_plugin/handlers/input.gd around lines 18-19 (and also at lines 89-90), the handler is using non-approved error codes `EACTION` and `EACTION_NOT_FOUND`; replace these with the allowed codes: use `EARG` for unknown action errors and `ENOTFOUND` for missing input-action errors. Update the two occurrences accordingly so the calls to _error_response use `EARG` when the action is unknown and `ENOTFOUND` when an input action is not found.
+
+- [] In skills/embedding_queue/main.go around lines 87 to 93, the envelope.Error call uses the non-standard error code "ERROR"; change that to the allowed code "ERUNTIME" so the error envelope conforms to coding guidelines (i.e., replace the second argument "ERROR" with "ERUNTIME" in the envelope.Error invocation).
+
+- [] In skills/embedding_queue/main.go around lines 223 to 230, the code compares the returned error to embedding.ErrNotFound using == which fails if the error is wrapped; change the check to use errors.Is(err, embedding.ErrNotFound) and ensure the package imports "errors" (or add it to the import block) so wrapped sentinel errors are detected correctly; leave the rest of the error handling and messages intact.
+
+- [] In skills/lsp_gopls/main.go around lines 676-679, the fail function builds an error envelope without setting data.hint; update the envelope construction to include a data.hint entry with an actionable guidance string (e.g., suggest checking invocation parameters, configuration, or logs) by passing a non-nil data map containing "hint": "<concise actionable hint>" into envelope.Error, then write the envelope and exit as before.
+
+- [] In skills/lsp_gopls/main.go around lines 657 to 662, resolvePath currently returns absolute paths without passing them through policy.PathValidator which allows path traversal and escaping the workspace; update resolvePath to always call the policy.PathValidator (or the project's path validation function) to validate and canonicalize the provided path (whether absolute or relative), ensure it is anchored inside the workspace (reject or return an error if validation fails), and for relative paths join with workspace before/after validation per the validator's API so no unvalidated absolute path is used.
+
+- [] In skills/lsp_gopls/main_test.go around lines 366 to 371, the code does a single-value type assertion for data["call_hierarchy"] and then checks for nil which can panic; change to a two-value type assertion like ch, ok := data["call_hierarchy"].(map[string]any) and then if !ok || ch == nil { t.Fatal("expected call_hierarchy, got nil or wrong type") } so you safely verify both type and nil before using ch.
+
+- [] In skills/lsp_gopls/main_test.go around lines 313 to 322, the code uses a single-value type assertion def := data["definition"].(map[string]any) then checks def == nil which is redundant and can panic if data["definition"] is nil; change to a two-value assertion like def, ok := data["definition"].(map[string]any) and if !ok || def == nil fail the test (t.Fatal) with a clear message, then proceed to access def["location"] safely and validate the line field.
+
+- [] In skills/lsp_tsserver/main.go around lines 551 to 600, the readResponse loop blocks on c.stdout.ReadString and never checks for context cancellation; change the function to accept a context (e.g., readResponse(ctx context.Context, expectedID int)) and run the existing blocking read logic in a dedicated goroutine that sends the parsed result or error on a buffered channel, then in the parent select on either ctx.Done() (return ctx.Err()) or the response channel; ensure the goroutine sends a single result and returns so it doesn't leak, and propagate any LSP error or unmarshalling result back to the caller as before.
+
+- [] In skills/lsp_tsserver/main.go around lines 288-294, Close() currently sends shutdown/exit without any timeout and directly calls cmd.Wait(), which can block forever; change it to perform shutdown with a context timeout (e.g., 5-10s) so sendRequest/notification are bounded, then close stdin, and wait for the process using a goroutine + select on a done channel and a timeout; if the timeout fires, forcefully kill the process (cmd.Process.Kill()) and return a timeout/kill error, otherwise return the cmd.Wait() result; ensure all errors from closing stdin and killing the process are captured and returned/wrapped.
+
+- [] recordStop fallback mode doesn't use device serial.
+
+When falling back to pkill, the command uses adb shell pkill without the -s serial flag, which could affect wrong devices if multiple emulators are connected.
+
+Store the serial along with the PID and remote path, then use it in the fallback:
+
++const androidRecordSerialFile = "/tmp/agentctl_android_record_serial.txt"
+
+ func recordStop(ctx context.Context, rc *runner.RunnerContext) error {
++	serial := ""
++	if serialData, err := os.ReadFile(androidRecordSerialFile); err == nil {
++		serial = strings.TrimSpace(string(serialData))
++		os.Remove(androidRecordSerialFile)
++	}
++
+     // ...
+     if err != nil {
+         // Fallback to pkill if no PID file
+-		cmd := exec.CommandContext(ctx, "adb", "shell", "pkill", "-INT", "screenrecord")
++		cmd := adbCommand(ctx, serial, "shell", "pkill", "-INT", "screenrecord")
+         errs.Ignore(cmd.Run(), "pkill screenrecord fallback")
+
+- [] In skills/mobile_android/main.go around lines 997-1001, there's a race where the goroutine unconditionally removes the PID file after cmd.Wait() while recordStop may concurrently read it; fix by synchronizing PID-file access: either use a file lock (flock) or a package-level mutex that both recordStart/recordStop and this goroutine acquire before reading/removing the PID file, or alternatively have the goroutine verify the file contains the same PID as cmd.Process.Pid before removing it; ensure both code paths use the same synchronization so recordStop never reads a stale/missing PID.
+
+- [] In workflows/lsp-analysis.yaml around lines 65 to 73, remove the unsupported "optional: true" keys on output parameters (lines 68 and 72) and replace them with a conditional/valueFrom pattern or guarded execution: change the outputs to compute values via valueFrom using a conditional expression that falls back to a safe default when the referenced step output is missing (e.g., use a ternary-like expression checking the step output != ''), or ensure the producing step is guarded by a when clause so downstream consumers never reference a missing value; also add downstream input defaults where needed so references to these outputs don’t fail.
+
+- [] In workflows/lsp-analysis.yaml around lines 29 to 33, the "symbols" step runs but its results are never consumed; either remove this step to avoid wasted execution or add its result to the workflow outputs (or pass it into downstream steps that need it). If removing, delete the entire "id: symbols" block; if keeping, expose its output by referencing the step id in the workflow outputs or wiring its output into subsequent steps' inputs so the produced symbols data is actually used.
+
+- [] Potential JSON injection via unescaped $file_path.
+
+If file_path contains characters like ", \, or newlines, the JSON will be malformed or allow injection. Use jq to safely construct the input JSON.
+
+-result=$("$AGENTCTL_BIN" run code/complexity --input "{\"path\":\"$file_path\",\"threshold\":$THRESHOLD,\"analysis_mode\":\"hotspots\",\"max_results\":5}" 2>/dev/null) || {
++input_json=$(jq -nc --arg path "$file_path" --argjson threshold "$THRESHOLD" '{
++  path: $path,
++  threshold: $threshold,
++  analysis_mode: "hotspots",
++  max_results: 5
++}')
++result=$("$AGENTCTL_BIN" run code/complexity --input "$input_json" 2>/dev/null) ||
+
+- [] In .claude/hooks/live-index.sh around lines 91-93, the file_path is interpolated directly into a JSON string which can break or be exploited if the path contains quotes, backslashes, or other special characters; instead construct the JSON safely (e.g., use jq or a safe JSON builder) so file_path is passed as a proper JSON string and embed_queue as a JSON value, then pass that constructed JSON to the --input argument (or via stdin/--input-file) to ensure correct escaping and prevent injection.
+
+- [] In .claude/hooks/session-save.sh around lines 74-75, the script extracts message=$(printf '%s' "$result" | jq -r '.data.message // "Session saved"') but never uses it; either remove that extraction line to eliminate the unused variable or log the message to stderr for observability (e.g., echo "Session saved: $message" >&2) — pick one approach and update the script accordingly so there are no unused variables left.
+
+- [] In .claude/hooks/smart-grep.sh around lines 52 to 55, the JSON payload is built by directly interpolating $pattern and $search_path into a string which allows special characters to break the JSON or enable command injection; change the code to build the JSON safely (do not inline variables into a literal JSON string). Use a safe JSON builder such as jq (or an equivalent method) to construct the payload with --arg/--argjson so pattern and path are properly escaped, pipe that JSON to the agentctl command (or pass it via stdin) and then capture its output into result while preserving the existing error handling.
+
+- [] Potential JSON injection via unescaped $file_path.
+
+Same issue as in complexity-warning.sh. Use jq to safely construct the JSON input.
+
+-result=$("$AGENTCTL_BIN" run code/symbols --input "{\"path\":\"$file_path\",\"include_private\":$INCLUDE_PRIVATE,\"max_results\":50}" 2>/dev/null) || {
++input_json=$(jq -nc --arg path "$file_path" --argjson include_private "$INCLUDE_PRIVATE" '{
++  path: $path,
++  include_private: $include_private,
++  max_results: 50
++}')
++result=$("$AGENTCTL_BIN" run code/symbols --input "$input_json" 2>/dev/null) || {
+
+- [] In cmd/agentctl/cmd/agent.go around lines 807-811, the code currently ignores errors returned by store.List during reply polling; update this to surface failures by logging the error (use the existing logger or add a logger parameter) and implement simple retry/backoff or return/stop after repeated failures (e.g., increment a failure counter and exit/return or sleep with backoff when threshold exceeded). Ensure the logged message includes context (callerNS and the error) so persistent storage issues are visible.
+
+- [] In cmd/agentctl/cmd/run.go around lines 90 to 92, the async branch returns executor.SubmitAsync(job) directly which bypasses the timeout handling used for sync submissions; modify the async path to enforce the same timeout envelope by either calling SubmitAsync with a context that has the configured timeout or by checking the returned error and converting timeout-related errors into the structured timeout envelope before returning, matching the existing sync-path behavior and error shape.
+
+- [] In cmd/agentctl/cmd/run_test.go around lines 31 to 41, the helper uses out := env[:0] which reuses env's backing array and mutates the caller's slice; change it to allocate a new slice (e.g. out := make([]string, 0, len(env))) and append non-matching entries into that new slice, then return append(out, prefix+value) so the original env is not mutated.
+
+- [] In cmd/agentctl/cmd/workflow.go around lines 255-256 (and also apply the same change at 274-275 and 295-296), the code uses fmt.Println() which writes directly to os.Stdout and bypasses the Cobra command output abstraction; replace those fmt.Println() calls with fmt.Fprintln(cmd.OutOrStdout(), ...) (or fmt.Fprintln(cmd.OutOrStdout()) for a blank line) so output is routed through the command's OutOrStdout for consistent testability and output handling.
+
+- [] In cmd/agentctl_viewer/robot.go around lines 46 to 78, the loop currently clears the accumulated jobs on every iteration with `jobs = jobs[:0]`, which causes only the last batch to be returned and discards earlier matches; remove or move that reset so it only runs once before the loop (or only reset when starting a fresh query), and instead append each batch's matching summaries into jobs across iterations while still enforcing the global limit and existing break conditions; ensure batch doubling logic and maxBatch check remain unchanged.
+
+- [] In cmd/agentctl_viewer/sqlite_view.go around lines 83 to 98, the current validation uses filepath.Clean and strings.HasPrefix which can be bypassed by symlinks; resolve this by converting both agentctlDir and dbPath to absolute paths and evaluating symlinks (use filepath.Abs + filepath.EvalSymlinks) and then verify that the resolved dbPath is inside the resolved agentctlDir (use filepath.Rel and ensure the relative path does not start with ".." and has no error); return an error if any resolution fails or if dbPath is outside agentctlDir.
+
+- [] In cmd/agentctl_viewer/util.go around lines 88 to 101, the switch handling job states omits the "canceled" case so canceled jobs fall through to the default unstyled branch; add a case for "canceled" that returns a lipgloss.NewStyle() with an appropriate foreground color (e.g., a muted gray like lipgloss.Color("244") to visually distinguish canceled jobs), keeping the same return pattern and formatting as the other cases.
+
+- [] internal/agent/daemon/daemon.go around lines 244-254: the current logic logs a warning when dedupeStore.IsProcessed fails but then proceeds to process the message, risking duplicates; change the flow so that on error from IsProcessed you log the error and take a conservative approach by treating the message as already processed — ack the message in mailboxStore and continue (optionally emit a metric for dedupe check failures) so temporary dedupe store outages do not lead to reprocessing.
+
+- [] In internal/agent/optimization/bootstrap.go around lines 352 to 358, the current truncate uses byte-slicing which can split multi-byte UTF-8 characters; convert the string to a rune slice and base the truncation on rune count instead (e.g., if maxLen <= 3 return a string of maxLen dots, otherwise if rune count <= maxLen return original, else return string(runes[:maxLen-3]) + "..."), ensuring no negative indexes and preserving valid UTF-8.
+
+- [] In internal/agent/optimization/feedback.go around lines 84–88, the current logic unconditionally sets outcome.Success = true when fb.Rating >= 4 which can override an explicitly recorded failure; change this so we do not override explicit outcomes—either remove the inference entirely, or add/consult an explicit "SuccessSet" (or similar) boolean on outcome and only set outcome.Success = true when SuccessSet is false (and then mark SuccessSet = true); update any callers/docs accordingly.
+
+- [] In internal/agent/optimization/mcp_collector.go around lines 272 to 288, the current rune arithmetic used to build the count string only works for two-digit counts and produces invalid characters for counts ≥ 100; replace the manual per-digit rune construction with a proper integer-to-string conversion (e.g., strconv.Itoa or fmt.Sprintf("%d", p.Count)) and build the final message using that string so counts of any size are rendered correctly; ensure you import strconv (or fmt) if not already.
+
+- [] internal/agent/optimization/prompt_optimizer.go around lines 304-318: the current loop splits the original text separately for each delimiter, producing overlapping/duplicate phrases; change to split the text once on any of the delimiters (e.g., use strings.FieldsFunc or a regex that treats . , ! ? as separators), trim each resulting part, apply the length filters, and collect unique phrases (use a map to deduplicate) before returning the slice.
+
+- [] In internal/agent/runtime/runtime.go around lines 281 to 284, the call to NewAnthropicLLMFromConfig uses context.Background(), which prevents propagation of the caller's cancellation/timeouts; replace context.Background() with the enclosing function's context (e.g., ctx) so the caller's context is passed through, allowing proper cancellation and timeout handling during LLM initialization.
+
+- [] In internal/agent/tools/mail_tools_test.go around lines 105 to 111, the direct type assertions parsed["count"].(float64) can panic if the key is missing or has the wrong type; change them to the comma-ok two-value form to check presence and type (e.g., val, ok := parsed["count"]; f, ok2 := val.(float64)) and add require.True/require.NotNil checks before converting to int so the test fails cleanly with a helpful message instead of panicking; update both assertions (for unread_only true and false) accordingly.
+
+- [] In internal/agent/tools/todo_tools.go around lines 335 to 343, the error returned from store.Get(ctx, parentID) is currently ignored; change the logic to check if err != nil and handle it: if the error indicates the parent was not found return an appropriate errorResult stating parent not found, otherwise return an errorResult with the actual error (e.g., "get parent task: %v"); only proceed to append the child ID and call store.Update when store.Get succeeds. Ensure you use the store's canonical way to detect not-found (errors.Is/typed error or store helper) when deciding which message to return.
+
+- [] Priority 0 (PriorityLow) cannot be explicitly set.
+
+Since PriorityLow = 0, the check if priority == 0 will override an intentional low-priority request with PriorityNormal. Consider using a pointer or a sentinel value.
+
+Option 1: Use a pointer in EnqueueRequest:
+
+// In types.go
+Priority *JobPriority `json:"priority,omitempty"`
+Option 2: Change PriorityLow to a non-zero value:
+
+PriorityLow    JobPriority = 10
+PriorityNormal JobPriority = 50
+PriorityHigh   JobPriority = 100
+Option 3: Check if priority was explicitly set (requires schema change or separate field).
+
+
+
+- [] In internal/storage/sessions/store.go around lines 183 to 191, the tag LIKE filter currently interpolates raw user tags which allows LIKE-pattern injection; escape SQL LIKE wildcards and the quote character before building the pattern and use an ESCAPE clause. Replace the current loop to escape % -> \%, _ -> \_, and " -> \" (use strings.NewReplacer), append the pattern "%\""+escapedTag+"\"%" to args, and change the condition to use "tags LIKE ? ESCAPE '\\'" so the backslash-escaped wildcards are honored by the DB.
+
+- [] in jobs.go Replace fmt.Fprintf stderr logging with Zerloog structured logging.
+
+- [] In internal/workflow/loader_test.go around lines 229 to 230, the calls to os.WriteFile ignore returned errors; update both calls to check the error and fail the test if non-nil (e.g., if err := os.WriteFile(...); err != nil { t.Fatalf("write file: %v", err) }) so test failures surface instead of silently continuing.
+
+- [] In internal/workflow/types.go around lines 118-121 (and similarly at 133-136) the struct field Duration is declared as time.Duration but tagged json:"duration_ms", which is misleading because time.Duration marshals as nanoseconds; change the representation to explicitly expose milliseconds: replace the time.Duration JSON field with an int64 field named DurationMs (json:"duration_ms") and when producing the response set DurationMs = originalDuration.Milliseconds(); alternatively, define a custom type (e.g., MillisDuration) with MarshalJSON/UnmarshalJSON that serializes/deserializes as milliseconds and use that type for the field—apply the same change at the other location (lines 133-136) to keep consistency.
+
+- [] In skills/build_godot/skill.yaml around lines 12 to 14, the io section is missing the required network: none declaration; update the io block to include a network: none entry (e.g., add a new line "network: none" under io) so the manifest meets validation requirements, and ensure indentation matches the existing YAML format.
+
+- [] In skills/code_incremental_index/main.go around lines 400 to 417, detectLanguage currently returns "gdscript" for ".gd" files but extractSymbols doesn't support that and will error; remove the ".gd" case so detectLanguage returns "" for .gd files (or otherwise treat unknown extensions as unsupported), and update any related callers/tests to expect an empty language for .gd files so extraction isn't attempted.
+
+- [] In skills/code_swe_grep/main.go around lines 660 to 686, the brace-counting loop currently treats every '{' and '}' equally and therefore miscounts braces that appear inside string literals, character literals, line comments (//) and block comments (/* ... */); update the function to skip braces that occur inside these contexts by adding a simple lexer state: track whether you're inside a single-quote char, double-quote string, backtick/raw string, or a block or line comment, honor escape characters (e.g., backslash) so escaped quotes don't flip state, treat '//' as entering a line comment until end-of-line and '/*'...'*/' as a block comment that ignores braces, and only increment/decrement braceCount when not in any of those states; alternatively, if you prefer not to implement this now, add a clear comment above the function documenting this limitation and that the current implementation is a heuristic fallback.
+
+- [] In skills/code_universal_swe_grep/main.go around lines 300 to 311, the code passes the entire input JSON via a --input command-line argument which can exceed OS argument length limits; instead either (A) pipe the JSON via stdin by removing the --input flag, set cmd.Stdin to a reader over inputJSON, and ensure the swe_grep skill accepts stdin, or (B) create a secure temporary file, write inputJSON to it, pass the temp file path as the --input argument, and delete the temp file after the command completes; implement one of these approaches and add error handling for write/cleanup and verification that the child process reads input from the chosen method.
+
+- [] In skills/code_universal_swe_grep/main_test.go around lines 163-170 the test named TestFindAgentctlBin_EnvOverride does not exercise the AGENTCTL_BIN environment override it claims to; update the test to actually verify override behavior by setting os.Setenv("AGENTCTL_BIN", "/tmp/fake-agentctl") (capture previous value with os.LookupEnv), call findAgentctlBin(), assert the returned path equals the override, then restore or unset the environment variable in a defer to avoid side effects; alternatively, if you prefer not to modify environment, rename the test to TestFindAgentctlBin_Basic to reflect that it only checks non-empty return.
+
+- [] In skills/editor_godot/godot_plugin/handlers/physics.gd around lines 16-17, the handler returns an error using the non-allowed code "EACTION"; replace it with the standardized allowed error code "EARG" so the call becomes _error_response("EARG", "PhysicsHandler: Unknown action: " + action, "") ensuring the error uses the approved code for unknown/invalid action arguments.
+
+- [] In skills/editor_godot/godot_plugin/handlers/plugins.gd around lines 18-19 (and similarly at 59-60 and 89-91), the handler returns non-standard error codes "EACTION" and "EPLUGIN_NOT_FOUND"; replace those with allowed codes per guidelines: use "EARG" for unknown/invalid action errors and "ENOTFOUND" for missing plugin errors, updating the _error_response calls' first argument accordingly while keeping existing message and payload unchanged.
+
+- [] In skills/editor_godot/godot_plugin/handlers/scripts.gd around lines 94-102, the code inserts method_args directly into generated GDScript which allows injection via newlines or special characters; add a validation step before using method_args: implement a helper function _is_valid_method_args(args: String) that rejects newlines, comment markers, and only permits a restricted charset (letters, digits, underscores, colons, commas, spaces, equals, brackets, dots) or a strict regex for GDScript parameter syntax, then call this validator after extracting method_args and before appending to content; if validation fails, either set method_args to an empty string or skip emitting the method and log/raise an error so untrusted input cannot inject arbitrary code.
+
+- [] In skills/editor_godot/godot_plugin/handlers/theme.gd around lines 149–154, the save only runs when theme_path is non-empty so edits to ThemeDB.get_project_theme() never persist; update the logic to handle empty theme_path by resolving and saving to the project theme location (e.g. obtain the project theme resource path or a default project theme file via ThemeDB/ProjectSettings or a ThemeDB.get_project_theme_path() helper) and call ResourceSaver.save(theme, resolved_path), otherwise return an explicit error or log that saving is not possible if no path can be resolved.
+
+- [] In skills/editor_godot/handlers/handlers.go around lines 203 to 210, the comment claims the function "returns a sorted list of all registered actions" but the implementation does not sort the slice; either update the comment to say it returns an unsorted list or add sorting here. Fix by choosing one: (a) change the comment to "returns a list of all registered actions" (no code change), or (b) import sort, call sort.Strings(actions) before returning so the function itself returns a sorted slice (remove any redundant sorting at call sites to avoid double work).
+
+- [] In skills/fs_apply_edit/main.go around lines 339 to 349, the closure is mutating result.Replacements to 0 during ReplaceAllStringFunc so the returned result.Replacements is always 0 for single-match edits; fix by tracking the replacement count in a local variable (e.g., count := 0; increment it inside the closure and do not modify result.Replacements there) or by performing the replacement first and then setting result.Replacements = 1 (or = count) after ReplaceAllStringFunc returns, leaving result.Replacements untouched during iteration so the final returned struct contains the correct number of replacements.
+
+- [] Bug: toolCounts is never populated, causing analyzeToolUsage to always return an empty slice.
+
+The function creates toolCounts, toolSuccess, and toolTotal maps but only populates toolTotal and toolSuccess. The iteration on line 170 loops over toolCounts, which remains empty.
+
+ func analyzeToolUsage(trajs []trajectory.Trajectory) []map[string]any {
+     // Count tool usage from trajectories
+     toolCounts := make(map[string]int)
+     toolSuccess := make(map[string]int)
+-	toolTotal := make(map[string]int)
+ 
+     for _, traj := range trajs {
+         if traj.Outcome == nil {
+             continue
+         }
+         // Note: This is simplified - actual implementation would need to
+         // query events for each trajectory to get tool calls
+-		toolTotal["all"]++
++		toolCounts["all"]++
+         if traj.Outcome.Success {
+             toolSuccess["all"]++
+         }
+     }
+ 
+     // Convert to output format
+     var result []map[string]any
+     for tool, count := range toolCounts {
+         successRate := 0.0
+-		if toolTotal[tool] > 0 {
+-			successRate = float64(toolSuccess[tool]) / float64(toolTotal[tool])
++		if count > 0 {
++			successRate = float64(toolSuccess[tool]) / float64(count)
+         }
+         result = append(result, map[string]any{
+             "tool":         tool,
+             "count":        count,
+             "success_rate": successRate,
+         })
+     }
+ 
+     return result
+ }
+
+
+- [] In skills/session_save/main.go around lines 80-81, the call uses non-standard error code "DECODE_ERROR"; replace it with a standard code per guidelines (use "EPARSE" for malformed input parsing errors or "EARG" if the issue is an invalid argument), and similarly update all other occurrences in this file: change "STORE_ERROR" to "EIO" (or "ERUNTIME" if it's a runtime storage failure), "ENCODE_ERROR" to "ERUNTIME", and "SAVE_ERROR" to "EIO"; keep the existing wrapped fmt.Errorf(...) message unchanged and only swap the error-code string literals so they conform to the allowed codes.
+
+- [] In workflows/code-review.yaml around lines 28 to 34, the workflow's complexity threshold is set to 10 which conflicts with the hook default of 15 in .claude/hooks/complexity-warning.sh; update the workflow to use the same threshold as the hook (15) or document the intentional difference. Change the threshold value in this workflow to 15 to align behavior, or add a comment in the workflow explaining why the workflow uses 10 while the hook uses 15, and ensure any README or developer docs reflect the chosen authoritative threshold.
+
+- [] In cmd/agentctl/cmd/overseer.go around lines 16 to 27, add a --dry-run boolean flag (registered on overseerRunCmd via Cobra and bound to Viper) and wire it into the RunE body so that when dry-run is true the command validates configuration and prints what would be done (storage root, poll interval, etc.) but does not call runtime.RunOverseer; otherwise proceed to call runtime.RunOverseer as before. Ensure the flag is added in init() or command setup, bound to viper (e.g., viper.BindPFlag), and that RunE checks viper.GetBool("dry-run") (or a local var) to perform the non-mutating dry-run path and return nil after outputting the planned actions.
+
+- [] In cmd/agentctl/cmd/quotas.go around lines 96,104-106,112,142,162,165,196,203-205,233,240,269,276 the error responses call writeErrorEnvelope without a data.hint, so responses lack actionable guidance; change writeErrorEnvelope to accept an optional hint string (or a variadic/opts param) and include it as data.hint in the returned envelope, then update each writeErrorEnvelope call at the listed lines to pass a contextual hint (e.g. line 96: "Verify storage root path is accessible and has correct permissions"; lines 104-106/203-205: "Run 'agentctl quotas list' to see available namespaces, or use 'agentctl quotas set' to create quotas"; lines 142/162/165/196/233/240/269/276: provide similarly specific guidance per failure), and run/update tests to ensure the JSON envelope now contains data.hint where provided.
+
+- [] In internal/retrieval/semantic_search.go around lines 14 to 18, the function returns nil when g.embedProvider is nil which causes JSON serialization to produce null; change the return to an empty slice (e.g., return []Candidate{} , nil) so callers and JSON marshalling get [] instead of null; make the single-line replacement where the current nil slice is returned.
+
+- [] In internal/workflow/dag.go around lines 246 to 250, the computeBatches function returns nil when d.order is empty which leads to JSON nulls; change the early return to return an empty slice literal ([][]string{}) instead of nil so JSON serializes as an empty array and update the return site accordingly.
+
+- [] In internal/workflow/scheduler.go around lines 398 to 402, when step.Input is nil the function currently returns nil which can break JSON serialization; change the return to an empty map (map[string]any{}) and nil error so callers receive a stable empty object for serialization.
+
+- [] In skills/optimize_weights/main.go around lines 133-137, the error envelope built by envelope.Error lacks a data.hint field; update the call to include a data map with a "hint" key containing an actionable suggestion (e.g., describe what likely went wrong and next steps to resolve) while keeping the existing error message, e.g. replace the nil data arg with a map[string]interface{}{"hint": "<actionable hint here>"} so the emitted error includes data.hint and then write it to stdout as before.
+
+- [] In skills/trajectory_export/main.go around line 323, the call to writeEpisodesToCAS discards the third return value (sizeBytes); update the writeEpisodesToCAS function signature to remove that unused return, adjust its return statements to return only (count, digest, error) where applicable, and update its callers (including the call at line 323) to accept two values plus error (count, digest, err). Also update any internal error return paths (around lines 425, 428 and the final return at 430) to match the new signature so no unused values remain.

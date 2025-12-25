@@ -2,9 +2,13 @@ package runservice
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 )
+
+// DefaultTimeout is the default execution timeout if none is specified.
+const DefaultTimeout = 2 * time.Minute
 
 // RunOptions captures the configurable behavior for a run invocation.
 type RunOptions struct {
@@ -36,6 +40,9 @@ type RunOptions struct {
 
 	// RememberSummary is an optional summary for the memory entry.
 	RememberSummary string
+
+	// Timeout is the maximum duration for the execution. Zero means use DefaultTimeout.
+	Timeout time.Duration
 }
 
 // Validate checks if the RunOptions are valid and returns an error if not.

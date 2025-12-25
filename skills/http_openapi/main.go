@@ -59,7 +59,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("http/openapi", "ECONFIG", err)
+		fail("http/openapi", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -84,10 +84,16 @@ func main() {
 func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	// Validate input
 	if in.Spec == "" {
-		return fmt.Errorf("spec is required")
+		return &client.Error{
+			Code:    "EARG",
+			Message: "spec is required (provide a spec path, URL, or memory: reference)",
+		}
 	}
 	if in.OperationID == "" {
-		return fmt.Errorf("operationId is required")
+		return &client.Error{
+			Code:    "EARG",
+			Message: "operationId is required (use 'agentctl openapi describe <spec>' to list available operations)",
+		}
 	}
 
 	// Initialize memory store if memory: references are used
@@ -102,7 +108,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 				Err:     err,
 			}
 		}
-		defer errs.Ignore(memStore.Close(), "close memory store")
+		defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 	}
 
 	// Load OpenAPI spec
@@ -300,7 +306,10 @@ func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *h
 
 	// Aggregate all responses
 	if len(allResponses) == 0 {
-		return fmt.Errorf("no pages fetched")
+		return &client.Error{
+			Code:    "EPAGINATION",
+			Message: "no pages fetched (check page size/offset or upstream pagination response)",
+		}
 	}
 
 	// Get pagination summary
@@ -435,8 +444,8 @@ func emitResponse(rc *runner.RunnerContext, resp *client.Response, pagingSummary
 	// If response has artifact (large response), include digest and preview
 	if resp.Artifact != nil {
 		data["artifact"] = resp.Digest
-		data["kind"] = resp.ContentType
-		data["size_bytes"] = resp.Size
+		summary["kind"] = resp.ContentType
+		summary["size_bytes"] = resp.Size
 
 		if resp.RecordCount > 0 {
 			summary["record_count"] = resp.RecordCount

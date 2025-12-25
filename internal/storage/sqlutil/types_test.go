@@ -10,7 +10,7 @@ import (
 func TestJSONSlice_Scan(t *testing.T) {
 	tests := []struct {
 		name    string
-		src     interface{}
+		src     any
 		want    JSONSlice
 		wantErr bool
 	}{
@@ -107,7 +107,7 @@ func TestJSONSlice_Value(t *testing.T) {
 func TestTimestamp_Scan(t *testing.T) {
 	tests := []struct {
 		name    string
-		src     interface{}
+		src     any
 		want    Timestamp
 		wantErr bool
 	}{

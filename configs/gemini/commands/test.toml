@@ -1,0 +1,13 @@
+# Test generation command
+description = "Generate tests for code"
+
+prompt = """Generate comprehensive tests for the specified code:
+
+1. **Happy Path**: Normal expected behavior
+2. **Edge Cases**: Boundaries, empty inputs, limits
+3. **Error Cases**: Invalid inputs, failures
+4. **Integration**: Interactions with dependencies
+
+Target: {{args}}
+
+Follow existing test patterns in the codebase. Use table-driven tests for Go."""

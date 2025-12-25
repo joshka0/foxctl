@@ -33,7 +33,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("fs/write", "ECONFIG", err)
+		fail("fs/write", "ERUNTIME", err)
 	}
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
 	if err != nil {
@@ -85,7 +85,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	// Perform write operation
-	bytesWritten, checksum, err := performWrite(targetPath, content, in.Mode, perm)
+	bytesWritten, _, err := performWrite(targetPath, content, in.Mode, perm)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"mode":          in.Mode,
 		"bytes_written": bytesWritten,
 		"file_size":     fileSize,
-		"sha256":        checksum,
 		"permissions":   fmt.Sprintf("%04o", perm),
 	}
 

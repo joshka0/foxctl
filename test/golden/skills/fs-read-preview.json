@@ -5,15 +5,12 @@
   "data": {
     "path": "/workspace/agentctl/docs/spec/core_profile_v1.md",
     "size_bytes": 2048,
-    "sha256": "sha256:5b9d6c0985d6fa334c6760b0a2345678ef90abcd1234fedcba567890abcdef12",
     "mode": "-rw-r--r--",
     "mod_time": "2025-11-08T10:05:00Z",
     "max_preview_bytes": 4096,
     "preview_bytes": 512,
     "binary": false,
     "artifact": "sha256:5b9d6c0985d6fa334c6760b0a2345678ef90abcd1234fedcba567890abcdef12",
-    "artifact_kind": "text/markdown; charset=utf-8",
-    "artifact_size_bytes": 2048,
     "truncated": false,
     "preview": "# Core Profile v1\nagentctl emits deterministic JSON envelopes...",
     "preview_line_count": 2,
@@ -22,8 +19,7 @@
   "meta": {
     "ts": "2025-11-12T10:29:45Z",
     "source": "run",
-    "runner": "exec",
-    "cas_digest": "sha256:5b9d6c0985d6fa334c6760b0a2345678ef90abcd1234fedcba567890abcdef12"
+    "runner": "exec"
   },
   "error": {}
 }

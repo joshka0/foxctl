@@ -99,11 +99,10 @@ reusing existing path validation and CAS rules.
   - `data.summary` with `files_considered`, `files_relevant`,
     `snippets_emitted`.
   - `data.snippets_inline[]` when total output is small enough.
-  - Optional `data.artifact`, `data.artifact_kind`, `data.artifact_size_bytes`
-    when results are large (NDJSON in CAS).
+  - Optional `data.artifact` when results are large (NDJSON in CAS).
 - [x] Use `skillslib.RunnerContext.Emit()` to ensure:
   - `data.artifact` is a `sha256:<hex>` digest.
-  - `meta.cas_digest` is auto-populated and matches `data.artifact`.
+  - `meta.cas_digest` is optional; if set it MUST match `data.artifact`.
   - Envelopes pass `protocol.Validate` and existing golden CAS rules.
 - [ ] Document NDJSON artifact format (without introducing new wire types):
   - One snippet per line with `file`, optional `symbol_id`, `start_line`,
@@ -190,7 +189,7 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
   - Example NDJSON snippets artifact under `test/golden/swe_grep/` (or similar).
 - [ ] Extend `test/golden/golden_test.go` (or a sibling) to validate:
   - Envelopes conform to `core_profile_v1`.
-  - `meta.cas_digest` == `data.artifact` when present.
+  - If `meta.cas_digest` is set, it matches `data.artifact`.
   - NDJSON artifact lines parse as expected snippet objects.
 
 ### D4. Integration tests (query → candidates → SWE Grep)

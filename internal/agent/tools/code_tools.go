@@ -641,7 +641,7 @@ func tokenizeSymbolQuery(s string) []string {
 	}
 	for _, r := range s {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '.' {
-			_, _ = b.WriteRune(r)
+			b.WriteRune(r)
 			continue
 		}
 		flush()
@@ -886,9 +886,6 @@ func (r *Registry) codeSweGrep(ctx context.Context, args map[string]any) (*model
 	// Include CAS artifact reference if present
 	if artifact, ok := data["artifact"].(string); ok {
 		result["cas_artifact"] = artifact
-	}
-	if artifactKind, ok := data["artifact_kind"].(string); ok {
-		result["cas_artifact_kind"] = artifactKind
 	}
 
 	return successResult(result), nil

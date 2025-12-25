@@ -1,0 +1,14 @@
+# Code explanation command
+description = "Explain how code works in detail"
+
+prompt = """Explain the specified code:
+
+1. **Purpose**: What problem does this solve?
+2. **Flow**: Step-by-step execution path
+3. **Data**: Key data structures and transformations
+4. **Interfaces**: How it interacts with other code
+5. **Edge Cases**: Special handling and error conditions
+
+Target: {{args}}
+
+Use clear language. Reference specific lines."""

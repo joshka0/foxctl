@@ -29,8 +29,8 @@ const maxBufferPoolSize = 1 << 20 // 1MB
 //  3. Use buffer for WASM module output
 //  4. Check capacity before returning to pool (prevents memory bloat)
 var bufferPool = sync.Pool{
-	New: func() interface{} {
-		return new(bytes.Buffer)
+	New: func() any {
+		return &bytes.Buffer{}
 	},
 }
 

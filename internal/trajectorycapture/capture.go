@@ -13,6 +13,21 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+func extractArtifactDigest(data any) string {
+	if data == nil {
+		return ""
+	}
+	switch v := data.(type) {
+	case map[string]any:
+		if s, ok := v["artifact"].(string); ok {
+			return strings.TrimSpace(s)
+		}
+	case map[string]string:
+		return strings.TrimSpace(v["artifact"])
+	}
+	return ""
+}
+
 // StartOptions configures a new run capture.
 type StartOptions struct {
 	StorageRoot     string
@@ -311,11 +326,16 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 	}
 	dataInline = secrets.RedactMap(dataInline)
 
+	artifact := extractArtifactDigest(env.Data)
+	if artifact == "" {
+		artifact = strings.TrimSpace(env.Meta.CASDigest)
+	}
+
 	meta := &trajectory.EventMeta{
 		TraceID:   strings.TrimSpace(correlationID),
 		JobID:     strings.TrimSpace(jobID),
 		CreatedBy: "agentctl",
-		CASDigest: strings.TrimSpace(env.Meta.CASDigest),
+		CASDigest: artifact,
 	}
 	if c.taskHint != nil {
 		meta.TaskID = strings.TrimSpace(c.taskHint.TaskID)
@@ -329,11 +349,6 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 		if !containsString(c.traj.TaskIDs, tid) {
 			c.traj.TaskIDs = append(c.traj.TaskIDs, tid)
 		}
-	}
-
-	artifact := ""
-	if env.Meta.CASDigest != "" {
-		artifact = env.Meta.CASDigest
 	}
 
 	_, err := c.store.InsertEvent(ctx, trajectory.Event{

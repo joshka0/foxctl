@@ -58,9 +58,7 @@ func TestRunFsTree(t *testing.T) {
 	}
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout, work)
-	defer func() {
-		_ = rc.Close() //nolint:errcheck
-	}()
+	defer rc.Close()
 
 	in := input{
 		Path:     work,
@@ -116,9 +114,7 @@ func TestRunFsTreeList(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	rc := newTestRunnerContext(t, stdout, work)
-	defer func() {
-		_ = rc.Close() //nolint:errcheck
-	}()
+	defer rc.Close()
 
 	in := input{
 		Path:     work,

@@ -1,0 +1,101 @@
+package templates
+
+import "fmt"
+
+templ TasksList(tasks []TaskSummary, stats TaskStats) {
+	@Layout("Tasks", "/tasks") {
+		<div class="page-header">
+			<h1 class="page-title">Tasks</h1>
+		</div>
+		
+		<!-- Stats Cards -->
+		<div class="grid-4 mb-4">
+			<div class="stat-card">
+				<div class="stat-value" style="color: var(--warning);">{ fmt.Sprintf("%d", stats.Pending) }</div>
+				<div class="stat-label">Pending</div>
+			</div>
+			<div class="stat-card">
+				<div class="stat-value" style="color: var(--info);">{ fmt.Sprintf("%d", stats.InProgress) }</div>
+				<div class="stat-label">In Progress</div>
+			</div>
+			<div class="stat-card">
+				<div class="stat-value" style="color: var(--success);">{ fmt.Sprintf("%d", stats.Completed) }</div>
+				<div class="stat-label">Completed</div>
+			</div>
+			<div class="stat-card">
+				<div class="stat-value">{ fmt.Sprintf("%d", stats.Total) }</div>
+				<div class="stat-label">Total Tasks</div>
+			</div>
+		</div>
+		
+		<div id="tasks-content">
+			@TasksTable(tasks)
+		</div>
+	}
+}
+
+templ TasksTable(tasks []TaskSummary) {
+	if len(tasks) == 0 {
+		<div class="empty-state">
+			<p>No tasks found</p>
+			<p class="text-muted">Tasks appear when using the harness task management</p>
+		</div>
+	} else {
+		<div class="card" style="padding: 0; overflow: hidden;">
+			<table class="table">
+				<thead>
+					<tr>
+						<th style="width: 100px;">ID</th>
+						<th>Title</th>
+						<th style="width: 120px;">Status</th>
+						<th style="width: 120px;">Created</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, task := range tasks {
+						<tr style="cursor: default;">
+							<td class="mono">{ truncateID(task.TaskID) }</td>
+							<td>
+								<div style="font-weight: 500;">{ task.Title }</div>
+								if task.Description != "" {
+									<div class="text-muted" style="font-size: 0.8rem; margin-top: 0.25rem;">{ truncateString(task.Description, 80) }</div>
+								}
+								if task.Notes != "" && task.Status == "completed" {
+									<div style="font-size: 0.75rem; margin-top: 0.25rem; color: var(--success);">
+										<span style="opacity: 0.7;">Notes:</span> { truncateString(task.Notes, 60) }
+									</div>
+								}
+							</td>
+							<td>
+								@TaskStatus(task.Status)
+							</td>
+							<td class="text-muted" style="font-size: 0.8rem;">
+								{ formatRelativeTime(task.CreatedAt) }
+								if task.CompletedAt != "" {
+									<div style="color: var(--success); font-size: 0.75rem;">
+										✓ { formatRelativeTime(task.CompletedAt) }
+									</div>
+								}
+							</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ TaskStatus(status string) {
+	switch status {
+		case "pending":
+			<span class="chip chip-warning">⏳ Pending</span>
+		case "in_progress":
+			<span class="chip chip-info">⟳ In Progress</span>
+		case "completed":
+			<span class="chip chip-success">✓ Completed</span>
+		case "blocked":
+			<span class="chip chip-error">⛔ Blocked</span>
+		default:
+			<span class="chip chip-default">{ status }</span>
+	}
+}

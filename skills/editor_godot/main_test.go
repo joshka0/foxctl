@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/jkatigb/agentctl/skills/editor_godot/handlers"
 )
 
 func TestParseInput(t *testing.T) {
@@ -12,13 +14,13 @@ func TestParseInput(t *testing.T) {
 		name    string
 		input   string
 		wantErr bool
-		check   func(t *testing.T, in Input)
+		check   func(t *testing.T, in handlers.Input)
 	}{
 		{
 			name:    "valid ping action",
 			input:   `{"action": "ping"}`,
 			wantErr: false,
-			check: func(t *testing.T, in Input) {
+			check: func(t *testing.T, in handlers.Input) {
 				if in.Action != "ping" {
 					t.Errorf("expected action=ping, got %s", in.Action)
 				}
@@ -34,7 +36,7 @@ func TestParseInput(t *testing.T) {
 			name:    "valid scene_tree with options",
 			input:   `{"action": "scene_tree", "max_depth": 5, "max_nodes": 100}`,
 			wantErr: false,
-			check: func(t *testing.T, in Input) {
+			check: func(t *testing.T, in handlers.Input) {
 				if in.Action != "scene_tree" {
 					t.Errorf("expected action=scene_tree, got %s", in.Action)
 				}
@@ -50,7 +52,7 @@ func TestParseInput(t *testing.T) {
 			name:    "valid node_inspect",
 			input:   `{"action": "node_inspect", "node_path": "/root/Main/Player"}`,
 			wantErr: false,
-			check: func(t *testing.T, in Input) {
+			check: func(t *testing.T, in handlers.Input) {
 				if in.NodePath != "/root/Main/Player" {
 					t.Errorf("expected node_path=/root/Main/Player, got %s", in.NodePath)
 				}
@@ -60,7 +62,7 @@ func TestParseInput(t *testing.T) {
 			name:    "custom host and port",
 			input:   `{"action": "ping", "host": "localhost", "port": 8888}`,
 			wantErr: false,
-			check: func(t *testing.T, in Input) {
+			check: func(t *testing.T, in handlers.Input) {
 				if in.Host != "localhost" {
 					t.Errorf("expected host=localhost, got %s", in.Host)
 				}
@@ -98,80 +100,80 @@ func TestParseInput(t *testing.T) {
 func TestValidateInput(t *testing.T) {
 	tests := []struct {
 		name    string
-		input   Input
+		input   handlers.Input
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name:    "ping requires nothing",
-			input:   Input{Action: "ping"},
+			input:   handlers.Input{Action: "ping"},
 			wantErr: false,
 		},
 		{
 			name:    "scene_tree requires nothing",
-			input:   Input{Action: "scene_tree"},
+			input:   handlers.Input{Action: "scene_tree"},
 			wantErr: false,
 		},
 		{
 			name:    "node_inspect requires node_path",
-			input:   Input{Action: "node_inspect"},
+			input:   handlers.Input{Action: "node_inspect"},
 			wantErr: true,
 			errMsg:  "node_path is required",
 		},
 		{
 			name:    "node_inspect with node_path",
-			input:   Input{Action: "node_inspect", NodePath: "/root/Main"},
+			input:   handlers.Input{Action: "node_inspect", NodePath: "/root/Main"},
 			wantErr: false,
 		},
 		{
 			name:    "node_create requires parent_path",
-			input:   Input{Action: "node_create"},
+			input:   handlers.Input{Action: "node_create"},
 			wantErr: true,
 			errMsg:  "parent_path is required",
 		},
 		{
 			name:    "node_create requires node_type",
-			input:   Input{Action: "node_create", ParentPath: "/root"},
+			input:   handlers.Input{Action: "node_create", ParentPath: "/root"},
 			wantErr: true,
 			errMsg:  "node_type is required",
 		},
 		{
 			name:    "node_create requires node_name",
-			input:   Input{Action: "node_create", ParentPath: "/root", NodeType: "Node2D"},
+			input:   handlers.Input{Action: "node_create", ParentPath: "/root", NodeType: "Node2D"},
 			wantErr: true,
 			errMsg:  "node_name is required",
 		},
 		{
 			name:    "node_create with all fields",
-			input:   Input{Action: "node_create", ParentPath: "/root", NodeType: "Node2D", NodeName: "Enemy"},
+			input:   handlers.Input{Action: "node_create", ParentPath: "/root", NodeType: "Node2D", NodeName: "Enemy"},
 			wantErr: false,
 		},
 		{
 			name:    "node_set_prop requires node_path",
-			input:   Input{Action: "node_set_prop"},
+			input:   handlers.Input{Action: "node_set_prop"},
 			wantErr: true,
 			errMsg:  "node_path is required",
 		},
 		{
 			name:    "node_set_prop requires property",
-			input:   Input{Action: "node_set_prop", NodePath: "/root/Main"},
+			input:   handlers.Input{Action: "node_set_prop", NodePath: "/root/Main"},
 			wantErr: true,
 			errMsg:  "property is required",
 		},
 		{
 			name:    "node_set_prop with all fields",
-			input:   Input{Action: "node_set_prop", NodePath: "/root/Main", Property: "position", Value: "Vector2(0, 0)"},
+			input:   handlers.Input{Action: "node_set_prop", NodePath: "/root/Main", Property: "position", Value: "Vector2(0, 0)"},
 			wantErr: false,
 		},
 		{
 			name:    "signal_connect requires all fields",
-			input:   Input{Action: "signal_connect", NodePath: "/root/A", SignalName: "pressed"},
+			input:   handlers.Input{Action: "signal_connect", NodePath: "/root/A", SignalName: "pressed"},
 			wantErr: true,
 			errMsg:  "target_path is required",
 		},
 		{
 			name:    "unknown action",
-			input:   Input{Action: "unknown_action"},
+			input:   handlers.Input{Action: "unknown_action"},
 			wantErr: true,
 			errMsg:  "unknown action",
 		},
@@ -179,9 +181,16 @@ func TestValidateInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateInput(tt.input)
+			handler, ok := handlers.GetHandler(tt.input.Action)
+			if !ok {
+				if tt.wantErr && tt.errMsg == "unknown action" {
+					return // Expected: unknown action
+				}
+				t.Fatalf("no handler for action %q", tt.input.Action)
+			}
+			err := handler.Validate(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateInput() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr && tt.errMsg != "" && err != nil {
@@ -196,17 +205,17 @@ func TestValidateInput(t *testing.T) {
 func TestBuildParams(t *testing.T) {
 	tests := []struct {
 		name   string
-		input  Input
+		input  handlers.Input
 		expect map[string]any
 	}{
 		{
 			name:   "ping has empty params",
-			input:  Input{Action: "ping"},
+			input:  handlers.Input{Action: "ping"},
 			expect: map[string]any{},
 		},
 		{
 			name:  "scene_tree includes max_depth and max_nodes",
-			input: Input{Action: "scene_tree", MaxDepth: 5, MaxNodes: 100},
+			input: handlers.Input{Action: "scene_tree", MaxDepth: 5, MaxNodes: 100},
 			expect: map[string]any{
 				"max_depth": 5,
 				"max_nodes": 100,
@@ -214,14 +223,14 @@ func TestBuildParams(t *testing.T) {
 		},
 		{
 			name:  "node_inspect includes node_path",
-			input: Input{Action: "node_inspect", NodePath: "/root/Main"},
+			input: handlers.Input{Action: "node_inspect", NodePath: "/root/Main"},
 			expect: map[string]any{
 				"node_path": "/root/Main",
 			},
 		},
 		{
 			name:  "node_create includes parent_path, type, name",
-			input: Input{Action: "node_create", ParentPath: "/root", NodeType: "Node2D", NodeName: "Enemy"},
+			input: handlers.Input{Action: "node_create", ParentPath: "/root", NodeType: "Node2D", NodeName: "Enemy"},
 			expect: map[string]any{
 				"parent_path": "/root",
 				"type":        "Node2D",
@@ -230,7 +239,7 @@ func TestBuildParams(t *testing.T) {
 		},
 		{
 			name:  "node_set_prop includes node_path, property, value",
-			input: Input{Action: "node_set_prop", NodePath: "/root/Main", Property: "position", Value: "Vector2(0, 0)"},
+			input: handlers.Input{Action: "node_set_prop", NodePath: "/root/Main", Property: "position", Value: "Vector2(0, 0)"},
 			expect: map[string]any{
 				"node_path": "/root/Main",
 				"property":  "position",
@@ -241,7 +250,11 @@ func TestBuildParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			params := buildParams(tt.input)
+			handler, ok := handlers.GetHandler(tt.input.Action)
+			if !ok {
+				t.Fatalf("no handler for action %q", tt.input.Action)
+			}
+			params := handler.BuildParams(tt.input)
 			for k, v := range tt.expect {
 				if params[k] != v {
 					t.Errorf("expected params[%s]=%v, got %v", k, v, params[k])
@@ -292,7 +305,11 @@ func TestGenerateSummary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			summary := generateSummary(tt.action, tt.data)
+			handler, ok := handlers.GetHandler(tt.action)
+			if !ok {
+				t.Fatalf("no handler for action %q", tt.action)
+			}
+			summary := handler.GenerateSummary(tt.action, tt.data)
 			if !strings.Contains(summary, tt.contain) {
 				t.Errorf("expected summary to contain %q, got %q", tt.contain, summary)
 			}

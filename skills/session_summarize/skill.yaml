@@ -1,0 +1,62 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/summarize
+  version: 0.1.0
+  description: "Generate structured summaries from captured Claude Code sessions using Cerebras"
+  tags: ["session", "memory", "claude-code", "cerebras", "summarize"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_summarize/session_summarize
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: session/summarize
+  parameters:
+    - name: session_id
+      type: string
+      required: true
+      description: "Session ID to summarize"
+    - name: force
+      type: boolean
+      required: false
+      description: "Re-summarize even if session already has a summary"
+    - name: max_tokens
+      type: integer
+      required: false
+      description: "Max tokens to send to LLM (default: 16000)"
+returns:
+  - name: session_id
+    type: string
+    description: "Summarized session ID"
+  - name: summary
+    type: string
+    description: "Human-readable narrative summary"
+  - name: accomplished
+    type: array
+    description: "List of things accomplished"
+  - name: decisions
+    type: array
+    description: "Key technical decisions made"
+  - name: gotchas
+    type: array
+    description: "Problems encountered and solutions"
+  - name: tags
+    type: array
+    description: "Topic tags"
+  - name: key_files
+    type: array
+    description: "Important files modified"
+  - name: tools_pattern
+    type: string
+    description: "Common tool sequence pattern"
+  - name: status
+    type: string
+    description: "Status: summarized, exists, error"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

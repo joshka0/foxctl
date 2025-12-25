@@ -8,23 +8,25 @@ and human contributors
 
 ## 🚨 TL;DR (agentctl-specific)
 
-This file supplements `global_rules.md` with **agentctl-specific** conventions.
-Obey global rules first, then these:
+This file supplements `.windsurf/rules/global_rules.md` with
+**agentctl-specific** conventions. Obey global rules first, then these:
 
 - **Envelope contract is sacred** — never change `meta.*` fields or envelope
   shape without spec + golden updates.
 - **WASI = `network:"none"`** — Core v1 mandates isolation; do not relax.
-- **Large outputs → CAS** — use `data.summary` + `data.artifact` + `meta.cas_digest`.
+- **Large outputs → CAS** — use `data.summary` + `data.artifact` (and optional
+  `meta.cas_digest` matching it).
 - **`--dry-run` required** for any state-changing CLI command.
-- **Every production bug or near-miss becomes a Gotchas Graveyard row and a new rule entry in `docs/start/gotchas.md` within 24 hours — no exceptions.**
+- **Every production bug or near-miss becomes a Gotchas Graveyard row and a new
+  rule entry in `docs/start/gotchas.md` within 24 hours — no exceptions.**
 
 ## 🤖 Hello, AI Assistant!
 
 This file is for you. It encodes our source‑of‑truth conventions so you can
 safely help us build **agentctl Core Profile v1**.
 
-For deeper, frequently updated details, see `docs/start/README.md` and the
-files under `docs/start/`.
+For deeper, frequently updated details, see `docs/start/README.md` and the files
+under `docs/start/`.
 
 - Canonical **JSON envelope** I/O (no binary inline)
 - **CAS** for large results with mandatory summaries
@@ -40,8 +42,7 @@ When in doubt, prefer the sources in **📚 Canonical Sources** and follow the
 
 ## 🌿 Branching & PR Norm (critical)
 
-1. **Create branch:** use a descriptive name like `feature/<short-name>` (e.g.,
-   `feature/openapi-dry-run`).
+1. **Create branch**
 2. **Open PR** into `main` (never push to `main`).
 3. **CI must pass** (lint, vet, unit tests, race).
 4. **Approval required** (at least one human).
@@ -78,7 +79,7 @@ resolution across overlapping spec branches.
 
 ```yaml
 Project: agentctl (single-binary CLI)
-Language: Go (>= 1.24), modules on, CGO off by default
+Language: Go 1.24.x (modules on, CGO off by default)
 CLI: Cobra + Viper
 I/O Contract: JSON envelopes (canonical, version: 1)
     Runners: WASI (wazero, pure Go) preferred; exec runner fallback
@@ -95,17 +96,18 @@ I/O Contract: JSON envelopes (canonical, version: 1)
 
 ---
 
-## � Documentation
+## 📚 Documentation
 
 **Usage & quick start:** See [`README.md`](README.md) for build instructions,
 CLI examples, and development setup.
 
-**Full index:** [`docs/start/README.md`](docs/start/README.md) — directory tree +
-quick reference table.
+**Full index:** [`docs/start/README.md`](docs/start/README.md) — directory
+tree + quick reference table.
 
 **Key specs:**
 
-- `docs/spec/core_profile_v1.md` — envelope, CAS, jobs, runners (§2, §4, §7, §10)
+- `docs/spec/core_profile_v1.md` — envelope, CAS, jobs, runners (§2, §4, §7,
+  §10)
 - `docs/spec/openapi_skill.md` — http/openapi input/output
 - `docs/spec/plugin_protocol.md` — auth/pagination plugins
 - `docs/agent_profile.md` — multi-agent orchestration
@@ -119,21 +121,17 @@ quick reference table.
 ```
 agentctl/
 ├── cmd/agentctl/                  # main CLI
+│   ├── cmd/                       # Cobra command tree
 │   └── main.go
+├── cmd/agentctl_viewer/           # optional TUI viewer
 ├── internal/
-│   ├── envelope/                  # envelope types, schema validation, JSON c14n
-│   ├── cas/                       # CAS (put/head/get, integrity check)
-│   ├── jobs/                      # job queue, SQLite persistence, NDJSON progress
-│   ├── memory/                    # auto-cache + named memory
-│   ├── cache/                     # memoization, RFC 8785, file/dir digests
-│   ├── runner/
-│   │   ├── wasi/                  # WASI runner (wazero)
-│   │   └── exec/                  # exec runner, resource limits
-│   ├── skill/                     # skill discovery/manifest validation
-│   └── openapi/                   # http/openapi skill (core), built-in page/auth
-│       ├── builtin_auth/          # bearer, apiKey, basic, oauth2-cc
-│       ├── builtin_paging/        # link, cursor, offset
-│       └── plugin/                # plugin SPI (stdin/stdout envelopes)
+│   ├── domain/                    # pure domain types (envelope, policy, skill, ...)
+│   ├── protocol/                  # wire-level helpers (wraps domain/envelope)
+│   ├── platform/                  # config/logging/errors/workspace
+│   ├── storage/                   # CAS, jobs, cache, memory, mailbox, ...
+│   ├── execution/                 # skill runners (wasi/exec), quotas, scheduler
+│   ├── openapi/                   # http/openapi internals (loader/builder/client/...)
+│   └── agent/                     # agent runtime/daemon/tools
 ├── skills/
 │   └── http_openapi/              # skill.yaml + Go implementation wrapper (exec)
 ├── plugins/                       # example plugins (Go, WASI/exec)
@@ -152,7 +150,7 @@ agentctl/
 └── AGENTS.md
 ```
 
-This layout is a simplified view. See `ARCHITECTURE.md` for an up-to-date
+This layout is a simplified view. See `docs/architecture.md` for an up-to-date
 overview of all subsystems.
 
 ---
@@ -168,7 +166,7 @@ Start
  │    ├─ YES → Enforce WASI: network=none (Core v1), exec only for egress; update egressAllow tests
  │    └─ NO  → continue
  ├─ Is output possibly large?
- │    ├─ YES → Use CAS wrapper (summary + artifact), set meta.cas_digest
+ │    ├─ YES → Use CAS wrapper (summary + artifact); meta.cas_digest optional (must match artifact if set)
  │    └─ NO  → continue
  ├─ Is this OpenAPI logic?
  │    ├─ Add/modify in internal/openapi/ (built-ins) or plugins/
@@ -178,7 +176,8 @@ Start
       - Envelopes to stdout, logs to stderr
       - Include context.Context, handle cancellation
       - Add unit tests + golden outputs
-      - Run make check (lint, vet, staticcheck, test -race)
+      - Run `make check` (fmt + lint + vet + test + check-coverage + build)
+      - Run `make test-race` when changing concurrency/cancelation-sensitive code
 ```
 
 ---
@@ -188,8 +187,11 @@ Start
 ### 1) Envelopes (non-negotiable)
 
 - `version: 1`, `status: "ok"|"error"`, `command`, `data`, `meta`, `error`.
-- **On large results:** `data.summary` (≤2 KiB) + `data.artifact` digest; set
-  `meta.cas_digest`.
+- `meta.ts` **MUST** be present (RFC3339 UTC).
+- For `status:"ok"`, `error.code` and `error.message` **MUST** be empty.
+- For `status:"error"`, `error.code` and `error.message` **MUST** be non-empty.
+- **On large results:** `data.summary` (≤2 KiB) + `data.artifact` digest;
+  `meta.cas_digest` is optional (if set MUST match `data.artifact`).
 - **Errors:** prefer actionable `error.code` (+ `data.hint`).
 - **Stdout:** envelopes only. **Stderr:** logs only.
 
@@ -241,8 +243,8 @@ Start
 
 ## 🧭 Do / Ask / Act (agentctl-specific)
 
-> **Global rules from `global_rules.md` always apply.** This section covers
-> agentctl-specific conventions only.
+> **Global rules from `.windsurf/rules/global_rules.md` always apply.** This
+> section covers agentctl-specific conventions only.
 
 **Do** — safe without asking:
 
@@ -259,32 +261,35 @@ Start
 
 ### ❌ agentctl Hard Fails (beyond global AUTO-REJECT)
 
-| Pattern                                      | Why                                    |
-|----------------------------------------------|----------------------------------------|
-| Changing `meta.*` or envelope fields         | Wire contract break                    |
-| `network:` not `"none"` in WASI manifest    | Core v1 isolation                      |
-| Emitting non-JSON stdout from CLI/skills    | Envelopes-only forever                 |
-| Missing `--dry-run` on state-changing cmd   | Safety valve                           |
+| Pattern                                   | Why                    |
+| ----------------------------------------- | ---------------------- |
+| Changing `meta.*` or envelope fields      | Wire contract break    |
+| `network:` not `"none"` in WASI manifest  | Core v1 isolation      |
+| Emitting non-JSON stdout from CLI/skills  | Envelopes-only forever |
+| Missing `--dry-run` on state-changing cmd | Safety valve           |
 
 ### Spec ↔ Code Drift Watchlist
 
-| Topic                | Spec (canonical)                                             | Code (actual)                                                                                   | Action                                             |
-| -------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| inline_output_kb     | `docs/spec/core_profile_v1.md` §2 → 32 KB default            | `internal/config.DefaultInlineOutputKB = 32` (tested in `internal/config/config_test.go`)       | Keep spec + constant in lockstep                   |
-| WASI network rule    | `docs/spec/core_profile_v1.md` §10 → WASI = `network:"none"` | Manifest validation + `scripts/checkmanifests` enforce the restriction                          | Add regression tests whenever new WASI skill ships |
-| Envelope meta fields | `docs/spec/core_profile_v1.md` §2 enumerates `meta.*`        | `internal/envelope.Envelope` + CLI smoke tests (`cmd/agentctl/cmd/run_test.go`) assert presence | Extend smoke tests when adding new meta fields     |
+| Topic                | Spec (canonical)                                             | Code (actual)                                                                                                                           | Action                                             |
+| -------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| inline_output_kb     | `docs/spec/core_profile_v1.md` §2 → 32 KB default            | `internal/platform/config.DefaultInlineOutputKB = 32` (tested in `internal/platform/config/config_test.go`)                             | Keep spec + constant in lockstep                   |
+| WASI network rule    | `docs/spec/core_profile_v1.md` §10 → WASI = `network:"none"` | Manifest validation + `scripts/checkmanifests` enforce the restriction                                                                  | Add regression tests whenever new WASI skill ships |
+| Envelope meta fields | `docs/spec/core_profile_v1.md` §2 enumerates `meta.*`        | `internal/domain/envelope.Envelope` + `internal/protocol.Validate` + CLI smoke tests (`cmd/agentctl/cmd/run_test.go`) assert invariants | Extend smoke tests when adding new meta fields     |
 
 ---
 
 ## 🧑‍💻 Go Conventions (agentctl-specific)
 
 > General Go style (context propagation, error wrapping, no panics) is enforced
-> by `global_rules.md`. Below are agentctl-specific patterns.
+> by `.windsurf/rules/global_rules.md`. Below are agentctl-specific patterns.
 
-- **Logging:** zerolog (JSON) → stderr only; typed fields, not interpolated strings.
+- **Logging:** zerolog (JSON) → stderr only; typed fields, not interpolated
+  strings.
 - **Envelope IO:** stdout = envelopes only; never plain text.
-- **Large output:** stream → CAS; set `meta.cas_digest`.
-- **TOCTOU:** validate and operate on the _same_ resolved path (symlinks can swap).
+- **Large output:** stream → CAS; include `data.artifact` (and optional
+  `meta.cas_digest` matching it).
+- **TOCTOU:** validate and operate on the _same_ resolved path (symlinks can
+  swap).
 - **Nil vs empty:** return `[]T{}` or `map[K]V{}`, not `nil`, for JSON output.
 
 ---
@@ -319,15 +324,16 @@ feedback hooks, and CI jobs, see:
 These are the issues that have already hurt us (or nearly did). Each row is a
 real incident → real root cause → a permanent new rule plus a regression test.
 
-| #  | Gotcha (what hurts)                                                | Real incident (date + link)                                         | Root cause                                      | Permanent new AUTO-REJECT rule (id)                          | Added regression test? |
-|----|--------------------------------------------------------------------|---------------------------------------------------------------------|-------------------------------------------------|---------------------------------------------------------------|------------------------|
-| G1 | Local Go CGO toolchain crash (`runtime/cgo: ... cgo: exit status 2`) when running race tests or building certain skills | 2025-11-30 — local dev on macOS with Go 1.24.10 via mise (`make test-race`) | Misconfigured local Go/CGO toolchain, not a code regression | See rule entry `R1` in `docs/start/gotchas.md`; never treat toolchain/CGO crashes as "tests green" | Pending                 |
-| G2 | JSON helpers returning `nil` slices/maps, producing `null` instead of `[]`/`{}` and surprising downstream tools | 2025-12-01 — post-review JSON helpers returned `nil` for empty files/metadata, causing `null` in envelopes and viewer bugs | Helpers violated the "nil vs empty" rule and did not normalize empty inputs | See rule entry `R2` in `docs/start/gotchas.md`; JSON-facing code must always return `[]T{}` / `map[K]V{}` so serialization is stable | Pending                 |
+| #  | Gotcha (what hurts)                                                                                                     | Real incident (date + link)                                                                                                | Root cause                                                                  | Permanent new AUTO-REJECT rule (id)                                                                                                  | Added regression test? |
+| -- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| G1 | Local Go CGO toolchain crash (`runtime/cgo: ... cgo: exit status 2`) when running race tests or building certain skills | 2025-11-30 — local dev on macOS with Go 1.24.10 via mise (`make test-race`)                                                | Misconfigured local Go/CGO toolchain, not a code regression                 | See rule entry `R1` in `docs/start/gotchas.md`; never treat toolchain/CGO crashes as "tests green"                                   | Pending                |
+| G2 | JSON helpers returning `nil` slices/maps, producing `null` instead of `[]`/`{}` and surprising downstream tools         | 2025-12-01 — post-review JSON helpers returned `nil` for empty files/metadata, causing `null` in envelopes and viewer bugs | Helpers violated the "nil vs empty" rule and did not normalize empty inputs | See rule entry `R2` in `docs/start/gotchas.md`; JSON-facing code must always return `[]T{}` / `map[K]V{}` so serialization is stable | Pending                |
+| G3 | CGO linker `duplicate symbol '_sqlite3_*'` when a build links both `go-libsql` and `go-sqlite3`                         | 2025-12-20 — CGO-enabled builds/tests failed due to SQLite symbol conflicts between embedded SQLite copies                 | `go-libsql` and `go-sqlite3` both embed SQLite by default under CGO         | See rule entry `R3` in `docs/start/gotchas.md`; CGO builds/tests must use `-tags=libsqlite3` (and install system SQLite dev libs)    | Yes (CI)               |
 
 ### How the graveyard works (zero tolerance)
 
-1. Every time we hit a production bug or serious near-miss, we add one row
-   to this table **within 24 hours**.
+1. Every time we hit a production bug or serious near-miss, we add one row to
+   this table **within 24 hours**.
 2. In the same PR, we add or update the corresponding rule entry in
    `docs/start/gotchas.md` that references the Gotcha ID (e.g. `G1`) and
    documents how the mistake is blocked going forward.
@@ -339,9 +345,9 @@ real incident → real root cause → a permanent new rule plus a regression tes
 
 ## 🔌 Plugin Skeletons (Go)
 
-Plugins are out-of-process helpers used by the OpenAPI skill for custom auth
-and pagination. They speak JSON envelopes over stdin/stdout and are discovered
-via plugin search paths.
+Plugins are out-of-process helpers used by the OpenAPI skill for custom auth and
+pagination. They speak JSON envelopes over stdin/stdout and are discovered via
+plugin search paths.
 
 For concrete Go skeletons and protocol details, see:
 
@@ -358,7 +364,7 @@ make fmt                # gofumpt
 make lint               # golangci-lint + staticcheck + govet
 make test               # unit tests (no network)
 make test-race          # unit tests with -race
-make test-live          # integration tests (AGENTCTL_TEST_LIVE=1)
+make test-integration   # integration tests (build tag: integration)
 make build              # build cmd/agentctl
 make snapshot           # goreleaser --snapshot
 make check-coverage     # enforce ≥85% coverage locally
@@ -366,10 +372,7 @@ make check-coverage     # enforce ≥85% coverage locally
 # OpenAPI convenience
 agentctl openapi import github.yaml --as=github
 agentctl run http/openapi \
-  --spec=memory:github \
-  --operationId=listReposForUser \
-  --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' \
-  --dry_run
+  --input '{"spec":"memory:github","operationId":"listReposForUser","params":{"path":{"username":"octocat"},"query":{"per_page":100}},"dry_run":true}'
 
 # CAS maintenance
 agentctl cas gc --older-than=168h --dry-run   # preview safe cleanup
@@ -381,7 +384,7 @@ agentctl cas gc --older-than=168h --dry-run   # preview safe cleanup
 
 ## 🧷 Error Codes (remember)
 
-`EARG, ENOTFOUND, ETIMEOUT, ERUNTIME, ERUNTIME_RESTART, EENVELOPE, EPARSE, EOUTPUT_TOO_LARGE, EPOLICY, EIO, EAUTH, EPAGINATION, EOPENAPI, ERATELIMIT, ECANCELED`
+`EARG, EOPENAPI, EAUTH, EPAGINATION, ERATELIMIT, ERUNTIME, ERUNTIME_RESTART, EOUTPUT_TOO_LARGE, EPOLICY, ENOTFOUND, ETIMEOUT, ESKILLDOWN, EPARSE, EENVELOPE, EIO, ECANCELED, ECACHE_MISS, ECACHE_UNAVAILABLE`
 
 **Tip:** include `data.hint` where possible to teach the user how to fix the
 problem.
@@ -390,8 +393,8 @@ problem.
 
 ## 🔐 Security (agentctl-specific)
 
-> Secrets handling is governed by `global_rules.md`. Below are agentctl-specific
-> security rules.
+> Secrets handling is governed by `.windsurf/rules/global_rules.md`. Below are
+> agentctl-specific security rules.
 
 - WASI runner must enforce `network:"none"` (Core v1).
 - Exec runner: loopback & UNIX sockets denied unless explicitly allow‑listed.
@@ -415,10 +418,12 @@ problem.
 
 ## 📝 PR Checklist (agentctl-specific)
 
-> Complete `global_rules.md` GOLD STANDARD CHECKLIST first, then these:
+> Complete the Gold Standard Checklist in `.github/pull_request_template.md`
+> first, then these:
 
 - [ ] Envelope on stdout, logs on stderr
-- [ ] Large output → CAS wrapper (`data.summary` + `data.artifact` + `meta.cas_digest`)
+- [ ] Large output → CAS wrapper (`data.summary` + `data.artifact`; optional
+      `meta.cas_digest` matching it)
 - [ ] `--dry-run` implemented for state-changing commands
 - [ ] Wire contract unchanged, or spec + golden tests updated
 - [ ] OpenAPI: dry-run, retries, pagination, auth, actionable errors

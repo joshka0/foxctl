@@ -300,7 +300,6 @@ func demoParameterTuning(ctx context.Context, searchStore *memory.SearchableStor
 			"demo-workspace",
 			3,
 		)
-
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue

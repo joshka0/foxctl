@@ -1,0 +1,13 @@
+# agentctl skill runner integration
+description = "Run an agentctl skill and analyze results"
+
+prompt = """Run the agentctl skill and analyze the output:
+
+```bash
+!{bin/agentctl run {{args}}}
+```
+
+Interpret the JSON envelope result:
+- Check the `success` field
+- Extract and explain the `data` content
+- Suggest next steps based on findings"""

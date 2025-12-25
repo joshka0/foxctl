@@ -83,10 +83,7 @@ func TestWriteEvent_Enabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open events file: %v", err)
 	}
-	defer func() {
-		// Test cleanup; error is not actionable.
-		_ = f.Close() //nolint:errcheck
-	}()
+	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
 	lines := 0
@@ -147,8 +144,7 @@ func TestSweGrepEvent(t *testing.T) {
 		2,    // filesRelevant
 		5,    // snippetsEmitted
 		true, // hasArtifact
-		"application/x-swe-grep-snippets+ndjson",
-		187, // durationMS
+		187,  // durationMS
 		"run",
 	)
 
@@ -192,9 +188,6 @@ func TestSweGrepEvent(t *testing.T) {
 	}
 	if !decoded.HasArtifact {
 		t.Error("HasArtifact = false, want true")
-	}
-	if decoded.ArtifactKind != "application/x-swe-grep-snippets+ndjson" {
-		t.Errorf("ArtifactKind = %q, want application/x-swe-grep-snippets+ndjson", decoded.ArtifactKind)
 	}
 	if decoded.DurationMS != 187 {
 		t.Errorf("DurationMS = %d, want 187", decoded.DurationMS)

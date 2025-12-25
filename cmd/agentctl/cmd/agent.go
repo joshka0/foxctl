@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agent/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
@@ -16,6 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +66,27 @@ var agentWatchCmd = &cobra.Command{
 	RunE:  runAgentWatch,
 }
 
+var agentRunCmd = &cobra.Command{
+	Use:   "run <agent-id>",
+	Short: "Run an agent daemon in the foreground",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentRun,
+}
+
+var agentAskCmd = &cobra.Command{
+	Use:   "ask <agent-id>",
+	Short: "Send an ask message to an agent",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentAsk,
+}
+
+var agentCmdCmd = &cobra.Command{
+	Use:   "cmd <agent-id>",
+	Short: "Send a command to an agent",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentCmd,
+}
+
 // Flags for agent spawn
 var (
 	spawnParentNS    string
@@ -71,17 +95,32 @@ var (
 	spawnSkillsAllow string
 	spawnPolicyFile  string
 	spawnShareBB     string
+	spawnLLMProvider string
+	spawnLLMModel    string
+	spawnLLMAPIKey   string
+	spawnDryRun      bool
 )
 
 // Flags for agent kill
 var (
 	killGraceful bool
 	killTimeoutS int
+	killDryRun   bool
 )
 
 // Flags for agent list
 var (
 	listLimit int
+)
+
+// Flags for agent ask
+var (
+	askDryRun bool
+)
+
+// Flags for agent cmd
+var (
+	cmdDryRun bool
 )
 
 func init() {
@@ -92,6 +131,9 @@ func init() {
 	agentCmd.AddCommand(agentKillCmd)
 	agentCmd.AddCommand(agentInfoCmd)
 	agentCmd.AddCommand(agentWatchCmd)
+	agentCmd.AddCommand(agentRunCmd)
+	agentCmd.AddCommand(agentAskCmd)
+	agentCmd.AddCommand(agentCmdCmd)
 
 	// Spawn flags
 	agentSpawnCmd.Flags().StringVar(&spawnParentNS, "ns", "", "Parent namespace (optional)")
@@ -100,13 +142,33 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnSkillsAllow, "skills-allow", "", "Comma-separated list of allowed skills")
 	agentSpawnCmd.Flags().StringVar(&spawnPolicyFile, "policy", "", "Path to policy JSON file")
 	agentSpawnCmd.Flags().StringVar(&spawnShareBB, "share-bb", "scoped", "Blackboard sharing mode (all|scoped|none)")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMProvider, "llm-provider", "", "LLM provider (gemini|openai|anthropic|groq|openrouter)")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMModel, "llm-model", "", "LLM model ID (e.g., claude-haiku-4-5)")
+	agentSpawnCmd.Flags().StringVar(&spawnLLMAPIKey, "llm-api-key", "", "LLM API key (or env var like $GROQ_API_KEY)")
+	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
 
 	// Kill flags
 	agentKillCmd.Flags().BoolVar(&killGraceful, "graceful", true, "Graceful shutdown")
 	agentKillCmd.Flags().IntVar(&killTimeoutS, "timeout", 30, "Timeout in seconds")
+	agentKillCmd.Flags().BoolVar(&killDryRun, "dry-run", false, "Preview what would be killed without terminating the agent")
 
 	// List flags
 	agentListCmd.Flags().IntVar(&listLimit, "limit", 20, "Maximum number of agents to list")
+
+	// Ask flags
+	agentAskCmd.Flags().String("question", "", "The question to ask (required)")
+	agentAskCmd.Flags().String("kind", "context", "Ask kind: context|secret|approval|toolhint|other")
+	agentAskCmd.Flags().Bool("wait", false, "Wait for reply before returning")
+	agentAskCmd.Flags().Duration("timeout", 5*time.Minute, "Timeout for --wait")
+	agentAskCmd.Flags().BoolVar(&askDryRun, "dry-run", false, "Preview what would be sent without sending the message")
+	_ = agentAskCmd.MarkFlagRequired("question") //nolint:errcheck
+
+	// Cmd flags
+	agentCmdCmd.Flags().String("action", "", "Command action: run_skill|run_turn|do_work")
+	agentCmdCmd.Flags().String("skill", "", "Skill to run (for run_skill action)")
+	agentCmdCmd.Flags().String("args", "{}", "JSON args for the command")
+	agentCmdCmd.Flags().BoolVar(&cmdDryRun, "dry-run", false, "Preview what would be sent without sending the command")
+	_ = agentCmdCmd.MarkFlagRequired("action") //nolint:errcheck
 }
 
 func runAgentSpawn(cmd *cobra.Command, _ []string) error {
@@ -155,16 +217,22 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer errs.Ignore(agentStore.Close(), "close agent store")
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer errs.Ignore(mailboxStore.Close(), "close mailbox store")
+	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
 
 	// Create manager
 	mgr := agentmanager.New(agentStore, mailboxStore)
+
+	// Resolve LLM API key (support $ENV_VAR syntax)
+	llmAPIKey := spawnLLMAPIKey
+	if strings.HasPrefix(llmAPIKey, "$") {
+		llmAPIKey = os.Getenv(strings.TrimPrefix(llmAPIKey, "$"))
+	}
 
 	// Spawn agent
 	req := agentmanager.SpawnRequest{
@@ -174,6 +242,32 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		SkillsAllow: skillsAllow,
 		Policy:      policy,
 		ShareBB:     spawnShareBB,
+		LLMProvider: spawnLLMProvider,
+		LLMModel:    spawnLLMModel,
+		LLMAPIKey:   llmAPIKey,
+	}
+
+	// Dry-run mode: show what would be spawned
+	if spawnDryRun {
+		data := map[string]any{
+			"dry_run":      true,
+			"would_spawn":  true,
+			"parent_ns":    req.ParentNS,
+			"role":         req.Role,
+			"skills_allow": req.SkillsAllow,
+			"share_bb":     req.ShareBB,
+			"llm_provider": req.LLMProvider,
+			"llm_model":    req.LLMModel,
+			"has_prompt":   len(req.Prompt) > 0,
+			"has_policy":   req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
+		}
+		env := envelope.OK("agent/spawn", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
+			m.Source = "run"
+		}))
+		if err := envelope.Write(os.Stdout, env); err != nil {
+			return fmt.Errorf("write envelope: %w", err)
+		}
+		return nil
 	}
 
 	resp, err := mgr.Spawn(ctx, req)
@@ -182,7 +276,7 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"agent_id": resp.AgentID,
 		"ns":       resp.NS,
 		"role":     resp.Role,
@@ -208,7 +302,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer errs.Ignore(agentStore.Close(), "close agent store")
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
 
 	// List agents
 	list, err := agentStore.List(ctx, listLimit)
@@ -217,7 +311,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("agent/list", map[string]interface{}{
+	env := envelope.OK("agent/list", map[string]any{
 		"agents": list,
 		"count":  len(list),
 	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
@@ -241,13 +335,13 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer errs.Ignore(agentStore.Close(), "close agent store")
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer errs.Ignore(mailboxStore.Close(), "close mailbox store")
+	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
 
 	// Create manager
 	mgr := agentmanager.New(agentStore, mailboxStore)
@@ -259,13 +353,39 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 		TimeoutS: killTimeoutS,
 	}
 
+	// Dry-run mode: show what would be killed
+	if killDryRun {
+		// Get agent info to show what would be killed
+		agentRecord, err := agentStore.Get(ctx, agentID)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
+		}
+		data := map[string]any{
+			"dry_run":    true,
+			"would_kill": true,
+			"agent_id":   agentID,
+			"namespace":  agentRecord.Namespace,
+			"role":       agentRecord.Role,
+			"state":      agentRecord.State,
+			"graceful":   killGraceful,
+			"timeout_s":  killTimeoutS,
+		}
+		env := envelope.OK("agent/kill", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
+			m.Source = "run"
+		}))
+		if err := envelope.Write(os.Stdout, env); err != nil {
+			return fmt.Errorf("write envelope: %w", err)
+		}
+		return nil
+	}
+
 	resp, err := mgr.Kill(ctx, req)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/kill", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to kill agent: %v", err))
 	}
 
 	// Write success envelope
-	data := map[string]interface{}{
+	data := map[string]any{
 		"agent_id":     resp.AgentID,
 		"final_status": resp.FinalStatus,
 		"exit_code":    resp.ExitCode,
@@ -292,7 +412,7 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/info", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer errs.Ignore(agentStore.Close(), "close agent store")
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
 
 	// Get agent
 	a, err := agentStore.Get(ctx, agentID)
@@ -328,13 +448,13 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
-	defer errs.Ignore(agentStore.Close(), "close agent store")
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
 
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/watch", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
 	}
-	defer errs.Ignore(mailboxStore.Close(), "close mailbox store")
+	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
 
 	// Verify agent exists
 	a, err := agentStore.Get(ctx, agentID)
@@ -360,7 +480,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 		case <-ctx.Done():
 			// Write final envelope
 			finalBool := true
-			env := envelope.OK("agent/watch", map[string]interface{}{
+			env := envelope.OK("agent/watch", map[string]any{
 				"status": "stopped",
 			}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 				m.Source = "run"
@@ -381,7 +501,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 				if errors.Is(err, agents.ErrNotFound) {
 					// Agent deleted, stop watching
 					finalBool := true
-					env := envelope.OK("agent/watch", map[string]interface{}{
+					env := envelope.OK("agent/watch", map[string]any{
 						"status": "terminated",
 					}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 						m.Source = "run"
@@ -401,7 +521,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 			if current.State != lastState {
 				seq++
 				finalBool := false
-				data := map[string]interface{}{
+				data := map[string]any{
 					"event":     "agent_state_changed",
 					"agent_id":  agentID,
 					"old_state": lastState,
@@ -434,7 +554,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 			if current.HeartbeatAt.After(lastHeartbeat) {
 				seq++
 				finalBool := false
-				data := map[string]interface{}{
+				data := map[string]any{
 					"event":        "agent_heartbeat",
 					"agent_id":     agentID,
 					"heartbeat_at": current.HeartbeatAt.Format(time.RFC3339),
@@ -471,10 +591,26 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 			if len(messages) > 0 {
 				seq++
 				finalBool := false
-				data := map[string]interface{}{
-					"event":         "mailbox_messages",
-					"agent_id":      agentID,
-					"message_count": len(messages),
+
+				// Include sample details
+				messageSamples := make([]map[string]any, 0, min(len(messages), 3))
+				for i, msg := range messages {
+					if i >= 3 {
+						break
+					}
+					messageSamples = append(messageSamples, map[string]any{
+						"id":          msg.ID,
+						"type":        msg.Type,
+						"from":        msg.FromNS,
+						"correlation": msg.Headers["correlation"],
+					})
+				}
+
+				data := map[string]any{
+					"event":           "mailbox_messages",
+					"agent_id":        agentID,
+					"message_count":   len(messages),
+					"message_samples": messageSamples,
 				}
 
 				env := envelope.Envelope{
@@ -501,8 +637,12 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func writeErrorEnvelope(_ *cobra.Command, command, code, message string) error {
-	env := envelope.Error(command, code, message, nil)
+func writeErrorEnvelope(_ *cobra.Command, command, code, message string, hints ...string) error {
+	var data map[string]any
+	if len(hints) > 0 && hints[0] != "" {
+		data = map[string]any{"hint": hints[0]}
+	}
+	env := envelope.Error(command, code, message, data)
 	if err := envelope.Write(os.Stdout, env); err != nil {
 		return fmt.Errorf("write error envelope: %w", err)
 	}
@@ -558,4 +698,286 @@ func trimString(s string) string {
 		end--
 	}
 	return s[start:end]
+}
+
+func runAgentRun(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	agentID := args[0]
+
+	opts := daemon.Options{
+		AgentID:           agentID,
+		StorageRoot:       cfg.Storage.Root,
+		PollInterval:      500 * time.Millisecond,
+		HeartbeatInterval: 10 * time.Second,
+		MaxPollMessages:   10,
+	}
+
+	return daemon.Run(ctx, opts)
+}
+
+func runAgentAsk(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	agentID := args[0]
+	question, err := cmd.Flags().GetString("question")
+	if err != nil {
+		return fmt.Errorf("get question flag: %w", err)
+	}
+	kind, err := cmd.Flags().GetString("kind")
+	if err != nil {
+		return fmt.Errorf("get kind flag: %w", err)
+	}
+	wait, err := cmd.Flags().GetBool("wait")
+	if err != nil {
+		return fmt.Errorf("get wait flag: %w", err)
+	}
+	timeout, err := cmd.Flags().GetDuration("timeout")
+	if err != nil {
+		return fmt.Errorf("get timeout flag: %w", err)
+	}
+
+	// Open mailbox store
+	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
+	}
+	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
+
+	// Get agent to find its namespace
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
+	}
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
+	agentRecord, err := agentStore.Get(ctx, agentID)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
+	}
+
+	// Build ask message
+	askID := ulid.Make().String()
+	askData := agent.AskData{
+		AskID:    askID,
+		Kind:     kind,
+		Question: question,
+	}
+	payload, err := json.Marshal(envelope.OK("agent.ask", askData))
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to marshal ask payload: %v", err))
+	}
+
+	msg := agent.Message{
+		ID:        ulid.Make().String(),
+		FromNS:    "cli:" + ulid.Make().String(), // unique caller namespace
+		ToNS:      agentRecord.Namespace,
+		Type:      agent.MessageTypeAsk,
+		TTLMS:     int64(timeout.Milliseconds()),
+		Headers:   map[string]string{"correlation": askID},
+		Payload:   payload,
+		VisibleAt: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Dry-run mode: show what would be sent
+	if askDryRun {
+		data := map[string]any{
+			"dry_run":    true,
+			"would_send": true,
+			"agent_id":   agentID,
+			"namespace":  agentRecord.Namespace,
+			"ask_id":     askID,
+			"kind":       kind,
+			"question":   question,
+			"timeout_ms": timeout.Milliseconds(),
+		}
+		env := envelope.OK("agent/ask", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
+			m.Source = "ask"
+		}))
+		if err := envelope.Write(os.Stdout, env); err != nil {
+			return fmt.Errorf("write envelope: %w", err)
+		}
+		return nil
+	}
+
+	if err := mailboxStore.Send(ctx, msg); err != nil {
+		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeEIO), err.Error())
+	}
+
+	// Output ask confirmation
+	env := envelope.OK("agent/ask", map[string]any{
+		"ask_id":     askID,
+		"message_id": msg.ID,
+		"sent_to":    agentRecord.Namespace,
+	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+		m.Source = "ask"
+	}))
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+
+	if wait {
+		return waitForReply(ctx, mailboxStore, msg.FromNS, askID, timeout)
+	}
+	return nil
+}
+
+func runAgentCmd(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	agentID := args[0]
+	action, err := cmd.Flags().GetString("action")
+	if err != nil {
+		return fmt.Errorf("get action flag: %w", err)
+	}
+	skill, err := cmd.Flags().GetString("skill")
+	if err != nil {
+		return fmt.Errorf("get skill flag: %w", err)
+	}
+	argsJSON, err := cmd.Flags().GetString("args")
+	if err != nil {
+		return fmt.Errorf("get args flag: %w", err)
+	}
+
+	var cmdArgs map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &cmdArgs); err != nil {
+		return writeErrorEnvelope(cmd, "agent/cmd", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON in args: %v", err))
+	}
+
+	// Open mailbox store
+	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/cmd", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open mailbox store: %v", err))
+	}
+	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
+
+	// Get agent to find its namespace
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/cmd", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
+	}
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
+
+	agentRecord, err := agentStore.Get(ctx, agentID)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/cmd", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
+	}
+
+	cmdID := ulid.Make().String()
+	cmdData := agent.CmdData{
+		CmdID:  cmdID,
+		Action: action,
+		Skill:  skill,
+		Args:   cmdArgs,
+	}
+
+	payload, err := json.Marshal(envelope.OK("agent.cmd", cmdData))
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/cmd", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to marshal cmd payload: %v", err))
+	}
+
+	msg := agent.Message{
+		ID:        ulid.Make().String(),
+		FromNS:    "cli:" + ulid.Make().String(),
+		ToNS:      agentRecord.Namespace,
+		Type:      agent.MessageTypeCmd,
+		TTLMS:     0,
+		Headers:   map[string]string{},
+		Payload:   payload,
+		VisibleAt: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
+	}
+
+	// Dry-run mode: show what would be sent
+	if cmdDryRun {
+		data := map[string]any{
+			"dry_run":    true,
+			"would_send": true,
+			"agent_id":   agentID,
+			"namespace":  agentRecord.Namespace,
+			"cmd_id":     cmdID,
+			"action":     action,
+			"skill":      skill,
+			"args":       cmdArgs,
+		}
+		env := envelope.OK("agent/cmd", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
+			m.Source = "cmd"
+		}))
+		if err := envelope.Write(os.Stdout, env); err != nil {
+			return fmt.Errorf("write envelope: %w", err)
+		}
+		return nil
+	}
+
+	if err := mailboxStore.Send(ctx, msg); err != nil {
+		return writeErrorEnvelope(cmd, "agent/cmd", string(protocol.ErrorCodeEIO), err.Error())
+	}
+
+	env := envelope.OK("agent/cmd", map[string]any{
+		"cmd_id":     cmdID,
+		"message_id": msg.ID,
+		"sent_to":    agentRecord.Namespace,
+	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
+		m.Source = "cmd"
+	}))
+	if err := envelope.Write(os.Stdout, env); err != nil {
+		return fmt.Errorf("write envelope: %w", err)
+	}
+
+	return nil
+}
+
+func waitForReply(ctx context.Context, store mailbox.Store, callerNS, askID string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 500 * time.Millisecond
+	const maxConsecutiveErrors = 5
+
+	consecutiveErrors := 0
+	currentBackoff := pollInterval
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(currentBackoff):
+			// Poll for replies to our namespace
+			messages, err := store.List(ctx, callerNS, 50)
+			if err != nil {
+				consecutiveErrors++
+				fmt.Fprintf(os.Stderr, "warning: failed to list mailbox messages (attempt %d/%d): %v\n",
+					consecutiveErrors, maxConsecutiveErrors, err)
+				if consecutiveErrors >= maxConsecutiveErrors {
+					return fmt.Errorf("too many consecutive mailbox errors (%d): %w", consecutiveErrors, err)
+				}
+				// Exponential backoff: double the interval up to 8 seconds
+				currentBackoff = min(currentBackoff*2, 8*time.Second)
+				continue
+			}
+			// Reset on success
+			consecutiveErrors = 0
+			currentBackoff = pollInterval
+			for _, msg := range messages {
+				if msg.Type != agent.MessageTypeReply {
+					continue
+				}
+				if msg.Headers["correlation"] == askID {
+					// Found our reply!
+					var replyEnv envelope.Envelope
+					if err := json.Unmarshal(msg.Payload, &replyEnv); err != nil {
+						return fmt.Errorf("failed to unmarshal reply payload: %w", err)
+					}
+
+					// Ack the reply
+					_ = store.Ack(ctx, msg.ID) //nolint:errcheck
+
+					// Output the reply envelope
+					if err := envelope.Write(os.Stdout, replyEnv); err != nil {
+						return fmt.Errorf("write reply envelope: %w", err)
+					}
+					return nil
+				}
+			}
+		}
+	}
+	return fmt.Errorf("timeout waiting for reply to ask_id=%s", askID)
 }

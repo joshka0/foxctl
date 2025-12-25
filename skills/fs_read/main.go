@@ -30,7 +30,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("fs/read", "ECONFIG", err)
+		fail("fs/read", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -95,18 +95,15 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	data := map[string]any{
-		"path":                validPath,
-		"size_bytes":          obj.Size,
-		"sha256":              obj.Digest,
-		"mode":                info.Mode().String(),
-		"mod_time":            info.ModTime().UTC().Format(time.RFC3339),
-		"max_preview_bytes":   limit,
-		"preview_bytes":       len(previewBytes),
-		"binary":              !isText,
-		"artifact":            obj.Digest,
-		"artifact_kind":       obj.Kind,
-		"artifact_size_bytes": obj.Size,
-		"truncated":           more || obj.Size > int64(len(previewBytes)),
+		"path":              validPath,
+		"size_bytes":        obj.Size,
+		"mode":              info.Mode().String(),
+		"mod_time":          info.ModTime().UTC().Format(time.RFC3339),
+		"max_preview_bytes": limit,
+		"preview_bytes":     len(previewBytes),
+		"binary":            !isText,
+		"artifact":          obj.Digest,
+		"truncated":         more || obj.Size > int64(len(previewBytes)),
 	}
 	if isText {
 		data["preview"] = string(previewBytes)

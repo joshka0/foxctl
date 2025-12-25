@@ -134,21 +134,21 @@ sourced from envelope `meta.correlation_id` and stored as `trace_id` in
 trajectory records/events. The following keys are recognized for trajectory-
 related envelopes and index rows:
 
-| Field                     | Type   | Required | Scope / Uniqueness                                                             | Usage Notes                                                                          |
-| ------------------------- | ------ | -------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `trace_id`                | string | yes      | Unique per trajectory (UUID/ULID/hex); reused by all envelopes in the same run | Primary correlation id; sourced from `meta.correlation_id` and stored as `trace_id`. |
-| `job_id`                  | string | optional | ULID; unique per job in a workspace                                            | Set when events originate from a `jobs/*` command.                                   |
-| `task_id`                 | string | optional | Task identifier; unique per tasks store                                        | Set for task-scoped events.                                                          |
-| `epic_id`                 | string | optional | Epic identifier                                                                | Set when an event relates to an epic-level plan.                                     |
-| `review_id`               | string | optional | Review artifact identifier                                                     | Set on `review_result` events and related envelopes.                                 |
-| `review_request_id`       | string | optional | ID of review request message or job                                            | Use when linking events back to a specific review request.                           |
-| `review_result_id`        | string | optional | ID of review result message or job                                             | Use when capturing async review completions.                                         |
-| `actor_id` / `agent_id`   | string | optional | Mailbox/agent actor id (e.g. `actor:agent:dspy:<slug>`)                        | Set for agent-initiated events and tool calls.                                       |
-| `task_run_id` / `run_id`  | string | optional | Unique id per execution attempt of a given task                                | Useful for distinguishing retries of the same task.                                  |
-| `trace_parent`            | string | optional | Parent trace id                                                                | Set when a trajectory is spawned from another trajectory/trace.                      |
-| `job_attempt` / `attempt` | int    | optional | Non-negative integer; monotonic per `job_id`                                   | Incremented on each retry of the same job.                                           |
-| `created_by`              | string | optional | Service or user identifier                                                     | E.g. `agentctl`, `actor:system:overseer`, `actor:human:<id>`.                        |
-| `cas_digest`              | string | optional | `sha256:<hex>`; MUST match any referenced CAS artifact                         | Set whenever `data_artifact` / `data.artifact` is present.                           |
+| Field                     | Type   | Required | Scope / Uniqueness                                                             | Usage Notes                                                                                                   |
+| ------------------------- | ------ | -------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `trace_id`                | string | yes      | Unique per trajectory (UUID/ULID/hex); reused by all envelopes in the same run | Primary correlation id; sourced from `meta.correlation_id` and stored as `trace_id`.                          |
+| `job_id`                  | string | optional | ULID; unique per job in a workspace                                            | Set when events originate from a `jobs/*` command.                                                            |
+| `task_id`                 | string | optional | Task identifier; unique per tasks store                                        | Set for task-scoped events.                                                                                   |
+| `epic_id`                 | string | optional | Epic identifier                                                                | Set when an event relates to an epic-level plan.                                                              |
+| `review_id`               | string | optional | Review artifact identifier                                                     | Set on `review_result` events and related envelopes.                                                          |
+| `review_request_id`       | string | optional | ID of review request message or job                                            | Use when linking events back to a specific review request.                                                    |
+| `review_result_id`        | string | optional | ID of review result message or job                                             | Use when capturing async review completions.                                                                  |
+| `actor_id` / `agent_id`   | string | optional | Mailbox/agent actor id (e.g. `actor:agent:dspy:<slug>`)                        | Set for agent-initiated events and tool calls.                                                                |
+| `task_run_id` / `run_id`  | string | optional | Unique id per execution attempt of a given task                                | Useful for distinguishing retries of the same task.                                                           |
+| `trace_parent`            | string | optional | Parent trace id                                                                | Set when a trajectory is spawned from another trajectory/trace.                                               |
+| `job_attempt` / `attempt` | int    | optional | Non-negative integer; monotonic per `job_id`                                   | Incremented on each retry of the same job.                                                                    |
+| `created_by`              | string | optional | Service or user identifier                                                     | E.g. `agentctl`, `actor:system:overseer`, `actor:human:<id>`.                                                 |
+| `cas_digest`              | string | optional | `sha256:<hex>`; MUST match any referenced CAS artifact                         | MAY be set when `data_artifact` / `data.artifact` is present; MUST be omitted when no artifact is referenced. |
 
 Unless otherwise specified, optional fields are omitted when not applicable;
 they have no implicit default meaning.
@@ -241,7 +241,8 @@ Instead, it defines:
 
 Implementations MUST follow Protocol v1 rules:
 
-- Use `meta.cas_digest` whenever `data.artifact` is present.
+- `meta.cas_digest` is optional; if set it MUST match `data.artifact` and MUST
+  be omitted when `data.artifact` is absent.
 - Keep inline previews (`data.summary` / `data_inline`) ≤ configured size.
 - Never store secrets in trajectories; secret redaction rules still apply.
 
@@ -257,7 +258,7 @@ specializes a few rules for trajectories.
     Protocol v1 `inline_output_kb` value.
   - If a serialized trajectory payload (full trace, large tool logs) would
     exceed this threshold, it MUST be stored in CAS and referenced via
-    `data.artifact` / `meta.cas_digest`.
+    `data.artifact` (and optionally `meta.cas_digest`).
   - `data_inline` / `data.summary` MUST remain small (≤ configured preview
     size); previews SHOULD be deterministic and secret-free.
 - **Redaction**

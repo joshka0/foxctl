@@ -47,10 +47,7 @@ func TestToolTrajectoryCapture_CodeSymbolSearch_EmitsToolCallAndResult(t *testin
 	if err != nil {
 		t.Fatalf("open trajectory store: %v", err)
 	}
-	t.Cleanup(func() {
-		// Test cleanup; error is not actionable.
-		_ = store.Close() //nolint:errcheck
-	})
+	t.Cleanup(func() { store.Close() })
 
 	events, err := store.GetEventsByTraceID(ctx, "ws-1", "trace-1")
 	if err != nil {

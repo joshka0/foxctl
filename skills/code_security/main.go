@@ -347,7 +347,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("code/security", "ECONFIG", err)
+		fail("code/security", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -425,8 +425,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 	if artifact.Digest != "" {
 		data["artifact"] = artifact.Digest
-		data["artifact_kind"] = artifact.Kind
-		data["artifact_size_bytes"] = artifact.Size
 	}
 
 	return rc.Emit("code/security", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})

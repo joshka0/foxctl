@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -40,6 +42,9 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 		return err
 	}
 
+	// Track whether the user explicitly set --workspace (including empty string)
+	flags.WorkspaceSet = cmd.Flags().Changed("workspace")
+
 	opts, err := buildRunOptions(cfg, skillName, flags, data)
 	if err != nil {
 		return writeRunValidationError(cmd, skillName, err)
@@ -48,11 +53,22 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 		opts.CLICommand = fmt.Sprintf("%s %s", cmd.CommandPath(), skillName)
 	}
 
-	executor := runservice.NewExecutor(cmd.Context(), cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+	// Apply timeout to context (default 2m if not specified)
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = runservice.DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+	defer cancel()
+
+	executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 	executor.SetAsyncRunner(defaultAsyncRunner)
 	defer executor.Close()
 
 	if done, err := executor.TryServeCache(data); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return writeTimeoutError(cmd, skillName, timeout)
+		}
 		return err
 	} else if done {
 		return nil
@@ -60,15 +76,36 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 
 	job, isDuplicate, err := executor.PrepareJob(data)
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return writeTimeoutError(cmd, skillName, timeout)
+		}
 		return err
 	}
 	if isDuplicate {
-		return executor.HandleDuplicate(job)
+		if err := executor.HandleDuplicate(job); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return writeTimeoutError(cmd, skillName, timeout)
+			}
+			return err
+		}
+		return nil
 	}
 	if opts.Async {
-		return executor.SubmitAsync(job)
+		if err := executor.SubmitAsync(job); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return writeTimeoutError(cmd, skillName, timeout)
+			}
+			return err
+		}
+		return nil
 	}
-	return executor.ExecuteSync(job)
+	if err := executor.ExecuteSync(job); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return writeTimeoutError(cmd, skillName, timeout)
+		}
+		return err
+	}
+	return nil
 }
 
 func writeRunValidationError(cmd *cobra.Command, skill string, cause error) error {
@@ -93,4 +130,21 @@ func writeRunValidationError(cmd *cobra.Command, skill string, cause error) erro
 
 	// Keep non-zero exit behavior.
 	return cause
+}
+
+func writeTimeoutError(cmd *cobra.Command, skill string, timeout time.Duration) error {
+	msg := fmt.Sprintf("execution timed out after %s", timeout)
+
+	data := map[string]any{
+		"skill":   skill,
+		"timeout": timeout.String(),
+		"hint":    "Increase timeout with --timeout flag (e.g., --timeout 5m) or check if there are stuck jobs with: sqlite3 ~/.agentctl/jobs/jobs.db \"SELECT id,command,state FROM jobs WHERE state='running'\"",
+	}
+
+	env := protocol.Error("agentctl.run", protocol.ErrorCodeETimeout, msg, data, protocol.WithSource("cli"))
+	if err := protocol.Write(cmd.OutOrStdout(), env); err != nil {
+		return fmt.Errorf("write timeout error envelope: %w", err)
+	}
+
+	return context.DeadlineExceeded
 }

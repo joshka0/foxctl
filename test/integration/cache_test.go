@@ -1,4 +1,7 @@
+//go:build integration
+
 // Package integration provides integration tests for agentctl.
+// These tests require the "integration" build tag to run.
 package integration
 
 import (

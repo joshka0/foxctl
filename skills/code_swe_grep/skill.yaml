@@ -63,12 +63,12 @@ signature:
     - name: artifact
       type: string
       description: "CAS digest of full NDJSON snippets when output is large"
-    - name: artifact_kind
+    - name: related_sessions
+      type: array
+      description: "Context hints from related past sessions (when embeddings available)"
+    - name: related_sessions_hint
       type: string
-      description: "MIME type of artifact (application/x-swe-grep-snippets+ndjson)"
-    - name: artifact_size_bytes
-      type: integer
-      description: "Size of CAS artifact in bytes"
+      description: "Non-fatal hint when session context is unavailable (e.g., missing API key)"
   help:
     short: "Extract high-signal code snippets from candidate files for a question."
     long: |
@@ -76,9 +76,21 @@ signature:
       1. Semantic/symbol indexes provide candidate files/symbols (Phase 3/4).
       2. SWE Grep reads those files live from the workspace.
       3. It extracts relevant snippets based on the question.
+      4. (New) Searches for related past sessions to provide context hints.
 
       The skill always reads live workspace files (not cached index data) to ensure
       snippets reflect the current tree. Large results are stored in CAS as NDJSON.
+
+      When GEMINI_API_KEY is set, the skill also searches for related past sessions
+      using semantic similarity. This provides context hints including:
+      - Session summaries describing what was worked on
+      - Gotchas and learnings from those sessions
+      - Key decisions that were made
+      - Key files that were touched
+
+      Environment Variables:
+      - GEMINI_API_KEY: Required for session context search (optional)
+      - EMBEDDING_MODEL: Model name (default: "gemini-embedding-001")
 
       See docs/spec/code_symbol_index_and_swe_grep.md §5 for the full contract.
     workflows:
@@ -96,7 +108,7 @@ signature:
             max_files: 10
             max_snippets: 20
 capabilities:
-  network: "none"
+  network: "egress"  # For embedding API calls (session context search)
   filesystem:
     - type: workdir
-  pure: true
+  pure: false  # Uses external embedding API when available

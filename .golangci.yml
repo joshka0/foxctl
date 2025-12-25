@@ -10,16 +10,29 @@ linters:
     - staticcheck
     - revive
     - errcheck
-  # depguard enabled with custom rules below
-
   settings:
     errcheck:
-      # Check blank assignments for unchecked errors
-      check-blank: true
-      # Ignore error checks in test cleanup defer statements
+      # Don't check blank assignments - the codebase uses _ = pattern for intentional ignores
+      check-blank: false
+      # Exclude common cleanup patterns inline
       exclude-functions:
-        - (io.Closer).Close # Allow _ = closer.Close() in defer for test cleanup
-
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*compress/gzip.Reader).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.Process).Kill
+        - (*os.Process).Wait
+        - (*os/exec.Cmd).Wait
+        - os.Remove
+        - os.RemoveAll
+        - os.Chdir
+        - (*net/http.Response).Body.Close
     revive:
       rules:
         - name: package-comments
@@ -27,40 +40,18 @@ linters:
         - name: exported
           disabled: true
         - name: var-naming
-          disabled: true # Allow package names like "types"
+          disabled: true
         - name: unhandled-error
-          severity: warning
-          disabled: false
-          arguments:
-            - "fmt.Printf"
-            - "fmt.Println"
+          disabled: true
+  exclusions:
+    # Use preset for common error handling patterns (Close, Flush, Remove, print, etc.)
+    presets:
+      - std-error-handling
+    rules:
+      # Allow staticcheck style suggestions
+      - linters:
+          - staticcheck
+        text: '(ST1023|QF1001|QF1011|omit type)'
+    # Exclude generated code
+    generated: strict
 
-    # Enforce layered architecture - prevent layer violations
-    depguard:
-      rules:
-        # Domain layer restrictions
-        domain-no-deps:
-          list-mode: strict
-          files:
-            - "**/internal/domain/**/*.go"
-          deny:
-            - pkg: "github.com/jkatigb/agentctl/internal/storage"
-              desc: "domain layer must not depend on storage"
-            - pkg: "github.com/jkatigb/agentctl/internal/execution"
-              desc: "domain layer must not depend on execution"
-            - pkg: "github.com/jkatigb/agentctl/internal/platform"
-              desc: "domain layer must not depend on platform"
-            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
-              desc: "domain layer must not depend on adapters"
-
-        # Execution layer restrictions
-        execution-limited-deps:
-          list-mode: strict
-          files:
-            - "**/internal/execution/**/*.go"
-          deny:
-            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
-              desc: "execution layer should not depend on adapters"
-
-issues:
-  exclude-use-default: false

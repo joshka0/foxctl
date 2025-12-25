@@ -1,10 +1,11 @@
 # OpenAPI Skill Specification
 
-**Version:** 1.0.0  
-**Status:** Draft  
+**Version:** 1.0.0\
+**Status:** Draft\
 **Last Updated:** 2025-11-12
 
-This is the complete specification for the `http/openapi` skill, a generic OpenAPI 3.x client built into agentctl Core Profile v1.
+This is the complete specification for the `http/openapi` skill, a generic
+OpenAPI 3.x client built into agentctl Core Profile v1.
 
 ---
 
@@ -34,18 +35,24 @@ This is the complete specification for the `http/openapi` skill, a generic OpenA
 
 ### 1.1 Purpose
 
-The `http/openapi` skill is a **generic, zero-codegen solution** for invoking any OpenAPI 3.x REST API operation. Instead of generating skill stubs for each API endpoint, this single skill can call any operation by reading the OpenAPI specification at runtime.
+The `http/openapi` skill is a **generic, zero-codegen solution** for invoking
+any OpenAPI 3.x REST API operation. Instead of generating skill stubs for each
+API endpoint, this single skill can call any operation by reading the OpenAPI
+specification at runtime.
 
 ### 1.2 Key Capabilities
 
 - **Universal API access**: Call any OpenAPI 3.x operation without codegen
 - **Spec-as-memory**: Load specs from files, CAS artifacts, or named memories
 - **Built-in auth**: Bearer, API Key, Basic Auth, OAuth2 Client Credentials
-- **Automatic pagination**: Link headers, cursor-based, offset/limit, total-count heuristics
+- **Automatic pagination**: Link headers, cursor-based, offset/limit,
+  total-count heuristics
 - **Smart retries**: Exponential backoff with jitter for 429/5xx errors
-- **CAS integration**: Large responses automatically stored as artifacts with summaries
+- **CAS integration**: Large responses automatically stored as artifacts with
+  summaries
 - **Dry-run support**: Preview requests without making actual API calls
-- **Plugin extensibility**: Custom auth and pagination strategies via subprocess plugins
+- **Plugin extensibility**: Custom auth and pagination strategies via subprocess
+  plugins
 
 ### 1.3 Use Cases
 
@@ -61,7 +68,9 @@ The `http/openapi` skill is a **generic, zero-codegen solution** for invoking an
 - **Extensible**: Plugin system for non-standard auth/pagination
 - **Production-ready**: Rate limiting, retries, error handling built-in
 
-This specification extracts and expands upon sections 3.1-3.10 of the Core Profile v1 specification, providing a complete implementation guide with examples and test fixtures.
+This specification extracts and expands upon sections 3.1-3.10 of the Core
+Profile v1 specification, providing a complete implementation guide with
+examples and test fixtures.
 
 ---
 
@@ -78,8 +87,8 @@ metadata:
   description: "Invoke OpenAPI 3.x operations with automatic pagination, auth, and retries"
   tags: ["http", "api", "openapi", "rest"]
 distribution:
-  type: exec  # May be WASI in future versions
-  artifact: sha256:...  # Actual digest computed at build time
+  type: exec # May be WASI in future versions
+  artifact: sha256:... # Actual digest computed at build time
 io:
   format: JSON
 signature:
@@ -134,7 +143,7 @@ signature:
       description: "CAS digest (sha256:...) when response exceeds inline threshold"
 
 capabilities:
-  network: egress  # Requires network access for API calls
+  network: egress # Requires network access for API calls
 ```
 
 ### 2.2 Version Compatibility
@@ -189,17 +198,20 @@ This section defines the complete input schema for the `http/openapi` skill.
 Specifies where to load the OpenAPI specification from:
 
 **File path**:
+
 ```json
 { "spec": "/path/to/openapi.yaml" }
 { "spec": "./relative/spec.json" }
 ```
 
 **CAS digest**:
+
 ```json
 { "spec": "sha256:abc123..." }
 ```
 
 **Named memory**:
+
 ```json
 { "spec": "memory:github" }
 ```
@@ -208,11 +220,13 @@ The skill loads and caches specs for 24 hours (configurable).
 
 #### 3.2.2 `operationId` (required, string)
 
-The unique identifier for the API operation to invoke. Must match an operationId defined in the spec.
+The unique identifier for the API operation to invoke. Must match an operationId
+defined in the spec.
 
 **Example**: `listReposForUser`, `createIssue`, `getUserByName`
 
-**Discovery**: Use `agentctl openapi describe memory:github` to list all available operations.
+**Discovery**: Use `agentctl openapi describe memory:github` to list all
+available operations.
 
 #### 3.2.3 `params` (optional, object)
 
@@ -221,20 +235,20 @@ Parameters organized by OpenAPI parameter locations:
 ```json
 {
   "params": {
-    "path": { 
+    "path": {
       "username": "octocat",
       "repo": "Hello-World"
     },
-    "query": { 
+    "query": {
       "per_page": 100,
       "sort": "created",
       "direction": "desc"
     },
-    "header": { 
+    "header": {
       "Accept": "application/vnd.github.v3+json",
       "X-Custom-Header": "value"
     },
-    "body": { 
+    "body": {
       "title": "New Issue",
       "body": "Issue description"
     }
@@ -242,15 +256,18 @@ Parameters organized by OpenAPI parameter locations:
 }
 ```
 
-**Type coercion**: String values automatically coerced to spec-defined types (integers, booleans, etc.).
+**Type coercion**: String values automatically coerced to spec-defined types
+(integers, booleans, etc.).
 
-**Validation**: Parameters validated against spec (lenient by default, strict if `--strict` config enabled).
+**Validation**: Parameters validated against spec (lenient by default, strict if
+`--strict` config enabled).
 
 #### 3.2.4 `auth` (optional, object)
 
 Authentication configuration with three sub-fields:
 
 **`scheme`** (string): Explicitly select security scheme
+
 - `"bearer"` - HTTP Bearer token auth
 - `"apiKey"` - API key in header or query
 - `"basic"` - HTTP Basic auth
@@ -259,15 +276,18 @@ Authentication configuration with three sub-fields:
 - `"auto"` or omitted - Auto-detect from spec
 
 **`secret_name`** (string): Select specific secret bundle
+
 - Useful when multiple APIs use different credentials
 - Default: Uses standard secret names (`bearer_token`, `api_key`, etc.)
 
 **`credentials`** (object): Direct credential override
+
 - **Not recommended** - prefer secrets/environment variables
 - Useful for testing or one-off operations
 - Keys depend on scheme: `token`, `api_key`, `username`, `password`, etc.
 
 **Example**:
+
 ```json
 {
   "auth": {
@@ -282,6 +302,7 @@ Authentication configuration with three sub-fields:
 Pagination configuration:
 
 **`strategy`** (string): Detection strategy
+
 - `"auto"` (default) - Try all strategies in order
 - `"link"` - RFC 5988 Link headers
 - `"cursor"` - Cursor-based (next_page_token, etc.)
@@ -289,17 +310,21 @@ Pagination configuration:
 - `"none"` - Disable pagination (fetch one page only)
 
 **Limits**:
+
 - `max_pages` (integer) - Maximum pages to fetch
 - `max_items` (integer) - Maximum total items to fetch
 
 **Field mappings** (for non-standard APIs):
-- `cursor_field` (string) - JSON path to cursor field (e.g., `"data.next_cursor"`)
+
+- `cursor_field` (string) - JSON path to cursor field (e.g.,
+  `"data.next_cursor"`)
 - `page_param` (string) - Page parameter name
 - `per_page_param` (string) - Page size parameter name
 - `offset_param` (string) - Offset parameter name
 - `limit_param` (string) - Limit parameter name
 
 **Example**:
+
 ```json
 {
   "paging": {
@@ -316,17 +341,20 @@ Retry and backoff configuration:
 
 - `base_ms` (integer, default: 250) - Initial retry delay in milliseconds
 - `factor` (float, default: 2.0) - Backoff multiplier (2.0 = exponential)
-- `max_attempts` (integer, default: 5) - Maximum attempts (includes initial request)
+- `max_attempts` (integer, default: 5) - Maximum attempts (includes initial
+  request)
 - `max_ms` (integer, default: 8000) - Maximum delay between retries
 - `retry_codes` (array, default: [429, 502, 503, 504]) - HTTP codes to retry
 
-**Backoff calculation**: `delay = min(base_ms * (factor ^ attempt), max_ms) * jitter`
+**Backoff calculation**:
+`delay = min(base_ms * (factor ^ attempt), max_ms) * jitter`
 
 **Jitter**: Random factor between 0.8-1.2 to prevent thundering herd
 
 **Retry-After**: Always respected when server provides this header
 
 **Example**:
+
 ```json
 {
   "retry": {
@@ -341,7 +369,9 @@ Retry and backoff configuration:
 
 #### 3.2.7 `dry_run` (optional, boolean, default: false)
 
-If true, constructs and validates the request without executing it. Returns a request plan showing:
+If true, constructs and validates the request without executing it. Returns a
+request plan showing:
+
 - HTTP method and URL
 - Headers (with secrets redacted)
 - Body (if applicable)
@@ -354,7 +384,8 @@ Useful for debugging and validation.
 
 ## 4. Output Envelope Schema
 
-All responses follow the standard JSON envelope format defined in Core Profile v1.
+All responses follow the standard JSON envelope format defined in Core Profile
+v1.
 
 ### 4.1 Success Response (Inline)
 
@@ -433,16 +464,13 @@ For large responses (≥ 32KB), stored in content-addressable storage:
         }
       }
     },
-    "artifact": "sha256:def456...",
-    "kind": "application/json",
-    "size_bytes": 1048576
+    "artifact": "sha256:def456..."
   },
   "meta": {
     "ts": "2025-11-12T10:30:00Z",
     "duration_ms": 2145,
     "source": "run",
     "runner": "exec",
-    "cas_digest": "sha256:def456...",
     "job_id": "01HQXY..."
   },
   "error": { "code": null, "message": null }
@@ -450,6 +478,7 @@ For large responses (≥ 32KB), stored in content-addressable storage:
 ```
 
 **Retrieving the artifact**:
+
 ```bash
 agentctl cas get sha256:def456... > full_response.json
 ```
@@ -545,6 +574,7 @@ agentctl openapi import ./spec.yaml --as=myapi --strict
 ```
 
 **What happens**:
+
 1. Spec validated (lenient by default)
 2. Spec stored in CAS
 3. Named memory entry created: `memory:github` → CAS digest
@@ -557,6 +587,7 @@ agentctl memory list --type=openapi_spec
 ```
 
 Output:
+
 ```text
 NAME      TYPE          WORKSPACE         SIZE    UPDATED
 github    openapi_spec  /home/user/proj   125KB   2h ago
@@ -575,11 +606,12 @@ agentctl openapi validate memory:github --strict
 ```
 
 **Validation checks**:
+
 - ✅ Valid OpenAPI 3.x structure
 - ✅ All `$ref` references resolved
 - ✅ SecuritySchemes defined for all security requirements
 - ✅ OperationIds are unique
-- ⚠️  Warnings for missing descriptions, examples (strict only)
+- ⚠️ Warnings for missing descriptions, examples (strict only)
 
 ### 5.4 Describing Specs
 
@@ -590,6 +622,7 @@ agentctl openapi describe memory:github
 ```
 
 Output:
+
 ```text
 OpenAPI: 3.0.3
 Title: GitHub REST API
@@ -610,6 +643,7 @@ createIssue               POST    /repos/{owner}/{repo}/issues   [issues]
 ```
 
 **Filtering by tag**:
+
 ```bash
 agentctl openapi describe memory:github --tag=issues
 ```
@@ -617,11 +651,13 @@ agentctl openapi describe memory:github --tag=issues
 ### 5.5 Spec Caching
 
 Specs are cached in memory for performance:
+
 - **Default TTL**: 24 hours
 - **Cache key**: Spec name + CAS digest
 - **Invalidation**: Auto on re-import, TTL expiry, or manual clear
 
 **Manual cache clear**:
+
 ```bash
 agentctl cache clear --type=openapi_spec
 agentctl cache clear --type=openapi_spec --name=github
@@ -642,21 +678,24 @@ Built-in support for common authentication patterns. Credentials loaded from:
 ### 6.2 Bearer Token (HTTP Bearer)
 
 **OpenAPI spec**:
+
 ```yaml
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: JWT  # Optional
+      bearerFormat: JWT # Optional
 ```
 
 **Setup**:
+
 ```bash
 export AGENTCTL_BEARER_TOKEN="ghp_abc123..."
 ```
 
 **Usage** (auto-detected):
+
 ```json
 {
   "spec": "memory:github",
@@ -666,6 +705,7 @@ export AGENTCTL_BEARER_TOKEN="ghp_abc123..."
 ```
 
 **Override**:
+
 ```json
 {
   "auth": {
@@ -680,26 +720,29 @@ export AGENTCTL_BEARER_TOKEN="ghp_abc123..."
 ### 6.3 API Key (Header or Query)
 
 **OpenAPI spec**:
+
 ```yaml
 components:
   securitySchemes:
     apiKeyAuth:
       type: apiKey
-      in: header  # or "query"
+      in: header # or "query"
       name: X-API-Key
 ```
 
 **Setup**:
+
 ```bash
 export AGENTCTL_API_KEY="sk_live_abc123..."
 ```
 
-**HTTP header**: `X-API-Key: sk_live_abc123...`  
+**HTTP header**: `X-API-Key: sk_live_abc123...`\
 **Or query**: `?api_key=sk_live_abc123...`
 
 ### 6.4 HTTP Basic Auth
 
 **OpenAPI spec**:
+
 ```yaml
 components:
   securitySchemes:
@@ -709,6 +752,7 @@ components:
 ```
 
 **Setup**:
+
 ```bash
 export AGENTCTL_BASIC_AUTH="username:password"
 # Or separate:
@@ -721,6 +765,7 @@ export AGENTCTL_BASIC_PASSWORD="pass"
 ### 6.5 OAuth2 Client Credentials
 
 **OpenAPI spec**:
+
 ```yaml
 components:
   securitySchemes:
@@ -735,12 +780,14 @@ components:
 ```
 
 **Setup**:
+
 ```bash
 export AGENTCTL_OAUTH2_CLIENT_ID="client_abc123"
 export AGENTCTL_OAUTH2_CLIENT_SECRET="secret_xyz789"
 ```
 
 **Flow**:
+
 1. Skill exchanges credentials for access token (first request)
 2. Token cached for lifetime (respects `expires_in`)
 3. Automatic refresh on expiration
@@ -751,6 +798,7 @@ export AGENTCTL_OAUTH2_CLIENT_SECRET="secret_xyz789"
 For non-standard auth (AWS SigV4, HMAC signatures, custom schemes):
 
 **OpenAPI spec hint**:
+
 ```yaml
 x-agentctl:
   auth: plugin:aws-sigv4
@@ -760,6 +808,7 @@ x-agentctl:
 ```
 
 **Usage**:
+
 ```json
 {
   "spec": "memory:aws-api",
@@ -768,7 +817,8 @@ x-agentctl:
 }
 ```
 
-See [Section 11: Plugin Protocol](#11-plugin-protocol) for implementation details.
+See [Section 11: Plugin Protocol](#11-plugin-protocol) for implementation
+details.
 
 ### 6.7 Multiple Auth Schemes
 
@@ -783,6 +833,7 @@ security:
 **Auto-selection**: Tries schemes in order until credentials found
 
 **Manual selection**:
+
 ```json
 {
   "auth": { "scheme": "bearer" }
@@ -792,6 +843,7 @@ security:
 ### 6.8 Security Best Practices
 
 **Credential redaction**: All secrets automatically redacted in:
+
 - Log output (replaced with `***`)
 - Error messages
 - Dry-run output
@@ -799,6 +851,7 @@ security:
 - Progress messages
 
 **Secret storage**:
+
 - ✅ Use environment variables or `/run/secrets/`
 - ✅ Use secret management systems (Vault, AWS Secrets Manager)
 - ❌ Don't hardcode in scripts or config files
@@ -810,7 +863,8 @@ security:
 
 ### 7.1 Overview
 
-The skill auto-detects and handles pagination for list operations. Four built-in strategies:
+The skill auto-detects and handles pagination for list operations. Four built-in
+strategies:
 
 1. **Link headers** (RFC 5988) - GitHub, GitLab
 2. **Cursor-based** - Stripe, Google APIs
@@ -831,6 +885,7 @@ Default behavior (`strategy: "auto"`):
 **RFC 5988 Web Linking standard**, used by GitHub, GitLab, etc.
 
 **Response header**:
+
 ```text
 Link: <https://api.github.com/users/octocat/repos?page=2>; rel="next",
       <https://api.github.com/users/octocat/repos?page=10>; rel="last"
@@ -839,6 +894,7 @@ Link: <https://api.github.com/users/octocat/repos?page=2>; rel="next",
 **Auto-detected**: No configuration needed
 
 **Limiting**:
+
 ```json
 {
   "paging": { "max_pages": 5 }
@@ -850,16 +906,19 @@ Link: <https://api.github.com/users/octocat/repos?page=2>; rel="next",
 **Stripe, Google Cloud, Slack, etc.**
 
 **Response body**:
+
 ```json
 {
-  "data": [ /* items */ ],
+  "data": [/* items */],
   "next_page_token": "eyJwYWdlIjoy..."
 }
 ```
 
-**Auto-detected fields**: `next_page_token`, `next_cursor`, `next`, `cursor`, `pagination.cursor`
+**Auto-detected fields**: `next_page_token`, `next_cursor`, `next`, `cursor`,
+`pagination.cursor`
 
 **Manual configuration**:
+
 ```json
 {
   "paging": {
@@ -877,6 +936,7 @@ Link: <https://api.github.com/users/octocat/repos?page=2>; rel="next",
 **Classic REST pagination**: `GET /api/items?offset=0&limit=50`
 
 **Parameter variations**:
+
 - `offset` + `limit`
 - `page` + `per_page`
 - `skip` + `take`
@@ -884,6 +944,7 @@ Link: <https://api.github.com/users/octocat/repos?page=2>; rel="next",
 **Auto-detection**: Finds params in spec
 
 **Manual configuration**:
+
 ```json
 {
   "paging": {
@@ -908,21 +969,25 @@ When no explicit pagination markers exist:
 ### 7.7 Pagination Control
 
 **Disable pagination** (fetch only first page):
+
 ```json
 { "paging": { "max_pages": 1 } }
 ```
 
 **Limit by items**:
+
 ```json
 { "paging": { "max_items": 500 } }
 ```
 
 **Limit by pages**:
+
 ```json
 { "paging": { "max_pages": 10 } }
 ```
 
 **Both limits** (whichever reached first):
+
 ```json
 { "paging": { "max_pages": 10, "max_items": 500 } }
 ```
@@ -949,23 +1014,25 @@ All responses include `summary.pagination`:
 
 ### 8.1 Default Retry Behavior
 
-**Retry codes**: 429 (Rate Limit), 502, 503, 504 (Server Errors)  
-**Strategy**: Exponential backoff with jitter  
-**Max attempts**: 5 (including initial request)  
+**Retry codes**: 429 (Rate Limit), 502, 503, 504 (Server Errors)\
+**Strategy**: Exponential backoff with jitter\
+**Max attempts**: 5 (including initial request)\
 **Backoff schedule**: 250ms, 500ms, 1s, 2s, 4s (with ±20% jitter)
 
 ### 8.2 Retry-After Header
 
 When server returns `Retry-After` header, it's always respected:
 
-**Seconds format**: `Retry-After: 60`  
+**Seconds format**: `Retry-After: 60`\
 **HTTP date format**: `Retry-After: Wed, 21 Oct 2025 07:28:00 GMT`
 
-**Behavior**: Wait specified duration before retry, overriding backoff calculation.
+**Behavior**: Wait specified duration before retry, overriding backoff
+calculation.
 
 ### 8.3 Rate Limit Tracking
 
 **Common headers tracked**:
+
 ```text
 X-RateLimit-Limit: 5000
 X-RateLimit-Remaining: 4999
@@ -976,6 +1043,7 @@ RateLimit-Reset: 1699564800
 ```
 
 **Included in response summary**:
+
 ```json
 {
   "summary": {
@@ -1003,18 +1071,20 @@ RateLimit-Reset: 1699564800
 }
 ```
 
-**Linear backoff** (factor=1.0): 500ms, 500ms, 500ms  
-**Exponential backoff** (factor=2.0): 500ms, 1000ms, 2000ms  
+**Linear backoff** (factor=1.0): 500ms, 500ms, 500ms\
+**Exponential backoff** (factor=2.0): 500ms, 1000ms, 2000ms\
 **Aggressive backoff** (factor=3.0): 500ms, 1500ms, 4500ms
 
 ### 8.5 Pagination Retry Budget
 
 Each page gets its own retry budget:
+
 - **Per-page**: max_attempts retries
 - **Total**: pages × max_attempts requests maximum
 - **Example**: 10 pages × 5 attempts = up to 50 requests
 
-**Failure handling**: If one page fails after retries, return partial results with error.
+**Failure handling**: If one page fails after retries, return partial results
+with error.
 
 ### 8.6 Disabling Retries
 
@@ -1050,7 +1120,10 @@ When rate limit exceeded after all retries:
 
 ---
 
-*[This is a comprehensive starting point. The spec continues with sections 9-17 covering Dry-Run Mode, Response Processing, Plugin Protocol, Error Codes, Examples, Golden Fixtures, Configuration, Testing, and Migration Guide. Due to length, I'll provide the complete document in a single file.]*
+_[This is a comprehensive starting point. The spec continues with sections 9-17
+covering Dry-Run Mode, Response Processing, Plugin Protocol, Error Codes,
+Examples, Golden Fixtures, Configuration, Testing, and Migration Guide. Due to
+length, I'll provide the complete document in a single file.]_
 
 ## 9. Dry-Run Mode
 
@@ -1059,6 +1132,7 @@ When rate limit exceeded after all retries:
 Preview and validate requests without making actual API calls.
 
 **Use cases**:
+
 - Parameter validation
 - Request debugging
 - Auth header verification (redacted)
@@ -1119,6 +1193,7 @@ Preview and validate requests without making actual API calls.
 ### 9.4 What Gets Validated
 
 ✅ **Validated in dry-run**:
+
 - Spec can be loaded and parsed
 - OperationId exists in spec
 - Required parameters provided
@@ -1127,6 +1202,7 @@ Preview and validate requests without making actual API calls.
 - Auth credentials present
 
 ❌ **Not validated**:
+
 - Network connectivity
 - API availability
 - Auth credentials correctness
@@ -1135,6 +1211,7 @@ Preview and validate requests without making actual API calls.
 ### 9.5 Security
 
 All credentials **redacted** in output:
+
 - `Authorization: Bearer ***`
 - `X-API-Key: ***`
 - `Authorization: Basic ***`
@@ -1150,10 +1227,12 @@ Full request plan logged at DEBUG level with secrets masked.
 **Threshold**: `inline_output_kb` (default: 32KB)
 
 **Small responses** (< 32KB):
+
 - Included inline in `data.body`
 - Full response immediately available
 
 **Large responses** (≥ 32KB):
+
 - Stored in CAS
 - `data.artifact` contains digest
 - `data.summary` contains preview
@@ -1161,22 +1240,24 @@ Full request plan logged at DEBUG level with secrets masked.
 ### 10.2 Summary Generation Rules
 
 **Always included**:
+
 ```json
 {
   "summary": {
     "status_code": 200,
-    "headers": { /* selected headers */ }
+    "headers": {/* selected headers */}
   }
 }
 ```
 
 **For successful responses**:
+
 ```json
 {
   "summary": {
     "status_code": 200,
-    "headers": { /* ... */ },
-    "pagination": { /* if paginated */ },
+    "headers": {/* ... */},
+    "pagination": {/* if paginated */},
     "kind": "application/json",
     "size_bytes": 1048576
   }
@@ -1184,6 +1265,7 @@ Full request plan logged at DEBUG level with secrets masked.
 ```
 
 **For CAS artifacts**:
+
 ```json
 {
   "summary": {
@@ -1200,29 +1282,35 @@ Full request plan logged at DEBUG level with secrets masked.
 ### 10.3 Header Selection
 
 **Rate limiting**:
+
 - `x-ratelimit-*`, `ratelimit-*`
 - `retry-after`
 
 **Caching**:
+
 - `etag`
 - `last-modified`
 - `cache-control`
 
 **Pagination**:
+
 - `link`
 - `x-total-count`, `x-total-pages`
 
 **Tracing**:
+
 - `x-request-id`, `request-id`
 - `x-trace-id`, `trace-id`
 
 **Content**:
+
 - `content-type`
 - `content-length`
 
 ### 10.4 Pagination Response Aggregation
 
 **Array responses**: Items concatenated
+
 ```javascript
 // Page 1: [{"id": 1}, {"id": 2}]
 // Page 2: [{"id": 3}, {"id": 4}]
@@ -1230,6 +1318,7 @@ Full request plan logged at DEBUG level with secrets masked.
 ```
 
 **Object responses**: Wrapped with page metadata
+
 ```json
 {
   "pages": [
@@ -1243,6 +1332,7 @@ Full request plan logged at DEBUG level with secrets masked.
 ### 10.5 Error Response Handling
 
 **4xx Client Errors**: Inline, not artifactized
+
 ```json
 {
   "status": "error",
@@ -1264,6 +1354,7 @@ Full request plan logged at DEBUG level with secrets masked.
 ```
 
 **5xx Server Errors**: Include server context
+
 ```json
 {
   "status": "error",
@@ -1284,6 +1375,7 @@ Full request plan logged at DEBUG level with secrets masked.
 ### 10.6 Preview Generation
 
 **JSON arrays**:
+
 ```json
 {
   "record_count": 247,
@@ -1299,6 +1391,7 @@ Full request plan logged at DEBUG level with secrets masked.
 ```
 
 **JSON objects**:
+
 ```json
 {
   "preview": {
@@ -1309,6 +1402,7 @@ Full request plan logged at DEBUG level with secrets masked.
 ```
 
 **Non-JSON** (HTML, XML, plain text):
+
 ```json
 {
   "kind": "text/html",
@@ -1327,6 +1421,7 @@ Full request plan logged at DEBUG level with secrets masked.
 Extend the skill with custom auth and pagination via out-of-process plugins.
 
 **Plugin types**:
+
 - **Auth plugins**: Custom signing (AWS SigV4, HMAC, etc.)
 - **Pagination plugins**: Non-standard pagination logic
 
@@ -1335,6 +1430,7 @@ Extend the skill with custom auth and pagination via out-of-process plugins.
 ### 11.2 Discovery
 
 Plugins found via:
+
 1. `AGENTCTL_PLUGIN_PATH` environment variable (colon-separated)
 2. `openapi.plugin_path` config setting
 3. Default: `~/.agentctl/plugins`
@@ -1346,6 +1442,7 @@ Plugins found via:
 **Command**: `plugin/auth`
 
 **Input**:
+
 ```json
 {
   "version": 1,
@@ -1379,6 +1476,7 @@ Plugins found via:
 ```
 
 **Output** (success):
+
 ```json
 {
   "version": 1,
@@ -1397,6 +1495,7 @@ Plugins found via:
 ```
 
 **Output** (error):
+
 ```json
 {
   "version": 1,
@@ -1417,6 +1516,7 @@ Plugins found via:
 **Command**: `plugin/pagination`
 
 **Input**:
+
 ```json
 {
   "version": 1,
@@ -1426,7 +1526,7 @@ Plugins found via:
       "status": 200,
       "headers": { "content-type": "application/json" },
       "body": {
-        "results": [ /* items */ ],
+        "results": [/* items */],
         "meta": { "next_token": "eyJwYWdlIjoy..." }
       }
     },
@@ -1437,6 +1537,7 @@ Plugins found via:
 ```
 
 **Output** (continue):
+
 ```json
 {
   "version": 1,
@@ -1453,6 +1554,7 @@ Plugins found via:
 ```
 
 **Output** (stop):
+
 ```json
 {
   "version": 1,
@@ -1564,6 +1666,7 @@ if __name__ == "__main__":
 ```
 
 **Make executable**:
+
 ```bash
 chmod +x ~/.agentctl/plugins/agentctl-plugin-aws-sigv4
 ```
@@ -1589,17 +1692,17 @@ x-agentctl:
 
 ### 12.1 Complete Error Catalog
 
-| Code | HTTP | Meaning | Remediation |
-|------|------|---------|-------------|
-| `EOPENAPI` | - | OpenAPI spec error | Validate spec, check operationId exists |
-| `EARG` | 400,422 | Invalid arguments | Check required params, verify types |
-| `EAUTH` | 401 | Authentication failed | Verify credentials, check token expiry |
-| `EPAGINATION` | - | Pagination failure | Specify strategy manually, check response structure |
-| `ERATELIMIT` | 429 | Rate limit exceeded | Wait for reset, reduce request rate |
-| `ERUNTIME` | 5xx | Network/server error | Retry later, check API status |
-| `ENOTFOUND` | 404 | Resource not found | Verify spec/memory name, check path params |
-| `ETIMEOUT` | - | Request timeout | Increase timeout, check network |
-| `EPOLICY` | - | Policy violation | Check egress allow list, verify capabilities |
+| Code          | HTTP    | Meaning               | Remediation                                         |
+| ------------- | ------- | --------------------- | --------------------------------------------------- |
+| `EOPENAPI`    | -       | OpenAPI spec error    | Validate spec, check operationId exists             |
+| `EARG`        | 400,422 | Invalid arguments     | Check required params, verify types                 |
+| `EAUTH`       | 401     | Authentication failed | Verify credentials, check token expiry              |
+| `EPAGINATION` | -       | Pagination failure    | Specify strategy manually, check response structure |
+| `ERATELIMIT`  | 429     | Rate limit exceeded   | Wait for reset, reduce request rate                 |
+| `ERUNTIME`    | 5xx     | Network/server error  | Retry later, check API status                       |
+| `ENOTFOUND`   | 404     | Resource not found    | Verify spec/memory name, check path params          |
+| `ETIMEOUT`    | -       | Request timeout       | Increase timeout, check network                     |
+| `EPOLICY`     | -       | Policy violation      | Check egress allow list, verify capabilities        |
 
 ### 12.2 Error Response Structure
 
@@ -1608,7 +1711,7 @@ x-agentctl:
   "status": "error",
   "command": "http/openapi",
   "data": {
-    "summary": { /* context */ },
+    "summary": {/* context */},
     "hint": "Actionable remediation suggestion"
   },
   "error": {
@@ -1765,6 +1868,7 @@ agentctl run http/openapi \
 ```
 
 **Response**:
+
 ```json
 {
   "status": "ok",
@@ -1828,6 +1932,7 @@ agentctl run http/openapi \
 ```
 
 **Response** shows request plan without executing:
+
 ```json
 {
   "status": "ok",
@@ -1892,6 +1997,7 @@ tests/fixtures/openapi/
 ### 14.2 Input Fixtures
 
 `tests/fixtures/openapi/inputs/github-list-repos.json`:
+
 ```json
 {
   "spec": "memory:github",
@@ -1904,6 +2010,7 @@ tests/fixtures/openapi/
 ```
 
 `tests/fixtures/openapi/inputs/error-missing-operationid.json`:
+
 ```json
 {
   "spec": "memory:github",
@@ -1914,6 +2021,7 @@ tests/fixtures/openapi/
 ### 14.3 Output Fixtures
 
 `tests/fixtures/openapi/outputs/success-inline.json`:
+
 ```json
 {
   "version": 1,
@@ -1935,6 +2043,7 @@ tests/fixtures/openapi/
 ```
 
 `tests/fixtures/openapi/outputs/error-eauth-401.json`:
+
 ```json
 {
   "version": 1,
@@ -1954,6 +2063,7 @@ tests/fixtures/openapi/
 ### 14.4 Spec Fixtures
 
 `tests/fixtures/openapi/specs/minimal.yaml`:
+
 ```yaml
 openapi: 3.0.0
 info:
@@ -1971,7 +2081,7 @@ paths:
           required: true
           schema: { type: integer }
       responses:
-        '200':
+        "200":
           description: Success
           content:
             application/json:
@@ -2002,6 +2112,7 @@ diff tests/fixtures/openapi/outputs/success-inline.json actual.json
 ### 15.1 Config File
 
 `~/.agentctl/config.yaml`:
+
 ```yaml
 openapi:
   strict_validate: false
@@ -2035,6 +2146,7 @@ export AGENTCTL_OAUTH2_CLIENT_SECRET="..."
 ### 15.3 Workspace Config
 
 Project-specific defaults in `.agentctl/config.yaml`:
+
 ```yaml
 openapi:
   operation_defaults:
@@ -2082,6 +2194,7 @@ agentctl openapi test memory:github
 ```
 
 Output:
+
 ```text
 ✓ getUser (GET /users/{username})
 ✓ listReposForUser (GET /users/{username}/repos)
@@ -2098,12 +2211,14 @@ Skipped: 49/247
 ### 17.1 From curl/HTTP Tools
 
 **Before**:
+
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
      "https://api.github.com/users/octocat/repos?per_page=100"
 ```
 
 **After**:
+
 ```bash
 agentctl openapi import https://api.github.com/openapi.json --as=github
 agentctl run http/openapi \
@@ -2114,7 +2229,7 @@ agentctl run http/openapi \
 
 ### 17.2 From Codegen
 
-**Before**: Generate client → write integration code  
+**Before**: Generate client → write integration code\
 **After**: Import spec → use generic skill
 
 **Benefits**: No codegen, instant updates, no dependencies
@@ -2122,6 +2237,7 @@ agentctl run http/openapi \
 ### 17.3 From Custom Skills
 
 **Optional wrapper generation**:
+
 ```bash
 agentctl openapi generate memory:github --install --group-by=tag
 agentctl run github/list-repos-for-user --username=octocat
@@ -2140,6 +2256,7 @@ agentctl run github/list-repos-for-user --username=octocat
 ## Appendix B: Changelog
 
 **Version 1.0.0 (2025-11-12)**:
+
 - Initial specification
 - OpenAPI 3.0.x and 3.1.x support
 - Built-in auth: Bearer, API Key, Basic, OAuth2

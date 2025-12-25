@@ -1,0 +1,13 @@
+# Dependency analysis command
+description = "Analyze code dependencies and imports"
+
+prompt = """Analyze dependencies:
+
+```bash
+!{agentctl run code/imports --input '{"path": "{{args}}"}'}
+```
+
+Summarize:
+- Key dependency relationships
+- Potential circular dependencies
+- Unused or problematic imports"""

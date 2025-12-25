@@ -1,0 +1,68 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/incremental_index
+  version: 0.1.0
+  description: "Index a single file's symbols into memory store for fast code search"
+  tags: ["code", "index", "symbols", "live", "incremental"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_incremental_index/code_incremental_index
+io:
+  format: JSON
+  inline_output_kb: 4
+signature:
+  command: code/incremental_index
+  parameters:
+    - name: file
+      type: string
+      required: true
+      description: "File path to index (relative or absolute)"
+    - name: workspace_id
+      type: string
+      required: false
+      default: "default"
+      description: "Workspace identifier for memory store"
+    - name: symbols
+      type: boolean
+      required: false
+      default: true
+      description: "Extract and store symbols"
+    - name: embed
+      type: boolean
+      required: false
+      default: false
+      description: "Generate embeddings synchronously (slow)"
+    - name: embed_queue
+      type: boolean
+      required: false
+      default: false
+      description: "Queue embedding for background processing"
+returns:
+  - name: file
+    type: string
+    description: "Indexed file path"
+  - name: language
+    type: string
+    description: "Detected language"
+  - name: symbols_extracted
+    type: integer
+    description: "Number of symbols extracted from file"
+  - name: symbols_updated
+    type: integer
+    description: "Number of symbols created or updated"
+  - name: symbols_deleted
+    type: integer
+    description: "Number of stale symbols removed"
+  - name: embedding_queued
+    type: boolean
+    description: "Whether embedding was queued"
+  - name: duration_ms
+    type: integer
+    description: "Processing time in milliseconds"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

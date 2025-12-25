@@ -1,0 +1,13 @@
+# Exclude Close methods for cleanup operations
+(*os.File).Close
+(*io.ReadCloser).Close
+(*io.WriteCloser).Close
+(io.Closer).Close
+(*database/sql.DB).Close
+(*database/sql.Rows).Close
+(*database/sql.Stmt).Close
+
+# Output operations
+fmt.Fprint
+fmt.Fprintf
+fmt.Fprintln

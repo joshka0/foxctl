@@ -127,8 +127,8 @@ Also sets `Meta.Workspace` and `Meta.SkillVer` if provided ✅
 
 ### Spec
 
-- Cached envelopes may reference CAS artifacts via `data.artifact` /
-  `meta.cas_digest`.
+- Cached envelopes may reference CAS artifacts via `data.artifact` / optional
+  `meta.cas_digest` (if set MUST match `data.artifact`).
 - On cache hit, these references remain valid.
 - Cache store pins artifacts on `Put`, unpins on `Delete`/expiry.
 
@@ -223,7 +223,7 @@ test/integration/cache_hit_test.go (or similar)
 ├── TestCacheHit_SameInputProducesHit
 │   - Run skill twice with identical input
 │   - Assert: 2nd run has meta.source="cache", meta.cache_key matches
-│   - Assert: data identical, meta.cas_digest identical (if CAS-backed)
+│   - Assert: data identical; if set, meta.cas_digest identical (if CAS-backed)
 ├── TestCacheMiss_DifferentInputProducesMiss
 │   - Run skill twice with different input
 │   - Assert: both runs execute (no meta.source="cache")

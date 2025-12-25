@@ -15,13 +15,16 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/rs/zerolog"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"gopkg.in/yaml.v3"
 )
+
+var logger = zerolog.New(os.Stderr).With().Timestamp().Str("skill", "mcp/install").Logger()
 
 type input struct {
 	ServerCmd string `json:"server_cmd"`
@@ -44,7 +47,7 @@ func main() {
 
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("mcp/install", "ECONFIG", err)
+		fail("mcp/install", "ERUNTIME", err)
 	}
 
 	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
@@ -95,8 +98,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	defer func() {
 		if err := mcpClient.Close(); err != nil {
-			// Log close error but don't fail the operation.
-			_, _ = fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err) //nolint:errcheck
+			logger.Warn().Err(err).Msg("failed to close MCP client")
 		}
 	}()
 
@@ -145,8 +147,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	for _, tool := range toolsResult.Tools {
 
 		if err := generateSkill(validDir, tool, in); err != nil {
-			// Warn but continue.
-			_, _ = fmt.Fprintf(os.Stderr, "failed to generate skill for %s: %v\n", tool.Name, err) //nolint:errcheck
+			logger.Error().Err(err).Str("tool", tool.Name).Msg("failed to generate skill")
 			continue
 		}
 

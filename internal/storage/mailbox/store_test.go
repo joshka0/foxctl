@@ -21,13 +21,13 @@ func TestMailboxStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	// Test Send
 	t.Run("Send", func(t *testing.T) {
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"skill": "test/skill",
-			"params": map[string]interface{}{
+			"params": map[string]any{
 				"arg1": "value1",
 			},
 		}
@@ -110,7 +110,7 @@ func TestMailboxStore(t *testing.T) {
 
 	// Test Send and Nack
 	t.Run("SendAndNack", func(t *testing.T) {
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"test": "data",
 		}
 		payloadBytes, err := json.Marshal(payload)
@@ -177,7 +177,7 @@ func TestMailboxPollTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	// Test Poll with timeout when no messages
 	t.Run("PollTimeout", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestMailboxMessageTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	messageTypes := []agent.MessageType{
 		agent.MessageTypeAsk,
@@ -222,7 +222,7 @@ func TestMailboxMessageTypes(t *testing.T) {
 
 	for i, msgType := range messageTypes {
 		t.Run(string(msgType), func(t *testing.T) {
-			payload := map[string]interface{}{
+			payload := map[string]any{
 				"type": msgType,
 			}
 			payloadBytes, err := json.Marshal(payload)

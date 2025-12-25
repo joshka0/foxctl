@@ -20,11 +20,11 @@ func TestBlackboardStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	// Test Post
 	t.Run("Post", func(t *testing.T) {
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"task_id":  "task-001",
 			"title":    "Process webhook",
 			"priority": 5,
@@ -122,7 +122,7 @@ func TestBlackboardStore(t *testing.T) {
 	// Test ListByTopic
 	t.Run("ListByTopic", func(t *testing.T) {
 		// Add another record
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"task_id": "task-002",
 			"title":   "Send notification",
 		}
@@ -269,7 +269,7 @@ func TestBlackboardWatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open store: %v", err)
 	}
-	defer func() { _ = store.Close() }() //nolint:errcheck
+	defer store.Close()
 
 	// Start watching from 1 second ago to ensure we catch records created "now"
 	fromTS := time.Now().Add(-1 * time.Second).Unix()
@@ -278,7 +278,7 @@ func TestBlackboardWatch(t *testing.T) {
 	// Post a record after starting watch
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		payload := map[string]interface{}{
+		payload := map[string]any{
 			"task_id": "watch-task-001",
 			"title":   "Watch test task",
 		}
