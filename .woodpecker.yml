@@ -1,0 +1,108 @@
+# agentctl CI - Woodpecker
+# Mirrors GitHub Actions CI workflow
+
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: manual
+
+variables:
+  - &ci_image "ghcr.io/jkatigb/agentctl-ci:go1.24"
+
+steps:
+  fmt:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+    commands:
+      - make fmt
+      - |
+        if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+          git diff --exit-code || (echo 'Formatting changed files. Run make fmt locally.' && exit 1)
+        fi
+
+  lint:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+      GOTOOLCHAIN: go1.24.3
+    commands:
+      - make lint
+
+  unit-tests:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+    commands:
+      - make test-short
+
+  race-tests:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+    commands:
+      - make test-race
+
+  coverage:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+    commands:
+      - mkdir -p coverage
+      - CGO_ENABLED=0 go test -short ./... -covermode=atomic -coverprofile=coverage/coverage.out
+      - CGO_ENABLED=0 go tool cover -func=coverage/coverage.out | tee coverage/summary.txt
+      - awk '/total:/ { if ($3+0 < 30.0) { print "Coverage below threshold:", $3; exit 1 } }' coverage/summary.txt
+
+  build:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+    commands:
+      - make build
+      - make skills-build
+      - go run ./scripts/checkmanifests
+
+  cgo-build-and-tests:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+    commands:
+      - make build-cgo
+      - make test-cgo-short
+
+  integration-tests:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+    commands:
+      - make test-integration
+    depends_on:
+      - build
+
+  llm-planner-integration:
+    image: *ci_image
+    pull: false
+    environment:
+      GOFLAGS: -buildvcs=false
+      AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
+      OPENROUTER_API_KEY:
+        from_secret: openrouter_api_key
+      OPENROUTER_MODEL_NAME: "openai/gpt-4o-mini"
+    commands:
+      - |
+        if [ -z "$OPENROUTER_API_KEY" ]; then
+          echo "OPENROUTER_API_KEY not set; skipping LLM planner integration test"
+          exit 0
+        fi
+      - CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
+    depends_on:
+      - cgo-build-and-tests
