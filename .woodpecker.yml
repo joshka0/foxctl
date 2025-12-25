@@ -75,6 +75,11 @@ steps:
     environment:
       GOFLAGS: -buildvcs=false
     commands:
+      # Ensure libsqlite3-dev is available
+      - |
+        if [ ! -f /usr/include/sqlite3.h ]; then
+          apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev
+        fi
       - make build-cgo
       - make test-cgo-short
 
@@ -100,5 +105,10 @@ steps:
         if [ -z "$OPENROUTER_API_KEY" ]; then
           echo "OPENROUTER_API_KEY not set; skipping LLM planner integration test"
           exit 0
+        fi
+      # Ensure libsqlite3-dev is available
+      - |
+        if [ ! -f /usr/include/sqlite3.h ]; then
+          apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev
         fi
       - CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/planning/llm -run TestOpenAIPlanner_Integration -timeout 120s -v
