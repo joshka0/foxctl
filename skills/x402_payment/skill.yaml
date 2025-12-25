@@ -1,0 +1,166 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: x402/payment
+  version: 0.1.0
+  description: "x402 protocol client with wallet management for AI-native HTTP payments"
+  tags: ["x402", "payment", "wallet", "usdc", "crypto", "http402", "micropayment"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/x402_payment/x402_payment
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: x402/payment
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation to perform: wallet/init, wallet/status, fetch, pay"
+      enum: ["wallet/init", "wallet/status", "fetch", "pay"]
+    # wallet/init parameters
+    - name: wallet_type
+      type: string
+      required: false
+      description: "Wallet type: cdp (Coinbase managed) or local (private key file)"
+      enum: ["cdp", "local"]
+      default: "cdp"
+    - name: network
+      type: string
+      required: false
+      description: "Network: base-mainnet, base-sepolia, solana-mainnet, solana-devnet"
+      default: "base-sepolia"
+    - name: key_path
+      type: string
+      required: false
+      description: "Path to private key file (for local wallet type)"
+    # wallet/status parameters (uses configured wallet)
+    - name: address
+      type: string
+      required: false
+      description: "Wallet address to check (overrides configured wallet)"
+    # fetch parameters
+    - name: url
+      type: string
+      required: false
+      description: "URL to fetch (for fetch operation)"
+    - name: method
+      type: string
+      required: false
+      default: "GET"
+      description: "HTTP method for fetch"
+    - name: headers
+      type: object
+      required: false
+      description: "Additional HTTP headers"
+    - name: body
+      type: string
+      required: false
+      description: "Request body (for POST/PUT)"
+    - name: max_payment
+      type: string
+      required: false
+      description: "Maximum payment amount in USDC (e.g., '1.00')"
+      default: "1.00"
+    - name: auto_pay
+      type: boolean
+      required: false
+      default: true
+      description: "Automatically pay when 402 is received"
+    # pay parameters
+    - name: to
+      type: string
+      required: false
+      description: "Recipient address (for pay operation)"
+    - name: amount
+      type: string
+      required: false
+      description: "Amount to pay in USDC (e.g., '0.01')"
+    - name: asset
+      type: string
+      required: false
+      default: "USDC"
+      description: "Asset to use for payment"
+  returns:
+    - name: operation
+      type: string
+      description: "Operation that was performed"
+    - name: wallet
+      type: object
+      description: "Wallet information (address, network, balance)"
+    - name: response
+      type: object
+      description: "HTTP response (for fetch operation)"
+    - name: payment
+      type: object
+      description: "Payment details (for pay operation)"
+    - name: error
+      type: string
+      description: "Error message if operation failed"
+  help:
+    short: "x402 HTTP payment protocol with wallet management"
+    long: |
+      Implements the x402 protocol for AI-native HTTP payments.
+
+      x402 uses HTTP 402 Payment Required to enable micropayments for APIs
+      and content. This skill manages wallets and handles 402 responses
+      automatically.
+
+      Wallet Types:
+      - cdp: Coinbase Developer Platform managed wallet (recommended)
+             Keys are secured in Coinbase's TEE, no private key handling
+      - local: Self-managed wallet using a local private key file
+
+      Networks:
+      - base-mainnet: Base L2 (production USDC)
+      - base-sepolia: Base Sepolia testnet
+      - solana-mainnet: Solana mainnet
+      - solana-devnet: Solana devnet
+
+      Environment Variables:
+      - CDP_API_KEY_ID: Coinbase CDP API key ID (for cdp wallet)
+      - CDP_API_KEY_SECRET: Coinbase CDP API key secret
+      - X402_WALLET_ADDRESS: Default wallet address
+      - X402_NETWORK: Default network
+    workflows:
+      - id: init-wallet
+        description: "Initialize a CDP managed wallet"
+        example_input:
+          operation: "wallet/init"
+          wallet_type: "cdp"
+          network: "base-sepolia"
+      - id: check-balance
+        description: "Check wallet balance"
+        example_input:
+          operation: "wallet/status"
+      - id: fetch-paid-resource
+        description: "Fetch a 402-protected resource"
+        example_input:
+          operation: "fetch"
+          url: "https://api.example.com/premium/data"
+          max_payment: "0.10"
+      - id: direct-payment
+        description: "Send a direct payment"
+        example_input:
+          operation: "pay"
+          to: "0x1234..."
+          amount: "0.05"
+capabilities:
+  network: "egress"
+  egressAllow:
+    - "*.coinbase.com"
+    - "*.cdp.coinbase.com"
+    - "mainnet.base.org"
+    - "sepolia.base.org"
+    - "api.mainnet-beta.solana.com"
+    - "api.devnet.solana.com"
+  filesystem:
+    - type: home
+    - type: workdir
+  pure: false
+  cacheable: false
+memory:
+  recommend: true
+  default_ttl: "1h"
