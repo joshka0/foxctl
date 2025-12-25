@@ -15,6 +15,7 @@ Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 | PreToolUse | `semantic-search` | Vector search on Grep/Glob (symbols, sessions, memories, tasks) |
 | PreToolUse | `file-memory-recall` | Surfaces memories/gotchas before editing |
 | PreToolUse | `task-guard` | Ensures task exists for writes |
+| PostToolUse | `read-context-suggestions` | Suggests context_ripgrep for symbols after reading code (full function bodies) |
 | PostToolUse | `lsp-diagnostics` | Shows LSP errors after editing |
 | PreCompact | `session-save` | Captures session state |
 | SessionStart | `session-restore` | Restores context on compact/resume |
@@ -46,6 +47,8 @@ agentctl workflow list
 | `code/complexity` | Complexity analysis |
 | `code/symbols` | Extract symbols |
 | `code/swe_grep` | Smart code retrieval |
+| `code/context_ripgrep` | Search and return full function bodies containing matches |
+| `code/smart_write` | Symbol-based editing with dry-run diff preview |
 | `test/run` | Run tests with coverage |
 | `lsp/gopls` | Go LSP operations |
 | `mobile/ios`, `mobile/android` | Simulator automation |

@@ -1,0 +1,172 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/smart_write
+  version: 0.1.0
+  description: "Symbol-aware file editing with dry-run diff preview"
+  tags: ["code", "edit", "refactor", "ast", "diff"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_smart_write/code_smart_write
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/smart_write
+  parameters:
+    - name: path
+      type: string
+      required: true
+      description: "File to edit (absolute or relative to workspace)"
+    - name: edits
+      type: array
+      required: true
+      description: "Array of edit operations"
+      items:
+        type: object
+        properties:
+          type:
+            type: string
+            enum: ["symbol", "lines", "replace"]
+            description: "Edit type: symbol (by name), lines (by range), replace (search/replace)"
+          symbol:
+            type: string
+            description: "Symbol name to replace (for type='symbol')"
+          start_line:
+            type: integer
+            description: "Start line number, 1-indexed (for type='lines')"
+          end_line:
+            type: integer
+            description: "End line number, 1-indexed inclusive (for type='lines')"
+          search:
+            type: string
+            description: "Text to search for (for type='replace')"
+          replace:
+            type: string
+            description: "Replacement text (for type='replace')"
+          within_symbol:
+            type: string
+            description: "Scope search/replace to within a symbol (for type='replace')"
+          new_code:
+            type: string
+            description: "New code content (for type='symbol' or type='lines')"
+          all:
+            type: boolean
+            default: false
+            description: "Replace all occurrences (for type='replace')"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Preview changes as unified diff without writing"
+    - name: context_lines
+      type: integer
+      required: false
+      default: 3
+      description: "Number of context lines in diff output"
+  returns:
+    - name: path
+      type: string
+    - name: edited
+      type: boolean
+      description: "Whether file was modified (false if dry_run)"
+    - name: edit_count
+      type: integer
+      description: "Number of edits applied"
+    - name: diff
+      type: string
+      description: "Unified diff output (always present for dry_run, optional otherwise)"
+    - name: symbols_found
+      type: array
+      description: "Symbols that were found and edited"
+  help:
+    short: "Edit files by symbol name, line range, or scoped search/replace with diff preview."
+    long: |
+      Use this skill to make precise edits to code files using semantic operations:
+
+      **Edit by Symbol Name** (type: "symbol"):
+      Replace an entire function, method, or type by its name:
+      ```json
+      {
+        "type": "symbol",
+        "symbol": "HandleRequest",
+        "new_code": "func HandleRequest(w http.ResponseWriter, r *http.Request) {\n  // new implementation\n}"
+      }
+      ```
+
+      **Edit by Line Range** (type: "lines"):
+      Replace specific line ranges (1-indexed, inclusive):
+      ```json
+      {
+        "type": "lines",
+        "start_line": 45,
+        "end_line": 60,
+        "new_code": "// new code here"
+      }
+      ```
+
+      **Scoped Search/Replace** (type: "replace"):
+      Search and replace within a specific symbol or the entire file:
+      ```json
+      {
+        "type": "replace",
+        "search": "oldVar",
+        "replace": "newVar",
+        "within_symbol": "ProcessData",
+        "all": true
+      }
+      ```
+
+      **Dry Run Mode**:
+      Use `dry_run: true` to preview changes as a unified diff without modifying the file:
+      ```json
+      {
+        "path": "main.go",
+        "dry_run": true,
+        "edits": [{"type": "symbol", "symbol": "Run", "new_code": "..."}]
+      }
+      ```
+
+      The diff output follows git-style unified diff format for easy review.
+
+      Supported languages for symbol detection:
+      - Go: func, method, type declarations
+      - Python: def, async def, class (indentation-based)
+      - JavaScript/TypeScript: function, arrow functions, class, interface, type
+      - GDScript: func, class_name, inner class (indentation-based)
+    workflows:
+      - id: refactor-function
+        description: "Replace a function implementation"
+        example_input:
+          path: "internal/api/handler.go"
+          dry_run: true
+          edits:
+            - type: "symbol"
+              symbol: "HandleRequest"
+              new_code: "func HandleRequest(w http.ResponseWriter, r *http.Request) {\n  w.WriteHeader(http.StatusOK)\n}"
+      - id: rename-within-function
+        description: "Rename a variable within a specific function"
+        example_input:
+          path: "main.go"
+          edits:
+            - type: "replace"
+              search: "oldName"
+              replace: "newName"
+              within_symbol: "main"
+              all: true
+      - id: update-lines
+        description: "Update specific lines in a file"
+        example_input:
+          path: "config.go"
+          dry_run: true
+          edits:
+            - type: "lines"
+              start_line: 10
+              end_line: 15
+              new_code: "const (\n  MaxRetries = 5\n  Timeout = 30\n)"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
