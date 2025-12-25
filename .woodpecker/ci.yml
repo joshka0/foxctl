@@ -8,7 +8,7 @@ when:
   - event: manual
 
 variables:
-  - &ci_image "ghcr.io/jkatigb/agentctl-ci:go1.24"
+  - &ci_image "jkatigbak/agentctl-ci:go1.24"
 
 steps:
   fmt:

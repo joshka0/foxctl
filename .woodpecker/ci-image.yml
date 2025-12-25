@@ -17,12 +17,12 @@ steps:
     pull: false
     privileged: true
     settings:
-      registry: ghcr.io
+      registry: docker.io
       username:
         from_secret: docker_username
       password:
         from_secret: docker_password
-      repo: ghcr.io/jkatigb/agentctl-ci
+      repo: jkatigbak/agentctl-ci
       dockerfile: Dockerfile.ci
       context: .
       platforms: linux/amd64
