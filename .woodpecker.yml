@@ -13,7 +13,7 @@ variables:
 steps:
   fmt:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
     commands:
@@ -25,7 +25,7 @@ steps:
 
   lint:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
       GOTOOLCHAIN: go1.24.3
@@ -34,7 +34,7 @@ steps:
 
   unit-tests:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
     commands:
@@ -42,7 +42,7 @@ steps:
 
   race-tests:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
     commands:
@@ -50,7 +50,7 @@ steps:
 
   coverage:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
     commands:
@@ -61,7 +61,7 @@ steps:
 
   build:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
     commands:
@@ -71,7 +71,7 @@ steps:
 
   cgo-build-and-tests:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
     commands:
@@ -85,7 +85,7 @@ steps:
 
   integration-tests:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
     commands:
@@ -93,7 +93,7 @@ steps:
 
   llm-planner-integration:
     image: *ci_image
-    pull: false
+    depends_on: []
     environment:
       GOFLAGS: -buildvcs=false
       AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
