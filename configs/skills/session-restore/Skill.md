@@ -9,7 +9,8 @@ Restores session state after context compaction with context injection.
 
 ## Usage
 
-This skill runs automatically via the SessionStart hook, but can be invoked manually:
+This skill runs automatically via the SessionStart hook, but can be invoked
+manually:
 
 ```bash
 agentctl run session/restore --input '{"trigger": "compact"}'
@@ -28,10 +29,10 @@ The skill injects a markdown context block containing:
 
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `trigger` | string | Source: `compact`, `resume`, `startup` |
-| `workspace` | string | Project workspace path (default: cwd) |
+| Parameter   | Type   | Description                            |
+| ----------- | ------ | -------------------------------------- |
+| `trigger`   | string | Source: `compact`, `resume`, `startup` |
+| `workspace` | string | Project workspace path (default: cwd)  |
 
 ## Output
 
@@ -66,6 +67,21 @@ The `session-restore.sh` hook runs on `SessionStart` events:
 }
 ```
 
+### Lineage & Identity Notes
+
+- Single active session per workspace/agent; start/resume/fork refuse if another
+  is active unless `--force`.
+- Active is determined by status (e.g., `running`); terminal statuses set
+  `ended_at`, non-terminal clear it on reopen.
+- Identity fallback file: `~/.agentctl/sessions/active/<workspace_hash>.json`
+  (stores `session_id`, `agent_id`, lineage) for hooks without env access.
+- Env to skills: `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID` + fallbacks
+  (`CLAUDE_SESSION_ID`, `OPENCODE_SESSION_ID`, `CURSOR_SESSION_ID`,
+  `TERM_SESSION_ID`) are forwarded by exec/WASI runners so restored sessions
+  attribute correctly.
+- Lineage inspection: `agentctl sessions chain --session <id>`; trajectories
+  store `session_id` for joins.
+
 ## Context Format
 
 The injected context follows this structure:
@@ -73,25 +89,29 @@ The injected context follows this structure:
 ```markdown
 ## Session Continuity Context
 
-*Restored after compact (snapshot from 5m ago)*
+_Restored after compact (snapshot from 5m ago)_
 
 ### Active Plan
-**Plan Title** (`plan-file.md`)
-Sections:
-  - Section 1
-  - Section 2
+
+**Plan Title** (`plan-file.md`) Sections:
+
+- Section 1
+- Section 2
 
 ### Active Task
-**Task Title** (ID: 01ABC...)
-Task description here
+
+**Task Title** (ID: 01ABC...) Task description here
 
 ### Pending Work
+
 - :hourglass: Pending task
 - :arrows_counterclockwise: In-progress task
 
 ### Gotchas & Learnings
+
 - **Task**: Important learning
 
 ---
-*Continue where you left off.*
+
+_Continue where you left off._
 ```
