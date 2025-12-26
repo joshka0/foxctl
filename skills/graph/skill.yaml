@@ -1,108 +1,117 @@
-name: graph/manage
-version: "0.1.0"
-description: >
-  Unified dependency graph operations: add nodes/edges, query relationships,
-  compute PageRank, and manage graph lifecycle.
-
-runner: exec
-entry: graph
-
-input_schema:
-  type: object
-  properties:
-    operation:
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: graph/manage
+  version: 0.1.0
+  description: "Unified dependency graph operations: add nodes/edges, query relationships, compute PageRank, and manage graph lifecycle"
+  tags: ["graph", "dependencies", "relationships", "pagerank"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/graph/graph
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: graph/manage
+  parameters:
+    - name: operation
       type: string
-      enum: [add_node, add_edge, query, neighbors, top_nodes, delete_node, delete_edge, stats, cleanup]
-      description: Operation to perform
-    workspace:
+      required: true
+      enum: ["add_node", "add_edge", "query", "neighbors", "top_nodes", "delete_node", "delete_edge", "stats", "cleanup"]
+      description: "Operation to perform"
+    - name: workspace
       type: string
-      description: Workspace path (defaults to runner workspace)
-    add_node:
+      required: false
+      description: "Workspace path (defaults to runner workspace)"
+    - name: node_id
+      type: string
+      required: false
+      description: "Node ID for operations that target a specific node"
+    - name: node_type
+      type: string
+      required: false
+      enum: ["task", "file", "symbol", "session", "memory"]
+      description: "Type of node"
+    - name: title
+      type: string
+      required: false
+      description: "Node title (for add_node)"
+    - name: current_path
+      type: string
+      required: false
+      description: "Current path for file nodes"
+    - name: from_id
+      type: string
+      required: false
+      description: "Source node ID (for add_edge)"
+    - name: from_type
+      type: string
+      required: false
+      description: "Source node type (for add_edge)"
+    - name: to_id
+      type: string
+      required: false
+      description: "Target node ID (for add_edge)"
+    - name: to_type
+      type: string
+      required: false
+      description: "Target node type (for add_edge)"
+    - name: edge_type
+      type: string
+      required: false
+      enum: ["depends_on", "parent_of", "calls", "modifies", "imports", "about"]
+      description: "Type of edge relationship"
+    - name: edge_id
+      type: string
+      required: false
+      description: "Edge ID (for delete_edge)"
+    - name: weight
+      type: number
+      required: false
+      description: "Edge weight (for add_edge)"
+    - name: ttl_days
+      type: integer
+      required: false
+      description: "Time-to-live in days for the edge"
+    - name: direction
+      type: string
+      required: false
+      enum: ["from", "to", "both", "in", "out"]
+      description: "Direction for query/neighbors operations"
+    - name: edge_types
+      type: array
+      required: false
+      description: "Filter by edge types"
+    - name: min_rank
+      type: number
+      required: false
+      description: "Minimum PageRank for top_nodes"
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of results"
+    - name: expired_edges
+      type: boolean
+      required: false
+      description: "Clean up expired edges (for cleanup)"
+    - name: dangling_edges
+      type: boolean
+      required: false
+      description: "Clean up dangling edges (for cleanup)"
+    - name: recalc_degrees
+      type: boolean
+      required: false
+      description: "Recalculate node degrees (for cleanup)"
+    - name: metadata
       type: object
-      properties:
-        node_id:
-          type: string
-        node_type:
-          type: string
-          enum: [task, file, symbol, session, memory]
-        title:
-          type: string
-        current_path:
-          type: string
-        metadata:
-          type: object
-    add_edge:
-      type: object
-      properties:
-        from_id:
-          type: string
-        from_type:
-          type: string
-        to_id:
-          type: string
-        to_type:
-          type: string
-        edge_type:
-          type: string
-          enum: [depends_on, parent_of, calls, modifies, imports, about]
-        weight:
-          type: number
-        ttl_days:
-          type: integer
-        metadata:
-          type: object
-    query:
-      type: object
-      properties:
-        node_id:
-          type: string
-        edge_types:
-          type: array
-          items:
-            type: string
-        direction:
-          type: string
-          enum: [from, to, both]
-    neighbors:
-      type: object
-      properties:
-        node_id:
-          type: string
-        direction:
-          type: string
-          enum: [in, out, both]
-        edge_types:
-          type: array
-          items:
-            type: string
-        limit:
-          type: integer
-    top_nodes:
-      type: object
-      properties:
-        node_type:
-          type: string
-        min_rank:
-          type: number
-        limit:
-          type: integer
-    delete_node:
-      type: object
-      properties:
-        node_id:
-          type: string
-    delete_edge:
-      type: object
-      properties:
-        edge_id:
-          type: string
-    cleanup:
-      type: object
-      properties:
-        expired_edges:
-          type: boolean
-        dangling_edges:
-          type: boolean
-        recalc_degrees:
-          type: boolean
-  required: [operation]
+      required: false
+      description: "Additional metadata for nodes/edges"
+returns:
+  - name: result
+    type: object
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
