@@ -248,12 +248,19 @@ func main() {
 		summaryText = fmt.Sprintf("Session snapshot (%s): Plan: %s", input.Trigger, snapshot.ActivePlan.Title)
 	}
 
+	// Resolve session ID from input or environment
+	sessionID := input.SessionID
+	if sessionID == "" {
+		sessionID = resolveSessionID()
+	}
+
 	_, err = memStore.SaveResult(ctx, memory.SaveOptions{
 		Name:      snapshotName,
 		Type:      "session_snapshot",
 		Workspace: input.Workspace,
 		Summary:   summaryText,
 		Result:    snapshotJSON,
+		SessionID: sessionID,
 	})
 	if err != nil {
 		fail("EIO", fmt.Errorf("save snapshot: %w", err))
@@ -274,4 +281,26 @@ func fail(code string, err error) {
 	env := envelope.Error(command, code, err.Error(), nil)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/save failure")
 	os.Exit(1)
+}
+
+// resolveSessionID returns the session ID from environment variables.
+// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
+// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
+func resolveSessionID() string {
+	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("CLAUDE_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("OPENCODE_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("CURSOR_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("TERM_SESSION_ID"); sid != "" {
+		return sid
+	}
+	return ""
 }

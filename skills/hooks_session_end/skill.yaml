@@ -1,0 +1,46 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/session_end
+  version: 0.1.0
+  description: "Claude Code Stop hook that captures session metrics and prompts for feedback"
+  tags: ["hook", "session", "feedback", "stop", "metrics"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_session_end/session_end
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: hooks/session_end
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event type (Stop)"
+    - name: workspace_root
+      type: string
+      required: true
+      description: "Absolute path to workspace root"
+    - name: session_id
+      type: string
+      required: false
+      description: "Claude session identifier"
+    - name: transcript_path
+      type: string
+      required: false
+      description: "Path to conversation transcript"
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook output with session metrics"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+env:
+  - name: AGENTCTL_SESSION_FEEDBACK_ENABLED
+    description: "Enable session feedback collection (default: true)"
+    default: "true"

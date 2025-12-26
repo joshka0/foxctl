@@ -76,6 +76,7 @@ func (e *Executor) TryServeCache(input []byte) (bool, error) {
 				JobID:           "",
 				CorrelationID:   e.options.CorrelationID,
 				Input:           input,
+				SessionID:       e.options.SessionID,
 			})
 			if capErr == nil {
 				e.trajCapture = capture
@@ -137,6 +138,7 @@ func (e *Executor) writeCacheMissError(input []byte) (bool, error) {
 			JobID:           "",
 			CorrelationID:   e.options.CorrelationID,
 			Input:           resolvedInput,
+			SessionID:       e.options.SessionID,
 		})
 		if capErr == nil {
 			e.trajCapture = capture
@@ -188,6 +190,7 @@ func (e *Executor) writeCacheError(input []byte, code protocol.ErrorCode, messag
 			JobID:           "",
 			CorrelationID:   e.options.CorrelationID,
 			Input:           e.options.Input,
+			SessionID:       e.options.SessionID,
 		})
 		if capErr == nil {
 			e.trajCapture = capture

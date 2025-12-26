@@ -115,6 +115,17 @@ echo "$context" | gemini -p "Refactoring priorities?"
 
 ## Gotchas
 
+### Build Commands
+
+**NEVER run `go build ./...`** - causes 266 duplicate SQLite symbol errors due to `go-libsql` (Turso) and `go-sqlite3` both embedding SQLite.
+
+Use instead:
+```bash
+make build          # Pure Go (no CGO)
+make build-cgo      # CGO with -tags=libsqlite3
+CGO_ENABLED=0 go build ./internal/...  # Compile-check specific packages
+```
+
 ### Memory Hooks
 
 | Hook | Trigger | Notes |

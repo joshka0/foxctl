@@ -43,6 +43,10 @@ type RunOptions struct {
 
 	// Timeout is the maximum duration for the execution. Zero means use DefaultTimeout.
 	Timeout time.Duration
+
+	// SessionID is the AI coding tool session ID for trajectory tracking.
+	// Resolved from environment variables if not set explicitly.
+	SessionID string
 }
 
 // Validate checks if the RunOptions are valid and returns an error if not.

@@ -1,0 +1,77 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/feedback
+  version: 0.1.0
+  description: "Capture session feedback for quality tracking and optimization"
+  tags: ["session", "feedback", "quality", "optimization", "dspy"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_feedback/session_feedback
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: session/feedback
+  parameters:
+    - name: session_id
+      type: string
+      required: false
+      description: "Session ID to associate feedback with"
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path"
+    - name: rating
+      type: number
+      required: true
+      description: "Session quality rating (1-5)"
+    - name: outcome
+      type: string
+      required: true
+      description: "Outcome: success, partial, failure, abandoned"
+    - name: what_worked
+      type: array
+      required: false
+      description: "List of things that worked well"
+    - name: what_didnt_work
+      type: array
+      required: false
+      description: "List of things that didn't work"
+    - name: blockers
+      type: array
+      required: false
+      description: "List of blockers encountered"
+    - name: suggestions
+      type: array
+      required: false
+      description: "Suggestions for improvement"
+    - name: task_id
+      type: string
+      required: false
+      description: "Task ID if session was focused on a specific task"
+    - name: tools_used
+      type: array
+      required: false
+      description: "List of tools/skills used in the session"
+    - name: duration_minutes
+      type: number
+      required: false
+      description: "Approximate session duration in minutes"
+    - name: notes
+      type: string
+      required: false
+      description: "Additional notes or context"
+returns:
+  - name: feedback_id
+    type: string
+    description: "ID of the stored feedback"
+  - name: message
+    type: string
+    description: "Human-readable result message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

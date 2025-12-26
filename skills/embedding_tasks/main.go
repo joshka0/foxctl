@@ -184,6 +184,9 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 	}
 	defer memStore.Close() //nolint:errcheck
 
+	// Resolve session ID for all entries
+	sessionID := resolveSessionID()
+
 	// Process each task
 	for _, t := range taskList {
 		content := taskEmbeddingContent(t)
@@ -232,6 +235,7 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 			Workspace: workspace,
 			Summary:   content,
 			Result:    resultData,
+			SessionID: sessionID,
 		}
 
 		if _, err := memStore.Save(ctx, entry); err != nil {
@@ -375,4 +379,26 @@ func getStorageRoot() string {
 // boolPtr returns a pointer to a bool value.
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+// resolveSessionID returns the session ID from environment variables.
+// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
+// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
+func resolveSessionID() string {
+	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("CLAUDE_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("OPENCODE_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("CURSOR_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("TERM_SESSION_ID"); sid != "" {
+		return sid
+	}
+	return ""
 }

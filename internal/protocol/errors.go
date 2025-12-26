@@ -40,6 +40,8 @@ const (
 	ErrorCodeECacheMiss ErrorCode = "ECACHE_MISS"
 	// ErrorCodeECacheUnavailable indicates cache storage is unavailable.
 	ErrorCodeECacheUnavailable ErrorCode = "ECACHE_UNAVAILABLE"
+	// ErrorCodeEConflict indicates a resource conflict (e.g., duplicate active session).
+	ErrorCodeEConflict ErrorCode = "ECONFLICT"
 )
 
 // String returns the string representation of the error code.

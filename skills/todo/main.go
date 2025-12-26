@@ -24,6 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
+	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -243,7 +244,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 
 	switch op {
 	case "add":
-		task, allTasks, err := handleAdd(ctx, store, workspaceID, in.Add)
+		task, allTasks, err := handleAdd(ctx, store, cfg, workspaceID, rc.SessionID, in.Add)
 		if err != nil {
 			return err
 		}
@@ -406,7 +407,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		if boardStore != nil {
 			defer boardStore.Close()
 		}
-		planResult, err := handlePlan(ctx, store, boardStore, workspaceID, in.Plan)
+		planResult, err := handlePlan(ctx, store, boardStore, cfg, workspaceID, rc.SessionID, in.Plan)
 		if err != nil {
 			return err
 		}
@@ -471,7 +472,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	})
 }
 
-func handleAdd(ctx context.Context, store tasks.Store, workspaceID string, req *addRequest) (*taskOutput, []tasks.Task, error) {
+func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID, sessionID string, req *addRequest) (*taskOutput, []tasks.Task, error) {
 	if req == nil {
 		return nil, nil, fmt.Errorf("add payload is required")
 	}
@@ -513,12 +514,16 @@ func handleAdd(ctx context.Context, store tasks.Store, workspaceID string, req *
 		ParentID:    req.ParentID,
 		DependsOn:   dedupe(req.DependsOn),
 		Status:      statusPending,
+		SessionID:   sessionID,
 	}
 
 	added, err := store.Add(ctx, newTask)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Create graph edges for task relationships (parent_of, depends_on)
+	createTaskDependencyEdges(ctx, cfg, workspaceID, added)
 
 	// Update parent's children if needed
 	if req.ParentID != "" {
@@ -972,7 +977,7 @@ func formatTime(t *time.Time) string {
 // handlePlan creates or refines a task graph based on the plan request.
 // If mode="draft", it returns a proposed plan without persisting.
 // If mode="apply", it creates the tasks and emits plan events via mailbox.
-func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.BoardStore, workspaceID string, req *planReq) (*planOutput, error) {
+func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.BoardStore, cfg config.Config, workspaceID, sessionID string, req *planReq) (*planOutput, error) {
 	if req == nil {
 		return nil, fmt.Errorf("plan payload is required")
 	}
@@ -1025,6 +1030,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Description: pt.Description,
 				ScopePath:   scopePath,
 				Status:      statusPending,
+				SessionID:   sessionID,
 			}
 
 			// If we have an epic, make tasks children of it
@@ -1101,6 +1107,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 						ScopePath:   scopePath,
 						Status:      statusPending,
 						DependsOn:   pt.DependsOn, // Titles for now
+						SessionID:   sessionID,
 					}
 					if epicTask != nil {
 						t.ParentID = epicTask.ID
@@ -1123,6 +1130,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Title:       epicTitle,
 				Description: req.Description,
 				Status:      statusPending,
+				SessionID:   sessionID,
 			}
 			if len(req.ScopePaths) > 0 {
 				t.ScopePath = req.ScopePaths[0]
@@ -1153,6 +1161,9 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 			if err != nil {
 				return nil, fmt.Errorf("create task %q: %w", plannedTasks[i].Title, err)
 			}
+
+			// Create graph edges for task relationships (parent_of, depends_on)
+			createTaskDependencyEdges(ctx, cfg, workspaceID, created)
 
 			titleToActualID[plannedTasks[i].Title] = created.ID
 			addedIDs = append(addedIDs, created.ID)
@@ -1354,4 +1365,91 @@ func fail(command, code string, err error, hint string) {
 	env := envelope.Error(command, code, err.Error(), data)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit todo failure")
 	os.Exit(1)
+}
+
+// createTaskDependencyEdges creates graph edges for task relationships.
+// Edge types:
+// - parent_of: parent task → child task
+// - depends_on: dependent task → dependency task
+func createTaskDependencyEdges(ctx context.Context, cfg config.Config, workspaceID string, task tasks.Task) {
+	// Open graph store (fail silently - graph is optional)
+	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return
+	}
+	defer errs.Ignore(graphStore.Close(), "close graph store")
+
+	now := time.Now().UTC()
+
+	// Ensure the task node exists
+	taskNodeID := graph.TaskNodeID(task.ID)
+	taskNode := graph.Node{
+		Workspace: workspaceID,
+		NodeID:    taskNodeID,
+		NodeType:  graph.NodeTypeTask,
+		Title:     task.Title,
+		LastSeen:  now,
+	}
+	errs.Ignore(graphStore.UpsertNode(ctx, taskNode), "upsert task node")
+
+	// Create parent_of edge: parent → child
+	if task.ParentID != "" {
+		parentNodeID := graph.TaskNodeID(task.ParentID)
+
+		// Ensure parent node exists
+		parentNode := graph.Node{
+			Workspace: workspaceID,
+			NodeID:    parentNodeID,
+			NodeType:  graph.NodeTypeTask,
+			Title:     task.ParentID, // Title will be updated by other operations
+			LastSeen:  now,
+		}
+		errs.Ignore(graphStore.UpsertNode(ctx, parentNode), "upsert parent task node")
+
+		// Edge: parent → child (parent_of)
+		// Structural edges (parent_of, depends_on) should not expire - they represent
+		// permanent task relationships, not temporal activity
+		edge := graph.Edge{
+			Workspace: workspaceID,
+			FromID:    parentNodeID,
+			FromType:  graph.NodeTypeTask,
+			ToID:      taskNodeID,
+			ToType:    graph.NodeTypeTask,
+			EdgeType:  graph.EdgeTypeParentOf,
+			Weight:    1.0,
+			TTLDays:   nil, // No TTL for structural edges
+			CreatedAt: now,
+		}
+		errs.Ignore(graphStore.UpsertEdge(ctx, edge), "upsert parent_of edge")
+	}
+
+	// Create depends_on edges: this task → dependency
+	for _, depID := range task.DependsOn {
+		depNodeID := graph.TaskNodeID(depID)
+
+		// Ensure dependency node exists
+		depNode := graph.Node{
+			Workspace: workspaceID,
+			NodeID:    depNodeID,
+			NodeType:  graph.NodeTypeTask,
+			Title:     depID, // Title will be updated by other operations
+			LastSeen:  now,
+		}
+		errs.Ignore(graphStore.UpsertNode(ctx, depNode), "upsert dependency task node")
+
+		// Edge: this task → dependency (depends_on)
+		// Structural edges should not expire
+		edge := graph.Edge{
+			Workspace: workspaceID,
+			FromID:    taskNodeID,
+			FromType:  graph.NodeTypeTask,
+			ToID:      depNodeID,
+			ToType:    graph.NodeTypeTask,
+			EdgeType:  graph.EdgeTypeDependsOn,
+			Weight:    1.0,
+			TTLDays:   nil, // No TTL for structural edges
+			CreatedAt: now,
+		}
+		errs.Ignore(graphStore.UpsertEdge(ctx, edge), "upsert depends_on edge")
+	}
 }

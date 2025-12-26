@@ -318,6 +318,7 @@ type SaveOptions struct {
 	Workspace string
 	Summary   string
 	Result    []byte
+	SessionID string // AI coding tool session ID (optional)
 }
 
 // SaveResult stores a result envelope using structured options.
@@ -329,6 +330,7 @@ func (s *Store) SaveResult(ctx context.Context, opts SaveOptions) (NamedEntry, e
 		Summary:   opts.Summary,
 		Result:    opts.Result,
 		Digests:   cache.CollectDigests(opts.Result),
+		SessionID: opts.SessionID,
 	}
 	return s.Save(ctx, entry)
 }
@@ -408,6 +410,10 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 			return fmt.Errorf("memory: add embedding column: %w", err)
 		}
 	}
+
+	// Add session_id column for cross-scope session tracking (any AI tool)
+	_, _ = db.ExecContext(ctx, `ALTER TABLE named_memory ADD COLUMN session_id TEXT`) //nolint:errcheck
+	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_memory_session ON named_memory(session_id)`)
 
 	// Create embedding_metadata table to track provider/model/dimensions per workspace
 	// This enables detection of dimension mismatches if embedding models change

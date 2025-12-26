@@ -48,6 +48,46 @@ case "$tool_name" in
       exit 0
     fi
 
+    # ============================================================
+    # BLOCK: Dangerous go build commands
+    # ============================================================
+    # go build ./... causes SQLite linker errors (go-libsql + go-sqlite3)
+    # go build ./skills/X without -o creates binaries at repo root
+    # go build -race ./... same issues
+    #
+    # Only check commands that START with go build (not heredocs/strings containing it)
+    # Match: "go build", "CGO_ENABLED=0 go build", etc.
+    # Skip: git commit -m "...go build..."
+    if echo "$command" | grep -qE '^(CGO_ENABLED=[01]\s+)?go\s+build'; then
+      # Check for explicitly dangerous patterns
+      if echo "$command" | grep -qE '^(CGO_ENABLED=[01]\s+)?go\s+build\s+\./\.\.\.'; then
+        jq -n '{
+          decision: "block",
+          reason: "🚫 BLOCKED: `go build ./...` causes 266 SQLite linker errors!\n\ngo-libsql (Turso) and go-sqlite3 both embed SQLite, causing duplicate symbols.\n\n✅ Use instead:\n  make build          # Pure Go (no CGO)\n  make build-cgo      # CGO with -tags=libsqlite3\n  CGO_ENABLED=0 go build ./internal/...  # Compile-check specific packages"
+        }'
+        exit 0
+      fi
+
+      # Check for skill builds without -o (creates binaries at repo root)
+      if echo "$command" | grep -qE '^(CGO_ENABLED=[01]\s+)?go\s+build\s+\./skills/' && ! echo "$command" | grep -qE '\s-o\s'; then
+        skill_name=$(echo "$command" | grep -oE 'skills/[^/\s]+' | head -1 | sed 's|skills/||')
+        jq -n --arg skill "$skill_name" '{
+          decision: "block",
+          reason: ("🚫 BLOCKED: `go build ./skills/` without -o creates binary at repo root!\n\n✅ Use instead:\n  make skill SKILL=" + $skill + "    # Builds & installs to ~/.agentctl/skills/\n  make skills-build       # Build all skills to dist/skills/")
+        }'
+        exit 0
+      fi
+
+      # Warn (but allow) for other go build commands
+      if echo "$command" | grep -qE '^CGO_ENABLED=1.*go\s+build' && ! echo "$command" | grep -qE '\-tags=libsqlite3'; then
+        jq -n '{
+          decision: "approve",
+          context: "⚠️ WARNING: CGO_ENABLED=1 without -tags=libsqlite3 may cause SQLite linker errors.\n\n✅ Use: make build-cgo (includes -tags=libsqlite3)"
+        }'
+        exit 0
+      fi
+    fi
+
     # Get the first word (the actual command being run)
     first_word=$(echo "$command" | awk '{print $1}')
 

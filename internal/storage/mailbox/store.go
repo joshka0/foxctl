@@ -24,6 +24,10 @@ type Store interface {
 	Nack(ctx context.Context, messageID string, visibilityTimeout time.Duration) error
 	List(ctx context.Context, agentNS string, limit int) ([]agent.Message, error)
 	Delete(ctx context.Context, messageID string) error
+	// ListBySession returns messages for a specific session lineage.
+	ListBySession(ctx context.Context, sessionID string, limit int) ([]agent.Message, error)
+	// ListByWorkspace returns messages for a specific workspace.
+	ListByWorkspace(ctx context.Context, workspace string, limit int) ([]agent.Message, error)
 }
 
 type sqlStore struct {
@@ -51,9 +55,10 @@ func (s *sqlStore) Send(ctx context.Context, msg agent.Message) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO mailbox (id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		msg.ID, msg.FromNS, msg.ToNS, msg.Type, msg.TTLMS, string(headersJSON), string(msg.Payload), msg.VisibleAt, msg.Attempt, msg.Timestamp)
+		INSERT INTO mailbox (id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		msg.ID, msg.FromNS, msg.ToNS, msg.Type, msg.TTLMS, string(headersJSON), string(msg.Payload), msg.VisibleAt, msg.Attempt, msg.Timestamp,
+		msg.SessionID, msg.Workspace, msg.AgentID)
 	if err != nil {
 		return fmt.Errorf("mailbox: send: %w", err)
 	}
@@ -75,7 +80,7 @@ func (s *sqlStore) Poll(ctx context.Context, agentNS string, timeout time.Durati
 		// Try to fetch messages
 		now := time.Now().Unix()
 		rows, err := s.db.QueryContext(ctx, `
-			SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts
+			SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
 			FROM mailbox
 			WHERE to_ns = ? AND visible_at <= ?
 			ORDER BY ts ASC
@@ -163,7 +168,7 @@ func (s *sqlStore) List(ctx context.Context, agentNS string, limit int) ([]agent
 		limit = 20
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts
+		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
 		FROM mailbox
 		WHERE to_ns = ?
 		ORDER BY ts DESC
@@ -201,6 +206,62 @@ func (s *sqlStore) Delete(ctx context.Context, messageID string) error {
 	return nil
 }
 
+func (s *sqlStore) ListBySession(ctx context.Context, sessionID string, limit int) ([]agent.Message, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
+		FROM mailbox
+		WHERE session_id = ?
+		ORDER BY ts DESC
+		LIMIT ?`, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("mailbox: list by session: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close mailbox list by session rows")
+	}()
+
+	var messages []agent.Message
+	for rows.Next() {
+		msg, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+	return messages, nil
+}
+
+func (s *sqlStore) ListByWorkspace(ctx context.Context, workspace string, limit int) ([]agent.Message, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
+		FROM mailbox
+		WHERE workspace = ?
+		ORDER BY ts DESC
+		LIMIT ?`, workspace, limit)
+	if err != nil {
+		return nil, fmt.Errorf("mailbox: list by workspace: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close mailbox list by workspace rows")
+	}()
+
+	var messages []agent.Message
+	for rows.Next() {
+		msg, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, msg)
+	}
+	return messages, nil
+}
+
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS mailbox (
@@ -213,22 +274,75 @@ CREATE TABLE IF NOT EXISTS mailbox (
 	payload      TEXT NOT NULL,
 	visible_at   INTEGER NOT NULL,
 	attempt      INTEGER NOT NULL DEFAULT 0,
-	ts           INTEGER NOT NULL
+	ts           INTEGER NOT NULL,
+	session_id   TEXT NOT NULL DEFAULT '',
+	workspace    TEXT NOT NULL DEFAULT '',
+	agent_id     TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_mailbox_to_visible ON mailbox(to_ns, visible_at);
 CREATE INDEX IF NOT EXISTS idx_mailbox_ts ON mailbox(ts);
+CREATE INDEX IF NOT EXISTS idx_mailbox_session ON mailbox(session_id);
+CREATE INDEX IF NOT EXISTS idx_mailbox_workspace ON mailbox(workspace);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("mailbox: migrate: %w", err)
 	}
+
+	// Add session columns if they don't exist (migration for existing databases)
+	sessionColumns := []string{
+		`ALTER TABLE mailbox ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mailbox ADD COLUMN workspace TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mailbox ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range sessionColumns {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			// Ignore "duplicate column" errors
+			if !isDuplicateColumnError(err) {
+				return fmt.Errorf("mailbox: migrate session columns: %w", err)
+			}
+		}
+	}
+
+	// Create indexes for session columns (may already exist)
+	sessionIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_mailbox_session ON mailbox(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_mailbox_workspace ON mailbox(workspace)`,
+	}
+	for _, stmt := range sessionIndexes {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			// Ignore errors, index might already exist
+			_ = err
+		}
+	}
+
 	return nil
+}
+
+// isDuplicateColumnError checks if an error is a "duplicate column" error.
+// SQLite error format: "SQL logic error: duplicate column name: xxx (1)"
+func isDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	// Simple substring search for "duplicate column name"
+	const needle = "duplicate column name"
+	if len(errStr) < len(needle) {
+		return false
+	}
+	for i := 0; i <= len(errStr)-len(needle); i++ {
+		if errStr[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func scanMessage(rows *sql.Rows) (agent.Message, error) {
 	var msg agent.Message
 	var headersJSON string
 	var payloadJSON string
-	if err := rows.Scan(&msg.ID, &msg.FromNS, &msg.ToNS, &msg.Type, &msg.TTLMS, &headersJSON, &payloadJSON, &msg.VisibleAt, &msg.Attempt, &msg.Timestamp); err != nil {
+	if err := rows.Scan(&msg.ID, &msg.FromNS, &msg.ToNS, &msg.Type, &msg.TTLMS, &headersJSON, &payloadJSON, &msg.VisibleAt, &msg.Attempt, &msg.Timestamp, &msg.SessionID, &msg.Workspace, &msg.AgentID); err != nil {
 		return agent.Message{}, fmt.Errorf("mailbox: scan: %w", err)
 	}
 

@@ -30,6 +30,11 @@ type Message struct {
 	VisibleAt int64             `json:"visible_at"`
 	Attempt   int               `json:"attempt"`
 	Timestamp int64             `json:"ts"`
+
+	// Session context for lineage-scoped reads
+	SessionID string `json:"session_id,omitempty"` // Originating session
+	Workspace string `json:"workspace,omitempty"`  // Workspace path
+	AgentID   string `json:"agent_id,omitempty"`   // Sending agent's ID
 }
 
 // AskData represents the data payload for an agent.ask message.

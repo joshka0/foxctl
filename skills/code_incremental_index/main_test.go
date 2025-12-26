@@ -225,7 +225,7 @@ func TestParseInput(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err = parseInput(tmpFile)
+			_, err = parseInput(tmpFile, "/test/workspace")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseInput() error = %v, wantErr %v", err, tt.wantErr)
 			}

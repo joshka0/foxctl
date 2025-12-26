@@ -10,6 +10,7 @@ linters:
     - staticcheck
     - revive
     - errcheck
+    - depguard
   settings:
     errcheck:
       # Don't check blank assignments - the codebase uses _ = pattern for intentional ignores
@@ -26,13 +27,15 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+        - (*os/exec.Cmd).Run
+        - (*os/exec.Cmd).Wait
         - (*os.Process).Kill
         - (*os.Process).Wait
-        - (*os/exec.Cmd).Wait
         - os.Remove
         - os.RemoveAll
         - os.Chdir
         - (*net/http.Response).Body.Close
+
     revive:
       rules:
         - name: package-comments
@@ -43,6 +46,34 @@ linters:
           disabled: true
         - name: unhandled-error
           disabled: true
+
+    # Enforce layered architecture - prevent layer violations
+    depguard:
+      rules:
+        # Domain layer restrictions
+        domain-no-deps:
+          list-mode: lax
+          files:
+            - "**/internal/domain/**/*.go"
+          deny:
+            - pkg: "github.com/jkatigb/agentctl/internal/storage"
+              desc: "domain layer must not depend on storage"
+            - pkg: "github.com/jkatigb/agentctl/internal/execution"
+              desc: "domain layer must not depend on execution"
+            - pkg: "github.com/jkatigb/agentctl/internal/platform"
+              desc: "domain layer must not depend on platform"
+            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+              desc: "domain layer must not depend on adapters"
+
+        # Execution layer restrictions
+        execution-limited-deps:
+          list-mode: lax
+          files:
+            - "**/internal/execution/**/*.go"
+          deny:
+            - pkg: "github.com/jkatigb/agentctl/internal/adapters"
+              desc: "execution layer should not depend on adapters"
+
   exclusions:
     # Use preset for common error handling patterns (Close, Flush, Remove, print, etc.)
     presets:
@@ -54,4 +85,3 @@ linters:
         text: '(ST1023|QF1001|QF1011|omit type)'
     # Exclude generated code
     generated: strict
-

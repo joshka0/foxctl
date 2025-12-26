@@ -143,3 +143,33 @@ func (s *TursoStore) SetArchivePath(ctx context.Context, sessionID, archivePath 
 func (s *TursoStore) GetArchivePath(ctx context.Context, sessionID string) (string, error) {
 	return "", errors.New("turso store not available")
 }
+
+// GetActive is a stub.
+func (s *TursoStore) GetActive(ctx context.Context, workspace, agentID string) (*Session, error) {
+	return nil, errors.New("turso store not available")
+}
+
+// SetStatus is a stub.
+func (s *TursoStore) SetStatus(ctx context.Context, id, status string) error {
+	return errors.New("turso store not available")
+}
+
+// FindLastSession is a stub.
+func (s *TursoStore) FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error) {
+	return nil, errors.New("turso store not available")
+}
+
+// SaveEdge is a stub.
+func (s *TursoStore) SaveEdge(ctx context.Context, edge storage.SessionEdge) error {
+	return errors.New("turso store not available")
+}
+
+// GetAncestorChain is a stub.
+func (s *TursoStore) GetAncestorChain(ctx context.Context, sessionID string, maxDepth int) ([]Session, error) {
+	return nil, errors.New("turso store not available")
+}
+
+// GetEdges is a stub.
+func (s *TursoStore) GetEdges(ctx context.Context, sessionID string) ([]storage.SessionEdge, error) {
+	return nil, errors.New("turso store not available")
+}

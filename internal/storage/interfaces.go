@@ -141,6 +141,7 @@ type NamedEntry struct {
 	UpdatedAt   time.Time
 	LastAccess  time.Time
 	AccessCount int
+	SessionID   string // AI coding tool session ID (Claude Code, OpenCode, Cursor, etc.)
 }
 
 // ScoredEntry couples a named entry with a relevance score.
@@ -200,7 +201,42 @@ type Session struct {
 	EmbeddingModel  string    `json:"embedding_model,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	// Lineage fields for session tracking
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	AgentID         string `json:"agent_id,omitempty"` // AI agent identifier (default: "agentctl")
+	Status          string `json:"status,omitempty"`   // ok, error, canceled
 }
+
+// Session status constants
+const (
+	SessionStatusRunning  = "running"  // Session is active
+	SessionStatusOK       = "ok"       // Session completed successfully
+	SessionStatusError    = "error"    // Session ended with error
+	SessionStatusCanceled = "canceled" // Session was canceled
+)
+
+// IsTerminalStatus returns true if the status indicates the session has ended.
+func IsTerminalStatus(status string) bool {
+	return status == SessionStatusOK || status == SessionStatusError || status == SessionStatusCanceled
+}
+
+// SessionEdge represents a relationship between two sessions.
+type SessionEdge struct {
+	ID          string         `json:"id"`
+	Workspace   string         `json:"workspace"`
+	FromSession string         `json:"from_session"`
+	ToSession   string         `json:"to_session"`
+	EdgeType    string         `json:"edge_type"` // continues, forked_from, relates_to
+	CreatedAt   time.Time      `json:"created_at"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+}
+
+// Session edge type constants
+const (
+	SessionEdgeContinues  = "continues"
+	SessionEdgeForkedFrom = "forked_from"
+	SessionEdgeRelatesTo  = "relates_to"
+)
 
 // SessionStats summarizes session store metadata.
 type SessionStats struct {
@@ -268,6 +304,14 @@ type SessionStore interface {
 	UpdateSummary(ctx context.Context, id string, summary string, accomplished, decisions, gotchas, userInsights, tags, keyFiles []string, toolsPattern string) error
 	SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error
 	Stats(ctx context.Context) (SessionStats, error)
+
+	// Lineage operations
+	GetActive(ctx context.Context, workspace, agentID string) (*Session, error)
+	SetStatus(ctx context.Context, id, status string) error
+	FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error)
+	SaveEdge(ctx context.Context, edge SessionEdge) error
+	GetAncestorChain(ctx context.Context, sessionID string, maxDepth int) ([]Session, error)
+	GetEdges(ctx context.Context, sessionID string) ([]SessionEdge, error)
 
 	// Turn operations
 	SaveTurn(ctx context.Context, turn SessionTurn) (SessionTurn, error)

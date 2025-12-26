@@ -6,8 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/oklog/ulid/v2"
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/sessionscmd"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -39,6 +43,12 @@ manually with:
 		newSessionsCaptureCommand(),
 		newSessionsSummarizeCommand(),
 		newSessionsImportCommand(),
+		// Lineage commands
+		newSessionsNewCommand(),
+		newSessionsResumeCommand(),
+		newSessionsForkCommand(),
+		newSessionsChainCommand(),
+		newSessionsCloseCommand(),
 	)
 	return cmd
 }
@@ -533,6 +543,598 @@ func truncateSummary(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// Lineage commands
+
+func newSessionsNewCommand() *cobra.Command {
+	var agentID string
+	var parentID string
+	var workspace string
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "new",
+		Short: "Create a new session",
+		Long: `Create a new session with optional parent for lineage tracking.
+
+This command creates a new session entry and optionally links it to a parent
+session for tracking continuation/fork relationships.
+
+Only one active session is allowed per workspace/agent combination. Use --force
+to close any existing active session before creating a new one.
+
+Examples:
+  agentctl sessions new
+  agentctl sessions new --agent-id claude-code
+  agentctl sessions new --parent 01HXYZ --agent-id my-agent
+  agentctl sessions new --force  # close existing active session first`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
+					// Determine workspace
+					ws := workspace
+					if ws == "" {
+						wd, err := os.Getwd()
+						if err != nil {
+							return fmt.Errorf("get working directory: %w", err)
+						}
+						ws = wd
+					}
+
+					aid := agentID
+					if aid == "" {
+						aid = "agentctl"
+					}
+
+					// Enforce one-active-session rule
+					active, err := store.GetActive(ctx, ws, aid)
+					if err != nil {
+						return fmt.Errorf("check active session: %w", err)
+					}
+					if active != nil {
+						if force {
+							// Force-close the existing session as canceled (interrupted)
+							if err := store.SetStatus(ctx, active.ID, storage.SessionStatusCanceled); err != nil {
+								return fmt.Errorf("close existing session: %w", err)
+							}
+							fmt.Fprintf(cmd.ErrOrStderr(), "Canceled existing active session: %s\n", active.ID)
+						} else {
+							return sessionscmd.WriteConflict(cmd.OutOrStdout(), "agentctl.sessions.new",
+								fmt.Sprintf("active session already exists: %s", active.ID),
+								"Close it with 'agentctl sessions close' or use --force to close and create new")
+						}
+					}
+
+					// Create new session
+					session := storage.Session{
+						ID:            ulid.Make().String(),
+						WorkspacePath: ws,
+						ProjectName:   filepath.Base(ws),
+						StartedAt:     time.Now().UTC(),
+						AgentID:       aid,
+						Status:        storage.SessionStatusRunning,
+					}
+
+					if parentID != "" {
+						session.ParentSessionID = parentID
+					}
+
+					saved, err := store.Save(ctx, session)
+					if err != nil {
+						return fmt.Errorf("save session: %w", err)
+					}
+
+					// Create edge if parent specified
+					if parentID != "" {
+						edge := storage.SessionEdge{
+							ID:          ulid.Make().String(),
+							Workspace:   ws,
+							FromSession: parentID,
+							ToSession:   saved.ID,
+							EdgeType:    storage.SessionEdgeContinues,
+							CreatedAt:   time.Now().UTC(),
+						}
+						if err := store.SaveEdge(ctx, edge); err != nil {
+							// Non-fatal, session was created
+							fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to save edge: %v\n", err)
+						}
+						// Ingest into graph for PageRank
+						sessionscmd.IngestSessionEdgeToGraph(ctx, cmd.ErrOrStderr(), cfg, edge)
+					}
+
+					// Write identity file for session discovery
+					sessionscmd.SetActiveIdentity(cmd.ErrOrStderr(), cfg, saved.ID, ws, aid, parentID)
+
+					payload := struct {
+						SessionID       string `json:"session_id"`
+						AgentID         string `json:"agent_id"`
+						ParentSessionID string `json:"parent_session_id,omitempty"`
+						Workspace       string `json:"workspace"`
+					}{
+						SessionID:       saved.ID,
+						AgentID:         saved.AgentID,
+						ParentSessionID: saved.ParentSessionID,
+						Workspace:       saved.WorkspacePath,
+					}
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.new", payload)
+				})
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "Agent identifier (default: agentctl)")
+	cmd.Flags().StringVar(&parentID, "parent", "", "Parent session ID for lineage")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (default: cwd)")
+	cmd.Flags().BoolVar(&force, "force", false, "Close existing active session before creating new")
+	return cmd
+}
+
+func newSessionsResumeCommand() *cobra.Command {
+	var agentID string
+	var sessionID string
+	var workspace string
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "resume",
+		Short: "Resume an existing session or find the last active session",
+		Long: `Resume an existing session by ID, or find the most recent session for the workspace.
+
+This command:
+1. If --session is provided, resumes that specific session
+2. Otherwise, finds the most recent session for the workspace/agent combination
+3. Creates a 'continues' edge from the found session to a new session
+
+Only one active session is allowed per workspace/agent combination. Use --force
+to close any existing active session before resuming.
+
+Examples:
+  agentctl sessions resume
+  agentctl sessions resume --session 01HXYZ
+  agentctl sessions resume --agent-id claude-code
+  agentctl sessions resume --force`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
+					// Determine workspace
+					ws := workspace
+					if ws == "" {
+						wd, err := os.Getwd()
+						if err != nil {
+							return fmt.Errorf("get working directory: %w", err)
+						}
+						ws = wd
+					}
+
+					aid := agentID
+					if aid == "" {
+						aid = "agentctl"
+					}
+
+					// Enforce one-active-session rule
+					active, err := store.GetActive(ctx, ws, aid)
+					if err != nil {
+						return fmt.Errorf("check active session: %w", err)
+					}
+					if active != nil {
+						if force {
+							// Force-close the existing session as canceled (interrupted)
+							if err := store.SetStatus(ctx, active.ID, storage.SessionStatusCanceled); err != nil {
+								return fmt.Errorf("close existing session: %w", err)
+							}
+							fmt.Fprintf(cmd.ErrOrStderr(), "Canceled existing active session: %s\n", active.ID)
+						} else {
+							return sessionscmd.WriteConflict(cmd.OutOrStdout(), "agentctl.sessions.resume",
+								fmt.Sprintf("active session already exists: %s", active.ID),
+								"Close it with 'agentctl sessions close' or use --force to close and resume")
+						}
+					}
+
+					var parentSession *storage.Session
+
+					if sessionID != "" {
+						// Resume specific session
+						s, err := store.Get(ctx, sessionID)
+						if err != nil {
+							if errors.Is(err, sessions.ErrNotFound) {
+								return sessionscmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.sessions.resume", sessionID)
+							}
+							return err
+						}
+						parentSession = &s
+					} else {
+						// Find last successfully completed session for workspace/agent.
+						// Only 'ok' sessions are resumable - errored/canceled sessions represent
+						// incomplete or problematic states that shouldn't be continued from.
+						s, err := store.FindLastSession(ctx, ws, aid, []string{storage.SessionStatusOK})
+						if err != nil {
+							return fmt.Errorf("find last session: %w", err)
+						}
+						if s == nil {
+							payload := struct {
+								Message string `json:"message"`
+								Hint    string `json:"hint"`
+							}{
+								Message: "no previous session found",
+								Hint:    "Create a new session with 'agentctl sessions new'",
+							}
+							return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.resume", payload)
+						}
+						parentSession = s
+					}
+
+					// Create continuation session
+					session := storage.Session{
+						ID:              ulid.Make().String(),
+						WorkspacePath:   ws,
+						ProjectName:     filepath.Base(ws),
+						StartedAt:       time.Now().UTC(),
+						AgentID:         aid,
+						Status:          storage.SessionStatusRunning,
+						ParentSessionID: parentSession.ID,
+					}
+
+					saved, err := store.Save(ctx, session)
+					if err != nil {
+						return fmt.Errorf("save session: %w", err)
+					}
+
+					// Create continues edge
+					edge := storage.SessionEdge{
+						ID:          ulid.Make().String(),
+						Workspace:   ws,
+						FromSession: parentSession.ID,
+						ToSession:   saved.ID,
+						EdgeType:    storage.SessionEdgeContinues,
+						CreatedAt:   time.Now().UTC(),
+					}
+					if err := store.SaveEdge(ctx, edge); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to save edge: %v\n", err)
+					}
+					// Ingest into graph for PageRank
+					sessionscmd.IngestSessionEdgeToGraph(ctx, cmd.ErrOrStderr(), cfg, edge)
+
+					// Write identity file for session discovery
+					sessionscmd.SetActiveIdentity(cmd.ErrOrStderr(), cfg, saved.ID, ws, aid, parentSession.ID)
+
+					payload := struct {
+						SessionID       string `json:"session_id"`
+						ParentSessionID string `json:"parent_session_id"`
+						AgentID         string `json:"agent_id"`
+						Workspace       string `json:"workspace"`
+						ResumedFrom     string `json:"resumed_from"`
+					}{
+						SessionID:       saved.ID,
+						ParentSessionID: saved.ParentSessionID,
+						AgentID:         saved.AgentID,
+						Workspace:       saved.WorkspacePath,
+						ResumedFrom:     parentSession.ID,
+					}
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.resume", payload)
+				})
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "Agent identifier (default: agentctl)")
+	cmd.Flags().StringVar(&sessionID, "session", "", "Specific session ID to resume")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (default: cwd)")
+	cmd.Flags().BoolVar(&force, "force", false, "Close existing active session before resuming")
+	return cmd
+}
+
+func newSessionsForkCommand() *cobra.Command {
+	var agentID string
+	var parentID string
+	var workspace string
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "fork",
+		Short: "Fork from an existing session",
+		Long: `Create a new session forked from an existing one.
+
+Unlike 'resume' which creates a 'continues' relationship, 'fork' creates a
+'forked_from' relationship indicating the new session branches from the parent.
+
+Only one active session is allowed per workspace/agent combination. Use --force
+to close any existing active session before forking.
+
+Examples:
+  agentctl sessions fork --parent 01HXYZ
+  agentctl sessions fork --parent 01HXYZ --agent-id new-agent
+  agentctl sessions fork --parent 01HXYZ --force`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if parentID == "" {
+				return sessionscmd.WriteArgError(cmd.OutOrStdout(), "agentctl.sessions.fork",
+					"--parent is required",
+					"Specify the session to fork from with --parent <session-id>")
+			}
+
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
+					// Verify parent exists
+					parent, err := store.Get(ctx, parentID)
+					if err != nil {
+						if errors.Is(err, sessions.ErrNotFound) {
+							return sessionscmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.sessions.fork", parentID)
+						}
+						return err
+					}
+
+					// Determine workspace
+					ws := workspace
+					if ws == "" {
+						ws = parent.WorkspacePath
+					}
+
+					aid := agentID
+					if aid == "" {
+						aid = "agentctl"
+					}
+
+					// Enforce one-active-session rule
+					active, err := store.GetActive(ctx, ws, aid)
+					if err != nil {
+						return fmt.Errorf("check active session: %w", err)
+					}
+					if active != nil {
+						if force {
+							// Force-close the existing session as canceled (interrupted)
+							if err := store.SetStatus(ctx, active.ID, storage.SessionStatusCanceled); err != nil {
+								return fmt.Errorf("close existing session: %w", err)
+							}
+							fmt.Fprintf(cmd.ErrOrStderr(), "Canceled existing active session: %s\n", active.ID)
+						} else {
+							return sessionscmd.WriteConflict(cmd.OutOrStdout(), "agentctl.sessions.fork",
+								fmt.Sprintf("active session already exists: %s", active.ID),
+								"Close it with 'agentctl sessions close' or use --force to close and fork")
+						}
+					}
+
+					// Create forked session
+					session := storage.Session{
+						ID:              ulid.Make().String(),
+						WorkspacePath:   ws,
+						ProjectName:     filepath.Base(ws),
+						StartedAt:       time.Now().UTC(),
+						AgentID:         aid,
+						Status:          storage.SessionStatusRunning,
+						ParentSessionID: parent.ID,
+					}
+
+					saved, err := store.Save(ctx, session)
+					if err != nil {
+						return fmt.Errorf("save session: %w", err)
+					}
+
+					// Create forked_from edge
+					edge := storage.SessionEdge{
+						ID:          ulid.Make().String(),
+						Workspace:   ws,
+						FromSession: parent.ID,
+						ToSession:   saved.ID,
+						EdgeType:    storage.SessionEdgeForkedFrom,
+						CreatedAt:   time.Now().UTC(),
+					}
+					if err := store.SaveEdge(ctx, edge); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to save edge: %v\n", err)
+					}
+					// Ingest into graph for PageRank
+					sessionscmd.IngestSessionEdgeToGraph(ctx, cmd.ErrOrStderr(), cfg, edge)
+
+					// Write identity file for session discovery
+					sessionscmd.SetActiveIdentity(cmd.ErrOrStderr(), cfg, saved.ID, ws, aid, parent.ID)
+
+					payload := struct {
+						SessionID  string `json:"session_id"`
+						ForkedFrom string `json:"forked_from"`
+						AgentID    string `json:"agent_id"`
+						Workspace  string `json:"workspace"`
+					}{
+						SessionID:  saved.ID,
+						ForkedFrom: parent.ID,
+						AgentID:    saved.AgentID,
+						Workspace:  saved.WorkspacePath,
+					}
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.fork", payload)
+				})
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "Agent identifier (default: agentctl)")
+	cmd.Flags().StringVar(&parentID, "parent", "", "Parent session ID to fork from (required)")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (default: inherited from parent)")
+	cmd.Flags().BoolVar(&force, "force", false, "Close existing active session before forking")
+	return cmd
+}
+
+func newSessionsChainCommand() *cobra.Command {
+	var sessionID string
+	var depth int
+
+	cmd := &cobra.Command{
+		Use:   "chain",
+		Short: "Show the ancestor chain of a session",
+		Long: `Display the lineage of a session by traversing parent_session_id links.
+
+This shows the chain of sessions leading up to the specified session,
+useful for understanding how a session evolved from its origins.
+
+Examples:
+  agentctl sessions chain --session 01HXYZ
+  agentctl sessions chain --session 01HXYZ --depth 10`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if sessionID == "" {
+				return sessionscmd.WriteArgError(cmd.OutOrStdout(), "agentctl.sessions.chain",
+					"--session is required",
+					"Specify the session to trace with --session <session-id>")
+			}
+
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
+					chain, err := store.GetAncestorChain(ctx, sessionID, depth)
+					if err != nil {
+						return fmt.Errorf("get ancestor chain: %w", err)
+					}
+
+					type chainEntry struct {
+						ID              string    `json:"id"`
+						ParentSessionID string    `json:"parent_session_id,omitempty"`
+						AgentID         string    `json:"agent_id"`
+						Status          string    `json:"status"`
+						Summary         string    `json:"summary,omitempty"`
+						StartedAt       time.Time `json:"started_at"`
+						Depth           int       `json:"depth"`
+					}
+
+					entries := make([]chainEntry, len(chain))
+					for i, s := range chain {
+						entries[i] = chainEntry{
+							ID:              s.ID,
+							ParentSessionID: s.ParentSessionID,
+							AgentID:         s.AgentID,
+							Status:          s.Status,
+							Summary:         truncateSummary(s.Summary, 80),
+							StartedAt:       s.StartedAt,
+							Depth:           i,
+						}
+					}
+
+					payload := struct {
+						SessionID string       `json:"session_id"`
+						Chain     []chainEntry `json:"chain"`
+						Count     int          `json:"count"`
+					}{
+						SessionID: sessionID,
+						Chain:     entries,
+						Count:     len(entries),
+					}
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.chain", payload)
+				})
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session", "", "Session ID to trace (required)")
+	cmd.Flags().IntVar(&depth, "depth", 5, "Maximum depth to traverse")
+	return cmd
+}
+
+func newSessionsCloseCommand() *cobra.Command {
+	var sessionID string
+	var status string
+	var workspace string
+	var agentID string
+
+	cmd := &cobra.Command{
+		Use:   "close",
+		Short: "Close a session with a status",
+		Long: `Close a session by setting its status.
+
+If no session ID is provided, closes the most recent active session for the
+workspace/agent combination.
+
+Status options:
+  ok       - Session completed successfully (default)
+  error    - Session ended with an error
+  canceled - Session was canceled
+
+Examples:
+  agentctl sessions close
+  agentctl sessions close --status error
+  agentctl sessions close --session 01HXYZ --status canceled`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Validate status
+			switch status {
+			case storage.SessionStatusOK, storage.SessionStatusError, storage.SessionStatusCanceled:
+				// Valid
+			default:
+				return sessionscmd.WriteArgError(cmd.OutOrStdout(), "agentctl.sessions.close",
+					fmt.Sprintf("invalid status: %s", status),
+					"Use one of: ok, error, canceled")
+			}
+
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
+					var targetID string
+					var targetWorkspace string
+
+					if sessionID != "" {
+						targetID = sessionID
+						// Get session to find workspace for identity file cleanup
+						if sess, err := store.Get(ctx, sessionID); err == nil {
+							targetWorkspace = sess.WorkspacePath
+						}
+					} else {
+						// Find active session
+						ws := workspace
+						if ws == "" {
+							wd, err := os.Getwd()
+							if err != nil {
+								return fmt.Errorf("get working directory: %w", err)
+							}
+							ws = wd
+						}
+
+						aid := agentID
+						if aid == "" {
+							aid = "agentctl"
+						}
+
+						active, err := store.GetActive(ctx, ws, aid)
+						if err != nil {
+							return fmt.Errorf("get active session: %w", err)
+						}
+						if active == nil {
+							payload := struct {
+								Message string `json:"message"`
+								Hint    string `json:"hint"`
+							}{
+								Message: "no active session found",
+								Hint:    "Specify a session with --session or create one with 'agentctl sessions new'",
+							}
+							return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.close", payload)
+						}
+						targetID = active.ID
+						targetWorkspace = active.WorkspacePath
+					}
+
+					// Update status
+					if err := store.SetStatus(ctx, targetID, status); err != nil {
+						if errors.Is(err, sessions.ErrNotFound) {
+							return sessionscmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.sessions.close", targetID)
+						}
+						return err
+					}
+
+					// Clear identity file for the workspace
+					if targetWorkspace != "" {
+						sessionscmd.ClearActiveIdentity(cmd.ErrOrStderr(), cfg, targetWorkspace)
+					}
+
+					payload := struct {
+						SessionID string `json:"session_id"`
+						Status    string `json:"status"`
+						Closed    bool   `json:"closed"`
+					}{
+						SessionID: targetID,
+						Status:    status,
+						Closed:    true,
+					}
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.close", payload)
+				})
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session", "", "Session ID to close (default: most recent active)")
+	cmd.Flags().StringVar(&status, "status", "ok", "Status to set (ok, error, canceled)")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (default: cwd)")
+	cmd.Flags().StringVar(&agentID, "agent-id", "", "Agent identifier (default: agentctl)")
+	return cmd
 }
 
 func init() {

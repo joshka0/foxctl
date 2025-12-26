@@ -166,9 +166,11 @@ CREATE INDEX IF NOT EXISTS idx_events_trace_id ON trajectory_events(workspace_id
 		return fmt.Errorf("trajectory: migrate: %w", err)
 	}
 
-	// Schema upgrade: add outcome_json column if missing (for existing databases)
+	// Schema upgrade: add columns if missing (for existing databases)
 	// SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we ignore the error.
 	_, _ = db.ExecContext(ctx, `ALTER TABLE trajectories ADD COLUMN outcome_json TEXT`) //nolint:errcheck
+	_, _ = db.ExecContext(ctx, `ALTER TABLE trajectories ADD COLUMN session_id TEXT`)   //nolint:errcheck
+	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_trajectories_session ON trajectories(workspace_id, session_id)`)
 	return nil
 }
 
@@ -209,12 +211,12 @@ func (s *sqlStore) InsertTrajectory(ctx context.Context, t Trajectory) (Trajecto
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO trajectories (id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO trajectories (id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at, session_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `,
 		t.ID, t.WorkspaceID, t.RootRequestID, taskIDsArg, t.EpicID, t.AgentRole,
 		t.JobID, t.TraceID, string(t.Status), t.Summary, t.ArtifactDigest, outcomeArg,
-		sqlutil.FormatTimestamp(t.CreatedAt), sqlutil.FormatTimestamp(t.UpdatedAt),
+		sqlutil.FormatTimestamp(t.CreatedAt), sqlutil.FormatTimestamp(t.UpdatedAt), t.SessionID,
 	)
 	if err != nil {
 		return Trajectory{}, fmt.Errorf("trajectory: insert: %w", err)
@@ -225,7 +227,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 // GetTrajectory returns a trajectory by ID.
 func (s *sqlStore) GetTrajectory(ctx context.Context, workspaceID, id string) (Trajectory, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at
+SELECT id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at, session_id
 FROM trajectories
 WHERE workspace_id = ? AND id = ?
 `, workspaceID, id)
@@ -267,12 +269,12 @@ func (s *sqlStore) UpdateTrajectory(ctx context.Context, t Trajectory) error {
 	result, err := s.db.ExecContext(ctx, `
 UPDATE trajectories SET
 	root_request_id = ?, task_ids_json = ?, epic_id = ?, agent_role = ?, job_id = ?,
-	trace_id = ?, status = ?, summary = ?, artifact_digest = ?, outcome_json = ?, updated_at = ?
+	trace_id = ?, status = ?, summary = ?, artifact_digest = ?, outcome_json = ?, updated_at = ?, session_id = ?
 WHERE workspace_id = ? AND id = ?
 `,
 		t.RootRequestID, taskIDsArg, t.EpicID, t.AgentRole, t.JobID,
 		t.TraceID, string(t.Status), t.Summary, t.ArtifactDigest, outcomeArg,
-		sqlutil.FormatTimestamp(t.UpdatedAt), t.WorkspaceID, t.ID,
+		sqlutil.FormatTimestamp(t.UpdatedAt), t.SessionID, t.WorkspaceID, t.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("trajectory: update: %w", err)
@@ -297,7 +299,7 @@ func (s *sqlStore) ListTrajectories(ctx context.Context, filter ListFilter) ([]T
 	}
 
 	query := `
-SELECT id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at
+SELECT id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at, session_id
 FROM trajectories
 WHERE workspace_id = ?`
 	args := []any{filter.WorkspaceID}
@@ -321,6 +323,10 @@ WHERE workspace_id = ?`
 	if filter.TraceID != "" {
 		query += ` AND trace_id = ?`
 		args = append(args, filter.TraceID)
+	}
+	if filter.SessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, filter.SessionID)
 	}
 	if !filter.Since.IsZero() {
 		query += ` AND created_at >= ?`
@@ -414,7 +420,7 @@ func (s *sqlStore) ListByOutcome(ctx context.Context, filter OutcomeFilter) ([]T
 	}
 
 	query := `
-SELECT id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at
+SELECT id, workspace_id, root_request_id, task_ids_json, epic_id, agent_role, job_id, trace_id, status, summary, artifact_digest, outcome_json, created_at, updated_at, session_id
 FROM trajectories
 WHERE workspace_id = ? AND outcome_json IS NOT NULL`
 	args := []any{filter.WorkspaceID}
@@ -786,13 +792,13 @@ var ErrNotFound = fmt.Errorf("trajectory: not found")
 // scanTrajectory scans a single row into a Trajectory.
 func scanTrajectory(row *sql.Row) (Trajectory, error) {
 	var t Trajectory
-	var taskIDsJSON, rootRequestID, epicID, agentRole, jobID, traceID, summary, artifactDigest, outcomeJSON sql.NullString
+	var taskIDsJSON, rootRequestID, epicID, agentRole, jobID, traceID, summary, artifactDigest, outcomeJSON, sessionID sql.NullString
 	var createdAt, updatedAt string
 	var status string
 
 	err := row.Scan(
 		&t.ID, &t.WorkspaceID, &rootRequestID, &taskIDsJSON, &epicID, &agentRole,
-		&jobID, &traceID, &status, &summary, &artifactDigest, &outcomeJSON, &createdAt, &updatedAt,
+		&jobID, &traceID, &status, &summary, &artifactDigest, &outcomeJSON, &createdAt, &updatedAt, &sessionID,
 	)
 	if err != nil {
 		return Trajectory{}, err
@@ -806,6 +812,7 @@ func scanTrajectory(row *sql.Row) (Trajectory, error) {
 	t.Status = Status(status)
 	t.Summary = summary.String
 	t.ArtifactDigest = artifactDigest.String
+	t.SessionID = sessionID.String
 
 	if taskIDsJSON.Valid && taskIDsJSON.String != "" {
 		// Optional JSON field; parse errors leave default empty slice.
@@ -828,13 +835,13 @@ func scanTrajectory(row *sql.Row) (Trajectory, error) {
 // scanTrajectoryRows scans rows into a Trajectory.
 func scanTrajectoryRows(rows *sql.Rows) (Trajectory, error) {
 	var t Trajectory
-	var taskIDsJSON, rootRequestID, epicID, agentRole, jobID, traceID, summary, artifactDigest, outcomeJSON sql.NullString
+	var taskIDsJSON, rootRequestID, epicID, agentRole, jobID, traceID, summary, artifactDigest, outcomeJSON, sessionID sql.NullString
 	var createdAt, updatedAt string
 	var status string
 
 	err := rows.Scan(
 		&t.ID, &t.WorkspaceID, &rootRequestID, &taskIDsJSON, &epicID, &agentRole,
-		&jobID, &traceID, &status, &summary, &artifactDigest, &outcomeJSON, &createdAt, &updatedAt,
+		&jobID, &traceID, &status, &summary, &artifactDigest, &outcomeJSON, &createdAt, &updatedAt, &sessionID,
 	)
 	if err != nil {
 		return Trajectory{}, err
@@ -848,6 +855,7 @@ func scanTrajectoryRows(rows *sql.Rows) (Trajectory, error) {
 	t.Status = Status(status)
 	t.Summary = summary.String
 	t.ArtifactDigest = artifactDigest.String
+	t.SessionID = sessionID.String
 
 	if taskIDsJSON.Valid && taskIDsJSON.String != "" {
 		// Optional JSON field; parse errors leave default empty slice.

@@ -183,6 +183,7 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 					CorrelationID:   corr,
 					AgentRole:       dspyRole,
 					Input:           inBytes,
+					SessionID:       resolveSessionID(),
 				})
 				if err == nil {
 					capture = c

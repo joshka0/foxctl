@@ -3,12 +3,17 @@
 // This skill indexes a single file's symbols into the memory store for fast
 // code search. It's designed to be called by hooks (e.g., PostToolUse on Edit)
 // for live indexing during development.
+//
+// Additionally, it ingests call and import relationships into the graph store
+// for PageRank-boosted code search per the dependency graph design.
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
@@ -22,6 +27,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
@@ -46,6 +52,8 @@ type output struct {
 	SymbolsDeleted   int    `json:"symbols_deleted"`
 	EmbeddingQueued  int    `json:"embedding_queued"`
 	EmbeddingSkipped int    `json:"embedding_skipped,omitempty"`
+	CallEdgesCreated int    `json:"call_edges_created,omitempty"`
+	ImportEdges      int    `json:"import_edges,omitempty"`
 	DurationMS       int64  `json:"duration_ms"`
 	Skipped          bool   `json:"skipped,omitempty"`
 	SkipReason       string `json:"skip_reason,omitempty"`
@@ -66,7 +74,9 @@ func main() {
 		errs.Ignore(rc.Close(), "runner context close")
 	}()
 
-	in, err := parseInput(os.Stdin)
+	// Pass workspace path so parseInput can use it as the default workspace scope
+	workspacePath := rc.PathValidator.Workspace()
+	in, err := parseInput(os.Stdin, workspacePath)
 	if err != nil {
 		fail("EARG", err)
 	}
@@ -76,7 +86,7 @@ func main() {
 	}
 }
 
-func parseInput(r io.Reader) (input, error) {
+func parseInput(r io.Reader, workspacePath string) (input, error) {
 	var in input
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
 		return input{}, fmt.Errorf("decode input: %w", err)
@@ -84,8 +94,10 @@ func parseInput(r io.Reader) (input, error) {
 	if in.File == "" {
 		return input{}, fmt.Errorf("file is required")
 	}
+	// Use the actual workspace path for scoping, not a hash or "default"
+	// This ensures symbols are indexed under the same key used by semantic search
 	if in.WorkspaceID == "" {
-		in.WorkspaceID = "default"
+		in.WorkspaceID = workspacePath
 	}
 	// Default symbols=true
 	if in.Symbols == nil {
@@ -158,7 +170,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	defer func() { errs.Ignore(store.Close(), "close memory store") }()
 
 	// Upsert symbols and delete stale ones
-	updated, deleted, err := upsertSymbols(ctx, store, in.WorkspaceID, relPath, symbols)
+	updated, deleted, err := upsertSymbols(ctx, store, in.WorkspaceID, relPath, rc.SessionID, symbols)
 	if err != nil {
 		return fmt.Errorf("upsert symbols: %w", err)
 	}
@@ -169,6 +181,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		embeddingQueued, embeddingSkipped = queueEmbeddings(ctx, rc.Config.Paths.Cache, in.WorkspaceID, symbols, content)
 	}
 
+	// Ingest calls and imports into graph store for PageRank
+	var callEdgesCreated, importEdgesCreated int
+	if len(symbols) > 0 && lang == "go" {
+		callEdgesCreated, importEdgesCreated = ingestGraphEdges(ctx, rc.Config.Storage.Root, in.WorkspaceID, relPath, symbols, content)
+	}
+
 	return emit(rc, output{
 		File:             relPath,
 		Language:         lang,
@@ -177,6 +195,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		SymbolsDeleted:   deleted,
 		EmbeddingQueued:  embeddingQueued,
 		EmbeddingSkipped: embeddingSkipped,
+		CallEdgesCreated: callEdgesCreated,
+		ImportEdges:      importEdgesCreated,
 		DurationMS:       time.Since(start).Milliseconds(),
 	})
 }
@@ -323,7 +343,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 
 // upsertSymbols saves new/updated symbols and removes stale ones.
 // Returns (updated count, deleted count, error).
-func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, filePath string, symbols []symbol.Symbol) (int, int, error) {
+func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, filePath, sessionID string, symbols []symbol.Symbol) (int, int, error) {
 	// Build a map of new symbol entry names
 	newSymbolNames := make(map[string]bool)
 	for _, sym := range symbols {
@@ -385,6 +405,7 @@ func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, 
 			Workspace: workspaceID,
 			Summary:   sym.Name,
 			Result:    resultBytes,
+			SessionID: sessionID,
 		}
 
 		// Save (upsert)
@@ -536,4 +557,133 @@ func fail(code string, err error) {
 	env := envelope.Error(Command, code, err.Error(), nil)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
 	os.Exit(1)
+}
+
+// ingestGraphEdges extracts call and import relationships and stores them in the graph store.
+// This enables PageRank-boosted code search by building the dependency graph.
+// Returns (call edges created, import edges created).
+func ingestGraphEdges(ctx context.Context, storageRoot, workspace, filePath string, symbols []symbol.Symbol, content []byte) (int, int) {
+	// Open graph store
+	graphStore, err := graph.Open(ctx, storageRoot)
+	if err != nil {
+		// Don't fail - graph ingestion is optional enhancement
+		return 0, 0
+	}
+	defer errs.Ignore(graphStore.Close(), "close graph store")
+
+	var callEdges, importEdges int
+	now := time.Now().UTC()
+
+	// Create file node for import relationships
+	fileNodeID := "file:" + filePath
+	if err := graphStore.UpsertNode(ctx, graph.Node{
+		Workspace:   workspace,
+		NodeID:      fileNodeID,
+		NodeType:    graph.NodeTypeFile,
+		Title:       filepath.Base(filePath),
+		CurrentPath: filePath,
+		LastSeen:    now,
+	}); err != nil {
+		// Log but continue
+		_ = err
+	}
+
+	// Extract Go imports and create edges
+	imports := extractGoImports(content)
+	for _, imp := range imports {
+		// Create import edge: file → import_path
+		// Use "pkg:" prefix for external packages
+		targetID := "pkg:" + imp
+		edge := graph.Edge{
+			Workspace: workspace,
+			FromID:    fileNodeID,
+			FromType:  graph.NodeTypeFile,
+			ToID:      targetID,
+			ToType:    graph.NodeTypeFile, // Could be NodeTypeSymbol for local imports
+			EdgeType:  graph.EdgeTypeImports,
+			Weight:    1.0,
+			CreatedAt: now,
+		}
+		if err := graphStore.UpsertEdge(ctx, edge); err == nil {
+			importEdges++
+		}
+	}
+
+	// Create symbol nodes and extract call edges
+	extractor := symbol.NewGoExtractor()
+	for _, sym := range symbols {
+		// Create symbol node
+		symbolNodeID := "symbol:" + sym.ID
+		if err := graphStore.UpsertNode(ctx, graph.Node{
+			Workspace:   workspace,
+			NodeID:      symbolNodeID,
+			NodeType:    graph.NodeTypeSymbol,
+			Title:       sym.Name,
+			CurrentPath: sym.FilePath,
+			LastSeen:    now,
+			Metadata: map[string]string{
+				"kind":      string(sym.Kind),
+				"signature": sym.Signature,
+			},
+		}); err != nil {
+			continue
+		}
+
+		// Extract calls from this symbol
+		calls, err := extractor.ExtractCalls(ctx, sym, content)
+		if err != nil {
+			continue
+		}
+
+		// Create call edges
+		for _, callName := range calls {
+			// Skip qualified calls (e.g., "fmt.Println", "http.Get") - we can't resolve
+			// cross-package targets without import resolution. Only same-file/package
+			// unqualified calls (e.g., "helper") can be matched within the same file.
+			if strings.Contains(callName, ".") {
+				continue
+			}
+
+			// Create edge: symbol → called_symbol
+			// The target may not exist yet; we create the edge anyway
+			// and the node will be created when that file is indexed
+			targetID := "symbol:" + filePath + ":" + callName
+			edge := graph.Edge{
+				Workspace: workspace,
+				FromID:    symbolNodeID,
+				FromType:  graph.NodeTypeSymbol,
+				ToID:      targetID,
+				ToType:    graph.NodeTypeSymbol,
+				EdgeType:  graph.EdgeTypeCalls,
+				Weight:    1.0,
+				CreatedAt: now,
+			}
+			if err := graphStore.UpsertEdge(ctx, edge); err == nil {
+				callEdges++
+			}
+		}
+	}
+
+	return callEdges, importEdges
+}
+
+// extractGoImports extracts import paths from Go source code.
+func extractGoImports(content []byte) []string {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", content, parser.ImportsOnly)
+	if err != nil {
+		return nil
+	}
+
+	var imports []string
+	for _, imp := range file.Imports {
+		// Extract import path, removing quotes
+		importPath := strings.Trim(imp.Path.Value, `"`)
+		// Skip standard library (no dots in path)
+		if !strings.Contains(importPath, ".") {
+			continue
+		}
+		imports = append(imports, importPath)
+	}
+	return imports
 }

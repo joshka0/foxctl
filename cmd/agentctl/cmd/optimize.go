@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/runservice"
+	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/spf13/cobra"
 )
@@ -36,6 +39,7 @@ prompt optimization), and feedback-driven weight learning.`,
 		newOptimizeWeightsCommand(),
 		newOptimizeReflectCommand(),
 		newOptimizeFeedbackCommand(),
+		newOptimizeSessionCommand(),
 	)
 	return cmd
 }
@@ -901,6 +905,128 @@ func newOptimizeFeedbackStatsCommand() *cobra.Command {
 	if err := cmd.MarkFlagRequired("role"); err != nil {
 		panic(err)
 	}
+	return cmd
+}
+
+// --- Session subcommand ---
+
+const optimizeSessionCommand = "optimize.session"
+
+func newOptimizeSessionCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "session",
+		Short: "Analyze session-level feedback",
+	}
+	cmd.AddCommand(newOptimizeSessionAnalyzeCommand())
+	return cmd
+}
+
+func newOptimizeSessionAnalyzeCommand() *cobra.Command {
+	var (
+		workspace string
+		since     string
+		minRating int
+		maxRating int
+		outcome   string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "analyze",
+		Short: "Analyze session feedback patterns and generate recommendations",
+		Long: `Analyze session feedback collected via the session/feedback skill
+and generate optimization recommendations based on patterns.
+
+Examples:
+  # Analyze all feedback for current workspace
+  agentctl optimize session analyze
+
+  # Analyze feedback from the last week
+  agentctl optimize session analyze --since 2024-01-01
+
+  # Only analyze sessions with low ratings
+  agentctl optimize session analyze --max-rating 2
+
+  # Focus on failed sessions
+  agentctl optimize session analyze --outcome failure`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+
+			cfg, err := commandConfig(cmd.Context())
+			if err != nil {
+				return writeOptimizeError(out, optimizeSessionCommand, err.Error())
+			}
+
+			absWorkspace, err := filepath.Abs(workspace)
+			if err != nil {
+				return writeOptimizeError(out, optimizeSessionCommand, fmt.Sprintf("resolve workspace: %v", err))
+			}
+
+			// Build input for optimize/feedback skill
+			input := map[string]any{
+				"workspace": absWorkspace,
+			}
+			if since != "" {
+				input["since"] = since
+			}
+			if minRating > 0 {
+				input["min_rating"] = minRating
+			}
+			if maxRating > 0 && maxRating < 5 {
+				input["max_rating"] = maxRating
+			}
+			if outcome != "" {
+				input["outcome"] = outcome
+			}
+
+			inputJSON, err := json.Marshal(input)
+			if err != nil {
+				return writeOptimizeError(out, optimizeSessionCommand, fmt.Sprintf("marshal input: %v", err))
+			}
+
+			// Find skill
+			skillName := "optimize/feedback"
+			handle, err := findSkill(cfg, skillName)
+			if err != nil {
+				return writeOptimizeError(out, optimizeSessionCommand, fmt.Sprintf("find skill: %v", err))
+			}
+
+			// Build run options
+			opts := runservice.RunOptions{
+				SkillName:     skillName,
+				Input:         inputJSON,
+				CacheMode:     cache.ModeOff, // Always run fresh
+				Workspace:     absWorkspace,
+				Timeout:       2 * time.Minute,
+				CorrelationID: "",
+				SessionID:     resolveSessionID(),
+			}
+			if err := opts.Validate(); err != nil {
+				return writeOptimizeError(out, optimizeSessionCommand, err.Error())
+			}
+
+			// Execute skill
+			ctx := cmd.Context()
+			executor := runservice.NewExecutor(ctx, cfg, handle, out, cmd.ErrOrStderr(), opts)
+			defer executor.Close()
+
+			// Execute through job system
+			job, isDuplicate, err := executor.PrepareJob(inputJSON)
+			if err != nil {
+				return writeOptimizeError(out, optimizeSessionCommand, fmt.Sprintf("prepare job: %v", err))
+			}
+			if isDuplicate {
+				return executor.HandleDuplicate(job)
+			}
+			return executor.ExecuteSync(job)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Filter feedback by workspace")
+	cmd.Flags().StringVar(&since, "since", "", "Only analyze feedback since this date (ISO 8601 or YYYY-MM-DD)")
+	cmd.Flags().IntVar(&minRating, "min-rating", 0, "Minimum rating to include (default: 1)")
+	cmd.Flags().IntVar(&maxRating, "max-rating", 0, "Maximum rating to include (default: 5)")
+	cmd.Flags().StringVar(&outcome, "outcome", "", "Filter by outcome: success, partial, failure, abandoned")
+
 	return cmd
 }
 

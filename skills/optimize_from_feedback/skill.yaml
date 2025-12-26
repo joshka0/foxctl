@@ -1,0 +1,64 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: optimize/feedback
+  version: 0.1.0
+  description: "Analyze session feedback to extract patterns and generate optimization recommendations"
+  tags: ["optimization", "feedback", "dspy", "patterns", "learning"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/optimize_from_feedback/optimize_from_feedback
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: optimize/feedback
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Filter feedback by workspace (default: all)"
+    - name: since
+      type: string
+      required: false
+      description: "Only analyze feedback since this date (ISO 8601)"
+    - name: min_rating
+      type: number
+      required: false
+      description: "Minimum rating to include (default: 1)"
+    - name: max_rating
+      type: number
+      required: false
+      description: "Maximum rating to include (default: 5)"
+    - name: outcome
+      type: string
+      required: false
+      description: "Filter by outcome: success, partial, failure, abandoned"
+returns:
+  - name: feedback_count
+    type: number
+    description: "Number of feedback entries analyzed"
+  - name: avg_rating
+    type: number
+    description: "Average session rating"
+  - name: outcome_distribution
+    type: object
+    description: "Distribution of outcomes"
+  - name: top_successes
+    type: array
+    description: "Most common things that worked well"
+  - name: top_failures
+    type: array
+    description: "Most common things that didn't work"
+  - name: top_blockers
+    type: array
+    description: "Most common blockers"
+  - name: recommendations
+    type: array
+    description: "Optimization recommendations based on patterns"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

@@ -90,11 +90,30 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 		RememberType:    flags.RememberType,
 		RememberSummary: flags.RememberSummary,
 		Timeout:         flags.Timeout,
+		SessionID:       resolveSessionID(),
 	}
 	if err := opts.Validate(); err != nil {
 		return runservice.RunOptions{}, err
 	}
 	return opts, nil
+}
+
+// resolveSessionID returns the session ID from environment variables.
+// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
+// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
+func resolveSessionID() string {
+	for _, key := range []string{
+		"AGENTCTL_SESSION_ID",
+		"CLAUDE_SESSION_ID",
+		"OPENCODE_SESSION_ID",
+		"CURSOR_SESSION_ID",
+		"TERM_SESSION_ID",
+	} {
+		if sid := os.Getenv(key); sid != "" {
+			return sid
+		}
+	}
+	return ""
 }
 
 func parseCacheMode(flagValue, defaultValue string) (cache.Mode, error) {

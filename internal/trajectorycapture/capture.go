@@ -40,6 +40,7 @@ type StartOptions struct {
 	CorrelationID   string
 	AgentRole       string
 	Input           []byte
+	SessionID       string // AI coding tool session ID (optional)
 }
 
 // RunCapture tracks a single run's trajectory capture.
@@ -117,6 +118,7 @@ func Start(ctx context.Context, opts StartOptions) (*RunCapture, error) {
 		Status:         trajectory.StatusPartial,
 		Summary:        "",
 		ArtifactDigest: "",
+		SessionID:      strings.TrimSpace(opts.SessionID),
 	}
 	if taskHints != nil {
 		traj.EpicID = strings.TrimSpace(taskHints.EpicID)

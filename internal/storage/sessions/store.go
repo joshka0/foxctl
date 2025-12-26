@@ -32,6 +32,9 @@ type SessionTurn = storage.SessionTurn
 // ToolCall aliases the shared tool call type.
 type ToolCall = storage.ToolCall
 
+// SessionEdge aliases the shared edge type.
+type SessionEdge = storage.SessionEdge
+
 // Stats aliases the shared stats type.
 type Stats = storage.SessionStats
 
@@ -49,6 +52,21 @@ type ScoredChunk = storage.ScoredChunk
 
 // ChunkListOptions aliases the shared chunk list options type.
 type ChunkListOptions = storage.ChunkListOptions
+
+// Session status constants (re-exported for convenience)
+const (
+	StatusRunning  = storage.SessionStatusRunning
+	StatusOK       = storage.SessionStatusOK
+	StatusError    = storage.SessionStatusError
+	StatusCanceled = storage.SessionStatusCanceled
+)
+
+// Session edge type constants (re-exported for convenience)
+const (
+	EdgeContinues  = storage.SessionEdgeContinues
+	EdgeForkedFrom = storage.SessionEdgeForkedFrom
+	EdgeRelatesTo  = storage.SessionEdgeRelatesTo
+)
 
 // Store handles session persistence.
 type Store struct {
@@ -108,6 +126,14 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 	}
 	session.UpdatedAt = now
 
+	// Set defaults for lineage fields
+	if session.AgentID == "" {
+		session.AgentID = "agentctl"
+	}
+	if session.Status == "" {
+		session.Status = StatusOK
+	}
+
 	// Format JSON arrays
 	accomplishedJSON, err := sqlutil.FormatJSON(session.Accomplished)
 	if err != nil {
@@ -130,14 +156,20 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 		return Session{}, fmt.Errorf("sessions: format key_files: %w", err)
 	}
 
+	// Handle nullable parent_session_id
+	var parentSessionID any
+	if session.ParentSessionID != "" {
+		parentSessionID = session.ParentSessionID
+	}
+
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO sessions (
 	id, workspace_path, project_name, git_branch, claude_version,
 	started_at, ended_at, summary, accomplished, decisions, gotchas,
 	tags, key_files, tools_pattern, message_count, user_turns,
 	tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-	created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	created_at, updated_at, parent_session_id, agent_id, status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	workspace_path = excluded.workspace_path,
 	project_name = excluded.project_name,
@@ -159,7 +191,10 @@ ON CONFLICT(id) DO UPDATE SET
 	raw_jsonl_path = excluded.raw_jsonl_path,
 	embedding = COALESCE(excluded.embedding, sessions.embedding),
 	embedding_model = COALESCE(excluded.embedding_model, sessions.embedding_model),
-	updated_at = excluded.updated_at
+	updated_at = excluded.updated_at,
+	parent_session_id = excluded.parent_session_id,
+	agent_id = excluded.agent_id,
+	status = excluded.status
 `,
 		session.ID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
 		sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
@@ -167,6 +202,7 @@ ON CONFLICT(id) DO UPDATE SET
 		tagsJSON, keyFilesJSON, session.ToolsPattern, session.MessageCount, session.UserTurns,
 		session.ToolInvocations, session.TotalTokens, session.RawJSONLPath, session.Embedding, session.EmbeddingModel,
 		sqlutil.FormatTimestamp(session.CreatedAt), sqlutil.FormatTimestamp(session.UpdatedAt),
+		parentSessionID, session.AgentID, session.Status,
 	)
 	if err != nil {
 		return Session{}, fmt.Errorf("sessions: save: %w", err)
@@ -181,7 +217,7 @@ func (s *Store) Get(ctx context.Context, id string) (Session, error) {
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at
+			created_at, updated_at, parent_session_id, agent_id, status
 		FROM sessions
 		WHERE id = ?`, id)
 	return scanSession(row)
@@ -226,7 +262,7 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at
+			created_at, updated_at, parent_session_id, agent_id, status
 		FROM sessions`
 
 	if len(conditions) > 0 {
@@ -273,7 +309,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at
+			created_at, updated_at, parent_session_id, agent_id, status
 		FROM sessions
 		WHERE LOWER(summary) LIKE ?
 			OR LOWER(tags) LIKE ?
@@ -380,7 +416,7 @@ func (s *Store) SearchSimilar(ctx context.Context, queryEmbedding []float32, lim
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at
+			created_at, updated_at, parent_session_id, agent_id, status
 		FROM sessions
 		WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0
 		ORDER BY started_at DESC`)
@@ -465,6 +501,217 @@ func cosineSimilarity(a, b []float32) float64 {
 	}
 
 	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+// --- Lineage Operations ---
+
+// GetActive returns the most recently started session for a workspace/agent that hasn't ended.
+// Returns nil if no active session exists.
+// Uses status-based detection: only sessions with status = 'running' are considered active.
+func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Session, error) {
+	if agentID == "" {
+		agentID = "agentctl"
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, status
+		FROM sessions
+		WHERE workspace_path = ? AND agent_id = ? AND status = ?
+		ORDER BY started_at DESC
+		LIMIT 1`, workspace, agentID, StatusRunning)
+
+	session, err := scanSession(row)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sessions: get active: %w", err)
+	}
+	return &session, nil
+}
+
+// SetStatus updates a session's status.
+// If the status is terminal (ok, error, canceled), also sets ended_at.
+func (s *Store) SetStatus(ctx context.Context, id, status string) error {
+	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
+
+	var query string
+	var args []any
+
+	if storage.IsTerminalStatus(status) {
+		// Terminal status: also set ended_at
+		query = `UPDATE sessions SET status = ?, ended_at = ?, updated_at = ? WHERE id = ?`
+		args = []any{status, now, now, id}
+	} else {
+		// Non-terminal status: clear ended_at (session is active)
+		query = `UPDATE sessions SET status = ?, ended_at = NULL, updated_at = ? WHERE id = ?`
+		args = []any{status, now, id}
+	}
+
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("sessions: set status: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// FindLastSession finds the most recent session matching criteria.
+// If statuses is empty, matches any status.
+func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error) {
+	if agentID == "" {
+		agentID = "agentctl"
+	}
+
+	var args []any
+	args = append(args, workspace, agentID)
+
+	query := `
+		SELECT id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, status
+		FROM sessions
+		WHERE workspace_path = ? AND agent_id = ?`
+
+	if len(statuses) > 0 {
+		placeholders := make([]string, len(statuses))
+		for i, s := range statuses {
+			placeholders[i] = "?"
+			args = append(args, s)
+		}
+		query += " AND status IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	query += " ORDER BY started_at DESC LIMIT 1"
+
+	row := s.db.QueryRowContext(ctx, query, args...)
+	session, err := scanSession(row)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sessions: find last session: %w", err)
+	}
+	return &session, nil
+}
+
+// SaveEdge saves a session edge (relationship between sessions).
+func (s *Store) SaveEdge(ctx context.Context, edge SessionEdge) error {
+	now := timeutil.NowUTC()
+	if edge.CreatedAt.IsZero() {
+		edge.CreatedAt = now
+	}
+
+	var metadataJSON any
+	if len(edge.Metadata) > 0 {
+		data, err := sqlutil.FormatJSON(edge.Metadata)
+		if err != nil {
+			return fmt.Errorf("sessions: format edge metadata: %w", err)
+		}
+		metadataJSON = data
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO session_edges (id, workspace, from_session, to_session, edge_type, created_at, metadata)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(from_session, to_session, edge_type) DO UPDATE SET
+			metadata = excluded.metadata`,
+		edge.ID, edge.Workspace, edge.FromSession, edge.ToSession, edge.EdgeType,
+		sqlutil.FormatTimestamp(edge.CreatedAt), metadataJSON)
+	if err != nil {
+		return fmt.Errorf("sessions: save edge: %w", err)
+	}
+	return nil
+}
+
+// GetAncestorChain retrieves the ancestor chain of a session using CTE.
+// Returns sessions in order from immediate parent to oldest ancestor.
+// maxDepth limits how far back to traverse (0 = no limit).
+func (s *Store) GetAncestorChain(ctx context.Context, sessionID string, maxDepth int) ([]Session, error) {
+	if maxDepth <= 0 {
+		maxDepth = 100 // reasonable default
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		WITH RECURSIVE ancestors(id, depth) AS (
+			SELECT parent_session_id, 1 FROM sessions WHERE id = ? AND parent_session_id IS NOT NULL
+			UNION ALL
+			SELECT s.parent_session_id, a.depth + 1
+			FROM sessions s
+			JOIN ancestors a ON s.id = a.id
+			WHERE s.parent_session_id IS NOT NULL AND a.depth < ?
+		)
+		SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+			s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
+			s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
+			s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.embedding, s.embedding_model,
+			s.created_at, s.updated_at, s.parent_session_id, s.agent_id, s.status
+		FROM sessions s
+		JOIN ancestors a ON s.id = a.id
+		ORDER BY a.depth ASC`, sessionID, maxDepth)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: get ancestor chain: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close ancestor chain rows")
+	}()
+
+	return scanSessions(rows)
+}
+
+// GetEdges retrieves all edges for a session (both incoming and outgoing).
+func (s *Store) GetEdges(ctx context.Context, sessionID string) ([]SessionEdge, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, workspace, from_session, to_session, edge_type, created_at, metadata
+		FROM session_edges
+		WHERE from_session = ? OR to_session = ?
+		ORDER BY created_at DESC`, sessionID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: get edges: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close session edges rows")
+	}()
+
+	var edges []SessionEdge
+	for rows.Next() {
+		var edge SessionEdge
+		var createdAt sql.NullString
+		var metadata sql.NullString
+
+		if err := rows.Scan(&edge.ID, &edge.Workspace, &edge.FromSession, &edge.ToSession,
+			&edge.EdgeType, &createdAt, &metadata); err != nil {
+			return nil, fmt.Errorf("sessions: scan edge: %w", err)
+		}
+
+		if createdAt.Valid {
+			ts, _ := sqlutil.ScanTimestamp(createdAt.String)
+			edge.CreatedAt = ts
+		}
+		if metadata.Valid {
+			var m map[string]any
+			if err := sqlutil.ScanJSON(metadata.String, &m); err == nil {
+				edge.Metadata = m
+			}
+		}
+
+		edges = append(edges, edge)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessions: edges rows error: %w", err)
+	}
+	return edges, nil
 }
 
 // --- Turn Operations ---
@@ -1161,7 +1408,11 @@ CREATE TABLE IF NOT EXISTS sessions (
 	embedding BLOB,
 	embedding_model TEXT,
 	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
+	updated_at TEXT NOT NULL,
+	-- Lineage fields
+	parent_session_id TEXT,
+	agent_id TEXT NOT NULL DEFAULT 'agentctl',
+	status TEXT NOT NULL DEFAULT 'ok'
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_path);
@@ -1217,6 +1468,24 @@ CREATE INDEX IF NOT EXISTS idx_chunks_session ON session_chunks(session_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_session_index ON session_chunks(session_id, chunk_index);
 CREATE INDEX IF NOT EXISTS idx_chunks_error ON session_chunks(session_id) WHERE has_error = 1;
 CREATE INDEX IF NOT EXISTS idx_chunks_hash ON session_chunks(content_hash);
+
+-- Session edges table for lineage relationships
+CREATE TABLE IF NOT EXISTS session_edges (
+	id TEXT PRIMARY KEY,
+	workspace TEXT NOT NULL,
+	from_session TEXT NOT NULL,
+	to_session TEXT NOT NULL,
+	edge_type TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	metadata TEXT,
+	FOREIGN KEY (from_session) REFERENCES sessions(id) ON DELETE CASCADE,
+	FOREIGN KEY (to_session) REFERENCES sessions(id) ON DELETE CASCADE,
+	UNIQUE(from_session, to_session, edge_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_edges_from ON session_edges(from_session);
+CREATE INDEX IF NOT EXISTS idx_session_edges_to ON session_edges(to_session);
+CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspace);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("sessions: migrate: %w", err)
@@ -1230,6 +1499,42 @@ CREATE INDEX IF NOT EXISTS idx_chunks_hash ON session_chunks(content_hash);
 			// Ignore error if column already exists
 			if !strings.Contains(err.Error(), "duplicate column") {
 				return fmt.Errorf("sessions: add user_insights column: %w", err)
+			}
+		}
+	}
+
+	// Add lineage columns for existing databases
+	lineageColumns := []struct {
+		name       string
+		ddl        string
+		hasDefault bool
+	}{
+		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT", false},
+		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl'", true},
+		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'", true},
+	}
+	for _, col := range lineageColumns {
+		row := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = ?", col.name)
+		if err := row.Scan(&colCount); err == nil && colCount == 0 {
+			if _, err := db.ExecContext(ctx, col.ddl); err != nil {
+				if !strings.Contains(err.Error(), "duplicate column") {
+					return fmt.Errorf("sessions: add %s column: %w", col.name, err)
+				}
+			}
+		}
+	}
+
+	// Create indexes for lineage columns (after columns are added)
+	lineageIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_agent ON sessions(workspace_path, agent_id, started_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)`,
+	}
+	for _, idx := range lineageIndexes {
+		if _, err := db.ExecContext(ctx, idx); err != nil {
+			// Ignore if index already exists
+			if !strings.Contains(err.Error(), "already exists") {
+				log.Printf("sessions: warning: failed to create lineage index: %v", err)
 			}
 		}
 	}
@@ -1265,13 +1570,14 @@ func scanSession(row scannable) (Session, error) {
 	var toolsPattern sql.NullString
 	var embedding []byte
 	var embeddingModel sql.NullString
+	var parentSessionID, agentID, status sql.NullString
 
 	err := row.Scan(
 		&session.ID, &session.WorkspacePath, &session.ProjectName, &session.GitBranch, &session.ClaudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &session.MessageCount, &session.UserTurns,
 		&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embedding, &embeddingModel,
-		&createdAt, &updatedAt,
+		&createdAt, &updatedAt, &parentSessionID, &agentID, &status,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1333,6 +1639,21 @@ func scanSession(row scannable) (Session, error) {
 	session.Embedding = embedding
 	if embeddingModel.Valid {
 		session.EmbeddingModel = embeddingModel.String
+	}
+
+	// Lineage fields
+	if parentSessionID.Valid {
+		session.ParentSessionID = parentSessionID.String
+	}
+	if agentID.Valid {
+		session.AgentID = agentID.String
+	} else {
+		session.AgentID = "agentctl" // default
+	}
+	if status.Valid {
+		session.Status = status.String
+	} else {
+		session.Status = StatusOK // default
 	}
 
 	return session, nil

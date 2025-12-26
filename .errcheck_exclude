@@ -6,6 +6,15 @@
 (*database/sql.DB).Close
 (*database/sql.Rows).Close
 (*database/sql.Stmt).Close
+(*database/sql.Tx).Rollback
+
+# Exclude common cleanup calls
+os.Chdir
+os.Remove
+os.RemoveAll
+(*os/exec.Cmd).Run
+(*os/exec.Cmd).Wait
+(*os.Process).Kill
 
 # Output operations
 fmt.Fprint

@@ -64,6 +64,7 @@ func (e *Executor) PrepareJob(input []byte) (jobs.Job, bool, error) {
 				JobID:           job.ID,
 				CorrelationID:   corr,
 				Input:           input,
+				SessionID:       e.options.SessionID,
 			})
 			if capErr == nil {
 				e.trajCapture = capture

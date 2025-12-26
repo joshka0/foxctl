@@ -18,7 +18,7 @@ GOLANGCI ?= golangci-lint
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo viewer snapshot tidy check skills-build skills-install skills-test completions
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo viewer snapshot tidy check skill skills-build skills-install skills-test completions
 
 fmt:
 	@echo "Running gofumpt"
@@ -167,6 +167,37 @@ web-build: web-templ
 
 web-run: web-build
 	@./bin/agentctl-web
+
+# Build and install a single skill: make skill SKILL=todo
+# This is the preferred way to rebuild a skill during development
+skill:
+ifndef SKILL
+	$(error SKILL is required. Usage: make skill SKILL=todo)
+endif
+	@set -euo pipefail; \
+		dir="skills/$(SKILL)"; \
+		if [ ! -d "$$dir" ]; then \
+			echo "Error: skill directory $$dir not found"; \
+			exit 1; \
+		fi; \
+		echo "Building skill: $(SKILL)"; \
+		outdir="dist/skills/$(SKILL)"; \
+		mkdir -p "$$outdir"; \
+		if ls "$$dir"/*.go >/dev/null 2>&1; then \
+			$(GO_CMD) build -o "$$outdir/bin" "./$$dir"; \
+		fi; \
+		if [ -f "$$dir/module.wasm" ]; then \
+			cp "$$dir/module.wasm" "$$outdir/module.wasm"; \
+		fi; \
+		if [ -f "$$dir/skill.yaml" ]; then \
+			cp "$$dir/skill.yaml" "$$outdir/skill.yaml"; \
+		fi; \
+		echo "Installing skill: $(SKILL)"; \
+		if [ -f "$$dir/skill.yaml" ] && [ -f "$$outdir/bin" ]; then \
+			$(MAKE) build 2>/dev/null || true; \
+			bin/$(BINARY) skills install --manifest "$$dir/skill.yaml" --binary "$$outdir/bin" --force; \
+		fi; \
+		echo "Done: $(SKILL)"
 
 skills-build:
 	@set -euo pipefail; \

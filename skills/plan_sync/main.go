@@ -147,13 +147,16 @@ func main() {
 	}
 
 	// Process each plan
+	// Resolve session ID once for all operations
+	sessionID := resolveSessionID()
+
 	output := Output{
 		DryRun:  input.DryRun,
 		Results: []SyncResult{},
 	}
 
 	for _, plan := range plansToProcess {
-		result := processPlan(ctx, &plan, parser, syncStates, taskStore, memStore, input)
+		result := processPlan(ctx, &plan, parser, syncStates, taskStore, memStore, input, sessionID)
 		output.Results = append(output.Results, result)
 		output.PlansProcessed++
 
@@ -184,6 +187,7 @@ func processPlan(
 	taskStore tasks.Store,
 	memStore *memory.Store,
 	input Input,
+	sessionID string,
 ) SyncResult {
 	result := SyncResult{
 		PlanFile:    plan.FilePath,
@@ -251,6 +255,7 @@ func processPlan(
 						Status:      tasks.StatusPending,
 						PlanFile:    plan.FilePath,
 						PlanSection: sectionPath,
+						SessionID:   sessionID,
 					}
 
 					// Set dependencies if available
@@ -293,6 +298,7 @@ func processPlan(
 				Workspace: input.Workspace,
 				Summary:   fmt.Sprintf("Plan sync state: %s", plan.Title),
 				Result:    stateJSON,
+				SessionID: sessionID,
 			})
 			if saveErr != nil {
 				fmt.Fprintf(os.Stderr, "plan_sync: save state for %s: %v\n", plan.FileName, saveErr)
@@ -343,4 +349,26 @@ func fail(code string, err error, hint string) {
 	env := envelope.Error(command, code, err.Error(), data)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit plan/sync failure")
 	os.Exit(1)
+}
+
+// resolveSessionID returns the session ID from environment variables.
+// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
+// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
+func resolveSessionID() string {
+	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("CLAUDE_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("OPENCODE_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("CURSOR_SESSION_ID"); sid != "" {
+		return sid
+	}
+	if sid := os.Getenv("TERM_SESSION_ID"); sid != "" {
+		return sid
+	}
+	return ""
 }

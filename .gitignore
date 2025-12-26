@@ -20,6 +20,8 @@
 *.key
 
 # Dev binaries (root directory)
+# Created by running `go build ./skills/X` without -o flag from repo root
+# Use `make skills-build` instead which outputs to dist/skills/
 /mcp_bridge
 /mcp_install
 /code_swe_grep
@@ -30,6 +32,16 @@
 /agentctl_viewer
 /text_replace
 /editor_godot
+/embedding_tasks
+/embedding_worker
+/graph
+/graph_pagerank
+/plan_sync
+/session_save
+/session_capture
+/session_summarize
+/todo
+/code_semantic_search
 
 # Skill binaries (match directory name pattern)
 # Each skill directory contains a binary with the same name as the directory
@@ -94,10 +106,19 @@ skills/text_replace/text_replace
 skills/text_ripgrep/text_ripgrep
 skills/todo/todo
 skills/trajectory_export/trajectory_export
+skills/code_semantic_search/code_semantic_search
+skills/embedding_tasks/embedding_tasks
+skills/embedding_worker/embedding_worker
+skills/graph/graph
+skills/graph_pagerank/graph_pagerank
+skills/hooks_session_end/hooks_session_end
+skills/optimize_from_feedback/optimize_from_feedback
+skills/session_feedback/session_feedback
 
 # Temp files
 test_*.go
 coderabbit-todos.txt
+coderabbit_feedback.txt
 pr*.json
 pr*.txt
 

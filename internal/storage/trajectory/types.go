@@ -123,6 +123,10 @@ type Trajectory struct {
 
 	// UpdatedAt records the last update time.
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// SessionID links to the AI coding tool session that created this trajectory.
+	// Supports Claude Code, OpenCode, Cursor, and other tools via AGENTCTL_SESSION_ID.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // CommandContext provides context about the command that triggered a user request.
@@ -279,6 +283,9 @@ type ListFilter struct {
 
 	// TraceID filters by trace id.
 	TraceID string
+
+	// SessionID filters by session id.
+	SessionID string
 
 	// Since filters to trajectories created after this time.
 	Since time.Time

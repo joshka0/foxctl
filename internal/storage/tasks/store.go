@@ -69,6 +69,9 @@ type Task struct {
 	// Plan integration fields (links task to ~/.claude/plans/)
 	PlanFile    string // Path to the Claude Code plan file this task is linked to
 	PlanSection string // Section path within the plan (e.g., "Phase 1 > Step 1.1")
+
+	// Session tracking - links task to AI coding tool session
+	SessionID string // AI coding tool session ID (Claude Code, OpenCode, Cursor, etc.)
 }
 
 // Task status constants per review_gate.md
@@ -160,6 +163,7 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 		`ALTER TABLE tasks ADD COLUMN last_review_id TEXT`,
 		`ALTER TABLE tasks ADD COLUMN plan_file TEXT`,
 		`ALTER TABLE tasks ADD COLUMN plan_section TEXT`,
+		`ALTER TABLE tasks ADD COLUMN session_id TEXT`,
 	}
 	for _, stmt := range alterDDL {
 		// Ignore errors from "duplicate column" - columns may already exist.
@@ -168,6 +172,9 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 
 	// Create plan_file index if missing (idempotent)
 	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_plan_file ON tasks(plan_file)`) //nolint:errcheck
+
+	// Create session index for cross-session queries (any AI coding tool)
+	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`) //nolint:errcheck
 
 	return nil
 }
@@ -212,12 +219,12 @@ func (s *sqlStore) Add(ctx context.Context, t Task) (Task, error) {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.WorkspaceID, t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status,
 		timeutil.FormatRFC3339Nano(t.CreatedAt), completedAt, t.Notes, t.Gotchas,
-		t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.PlanFile, t.PlanSection)
+		t.LastReviewStatus, lastReviewAt, t.LastReviewID, t.PlanFile, t.PlanSection, t.SessionID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: insert: %w", err)
 	}
@@ -252,12 +259,12 @@ UPDATE tasks SET
 	title = ?, description = ?, scope_path = ?, parent_id = ?,
 	children = ?, depends_on = ?, status = ?, completed_at = ?,
 	notes = ?, gotchas = ?, last_review_status = ?, last_review_at = ?, last_review_id = ?,
-	plan_file = ?, plan_section = ?
+	plan_file = ?, plan_section = ?, session_id = ?
 WHERE id = ?`,
 		t.Title, t.Description, t.ScopePath, t.ParentID,
 		string(childrenJSON), string(dependsOnJSON), t.Status, completedAt,
 		t.Notes, t.Gotchas, t.LastReviewStatus, lastReviewAt, t.LastReviewID,
-		t.PlanFile, t.PlanSection, t.ID)
+		t.PlanFile, t.PlanSection, t.SessionID, t.ID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: update: %w", err)
 	}
@@ -272,7 +279,7 @@ WHERE id = ?`,
 // Get returns a task by ID.
 func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
 FROM tasks WHERE id = ?`, id)
 	return scanTask(row)
 }
@@ -280,7 +287,7 @@ FROM tasks WHERE id = ?`, id)
 // ListByWorkspace returns tasks scoped to a workspace.
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
 FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
@@ -304,7 +311,7 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 // ListByPlanFile returns tasks linked to a specific plan file.
 func (s *sqlStore) ListByPlanFile(ctx context.Context, planFile string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
 FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by plan: %w", err)
@@ -325,7 +332,7 @@ FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
 // GetActive returns the active task for a workspace, if any.
 func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section
+SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id
 FROM tasks t
 JOIN active_tasks a ON t.id = a.task_id
 WHERE a.workspace_id = ?`, workspaceID)
@@ -436,12 +443,13 @@ func scanTask(row *sql.Row) (Task, error) {
 	var description, scopePath, parentID, notes, gotchas sql.NullString
 	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
 	var planFile, planSection sql.NullString
+	var sessionID sql.NullString
 
 	err := row.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection)
+		&planFile, &planSection, &sessionID)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return Task{}, err
@@ -458,6 +466,7 @@ func scanTask(row *sql.Row) (Task, error) {
 	t.LastReviewID = lastReviewID.String
 	t.PlanFile = planFile.String
 	t.PlanSection = planSection.String
+	t.SessionID = sessionID.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
@@ -484,12 +493,13 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	var description, scopePath, parentID, notes, gotchas sql.NullString
 	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
 	var planFile, planSection sql.NullString
+	var sessionID sql.NullString
 
 	err := rows.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection)
+		&planFile, &planSection, &sessionID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
 	}
@@ -503,6 +513,7 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.LastReviewID = lastReviewID.String
 	t.PlanFile = planFile.String
 	t.PlanSection = planSection.String
+	t.SessionID = sessionID.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {

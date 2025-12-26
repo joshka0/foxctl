@@ -4,6 +4,7 @@ package agent
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestState_Constants(t *testing.T) {
@@ -306,5 +307,66 @@ func TestFilesystemPolicy_JSONSerialization(t *testing.T) {
 	}
 	if got[0].Type != policies[0].Type {
 		t.Errorf("Type = %q, want %q", got[0].Type, policies[0].Type)
+	}
+}
+
+// Tests from session lineage branch
+
+func TestBlackboardRecordIsExpired(t *testing.T) {
+	tests := []struct {
+		name    string
+		record  BlackboardRecord
+		expired bool
+	}{
+		{"no TTL", BlackboardRecord{TS: time.Now().Unix(), TTLSec: 0}, false},
+		{"not expired", BlackboardRecord{TS: time.Now().Unix(), TTLSec: 3600}, false},
+		{"expired", BlackboardRecord{TS: time.Now().Add(-2 * time.Hour).Unix(), TTLSec: 60}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.record.IsExpired(); got != tt.expired {
+				t.Errorf("IsExpired() = %v, want %v", got, tt.expired)
+			}
+		})
+	}
+}
+
+func TestBlackboardRecordIsLeased(t *testing.T) {
+	tests := []struct {
+		name   string
+		record BlackboardRecord
+		leased bool
+	}{
+		{"no lease", BlackboardRecord{}, false},
+		{"active lease", BlackboardRecord{Lease: &Lease{Holder: "agent1", Until: time.Now().Add(time.Hour).Unix()}}, true},
+		{"expired lease", BlackboardRecord{Lease: &Lease{Holder: "agent1", Until: time.Now().Add(-time.Hour).Unix()}}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.record.IsLeased(); got != tt.leased {
+				t.Errorf("IsLeased() = %v, want %v", got, tt.leased)
+			}
+		})
+	}
+}
+
+func TestFileReservationIsExpired(t *testing.T) {
+	tests := []struct {
+		name    string
+		res     FileReservation
+		expired bool
+	}{
+		{"active", FileReservation{ExpiresAt: time.Now().Add(time.Hour)}, false},
+		{"expired", FileReservation{ExpiresAt: time.Now().Add(-time.Hour)}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.res.IsExpired(); got != tt.expired {
+				t.Errorf("IsExpired() = %v, want %v", got, tt.expired)
+			}
+		})
 	}
 }

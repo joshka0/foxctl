@@ -10,11 +10,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/spf13/cobra"
 )
@@ -76,6 +78,20 @@ func WriteArgError(out io.Writer, command, message, hint string) error {
 	env := protocol.Error(
 		command,
 		protocol.ErrorCodeEARG,
+		message,
+		data,
+	)
+	return protocol.Write(out, env)
+}
+
+// WriteConflict renders an ECONFLICT error envelope for resource conflicts.
+func WriteConflict(out io.Writer, command, message, hint string) error {
+	data := map[string]any{
+		"hint": hint,
+	}
+	env := protocol.Error(
+		command,
+		protocol.ErrorCodeEConflict,
 		message,
 		data,
 	)
@@ -189,4 +205,94 @@ func decodeWorkspacePath(encoded string) string {
 	}
 	// Replace remaining dashes with /
 	return strings.ReplaceAll(encoded, "-", "/")
+}
+
+// SetActiveIdentity writes the identity file for an active session.
+// This is a fallback mechanism for session discovery when env vars aren't available.
+// Errors are non-fatal and logged to stderr.
+func SetActiveIdentity(stderr io.Writer, cfg config.Config, sessionID, workspace, agentID, parentID string) {
+	im := sessions.NewIdentityManager(cfg.Home)
+	activeSession := sessions.ActiveSession{
+		SessionID: sessionID,
+		Workspace: workspace,
+		AgentID:   agentID,
+		StartedAt: time.Now().UTC(),
+		ParentID:  parentID,
+	}
+	if err := im.SetActive(activeSession); err != nil {
+		fmt.Fprintf(stderr, "warning: failed to write identity file: %v\n", err)
+	}
+}
+
+// ClearActiveIdentity removes the identity file for a workspace.
+// This is a fallback mechanism for session discovery when env vars aren't available.
+// Errors are non-fatal and logged to stderr.
+func ClearActiveIdentity(stderr io.Writer, cfg config.Config, workspace string) {
+	im := sessions.NewIdentityManager(cfg.Home)
+	if err := im.ClearActive(workspace); err != nil {
+		fmt.Fprintf(stderr, "warning: failed to clear identity file: %v\n", err)
+	}
+}
+
+// IngestSessionEdgeToGraph creates graph edges for session lineage to enable PageRank flow.
+// This mirrors session_edges into graph_edges so sessions participate in the dependency graph.
+// Errors are non-fatal and logged to stderr.
+func IngestSessionEdgeToGraph(ctx context.Context, stderr io.Writer, cfg config.Config, edge storage.SessionEdge) {
+	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		fmt.Fprintf(stderr, "warning: failed to open graph store: %v\n", err)
+		return
+	}
+	defer func() {
+		errs.Ignore(graphStore.Close(), "close graph store")
+	}()
+
+	now := time.Now().UTC()
+
+	// Create session nodes for both endpoints
+	fromNode := graph.Node{
+		Workspace: edge.Workspace,
+		NodeID:    "session:" + edge.FromSession,
+		NodeType:  graph.NodeTypeSession,
+		LastSeen:  now,
+	}
+	if err := graphStore.UpsertNode(ctx, fromNode); err != nil {
+		fmt.Fprintf(stderr, "warning: failed to upsert from session node: %v\n", err)
+	}
+
+	toNode := graph.Node{
+		Workspace: edge.Workspace,
+		NodeID:    "session:" + edge.ToSession,
+		NodeType:  graph.NodeTypeSession,
+		LastSeen:  now,
+	}
+	if err := graphStore.UpsertNode(ctx, toNode); err != nil {
+		fmt.Fprintf(stderr, "warning: failed to upsert to session node: %v\n", err)
+	}
+
+	// Map session edge type to graph edge type
+	var edgeType graph.EdgeType
+	switch edge.EdgeType {
+	case storage.SessionEdgeContinues, storage.SessionEdgeForkedFrom:
+		edgeType = graph.EdgeTypeParentOf // parent session → child session
+	case storage.SessionEdgeRelatesTo:
+		edgeType = graph.EdgeTypeRelatesTo
+	default:
+		edgeType = graph.EdgeTypeRelatesTo
+	}
+
+	// Create graph edge (no TTL for session lineage - permanent)
+	graphEdge := graph.Edge{
+		Workspace: edge.Workspace,
+		FromID:    "session:" + edge.FromSession,
+		FromType:  graph.NodeTypeSession,
+		ToID:      "session:" + edge.ToSession,
+		ToType:    graph.NodeTypeSession,
+		EdgeType:  edgeType,
+		Weight:    1.0,
+		CreatedAt: now,
+	}
+	if err := graphStore.UpsertEdge(ctx, graphEdge); err != nil {
+		fmt.Fprintf(stderr, "warning: failed to create graph edge: %v\n", err)
+	}
 }

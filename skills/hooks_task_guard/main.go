@@ -9,12 +9,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/hook"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
@@ -113,6 +115,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			reason = fmt.Sprintf("task dirtied (demoted to in_progress): %s", task.Title)
 		}
 
+		// Create graph edge: task → file (modified)
+		if scopePath != "" {
+			createModifiedEdge(ctx, cfg, workspaceID, task.ID, scopePath)
+		}
+
 		output = hook.NewApprove(reason, map[string]any{
 			"task_id":      task.ID,
 			"task_title":   task.Title,
@@ -143,6 +150,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			reason := "active task exists"
 			if dirtied {
 				reason = fmt.Sprintf("task dirtied (demoted to in_progress): %s", task.Title)
+			}
+
+			// Create graph edge: task → file (modified)
+			if scopePath != "" {
+				createModifiedEdge(ctx, cfg, workspaceID, task.ID, scopePath)
 			}
 
 			output = hook.NewApprove(reason, map[string]any{
@@ -205,4 +217,57 @@ func fail(command, code string, err error) {
 	env := envelope.Error(command, code, err.Error(), nil)
 	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
 	os.Exit(1)
+}
+
+// createModifiedEdge creates a graph edge from task to file when modified.
+// This enables PageRank to flow from tasks to the files they touch.
+func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, taskID, filePath string) {
+	// Open graph store (fail silently - graph is optional)
+	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return
+	}
+	defer errs.Ignore(graphStore.Close(), "close graph store")
+
+	// Ensure task node exists
+	taskNodeID := graph.TaskNodeID(taskID)
+	taskNode := graph.Node{
+		Workspace:   workspaceID,
+		NodeID:      taskNodeID,
+		NodeType:    graph.NodeTypeTask,
+		Title:       taskID, // Will be updated by ingestion
+		CurrentPath: "",
+		LastSeen:    time.Now().UTC(),
+	}
+	errs.Ignore(graphStore.UpsertNode(ctx, taskNode), "upsert task node")
+
+	// Ensure file node exists
+	fileNodeID := graph.FileNodeID(filePath)
+	fileNode := graph.Node{
+		Workspace:   workspaceID,
+		NodeID:      fileNodeID,
+		NodeType:    graph.NodeTypeFile,
+		Title:       filepath.Base(filePath),
+		CurrentPath: filePath,
+		LastSeen:    time.Now().UTC(),
+	}
+	errs.Ignore(graphStore.UpsertNode(ctx, fileNode), "upsert file node")
+
+	// Create edge: task → file (modified)
+	edge := graph.Edge{
+		Workspace: workspaceID,
+		FromID:    taskNodeID,
+		FromType:  graph.NodeTypeTask,
+		ToID:      fileNodeID,
+		ToType:    graph.NodeTypeFile,
+		EdgeType:  graph.EdgeTypeModified,
+		Weight:    1.0,
+		TTLDays:   intPtr(90), // 90 day TTL for task edges
+		CreatedAt: time.Now().UTC(),
+	}
+	errs.Ignore(graphStore.UpsertEdge(ctx, edge), "upsert modified edge")
+}
+
+func intPtr(i int) *int {
+	return &i
 }

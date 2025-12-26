@@ -12,6 +12,42 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
+// sessionEnvVars lists environment variables that should be propagated to skills
+// for session lineage tracking. These enable skills to identify the current session
+// context regardless of which AI coding tool invoked them.
+var sessionEnvVars = []string{
+	"AGENTCTL_SESSION_ID", // Canonical session ID (highest priority)
+	"AGENTCTL_AGENT_ID",   // Agent identifier (agentctl, subagent:X, etc.)
+	"CLAUDE_SESSION_ID",   // Claude Code session ID
+	"OPENCODE_SESSION_ID", // OpenCode session ID
+	"CURSOR_SESSION_ID",   // Cursor session ID
+	"TERM_SESSION_ID",     // Terminal session ID
+}
+
+// buildSkillEnv constructs the environment for skill execution.
+// For exec runners, baseEnv is os.Environ() and session vars pass through automatically.
+// For WASI runners, baseEnv is nil and propagateSessionVars must be true to explicitly
+// propagate session-related vars since WASI starts with an empty environment.
+func buildSkillEnv(baseEnv []string, workspace string, propagateSessionVars bool) []string {
+	env := baseEnv
+
+	// Add workspace if provided
+	if workspace != "" {
+		env = append(env, fmt.Sprintf("AGENTCTL_WORKSPACE=%s", workspace))
+	}
+
+	// For WASI or other isolated runtimes, explicitly propagate session vars from parent
+	if propagateSessionVars {
+		for _, key := range sessionEnvVars {
+			if val := os.Getenv(key); val != "" {
+				env = append(env, fmt.Sprintf("%s=%s", key, val))
+			}
+		}
+	}
+
+	return env
+}
+
 // RunOptions contains parameters for executing a skill.
 type RunOptions struct {
 	Manifest     skill.Manifest
@@ -25,16 +61,13 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 	switch opts.Manifest.Distribution.Type {
 	case "exec":
 		r := execrunner.Runner{Manifest: opts.Manifest, Binary: opts.ArtifactPath}
-		if ws != "" {
-			env := append(os.Environ(), fmt.Sprintf("AGENTCTL_WORKSPACE=%s", ws))
-			r.Options.Env = env
-		}
+		// exec inherits os.Environ(), so session vars pass through automatically (propagate=false)
+		r.Options.Env = buildSkillEnv(os.Environ(), ws, false)
 		return r.Run(ctx, opts.Input)
 	case "wasi":
 		r := wasirunner.Runner{Manifest: opts.Manifest, ModulePath: opts.ArtifactPath}
-		if ws != "" {
-			r.Options.Env = append(r.Options.Env, fmt.Sprintf("AGENTCTL_WORKSPACE=%s", ws))
-		}
+		// WASI starts with empty env, so we must explicitly propagate session vars (propagate=true)
+		r.Options.Env = buildSkillEnv(nil, ws, true)
 		return r.Run(ctx, opts.Input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported distribution type %q", opts.Manifest.Distribution.Type)

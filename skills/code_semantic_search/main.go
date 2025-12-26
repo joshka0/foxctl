@@ -9,8 +9,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +31,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
+	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -56,6 +55,14 @@ const (
 	DefaultMinSimilarity   = 0.3
 	DefaultMaxContextHints = 3
 	RRFConstant            = 60 // Standard RRF constant
+)
+
+// PageRank scoring weights (from plan: 0.50*Similarity + 0.30*PageRank + 0.20*Connection).
+const (
+	WeightSimilarity = 0.50
+	WeightPageRank   = 0.30
+	WeightConnection = 0.20
+	DefaultMaxPR     = 0.1 // Max PageRank for normalization (typical converged max)
 )
 
 // Timeout constants.
@@ -113,8 +120,10 @@ type Result struct {
 	Snippet    string  `json:"snippet,omitempty"`     // Code snippet (for symbols)
 	Summary    string  `json:"summary,omitempty"`     // Summary text (for sessions/memories)
 	Similarity float64 `json:"similarity"`            // Similarity score (0-1)
-	Rank       int     `json:"rank"`                  // Final rank after RRF
+	Rank       int     `json:"rank"`                  // Final rank after fusion
 	RRFScore   float64 `json:"rrf_score,omitempty"`   // RRF score used for ranking
+	PageRank   float64 `json:"pagerank,omitempty"`    // PageRank authority score (0-1 normalized)
+	FinalScore float64 `json:"final_score,omitempty"` // Combined score with PageRank boost
 	SourceRank int     `json:"source_rank,omitempty"` // Rank within source
 }
 
@@ -264,8 +273,9 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	}
 	_ = validator // PathValidator available for path validation if needed
 
-	// Derive hashed ID for some lookups (symbols use hash-based IDs)
-	workspaceID := deriveWorkspaceID(workspacePath)
+	// Use actual workspace path for storage scoping
+	// This ensures consistency with code/incremental_index which indexes under the actual path
+	workspaceID := workspacePath
 
 	// Create embedding provider (provider-agnostic: config + env overrides)
 	embedProvider, embedHint := createEmbedProvider(cfg)
@@ -453,6 +463,9 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 
 	// Apply Reciprocal Rank Fusion to combine results
 	fusedResults := reciprocalRankFusion(allResults, in.MinSimilarity)
+
+	// Apply PageRank boost from dependency graph
+	fusedResults = applyPageRankBoost(searchCtx, cfg, workspacePath, fusedResults)
 
 	// Limit results
 	if len(fusedResults) > in.Limit {
@@ -1114,6 +1127,102 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 	return results
 }
 
+// applyPageRankBoost looks up PageRank scores from the dependency graph and applies
+// the weighted scoring formula: FinalScore = 0.50*RRFScore + 0.30*PageRank + 0.20*Connection
+// Results are re-sorted by FinalScore only if meaningful PageRank data exists.
+// When no PageRank data is available, FinalScore = RRFScore (no reordering).
+func applyPageRankBoost(ctx context.Context, cfg config.Config, workspacePath string, results []Result) []Result {
+	if len(results) == 0 {
+		return results
+	}
+
+	// Open graph store
+	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		// Graph unavailable - use RRFScore as FinalScore (no reordering)
+		for i := range results {
+			results[i].FinalScore = results[i].RRFScore
+		}
+		return results
+	}
+	defer errs.Ignore(graphStore.Close(), "close graph store")
+
+	// Build lookup maps by path and name for symbols
+	pathRanks := make(map[string]float64)
+	nameRanks := make(map[string]float64)
+
+	// Get top nodes to build lookup (covers high-PageRank items)
+	topNodes, err := graphStore.TopNodes(ctx, graph.TopNodesOptions{
+		Workspace: workspacePath,
+		Limit:     500, // Get enough to cover likely matches
+	})
+	if err == nil {
+		for _, node := range topNodes {
+			if node.CurrentPath != "" {
+				pathRanks[node.CurrentPath] = node.PageRank
+			}
+			// Also index by title (symbol name)
+			if node.Title != "" {
+				nameRanks[node.Title] = node.PageRank
+			}
+		}
+	}
+
+	// If no PageRank data exists, use RRFScore as FinalScore (no reordering)
+	// This prevents changing the scoring regime when graph_pagerank hasn't been run
+	if len(topNodes) == 0 || (len(pathRanks) == 0 && len(nameRanks) == 0) {
+		for i := range results {
+			results[i].FinalScore = results[i].RRFScore
+		}
+		return results
+	}
+
+	// Find max PageRank for normalization
+	maxPR := DefaultMaxPR
+	if topNodes[0].PageRank > maxPR {
+		maxPR = topNodes[0].PageRank
+	}
+
+	// Apply PageRank boost to each result
+	for i := range results {
+		r := &results[i]
+
+		// Look up PageRank by path or name
+		var pr float64
+		if r.Path != "" {
+			if rank, ok := pathRanks[r.Path]; ok {
+				pr = rank
+			}
+		}
+		if pr == 0 && r.Name != "" {
+			if rank, ok := nameRanks[r.Name]; ok {
+				pr = rank
+			}
+		}
+
+		// Normalize PageRank to 0-1 range
+		normalizedPR := pr / maxPR
+		if normalizedPR > 1.0 {
+			normalizedPR = 1.0
+		}
+
+		r.PageRank = normalizedPR
+
+		// Calculate final score using weighted formula with RRFScore as base
+		// ConnectionBoost is currently 0 (future: based on graph connectivity to active session/task)
+		connectionBoost := 0.0
+
+		r.FinalScore = WeightSimilarity*r.RRFScore + WeightPageRank*normalizedPR + WeightConnection*connectionBoost
+	}
+
+	// Re-sort by final score descending
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].FinalScore > results[j].FinalScore
+	})
+
+	return results
+}
+
 func extractContextHints(sessionResults []Result, maxHints int) []ContextHint {
 	if len(sessionResults) == 0 {
 		return nil
@@ -1147,13 +1256,6 @@ func extractSymbolName(symbolID string) string {
 		return parts[1]
 	}
 	return symbolID
-}
-
-func deriveWorkspaceID(workspacePath string) string {
-	// Use SHA256 hash of workspace path for consistent ID derivation
-	// This matches the pattern used elsewhere in agentctl
-	hash := sha256.Sum256([]byte(workspacePath))
-	return hex.EncodeToString(hash[:8]) // First 8 bytes = 16 hex chars
 }
 
 func truncate(s string, maxLen int) string {
