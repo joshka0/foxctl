@@ -1145,7 +1145,7 @@ func applyPageRankBoost(ctx context.Context, cfg config.Config, workspacePath st
 		}
 		return results
 	}
-	defer errs.Ignore(graphStore.Close(), "close graph store")
+	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
 
 	// Build lookup maps by path and name for symbols
 	pathRanks := make(map[string]float64)

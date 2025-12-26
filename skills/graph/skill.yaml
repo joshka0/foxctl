@@ -1,0 +1,108 @@
+name: graph/manage
+version: "0.1.0"
+description: >
+  Unified dependency graph operations: add nodes/edges, query relationships,
+  compute PageRank, and manage graph lifecycle.
+
+runner: exec
+entry: graph
+
+input_schema:
+  type: object
+  properties:
+    operation:
+      type: string
+      enum: [add_node, add_edge, query, neighbors, top_nodes, delete_node, delete_edge, stats, cleanup]
+      description: Operation to perform
+    workspace:
+      type: string
+      description: Workspace path (defaults to runner workspace)
+    add_node:
+      type: object
+      properties:
+        node_id:
+          type: string
+        node_type:
+          type: string
+          enum: [task, file, symbol, session, memory]
+        title:
+          type: string
+        current_path:
+          type: string
+        metadata:
+          type: object
+    add_edge:
+      type: object
+      properties:
+        from_id:
+          type: string
+        from_type:
+          type: string
+        to_id:
+          type: string
+        to_type:
+          type: string
+        edge_type:
+          type: string
+          enum: [depends_on, parent_of, calls, modifies, imports, about]
+        weight:
+          type: number
+        ttl_days:
+          type: integer
+        metadata:
+          type: object
+    query:
+      type: object
+      properties:
+        node_id:
+          type: string
+        edge_types:
+          type: array
+          items:
+            type: string
+        direction:
+          type: string
+          enum: [from, to, both]
+    neighbors:
+      type: object
+      properties:
+        node_id:
+          type: string
+        direction:
+          type: string
+          enum: [in, out, both]
+        edge_types:
+          type: array
+          items:
+            type: string
+        limit:
+          type: integer
+    top_nodes:
+      type: object
+      properties:
+        node_type:
+          type: string
+        min_rank:
+          type: number
+        limit:
+          type: integer
+    delete_node:
+      type: object
+      properties:
+        node_id:
+          type: string
+    delete_edge:
+      type: object
+      properties:
+        edge_id:
+          type: string
+    cleanup:
+      type: object
+      properties:
+        expired_edges:
+          type: boolean
+        dangling_edges:
+          type: boolean
+        recalc_degrees:
+          type: boolean
+  required: [operation]

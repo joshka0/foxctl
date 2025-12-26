@@ -49,7 +49,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("runner context: %w", err)
 	}
-	defer errs.Ignore(rc.Close(), "close runner context")
+	defer func() { errs.Ignore(rc.Close(), "close runner context") }()
 
 	var in input
 	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
@@ -73,7 +73,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("open graph store: %w", err)
 	}
-	defer errs.Ignore(store.Close(), "close graph store")
+	defer func() { errs.Ignore(store.Close(), "close graph store") }()
 
 	var data map[string]any
 

@@ -166,6 +166,11 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/memory-embed.sh",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/task-file-link.sh",
+            "timeout": 3
           }
         ]
       }
@@ -212,6 +217,16 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/session-capture.sh",
             "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/graph-cleanup.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/graph-pagerank.sh",
+            "timeout": 10
           }
         ]
       }

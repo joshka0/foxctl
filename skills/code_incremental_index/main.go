@@ -569,7 +569,7 @@ func ingestGraphEdges(ctx context.Context, storageRoot, workspace, filePath stri
 		// Don't fail - graph ingestion is optional enhancement
 		return 0, 0
 	}
-	defer errs.Ignore(graphStore.Close(), "close graph store")
+	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
 
 	var callEdges, importEdges int
 	now := time.Now().UTC()

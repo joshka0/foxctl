@@ -238,7 +238,7 @@ func createSessionGraphEdges(ctx context.Context, cfg config.Config, workspaceID
 	if err != nil {
 		return
 	}
-	defer errs.Ignore(graphStore.Close(), "close graph store")
+	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
 
 	// Ensure session node exists
 	sessionNodeID := graph.SessionNodeID(sessionID)

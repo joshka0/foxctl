@@ -227,7 +227,7 @@ func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, tas
 	if err != nil {
 		return
 	}
-	defer errs.Ignore(graphStore.Close(), "close graph store")
+	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
 
 	// Ensure task node exists
 	taskNodeID := graph.TaskNodeID(taskID)

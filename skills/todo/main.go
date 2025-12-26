@@ -1377,7 +1377,7 @@ func createTaskDependencyEdges(ctx context.Context, cfg config.Config, workspace
 	if err != nil {
 		return
 	}
-	defer errs.Ignore(graphStore.Close(), "close graph store")
+	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
 
 	now := time.Now().UTC()
 
