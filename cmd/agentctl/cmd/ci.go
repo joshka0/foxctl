@@ -11,6 +11,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 func newCICommand() *cobra.Command {
@@ -26,11 +28,350 @@ func newCICommand() *cobra.Command {
 			"See docs/ci/ for detailed examples and skill contracts.",
 	}
 	cmd.AddCommand(
+		newCIStatusCommand(),
 		newCIPRCommentsCommand(),
 		newCIChecksCommand(),
 		newCITodosCommand(),
 	)
 	return cmd
+}
+
+// CIStatus represents the unified CI status for a PR.
+type CIStatus struct {
+	PRNumber      int            `json:"pr_number"`
+	Title         string         `json:"title"`
+	URL           string         `json:"url"`
+	OverallStatus string         `json:"overall_status"` // "passing", "failing", "pending"
+	CI            CISection      `json:"ci"`
+	Comments      CommentSection `json:"comments"`
+	MergeStatus   MergeSection   `json:"merge_status"`
+}
+
+// CISection contains CI check information.
+type CISection struct {
+	Status       string      `json:"status"` // "passed", "failed", "pending"
+	FailureCount int         `json:"failure_count"`
+	Failures     []CIFailure `json:"failures,omitempty"`
+}
+
+// CIFailure represents a single CI failure.
+type CIFailure struct {
+	Name         string   `json:"name"`
+	ErrorExcerpt string   `json:"error_excerpt,omitempty"`
+	Locations    []string `json:"locations,omitempty"`
+	URL          string   `json:"url"`
+}
+
+// CommentSection contains review comment information.
+type CommentSection struct {
+	Count int           `json:"count"`
+	Items []CommentItem `json:"items,omitempty"`
+}
+
+// CommentItem represents a single review comment.
+type CommentItem struct {
+	Author   string `json:"author"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Body     string `json:"body"`
+	Severity string `json:"severity,omitempty"`
+}
+
+// MergeSection contains merge status information.
+type MergeSection struct {
+	Mergeable        bool     `json:"mergeable"`
+	HasConflicts     bool     `json:"has_conflicts"`
+	ConflictingFiles []string `json:"conflicting_files,omitempty"`
+}
+
+func newCIStatusCommand() *cobra.Command {
+	var pr string
+	var owner string
+	var repo string
+	var format string
+	var skipCache bool
+	var dataOnly bool
+	var helpJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Unified view of CI status, comments, and merge status",
+		Long: "Show a unified, concise view of CI failures, review comments, and merge status for a PR. " +
+			"Aggregates data from ci/github_checks and ci/prcomments skills into a single actionable report.",
+		Example: "  # View unified status for current branch\n" +
+			"  agentctl ci status --pr feat/my-branch\n\n" +
+			"  # View unified status for PR number\n" +
+			"  agentctl ci status --pr 123\n\n" +
+			"  # JSON output for AI consumption\n" +
+			"  agentctl ci status --pr 123 --data-only\n",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if helpJSON {
+				return writeCIHelpJSON(cmd)
+			}
+			if strings.TrimSpace(pr) == "" {
+				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 66.")
+			}
+			return runCIStatus(cmd, pr, owner, repo, format, skipCache, dataOnly)
+		},
+	}
+
+	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
+	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name or owner/repo shorthand (optional)")
+	cmd.Flags().StringVar(&format, "format", "markdown", "Output format: markdown or json")
+	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute skills")
+	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
+	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
+	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the command")
+	return cmd
+}
+
+func runCIStatus(cmd *cobra.Command, pr, owner, repo, format string, skipCache, dataOnly bool) error {
+	// Build payload for both skills
+	checksPayload := map[string]any{
+		"pr":          pr,
+		"mode":        "detailed",
+		"errors_only": true,
+	}
+	commentsPayload := map[string]any{
+		"pr":          pr,
+		"errors_only": true,
+		"format":      "json",
+	}
+	if owner != "" {
+		checksPayload["owner"] = owner
+		commentsPayload["owner"] = owner
+	}
+	if repo != "" {
+		checksPayload["repo"] = repo
+		commentsPayload["repo"] = repo
+	}
+
+	// Call ci/github_checks
+	checksEnv, checksErr := runCISkillForEnvelope(cmd, "ci/github_checks", checksPayload, skipCache)
+
+	// Call ci/prcomments
+	commentsEnv, commentsErr := runCISkillForEnvelope(cmd, "ci/prcomments", commentsPayload, skipCache)
+
+	// Build unified status from results
+	status := buildCIStatus(checksEnv, checksErr, commentsEnv, commentsErr)
+
+	// Output based on format
+	if dataOnly {
+		out := map[string]any{
+			"status": "ok",
+			"data":   status,
+		}
+		enc := json.NewEncoder(cmd.OutOrStdout())
+		enc.SetEscapeHTML(false)
+		return enc.Encode(out)
+	}
+
+	if format == "json" {
+		env := protocol.OK("ci/status", status, protocol.WithSource("cli"))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	// Markdown format
+	markdown := formatCIStatusMarkdown(status)
+	env := protocol.OK("ci/status", map[string]any{
+		"markdown": markdown,
+		"data":     status,
+	}, protocol.WithSource("cli"))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func buildCIStatus(checksEnv envelope.Envelope, checksErr error, commentsEnv envelope.Envelope, commentsErr error) CIStatus {
+	status := CIStatus{
+		OverallStatus: "passing",
+		CI: CISection{
+			Status: "passed",
+		},
+	}
+
+	// Extract from ci/github_checks
+	if checksErr == nil && checksEnv.Status == "ok" {
+		if data, ok := checksEnv.Data.(map[string]any); ok {
+			if prNum, ok := data["pr_number"].(float64); ok {
+				status.PRNumber = int(prNum)
+			}
+			if repo, ok := data["repository"].(string); ok {
+				status.URL = fmt.Sprintf("https://github.com/%s/pull/%d", repo, status.PRNumber)
+			}
+			if hasBlocking, ok := data["has_blocking_ci"].(bool); ok && hasBlocking {
+				status.OverallStatus = "failing"
+				status.CI.Status = "failed"
+			}
+			if totals, ok := data["totals"].(map[string]any); ok {
+				if failed, ok := totals["failed"].(float64); ok {
+					status.CI.FailureCount = int(failed)
+				}
+			}
+			if checks, ok := data["checks"].([]any); ok {
+				for _, c := range checks {
+					if cm, ok := c.(map[string]any); ok {
+						conclusion, _ := cm["conclusion"].(string)
+						if conclusion == "failure" || conclusion == "error" || conclusion == "cancelled" {
+							failure := CIFailure{
+								Name: getString(cm, "name"),
+								URL:  getString(cm, "html_url"),
+							}
+							if excerpt, ok := cm["error_excerpt"].(string); ok {
+								failure.ErrorExcerpt = excerpt
+							}
+							if locs, ok := cm["locations"].([]any); ok {
+								for _, loc := range locs {
+									if locStr, ok := loc.(string); ok {
+										failure.Locations = append(failure.Locations, locStr)
+									}
+								}
+							}
+							if failedStep, ok := cm["failed_step"].(string); ok && failure.ErrorExcerpt == "" {
+								failure.ErrorExcerpt = fmt.Sprintf("Failed step: %s", failedStep)
+							}
+							status.CI.Failures = append(status.CI.Failures, failure)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Extract from ci/prcomments
+	if commentsErr == nil && commentsEnv.Status == "ok" {
+		if data, ok := commentsEnv.Data.(map[string]any); ok {
+			if title, ok := data["title"].(string); ok {
+				status.Title = title
+			}
+			if prNum, ok := data["pr_number"].(float64); ok && status.PRNumber == 0 {
+				status.PRNumber = int(prNum)
+			}
+			if url, ok := data["url"].(string); ok && status.URL == "" {
+				status.URL = url
+			}
+			// Extract merge status
+			if statusMap, ok := data["status"].(map[string]any); ok {
+				if hasConflicts, ok := statusMap["has_merge_conflicts"].(bool); ok {
+					status.MergeStatus.HasConflicts = hasConflicts
+					status.MergeStatus.Mergeable = !hasConflicts
+					if hasConflicts {
+						status.OverallStatus = "failing"
+					}
+				}
+			}
+			// Extract comments
+			if tasksList, ok := data["tasks_list"].([]any); ok {
+				for _, t := range tasksList {
+					if tm, ok := t.(map[string]any); ok {
+						kind, _ := tm["kind"].(string)
+						if kind == "review_comment" {
+							item := CommentItem{
+								Author: getString(tm, "comment_author"),
+								Body:   getString(tm, "summary"),
+								File:   getString(tm, "file"),
+							}
+							if line, ok := tm["line"].(float64); ok {
+								item.Line = int(line)
+							}
+							if severity, ok := tm["severity"].(string); ok {
+								item.Severity = severity
+							}
+							status.Comments.Items = append(status.Comments.Items, item)
+						}
+					}
+				}
+				status.Comments.Count = len(status.Comments.Items)
+			}
+		}
+	}
+
+	return status
+}
+
+func getString(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func formatCIStatusMarkdown(status CIStatus) string {
+	var buf bytes.Buffer
+
+	// Header
+	title := status.Title
+	if title == "" {
+		title = "PR"
+	}
+	fmt.Fprintf(&buf, "## PR #%d: %s\n\n", status.PRNumber, title)
+
+	// Status line
+	var statusIcon string
+	switch status.OverallStatus {
+	case "failing":
+		statusIcon = "❌"
+	case "pending":
+		statusIcon = "⏳"
+	default:
+		statusIcon = "✅"
+	}
+
+	mergeIcon := "✅"
+	if status.MergeStatus.HasConflicts {
+		mergeIcon = "⚠️ Conflicts"
+	}
+
+	titleCaser := cases.Title(language.English)
+	fmt.Fprintf(&buf, "**Status:** %s %s | **Merge:** %s\n\n", statusIcon, titleCaser.String(status.OverallStatus), mergeIcon)
+
+	// CI Failures
+	if status.CI.FailureCount > 0 {
+		fmt.Fprintf(&buf, "### CI Failures (%d)\n\n", status.CI.FailureCount)
+		for i, f := range status.CI.Failures {
+			fmt.Fprintf(&buf, "%d. **%s** [→ logs](%s)\n", i+1, f.Name, f.URL)
+			if f.ErrorExcerpt != "" {
+				// Indent excerpt
+				lines := strings.Split(f.ErrorExcerpt, "\n")
+				for _, line := range lines {
+					if strings.TrimSpace(line) != "" {
+						fmt.Fprintf(&buf, "   %s\n", line)
+					}
+				}
+			}
+			for _, loc := range f.Locations {
+				fmt.Fprintf(&buf, "   → %s\n", loc)
+			}
+			fmt.Fprintf(&buf, "\n")
+		}
+	}
+
+	// Review Comments
+	if status.Comments.Count > 0 {
+		fmt.Fprintf(&buf, "### Review Comments (%d)\n\n", status.Comments.Count)
+		for i, c := range status.Comments.Items {
+			loc := ""
+			if c.File != "" {
+				if c.Line > 0 {
+					loc = fmt.Sprintf(" on %s:%d", c.File, c.Line)
+				} else {
+					loc = fmt.Sprintf(" on %s", c.File)
+				}
+			}
+			severity := ""
+			if c.Severity != "" {
+				severity = fmt.Sprintf(" [%s]", c.Severity)
+			}
+			fmt.Fprintf(&buf, "%d. **@%s**%s%s\n", i+1, c.Author, severity, loc)
+			fmt.Fprintf(&buf, "   %s\n\n", c.Body)
+		}
+	}
+
+	// No issues
+	if status.CI.FailureCount == 0 && status.Comments.Count == 0 && !status.MergeStatus.HasConflicts {
+		fmt.Fprintf(&buf, "✅ **No outstanding issues** - CI passing, no review comments\n")
+	}
+
+	return buf.String()
 }
 
 func newCIPRCommentsCommand() *cobra.Command {

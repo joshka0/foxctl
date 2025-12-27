@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,16 +48,17 @@ type CheckRun struct {
 }
 
 type CheckSummary struct {
-	ID              int    `json:"id"`
-	Name            string `json:"name"`
-	Status          string `json:"status"`
-	Conclusion      string `json:"conclusion"`
-	HTMLURL         string `json:"html_url"`
-	StartedAt       string `json:"started_at,omitempty"`
-	CompletedAt     string `json:"completed_at,omitempty"`
-	DurationSeconds int64  `json:"duration_seconds,omitempty"`
-	FailedStep      string `json:"failed_step,omitempty"`
-	ErrorExcerpt    string `json:"error_excerpt,omitempty"`
+	ID              int      `json:"id"`
+	Name            string   `json:"name"`
+	Status          string   `json:"status"`
+	Conclusion      string   `json:"conclusion"`
+	HTMLURL         string   `json:"html_url"`
+	StartedAt       string   `json:"started_at,omitempty"`
+	CompletedAt     string   `json:"completed_at,omitempty"`
+	DurationSeconds int64    `json:"duration_seconds,omitempty"`
+	FailedStep      string   `json:"failed_step,omitempty"`
+	ErrorExcerpt    string   `json:"error_excerpt,omitempty"`
+	Locations       []string `json:"locations,omitempty"`
 }
 
 type JobDetails struct {
@@ -210,12 +212,26 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 			}
 		}
 
-		if mode == "detailed" && strings.Contains(c.HTMLURL, "/actions/runs/") {
+		// For blocking checks, fetch detailed error info
+		if isBlockingConclusion(c.Conclusion) && strings.Contains(c.HTMLURL, "/actions/runs/") {
 			job, err := getJobDetails(client, token, owner, repo, c.HTMLURL)
 			if err == nil && job != nil {
 				failedStep := findFailedStep(job)
 				if failedStep != nil {
 					cs.FailedStep = failedStep.Name
+				}
+				// Fetch logs and extract concise error
+				if mode == "detailed" {
+					rawLogs, logErr := getJobLogs(client, token, owner, repo, job.ID)
+					if logErr == nil && rawLogs != "" {
+						stepName := ""
+						if failedStep != nil {
+							stepName = failedStep.Name
+						}
+						excerpt, locations := extractConciseError(rawLogs, stepName, c.HTMLURL)
+						cs.ErrorExcerpt = excerpt
+						cs.Locations = locations
+					}
 				}
 			}
 		}
@@ -421,6 +437,175 @@ func classifyCIStatus(total, failed, cancelled, neutral, success int) (string, b
 	hasNeutralOrSkipped := neutral > 0
 
 	return overall, hasBlockingCI, allChecksSuccessful, hasNeutralOrSkipped
+}
+
+// getJobLogs fetches raw logs for a GitHub Actions job.
+func getJobLogs(client *http.Client, token, owner, repo string, jobID int) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d/logs", owner, repo, jobID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	// Handle redirect manually to get actual log content
+	clientNoRedirect := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := clientNoRedirect.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
+		location := resp.Header.Get("Location")
+		if location != "" {
+			redirectReq, err := http.NewRequest("GET", location, nil)
+			if err != nil {
+				return "", err
+			}
+			redirectResp, err := client.Do(redirectReq)
+			if err != nil {
+				return "", err
+			}
+			defer redirectResp.Body.Close()
+			data, err := io.ReadAll(redirectResp.Body)
+			if err != nil {
+				return "", err
+			}
+			return string(data), nil
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("log fetch returned %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// fileLinePattern matches common file:line patterns in error messages.
+var fileLinePattern = regexp.MustCompile(`([a-zA-Z0-9_\-./]+\.(go|ts|tsx|js|jsx|py|rs|java|kt|swift|c|cpp|h|hpp)):(\d+)`)
+
+// extractConciseError extracts a concise error excerpt (max 10 lines) with file:line locations.
+func extractConciseError(rawLog, failedStepName, logsURL string) (excerpt string, locations []string) {
+	if rawLog == "" {
+		return "", nil
+	}
+
+	lines := strings.Split(rawLog, "\n")
+	seen := make(map[string]bool)
+	locationSet := make(map[string]bool)
+
+	var errorLines []string
+
+	// Patterns that indicate actual errors (not just progress)
+	errorPatterns := []string{
+		"error:", "Error:", "FAILED", "failed", "panic:",
+		"exit code 1", "exit code 2", "Process completed with exit code",
+		"undefined:", "cannot find", "not found", "fatal:",
+		"--- FAIL:", "FAIL:", "compilation failed",
+	}
+
+	// Find the failed step section if possible
+	inFailedStep := false
+	stepStartIdx := -1
+	stepEndIdx := len(lines)
+
+	for i, line := range lines {
+		if strings.Contains(line, "##[group]") && failedStepName != "" && strings.Contains(line, failedStepName) {
+			inFailedStep = true
+			stepStartIdx = i
+		} else if inFailedStep && strings.Contains(line, "##[error]Process completed with exit code") {
+			stepEndIdx = i + 1
+			break
+		}
+	}
+
+	// If we found the failed step, focus on that section
+	if stepStartIdx >= 0 {
+		lines = lines[stepStartIdx:stepEndIdx]
+	}
+
+	// Clean GitHub Actions log formatting
+	cleanLine := func(line string) string {
+		// Remove timestamps and group markers
+		if idx := strings.Index(line, "Z "); idx > 0 && idx < 30 {
+			line = line[idx+2:]
+		}
+		line = strings.TrimPrefix(line, "##[group]")
+		line = strings.TrimPrefix(line, "##[endgroup]")
+		line = strings.TrimPrefix(line, "##[error]")
+		line = strings.TrimPrefix(line, "##[warning]")
+		return strings.TrimSpace(line)
+	}
+
+	for _, line := range lines {
+		cleaned := cleanLine(line)
+		if cleaned == "" {
+			continue
+		}
+
+		// Check if this line contains an error pattern
+		isError := false
+		for _, pattern := range errorPatterns {
+			if strings.Contains(cleaned, pattern) {
+				isError = true
+				break
+			}
+		}
+
+		// Extract file:line references
+		matches := fileLinePattern.FindAllStringSubmatch(cleaned, -1)
+		for _, match := range matches {
+			if len(match) >= 4 {
+				loc := fmt.Sprintf("%s:%s", match[1], match[3])
+				if !locationSet[loc] {
+					locationSet[loc] = true
+					locations = append(locations, loc)
+				}
+			}
+		}
+
+		// Collect error lines, deduplicate
+		if isError && !seen[cleaned] {
+			seen[cleaned] = true
+			errorLines = append(errorLines, cleaned)
+		}
+	}
+
+	// Limit to 10 lines
+	maxLines := 10
+	if len(errorLines) > maxLines {
+		errorLines = errorLines[:maxLines]
+		errorLines = append(errorLines, fmt.Sprintf("... (truncated, see full logs: %s)", logsURL))
+	}
+
+	if len(errorLines) == 0 {
+		// No error patterns found, return last few lines of log
+		if len(lines) > 5 {
+			lines = lines[len(lines)-5:]
+		}
+		for _, line := range lines {
+			cleaned := cleanLine(line)
+			if cleaned != "" && !seen[cleaned] {
+				seen[cleaned] = true
+				errorLines = append(errorLines, cleaned)
+			}
+		}
+	}
+
+	return strings.Join(errorLines, "\n"), locations
 }
 
 func githubGET(client *http.Client, token, url string, v any) error {
