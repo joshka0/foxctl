@@ -305,7 +305,7 @@ func (s *SQLiteStore) Delete(ctx context.Context, consoleID string) error {
 
 // scanSessions scans rows into a slice of ConsoleSession.
 func scanSessions(rows *sql.Rows) ([]ConsoleSession, error) {
-	var sessions []ConsoleSession
+	sessions := []ConsoleSession{}
 	for rows.Next() {
 		var session ConsoleSession
 		var sessionID sql.NullString

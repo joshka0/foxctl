@@ -9,6 +9,7 @@ distribution:
   type: exec
   exec:
     entry: graph_pagerank
+  network: none
 io:
   format: JSON
   inline_output_kb: 32

@@ -19,6 +19,8 @@ const (
 	ComponentSessions Component = "sessions"
 	// ComponentJobs includes job artifacts.
 	ComponentJobs Component = "jobs"
+	// ComponentObservability includes wide event logs.
+	ComponentObservability Component = "observability"
 )
 
 // AllComponents returns all available backup components.
@@ -29,6 +31,7 @@ func AllComponents() []Component {
 		ComponentMemory,
 		ComponentSessions,
 		ComponentJobs,
+		ComponentObservability,
 	}
 }
 

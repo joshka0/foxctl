@@ -35,7 +35,7 @@ func NewTrajectoryPersister(store trajectory.Store) *TrajectoryPersister {
 
 // Persist implements the Persister interface.
 // It converts actor.Event to trajectory.Event and stores it.
-func (p *TrajectoryPersister) Persist(event Event) error {
+func (p *TrajectoryPersister) Persist(ctx context.Context, event Event) error {
 	// Skip events that shouldn't be persisted
 	if !event.Type.ShouldPersist() {
 		return nil
@@ -48,7 +48,7 @@ func (p *TrajectoryPersister) Persist(event Event) error {
 	}
 
 	// Get or create trajectory for this workspace
-	trajectoryID, err := p.getOrCreateTrajectory(workspace, event.SessionID)
+	trajectoryID, err := p.getOrCreateTrajectory(ctx, workspace, event.SessionID)
 	if err != nil {
 		return fmt.Errorf("get or create trajectory: %w", err)
 	}
@@ -56,10 +56,7 @@ func (p *TrajectoryPersister) Persist(event Event) error {
 	// Map actor event to trajectory event
 	trajEvent := mapActorEventToTrajectory(event, trajectoryID)
 
-	// Insert event
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
+	// Insert event using the provided context
 	if _, err := p.store.InsertEvent(ctx, trajEvent); err != nil {
 		return fmt.Errorf("insert event: %w", err)
 	}
@@ -69,7 +66,7 @@ func (p *TrajectoryPersister) Persist(event Event) error {
 
 // getOrCreateTrajectory returns a trajectory ID for the workspace,
 // creating one if it doesn't exist.
-func (p *TrajectoryPersister) getOrCreateTrajectory(workspace, sessionID string) (string, error) {
+func (p *TrajectoryPersister) getOrCreateTrajectory(ctx context.Context, workspace, sessionID string) (string, error) {
 	// Check cache first
 	p.mu.RLock()
 	if id, ok := p.trajectoryIDs[workspace]; ok {
@@ -86,9 +83,6 @@ func (p *TrajectoryPersister) getOrCreateTrajectory(workspace, sessionID string)
 	if id, ok := p.trajectoryIDs[workspace]; ok {
 		return id, nil
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 
 	traj := trajectory.Trajectory{
 		ID:          ulid.Make().String(),

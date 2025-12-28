@@ -415,6 +415,9 @@ func (s *Service) collectFiles(component backup.Component) ([]backup.FileEntry, 
 	case backup.ComponentJobs:
 		basePath = s.cfg.Paths.Jobs
 		pattern = "*"
+	case backup.ComponentObservability:
+		basePath = s.cfg.Paths.Observability
+		pattern = "*.ndjson"
 	default:
 		return nil, fmt.Errorf("unknown component: %s", component)
 	}
@@ -442,6 +445,14 @@ func (s *Service) collectFiles(component backup.Component) ([]backup.FileEntry, 
 
 		// For jobs, limit to recent jobs to avoid huge backups
 		if component == backup.ComponentJobs {
+			// Only include files modified in last 7 days
+			if time.Since(info.ModTime()) > 7*24*time.Hour {
+				return nil
+			}
+		}
+
+		// For observability, limit to recent event files to avoid huge backups
+		if component == backup.ComponentObservability {
 			// Only include files modified in last 7 days
 			if time.Since(info.ModTime()) > 7*24*time.Hour {
 				return nil

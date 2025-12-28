@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -273,7 +274,7 @@ type mockPersister struct {
 	errToReturn error
 }
 
-func (m *mockPersister) Persist(event Event) error {
+func (m *mockPersister) Persist(_ context.Context, event Event) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.errToReturn != nil {

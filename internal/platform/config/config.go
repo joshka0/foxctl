@@ -39,10 +39,11 @@ type Config struct {
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
 type Paths struct {
-	CAS    string `mapstructure:"cas" json:"cas"`
-	Jobs   string `mapstructure:"jobs" json:"jobs"`
-	Cache  string `mapstructure:"cache" json:"cache"`
-	Skills string `mapstructure:"skills" json:"skills"`
+	CAS           string `mapstructure:"cas" json:"cas"`
+	Jobs          string `mapstructure:"jobs" json:"jobs"`
+	Cache         string `mapstructure:"cache" json:"cache"`
+	Skills        string `mapstructure:"skills" json:"skills"`
+	Observability string `mapstructure:"observability" json:"observability"`
 }
 
 // StorageSettings configure persistent storage for agents, mailboxes, blackboard, and quotas.
@@ -231,6 +232,7 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("paths.jobs", filepath.Join(defaultHome, "jobs"))
 	v.SetDefault("paths.cache", filepath.Join(defaultHome, "cache"))
 	v.SetDefault("paths.skills", filepath.Join(defaultHome, "skills"))
+	v.SetDefault("paths.observability", filepath.Join(defaultHome, "observability"))
 	v.SetDefault("storage.root", filepath.Join(defaultHome, "storage"))
 	v.SetDefault("memory.auto_cache_ttl", "24h")
 	v.SetDefault("memory.default_named_ttl", "720h") // 30d
@@ -287,6 +289,7 @@ func finalizeConfig(cfg Config, home string) Config {
 	cfg.Paths.Jobs = resolvePath(cfg.Paths.Jobs, cfg.Home, home)
 	cfg.Paths.Cache = resolvePath(cfg.Paths.Cache, cfg.Home, home)
 	cfg.Paths.Skills = resolvePath(cfg.Paths.Skills, cfg.Home, home)
+	cfg.Paths.Observability = resolvePath(cfg.Paths.Observability, cfg.Home, home)
 	cfg.Storage.Root = resolvePath(cfg.Storage.Root, cfg.Home, home)
 	if len(cfg.OpenAPI.PluginPath) == 0 {
 		cfg.OpenAPI.PluginPath = []string{filepath.Join(cfg.Home, "plugins")}

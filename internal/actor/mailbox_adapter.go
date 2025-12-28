@@ -44,12 +44,15 @@ func NewMailboxAdapter(store mailbox.Store, opts ...MailboxAdapterOption) *Mailb
 }
 
 // ttlMillis computes TTL in milliseconds; if ExpiresAt is zero, falls back to default 5m.
+// If CreatedAt is zero but ExpiresAt is set, also falls back to default TTL to avoid
+// returning an absolute timestamp instead of a duration.
 func (m *Message) ttlMillis() int64 {
 	if m.ExpiresAt.IsZero() {
 		return int64((5 * time.Minute).Milliseconds())
 	}
 	if m.CreatedAt.IsZero() {
-		return int64(m.ExpiresAt.UnixMilli())
+		// Fall back to default TTL when CreatedAt is unknown
+		return int64((5 * time.Minute).Milliseconds())
 	}
 	return int64(m.ExpiresAt.Sub(m.CreatedAt).Milliseconds())
 }
@@ -111,6 +114,7 @@ func (a *MailboxAdapter) toAgentMessage(m *Message) agent.Message {
 	if created.IsZero() {
 		created = time.Now()
 	}
+	// Note: TTL is computed by m.ttlMillis() which handles ExpiresAt.IsZero()
 	leasedAt := m.LeasedAt
 	if leasedAt.IsZero() {
 		leasedAt = created

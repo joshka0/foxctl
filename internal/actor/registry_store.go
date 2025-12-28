@@ -191,7 +191,7 @@ func (s *SQLiteRegistryStore) ListActors(ctx context.Context) ([]ActorRecord, er
 	}
 	defer rows.Close()
 
-	var records []ActorRecord
+	records := []ActorRecord{}
 	for rows.Next() {
 		var rec ActorRecord
 		var createdAt, updatedAt string

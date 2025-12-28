@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"time"
@@ -122,7 +123,7 @@ type EventBus struct {
 
 // Persister persists important events to durable storage.
 type Persister interface {
-	Persist(event Event) error
+	Persist(ctx context.Context, event Event) error
 }
 
 // EventBusOption configures an EventBus.
@@ -237,7 +238,9 @@ func (eb *EventBus) Publish(event Event) {
 	if event.Type.ShouldPersist() && eb.persister != nil {
 		// Fire and forget - don't block publishing
 		go func() {
-			_ = eb.persister.Persist(event)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = eb.persister.Persist(ctx, event)
 		}()
 	}
 }
@@ -267,7 +270,9 @@ func (eb *EventBus) PublishSync(event Event) error {
 
 	// Persist synchronously
 	if event.Type.ShouldPersist() && eb.persister != nil {
-		return eb.persister.Persist(event)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return eb.persister.Persist(ctx, event)
 	}
 
 	return nil

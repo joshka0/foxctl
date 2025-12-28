@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/execution"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/observability"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/platform/metrics"
@@ -194,15 +195,65 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 		defer cleanup()
 	}
 
+	// Ensure trace ID for observability
+	ctx, traceID := observability.EnsureTraceID(ctx)
+
+	// Build wide event for skill execution
+	eventBuilder := observability.NewEvent(observability.OpSkillRun).
+		WithTraceID(traceID).
+		WithComponent(observability.ComponentSkill).
+		WithCommand(opts.Manifest.Metadata.Name).
+		WithJobID(opts.JobID).
+		WithData("skill_version", opts.Manifest.Metadata.Version).
+		EnrichFromEnv()
+
+	// Add workspace if available
+	if ws := e.jobWorkspace(opts.JobID); ws != "" {
+		eventBuilder = eventBuilder.WithWorkspace(ws)
+	}
+
 	stdout, stderr, runErr := e.runSkill(ctx, opts.Manifest, opts.ArtifactPath, opts.Input)
-	metrics.Global().RecordExecutionTime(time.Since(start))
+	duration := time.Since(start)
+	metrics.Global().RecordExecutionTime(duration)
 	e.writeStderrLog(opts.JobID, stderr)
 
 	if runErr != nil {
+		// Emit error event
+		observability.Emit(ctx, eventBuilder.Error(runErr, duration))
 		return e.handleFailure(ctx, opts.JobID, stdout, stderr, runErr, pw)
 	}
 
-	return e.handleSuccess(ctx, opts.JobID, stdout, pw)
+	// Check if the envelope indicates an error status
+	result, handleErr := e.handleSuccess(ctx, opts.JobID, stdout, pw)
+	if handleErr != nil {
+		// Emit error event for envelope validation/write failures
+		observability.Emit(ctx, eventBuilder.Error(handleErr, duration))
+		return result, handleErr
+	}
+
+	// Check envelope status for protocol-level errors
+	var env envelope.Envelope
+	if json.Unmarshal(stdout, &env) == nil && env.Status == "error" {
+		// Skill returned an error envelope - still emit as error for observability
+		eventBuilder = eventBuilder.WithData("envelope_error", true)
+		if env.Error.Code != "" {
+			eventBuilder = eventBuilder.
+				WithData("error_code", env.Error.Code).
+				WithData("error_message", env.Error.Message)
+		}
+		observability.Emit(ctx, eventBuilder.ErrorWithDetails(
+			"skill_error",
+			env.Error.Code,
+			env.Error.Message,
+			false,
+			duration,
+		))
+	} else {
+		// Success
+		observability.Emit(ctx, eventBuilder.Success(duration))
+	}
+
+	return result, handleErr
 }
 
 func (e *Executor) startExecution(ctx context.Context, jobID string) (context.Context, *progressWriter, func(), time.Time, error) {

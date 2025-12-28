@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/execution"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/storage/jobs/types"
@@ -500,4 +502,227 @@ func TestExecutorWithSkillExecutor(t *testing.T) {
 	// This demonstrates that the executor can be created with a mock,
 	// which enables better testing in the future.
 	t.Log("Successfully created executor with mock SkillExecutor")
+}
+
+// TestExecutorEmitsWideEventOnSuccess verifies that successful skill execution
+// emits a wide event with status "ok".
+func TestExecutorEmitsWideEventOnSuccess(t *testing.T) {
+	// Set up observability
+	obsDir := t.TempDir()
+	observability.SetObsDirForTesting(obsDir)
+	observability.SetSamplerForTesting(observability.SampleAll{})
+
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	runner := func(_ context.Context, _ skill.Manifest, _ string, _ []byte) ([]byte, []byte, error) {
+		env := envelope.OK("test-skill", map[string]string{"result": "success"})
+		buf, _ := json.Marshal(env)
+		return buf, nil, nil
+	}
+	exec := New(root, persist, WithRunner(runner))
+
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "test/success-skill", Version: "1.0.0"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/test"},
+		},
+	}
+
+	_, _, err := exec.RunSkill(ctx, manifest, "artifact", []byte(`{}`))
+	if err != nil {
+		t.Fatalf("run skill: %v", err)
+	}
+
+	// Verify wide event was emitted
+	events := readWideEvents(t, obsDir)
+	if len(events) == 0 {
+		t.Fatal("expected at least one wide event")
+	}
+
+	// Find the skill.run event
+	var found *observability.WideEvent
+	for i := range events {
+		if events[i].Operation == observability.OpSkillRun {
+			found = &events[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected skill.run wide event")
+	}
+
+	if found.Status != observability.StatusOK {
+		t.Errorf("Status = %q, want %q", found.Status, observability.StatusOK)
+	}
+	if found.Command != "test/success-skill" {
+		t.Errorf("Command = %q, want test/success-skill", found.Command)
+	}
+	if found.Component != observability.ComponentSkill {
+		t.Errorf("Component = %q, want %q", found.Component, observability.ComponentSkill)
+	}
+	if found.DurationMS < 0 {
+		t.Error("DurationMS should be non-negative")
+	}
+	if found.Data["skill_version"] != "1.0.0" {
+		t.Errorf("Data[skill_version] = %v, want 1.0.0", found.Data["skill_version"])
+	}
+}
+
+// TestExecutorEmitsWideEventOnRunnerError verifies that runner failures emit
+// an error wide event.
+func TestExecutorEmitsWideEventOnRunnerError(t *testing.T) {
+	obsDir := t.TempDir()
+	observability.SetObsDirForTesting(obsDir)
+	observability.SetSamplerForTesting(observability.SampleAll{})
+
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	runnerErr := errors.New("connection refused: dial tcp")
+	runner := func(_ context.Context, _ skill.Manifest, _ string, _ []byte) ([]byte, []byte, error) {
+		return nil, []byte("stderr output"), runnerErr
+	}
+	exec := New(root, persist, WithRunner(runner))
+
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "test/failing-skill", Version: "2.0.0"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/fail"},
+		},
+	}
+
+	_, _, err := exec.RunSkill(ctx, manifest, "artifact", []byte(`{}`))
+	if err == nil {
+		t.Fatal("expected error from skill execution")
+	}
+
+	events := readWideEvents(t, obsDir)
+	if len(events) == 0 {
+		t.Fatal("expected at least one wide event")
+	}
+
+	var found *observability.WideEvent
+	for i := range events {
+		if events[i].Operation == observability.OpSkillRun {
+			found = &events[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected skill.run wide event")
+	}
+
+	if found.Status != observability.StatusError {
+		t.Errorf("Status = %q, want %q", found.Status, observability.StatusError)
+	}
+	if found.Command != "test/failing-skill" {
+		t.Errorf("Command = %q, want test/failing-skill", found.Command)
+	}
+	if found.ErrorType != "network" {
+		t.Errorf("ErrorType = %q, want network", found.ErrorType)
+	}
+}
+
+// TestExecutorEmitsWideEventOnEnvelopeError verifies that when a skill returns
+// an error envelope (status="error"), it emits an error wide event with the
+// skill's error code.
+func TestExecutorEmitsWideEventOnEnvelopeError(t *testing.T) {
+	obsDir := t.TempDir()
+	observability.SetObsDirForTesting(obsDir)
+	observability.SetSamplerForTesting(observability.SampleAll{})
+
+	ctx := context.Background()
+	root := t.TempDir()
+	persist := newFakePersistence()
+
+	runner := func(_ context.Context, _ skill.Manifest, _ string, _ []byte) ([]byte, []byte, error) {
+		// Return an error envelope (skill succeeded but returned an error response)
+		env := envelope.Error("test-skill", "EINVALID_INPUT", "field 'name' is required", nil)
+		buf, _ := json.Marshal(env)
+		return buf, nil, nil
+	}
+	exec := New(root, persist, WithRunner(runner))
+
+	manifest := skill.Manifest{
+		Metadata: skill.Metadata{Name: "test/validation-skill", Version: "1.0.0"},
+		Distribution: skill.Distribution{
+			Type: "exec",
+			Exec: &skill.ExecDistribution{Entry: "/bin/validate"},
+		},
+	}
+
+	// Should succeed (envelope is valid, just status=error)
+	_, _, err := exec.RunSkill(ctx, manifest, "artifact", []byte(`{}`))
+	if err != nil {
+		t.Fatalf("run skill: %v", err)
+	}
+
+	events := readWideEvents(t, obsDir)
+	if len(events) == 0 {
+		t.Fatal("expected at least one wide event")
+	}
+
+	var found *observability.WideEvent
+	for i := range events {
+		if events[i].Operation == observability.OpSkillRun {
+			found = &events[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected skill.run wide event")
+	}
+
+	if found.Status != observability.StatusError {
+		t.Errorf("Status = %q, want %q", found.Status, observability.StatusError)
+	}
+	if found.ErrorType != "skill_error" {
+		t.Errorf("ErrorType = %q, want skill_error", found.ErrorType)
+	}
+	if found.ErrorCode != "EINVALID_INPUT" {
+		t.Errorf("ErrorCode = %q, want EINVALID_INPUT", found.ErrorCode)
+	}
+	if found.ErrorMessage != "field 'name' is required" {
+		t.Errorf("ErrorMessage = %q, want field 'name' is required", found.ErrorMessage)
+	}
+	if found.Data["envelope_error"] != true {
+		t.Errorf("Data[envelope_error] = %v, want true", found.Data["envelope_error"])
+	}
+	if found.Data["error_code"] != "EINVALID_INPUT" {
+		t.Errorf("Data[error_code] = %v, want EINVALID_INPUT", found.Data["error_code"])
+	}
+}
+
+// readWideEvents reads all wide events from the observability directory.
+func readWideEvents(t *testing.T, obsDir string) []observability.WideEvent {
+	t.Helper()
+
+	filePath := filepath.Join(obsDir, "events", observability.WideEventFileName+".ndjson")
+	f, err := os.Open(filePath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("open wide events file: %v", err)
+	}
+	defer f.Close()
+
+	var events []observability.WideEvent
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var ev observability.WideEvent
+		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
+			t.Fatalf("unmarshal wide event: %v", err)
+		}
+		events = append(events, ev)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan wide events: %v", err)
+	}
+	return events
 }

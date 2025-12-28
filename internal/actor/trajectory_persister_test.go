@@ -165,7 +165,7 @@ func TestTrajectoryPersister_Persist_MailReceived(t *testing.T) {
 		WithSession("session-123").
 		WithWorkspace("workspace-1")
 
-	err := persister.Persist(event)
+	err := persister.Persist(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Persist() error = %v", err)
 	}
@@ -207,7 +207,7 @@ func TestTrajectoryPersister_Persist_MultipleEvents(t *testing.T) {
 	}
 
 	for _, e := range events {
-		if err := persister.Persist(e); err != nil {
+		if err := persister.Persist(context.Background(), e); err != nil {
 			t.Fatalf("Persist() error = %v", err)
 		}
 	}
@@ -237,7 +237,7 @@ func TestTrajectoryPersister_Persist_MultipleWorkspaces(t *testing.T) {
 	}
 
 	for _, e := range events {
-		if err := persister.Persist(e); err != nil {
+		if err := persister.Persist(context.Background(), e); err != nil {
 			t.Fatalf("Persist() error = %v", err)
 		}
 	}
@@ -261,7 +261,7 @@ func TestTrajectoryPersister_Persist_SkipsNonPersistedEvents(t *testing.T) {
 	}
 
 	for _, e := range nonPersistedEvents {
-		if err := persister.Persist(e); err != nil {
+		if err := persister.Persist(context.Background(), e); err != nil {
 			t.Fatalf("Persist() error = %v", err)
 		}
 	}
@@ -291,7 +291,7 @@ func TestTrajectoryPersister_Persist_WithData(t *testing.T) {
 		WithWorkspace("ws-1").
 		WithData(data)
 
-	if err := persister.Persist(event); err != nil {
+	if err := persister.Persist(context.Background(), event); err != nil {
 		t.Fatalf("Persist() error = %v", err)
 	}
 
@@ -323,7 +323,7 @@ func TestTrajectoryPersister_Persist_DefaultWorkspace(t *testing.T) {
 	// Event without workspace should use "default"
 	event := NewEvent(EventAgentStarted, "actor-1")
 
-	if err := persister.Persist(event); err != nil {
+	if err := persister.Persist(context.Background(), event); err != nil {
 		t.Fatalf("Persist() error = %v", err)
 	}
 
@@ -348,7 +348,7 @@ func TestTrajectoryPersister_Persist_Concurrent(t *testing.T) {
 			defer wg.Done()
 			event := NewEvent(EventMailReceived, "actor").
 				WithWorkspace("ws-concurrent")
-			_ = persister.Persist(event)
+			_ = persister.Persist(context.Background(), event)
 		}(i)
 	}
 	wg.Wait()

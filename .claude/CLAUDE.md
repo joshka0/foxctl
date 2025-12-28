@@ -87,11 +87,25 @@ agentctl workflow list
 > stored embeddings MUST use the same provider. If both keys are set, skills
 > prefer Gemini for consistency.
 
+### Observability (Wide Events)
+
+| Variable                       | Default | Description                           |
+| ------------------------------ | ------- | ------------------------------------- |
+| `AGENTCTL_OBS_DIR`             | -       | Enable observability; root directory  |
+| `AGENTCTL_OBS_SAMPLE_ERRORS`   | `true`  | Always sample error events            |
+| `AGENTCTL_OBS_SLOW_THRESHOLD_MS` | `1000`  | Slow request threshold (ms)         |
+| `AGENTCTL_OBS_SAMPLE_RATE`     | `0.05`  | Random sample rate for healthy events |
+| `AGENTCTL_TRACE_ID`            | auto    | Propagate trace ID to child processes |
+
+See `docs/observability/wide-events.md` for full documentation.
+
 ## Storage
 
 - Tasks: `~/.agentctl/storage/tasks.db`
 - CAS: `~/.agentctl/cas/sha256/<digest>`
 - Jobs: `~/.agentctl/jobs/<ulid>/`
+- Observability: `~/.agentctl/observability/events/` (NDJSON event logs)
+- Backups: `~/.agentctl/backups/` (includes observability component)
 
 ## Development
 

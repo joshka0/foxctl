@@ -77,6 +77,10 @@ type Supervisor struct {
 	// restarts tracks restart times for backoff calculation
 	restarts map[string][]time.Time
 
+	// processing tracks which namespaces have a wake-up handler running
+	// to prevent unbounded goroutine spawning under high message volume
+	processing map[string]bool
+
 	// mailbox is the shared mailbox store
 	mailbox MailboxStore
 
@@ -130,6 +134,7 @@ func NewSupervisor(mb MailboxStore, opts ...SupervisorOption) *Supervisor {
 		actors:       make(map[string]Actor),
 		stats:        make(map[string]*Stats),
 		restarts:     make(map[string][]time.Time),
+		processing:   make(map[string]bool),
 		mailbox:      mb,
 		strategy:     DefaultSupervisionStrategy(),
 		leaseTimeout: 5 * time.Minute,
@@ -333,10 +338,24 @@ func (s *Supervisor) ListActors() []string {
 // HandleWakeUp processes a wake-up signal from the watcher.
 //
 // Contract: Only claims message if actor is idle (sequential processing).
+// Uses a processing map to prevent unbounded goroutine spawning under high volume.
 func (s *Supervisor) HandleWakeUp(ctx context.Context, wake WakeUp) {
+	s.mu.Lock()
+	if s.processing[wake.Namespace] {
+		s.mu.Unlock()
+		return // Already processing this namespace
+	}
+	s.processing[wake.Namespace] = true
+	s.mu.Unlock()
+
 	s.wg.Add(1)
 	go func() {
-		defer s.wg.Done()
+		defer func() {
+			s.mu.Lock()
+			delete(s.processing, wake.Namespace)
+			s.mu.Unlock()
+			s.wg.Done()
+		}()
 		s.handleWakeUp(ctx, wake)
 	}()
 }

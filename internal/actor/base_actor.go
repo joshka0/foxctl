@@ -263,12 +263,30 @@ func (a *BaseActor) SetTimer(name string, duration time.Duration, data any) {
 		existing.Stop()
 	}
 
+	namespace := a.config.Namespace
+	deadline := time.Now().Add(duration)
+
 	timer := time.AfterFunc(duration, func() {
-		// Timer callback - would need to be routed through supervisor
-		// For now, just clean up the timer
+		// Clean up timer first
 		a.mu.Lock()
 		delete(a.timers, name)
+		onTimeout := a.onTimeout
 		a.mu.Unlock()
+
+		// Invoke timeout handler outside the lock
+		if onTimeout != nil {
+			event := TimerEvent{
+				Name:      name,
+				Deadline:  deadline,
+				Namespace: namespace,
+				Data:      data,
+			}
+			// Use a background context with timeout for the callback
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			// Fire and forget - errors are handled by the callback
+			_ = onTimeout(ctx, event)
+		}
 	})
 
 	a.timers[name] = timer

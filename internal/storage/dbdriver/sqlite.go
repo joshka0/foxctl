@@ -30,15 +30,7 @@ func openSQLite(ctx context.Context, cfg SQLiteConfig, migrate MigrationFunc) (D
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
 
-	// Enable WAL mode for better concurrency
-	if cfg.EnableWAL {
-		if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=WAL;"); err != nil {
-			_ = db.Close() //nolint:errcheck
-			return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
-		}
-	}
-
-	// Set busy timeout
+	// Set busy timeout FIRST to avoid SQLITE_BUSY during subsequent PRAGMA commands
 	busyTimeout := cfg.BusyTimeout
 	if busyTimeout == 0 {
 		busyTimeout = 5000
@@ -46,6 +38,14 @@ func openSQLite(ctx context.Context, cfg SQLiteConfig, migrate MigrationFunc) (D
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d;", busyTimeout)); err != nil {
 		_ = db.Close() //nolint:errcheck
 		return nil, fmt.Errorf("failed to set busy timeout: %w", err)
+	}
+
+	// Enable WAL mode for better concurrency
+	if cfg.EnableWAL {
+		if _, err := db.ExecContext(ctx, "PRAGMA journal_mode=WAL;"); err != nil {
+			_ = db.Close() //nolint:errcheck
+			return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+		}
 	}
 
 	// Enable foreign keys

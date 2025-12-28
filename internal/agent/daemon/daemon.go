@@ -28,6 +28,11 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
+// messageLeaseDuration is the default lease timeout for message polling.
+// This duration should align with the visibility timeout used for Nack operations
+// to ensure consistent message handling semantics.
+const messageLeaseDuration = 30 * time.Second
+
 // Run starts the agent daemon.
 func Run(ctx context.Context, opts Options) error {
 	// 1. Open stores
@@ -235,7 +240,7 @@ func Run(ctx context.Context, opts Options) error {
 				return nil
 			}
 
-			messages, err := mailboxStore.Poll(ctx, agentRecord.Namespace, 30*time.Second, opts.MaxPollMessages)
+			messages, err := mailboxStore.Poll(ctx, agentRecord.Namespace, messageLeaseDuration, opts.MaxPollMessages)
 			if err != nil {
 				logger.Error().Err(err).Msg("poll failed")
 				continue
@@ -246,7 +251,7 @@ func Run(ctx context.Context, opts Options) error {
 				processed, err := dedupeStore.IsProcessed(ctx, opts.AgentID, msg.ID)
 				if err != nil {
 					logger.Warn().Err(err).Str("msg_id", msg.ID).Msg("dedupe check failed, nacking for retry")
-					if nackErr := mailboxStore.Nack(ctx, msg.ID, 30*time.Second); nackErr != nil {
+					if nackErr := mailboxStore.Nack(ctx, msg.ID, messageLeaseDuration); nackErr != nil {
 						logger.Error().Err(nackErr).Str("msg_id", msg.ID).Msg("failed to nack message")
 					}
 					continue
