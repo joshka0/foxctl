@@ -1,0 +1,29 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: graph/pagerank
+  version: 0.1.0
+  description: "Compute PageRank scores for all nodes in the dependency graph"
+  tags: ["graph", "pagerank", "ranking"]
+distribution:
+  type: exec
+  exec:
+    entry: graph_pagerank
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: graph/pagerank
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace path (defaults to runner workspace)"
+    - name: damping_factor
+      type: number
+      required: false
+      description: "PageRank damping factor (default 0.85)"
+    - name: tolerance
+      type: number
+      required: false
+      description: "Convergence tolerance (default 1e-6)"

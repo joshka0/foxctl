@@ -29,13 +29,14 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 	if err != nil {
 		return nil, fmt.Errorf("sqliteutil: open: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		errs.Ignore(db.Close(), "close sqlite db after WAL failure")
-		return nil, fmt.Errorf("sqliteutil: enable wal: %w", err)
-	}
+	// Set busy_timeout FIRST so WAL mode change can wait for locks
 	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=5000;`); err != nil {
 		errs.Ignore(db.Close(), "close sqlite db after busy_timeout failure")
 		return nil, fmt.Errorf("sqliteutil: set busy_timeout: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
+		errs.Ignore(db.Close(), "close sqlite db after WAL failure")
+		return nil, fmt.Errorf("sqliteutil: enable wal: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON;`); err != nil {
 		errs.Ignore(db.Close(), "close sqlite db after foreign_keys failure")

@@ -16,13 +16,13 @@ func TestBackupCreateAndRestore(t *testing.T) {
 
 	// Create test directory structure
 	storageDir := filepath.Join(tmpDir, "storage")
-	if err := os.MkdirAll(storageDir, 0755); err != nil {
+	if err := os.MkdirAll(storageDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a test database file
 	testDB := filepath.Join(storageDir, "test.db")
-	if err := os.WriteFile(testDB, []byte("test database content"), 0644); err != nil {
+	if err := os.WriteFile(testDB, []byte("test database content"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,12 +124,12 @@ func TestComponentFiltering(t *testing.T) {
 	// Create multiple component directories
 	storageDir := filepath.Join(tmpDir, "storage")
 	memoryDir := filepath.Join(tmpDir, "memory")
-	_ = os.MkdirAll(storageDir, 0755)
-	_ = os.MkdirAll(memoryDir, 0755)
+	_ = os.MkdirAll(storageDir, 0o755)
+	_ = os.MkdirAll(memoryDir, 0o755)
 
 	// Create test files
-	_ = os.WriteFile(filepath.Join(storageDir, "test.db"), []byte("db"), 0644)
-	_ = os.WriteFile(filepath.Join(memoryDir, "mem.json"), []byte("mem"), 0644)
+	_ = os.WriteFile(filepath.Join(storageDir, "test.db"), []byte("db"), 0o644)
+	_ = os.WriteFile(filepath.Join(memoryDir, "mem.json"), []byte("mem"), 0o644)
 
 	cfg := config.Config{
 		Home: tmpDir,
@@ -166,8 +166,8 @@ func TestExcludeComponents(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	storageDir := filepath.Join(tmpDir, "storage")
-	_ = os.MkdirAll(storageDir, 0755)
-	_ = os.WriteFile(filepath.Join(storageDir, "test.db"), []byte("db"), 0644)
+	_ = os.MkdirAll(storageDir, 0o755)
+	_ = os.WriteFile(filepath.Join(storageDir, "test.db"), []byte("db"), 0o644)
 
 	cfg := config.Config{
 		Home: tmpDir,

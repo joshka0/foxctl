@@ -235,7 +235,7 @@ func Run(ctx context.Context, opts Options) error {
 				return nil
 			}
 
-			messages, err := mailboxStore.Poll(ctx, agentRecord.Namespace, 0, opts.MaxPollMessages)
+			messages, err := mailboxStore.Poll(ctx, agentRecord.Namespace, 30*time.Second, opts.MaxPollMessages)
 			if err != nil {
 				logger.Error().Err(err).Msg("poll failed")
 				continue

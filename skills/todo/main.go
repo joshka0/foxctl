@@ -63,6 +63,15 @@ type input struct {
 	ReviewRequest *reviewRequestReq `json:"review_request"`
 	ReviewStatus  *reviewStatusReq  `json:"review_status"`
 	Search        *searchReq        `json:"search"`
+	List          *listReq          `json:"list"`
+}
+
+// listReq defines the input for the list operation.
+type listReq struct {
+	Ranked         bool   `json:"ranked"`          // Include PageRank scores (default: false)
+	Status         string `json:"status"`          // Filter by status: pending, in_progress, completed, blocked
+	SortBy         string `json:"sort_by"`         // Sort by: created_at, pagerank, critical_path (default: created_at)
+	IncludeMetrics bool   `json:"include_metrics"` // Include full graph metrics (degrees, critical path)
 }
 
 // searchReq defines the input for semantic task search.
@@ -191,6 +200,12 @@ type taskOutput struct {
 	LastReviewStatus string `json:"last_review_status,omitempty"`
 	LastReviewAt     string `json:"last_review_at,omitempty"`
 	LastReviewID     string `json:"last_review_id,omitempty"`
+
+	// Graph metrics (populated when ranked=true or include_metrics=true)
+	PageRank          float64 `json:"pagerank,omitempty"`
+	CriticalPathScore int     `json:"critical_path_score,omitempty"`
+	InDegree          int     `json:"in_degree,omitempty"`
+	OutDegree         int     `json:"out_degree,omitempty"`
 }
 
 func main() {
@@ -283,10 +298,53 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		if err != nil {
 			return err
 		}
+
+		// Apply status filter if specified
+		if in.List != nil && in.List.Status != "" {
+			allTasks = filterByStatus(allTasks, in.List.Status)
+		}
+
+		// Check if we need graph metrics
+		needsMetrics := in.List != nil && (in.List.Ranked || in.List.IncludeMetrics)
+		var metricsMap map[string]tasksgraph.NodeMetrics
+		var sortBy string
+
+		if needsMetrics {
+			// Compute graph metrics using tasksgraph analyzer
+			insights, err := tasksgraph.NewAnalyzer().Analyze(allTasks, workspaceID)
+			if err == nil {
+				metricsMap = make(map[string]tasksgraph.NodeMetrics)
+				for _, m := range insights.Nodes {
+					metricsMap[m.TaskID] = m
+				}
+			}
+		}
+
+		// Determine sort order
+		if in.List != nil && in.List.SortBy != "" {
+			sortBy = in.List.SortBy
+		}
+
+		// Sort tasks based on sortBy
+		if sortBy == "pagerank" && metricsMap != nil {
+			sort.Slice(allTasks, func(i, j int) bool {
+				return metricsMap[allTasks[i].ID].PageRank > metricsMap[allTasks[j].ID].PageRank
+			})
+		} else if sortBy == "critical_path" && metricsMap != nil {
+			sort.Slice(allTasks, func(i, j int) bool {
+				return metricsMap[allTasks[i].ID].CriticalPathScore > metricsMap[allTasks[j].ID].CriticalPathScore
+			})
+		}
+		// Default sort is by creation time (already the case from store)
+
+		// Convert to output with optional metrics
+		taskOutputs := toOutputListWithMetrics(allTasks, metricsMap)
+
 		data = map[string]any{
-			"tasks":         toOutputList(allTasks),
+			"tasks":         taskOutputs,
 			"total_tasks":   len(allTasks),
 			"pending_tasks": countPending(allTasks),
+			"ranked":        needsMetrics,
 		}
 
 	case "get_active":
@@ -1324,6 +1382,19 @@ func filterPending(taskList []tasks.Task) []tasks.Task {
 	return out
 }
 
+func filterByStatus(taskList []tasks.Task, status string) []tasks.Task {
+	if status == "" {
+		return taskList
+	}
+	out := make([]tasks.Task, 0)
+	for _, t := range taskList {
+		if t.Status == status {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func toOutput(t tasks.Task) *taskOutput {
 	out := &taskOutput{
 		ID:               t.ID,
@@ -1349,10 +1420,18 @@ func toOutput(t tasks.Task) *taskOutput {
 	return out
 }
 
-func toOutputList(taskList []tasks.Task) []*taskOutput {
+func toOutputListWithMetrics(taskList []tasks.Task, metrics map[string]tasksgraph.NodeMetrics) []*taskOutput {
 	out := make([]*taskOutput, len(taskList))
 	for i, t := range taskList {
 		out[i] = toOutput(t)
+		if metrics != nil {
+			if m, ok := metrics[t.ID]; ok {
+				out[i].PageRank = m.PageRank
+				out[i].CriticalPathScore = m.CriticalPathScore
+				out[i].InDegree = m.InDegree
+				out[i].OutDegree = m.OutDegree
+			}
+		}
 	}
 	return out
 }

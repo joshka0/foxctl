@@ -1,3 +1,6 @@
+//go:build sqlite_mattn
+// +build sqlite_mattn
+
 package mailbox
 
 import (
@@ -74,7 +77,7 @@ func TestMailboxStore(t *testing.T) {
 		}
 	})
 
-	// Test Poll (non-blocking with immediate message)
+	// Test Poll (leases immediately)
 	t.Run("Poll", func(t *testing.T) {
 		messages, err := store.Poll(ctx, "org/app/agent-002", 100*time.Millisecond, 10)
 		if err != nil {
@@ -166,7 +169,7 @@ func TestMailboxStore(t *testing.T) {
 	})
 }
 
-func TestMailboxPollTimeout(t *testing.T) {
+func TestMailboxPollNoBlock(t *testing.T) {
 	ctx := context.Background()
 
 	// Create temporary directory for test
@@ -179,8 +182,8 @@ func TestMailboxPollTimeout(t *testing.T) {
 	}
 	defer store.Close()
 
-	// Test Poll with timeout when no messages
-	t.Run("PollTimeout", func(t *testing.T) {
+	// Test Poll returns quickly when no messages
+	t.Run("PollReturnsQuickly", func(t *testing.T) {
 		start := time.Now()
 		messages, err := store.Poll(ctx, "org/app/agent-999", 200*time.Millisecond, 10)
 		elapsed := time.Since(start)
@@ -193,14 +196,55 @@ func TestMailboxPollTimeout(t *testing.T) {
 			t.Errorf("expected 0 messages, got %d", len(messages))
 		}
 
-		// Should wait approximately the timeout duration
-		if elapsed < 200*time.Millisecond {
-			t.Errorf("poll returned too quickly: %v", elapsed)
-		}
-		if elapsed > 500*time.Millisecond {
+		if elapsed > 50*time.Millisecond {
 			t.Errorf("poll took too long: %v", elapsed)
 		}
 	})
+}
+
+func TestMailboxPollRespectsLeaseDuration(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now()
+	msg := agent.Message{
+		ID:        "lease-msg",
+		FromNS:    "sender",
+		ToNS:      "worker",
+		Type:      agent.MessageTypeCmd,
+		TTLMS:     60_000,
+		VisibleAt: now.Unix(),
+		Timestamp: now.Unix(),
+	}
+	if err := store.Send(ctx, msg); err != nil {
+		t.Fatalf("failed to send message: %v", err)
+	}
+
+	lease := 1 * time.Second
+	start := time.Now()
+	messages, err := store.Poll(ctx, "worker", lease, 1)
+	if err != nil {
+		t.Fatalf("poll error: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+
+	got := messages[0]
+	expectedMin := start.Add(lease - 150*time.Millisecond).Unix() // allow small scheduling jitter
+	expectedMax := start.Add(lease + 150*time.Millisecond).Unix()
+	if got.VisibleAt < expectedMin || got.VisibleAt > expectedMax {
+		t.Fatalf("visible_at %d not within expected lease window [%d, %d]", got.VisibleAt, expectedMin, expectedMax)
+	}
+	if got.Attempt != 1 {
+		t.Fatalf("attempt = %d, want 1", got.Attempt)
+	}
 }
 
 func TestMailboxMessageTypes(t *testing.T) {

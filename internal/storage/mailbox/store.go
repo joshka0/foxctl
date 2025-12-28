@@ -19,7 +19,7 @@ import (
 type Store interface {
 	Close() error
 	Send(ctx context.Context, msg agent.Message) error
-	Poll(ctx context.Context, agentNS string, timeout time.Duration, maxMessages int) ([]agent.Message, error)
+	Poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int) ([]agent.Message, error)
 	Ack(ctx context.Context, messageID string) error
 	Nack(ctx context.Context, messageID string, visibilityTimeout time.Duration) error
 	List(ctx context.Context, agentNS string, limit int) ([]agent.Message, error)
@@ -28,6 +28,9 @@ type Store interface {
 	ListBySession(ctx context.Context, sessionID string, limit int) ([]agent.Message, error)
 	// ListByWorkspace returns messages for a specific workspace.
 	ListByWorkspace(ctx context.Context, workspace string, limit int) ([]agent.Message, error)
+	// DB returns the underlying database connection for advanced operations.
+	// This is primarily used by the actor.Watcher to create triggers.
+	DB() *sql.DB
 }
 
 type sqlStore struct {
@@ -48,6 +51,10 @@ func (s *sqlStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *sqlStore) DB() *sql.DB {
+	return s.db
+}
+
 func (s *sqlStore) Send(ctx context.Context, msg agent.Message) error {
 	headersJSON, err := json.Marshal(msg.Headers)
 	if err != nil {
@@ -65,71 +72,100 @@ func (s *sqlStore) Send(ctx context.Context, msg agent.Message) error {
 	return nil
 }
 
-func (s *sqlStore) Poll(ctx context.Context, agentNS string, timeout time.Duration, maxMessages int) ([]agent.Message, error) {
+func (s *sqlStore) Poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int) ([]agent.Message, error) {
 	if maxMessages <= 0 {
-		maxMessages = 10
+		maxMessages = 1
+	}
+	if leaseDuration <= 0 {
+		leaseDuration = 30 * time.Second
 	}
 
-	deadline := time.Now().Add(timeout)
-	for {
-		// Check context
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("mailbox: begin poll tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
-		// Try to fetch messages
-		now := time.Now().Unix()
-		rows, err := s.db.QueryContext(ctx, `
-			SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
-			FROM mailbox
-			WHERE to_ns = ? AND visible_at <= ?
-			ORDER BY ts ASC
-			LIMIT ?`, agentNS, now, maxMessages)
+	now := time.Now().Unix()
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
+		FROM mailbox
+		WHERE to_ns = ? AND visible_at <= ?
+		ORDER BY ts ASC
+		LIMIT ?`, agentNS, now, maxMessages)
+	if err != nil {
+		return nil, fmt.Errorf("mailbox: poll: %w", err)
+	}
+
+	var messages []agent.Message
+	for rows.Next() {
+		msg, err := scanMessage(rows)
 		if err != nil {
-			return nil, fmt.Errorf("mailbox: poll: %w", err)
+			errs.Ignore(rows.Close(), "close mailbox poll rows")
+			return nil, err
 		}
-
-		var messages []agent.Message
-		for rows.Next() {
-			msg, err := scanMessage(rows)
-			if err != nil {
-				errs.Ignore(rows.Close(), "close mailbox poll rows")
-				return nil, err
-			}
-			messages = append(messages, msg)
-		}
+		messages = append(messages, msg)
+	}
+	if err := rows.Err(); err != nil {
 		errs.Ignore(rows.Close(), "close mailbox poll rows")
+		return nil, err
+	}
+	errs.Ignore(rows.Close(), "close mailbox poll rows")
 
-		if len(messages) > 0 {
-			// Update visibility timeout for leased messages (30 seconds default)
-			newVisibleAt := time.Now().Add(30 * time.Second).Unix()
-			for i := range messages {
-				_, err := s.db.ExecContext(ctx, `
-					UPDATE mailbox SET visible_at = ?, attempt = attempt + 1 WHERE id = ?`,
-					newVisibleAt, messages[i].ID)
-				if err != nil {
-					return nil, fmt.Errorf("mailbox: update visibility: %w", err)
-				}
-				// Update the message struct to reflect new values
-				messages[i].VisibleAt = newVisibleAt
-				messages[i].Attempt++
-			}
-			return messages, nil
+	if len(messages) == 0 {
+		// Nothing to claim; commit the empty transaction
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("mailbox: commit empty poll: %w", err)
 		}
+		return []agent.Message{}, nil
+	}
 
-		// No messages available, check if we should wait
-		if time.Now().After(deadline) {
-			return []agent.Message{}, nil
+	// Lease claimed messages
+	leaseUntil := time.Now().Add(leaseDuration).Unix()
+	for i := range messages {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE mailbox
+			SET visible_at = ?, attempt = attempt + 1
+			WHERE id = ? AND visible_at <= ?`,
+			leaseUntil, messages[i].ID, now)
+		if err != nil {
+			return nil, fmt.Errorf("mailbox: update visibility: %w", err)
 		}
+		rowsAffected, err := res.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("mailbox: lease rows affected: %w", err)
+		}
+		if rowsAffected == 0 {
+			// Lost the race to lease this message; skip it
+			messages[i].ID = ""
+			continue
+		}
+		messages[i].VisibleAt = leaseUntil
+		messages[i].Attempt++
+	}
 
-		// Sleep briefly before retrying
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-			// Continue polling
+	// Filter out any messages that failed to lease
+	filtered := messages[:0]
+	for _, msg := range messages {
+		if msg.ID != "" {
+			filtered = append(filtered, msg)
 		}
 	}
+
+	if len(filtered) == 0 {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("mailbox: commit empty lease: %w", err)
+		}
+		return []agent.Message{}, nil
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("mailbox: commit poll: %w", err)
+	}
+
+	return filtered, nil
 }
 
 func (s *sqlStore) Ack(ctx context.Context, messageID string) error {

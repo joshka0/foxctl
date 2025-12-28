@@ -16,6 +16,16 @@ const (
 	MessageTypeCmd MessageType = "agent.cmd"
 	// MessageTypeEvent represents a notification.
 	MessageTypeEvent MessageType = "agent.event"
+
+	// Console message types for interactive actor consoles.
+	// MessageTypeConsoleAsk is a user request from console.
+	MessageTypeConsoleAsk MessageType = "console.ask"
+	// MessageTypeConsoleReply is the final response to console.
+	MessageTypeConsoleReply MessageType = "console.reply"
+	// MessageTypeConsoleEvent is a streaming update to console.
+	MessageTypeConsoleEvent MessageType = "console.event"
+	// MessageTypeConsoleCmd is a control command (e.g., cancel).
+	MessageTypeConsoleCmd MessageType = "console.cmd"
 )
 
 // Message represents a mailbox message for inter-agent communication.

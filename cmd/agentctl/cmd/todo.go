@@ -118,12 +118,48 @@ func newTodoCompleteCommand() *cobra.Command {
 
 func newTodoListCommand() *cobra.Command {
 	var workspaceID string
+	var ranked bool
+	var status string
+	var sortBy string
+	var includeMetrics bool
+
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List tasks from the store",
+		Short: "List tasks with optional PageRank sorting",
+		Long: `List tasks from the store with optional PageRank prioritization.
+
+Examples:
+  # Simple list
+  agentctl todo list
+
+  # Ranked by PageRank (most depended-upon first)
+  agentctl todo list --ranked
+
+  # Pending tasks sorted by critical path
+  agentctl todo list --status pending --sort-by critical_path
+
+  # Full metrics for all tasks
+  agentctl todo list --ranked --include-metrics`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			listOpts := map[string]any{}
+			if ranked {
+				listOpts["ranked"] = true
+			}
+			if status != "" {
+				listOpts["status"] = status
+			}
+			if sortBy != "" {
+				listOpts["sort_by"] = sortBy
+			}
+			if includeMetrics {
+				listOpts["include_metrics"] = true
+			}
+
 			payload := map[string]any{
 				"operation": "list",
+			}
+			if len(listOpts) > 0 {
+				payload["list"] = listOpts
 			}
 			if workspaceID != "" {
 				payload["workspace_id"] = workspaceID
@@ -131,7 +167,12 @@ func newTodoListCommand() *cobra.Command {
 			return runTodoSkill(cmd, payload)
 		},
 	}
+
 	cmd.Flags().StringVar(&workspaceID, "workspace", "", "Workspace ID (default: current working directory)")
+	cmd.Flags().BoolVar(&ranked, "ranked", false, "Include PageRank scores and sort by priority")
+	cmd.Flags().StringVar(&status, "status", "", "Filter by status: pending, in_progress, completed, blocked")
+	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: created_at, pagerank, critical_path")
+	cmd.Flags().BoolVar(&includeMetrics, "include-metrics", false, "Include full graph metrics (degrees, critical path)")
 	return cmd
 }
 

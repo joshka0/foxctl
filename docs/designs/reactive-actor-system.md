@@ -8,26 +8,37 @@ These invariants MUST be maintained by any implementation:
 
 ### Delivery Contract
 
-- **At-least-once delivery**: Messages may be delivered multiple times on failure; handlers must be idempotent
-- **Leased queue semantics**: Messages are claimed with a visibility timeout; lease expires on crash → auto-retry
-- **Notify is wake-up only**: SQLite triggers signal "work available", but consumption always goes through `Poll()` with atomic claim
+- **At-least-once delivery**: Messages may be delivered multiple times on
+  failure; handlers must be idempotent
+- **Leased queue semantics**: Messages are claimed with a caller-provided
+  visibility timeout (`leaseDuration`); lease expires on crash → auto-retry.
+  Claims are atomic and non-blocking (no long waits in `Poll`).
+- **Notify is wake-up only**: SQLite triggers signal "work available", but
+  consumption always goes through `Poll()` with atomic claim
 
 ### Concurrency Contract
 
-- **Sequential processing (MVP)**: Per-actor concurrency = 1; supervisor only claims next message when actor is idle
+- **Sequential processing (MVP)**: Per-actor concurrency = 1; supervisor only
+  claims next message when actor is idle
 - **Queue depth in SQLite**: No in-memory message buffering; SQLite is the queue
 
 ### Observability Contract
 
-- **EventBus is ephemeral**: In-memory pub/sub for low-latency fanout; subscribers may miss events
-- **Important events persisted**: `mail.received`, `mail.acked`, `agent.started/stopped/error`, `task.completed` → `trajectory.db`
-- **CLI follows envelope rules**: Outputs are JSON envelopes; large data → CAS + summary
+- **EventBus is ephemeral**: In-memory pub/sub for low-latency fanout;
+  subscribers may miss events
+- **Important events persisted**: `mail.received`, `mail.sent`, `mail.acked`,
+  `agent.started/stopped/error`, `task.completed` → `trajectory.db`
+- **Event metadata**: `mail.*` events carry `source`, `target`, `session_id`,
+  and `workspace` for traceability.
+- **CLI follows envelope rules**: Outputs are JSON envelopes; large data → CAS +
+  summary
 
 ## Overview
 
-This document describes the reactive actor system that transforms agentctl agents
-from poll-based daemons into event-driven actors. Each agent becomes a true actor
-in the system, reacting to messages as they arrive rather than polling for work.
+This document describes the reactive actor system that transforms agentctl
+agents from poll-based daemons into event-driven actors. Each agent becomes a
+true actor in the system, reacting to messages as they arrive rather than
+polling for work.
 
 ## Motivation
 
@@ -55,21 +66,21 @@ Agent Daemon                      Mailbox (SQLite)
 ### Target State: Reactive Actor Model
 
 ```
-                    Actor Supervisor
-  (Single long-running process managing all actor lifecycles)
-           │                    │                    │
-           ▼                    ▼                    ▼
-  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-  │ Actor: coder │    │Actor: planner│    │Actor:reviewer│
-  │              │    │              │    │              │
-  │ onMailRecv() │    │ onMailRecv() │    │ onMailRecv() │
-  │ onTimeout()  │    │ onTimeout()  │    │ onTimeout()  │
-  │ onError()    │    │ onError()    │    │ onError()    │
-  └──────────────┘    └──────────────┘    └──────────────┘
-           ▲                    ▲                    ▲
-           └────────────────────┼────────────────────┘
-                                │
-                    Event Bus (SQLite + Notify)
+                  Actor Supervisor
+(Single long-running process managing all actor lifecycles)
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ Actor: coder │    │Actor: planner│    │Actor:reviewer│
+│              │    │              │    │              │
+│ onMailRecv() │    │ onMailRecv() │    │ onMailRecv() │
+│ onTimeout()  │    │ onTimeout()  │    │ onTimeout()  │
+│ onError()    │    │ onError()    │    │ onError()    │
+└──────────────┘    └──────────────┘    └──────────────┘
+         ▲                    ▲                    ▲
+         └────────────────────┼────────────────────┘
+                              │
+                  Event Bus (SQLite + Notify)
 ```
 
 **Benefits:**
@@ -179,7 +190,8 @@ type WakeUp struct {
 1. Create a `mailbox_notify` table with trigger on `mailbox` INSERT
 2. Fast poll (50ms) on notify table for new entries
 3. **Wake-up only**: Watcher sends namespace to supervisor
-4. Supervisor calls `mailbox.Poll(ctx, namespace, leaseTimeout)` to atomically claim
+4. Supervisor calls `mailbox.Poll(ctx, namespace, leaseTimeout)` to atomically
+   claim (uses the provided lease duration; no blocking wait)
 5. Cleanup processed notifications
 
 ```sql
@@ -242,14 +254,15 @@ func (s *Supervisor) handleWakeUp(ctx context.Context, wake WakeUp) {
 }
 ```
 
-This gives us near-real-time notifications (~50ms) without requiring
-external dependencies like Redis or a message broker, while preserving
-the existing lease/ack semantics for crash safety.
+This gives us near-real-time notifications (~50ms) without requiring external
+dependencies like Redis or a message broker, while preserving the existing
+lease/ack semantics for crash safety.
 
 ### 4. Event Bus
 
-Central hub for all system events. **Note:** The EventBus is ephemeral (in-memory);
-important events are selectively persisted to `trajectory.db` for audit/debug.
+Central hub for all system events. **Note:** The EventBus is ephemeral
+(in-memory); important events are selectively persisted to `trajectory.db` for
+audit/debug.
 
 ```go
 type EventBus struct {
@@ -262,20 +275,20 @@ type EventBus struct {
 type EventType string
 const (
     // Mail events (PERSISTED)
-    EventMailReceived   EventType = "mail.received"   // ✓ persist
+    EventMailReceived   EventType = "mail.received"   // 
     EventMailSent       EventType = "mail.sent"
-    EventMailAcked      EventType = "mail.acked"      // ✓ persist
-    EventMailExpired    EventType = "mail.expired"    // ✓ persist
+    EventMailAcked      EventType = "mail.acked"      // 
+    EventMailExpired    EventType = "mail.expired"    // 
 
     // Task events
     EventTaskCreated    EventType = "task.created"
     EventTaskUpdated    EventType = "task.updated"
-    EventTaskCompleted  EventType = "task.completed"  // ✓ persist
+    EventTaskCompleted  EventType = "task.completed"  // 
 
     // Agent events (PERSISTED)
-    EventAgentStarted   EventType = "agent.started"   // ✓ persist
-    EventAgentStopped   EventType = "agent.stopped"   // ✓ persist
-    EventAgentError     EventType = "agent.error"     // ✓ persist
+    EventAgentStarted   EventType = "agent.started"   // 
+    EventAgentStopped   EventType = "agent.stopped"   // 
+    EventAgentError     EventType = "agent.error"     // 
 
     // Hook events (ephemeral - too noisy)
     EventHookTriggered  EventType = "hook.triggered"
@@ -398,26 +411,26 @@ type MessageHandler func(ctx context.Context, msg *mailbox.Message) (*mailbox.Me
 
 **Failure scenarios:**
 
-| Scenario | Behavior |
-|----------|----------|
-| Actor crashes mid-processing | Lease expires → message visible again → retry |
-| Actor returns error | Nack with backoff → message requeued with delay |
-| Max retries exceeded | Message moved to dead letter / human escalation |
-| Supervisor crashes | All leases expire → messages become visible on restart |
+| Scenario                     | Behavior                                               |
+| ---------------------------- | ------------------------------------------------------ |
+| Actor crashes mid-processing | Lease expires → message visible again → retry          |
+| Actor returns error          | Nack with backoff → message requeued with delay        |
+| Max retries exceeded         | Message moved to dead letter / human escalation        |
+| Supervisor crashes           | All leases expire → messages become visible on restart |
 
 ## Integration with Existing Components
 
 ### Storage Integration
 
-| Store | Purpose in Actor System |
-|-------|------------------------|
-| `mailbox.db` | Message queue, triggers notifications |
-| `agents.db` | Actor metadata, lifecycle state |
-| `sessions.db` | Context persistence, turn history |
-| `memory.db` | Long-term learnings, gotchas |
-| `graph.db` | Task→file relationships |
-| `trajectory.db` | Tool call traces for debugging |
-| `tasks.db` | Current task context |
+| Store           | Purpose in Actor System               |
+| --------------- | ------------------------------------- |
+| `mailbox.db`    | Message queue, triggers notifications |
+| `agents.db`     | Actor metadata, lifecycle state       |
+| `sessions.db`   | Context persistence, turn history     |
+| `memory.db`     | Long-term learnings, gotchas          |
+| `graph.db`      | Task→file relationships               |
+| `trajectory.db` | Tool call traces for debugging        |
+| `tasks.db`      | Current task context                  |
 
 ### Hook Integration
 
@@ -502,13 +515,13 @@ func (a *Actor) OnError(ctx context.Context, err error) Directive {
 
 ## Migration Path
 
-| Phase | Current | New | Effort |
-|-------|---------|-----|--------|
-| 1 | Poll-based daemon | Add MailboxWatcher | Low |
-| 2 | Single agent per process | Supervisor manages multiple | Medium |
-| 3 | Manual message routing | Event-driven routing | Medium |
-| 4 | No event subscriptions | EventBus with pub/sub | Medium |
-| 5 | Hooks are external | Hooks emit to EventBus | Low |
+| Phase | Current                  | New                         | Effort |
+| ----- | ------------------------ | --------------------------- | ------ |
+| 1     | Poll-based daemon        | Add MailboxWatcher          | Low    |
+| 2     | Single agent per process | Supervisor manages multiple | Medium |
+| 3     | Manual message routing   | Event-driven routing        | Medium |
+| 4     | No event subscriptions   | EventBus with pub/sub       | Medium |
+| 5     | Hooks are external       | Hooks emit to EventBus      | Low    |
 
 ### Phase 1: MailboxWatcher (Low effort)
 
@@ -575,7 +588,8 @@ These questions have been resolved:
 
 **Decision:** Queue depth stays in SQLite; sequential actor processing.
 
-- **Per-actor concurrency = 1** (MVP): Supervisor only claims next message when actor is idle
+- **Per-actor concurrency = 1** (MVP): Supervisor only claims next message when
+  actor is idle
 - **No in-memory buffering**: SQLite is the queue, no mailbox overflow possible
 - **Sender never blocks**: `mailbox.Send()` always succeeds (INSERT into SQLite)
 - Later: Add per-actor concurrency > 1 for specific message types if needed
@@ -590,10 +604,12 @@ These questions have been resolved:
 
 ## Future Considerations
 
-- **Multi-supervisor**: For large deployments, support multiple supervisors with leader election
+- **Multi-supervisor**: For large deployments, support multiple supervisors with
+  leader election
 - **Actor migration**: Move actors between supervisors for load balancing
 - **Distributed mailbox**: Replace SQLite with distributed queue for multi-node
-- **Actor hierarchies**: Parent-child actor relationships with cascading supervision
+- **Actor hierarchies**: Parent-child actor relationships with cascading
+  supervision
 - **Message priorities**: Add priority lanes for urgent/interrupt messages
 
 ## Related Documents

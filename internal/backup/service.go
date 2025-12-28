@@ -70,7 +70,7 @@ func (s *Service) Create(ctx context.Context, opts backup.CreateOptions) (*backu
 	outputPath := opts.OutputPath
 	if outputPath == "" {
 		backupDir := filepath.Join(s.cfg.Home, DefaultBackupDir)
-		if err := os.MkdirAll(backupDir, 0755); err != nil {
+		if err := os.MkdirAll(backupDir, 0o755); err != nil {
 			return nil, fmt.Errorf("create backup directory: %w", err)
 		}
 
@@ -155,7 +155,7 @@ func (s *Service) Create(ctx context.Context, opts backup.CreateOptions) (*backu
 	manifestHeader := &tar.Header{
 		Name:    ManifestFile,
 		Size:    int64(len(manifestData)),
-		Mode:    0644,
+		Mode:    0o644,
 		ModTime: time.Now(),
 	}
 	if err := tw.WriteHeader(manifestHeader); err != nil {
@@ -359,7 +359,7 @@ func (s *Service) Restore(ctx context.Context, path string, opts backup.RestoreO
 
 		// Create directory if needed
 		dir := filepath.Dir(originalPath)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("warning: create dir for %s: %v", header.Name, err))
 			continue
 		}
@@ -463,7 +463,6 @@ func (s *Service) collectFiles(component backup.Component) ([]backup.FileEntry, 
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("walk %s: %w", basePath, err)
 	}

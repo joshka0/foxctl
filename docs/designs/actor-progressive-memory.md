@@ -8,28 +8,41 @@ These invariants MUST be maintained by any implementation:
 
 ### Durability Contract
 
-- **Raw turns are durable**: Turns are persisted to `sessions.db` before any processing
-- **Compaction is cursor-based**: A cursor tracks `next_turn_to_summarize`; compaction is resumable
-- **Never delete before persist**: Raw turns remain until summary is durably written
-- **Crash-safe compaction**: On failure, cursor doesn't advance; retry produces same result
+- **Raw turns are durable**: Turns are persisted to `sessions.db` before any
+  processing
+- **Compaction is cursor-based**: A cursor tracks `next_turn_to_summarize`;
+  compaction is resumable
+- **Never delete before persist**: Raw turns remain until summary is durably
+  written
+- **Crash-safe compaction**: Summaries are inserted in a single transaction that
+  advances the cursor only after a successful insert; failures leave state
+  unchanged and retries produce the same result
+- **Monotonic summary indexing**: `summary_index` increases monotonically per
+  actor to avoid UNIQUE conflicts and ensure deterministic distillation order
+- **Snapshot summarization**: Summarization is done outside the global lock; DB
+  work uses short transactions to avoid blocking reads/writes
 
 ### Secret Safety Contract
 
-- **Redact before persistence**: Summaries, learnings, and L1/L2 artifacts are redacted
+- **Redact before persistence**: Summaries, learnings, and L1/L2 artifacts are
+  redacted
 - **Pattern-based redaction**: API keys, tokens, authorization headers, secrets
-- **Raw turns may contain secrets**: Only archive redacted versions; full turns in CAS with TTL
+- **Raw turns may contain secrets**: Only archive redacted versions; full turns
+  in CAS with TTL
 
 ### Token Estimation Contract
 
 - **Simple estimator for MVP**: `len(text)/4` + safety margin
-- **Provider-agnostic**: No tiktoken dependency; works across Gemini, Claude, OpenAI
+- **Provider-agnostic**: No tiktoken dependency; works across Gemini, Claude,
+  OpenAI
 - **Target 80% of budget**: Leave headroom for estimation error
 
 ## Overview
 
 This document describes the progressive memory system for long-running reactive
 actors. The system maintains a compact, relevant context window by progressively
-summarizing and distilling conversation history while preserving critical information.
+summarizing and distilling conversation history while preserving critical
+information.
 
 ## Problem Statement
 
@@ -37,7 +50,8 @@ Long-running actors face a fundamental tension:
 
 - **Need memory:** Actors must remember past interactions to be useful
 - **Limited context:** LLM context windows are finite (32K-128K tokens)
-- **Noise accumulates:** Raw conversation history contains redundancy and tangents
+- **Noise accumulates:** Raw conversation history contains redundancy and
+  tangents
 
 ### Without Progressive Memory
 
@@ -109,8 +123,8 @@ The most recent turns at full fidelity. No summarization, no loss.
 - Full tool call details (input/output)
 - Exact timestamps
 
-**Purpose:** Immediate context for current work. The actor needs full detail
-for recent interactions to maintain coherence.
+**Purpose:** Immediate context for current work. The actor needs full detail for
+recent interactions to maintain coherence.
 
 **Lifecycle:** When buffer fills, oldest turns are summarized into L1.
 
@@ -142,11 +156,11 @@ Highly compressed session history. The essential trajectory of the conversation.
 - Accumulated learnings/gotchas
 - Current state summary
 
-**Purpose:** Long-term memory. Allows actor to understand "how we got here"
-even after hundreds of turns.
+**Purpose:** Long-term memory. Allows actor to understand "how we got here" even
+after hundreds of turns.
 
-**Lifecycle:** Oldest distilled entries are re-distilled or archived when
-L2 exceeds budget.
+**Lifecycle:** Oldest distilled entries are re-distilled or archived when L2
+exceeds budget.
 
 ## Distillation Pipeline
 
@@ -225,14 +239,14 @@ type MemoryConfig struct {
 
 **Default values (tunable):**
 
-| Parameter | Default | Notes |
-|-----------|---------|-------|
-| `RawBufferSize` | 5-10 turns | Balance: more = better context, fewer = more frequent summarization |
-| `RecentSummarySize` | 2-3 summaries | How many batch summaries before distillation |
-| `RawTokenBudget` | 8K tokens | Space for raw turns |
-| `L1TokenBudget` | 6K tokens | Space for recent summaries |
-| `L2TokenBudget` | 4K tokens | Space for distilled history |
-| `SummarizerModel` | gemini-flash | Fast, cheap model for summarization |
+| Parameter           | Default       | Notes                                                               |
+| ------------------- | ------------- | ------------------------------------------------------------------- |
+| `RawBufferSize`     | 5-10 turns    | Balance: more = better context, fewer = more frequent summarization |
+| `RecentSummarySize` | 2-3 summaries | How many batch summaries before distillation                        |
+| `RawTokenBudget`    | 8K tokens     | Space for raw turns                                                 |
+| `L1TokenBudget`     | 6K tokens     | Space for recent summaries                                          |
+| `L2TokenBudget`     | 4K tokens     | Space for distilled history                                         |
+| `SummarizerModel`   | gemini-flash  | Fast, cheap model for summarization                                 |
 
 These values should be tuned based on:
 
@@ -608,11 +622,11 @@ func (a *DspyActor) buildContext(ctx context.Context, msg *mailbox.Message) *LLM
 
 ## Storage Integration
 
-| Store | Role in Progressive Memory |
-|-------|---------------------------|
-| `sessions.db` | Archive for raw turns after summarization |
-| `memory.db` | Long-term learnings extracted during distillation |
-| Embeddings | Enable semantic retrieval of archived content |
+| Store         | Role in Progressive Memory                        |
+| ------------- | ------------------------------------------------- |
+| `sessions.db` | Archive for raw turns after summarization         |
+| `memory.db`   | Long-term learnings extracted during distillation |
+| Embeddings    | Enable semantic retrieval of archived content     |
 
 When summarizing, the system can optionally:
 
@@ -676,7 +690,8 @@ These questions have been resolved:
 
 - Task completion triggers final summarization
 - Session summary persisted to `sessions.db`
-- Next task starts with clean L0, but can retrieve past summaries via semantic search
+- Next task starts with clean L0, but can retrieve past summaries via semantic
+  search
 - L2 carries forward if continuing same session
 
 ### 4. Multi-model
@@ -698,7 +713,8 @@ These questions have been resolved:
 ## Future Considerations
 
 - **Adaptive thresholds**: Auto-tune buffer sizes based on task complexity
-- **Semantic deduplication**: Detect and merge redundant information across summaries
+- **Semantic deduplication**: Detect and merge redundant information across
+  summaries
 - **Multi-modal memory**: Handle image/audio content in turns
 - **Cross-session learning**: Extract patterns that apply across sessions
 
