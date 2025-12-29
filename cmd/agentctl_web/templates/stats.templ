@@ -2,8 +2,8 @@ package templates
 
 import "fmt"
 
-templ Stats(stats *JobStats) {
-	@Layout("Stats", "/stats") {
+templ Stats(stats *JobStats, workspace string, workspaces []Workspace) {
+	@Layout("Stats", "/stats", workspace, workspaces) {
 		@StatsContent(stats)
 	}
 }

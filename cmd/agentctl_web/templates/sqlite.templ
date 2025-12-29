@@ -2,8 +2,8 @@ package templates
 
 import "fmt"
 
-templ SQLiteBrowser(databases []SQLiteDatabase) {
-	@Layout("SQLite", "/sqlite") {
+templ SQLiteBrowser(databases []SQLiteDatabase, workspace string, workspaces []Workspace) {
+	@Layout("SQLite", "/sqlite", workspace, workspaces) {
 		<div class="page-header">
 			<h1 class="page-title">SQLite Browser</h1>
 			<span class="text-muted">Databases in ~/.agentctl</span>
@@ -45,8 +45,8 @@ templ SQLiteDatabaseList(databases []SQLiteDatabase) {
 	}
 }
 
-templ SQLiteTables(tables []SQLiteTable, dbName string) {
-	@Layout("SQLite - " + dbName, "/sqlite") {
+templ SQLiteTables(tables []SQLiteTable, dbName string, workspace string, workspaces []Workspace) {
+	@Layout("SQLite - " + dbName, "/sqlite", workspace, workspaces) {
 		<div class="breadcrumb">
 			<a href="/sqlite" hx-boost="true">SQLite</a>
 			<span>/</span>
@@ -98,8 +98,8 @@ templ SQLiteTableList(tables []SQLiteTable, dbName string) {
 	}
 }
 
-templ SQLiteData(columns []string, rows []map[string]any, dbName, tableName string, rowCount int) {
-	@Layout("SQLite - " + tableName, "/sqlite") {
+templ SQLiteData(columns []string, rows []map[string]any, dbName, tableName string, rowCount int, workspace string, workspaces []Workspace) {
+	@Layout("SQLite - " + tableName, "/sqlite", workspace, workspaces) {
 		<div class="breadcrumb">
 			<a href="/sqlite" hx-boost="true">SQLite</a>
 			<span>/</span>

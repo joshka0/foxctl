@@ -1,0 +1,35 @@
+# Pod Disruption Budgets for high availability
+
+---
+# Core agentctl deployment
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentctl
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: core
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/component: core
+
+---
+# Embedding workers (allow all to be disrupted since work is queued)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentctl-embedding-worker
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: embedding-worker
+spec:
+  maxUnavailable: "50%"
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentctl
+      app.kubernetes.io/component: embedding-worker

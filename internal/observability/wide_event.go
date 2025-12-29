@@ -27,9 +27,9 @@ type WideEvent struct {
 	Component string `json:"component"` // "cli", "web", "hook", "skill"
 
 	// Operation context
-	Operation string `json:"operation"`          // "skill.run", "hook.execute", etc.
-	Command   string `json:"command,omitempty"`  // Skill/hook/command name
-	Subtype   string `json:"subtype,omitempty"`  // Additional classification
+	Operation string `json:"operation"`         // "skill.run", "hook.execute", etc.
+	Command   string `json:"command,omitempty"` // Skill/hook/command name
+	Subtype   string `json:"subtype,omitempty"` // Additional classification
 
 	// Business context
 	SessionID   string `json:"session_id,omitempty"`   // AGENTCTL_SESSION_ID

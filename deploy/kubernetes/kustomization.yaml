@@ -1,0 +1,51 @@
+# Kustomization for agentctl Kubernetes deployment
+# Usage: kubectl apply -k deploy/kubernetes/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agentctl
+
+# Common labels applied to all resources
+commonLabels:
+  app.kubernetes.io/part-of: agentctl
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+# Core infrastructure
+- namespace.yaml
+- secrets.yaml
+- rbac.yaml
+- configmap.yaml
+
+# Deployments
+- deployment.yaml
+- embedding-worker.yaml
+
+# Scaling and availability
+- hpa.yaml
+- pdb.yaml
+
+# Maintenance jobs
+- cronjobs.yaml
+
+# Security
+- network-policy.yaml
+
+# Optional: Workspace deployment with git-sync
+# Uncomment and customize for your repository
+# - workspace-deployment.yaml
+
+# Image configuration
+# Uncomment and set your container registry
+# images:
+# - name: agentctl
+#   newName: your-registry.io/agentctl
+#   newTag: v1.0.0
+
+# Patches for environment-specific configuration
+# patches:
+# - path: patches/production.yaml
+#   target:
+#     kind: Deployment
+#     name: agentctl

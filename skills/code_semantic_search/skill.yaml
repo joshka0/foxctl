@@ -44,6 +44,21 @@ signature:
       required: false
       default: true
       description: Include context hints from session matches
+    - name: rerank_enabled
+      type: boolean
+      required: false
+      default: false
+      description: Enable Voyage rerank-2.5 for improved relevance (requires VOYAGE_API_KEY)
+    - name: rerank_top_k
+      type: integer
+      required: false
+      default: 50
+      description: Number of candidates to rerank
+    - name: rerank_model
+      type: string
+      required: false
+      default: rerank-2.5
+      description: Reranking model (rerank-2.5, rerank-2, rerank-lite-1)
   returns:
     - name: query
       type: string

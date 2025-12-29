@@ -2,7 +2,88 @@ package semantic
 
 import (
 	"context"
+	"sync"
 )
+
+// EmbeddingScope identifies the type of content being embedded.
+// Different scopes may use different embedding models optimized for that content type.
+type EmbeddingScope string
+
+const (
+	// ScopeSymbols is for code symbols (functions, classes, variables).
+	// Best model: voyage-code-3 (optimized for code retrieval).
+	ScopeSymbols EmbeddingScope = "symbols"
+
+	// ScopeMemory is for memories, gotchas, and learnings.
+	// Best model: voyage-3-large (highest quality text retrieval).
+	ScopeMemory EmbeddingScope = "memory"
+
+	// ScopeTasks is for task descriptions and notes.
+	// Best model: voyage-3.5 (good quality at lower cost).
+	ScopeTasks EmbeddingScope = "tasks"
+
+	// ScopeSessions is for session summaries and context.
+	// Best model: voyage-3.5 (good quality at lower cost).
+	ScopeSessions EmbeddingScope = "sessions"
+
+	// ScopeDefault is the fallback scope for unspecified content.
+	ScopeDefault EmbeddingScope = "default"
+)
+
+// ScopeModelRecommendation returns the recommended Voyage model for a scope.
+// Returns (model, isCodeModel) where isCodeModel indicates if voyage-code-3 should be used.
+//
+// Recommendations based on benchmarks (Dec 2024):
+// - voyage-code-3: 13.80% better than OpenAI-v3-large on code retrieval
+// - voyage-3-large: Best text retrieval (nDCG@10: 0.837), $0.18/1M tokens
+// - voyage-3.5: Good text retrieval (nDCG@10: 0.816), $0.06/1M tokens (3x cheaper)
+func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel bool) {
+	switch scope {
+	case ScopeSymbols:
+		return "voyage-code-3", true
+	case ScopeMemory:
+		return "voyage-3-large", false
+	case ScopeTasks, ScopeSessions:
+		return "voyage-3.5", false
+	default:
+		return "voyage-3.5", false
+	}
+}
+
+// ScopeInputType returns the appropriate Voyage input_type for a scope.
+// Using input_type improves retrieval quality by adding scope-specific prompts.
+func ScopeInputType(scope EmbeddingScope, isQuery bool) string {
+	if isQuery {
+		return "query"
+	}
+	return "document"
+}
+
+// ScopePricePerMillionTokens returns the price per million tokens for a scope.
+// Useful for cost estimation before making API calls.
+func ScopePricePerMillionTokens(scope EmbeddingScope) float64 {
+	model, _ := ScopeModelRecommendation(scope)
+	switch model {
+	case "voyage-code-3", "voyage-3-large":
+		return 0.18
+	case "voyage-3.5":
+		return 0.06
+	case "voyage-3.5-lite":
+		return 0.02
+	default:
+		return 0.06 // Default to voyage-3.5 pricing
+	}
+}
+
+// AllScopes returns all defined embedding scopes.
+func AllScopes() []EmbeddingScope {
+	return []EmbeddingScope{
+		ScopeSymbols,
+		ScopeMemory,
+		ScopeTasks,
+		ScopeSessions,
+	}
+}
 
 // EmbeddingProvider generates embeddings for text content.
 // Implementations may call external APIs, use WASI skills, or local models.
@@ -20,6 +101,108 @@ type EmbeddingProvider interface {
 
 	// Dimensions returns the embedding vector dimension.
 	Dimensions() int
+}
+
+// UsageTrackingProvider extends EmbeddingProvider with usage statistics.
+// Providers that track API usage should implement this interface.
+type UsageTrackingProvider interface {
+	EmbeddingProvider
+
+	// Usage returns cumulative usage statistics since provider creation.
+	Usage() EmbeddingUsage
+
+	// ResetUsage resets the usage counters to zero.
+	ResetUsage()
+}
+
+// EmbeddingUsage tracks API usage for embedding providers.
+type EmbeddingUsage struct {
+	// Provider identifies the embedding provider (e.g., "gemini", "voyage").
+	Provider string `json:"provider"`
+
+	// Model is the specific model used (e.g., "gemini-embedding-001").
+	Model string `json:"model"`
+
+	// Requests is the number of API requests made.
+	Requests int64 `json:"requests"`
+
+	// TokensEstimated is the estimated input token count.
+	// For providers that don't return token counts (like Gemini),
+	// this is estimated at ~4 characters per token.
+	TokensEstimated int64 `json:"tokens_estimated"`
+
+	// TokensActual is the actual token count returned by the API.
+	// Only populated for providers that return this info (like Voyage).
+	TokensActual int64 `json:"tokens_actual,omitempty"`
+
+	// TextsProcessed is the number of individual texts embedded.
+	TextsProcessed int64 `json:"texts_processed"`
+
+	// CostUSD is the estimated cost in USD.
+	// Based on provider pricing (Gemini is currently free).
+	CostUSD float64 `json:"cost_usd"`
+}
+
+// Add adds another usage record to this one (for aggregation).
+func (u *EmbeddingUsage) Add(other EmbeddingUsage) {
+	u.Requests += other.Requests
+	u.TokensEstimated += other.TokensEstimated
+	u.TokensActual += other.TokensActual
+	u.TextsProcessed += other.TextsProcessed
+	u.CostUSD += other.CostUSD
+}
+
+// usageTracker provides thread-safe usage tracking for providers.
+type usageTracker struct {
+	mu    sync.Mutex
+	usage EmbeddingUsage
+}
+
+func newUsageTracker(provider, model string) *usageTracker {
+	return &usageTracker{
+		usage: EmbeddingUsage{
+			Provider: provider,
+			Model:    model,
+		},
+	}
+}
+
+func (t *usageTracker) record(requests, textsProcessed int, estimatedTokens, actualTokens int64, costUSD float64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.usage.Requests += int64(requests)
+	t.usage.TextsProcessed += int64(textsProcessed)
+	t.usage.TokensEstimated += estimatedTokens
+	t.usage.TokensActual += actualTokens
+	t.usage.CostUSD += costUSD
+}
+
+func (t *usageTracker) get() EmbeddingUsage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.usage
+}
+
+func (t *usageTracker) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	provider := t.usage.Provider
+	model := t.usage.Model
+	t.usage = EmbeddingUsage{
+		Provider: provider,
+		Model:    model,
+	}
+}
+
+// estimateTokens estimates token count from text.
+// Uses ~4 characters per token as a rough approximation for English text.
+func estimateTokens(texts []string) int64 {
+	var totalChars int64
+	for _, text := range texts {
+		totalChars += int64(len(text))
+	}
+	// ~4 characters per token is a common approximation
+	return (totalChars + 3) / 4
 }
 
 // NoOpProvider is a stub provider that returns empty embeddings.

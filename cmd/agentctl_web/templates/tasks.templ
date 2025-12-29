@@ -2,8 +2,8 @@ package templates
 
 import "fmt"
 
-templ TasksList(tasks []TaskSummary, stats TaskStats) {
-	@Layout("Tasks", "/tasks") {
+templ TasksList(tasks []TaskSummary, stats TaskStats, workspace string, workspaces []Workspace) {
+	@Layout("Tasks", "/tasks", workspace, workspaces) {
 		<div class="page-header">
 			<h1 class="page-title">Tasks</h1>
 		</div>

@@ -1,0 +1,69 @@
+# Horizontal Pod Autoscaler for agentctl
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agentctl
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: autoscaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: agentctl
+
+  minReplicas: 2
+  maxReplicas: 10
+
+  metrics:
+  # Scale based on CPU utilization
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+  # Scale based on memory utilization
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+  # Custom metric: mailbox depth (requires metrics adapter)
+  # - type: External
+  #   external:
+  #     metric:
+  #       name: agentctl_mailbox_depth
+  #     target:
+  #       type: AverageValue
+  #       averageValue: 100
+
+  behavior:
+    # Conservative scale down to avoid thrashing
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+      selectPolicy: Min
+
+    # Aggressive scale up to handle load spikes
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 4
+        periodSeconds: 15
+      selectPolicy: Max

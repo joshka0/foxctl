@@ -207,23 +207,26 @@ func listTables(dbPath string) ([]SQLiteTableInfo, error) {
 	}
 	defer rows.Close()
 
-	var tables []SQLiteTableInfo
+	// Collect table names first (can't run nested queries on same connection)
+	var tableNames []string
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			continue
 		}
+		tableNames = append(tableNames, name)
+	}
+	rows.Close() // Close before running row count queries
 
-		// Use approximate row count from sqlite_stat1 if available,
-		// otherwise use a quick estimate based on page count
+	// Now get row counts
+	var tables []SQLiteTableInfo
+	for _, name := range tableNames {
 		var count int64 = -1
-
-		// Try quick MAX(rowid) estimate first (instant for most tables)
+		// Try quick MAX(rowid) estimate (instant for most tables)
 		err := db.QueryRow(fmt.Sprintf("SELECT MAX(rowid) FROM %q", name)).Scan(&count)
 		if err != nil {
-			count = 0 // Assume empty or no rowid
+			count = 0
 		}
-
 		tables = append(tables, SQLiteTableInfo{
 			Name:     name,
 			RowCount: count,

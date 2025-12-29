@@ -8,13 +8,40 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/oklog/ulid/v2"
+)
+
+// Voyage embedding pricing (per 1M tokens, as of Dec 2024)
+// See: https://docs.voyageai.com/docs/pricing
+const (
+	// Voyage3LargePricePerMillionTokens is the price for voyage-3-large model.
+	// Best for high-quality text retrieval (nDCG@10: 0.837).
+	Voyage3LargePricePerMillionTokens = 0.18
+
+	// VoyageCode3PricePerMillionTokens is the price for voyage-code-3 model.
+	// Best for code retrieval (13.80% better than OpenAI-v3-large).
+	VoyageCode3PricePerMillionTokens = 0.18
+
+	// Voyage35PricePerMillionTokens is the price for voyage-3.5 model.
+	// Good balance of quality (nDCG@10: 0.816) and cost.
+	Voyage35PricePerMillionTokens = 0.06
+
+	// Voyage35LitePricePerMillionTokens is the price for voyage-3.5-lite model.
+	// Budget option for text embeddings.
+	Voyage35LitePricePerMillionTokens = 0.02
 )
 
 // VoyageProvider implements EmbeddingProvider using Voyage AI's API.
 // It supports code-optimized embeddings with voyage-code-3 model.
 // See: https://docs.voyageai.com/docs/embeddings
+//
+// VoyageProvider also implements UsageTrackingProvider for cost monitoring.
+// Pricing: voyage-code-3 = $0.18/1M tokens (200M free), voyage-3.5 = $0.06/1M, voyage-3.5-lite = $0.02/1M.
 type VoyageProvider struct {
 	apiKey     string
 	model      string
@@ -28,6 +55,9 @@ type VoyageProvider struct {
 	rateLimit     int           // Max requests per window (default: 3)
 	rateWindow    time.Duration // Window duration (default: 62s)
 	rateLimitWait bool          // Whether to wait or error on rate limit
+
+	// Usage tracking
+	tracker *usageTracker
 }
 
 // VoyageConfig holds configuration for the Voyage AI embedding provider.
@@ -116,6 +146,7 @@ func NewVoyageProvider(cfg VoyageConfig) (*VoyageProvider, error) {
 		rateLimit:     rateLimit,
 		rateWindow:    rateWindow,
 		rateLimitWait: rateLimitWait,
+		tracker:       newUsageTracker("voyage", model),
 	}, nil
 }
 
@@ -185,6 +216,7 @@ func (p *VoyageProvider) waitForRateLimit(ctx context.Context) error {
 		}
 
 		// Wait for the duration or context cancellation
+		fmt.Fprintf(os.Stderr, "Rate limited (3 RPM), waiting %v...\n", waitDuration.Round(time.Second))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -244,6 +276,10 @@ func (p *VoyageProvider) embedBatchInternal(ctx context.Context, texts []string)
 func (p *VoyageProvider) doEmbedRequest(ctx context.Context, texts []string, inputType string) ([][]float32, error) {
 	const maxRetries = 5
 
+	start := time.Now()
+	textsCount := len(texts)
+	estimatedTokens := estimateTokens(texts)
+
 	url := fmt.Sprintf("%s/embeddings", p.baseURL)
 	reqBody := voyageEmbedRequest{
 		Input:     texts,
@@ -253,6 +289,7 @@ func (p *VoyageProvider) doEmbedRequest(ctx context.Context, texts []string, inp
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
 		return nil, fmt.Errorf("voyage: marshal request: %w", err)
 	}
 
@@ -260,11 +297,13 @@ func (p *VoyageProvider) doEmbedRequest(ctx context.Context, texts []string, inp
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		// Wait for rate limit slot (blocks if at capacity)
 		if err := p.waitForRateLimit(ctx); err != nil {
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
 			return nil, err
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 		if err != nil {
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
 			return nil, fmt.Errorf("voyage: create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -272,12 +311,14 @@ func (p *VoyageProvider) doEmbedRequest(ctx context.Context, texts []string, inp
 
 		resp, err := p.httpClient.Do(req)
 		if err != nil {
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
 			return nil, fmt.Errorf("voyage: request failed: %w", err)
 		}
 
 		respBody, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
 			return nil, fmt.Errorf("voyage: read response: %w", err)
 		}
 
@@ -295,43 +336,61 @@ func (p *VoyageProvider) doEmbedRequest(ctx context.Context, texts []string, inp
 				waitTime := p.rateWindow + time.Duration(attempt)*10*time.Second
 				select {
 				case <-ctx.Done():
+					p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusCanceled, ctx.Err())
 					return nil, ctx.Err()
 				case <-time.After(waitTime):
 					continue
 				}
 			}
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, lastErr)
 			return nil, lastErr
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			var errResp voyageErrorResponse
 			if json.Unmarshal(respBody, &errResp) == nil && errResp.Detail != "" {
-				return nil, fmt.Errorf("voyage: API error %d: %s", resp.StatusCode, errResp.Detail)
+				err := fmt.Errorf("voyage: API error %d: %s", resp.StatusCode, errResp.Detail)
+				p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+				return nil, err
 			}
-			return nil, fmt.Errorf("voyage: API returned status %d: %s", resp.StatusCode, string(respBody))
+			err := fmt.Errorf("voyage: API returned status %d: %s", resp.StatusCode, string(respBody))
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+			return nil, err
 		}
 
 		var embedResp voyageEmbedResponse
 		if err := json.Unmarshal(respBody, &embedResp); err != nil {
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
 			return nil, fmt.Errorf("voyage: unmarshal response: %w", err)
 		}
 
 		if len(embedResp.Data) != len(texts) {
-			return nil, fmt.Errorf("voyage: expected %d embeddings, got %d", len(texts), len(embedResp.Data))
+			err := fmt.Errorf("voyage: expected %d embeddings, got %d", len(texts), len(embedResp.Data))
+			p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+			return nil, err
 		}
 
 		// Sort by index to maintain order (API returns in order but let's be safe)
 		result := make([][]float32, len(texts))
 		for _, emb := range embedResp.Data {
 			if emb.Index < 0 || emb.Index >= len(texts) {
-				return nil, fmt.Errorf("voyage: invalid embedding index %d", emb.Index)
+				err := fmt.Errorf("voyage: invalid embedding index %d", emb.Index)
+				p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, err)
+				return nil, err
 			}
 			result[emb.Index] = emb.Embedding
 		}
 
+		// Track successful usage with actual token count from API
+		actualTokens := int64(embedResp.Usage.TotalTokens)
+		costUSD := float64(actualTokens) * p.pricePerToken()
+		p.tracker.record(1, textsCount, estimatedTokens, actualTokens, costUSD)
+		p.emitEvent(ctx, start, textsCount, estimatedTokens, actualTokens, observability.StatusOK, nil)
+
 		return result, nil
 	}
 
+	p.emitEvent(ctx, start, textsCount, estimatedTokens, 0, observability.StatusError, lastErr)
 	return nil, lastErr
 }
 
@@ -356,4 +415,69 @@ func (p *VoyageProvider) Model() string {
 // Dimensions returns the embedding vector dimension.
 func (p *VoyageProvider) Dimensions() int {
 	return p.dimensions
+}
+
+// Usage returns cumulative usage statistics since provider creation.
+func (p *VoyageProvider) Usage() EmbeddingUsage {
+	return p.tracker.get()
+}
+
+// ResetUsage resets the usage counters to zero.
+func (p *VoyageProvider) ResetUsage() {
+	p.tracker.reset()
+}
+
+// pricePerToken returns the price per token based on the model.
+func (p *VoyageProvider) pricePerToken() float64 {
+	switch {
+	case strings.Contains(p.model, "3.5-lite"):
+		return Voyage35LitePricePerMillionTokens / 1_000_000
+	case strings.Contains(p.model, "3.5"):
+		return Voyage35PricePerMillionTokens / 1_000_000
+	case strings.Contains(p.model, "3-large"):
+		return Voyage3LargePricePerMillionTokens / 1_000_000
+	case strings.Contains(p.model, "code-3"):
+		return VoyageCode3PricePerMillionTokens / 1_000_000
+	default:
+		// Default to voyage-3.5 pricing for unknown models
+		return Voyage35PricePerMillionTokens / 1_000_000
+	}
+}
+
+// emitEvent emits a wide event for observability.
+func (p *VoyageProvider) emitEvent(ctx context.Context, start time.Time, textsCount int, estimatedTokens, actualTokens int64, status observability.Status, err error) {
+	durationMS := time.Since(start).Milliseconds()
+
+	costUSD := 0.0
+	if actualTokens > 0 {
+		costUSD = float64(actualTokens) * p.pricePerToken()
+	}
+
+	event := &observability.WideEvent{
+		Ts:         time.Now().UTC(),
+		TraceID:    observability.TraceIDFromContext(ctx),
+		SpanID:     ulid.Make().String(),
+		Service:    "agentctl",
+		Component:  observability.ComponentSkill,
+		Operation:  "embedding.generate",
+		Command:    "voyage",
+		Subtype:    p.model,
+		Status:     status,
+		DurationMS: durationMS,
+		Data: map[string]any{
+			"provider":         "voyage",
+			"model":            p.model,
+			"texts_count":      textsCount,
+			"tokens_estimated": estimatedTokens,
+			"tokens_actual":    actualTokens,
+			"dimensions":       p.dimensions,
+			"cost_usd":         costUSD,
+		},
+	}
+
+	if err != nil {
+		event.ErrorMessage = err.Error()
+	}
+
+	observability.Emit(ctx, event)
 }

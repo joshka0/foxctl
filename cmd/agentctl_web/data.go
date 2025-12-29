@@ -33,7 +33,7 @@ func getJobsRoot() (string, error) {
 	return filepath.Join(home, ".agentctl", "jobs"), nil
 }
 
-// GetJobs fetches job summaries
+// GetJobs fetches job summaries, filtered by workspace if set
 func (d *DataService) GetJobs(state string, limit int) ([]templates.JobSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -49,13 +49,27 @@ func (d *DataService) GetJobs(state string, limit int) ([]templates.JobSummary, 
 	}
 	defer store.Close()
 
-	jobs, err := store.List(ctx, limit)
+	// Fetch more jobs than limit to account for filtering
+	fetchLimit := limit
+	if d.workspace != "" {
+		fetchLimit = limit * 5 // Fetch more to filter
+	}
+
+	jobs, err := store.List(ctx, fetchLimit)
 	if err != nil {
 		return nil, err
 	}
 
 	var result []templates.JobSummary
 	for _, j := range jobs {
+		// Filter by workspace if set
+		if d.workspace != "" {
+			jobWorkspace := d.getJobWorkspace(jobsRoot, j.ID)
+			if jobWorkspace != "" && jobWorkspace != d.workspace {
+				continue
+			}
+		}
+
 		summary := templates.JobSummary{
 			ID:        j.ID,
 			Command:   j.Command,
@@ -73,9 +87,23 @@ func (d *DataService) GetJobs(state string, limit int) ([]templates.JobSummary, 
 		}
 
 		result = append(result, summary)
+
+		// Stop if we have enough
+		if len(result) >= limit {
+			break
+		}
 	}
 
 	return result, nil
+}
+
+// getJobWorkspace reads the workspace file for a job
+func (d *DataService) getJobWorkspace(jobsRoot, jobID string) string {
+	data, err := os.ReadFile(filepath.Join(jobsRoot, jobID, "workspace"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // GetJobDetail fetches full job details
@@ -167,10 +195,17 @@ func (d *DataService) GetTasks(limit int) ([]templates.TaskSummary, error) {
 		limit = 100
 	}
 
-	output, err := d.runAgentctl("todo/manage", map[string]any{
+	input := map[string]any{
 		"action": "list",
 		"limit":  limit,
-	})
+	}
+
+	// Add workspace filter if set
+	if d.workspace != "" {
+		input["workspace"] = d.workspace
+	}
+
+	output, err := d.runAgentctl("todo/manage", input)
 	if err != nil {
 		return []templates.TaskSummary{}, nil // Return empty on error
 	}
@@ -418,6 +453,164 @@ func (d *DataService) GetSQLiteSchema(dbName, tableName string) (string, error) 
 	}
 
 	return getTableSchema(dbPath, tableName)
+}
+
+// GetSearch runs semantic search with optional reranking
+func (d *DataService) GetSearch(query string, limit int, rerank bool, scopes []string) ([]templates.SearchResult, *templates.SearchStats, error) {
+	if query == "" {
+		return []templates.SearchResult{}, &templates.SearchStats{}, nil
+	}
+
+	if len(scopes) == 0 {
+		scopes = []string{"symbols", "sessions", "memories", "tasks"}
+	}
+
+	input := map[string]any{
+		"query":          query,
+		"scope":          scopes,
+		"limit":          limit,
+		"summarize":      false,
+		"rerank_enabled": rerank,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", string(inputJSON))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, nil, fmt.Errorf("search timed out")
+		}
+		return nil, nil, fmt.Errorf("search failed: %w: %s", err, string(output))
+	}
+
+	var envelope struct {
+		Status string `json:"status"`
+		Data   struct {
+			Query   string `json:"query"`
+			Results []struct {
+				Source      string  `json:"source"`
+				ID          string  `json:"id"`
+				Name        string  `json:"name"`
+				Path        string  `json:"path"`
+				Similarity  float64 `json:"similarity"`
+				RerankScore float64 `json:"rerank_score"`
+				FinalScore  float64 `json:"final_score"`
+				Rank        int     `json:"rank"`
+				SourceRank  int     `json:"source_rank"`
+			} `json:"results"`
+			Stats struct {
+				TotalResults    int            `json:"total_results"`
+				SourceCounts    map[string]int `json:"source_counts"`
+				EmbeddingDims   int            `json:"embedding_dimensions"`
+				SourceLatencies map[string]int `json:"source_latencies_ms"`
+			} `json:"stats"`
+		} `json:"data"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(output, &envelope); err != nil {
+		return nil, nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	if envelope.Status == "error" && envelope.Error.Message != "" {
+		return nil, nil, fmt.Errorf("search error: %s", envelope.Error.Message)
+	}
+
+	results := make([]templates.SearchResult, 0, len(envelope.Data.Results))
+	for _, r := range envelope.Data.Results {
+		results = append(results, templates.SearchResult{
+			Source:      r.Source,
+			ID:          r.ID,
+			Name:        r.Name,
+			Path:        r.Path,
+			Similarity:  r.Similarity,
+			RerankScore: r.RerankScore,
+			FinalScore:  r.FinalScore,
+			Rank:        r.Rank,
+			SourceRank:  r.SourceRank,
+		})
+	}
+
+	// Calculate total latency
+	var totalLatency int64
+	for _, lat := range envelope.Data.Stats.SourceLatencies {
+		totalLatency += int64(lat)
+	}
+
+	stats := &templates.SearchStats{
+		TotalResults:  envelope.Data.Stats.TotalResults,
+		SourceCounts:  envelope.Data.Stats.SourceCounts,
+		Reranked:      rerank,
+		EmbeddingDims: envelope.Data.Stats.EmbeddingDims,
+		LatencyMS:     totalLatency,
+	}
+
+	return results, stats, nil
+}
+
+// GetWorkspaces discovers known workspaces from sessions database
+func (d *DataService) GetWorkspaces() ([]templates.Workspace, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	dbPath := filepath.Join(home, ".agentctl", "storage", "sessions.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return []templates.Workspace{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Query distinct workspaces with session counts and last used
+	query := `
+		SELECT
+			workspace_path,
+			COUNT(*) as session_count,
+			MAX(started_at) as last_used
+		FROM sessions
+		WHERE workspace_path != '' AND workspace_path NOT LIKE '/tmp/%'
+		GROUP BY workspace_path
+		ORDER BY last_used DESC
+		LIMIT 20
+	`
+
+	cmd := exec.CommandContext(ctx, "sqlite3", "-json", dbPath, query)
+	output, err := cmd.Output()
+	if err != nil {
+		return []templates.Workspace{}, nil
+	}
+
+	var rows []struct {
+		WorkspacePath string `json:"workspace_path"`
+		SessionCount  int    `json:"session_count"`
+		LastUsed      string `json:"last_used"`
+	}
+	if err := json.Unmarshal(output, &rows); err != nil {
+		return []templates.Workspace{}, nil
+	}
+
+	workspaces := make([]templates.Workspace, 0, len(rows))
+	for _, row := range rows {
+		workspaces = append(workspaces, templates.Workspace{
+			Path:         row.WorkspacePath,
+			Name:         filepath.Base(row.WorkspacePath),
+			SessionCount: row.SessionCount,
+			LastUsed:     row.LastUsed,
+		})
+	}
+
+	return workspaces, nil
 }
 
 // runAgentctl executes an agentctl skill and returns the output

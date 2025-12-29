@@ -125,3 +125,6 @@ pr*.txt
 # Claude Code local settings
 .claude/settings.local.json.env
 .opencode
+.opencode/
+.opencode/*
+.opencode/**

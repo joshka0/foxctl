@@ -2,8 +2,8 @@ package templates
 
 import "fmt"
 
-templ Insights(data *InsightsData) {
-	@Layout("Insights", "/insights") {
+templ Insights(data *InsightsData, workspace string, workspaces []Workspace) {
+	@Layout("Insights", "/insights", workspace, workspaces) {
 		@InsightsContent(data)
 	}
 }

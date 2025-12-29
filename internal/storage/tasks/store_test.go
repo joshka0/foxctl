@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -455,6 +456,49 @@ func TestStore_PlanFields(t *testing.T) {
 	}
 	if updated.PlanSection != "Phase 1 > Step 1.2" {
 		t.Errorf("expected plan_section %q, got %q", "Phase 1 > Step 1.2", updated.PlanSection)
+	}
+}
+
+func TestStore_SetEmbedding(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	task, err := store.Add(ctx, Task{
+		WorkspaceID: "ws-1",
+		Title:       "Embeddable Task",
+	})
+	if err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	embedding := []byte{0x01, 0x02, 0x03}
+	model := "voyage-code-3"
+
+	if err := store.SetEmbedding(ctx, task.ID, embedding, model); err != nil {
+		t.Fatalf("SetEmbedding failed: %v", err)
+	}
+
+	sqlStore, ok := store.(*sqlStore)
+	if !ok {
+		t.Fatalf("expected *sqlStore, got %T", store)
+	}
+
+	var storedEmbedding []byte
+	var storedModel string
+	row := sqlStore.db.QueryRowContext(ctx, `SELECT embedding, embedding_model FROM tasks WHERE id = ?`, task.ID)
+	if err := row.Scan(&storedEmbedding, &storedModel); err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	if !bytes.Equal(storedEmbedding, embedding) {
+		t.Fatalf("embedding mismatch: got %v want %v", storedEmbedding, embedding)
+	}
+	if storedModel != model {
+		t.Fatalf("model mismatch: got %q want %q", storedModel, model)
+	}
+
+	if err := store.SetEmbedding(ctx, "missing-id", embedding, model); err == nil {
+		t.Fatal("expected error for missing task ID, got nil")
 	}
 }
 

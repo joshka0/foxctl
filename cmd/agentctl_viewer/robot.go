@@ -749,3 +749,116 @@ func handleRobotSQLite(dbName, tableName string, limit int) {
 		"rows":    rowList,
 	}, meta))
 }
+
+func handleRobotSearch(workspace, query string, limit int, rerank bool, scopes []string) {
+	workspace = getWorkspace(workspace)
+
+	if query == "" {
+		writeJSON(newErrorEnvelope("viewer/search", "INVALID_QUERY", "search query is required"))
+		os.Exit(1)
+	}
+
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(scopes) == 0 {
+		scopes = []string{"symbols", "sessions", "memories", "tasks"}
+	}
+
+	input := searchInput{
+		Query:         query,
+		Scope:         scopes,
+		Limit:         limit,
+		Summarize:     false,
+		RerankEnabled: rerank,
+	}
+
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		writeJSON(newErrorEnvelope("viewer/search", "MARSHAL_ERROR", err.Error()))
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", string(inputJSON))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			writeJSON(newErrorEnvelope("viewer/search", "TIMEOUT_ERROR", "search timed out"))
+			os.Exit(1)
+		}
+		writeJSON(newErrorEnvelope("viewer/search", "SKILL_ERROR", fmt.Sprintf("%v: %s", err, string(output))))
+		os.Exit(1)
+	}
+
+	var envelope struct {
+		Status string `json:"status"`
+		Data   struct {
+			Query   string `json:"query"`
+			Results []struct {
+				Source      string  `json:"source"`
+				ID          string  `json:"id"`
+				Name        string  `json:"name"`
+				Path        string  `json:"path"`
+				Similarity  float64 `json:"similarity"`
+				RerankScore float64 `json:"rerank_score"`
+				FinalScore  float64 `json:"final_score"`
+				Rank        int     `json:"rank"`
+				SourceRank  int     `json:"source_rank"`
+			} `json:"results"`
+			Stats struct {
+				TotalResults    int            `json:"total_results"`
+				SourceCounts    map[string]int `json:"source_counts"`
+				EmbeddingDims   int            `json:"embedding_dimensions"`
+				SourceLatencies map[string]int `json:"source_latencies_ms"`
+			} `json:"stats"`
+		} `json:"data"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(output, &envelope); err != nil {
+		writeJSON(newErrorEnvelope("viewer/search", "PARSE_ERROR", fmt.Sprintf("failed to parse search response: %v", err)))
+		os.Exit(1)
+	}
+
+	if envelope.Status == "error" && envelope.Error.Message != "" {
+		writeJSON(newErrorEnvelope("viewer/search", "SEARCH_ERROR", envelope.Error.Message))
+		os.Exit(1)
+	}
+
+	// Convert to our result format
+	results := make([]searchResult, 0, len(envelope.Data.Results))
+	for _, r := range envelope.Data.Results {
+		results = append(results, searchResult{
+			Source:      r.Source,
+			ID:          r.ID,
+			Name:        r.Name,
+			Path:        r.Path,
+			Similarity:  r.Similarity,
+			RerankScore: r.RerankScore,
+			FinalScore:  r.FinalScore,
+			Rank:        r.Rank,
+			SourceRank:  r.SourceRank,
+		})
+	}
+
+	meta := map[string]any{
+		"workspace": workspace,
+		"query":     query,
+		"reranked":  rerank,
+		"scopes":    scopes,
+		"summary": map[string]any{
+			"total":            envelope.Data.Stats.TotalResults,
+			"source_counts":    envelope.Data.Stats.SourceCounts,
+			"embedding_dims":   envelope.Data.Stats.EmbeddingDims,
+			"source_latencies": envelope.Data.Stats.SourceLatencies,
+		},
+	}
+
+	writeJSON(newEnvelope("viewer/search", map[string]any{
+		"results": results,
+	}, meta))
+}

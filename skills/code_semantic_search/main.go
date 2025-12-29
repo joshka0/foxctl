@@ -25,6 +25,7 @@ import (
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/indexing/rerank"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -89,6 +90,11 @@ type Input struct {
 	IncludeContext *bool    `json:"include_context,omitempty"` // Include session context hints (default: true)
 	Summarize      bool     `json:"summarize,omitempty"`       // Send results to LLM for synthesis
 	SummarizeModel string   `json:"summarize_model,omitempty"` // Override default LLM model
+
+	// Reranking options (requires VOYAGE_API_KEY)
+	RerankEnabled bool   `json:"rerank_enabled,omitempty"` // Enable reranking (default: from env)
+	RerankTopK    int    `json:"rerank_top_k,omitempty"`   // Candidates to rerank (default: 50)
+	RerankModel   string `json:"rerank_model,omitempty"`   // Override model (default: rerank-2.5)
 }
 
 // Output is the JSON output.
@@ -112,19 +118,20 @@ type SynthesisSummary struct {
 
 // Result represents a single search result.
 type Result struct {
-	Source     string  `json:"source"`                // "symbol", "session", "memory"
-	ID         string  `json:"id"`                    // Unique identifier (normalized)
-	Name       string  `json:"name"`                  // Display name
-	Path       string  `json:"path,omitempty"`        // File path (for symbols)
-	Line       int     `json:"line,omitempty"`        // Line number (for symbols)
-	Snippet    string  `json:"snippet,omitempty"`     // Code snippet (for symbols)
-	Summary    string  `json:"summary,omitempty"`     // Summary text (for sessions/memories)
-	Similarity float64 `json:"similarity"`            // Similarity score (0-1)
-	Rank       int     `json:"rank"`                  // Final rank after fusion
-	RRFScore   float64 `json:"rrf_score,omitempty"`   // RRF score used for ranking
-	PageRank   float64 `json:"pagerank,omitempty"`    // PageRank authority score (0-1 normalized)
-	FinalScore float64 `json:"final_score,omitempty"` // Combined score with PageRank boost
-	SourceRank int     `json:"source_rank,omitempty"` // Rank within source
+	Source      string  `json:"source"`                 // "symbol", "session", "memory"
+	ID          string  `json:"id"`                     // Unique identifier (normalized)
+	Name        string  `json:"name"`                   // Display name
+	Path        string  `json:"path,omitempty"`         // File path (for symbols)
+	Line        int     `json:"line,omitempty"`         // Line number (for symbols)
+	Snippet     string  `json:"snippet,omitempty"`      // Code snippet (for symbols)
+	Summary     string  `json:"summary,omitempty"`      // Summary text (for sessions/memories)
+	Similarity  float64 `json:"similarity"`             // Similarity score (0-1)
+	Rank        int     `json:"rank"`                   // Final rank after fusion
+	RRFScore    float64 `json:"rrf_score,omitempty"`    // RRF score used for ranking
+	PageRank    float64 `json:"pagerank,omitempty"`     // PageRank authority score (0-1 normalized)
+	FinalScore  float64 `json:"final_score,omitempty"`  // Combined score with PageRank boost
+	RerankScore float64 `json:"rerank_score,omitempty"` // Reranker relevance score (0-1)
+	SourceRank  int     `json:"source_rank,omitempty"`  // Rank within source
 }
 
 // ContextHint represents a hint from related sessions.
@@ -144,6 +151,12 @@ type SearchStats struct {
 	SourcesMissing      []string       `json:"sources_missing,omitempty"`
 	EmbeddingDimensions int            `json:"embedding_dimensions,omitempty"`
 	Hint                string         `json:"hint,omitempty"` // Remediation hint
+
+	// Reranking stats (populated when reranking is enabled)
+	RerankEnabled   bool   `json:"rerank_enabled,omitempty"`
+	RerankModel     string `json:"rerank_model,omitempty"`
+	RerankLatencyMS int    `json:"rerank_latency_ms,omitempty"`
+	RerankCount     int    `json:"rerank_count,omitempty"` // Number of candidates reranked
 }
 
 func main() {
@@ -467,6 +480,15 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	// Apply PageRank boost from dependency graph
 	fusedResults = applyPageRankBoost(searchCtx, cfg, workspacePath, fusedResults)
 
+	// Apply reranking if enabled
+	fusedResults, rerankStats := applyReranking(searchCtx, *in, fusedResults)
+	if rerankStats.enabled {
+		out.Stats.RerankEnabled = true
+		out.Stats.RerankModel = rerankStats.model
+		out.Stats.RerankLatencyMS = rerankStats.latencyMS
+		out.Stats.RerankCount = rerankStats.count
+	}
+
 	// Limit results
 	if len(fusedResults) > in.Limit {
 		fusedResults = fusedResults[:in.Limit]
@@ -525,24 +547,25 @@ type sourceResults struct {
 //   - embedding.provider / EMBEDDING_PROVIDER (voyage, gemini)
 //   - embedding.model / EMBEDDING_MODEL
 //   - embedding.dimensions (optional informational)
-//   - GEMINI_API_KEY (required for Gemini - preferred for consistency with stored embeddings)
-//   - VOYAGE_API_KEY (required for Voyage)
+//   - VOYAGE_API_KEY (required for Voyage - preferred for code search)
+//   - GEMINI_API_KEY (required for Gemini)
 //
-// Provider priority: explicit config > GEMINI_API_KEY > VOYAGE_API_KEY
-// Dimensions: Gemini = 3072, Voyage = 1024
-// IMPORTANT: Stored embeddings use Gemini (3072-dim), so prefer Gemini to avoid dimension mismatch.
+// Provider priority: explicit config > VOYAGE_API_KEY > GEMINI_API_KEY
+// Dimensions: Voyage = 1024, Gemini = 3072
+// IMPORTANT: Query embeddings must match stored embeddings. Prefer Voyage for code search.
 func createEmbedProvider(cfg config.Config) (semantic.EmbeddingProvider, string) {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
 	// Determine provider: explicit env > auto-detect by API key > config default
+	// Priority: VOYAGE_API_KEY > GEMINI_API_KEY (matches semantic-index command)
 	providerName := os.Getenv("EMBEDDING_PROVIDER")
 	if providerName == "" {
-		// Auto-detect based on available API keys (prefer Gemini for consistency with stored embeddings)
-		if geminiKey != "" {
-			providerName = "gemini"
-		} else if voyageKey != "" {
+		// Auto-detect based on available API keys (prefer Voyage for code search)
+		if voyageKey != "" {
 			providerName = "voyage"
+		} else if geminiKey != "" {
+			providerName = "gemini"
 		} else if cfg.Embedding.Provider != "" {
 			providerName = cfg.Embedding.Provider
 		} else {
@@ -654,6 +677,16 @@ func searchSymbolsWithRetrieval(
 		// Use SymbolID if Name is empty
 		if result.Name == "" && candidate.SymbolID != "" {
 			result.Name = extractSymbolName(candidate.SymbolID)
+		}
+
+		// Extract code snippet for reranking (reads ~11 lines around the symbol)
+		if candidate.Path != "" && candidate.Line > 0 {
+			fullPath := candidate.Path
+			// If path is relative, join with workspace path
+			if !filepath.IsAbs(candidate.Path) {
+				fullPath = filepath.Join(workspacePath, candidate.Path)
+			}
+			result.Snippet = extractSnippet(fullPath, candidate.Line, 5)
 		}
 
 		results = append(results, result)
@@ -1223,6 +1256,117 @@ func applyPageRankBoost(ctx context.Context, cfg config.Config, workspacePath st
 	return results
 }
 
+// rerankStatsResult holds reranking statistics for output.
+type rerankStatsResult struct {
+	enabled   bool
+	model     string
+	latencyMS int
+	count     int
+}
+
+// applyReranking applies Voyage rerank-2.5 to improve result relevance.
+// Reranking uses cross-attention between query and documents for better precision.
+// Returns original results unchanged if reranking is disabled or fails.
+func applyReranking(ctx context.Context, in Input, results []Result) ([]Result, rerankStatsResult) {
+	stats := rerankStatsResult{}
+
+	// Check if reranking is enabled
+	rerankCfg := rerank.FromEnv()
+	if in.RerankEnabled {
+		rerankCfg.Enabled = true
+	}
+	if in.RerankTopK > 0 {
+		rerankCfg.TopK = in.RerankTopK
+	}
+	if in.RerankModel != "" {
+		rerankCfg.Model = in.RerankModel
+	}
+
+	if !rerankCfg.Enabled || len(results) == 0 {
+		return results, stats
+	}
+
+	// Create reranker provider
+	provider, err := rerank.NewVoyageProvider(rerankCfg.ToVoyageConfig())
+	if err != nil {
+		// Reranking unavailable (no API key) - return original results silently
+		return results, stats
+	}
+
+	// Determine how many candidates to rerank
+	topK := rerankCfg.TopK
+	if topK <= 0 || topK > len(results) {
+		topK = len(results)
+	}
+
+	// Convert results to rerank candidates
+	candidates := make([]rerank.Candidate, topK)
+	for i := 0; i < topK; i++ {
+		r := results[i]
+		// Use snippet for symbols, summary for sessions/memories
+		content := r.Snippet
+		if content == "" {
+			content = r.Summary
+		}
+		if content == "" {
+			content = r.Name
+		}
+		candidates[i] = rerank.Candidate{
+			ID:            r.ID,
+			Content:       content,
+			OriginalScore: r.FinalScore,
+			Metadata: map[string]any{
+				"index": i,
+			},
+		}
+	}
+
+	// Rerank candidates
+	start := time.Now()
+	reranked, err := provider.Rerank(ctx, in.Query, candidates, 0)
+	latencyMS := int(time.Since(start).Milliseconds())
+
+	if err != nil {
+		// Reranking failed - return original results silently
+		return results, stats
+	}
+
+	// Build reranked results
+	rerankedResults := make([]Result, 0, len(reranked))
+	for _, rr := range reranked {
+		val, ok := rr.Metadata["index"]
+		if !ok {
+			_, _ = fmt.Fprintf(os.Stderr, "rerank: missing index in metadata for id=%s, skipping\n", rr.ID)
+			continue
+		}
+		idx, ok := val.(int)
+		if !ok {
+			_, _ = fmt.Fprintf(os.Stderr, "rerank: index is not int for id=%s (got %T), skipping\n", rr.ID, val)
+			continue
+		}
+		if idx < 0 || idx >= len(results) {
+			_, _ = fmt.Fprintf(os.Stderr, "rerank: index %d out of bounds (len=%d) for id=%s, skipping\n", idx, len(results), rr.ID)
+			continue
+		}
+		r := results[idx]
+		r.RerankScore = rr.RerankScore
+		r.FinalScore = rr.FinalScore // Use reranker's final score
+		rerankedResults = append(rerankedResults, r)
+	}
+
+	// Append remaining results that weren't reranked (keep original order)
+	if topK < len(results) {
+		rerankedResults = append(rerankedResults, results[topK:]...)
+	}
+
+	stats.enabled = true
+	stats.model = provider.Model()
+	stats.latencyMS = latencyMS
+	stats.count = len(candidates)
+
+	return rerankedResults, stats
+}
+
 func extractContextHints(sessionResults []Result, maxHints int) []ContextHint {
 	if len(sessionResults) == 0 {
 		return nil
@@ -1256,6 +1400,48 @@ func extractSymbolName(symbolID string) string {
 		return parts[1]
 	}
 	return symbolID
+}
+
+// extractSnippet reads a code snippet from a file around the given line number.
+// Returns up to contextLines before and after the target line (default: 5 lines each = ~11 lines total).
+// Returns empty string if file cannot be read or line is out of bounds.
+func extractSnippet(filePath string, targetLine, contextLines int) string {
+	if contextLines <= 0 {
+		contextLines = 5 // Default: 5 lines before and after
+	}
+
+	// Read file contents
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(data), "\n")
+	if targetLine <= 0 || targetLine > len(lines) {
+		return ""
+	}
+
+	// Calculate range (0-indexed)
+	startIdx := targetLine - 1 - contextLines
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	endIdx := targetLine - 1 + contextLines
+	if endIdx >= len(lines) {
+		endIdx = len(lines) - 1
+	}
+
+	// Extract snippet lines
+	snippetLines := lines[startIdx : endIdx+1]
+
+	// Join and truncate if too long
+	snippet := strings.Join(snippetLines, "\n")
+	const maxSnippetLen = 500
+	if len(snippet) > maxSnippetLen {
+		snippet = snippet[:maxSnippetLen-3] + "..."
+	}
+
+	return snippet
 }
 
 func truncate(s string, maxLen int) string {

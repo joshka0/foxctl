@@ -22,6 +22,7 @@ func main() {
 	robotMailbox := flag.String("robot-mailbox", "", "Output mailbox messages for actor as JSON")
 	robotReservations := flag.Bool("robot-reservations", false, "Output active file reservations as JSON")
 	robotSQLite := flag.Bool("robot-sqlite", false, "Output SQLite database info as JSON")
+	robotSearch := flag.String("robot-search", "", "Semantic search query (JSON output for AI agents)")
 	dbFlag := flag.String("db", "", "SQLite database name (for --robot-sqlite)")
 	tableFlag := flag.String("table", "", "SQLite table name (for --robot-sqlite)")
 	workspaceFlag := flag.String("workspace", "", "Filter by workspace path")
@@ -33,6 +34,9 @@ func main() {
 	mailboxFlag := flag.String("mailbox", "", "Show mailbox for actor (e.g., actor:coder:agent1)")
 	reservationsFlag := flag.Bool("reservations", false, "Show file reservations view")
 	sqliteFlag := flag.Bool("sqlite", false, "Show SQLite database browser")
+	searchFlag := flag.String("search", "", "Start in search mode with query")
+	rerankFlag := flag.Bool("rerank", false, "Enable Voyage rerank-2.5 for search")
+	scopeFlag := flag.String("scope", "", "Search scopes: symbols,sessions,memories,tasks (comma-separated)")
 	flag.Parse()
 
 	if *help {
@@ -100,6 +104,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	if *robotSearch != "" {
+		scopes := parseScopes(*scopeFlag)
+		handleRobotSearch(*workspaceFlag, *robotSearch, *limitFlag, *rerankFlag, scopes)
+		os.Exit(0)
+	}
+
 	if *insightsFlag {
 		runInsightsView(*workspaceFlag)
 		os.Exit(0)
@@ -128,6 +138,17 @@ func main() {
 	if *sqliteFlag {
 		// For SQLite mode, we don't require jobs
 		p := tea.NewProgram(newModelWithMode(nil, *workspaceFlag, "", viewSQLite), tea.WithAltScreen())
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// Handle --search flag: start TUI in search mode
+	if *searchFlag != "" {
+		scopes := parseScopes(*scopeFlag)
+		p := tea.NewProgram(newSearchModel(*workspaceFlag, *searchFlag, *limitFlag, *rerankFlag, scopes), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)

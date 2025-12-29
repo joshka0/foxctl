@@ -76,18 +76,36 @@ agentctl workflow list
 
 ## Environment
 
-| Variable                   | Default       | Description                      |
-| -------------------------- | ------------- | -------------------------------- |
-| `AGENTCTL_TASK_GUARD_MODE` | `auto`        | `auto` or `strict`               |
-| `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                     |
-| `GEMINI_API_KEY`           | -             | For embeddings (3072 dimensions) |
-| `VOYAGE_API_KEY`           | -             | For embeddings (1024 dimensions) |
+| Variable                   | Default       | Description                                      |
+| -------------------------- | ------------- | ------------------------------------------------ |
+| `AGENTCTL_TASK_GUARD_MODE` | `auto`        | `auto` or `strict`                               |
+| `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                                     |
+| `GEMINI_API_KEY`           | -             | For Gemini embeddings (3072 dimensions)          |
+| `VOYAGE_API_KEY`           | -             | For Voyage embeddings/reranking (1024 dimensions)|
+| `MISTRAL_API_KEY`          | -             | For Mistral/Codestral embeddings (1024 dimensions) |
+| `AGENTCTL_SEMANTIC_RERANK` | `0`           | Set to `1` to enable Voyage rerank-2.5 in hooks  |
 
-> ⚠️ **Embedding Dimension Mismatch**: Gemini=3072, Voyage=1024. Query and
-> stored embeddings MUST use the same provider. If both keys are set, skills
-> prefer Gemini for consistency.
+### Scope-Based Embedding Models
+
+Voyage AI is the recommended provider for embeddings (based on Dec 2024 benchmarks):
+
+| Scope      | Content Type    | Model            | Price/1M | Rationale                             |
+| ---------- | --------------- | ---------------- | -------- | ------------------------------------- |
+| `symbols`  | Code            | `voyage-code-3`  | $0.18    | 13.80% better than OpenAI on code     |
+| `memory`   | Gotchas/notes   | `voyage-3-large` | $0.18    | Best text retrieval (nDCG@10: 0.837)  |
+| `tasks`    | Task desc       | `voyage-3.5`     | $0.06    | Good quality at 1/3 cost              |
+| `sessions` | Session context | `voyage-3.5`     | $0.06    | Good quality at 1/3 cost              |
+
+All Voyage models use 1024 dimensions. Use `ScopeModelRecommendation(scope)` to get the
+appropriate model for each scope.
+
+> ⚠️ **Embedding Dimension Mismatch**: Gemini=3072, Voyage/Mistral/Codestral=1024.
+> Query and stored embeddings MUST use the same provider per scope.
 
 ### Observability (Wide Events)
+
+**ENABLED** via `.env`: `AGENTCTL_OBS_DIR=$HOME/.agentctl/observability`
+(Note: Use absolute path, not `~` - tilde isn't expanded in env vars)
 
 | Variable                       | Default | Description                           |
 | ------------------------------ | ------- | ------------------------------------- |
@@ -96,6 +114,9 @@ agentctl workflow list
 | `AGENTCTL_OBS_SLOW_THRESHOLD_MS` | `1000`  | Slow request threshold (ms)         |
 | `AGENTCTL_OBS_SAMPLE_RATE`     | `0.05`  | Random sample rate for healthy events |
 | `AGENTCTL_TRACE_ID`            | auto    | Propagate trace ID to child processes |
+
+**Why enabled:** Captures skill execution events, errors, and timing for debugging.
+Events are stored as NDJSON in `~/.agentctl/observability/events/`.
 
 See `docs/observability/wide-events.md` for full documentation.
 
@@ -167,6 +188,37 @@ make build          # Pure Go (no CGO)
 make build-cgo      # CGO with -tags=libsqlite3
 CGO_ENABLED=0 go build ./internal/...  # Compile-check specific packages
 ```
+
+### Skill Build → Install (Two-Stage Process)
+
+**Skills require TWO steps to deploy changes:**
+
+1. **Build**: Compiles the skill source code to a binary
+2. **Install**: Copies the binary to `~/.agentctl/skills/<name>/bin`
+
+The skill resolver always looks for `bin` in the installed skill directory
+(`~/.agentctl/skills/<skill-name>/`), NOT the source directory.
+
+**Common mistake:** Running `go build ./skills/<name>` creates a binary in the
+wrong location. The installed skill continues running the OLD binary.
+
+**Correct workflow:**
+
+```bash
+# Option 1: Rebuild all skills and install (safest)
+make skills-install
+
+# Option 2: Single skill build + install
+CGO_ENABLED=0 go build -o ~/.agentctl/skills/<skill-category>/<skill-name>/bin ./skills/<source-dir>
+
+# Example for code/semantic_search:
+CGO_ENABLED=0 go build -o ~/.agentctl/skills/code/semantic_search/bin ./skills/code_semantic_search
+```
+
+**Debug tip:** If skill changes aren't taking effect:
+1. Check timestamps: `ls -la ~/.agentctl/skills/<path>/bin`
+2. Verify binary: `strings ~/.agentctl/skills/<path>/bin | grep "<expected-string>"`
+3. Rebuild to correct location as shown above
 
 ### Memory Hooks
 

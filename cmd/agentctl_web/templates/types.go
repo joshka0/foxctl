@@ -116,3 +116,33 @@ type SQLiteTable struct {
 	Name     string `json:"name"`
 	RowCount int    `json:"row_count"`
 }
+
+// SearchResult represents a semantic search result
+type SearchResult struct {
+	Source      string  `json:"source"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name,omitempty"`
+	Path        string  `json:"path"`
+	Similarity  float64 `json:"similarity"`
+	RerankScore float64 `json:"rerank_score,omitempty"`
+	FinalScore  float64 `json:"final_score"`
+	Rank        int     `json:"rank"`
+	SourceRank  int     `json:"source_rank"`
+}
+
+// SearchStats holds search result statistics
+type SearchStats struct {
+	TotalResults  int            `json:"total_results"`
+	SourceCounts  map[string]int `json:"source_counts"`
+	Reranked      bool           `json:"reranked"`
+	EmbeddingDims int            `json:"embedding_dimensions"`
+	LatencyMS     int64          `json:"latency_ms"`
+}
+
+// Workspace represents a known workspace
+type Workspace struct {
+	Path        string `json:"path"`
+	Name        string `json:"name"`         // Last path component
+	SessionCount int   `json:"session_count"`
+	LastUsed    string `json:"last_used"`
+}

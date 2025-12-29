@@ -130,3 +130,50 @@ func safeSlice(s string, n int) string {
 	}
 	return string(runes[:n])
 }
+
+// parseScopes parses comma-separated scope list, returning defaults if empty.
+func parseScopes(scopeStr string) []string {
+	if scopeStr == "" {
+		return nil // let the handler use defaults
+	}
+	parts := strings.Split(scopeStr, ",")
+	scopes := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			scopes = append(scopes, p)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil
+	}
+	return scopes
+}
+
+// titleCase returns the string with the first letter capitalized.
+// This is a simple replacement for the deprecated strings.Title for ASCII strings.
+func titleCase(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	if s[0] >= 'a' && s[0] <= 'z' {
+		return string(s[0]-32) + s[1:]
+	}
+	return s
+}
+
+// sourceColor returns a lipgloss style for the given search source.
+func sourceColor(source string) lipgloss.Style {
+	switch source {
+	case "symbol", "symbols":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("39")) // blue
+	case "session", "sessions":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("135")) // purple
+	case "memory", "memories":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("220")) // yellow
+	case "task", "tasks":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")) // green
+	default:
+		return lipgloss.NewStyle()
+	}
+}

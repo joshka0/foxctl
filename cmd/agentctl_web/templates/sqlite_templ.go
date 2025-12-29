@@ -5,14 +5,12 @@ package templates
 
 //lint:file-ignore SA4006 This context is only used if a nested component is present.
 
-import (
-	"github.com/a-h/templ"
-	templruntime "github.com/a-h/templ/runtime"
-)
+import "github.com/a-h/templ"
+import templruntime "github.com/a-h/templ/runtime"
 
 import "fmt"
 
-func SQLiteBrowser(databases []SQLiteDatabase) templ.Component {
+func SQLiteBrowser(databases []SQLiteDatabase, workspace string, workspaces []Workspace) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -59,7 +57,7 @@ func SQLiteBrowser(databases []SQLiteDatabase) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("SQLite", "/sqlite").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("SQLite", "/sqlite", workspace, workspaces).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -165,7 +163,7 @@ func SQLiteDatabaseList(databases []SQLiteDatabase) templ.Component {
 	})
 }
 
-func SQLiteTables(tables []SQLiteTable, dbName string) templ.Component {
+func SQLiteTables(tables []SQLiteTable, dbName string, workspace string, workspaces []Workspace) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -247,7 +245,7 @@ func SQLiteTables(tables []SQLiteTable, dbName string) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("SQLite - "+dbName, "/sqlite").Render(templ.WithChildren(ctx, templ_7745c5c3_Var9), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("SQLite - "+dbName, "/sqlite", workspace, workspaces).Render(templ.WithChildren(ctx, templ_7745c5c3_Var9), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -340,7 +338,7 @@ func SQLiteTableList(tables []SQLiteTable, dbName string) templ.Component {
 	})
 }
 
-func SQLiteData(columns []string, rows []map[string]any, dbName, tableName string, rowCount int) templ.Component {
+func SQLiteData(columns []string, rows []map[string]any, dbName, tableName string, rowCount int, workspace string, workspaces []Workspace) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -448,7 +446,7 @@ func SQLiteData(columns []string, rows []map[string]any, dbName, tableName strin
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("SQLite - "+tableName, "/sqlite").Render(templ.WithChildren(ctx, templ_7745c5c3_Var18), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("SQLite - "+tableName, "/sqlite", workspace, workspaces).Render(templ.WithChildren(ctx, templ_7745c5c3_Var18), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -82,6 +82,7 @@ const (
 	viewStats
 	viewBlackboard
 	viewSQLite
+	viewSearch
 )
 
 // viewModeLabels maps view modes to their display labels
@@ -94,10 +95,11 @@ var viewModeLabels = map[viewMode]string{
 	viewStats:        "Stats",
 	viewBlackboard:   "Blackboard",
 	viewSQLite:       "SQLite",
+	viewSearch:       "Search",
 }
 
 // viewModeCount is the total number of view modes
-const viewModeCount = 8
+const viewModeCount = 9
 
 type mailboxMessage struct {
 	ID        string `json:"id"`
@@ -185,6 +187,37 @@ type blackboardRecord struct {
 type lease struct {
 	Holder string `json:"holder"`
 	Until  int64  `json:"until"`
+}
+
+// searchResult represents a semantic search result.
+type searchResult struct {
+	Source      string  `json:"source"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name,omitempty"`
+	Path        string  `json:"path"`
+	Similarity  float64 `json:"similarity"`
+	RerankScore float64 `json:"rerank_score,omitempty"`
+	FinalScore  float64 `json:"final_score"`
+	Rank        int     `json:"rank"`
+	SourceRank  int     `json:"source_rank"`
+}
+
+// searchStats holds search result statistics.
+type searchStats struct {
+	TotalResults   int            `json:"total_results"`
+	SourceCounts   map[string]int `json:"source_counts"`
+	Reranked       bool           `json:"reranked"`
+	EmbeddingDims  int            `json:"embedding_dimensions"`
+	LatencyMS      int64          `json:"latency_ms"`
+}
+
+// searchInput is used to build semantic search skill input.
+type searchInput struct {
+	Query         string   `json:"query"`
+	Scope         []string `json:"scope"`
+	Limit         int      `json:"limit"`
+	Summarize     bool     `json:"summarize"`
+	RerankEnabled bool     `json:"rerank_enabled"`
 }
 
 func nowUTC() string {

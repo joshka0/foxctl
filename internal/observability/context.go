@@ -8,8 +8,10 @@ import (
 )
 
 // Context keys for observability data.
-type traceIDKey struct{}
-type spanIDKey struct{}
+type (
+	traceIDKey struct{}
+	spanIDKey  struct{}
+)
 
 // EnvTraceID is the environment variable for propagating trace IDs.
 const EnvTraceID = "AGENTCTL_TRACE_ID"

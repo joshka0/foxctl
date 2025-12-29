@@ -10,6 +10,7 @@
 #   AGENTCTL_BIN - Path to agentctl binary (default: agentctl)
 #   AGENTCTL_SEMANTIC_DISABLED - Set to 1 to disable
 #   AGENTCTL_SEMANTIC_MAX_RESULTS - Max results per scope (default: 3)
+#   AGENTCTL_SEMANTIC_RERANK - Set to 1 to enable Voyage rerank-2.5 (requires VOYAGE_API_KEY)
 
 set -euo pipefail
 
@@ -65,15 +66,25 @@ case "$pattern" in
     ;;
 esac
 
+# Check if reranking is enabled
+RERANK_ENABLED="${AGENTCTL_SEMANTIC_RERANK:-0}"
+if [[ "$RERANK_ENABLED" == "1" ]]; then
+  rerank_flag="true"
+else
+  rerank_flag="false"
+fi
+
 # Run semantic search with all scopes
 input_json=$(jq -nc \
   --arg query "$pattern" \
   --argjson limit "$MAX_RESULTS" \
+  --argjson rerank "$rerank_flag" \
   '{
     query: $query,
-    scopes: ["symbols", "sessions", "memories", "tasks"],
+    scope: ["symbols", "sessions", "memories", "tasks"],
     limit: $limit,
-    summarize: false
+    summarize: false,
+    rerank_enabled: $rerank
   }')
 
 result=$("$AGENTCTL_BIN" run code/semantic_search --input "$input_json" 2>/dev/null) || {
@@ -120,9 +131,16 @@ if [[ -n "$summary" && "$summary" != "null" ]]; then
 **Insight:** $summary"
 fi
 
+# Add rerank indicator if enabled
+if [[ "$RERANK_ENABLED" == "1" ]]; then
+  rerank_note=" (reranked)"
+else
+  rerank_note=""
+fi
+
 context+="
 ---
-*Vector search across code, sessions, memories & tasks.*"
+*Vector search across code, sessions, memories & tasks${rerank_note}.*"
 
 # Return approve with context
 jq -n --arg ctx "$context" '{

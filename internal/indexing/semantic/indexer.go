@@ -492,6 +492,8 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 		chunks := idx.splitIntoChunks(content)
 		chunkCount := len(chunks)
 
+		idx.logger.Info().Str("path", file.Path).Int("chunks", chunkCount).Msg("indexing chunked file")
+
 		// Phase 1: Generate all embeddings first
 		chunkEmbeddings := make([][]float32, chunkCount)
 		for i, chunk := range chunks {
@@ -549,6 +551,7 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 	}
 
 	// Single file embedding
+	idx.logger.Info().Str("path", file.Path).Int("size", len(content)).Msg("indexing file")
 	embedding, err := idx.provider.Embed(ctx, string(content))
 	if err != nil {
 		return 0, fmt.Errorf("embed: %w", err)

@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
@@ -14,6 +16,76 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+// detectGitRepo attempts to detect owner and repo from git remote origin.
+// Returns empty strings if detection fails (non-blocking).
+func detectGitRepo(ctx context.Context) (owner, repo string) {
+	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ""
+	}
+	url := strings.TrimSpace(string(out))
+	if url == "" {
+		return "", ""
+	}
+
+	// Support ssh format: git@github.com:owner/repo.git
+	if strings.HasPrefix(url, "git@") {
+		parts := strings.SplitN(url, ":", 2)
+		if len(parts) != 2 {
+			return "", ""
+		}
+		path := strings.TrimSuffix(parts[1], ".git")
+		sub := strings.SplitN(path, "/", 2)
+		if len(sub) != 2 {
+			return "", ""
+		}
+		return sub[0], sub[1]
+	}
+
+	// Support https format: https://github.com/owner/repo.git
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		parts := strings.Split(url, "/")
+		if len(parts) < 2 {
+			return "", ""
+		}
+		repoName := strings.TrimSuffix(parts[len(parts)-1], ".git")
+		ownerName := parts[len(parts)-2]
+		return ownerName, repoName
+	}
+
+	return "", ""
+}
+
+// resolveOwnerRepo returns owner and repo, using git remote detection as fallback.
+// If repo is provided as "owner/repo" shorthand, it splits and returns both.
+func resolveOwnerRepo(ctx context.Context, owner, repo string) (string, string) {
+	// Handle owner/repo shorthand in repo flag
+	if repo != "" && strings.Contains(repo, "/") {
+		parts := strings.SplitN(repo, "/", 2)
+		if len(parts) == 2 {
+			return parts[0], parts[1]
+		}
+	}
+
+	// If both provided, use them
+	if owner != "" && repo != "" {
+		return owner, repo
+	}
+
+	// Auto-detect from git remote
+	detectedOwner, detectedRepo := detectGitRepo(ctx)
+
+	if owner == "" {
+		owner = detectedOwner
+	}
+	if repo == "" {
+		repo = detectedRepo
+	}
+
+	return owner, repo
+}
 
 func newCICommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -127,6 +199,9 @@ func newCIStatusCommand() *cobra.Command {
 }
 
 func runCIStatus(cmd *cobra.Command, pr, owner, repo, format string, skipCache, dataOnly bool) error {
+	// Auto-detect owner/repo from git if not provided
+	owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
+
 	// Build payload for both skills
 	checksPayload := map[string]any{
 		"pr":          pr,
@@ -414,6 +489,9 @@ func newCIPRCommentsCommand() *cobra.Command {
 			if strings.TrimSpace(pr) == "" {
 				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 66.")
 			}
+			// Auto-detect owner/repo from git if not provided
+			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
+
 			payload := map[string]any{
 				"pr":           pr,
 				"with_context": withContext,
@@ -472,9 +550,15 @@ func newCIChecksCommand() *cobra.Command {
 			"    --mode detailed \\\n" +
 			"    --errors-only\n",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if helpJSON {
+				return writeCIHelpJSON(cmd)
+			}
 			if strings.TrimSpace(pr) == "" {
 				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 66.")
 			}
+			// Auto-detect owner/repo from git if not provided
+			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
+
 			payload := map[string]any{
 				"pr":          pr,
 				"errors_only": errorsOnly,
@@ -528,6 +612,9 @@ func newCITodosCommand() *cobra.Command {
 			if strings.TrimSpace(pr) == "" {
 				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 78.")
 			}
+			// Auto-detect owner/repo from git if not provided
+			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
+
 			payload := map[string]any{
 				"pr":           pr,
 				"with_context": false,

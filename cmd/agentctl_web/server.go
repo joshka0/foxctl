@@ -66,6 +66,12 @@ func NewServer(workspace string) http.Handler {
 	r.Get("/sqlite/{db}", h.SQLiteTables)
 	r.Get("/sqlite/{db}/{table}", h.SQLiteData)
 
+	// Search routes
+	r.Get("/search", h.Search)
+
+	// Workspace switching
+	r.Get("/switch-workspace", h.SwitchWorkspace)
+
 	// SSE endpoint
 	r.Get("/events", hub.Handler)
 

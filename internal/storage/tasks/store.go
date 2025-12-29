@@ -29,6 +29,8 @@ type Store interface {
 	ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error)
 	// ListByPlanFile returns tasks linked to a specific plan file.
 	ListByPlanFile(ctx context.Context, planFile string) ([]Task, error)
+	// ListAll returns all tasks (for embedding operations).
+	ListAll(ctx context.Context, limit int) ([]Task, error)
 
 	// GetActive returns the active task for a workspace, if any.
 	GetActive(ctx context.Context, workspaceID string) (Task, bool, error)
@@ -43,6 +45,9 @@ type Store interface {
 	// If so, it demotes the status to in_progress and marks the review as stale.
 	// Returns (task, dirtied, error) where dirtied is true if the task was modified.
 	DirtyIfReviewed(ctx context.Context, taskID string) (Task, bool, error)
+
+	// SetEmbedding stores an embedding vector for a task.
+	SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error
 }
 
 // Task represents a persisted task record.
@@ -164,6 +169,8 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 		`ALTER TABLE tasks ADD COLUMN plan_file TEXT`,
 		`ALTER TABLE tasks ADD COLUMN plan_section TEXT`,
 		`ALTER TABLE tasks ADD COLUMN session_id TEXT`,
+		`ALTER TABLE tasks ADD COLUMN embedding BLOB`,
+		`ALTER TABLE tasks ADD COLUMN embedding_model TEXT`,
 	}
 	for _, stmt := range alterDDL {
 		// Ignore errors from "duplicate column" - columns may already exist.
@@ -432,6 +439,53 @@ func (s *sqlStore) DirtyIfReviewed(ctx context.Context, taskID string) (Task, bo
 	}
 
 	return updated, true, nil
+}
+
+// ListAll returns all tasks up to the specified limit.
+func (s *sqlStore) ListAll(ctx context.Context, limit int) ([]Task, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
+FROM tasks ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list all: %w", err)
+	}
+	defer func() {
+		_ = rows.Close() //nolint:errcheck
+	}()
+
+	tasks := make([]Task, 0)
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// SetEmbedding stores an embedding vector for a task.
+func (s *sqlStore) SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE tasks SET
+			embedding = ?,
+			embedding_model = ?
+		WHERE id = ?`,
+		embedding, model, id)
+	if err != nil {
+		return fmt.Errorf("tasks: set embedding: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("tasks: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("tasks: task %q not found", id)
+	}
+	return nil
 }
 
 // scanTask scans a single task from a row.

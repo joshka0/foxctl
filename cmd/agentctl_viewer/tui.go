@@ -69,6 +69,16 @@ type model struct {
 	sqliteColumns       []string
 	sqlitePane          sqlitePane
 	sqliteSchema        string
+
+	// Search state
+	searchQuery    string
+	searchResults  []searchResult
+	searchCursor   int
+	searchStats    *searchStats
+	searchRerank   bool
+	searchScopes   []string
+	searchLimit    int
+	selectedResult *searchResult
 }
 
 type (
@@ -89,6 +99,13 @@ type (
 	}
 	sqliteSchemaLoadedMsg string
 )
+
+// Search messages
+type searchLoadedMsg struct {
+	results []searchResult
+	stats   *searchStats
+	err     error
+}
 
 func loadMailboxCmd(workspace, actorID string) tea.Cmd {
 	return func() tea.Msg {
@@ -178,6 +195,14 @@ func loadSQLiteSchemaCmd(dbPath, tableName string) tea.Cmd {
 	}
 }
 
+// loadSearchCmd runs semantic search and returns results.
+func loadSearchCmd(query string, limit int, rerank bool, scopes []string) tea.Cmd {
+	return func() tea.Msg {
+		results, stats, err := fetchSearchResults(query, limit, rerank, scopes)
+		return searchLoadedMsg{results: results, stats: stats, err: err}
+	}
+}
+
 type jobPreviewLoadedMsg struct {
 	detail *jobDetail
 }
@@ -243,6 +268,31 @@ func newModelWithMode(jobs []jobSummary, workspace, actorID string, initialMode 
 	}
 }
 
+// newSearchModel creates a model initialized for search mode.
+func newSearchModel(workspace, query string, limit int, rerank bool, scopes []string) model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(scopes) == 0 {
+		scopes = []string{"symbols", "sessions", "memories", "tasks"}
+	}
+
+	return model{
+		mode:         viewSearch,
+		workspace:    workspace,
+		searchQuery:  query,
+		searchLimit:  limit,
+		searchRerank: rerank,
+		searchScopes: scopes,
+		spinner:      s,
+		loading:      true,
+	}
+}
+
 func (m model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmds = append(cmds, m.spinner.Tick, tickCmd())
@@ -251,6 +301,10 @@ func (m model) Init() tea.Cmd {
 	switch m.mode {
 	case viewSQLite:
 		cmds = append(cmds, loadSQLiteDatabasesCmd())
+	case viewSearch:
+		if m.searchQuery != "" {
+			cmds = append(cmds, loadSearchCmd(m.searchQuery, m.searchLimit, m.searchRerank, m.searchScopes))
+		}
 	default:
 		if len(m.jobs) > 0 {
 			cmds = append(cmds, loadJobPreviewCmd(m.jobs[m.cursor]))
@@ -495,6 +549,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setViewportContent()
 		return m, nil
 
+	case searchLoadedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.lastError = fmt.Sprintf("search failed: %v", msg.err)
+		} else {
+			m.searchResults = msg.results
+			m.searchStats = msg.stats
+			m.lastError = ""
+			if m.searchCursor >= len(m.searchResults) && len(m.searchResults) > 0 {
+				m.searchCursor = len(m.searchResults) - 1
+			}
+		}
+		m.setViewportContent()
+		return m, nil
+
 	case jobLoadedMsg:
 		m.selected = msg.detail
 		m.activeTab = tabInfo
@@ -588,6 +657,8 @@ func (m *model) setViewportContent() {
 			content = m.renderBlackboard()
 		case viewSQLite:
 			content = m.renderSQLite()
+		case viewSearch:
+			content = m.renderSearch()
 		default:
 			return
 		}
@@ -642,6 +713,11 @@ func (m model) updateList(msg tea.KeyMsg) (model, tea.Cmd) {
 			m.mode = viewSQLite
 			return m.handleModeChange()
 		}
+	case "9":
+		if m.selected == nil && m.selectedTask == nil && m.selectedMessage == nil && m.selectedBB == nil && m.selectedResult == nil {
+			m.mode = viewSearch
+			return m.handleModeChange()
+		}
 
 	// View cycling
 	case "[":
@@ -693,6 +769,10 @@ func (m model) updateList(msg tea.KeyMsg) (model, tea.Cmd) {
 		}
 		if m.selectedBB != nil {
 			m.selectedBB = nil
+			return m, nil
+		}
+		if m.selectedResult != nil {
+			m.selectedResult = nil
 			return m, nil
 		}
 		// SQLite: go back in pane hierarchy
@@ -837,6 +917,10 @@ func (m model) handleCursorUp() (model, tea.Cmd) {
 				m.sqliteSelectedTable--
 			}
 		}
+	case viewSearch:
+		if m.searchCursor > 0 {
+			m.searchCursor--
+		}
 	}
 	return m, nil
 }
@@ -879,6 +963,10 @@ func (m model) handleCursorDown() (model, tea.Cmd) {
 			if m.sqliteSelectedTable < len(m.sqliteTables)-1 {
 				m.sqliteSelectedTable++
 			}
+		}
+	case viewSearch:
+		if m.searchCursor < len(m.searchResults)-1 {
+			m.searchCursor++
 		}
 	}
 	return m, nil
@@ -927,6 +1015,11 @@ func (m model) handleEnter() (model, tea.Cmd) {
 				return m, tea.Batch(loadSQLiteRowsCmd(db.Path, table.Name, 50), m.spinner.Tick)
 			}
 		}
+	case viewSearch:
+		if m.searchCursor < len(m.searchResults) {
+			result := m.searchResults[m.searchCursor]
+			m.selectedResult = &result
+		}
 	}
 	return m, nil
 }
@@ -937,6 +1030,7 @@ func (m *model) handleModeChange() (model, tea.Cmd) {
 	m.selectedTask = nil
 	m.selectedMessage = nil
 	m.selectedBB = nil
+	m.selectedResult = nil
 	m.lastError = ""
 
 	switch m.mode {
@@ -962,6 +1056,13 @@ func (m *model) handleModeChange() (model, tea.Cmd) {
 		m.loading = true
 		m.sqlitePane = paneDatabases
 		return *m, tea.Batch(loadSQLiteDatabasesCmd(), m.spinner.Tick)
+	case viewSearch:
+		// If we have a query, search. Otherwise show empty state
+		if m.searchQuery != "" {
+			m.loading = true
+			return *m, tea.Batch(loadSearchCmd(m.searchQuery, m.searchLimit, m.searchRerank, m.searchScopes), m.spinner.Tick)
+		}
+		m.setViewportContent()
 	case viewJobs:
 		if len(m.jobs) > 0 && m.cursor < len(m.jobs) {
 			return *m, loadJobPreviewCmd(m.jobs[m.cursor])
@@ -1034,6 +1135,8 @@ func (m model) View() string {
 		mainContent = m.viewMessageDetail()
 	} else if m.selectedBB != nil {
 		mainContent = m.viewBlackboardDetail()
+	} else if m.selectedResult != nil {
+		mainContent = m.viewSearchResultDetail()
 	} else {
 		switch m.mode {
 		case viewJobs:
@@ -1046,7 +1149,7 @@ func (m model) View() string {
 			preview := m.renderPreview(previewWidth)
 
 			mainContent = lipgloss.JoinHorizontal(lipgloss.Top, list, preview)
-		case viewTasks, viewInsights, viewMailbox, viewReservations, viewStats, viewBlackboard, viewSQLite:
+		case viewTasks, viewInsights, viewMailbox, viewReservations, viewStats, viewBlackboard, viewSQLite, viewSearch:
 			mainContent = m.viewport.View()
 		default:
 			mainContent = "\n  Coming soon..."
@@ -1101,6 +1204,14 @@ func (m model) renderStatusBar() string {
 		if len(m.sqliteDatabases) > 0 && m.sqliteSelectedDB < len(m.sqliteDatabases) {
 			dbName := m.sqliteDatabases[m.sqliteSelectedDB].getFriendlyName()
 			parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(dbName))
+		}
+	case viewSearch:
+		parts = append(parts, fmt.Sprintf("%d results", len(m.searchResults)))
+		if m.searchRerank {
+			parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("reranked"))
+		}
+		if m.searchStats != nil {
+			parts = append(parts, fmt.Sprintf("%dms", m.searchStats.LatencyMS))
 		}
 	}
 
@@ -1298,6 +1409,7 @@ func (m model) renderSidebar() string {
 		{viewStats, "Stats", "6"},
 		{viewBlackboard, "Blackboard", "7"},
 		{viewSQLite, "SQLite", "8"},
+		{viewSearch, "Search", "9"},
 	}
 
 	var b strings.Builder
@@ -2103,6 +2215,136 @@ func (m model) renderSQLiteData(labelStyle lipgloss.Style) string {
 
 	if len(m.sqliteRows) > rowLimit {
 		b.WriteString(labelStyle.Render(fmt.Sprintf("\n  ... and %d more rows", len(m.sqliteRows)-rowLimit)))
+	}
+
+	return b.String()
+}
+
+// viewSearchResultDetail renders the search result detail view
+func (m model) viewSearchResultDetail() string {
+	result := m.selectedResult
+	if result == nil {
+		return ""
+	}
+
+	sidebarWidth := 20
+	mainWidth := m.width - sidebarWidth
+
+	var b strings.Builder
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170"))
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("240")).Width(14)
+	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	srcStyle := sourceColor(result.Source)
+	b.WriteString(titleStyle.Render("Search Result") + " " + srcStyle.Render("["+result.Source+"]") + "\n\n")
+
+	b.WriteString(labelStyle.Render("ID:") + valueStyle.Render(result.ID) + "\n")
+	if result.Name != "" {
+		b.WriteString(labelStyle.Render("Name:") + valueStyle.Render(result.Name) + "\n")
+	}
+	b.WriteString(labelStyle.Render("Path:") + valueStyle.Render(result.Path) + "\n")
+	b.WriteString(labelStyle.Render("Similarity:") + lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render(fmt.Sprintf("%.2f%%", result.Similarity*100)) + "\n")
+	if result.RerankScore > 0 {
+		b.WriteString(labelStyle.Render("Rerank Score:") + lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render(fmt.Sprintf("%.4f", result.RerankScore)) + "\n")
+	}
+	b.WriteString(labelStyle.Render("Final Score:") + valueStyle.Render(fmt.Sprintf("%.4f", result.FinalScore)) + "\n")
+	b.WriteString(labelStyle.Render("Rank:") + valueStyle.Render(fmt.Sprintf("#%d", result.Rank)) + "\n")
+	b.WriteString(labelStyle.Render("Source Rank:") + valueStyle.Render(fmt.Sprintf("#%d", result.SourceRank)) + "\n")
+
+	// Footer
+	footerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		BorderForeground(lipgloss.Color("238"))
+
+	help := "esc: back"
+	b.WriteString("\n\n" + footerStyle.Width(mainWidth-4).Render(help))
+
+	return lipgloss.NewStyle().Padding(1, 2).Render(b.String())
+}
+
+// renderSearch renders the semantic search results view
+func (m model) renderSearch() string {
+	if m.loading && len(m.searchResults) == 0 {
+		return "\n  Searching... " + m.spinner.View()
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("170")).MarginBottom(1)
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	rerankStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	highlightStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("226")).
+		Foreground(lipgloss.Color("0")).
+		Bold(true)
+
+	var b strings.Builder
+
+	// Header with query
+	header := fmt.Sprintf("Search: %q", m.searchQuery)
+	if m.searchRerank {
+		header += " " + rerankStyle.Render("(reranked)")
+	}
+	b.WriteString(titleStyle.Render(header) + "\n")
+
+	// Stats line
+	if m.searchStats != nil {
+		b.WriteString(labelStyle.Render(fmt.Sprintf("   %d results | %dms", m.searchStats.TotalResults, m.searchStats.LatencyMS)) + "\n")
+	}
+	b.WriteString("\n")
+
+	if len(m.searchResults) == 0 {
+		b.WriteString("  " + labelStyle.Render("(no results)"))
+		return b.String()
+	}
+
+	// Group results by source
+	bySource := make(map[string][]int) // source -> indices in searchResults
+	for i, r := range m.searchResults {
+		bySource[r.Source] = append(bySource[r.Source], i)
+	}
+
+	// Render results by source group
+	sourceOrder := []string{"symbols", "symbol", "sessions", "session", "memories", "memory", "tasks", "task"}
+	for _, source := range sourceOrder {
+		indices, ok := bySource[source]
+		if !ok || len(indices) == 0 {
+			continue
+		}
+
+		srcStyle := sourceColor(source)
+		b.WriteString(srcStyle.Render(fmt.Sprintf("── %s (%d) ──", titleCase(source), len(indices))) + "\n")
+
+		for _, idx := range indices {
+			r := m.searchResults[idx]
+			cursor := "  "
+			if idx == m.searchCursor {
+				cursor = "> "
+			}
+
+			// Score display
+			scoreStr := fmt.Sprintf("%.0f%%", r.Similarity*100)
+			if r.RerankScore > 0 {
+				scoreStr = fmt.Sprintf("%.0f%%→%.2f", r.Similarity*100, r.RerankScore)
+			}
+
+			// Path display (truncate if needed)
+			path := r.Path
+			if r.Name != "" && r.Name != r.Path {
+				path = r.Name + " " + labelStyle.Render(r.Path)
+			}
+			if len(path) > 60 {
+				path = "..." + path[len(path)-57:]
+			}
+
+			line := fmt.Sprintf("[%s] %s", scoreStr, path)
+
+			if idx == m.searchCursor {
+				b.WriteString(cursor + highlightStyle.Render(line) + "\n")
+			} else {
+				b.WriteString(cursor + line + "\n")
+			}
+		}
+		b.WriteString("\n")
 	}
 
 	return b.String()

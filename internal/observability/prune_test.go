@@ -12,7 +12,7 @@ import (
 func writeTestEvents(t *testing.T, dir string, events []WideEvent) {
 	t.Helper()
 	eventsDir := filepath.Join(dir, "events")
-	if err := os.MkdirAll(eventsDir, 0755); err != nil {
+	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
 		t.Fatalf("create events dir: %v", err)
 	}
 

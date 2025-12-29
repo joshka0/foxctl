@@ -1,0 +1,236 @@
+# Scheduled jobs for agentctl maintenance
+
+---
+# PageRank recalculation for task prioritization
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: agentctl-pagerank
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: cronjob
+spec:
+  schedule: "0 * * * *"  # Every hour
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: agentctl
+            app.kubernetes.io/component: cronjob
+        spec:
+          serviceAccountName: agentctl
+          restartPolicy: OnFailure
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+
+          containers:
+          - name: pagerank
+            image: agentctl:latest
+            command:
+            - agentctl
+            - overseer
+            - rerank
+
+            env:
+            - name: AGENTCTL_DB_DRIVER
+              value: "turso"
+            - name: TURSO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agentctl-secrets
+                  key: turso-url
+            - name: TURSO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agentctl-secrets
+                  key: turso-token
+
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          volumes:
+          - name: tmp
+            emptyDir:
+              sizeLimit: 100Mi
+
+---
+# CAS garbage collection
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: agentctl-cas-gc
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: cronjob
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: agentctl
+            app.kubernetes.io/component: cronjob
+        spec:
+          serviceAccountName: agentctl
+          restartPolicy: OnFailure
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+
+          containers:
+          - name: gc
+            image: agentctl:latest
+            command:
+            - agentctl
+            - cas
+            - gc
+            args:
+            - --max-age=168h  # 7 days
+            - --dry-run=false
+
+            env:
+            - name: AGENTCTL_DB_DRIVER
+              value: "turso"
+            - name: TURSO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agentctl-secrets
+                  key: turso-url
+            - name: TURSO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agentctl-secrets
+                  key: turso-token
+            - name: AGENTCTL_CAS_BACKEND
+              value: "s3"
+            - name: AGENTCTL_CAS_BUCKET
+              value: "agentctl-cas"
+
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          volumes:
+          - name: tmp
+            emptyDir:
+              sizeLimit: 100Mi
+
+---
+# Session cleanup (old terminated sessions)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: agentctl-session-cleanup
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: cronjob
+spec:
+  schedule: "30 4 * * 0"  # Weekly on Sunday at 4:30 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: agentctl
+            app.kubernetes.io/component: cronjob
+        spec:
+          serviceAccountName: agentctl
+          restartPolicy: OnFailure
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+
+          containers:
+          - name: cleanup
+            image: agentctl:latest
+            command:
+            - agentctl
+            - sessions
+            - cleanup
+            args:
+            - --older-than=720h  # 30 days
+            - --status=ok,error,canceled
+
+            env:
+            - name: AGENTCTL_DB_DRIVER
+              value: "turso"
+            - name: TURSO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: agentctl-secrets
+                  key: turso-url
+            - name: TURSO_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: agentctl-secrets
+                  key: turso-token
+
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "200m"
+
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+          volumes:
+          - name: tmp
+            emptyDir:
+              sizeLimit: 100Mi

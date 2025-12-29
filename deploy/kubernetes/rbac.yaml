@@ -1,0 +1,54 @@
+# RBAC configuration for agentctl
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agentctl
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: rbac
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agentctl
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: rbac
+rules:
+# Read configmaps for configuration
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+
+# Read specific secrets
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["agentctl-secrets", "git-creds"]
+  verbs: ["get"]
+
+# Read pod info for distributed coordination
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentctl
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: agentctl
+  namespace: agentctl
+roleRef:
+  kind: Role
+  name: agentctl
+  apiGroup: rbac.authorization.k8s.io

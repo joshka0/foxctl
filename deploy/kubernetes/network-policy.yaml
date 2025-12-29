@@ -1,0 +1,91 @@
+# Network policies for agentctl security
+
+---
+# Default deny all ingress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: agentctl
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+
+---
+# Allow agentctl pods to communicate with each other
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentctl-internal
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agentctl
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from other agentctl pods
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: agentctl
+  egress:
+  # Allow to other agentctl pods
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: agentctl
+
+  # Allow DNS resolution
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+
+  # Allow HTTPS to external services (Turso, Voyage, GitHub, S3)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 443
+
+---
+# Allow Prometheus to scrape metrics
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agentctl
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+      podSelector:
+        matchLabels:
+          app: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080

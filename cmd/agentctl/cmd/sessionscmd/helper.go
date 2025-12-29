@@ -119,6 +119,11 @@ func ClaudeProjectsDir() string {
 // uuidRegex matches UUID-format session IDs (e.g., ccf28c56-45c8-494e-a764-9a97e24a358d)
 var uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+// IsUUIDFormat checks if the given string matches UUID format.
+func IsUUIDFormat(s string) bool {
+	return uuidRegex.MatchString(s)
+}
+
 // FindUncapturedSessions scans the Claude projects directory for JSONL files
 // that haven't been captured yet.
 func FindUncapturedSessions(projectsDir string, captured map[string]bool, projectFilter string) ([]UncapturedSession, error) {

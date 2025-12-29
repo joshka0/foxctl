@@ -1,0 +1,31 @@
+# Configuration for agentctl deployment
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentctl-config
+  namespace: agentctl
+  labels:
+    app.kubernetes.io/name: agentctl
+    app.kubernetes.io/component: config
+data:
+  # Database configuration
+  AGENTCTL_DB_DRIVER: "turso"
+
+  # CAS configuration
+  AGENTCTL_CAS_BACKEND: "s3"
+  AGENTCTL_CAS_BUCKET: "agentctl-cas"
+  AWS_REGION: "us-west-2"
+
+  # Observability
+  AGENTCTL_OBS_SAMPLE_RATE: "0.05"
+  AGENTCTL_OBS_SLOW_THRESHOLD_MS: "1000"
+  AGENTCTL_OBS_SAMPLE_ERRORS: "true"
+
+  # Actor system tuning
+  AGENTCTL_MAILBOX_POLL_INTERVAL: "50ms"
+  AGENTCTL_ACTOR_LEASE_DURATION: "30s"
+
+  # Embedding configuration
+  AGENTCTL_EMBEDDING_BATCH_SIZE: "100"
+  AGENTCTL_EMBEDDING_CONCURRENCY: "5"

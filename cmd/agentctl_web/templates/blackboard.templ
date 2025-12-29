@@ -2,8 +2,8 @@ package templates
 
 import "fmt"
 
-templ Blackboard(records []BlackboardRecord, ns, topic string) {
-	@Layout("Blackboard", "/blackboard") {
+templ Blackboard(records []BlackboardRecord, ns, topic string, workspace string, workspaces []Workspace) {
+	@Layout("Blackboard", "/blackboard", workspace, workspaces) {
 		<div class="page-header">
 			<h1 class="page-title">Blackboard</h1>
 			<div style="display: flex; gap: 0.5rem;">
