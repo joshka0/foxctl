@@ -15,6 +15,9 @@ import (
 	"github.com/oklog/ulid/v2"
 )
 
+// DefaultListAllLimit is the maximum number of tasks returned by ListAll when no limit is specified.
+const DefaultListAllLimit = 1000
+
 // Store defines the persistence interface for tasks and active-task state.
 type Store interface {
 	Close() error
@@ -444,7 +447,7 @@ func (s *sqlStore) DirtyIfReviewed(ctx context.Context, taskID string) (Task, bo
 // ListAll returns all tasks up to the specified limit.
 func (s *sqlStore) ListAll(ctx context.Context, limit int) ([]Task, error) {
 	if limit <= 0 {
-		limit = 1000
+		limit = DefaultListAllLimit
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id

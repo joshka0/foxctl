@@ -14,6 +14,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/oklog/ulid/v2"
+	"github.com/rs/zerolog/log"
 )
 
 // Voyage embedding pricing (per 1M tokens, as of Dec 2024)
@@ -216,7 +217,10 @@ func (p *VoyageProvider) waitForRateLimit(ctx context.Context) error {
 		}
 
 		// Wait for the duration or context cancellation
-		fmt.Fprintf(os.Stderr, "Rate limited (3 RPM), waiting %v...\n", waitDuration.Round(time.Second))
+		log.Warn().
+			Str("provider", "voyage").
+			Dur("wait_duration", waitDuration).
+			Msg("Rate limited, waiting for slot")
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

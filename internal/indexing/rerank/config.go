@@ -45,6 +45,12 @@ type Config struct {
 	// nil = default (3 for free tier)
 	// 0 = disabled (for paid accounts)
 	RateLimit *int
+
+	// RateLimitWait controls behavior when rate limited.
+	// nil = default (true, wait for slot)
+	// true = wait until a slot is available
+	// false = return error immediately
+	RateLimitWait *bool
 }
 
 // DefaultConfig returns the default reranking configuration.
@@ -69,6 +75,8 @@ func DefaultConfig() Config {
 //   - AGENTCTL_RERANK_SCORE_BLEND: blend factor (0.0-1.0)
 //   - AGENTCTL_RERANK_MODEL: model name
 //   - AGENTCTL_RERANK_RATE_LIMIT: requests per minute (0 to disable)
+//   - AGENTCTL_RERANK_RATE_LIMIT_WAIT: "true" to wait, "false" to error immediately
+//   - AGENTCTL_RERANK_TIMEOUT: timeout duration (e.g., "30s", "1m")
 func FromEnv() Config {
 	cfg := DefaultConfig()
 
@@ -110,11 +118,24 @@ func FromEnv() Config {
 		}
 	}
 
+	if v := os.Getenv("AGENTCTL_RERANK_RATE_LIMIT_WAIT"); v != "" {
+		wait := v == "true" || v == "1"
+		cfg.RateLimitWait = &wait
+	}
+
+	if v := os.Getenv("AGENTCTL_RERANK_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.Timeout = d
+		}
+	}
+
 	return cfg
 }
 
 // Merge applies non-zero values from other to this config.
 // Useful for combining environment config with per-request overrides.
+// Note: Enabled field can only be set to true via merge (cannot merge false over true).
+// To disable, set Enabled=false in the base config before merging.
 func (c Config) Merge(other Config) Config {
 	result := c
 
@@ -145,13 +166,21 @@ func (c Config) Merge(other Config) Config {
 	if other.RateLimit != nil {
 		result.RateLimit = other.RateLimit
 	}
+	if other.RateLimitWait != nil {
+		result.RateLimitWait = other.RateLimitWait
+	}
 
 	return result
 }
 
 // ToVoyageConfig converts Config to VoyageConfig for provider creation.
+// Default RateLimitWait is true (wait for slot rather than fail immediately).
 func (c Config) ToVoyageConfig() VoyageConfig {
+	// Default to true if not explicitly configured
 	rateLimitWait := true
+	if c.RateLimitWait != nil {
+		rateLimitWait = *c.RateLimitWait
+	}
 	var scoreBlend float64
 	if c.ScoreBlend != nil {
 		scoreBlend = *c.ScoreBlend

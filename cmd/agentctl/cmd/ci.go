@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -20,6 +21,10 @@ import (
 // detectGitRepo attempts to detect owner and repo from git remote origin.
 // Returns empty strings if detection fails (non-blocking).
 func detectGitRepo(ctx context.Context) (owner, repo string) {
+	// Add timeout to prevent hanging on slow git operations
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
 	out, err := cmd.Output()
 	if err != nil {

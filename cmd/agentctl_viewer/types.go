@@ -204,11 +204,11 @@ type searchResult struct {
 
 // searchStats holds search result statistics.
 type searchStats struct {
-	TotalResults   int            `json:"total_results"`
-	SourceCounts   map[string]int `json:"source_counts"`
-	Reranked       bool           `json:"reranked"`
-	EmbeddingDims  int            `json:"embedding_dimensions"`
-	LatencyMS      int64          `json:"latency_ms"`
+	TotalResults  int            `json:"total_results"`
+	SourceCounts  map[string]int `json:"source_counts"`
+	Reranked      bool           `json:"reranked"`
+	EmbeddingDims int            `json:"embedding_dimensions"`
+	LatencyMS     int64          `json:"latency_ms"`
 }
 
 // searchInput is used to build semantic search skill input.

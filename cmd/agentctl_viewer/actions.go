@@ -242,9 +242,15 @@ func fetchSearchResults(query string, limit int, rerank bool, scopes []string) (
 		totalLatency += int64(lat)
 	}
 
+	// Ensure SourceCounts is not nil for stable JSON serialization
+	sourceCounts := envelope.Data.Stats.SourceCounts
+	if sourceCounts == nil {
+		sourceCounts = make(map[string]int)
+	}
+
 	stats := &searchStats{
 		TotalResults:  envelope.Data.Stats.TotalResults,
-		SourceCounts:  envelope.Data.Stats.SourceCounts,
+		SourceCounts:  sourceCounts,
 		Reranked:      rerank,
 		EmbeddingDims: envelope.Data.Stats.EmbeddingDims,
 		LatencyMS:     totalLatency,

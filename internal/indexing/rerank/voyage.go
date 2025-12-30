@@ -14,6 +14,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/oklog/ulid/v2"
+	"github.com/rs/zerolog/log"
 )
 
 // Voyage rerank pricing (per 1M tokens, as of Dec 2024)
@@ -235,8 +236,10 @@ func (p *VoyageProvider) Rerank(ctx context.Context, query string, candidates []
 	// Voyage API supports up to 1000 documents per request
 	const maxBatchSize = 1000
 	if len(candidates) > maxBatchSize {
-		// For now, just process first 1000
-		// TODO: Implement batching if needed
+		log.Warn().
+			Int("total_candidates", len(candidates)).
+			Int("max_batch_size", maxBatchSize).
+			Msg("Truncating candidates to max batch size; batching not yet implemented")
 		candidates = candidates[:maxBatchSize]
 	}
 
