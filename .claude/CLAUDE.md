@@ -50,6 +50,16 @@ agentctl todo list
 agentctl todo active
 agentctl todo complete --id <id> --notes "Done"
 
+# CI / PR Review
+agentctl ci status --pr 123                      # Unified: CI + comments + merge
+agentctl ci comments --pr 123 --source greptile  # Filter: coderabbit, greptile, human
+agentctl ci results --pr 123 --failed            # CI check results
+
+# Incremental Indexing
+agentctl index git-diff                          # Index files changed by git pull
+agentctl index git-diff --base HEAD~3            # Index last 3 commits
+agentctl index git-diff --dry-run                # Preview what would be indexed
+
 # Skills
 agentctl run <skill> --input '<json>'
 agentctl skills list
@@ -86,6 +96,17 @@ agentctl index sync query --query "API design" --workspaces project-a,project-b
 - CGO build (`make build-cgo`) for Turso support
 - `VOYAGE_API_KEY` for query embedding generation
 - `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for remote access
+
+### Git Pull Auto-Index
+
+Automatically index changed files after `git pull`:
+
+```bash
+# One-time setup
+echo '#!/bin/sh
+agentctl index git-diff' > .git/hooks/post-merge
+chmod +x .git/hooks/post-merge
+```
 
 ## Key Skills
 

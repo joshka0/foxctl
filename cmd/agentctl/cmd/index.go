@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +56,7 @@ Remote sync:
 		newIndexInitCommand(),
 		newIndexStatusCommand(),
 		newIndexSyncCommand(),
+		newIndexGitDiffCommand(),
 	)
 	return cmd
 }
@@ -996,6 +1000,272 @@ func syncSessionsToTurso(ctx context.Context, cfg config.Config, remoteURL, remo
 	}
 
 	return count, nil
+}
+
+func newIndexGitDiffCommand() *cobra.Command {
+	var workspace string
+	var base string
+	var head string
+	var dryRun bool
+	var embed bool
+
+	cmd := &cobra.Command{
+		Use:   "git-diff",
+		Short: "Index files changed between git commits (e.g., after git pull)",
+		Long: `Index files that changed between two git commits.
+
+This is designed to run after git operations like pull, merge, or rebase
+to incrementally update the symbol index with only the changed files.
+
+The default range is ORIG_HEAD..HEAD which captures changes from the most
+recent pull/merge. This can be run from a git post-merge hook for automatic
+incremental indexing.
+
+Git hook setup (optional):
+  echo '#!/bin/sh
+  agentctl index git-diff' > .git/hooks/post-merge
+  chmod +x .git/hooks/post-merge`,
+		Example: `  # Index files changed by last pull/merge
+  agentctl index git-diff
+
+  # Index files changed in last 3 commits
+  agentctl index git-diff --base HEAD~3
+
+  # Index specific commit range
+  agentctl index git-diff --base abc123 --head def456
+
+  # Dry run to see what would be indexed
+  agentctl index git-diff --dry-run`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexGitDiff(cmd, workspace, base, head, dryRun, embed)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().StringVar(&base, "base", "ORIG_HEAD", "Base commit (default: ORIG_HEAD for post-pull)")
+	cmd.Flags().StringVar(&head, "head", "HEAD", "Head commit")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be indexed without making changes")
+	cmd.Flags().BoolVar(&embed, "embed", false, "Also queue embeddings for changed files")
+
+	return cmd
+}
+
+func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, embed bool) error {
+	ctx := cmd.Context()
+	start := time.Now()
+
+	// Resolve workspace
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	// Check for VOYAGE_API_KEY if embedding is requested
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	if embed && voyageKey == "" && !dryRun {
+		return fmt.Errorf("VOYAGE_API_KEY required when --embed is set")
+	}
+
+	// Get changed files from git
+	changedFiles, err := getGitDiffFiles(ctx, absWorkspace, base, head)
+	if err != nil {
+		return fmt.Errorf("get git diff: %w", err)
+	}
+
+	// Filter to supported file types
+	supportedExts := map[string]bool{
+		".go": true, ".py": true, ".js": true, ".jsx": true, ".ts": true, ".tsx": true,
+	}
+	var filesToIndex []string
+	for _, f := range changedFiles {
+		ext := strings.ToLower(filepath.Ext(f))
+		if supportedExts[ext] {
+			filesToIndex = append(filesToIndex, f)
+		}
+	}
+
+	if dryRun {
+		data := map[string]any{
+			"dry_run":        true,
+			"workspace":      absWorkspace,
+			"base":           base,
+			"head":           head,
+			"changed_files":  len(changedFiles),
+			"files_to_index": len(filesToIndex),
+			"files":          filesToIndex,
+		}
+		env := protocol.OK("index.git-diff", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	if len(filesToIndex) == 0 {
+		data := map[string]any{
+			"workspace":     absWorkspace,
+			"base":          base,
+			"head":          head,
+			"changed_files": len(changedFiles),
+			"indexed":       0,
+			"message":       "no supported files to index",
+			"duration_ms":   time.Since(start).Milliseconds(),
+		}
+		env := protocol.OK("index.git-diff", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	// Load config
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Index changed files using semantic indexer
+	storageDir := filepath.Join(cfg.Home, "storage")
+	casDir := cfg.Paths.CAS
+	if casDir == "" {
+		casDir = filepath.Join(cfg.Home, "cas")
+	}
+
+	store, err := memory.Open(ctx, storageDir, casDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
+
+	// Create provider if embedding is enabled
+	var provider *semantic.VoyageProvider
+	if embed && voyageKey != "" {
+		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey:        voyageKey,
+			Model:         modelSymbols,
+			RateLimitWait: boolPtr(true),
+		})
+		if err != nil {
+			return fmt.Errorf("create voyage provider: %w", err)
+		}
+	}
+
+	// Use indexer for file processing
+	indexerCfg := semantic.Config{Enabled: true}
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+
+	var indexedCount int
+	var queuedCount int
+	var errorCount int
+	results := make([]map[string]any, 0) // Initialize as empty slice for stable JSON
+
+	// Create indexer once outside the loop
+	var indexer *semantic.Indexer
+	if provider != nil {
+		indexer = semantic.NewIndexer(indexerCfg, store, provider, absWorkspace, logger)
+	}
+
+	for _, relPath := range filesToIndex {
+		absPath := filepath.Join(absWorkspace, relPath)
+
+		// Check if file exists (might have been deleted)
+		if _, err := os.Stat(absPath); os.IsNotExist(err) {
+			results = append(results, map[string]any{
+				"file":   relPath,
+				"status": "skipped",
+				"reason": "file deleted",
+			})
+			continue
+		}
+
+		// Use semantic indexer for this file
+		if indexer != nil {
+			args := semantic.JobArgs{
+				WorkspaceID: absWorkspace,
+				Reason:      semantic.ReasonGitPull,
+				Files:       []semantic.JobFileInput{{Path: relPath}}, // Use relative path
+			}
+
+			result, err := indexer.RunInitFilesJob(ctx, args)
+			if err != nil {
+				results = append(results, map[string]any{
+					"file":   relPath,
+					"status": "error",
+					"error":  err.Error(),
+				})
+				errorCount++
+				continue
+			}
+
+			results = append(results, map[string]any{
+				"file":           relPath,
+				"status":         "indexed",
+				"files_indexed":  result.Summary.FilesIndexed,
+				"chunks_indexed": result.Summary.ChunksIndexed,
+			})
+			indexedCount++
+			fmt.Fprintf(os.Stderr, "  [indexed] %s\n", relPath)
+		} else {
+			// Without provider, just report the file as queued (not indexed)
+			results = append(results, map[string]any{
+				"file":   relPath,
+				"status": "queued",
+				"note":   "no embedding provider (add --embed with VOYAGE_API_KEY)",
+			})
+			queuedCount++
+			fmt.Fprintf(os.Stderr, "  [queued] %s\n", relPath)
+		}
+	}
+
+	data := map[string]any{
+		"workspace":     absWorkspace,
+		"base":          base,
+		"head":          head,
+		"changed_files": len(changedFiles),
+		"indexed":       indexedCount,
+		"queued":        queuedCount,
+		"errors":        errorCount,
+		"embed":         embed,
+		"results":       results,
+		"duration_ms":   time.Since(start).Milliseconds(),
+	}
+
+	env := protocol.OK("index.git-diff", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+// getGitDiffFiles returns the list of files changed between base and head commits.
+func getGitDiffFiles(ctx context.Context, repoPath, base, head string) ([]string, error) {
+	// First check if ORIG_HEAD exists (it won't if no merge/pull has happened)
+	if base == "ORIG_HEAD" {
+		checkCmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--verify", "ORIG_HEAD")
+		if err := checkCmd.Run(); err != nil {
+			// ORIG_HEAD doesn't exist, fall back to HEAD~1
+			base = "HEAD~1"
+		}
+	}
+
+	// Get list of changed files
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "diff", "--name-only", base+".."+head)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// If the range doesn't work, try without the range (unstaged changes)
+		cmd2 := exec.CommandContext(ctx, "git", "-C", repoPath, "diff", "--name-only")
+		var stdout2 bytes.Buffer
+		cmd2.Stdout = &stdout2
+		if err2 := cmd2.Run(); err2 != nil {
+			return nil, fmt.Errorf("git diff failed: %w (stderr: %s)", err, stderr.String())
+		}
+		stdout = stdout2
+	}
+
+	// Parse output
+	var files []string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+
+	return files, nil
 }
 
 func init() {

@@ -29,6 +29,9 @@ const (
 
 	// ReasonManual indicates explicit CLI/API-triggered indexing.
 	ReasonManual IndexReason = "manual"
+
+	// ReasonGitPull indicates indexing triggered by git pull/merge.
+	ReasonGitPull IndexReason = "git_pull"
 )
 
 // FileChangeKind describes what kind of change occurred to a file.

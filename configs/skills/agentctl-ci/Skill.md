@@ -1,112 +1,130 @@
 ---
 name: agentctl CI
-description: GitHub CI integration - check PR status, get check run summaries, and retrieve failure logs.
+description: GitHub CI integration - check PR status, get check run summaries, review comments (CodeRabbit, Greptile), and failure logs.
 ---
 
 # GitHub CI Integration
 
-Summarize GitHub CI check runs for pull requests.
+Unified view of CI status, review comments, and check results for pull requests.
+Works with open, closed, and merged PRs.
 
-## Check PR Status
+## Quick Commands
 
 ```bash
-agentctl run ci/github_checks --input '{
-  "pr": "123"
-}'
+# Unified status - CI + comments + merge status
+agentctl ci status --pr 123
+
+# Get review comments (hides resolved by default)
+agentctl ci comments --pr 123
+
+# Include resolved/addressed comments
+agentctl ci comments --pr 123 --all
+
+# Get CI check results
+agentctl ci results --pr 123
+
+# Filter by source
+agentctl ci comments --pr 123 --source greptile
+agentctl ci comments --pr 123 --source coderabbit
+
+# Show only failed checks
+agentctl ci results --pr 123 --failed
+```
+
+## Commands
+
+### `ci status` - Unified PR Status
+
+Shows CI failures, review comments, and merge status in one view.
+
+```bash
+agentctl ci status --pr 123
+agentctl ci status --pr 123 --owner myorg --repo myrepo
+```
+
+### `ci comments` - Review Comments
+
+Get review comments with source filtering (supports CodeRabbit, Greptile, human reviewers).
+By default, resolved/addressed comments are hidden.
+
+```bash
+# Unresolved comments only (default)
+agentctl ci comments --pr 123
+
+# Include resolved/addressed comments
+agentctl ci comments --pr 123 --all
+
+# Filter by source
+agentctl ci comments --pr 123 --source greptile
+agentctl ci comments --pr 123 --source coderabbit
+agentctl ci comments --pr 123 --source human
+
+# Combine filters
+agentctl ci comments --pr 123 --source greptile --all
+
+# JSON output
+agentctl ci comments --pr 123 --data-only
+```
+
+Each comment includes `resolved` and `outdated` fields when available.
+
+### `ci results` - CI Check Results
+
+Get CI check run results with optional failure filtering.
+
+```bash
+# All check results
+agentctl ci results --pr 123
+
+# Only failed checks
+agentctl ci results --pr 123 --failed
+
+# JSON output
+agentctl ci results --pr 123 --data-only
 ```
 
 ## Parameters
 
-| Parameter     | Type    | Required | Default     | Description                           |
-| ------------- | ------- | -------- | ----------- | ------------------------------------- |
-| `pr`          | string  | Yes      | -           | PR number or branch name              |
-| `owner`       | string  | No       | auto-detect | GitHub repository owner               |
-| `repo`        | string  | No       | auto-detect | Repository name (or `owner/repo`)     |
-| `mode`        | string  | No       | `summary`   | Detail level: `summary` or `detailed` |
-| `errors_only` | boolean | No       | `false`     | Only show failing/errored checks      |
+| Flag | Description |
+|------|-------------|
+| `--pr` | PR number or branch name (required) |
+| `--owner` | GitHub repo owner (auto-detect from git remote) |
+| `--repo` | Repository name (auto-detect from git remote) |
+| `--source` | Filter comments: `coderabbit`, `greptile`, `human` |
+| `--all` | Include resolved/addressed comments (default: hide resolved) |
+| `--failed` | Show only failed checks (for `results`) |
+| `--skip-cache` | Bypass cache for fresh data |
+| `--data-only` | Output JSON only (for AI/scripting) |
 
-## Examples
+## Supported Review Bots
 
-### Summary View
-
-Quick overview of all check statuses:
-
-```bash
-agentctl run ci/github_checks --input '{
-  "pr": "456",
-  "mode": "summary"
-}'
-```
-
-### Detailed View
-
-Full check information with logs:
-
-```bash
-agentctl run ci/github_checks --input '{
-  "pr": "456",
-  "mode": "detailed"
-}'
-```
-
-### Failures Only
-
-See only what's broken:
-
-```bash
-agentctl run ci/github_checks --input '{
-  "pr": "456",
-  "errors_only": true
-}'
-```
-
-### Explicit Repository
-
-Specify repo when not auto-detected:
-
-```bash
-agentctl run ci/github_checks --input '{
-  "pr": "123",
-  "owner": "myorg",
-  "repo": "myrepo"
-}'
-```
-
-Or shorthand:
-
-```bash
-agentctl run ci/github_checks --input '{
-  "pr": "123",
-  "repo": "myorg/myrepo"
-}'
-```
-
-### Check by Branch
-
-```bash
-agentctl run ci/github_checks --input '{
-  "pr": "feature/new-api"
-}'
-```
-
-## Output
-
-Returns check run information:
-
-- **Summary mode**: Check name, status (success/failure/pending), conclusion
-- **Detailed mode**: Above plus step logs, timing, annotations
-
-## Use Cases
-
-- **PR triage**: Quickly see what's failing
-- **Debug CI**: Get detailed logs for failed checks
-- **Automation**: Monitor PR readiness before merge
-- **Status reports**: Aggregate CI health for multiple PRs
+| Bot | Username | Features |
+|-----|----------|----------|
+| CodeRabbit | `coderabbitai[bot]` | Severity levels, code suggestions |
+| Greptile | `greptile-apps[bot]` | Syntax errors, refactoring suggestions |
 
 ## Environment
 
-Set `GITHUB_TOKEN` for private repositories or higher rate limits:
+Set `GITHUB_TOKEN` or use `gh auth login` for private repos.
 
-```bash
-export GITHUB_TOKEN=ghp_xxxxx
+## Output Example
+
+```markdown
+## PR #123: Feature title
+
+**Status:** ❌ Failing | **Merge:** ✅
+
+### CI Failures (2)
+
+1. **lint** [→ logs](url)
+   gofmt found diffs
+   → internal/auth/service.go:142
+
+### Review Comments (3)
+
+1. **@greptile-apps[bot]** [major] on api/handler.go:55
+   **syntax:** missing nil check
+
+2. **@coderabbitai[bot]** [critical] on auth/service.go:142
+   Missing nil check before user access
 ```

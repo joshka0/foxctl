@@ -29,13 +29,14 @@ import (
 var logger = zerolog.New(os.Stderr).With().Str("component", "ci_prcomments").Timestamp().Logger()
 
 type input struct {
-	PR          string `json:"pr"`
-	Owner       string `json:"owner"`
-	Repo        string `json:"repo"`
-	WithContext bool   `json:"with_context"`
-	Format      string `json:"format"`
-	OutputPath  string `json:"output_path"`
-	ErrorsOnly  bool   `json:"errors_only"`
+	PR              string `json:"pr"`
+	Owner           string `json:"owner"`
+	Repo            string `json:"repo"`
+	WithContext     bool   `json:"with_context"`
+	Format          string `json:"format"`
+	OutputPath      string `json:"output_path"`
+	ErrorsOnly      bool   `json:"errors_only"`
+	IncludeResolved bool   `json:"include_resolved"` // Include resolved/addressed comments (default: false)
 }
 
 type Comment struct {
@@ -45,6 +46,8 @@ type Comment struct {
 	CreatedAt time.Time `json:"created_at"`
 	Path      string    `json:"path,omitempty"`
 	Line      *int      `json:"line,omitempty"`
+	Resolved  bool      `json:"resolved,omitempty"`  // Thread is resolved/addressed
+	Outdated  bool      `json:"outdated,omitempty"`  // Comment is on outdated code
 }
 
 type User struct {
@@ -113,6 +116,8 @@ type TaskItem struct {
 	Line          *int   `json:"line,omitempty"`
 	CommentAuthor string `json:"comment_author,omitempty"`
 	CommentBody   string `json:"comment_body,omitempty"`
+	Resolved      bool   `json:"resolved,omitempty"`
+	Outdated      bool   `json:"outdated,omitempty"`
 }
 
 func main() {
@@ -219,6 +224,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		logger.Warn().Err(err).Str("operation", "get-review-comments").Int("pr", prNum).Msg("failed to get review comments")
 	}
 
+	// Fetch resolved/outdated status via GraphQL and merge into review comments
+	threadStatuses, err := getReviewThreadStatuses(client, token, owner, repo, prNum)
+	if err != nil {
+		logger.Warn().Err(err).Str("operation", "get-review-thread-statuses").Int("pr", prNum).Msg("failed to get review thread statuses")
+	} else {
+		mergeResolvedStatus(reviewComments, threadStatuses)
+	}
+
 	checkRuns, err := getCheckRuns(client, token, owner, repo, prNum)
 	if err != nil {
 		logger.Warn().Err(err).Str("operation", "get-check-runs").Int("pr", prNum).Msg("failed to get CI check runs")
@@ -237,7 +250,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		truncated = true
 	}
 
-	tasksList := buildTasksList(conflictingFiles, allComments, checkRuns)
+	tasksList := buildTasksList(conflictingFiles, allComments, checkRuns, in.IncludeResolved)
 	hasBlockingIssues := len(tasksList) > 0
 
 	data := map[string]any{
@@ -393,6 +406,116 @@ func getReviewComments(client *http.Client, token, owner, repo string, prNum int
 		return nil, err
 	}
 	return comments, nil
+}
+
+// ReviewThreadStatus maps comment IDs to their resolved/outdated status from GraphQL API.
+type ReviewThreadStatus struct {
+	CommentID  int
+	IsResolved bool
+	IsOutdated bool
+}
+
+// getReviewThreadStatuses fetches resolved/outdated status for all review comments via GraphQL.
+// This is needed because the REST API doesn't expose these fields.
+func getReviewThreadStatuses(client *http.Client, token, owner, repo string, prNum int) (map[int]ReviewThreadStatus, error) {
+	query := `
+query($owner: String!, $repo: String!, $prNum: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $prNum) {
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          isOutdated
+          comments(first: 1) {
+            nodes {
+              databaseId
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+	variables := map[string]any{
+		"owner": owner,
+		"repo":  repo,
+		"prNum": prNum,
+	}
+	payload := map[string]any{
+		"query":     query,
+		"variables": variables,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal graphql query: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", "https://api.github.com/graphql", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create graphql request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("graphql request: %w", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("graphql request failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewThreads struct {
+						Nodes []struct {
+							IsResolved bool `json:"isResolved"`
+							IsOutdated bool `json:"isOutdated"`
+							Comments   struct {
+								Nodes []struct {
+									DatabaseID int `json:"databaseId"`
+								} `json:"nodes"`
+							} `json:"comments"`
+						} `json:"nodes"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode graphql response: %w", err)
+	}
+
+	statuses := make(map[int]ReviewThreadStatus)
+	for _, thread := range result.Data.Repository.PullRequest.ReviewThreads.Nodes {
+		if len(thread.Comments.Nodes) > 0 {
+			commentID := thread.Comments.Nodes[0].DatabaseID
+			statuses[commentID] = ReviewThreadStatus{
+				CommentID:  commentID,
+				IsResolved: thread.IsResolved,
+				IsOutdated: thread.IsOutdated,
+			}
+		}
+	}
+	return statuses, nil
+}
+
+// mergeResolvedStatus updates comments with their resolved/outdated status from GraphQL data.
+func mergeResolvedStatus(comments []Comment, statuses map[int]ReviewThreadStatus) {
+	for i := range comments {
+		if status, ok := statuses[comments[i].ID]; ok {
+			comments[i].Resolved = status.IsResolved
+			comments[i].Outdated = status.IsOutdated
+		}
+	}
 }
 
 func getCheckRuns(client *http.Client, token, owner, repo string, prNum int) ([]CheckRun, error) {
@@ -796,7 +919,7 @@ func getChangedFilesForPR(client *http.Client, token, owner, repo string, prNum 
 	return conflicting
 }
 
-func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []CheckRun) []TaskItem {
+func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []CheckRun, includeResolved bool) []TaskItem {
 	tasks := make([]TaskItem, 0)
 	if len(conflictingFiles) > 0 {
 		tasks = append(tasks, TaskItem{
@@ -816,6 +939,10 @@ func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []C
 		}
 	}
 	for _, comment := range comments {
+		// Skip resolved comments unless includeResolved is true
+		if comment.Resolved && !includeResolved {
+			continue
+		}
 		cleanBody := cleanCommentBody(comment.Body)
 		if cleanBody == "" {
 			continue
@@ -825,10 +952,22 @@ func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []C
 			Summary:       fmt.Sprintf("Address review comment from %s", comment.User.Login),
 			CommentAuthor: comment.User.Login,
 			CommentBody:   cleanBody,
+			Resolved:      comment.Resolved,
+			Outdated:      comment.Outdated,
 		}
 		if comment.User.Login == "coderabbitai[bot]" {
 			item.Source = "coderabbit"
 			sev, summary := classifyCodeRabbitTask(cleanBody)
+			if sev != "" {
+				item.Severity = sev
+			}
+			if summary != "" {
+				item.Summary = summary
+			}
+		}
+		if strings.Contains(comment.User.Login, "greptile") {
+			item.Source = "greptile"
+			sev, summary := classifyGreptileTask(cleanBody)
 			if sev != "" {
 				item.Severity = sev
 			}
@@ -892,6 +1031,9 @@ func cleanCommentBody(body string) string {
 	}
 	if strings.Contains(body, "coderabbitai[bot]") {
 		return extractCodeRabbitComment(body)
+	}
+	if strings.Contains(body, "greptile") || strings.Contains(body, "Greptile") {
+		return extractGreptileComment(body)
 	}
 
 	htmlCommentRegex := regexp.MustCompile(`(?s)<!--.*?-->`)
@@ -1059,6 +1201,103 @@ func extractCodeRabbitComment(body string) string {
 		return strings.Join(result, "\n")
 	}
 	return ""
+}
+
+// extractGreptileComment extracts actionable content from Greptile bot comments.
+// Greptile comments are generally cleaner than CodeRabbit but may contain metadata.
+func extractGreptileComment(body string) string {
+	// Remove HTML comments
+	body = regexp.MustCompile(`(?s)<!--.*?-->`).ReplaceAllString(body, "")
+
+	lines := strings.Split(body, "\n")
+	var result []string
+	inCode := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// Skip common Greptile metadata patterns
+		if strings.HasPrefix(trimmed, "🤖") && strings.Contains(trimmed, "Greptile") {
+			continue
+		}
+		if strings.Contains(trimmed, "React with 👍 or 👎") {
+			continue
+		}
+		// Track code blocks but include them (they contain actual suggestions)
+		if strings.HasPrefix(trimmed, "```") {
+			inCode = !inCode
+		}
+		result = append(result, strings.TrimRight(line, " \t"))
+	}
+
+	// Clean up leading/trailing empty lines
+	for len(result) > 0 && strings.TrimSpace(result[0]) == "" {
+		result = result[1:]
+	}
+	for len(result) > 0 && strings.TrimSpace(result[len(result)-1]) == "" {
+		result = result[:len(result)-1]
+	}
+
+	if len(result) > 0 {
+		return strings.Join(result, "\n")
+	}
+	return ""
+}
+
+// classifyGreptileTask extracts severity and summary from Greptile comment content.
+// Greptile uses labels like "logic", "style", "security", "performance" as comment types.
+func classifyGreptileTask(cleanBody string) (severity, summary string) {
+	lines := strings.Split(cleanBody, "\n")
+
+	// Look for severity indicators
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+
+		// Security and performance issues are typically critical/major
+		if strings.Contains(lower, "security") || strings.Contains(lower, "vulnerability") {
+			severity = "critical"
+			break
+		}
+		if strings.Contains(lower, "performance") || strings.Contains(lower, "memory leak") {
+			severity = "major"
+			break
+		}
+		if strings.Contains(lower, "bug") || strings.Contains(lower, "error") {
+			severity = "major"
+			break
+		}
+		if strings.Contains(lower, "style") || strings.Contains(lower, "naming") {
+			severity = "minor"
+			break
+		}
+	}
+
+	// Extract first meaningful line as summary
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		// Skip headers and metadata
+		if strings.HasPrefix(trimmed, "#") {
+			trimmed = strings.TrimLeft(trimmed, "# ")
+		}
+		if strings.HasPrefix(trimmed, "```") {
+			continue
+		}
+		if len(trimmed) > 10 {
+			summary = trimmed
+			if len(summary) > 100 {
+				summary = summary[:100] + "..."
+			}
+			break
+		}
+	}
+
+	return severity, summary
 }
 
 func fail(command, code string, err error) {

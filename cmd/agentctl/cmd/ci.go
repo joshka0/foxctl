@@ -109,6 +109,8 @@ func newCICommand() *cobra.Command {
 		newCIPRCommentsCommand(),
 		newCIChecksCommand(),
 		newCITodosCommand(),
+		newCICommentsCommand(),
+		newCIResultsCommand(),
 	)
 	return cmd
 }
@@ -669,6 +671,165 @@ func newCITodosCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the ci/prcomments skill")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
+	return cmd
+}
+
+func newCICommentsCommand() *cobra.Command {
+	var pr string
+	var owner string
+	var repo string
+	var source string
+	var skipCache bool
+	var dataOnly bool
+	var showAll bool
+
+	cmd := &cobra.Command{
+		Use:   "comments",
+		Short: "Get review comments for a PR (supports CodeRabbit, Greptile, and other bots)",
+		Long: "Retrieve and filter review comments from a PR. By default, resolved/addressed " +
+			"comments are hidden. Use --all to show all comments including resolved ones. " +
+			"Supports filtering by source (coderabbit, greptile, human).",
+		Example: "  # Get unresolved review comments (default)\n" +
+			"  agentctl ci comments --pr 128\n\n" +
+			"  # Get all comments including resolved\n" +
+			"  agentctl ci comments --pr 128 --all\n\n" +
+			"  # Get only Greptile comments\n" +
+			"  agentctl ci comments --pr 128 --source greptile\n\n" +
+			"  # Get only CodeRabbit comments\n" +
+			"  agentctl ci comments --pr 128 --source coderabbit\n",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(pr) == "" {
+				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name.")
+			}
+			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
+
+			payload := map[string]any{
+				"pr":               pr,
+				"errors_only":      false,
+				"format":           "json",
+				"include_resolved": showAll, // Include resolved comments when --all is specified
+			}
+			if owner != "" {
+				payload["owner"] = owner
+			}
+			if repo != "" {
+				payload["repo"] = repo
+			}
+
+			env, err := runCISkillForEnvelope(cmd, "ci/prcomments", payload, skipCache)
+			if err != nil {
+				return err
+			}
+
+			// Extract and filter comments
+			data, ok := env.Data.(map[string]any)
+			if !ok {
+				return fmt.Errorf("unexpected data type: %T", env.Data)
+			}
+
+			tasksList, _ := data["tasks_list"].([]any)
+			comments := make([]map[string]any, 0) // Initialize as empty slice for stable JSON
+			for _, t := range tasksList {
+				tm, ok := t.(map[string]any)
+				if !ok {
+					continue
+				}
+				kind, _ := tm["kind"].(string)
+				if kind != "review_comment" {
+					continue
+				}
+				// Filter by source if specified
+				if source != "" {
+					itemSource, _ := tm["source"].(string)
+					if source == "human" && itemSource != "" {
+						continue // Skip bot comments when filtering for human
+					}
+					if source != "human" && itemSource != source {
+						continue
+					}
+				}
+				comments = append(comments, tm)
+			}
+
+			result := map[string]any{
+				"pr_number":  data["pr_number"],
+				"repository": data["repository"],
+				"url":        data["url"],
+				"comments":   comments,
+				"count":      len(comments),
+			}
+			if source != "" {
+				result["filter"] = source
+			}
+
+			if dataOnly {
+				out := map[string]any{"status": "ok", "data": result}
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetEscapeHTML(false)
+				return enc.Encode(out)
+			}
+
+			env.Data = result
+			return protocol.Write(cmd.OutOrStdout(), env)
+		},
+	}
+
+	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
+	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name (optional)")
+	cmd.Flags().StringVar(&source, "source", "", "Filter by comment source: coderabbit, greptile, human")
+	cmd.Flags().BoolVar(&showAll, "all", false, "Show all comments including resolved/addressed (default: hide resolved)")
+	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache")
+	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias)")
+	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} for AI consumption")
+	return cmd
+}
+
+func newCIResultsCommand() *cobra.Command {
+	var pr string
+	var owner string
+	var repo string
+	var failedOnly bool
+	var skipCache bool
+	var dataOnly bool
+
+	cmd := &cobra.Command{
+		Use:   "results",
+		Short: "Get CI check results for a PR",
+		Long:  "Retrieve CI check run results for a PR. By default shows all checks; use --failed to show only failures.",
+		Example: "  # Get all CI results\n" +
+			"  agentctl ci results --pr 128\n\n" +
+			"  # Get only failed checks\n" +
+			"  agentctl ci results --pr 128 --failed\n",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if strings.TrimSpace(pr) == "" {
+				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name.")
+			}
+			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
+
+			payload := map[string]any{
+				"pr":          pr,
+				"mode":        "detailed",
+				"errors_only": failedOnly,
+			}
+			if owner != "" {
+				payload["owner"] = owner
+			}
+			if repo != "" {
+				payload["repo"] = repo
+			}
+
+			return runCISkill(cmd, "ci/github_checks", payload, skipCache, dataOnly, false)
+		},
+	}
+
+	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
+	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name (optional)")
+	cmd.Flags().BoolVar(&failedOnly, "failed", false, "Show only failed checks")
+	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache")
+	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias)")
+	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} for AI consumption")
 	return cmd
 }
 
