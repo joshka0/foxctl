@@ -166,7 +166,7 @@ embedding.
 
 ```bash
 # Get second opinion
-context=$(bin/agentctl run code/complexity --input '{"path": "."}')
+context=$(agentctl run code/complexity --input '{"path": "."}')
 echo "$context" | gemini -p "Refactoring priorities?"
 ```
 
@@ -239,7 +239,7 @@ CGO_ENABLED=0 go build -o ~/.agentctl/skills/code/semantic_search/bin ./skills/c
 
 ```bash
 # 1. Saves to agentctl memory
-bin/agentctl memory put --name "gotcha-<topic>" --type "gotcha" \
+agentctl memory put --name "gotcha-<topic>" --type "gotcha" \
   --summary "<note>" --data '{"details": "..."}'
 
 # 2. Appends to CLAUDE.md under Gotchas section

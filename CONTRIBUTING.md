@@ -83,7 +83,7 @@ agentctl/
 ### Key Make Targets
 
 ```bash
-make build              # Build CLI → ./bin/agentctl
+make build              # Build CLI → ./agentctl
 make skills-build       # Build all skills → ./dist/skills/
 make test               # Run unit tests
 make test-race          # Run tests with race detection

@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(bin/agentctl:*), Bash(gemini:*), Read
+allowed-tools: Bash(agentctl:*), Bash(gemini:*), Read
 description: Enhanced friend command that uses agentctl for structured context before consulting Gemini
 argument-hint: "<query>"
 ---
@@ -10,9 +10,9 @@ Get a second opinion from Gemini on code/architecture questions, using agentctl 
 ## Workflow (agent-only)
 
 1. **Gather structured context using agentctl skills:**
-   - `bin/agentctl run code/complexity` - Get complexity hotspots
-   - `bin/agentctl run code/symbols` - Extract code structure
-   - `bin/agentctl run code/swe_grep` - Find relevant code snippets
+   - `agentctl run code/complexity` - Get complexity hotspots
+   - `agentctl run code/symbols` - Extract code structure
+   - `agentctl run code/swe_grep` - Find relevant code snippets
 
 2. **Format context for Gemini:**
    - Create a structured summary from agentctl output
@@ -20,7 +20,7 @@ Get a second opinion from Gemini on code/architecture questions, using agentctl 
 
 3. **Log the query to mailbox (for traceability):**
    ```bash
-   bin/agentctl mailbox send gemini-queries \
+   agentctl mailbox send gemini-queries \
      --from claude-agent \
      --type agent.ask \
      --payload '{"query": "$ARGUMENTS", "context_summary": "..."}'
@@ -33,7 +33,7 @@ Get a second opinion from Gemini on code/architecture questions, using agentctl 
 
 5. **Log Gemini's response to mailbox:**
    ```bash
-   bin/agentctl mailbox send claude-queries \
+   agentctl mailbox send claude-queries \
      --from gemini-agent \
      --type agent.reply \
      --payload '{"response": "..."}'
@@ -48,11 +48,11 @@ Get a second opinion from Gemini on code/architecture questions, using agentctl 
 
 ```bash
 # Get complexity analysis
-result=$(bin/agentctl run code/complexity --input '{"path": "internal/agent", "threshold": 10}' 2>&1)
+result=$(agentctl run code/complexity --input '{"path": "internal/agent", "threshold": 10}' 2>&1)
 complexity=$(echo "$result" | grep '{"version"' | jq -r '.data.results[] | "- \(.function): complexity \(.cyclomatic_complexity)"')
 
 # Get code symbols
-symbols=$(bin/agentctl run code/symbols --input '{"path": "internal/agent", "lang": "go"}' 2>&1)
+symbols=$(agentctl run code/symbols --input '{"path": "internal/agent", "lang": "go"}' 2>&1)
 ```
 
 ## Output Format

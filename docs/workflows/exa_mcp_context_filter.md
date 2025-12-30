@@ -18,7 +18,7 @@ It assumes you:
 From the repo root:
 
 ```bash
-make build        # builds ./bin/agentctl
+make build        # builds ./agentctl
 make skills-build # builds skills into dist/skills/
 ```
 
@@ -39,7 +39,7 @@ The Exa MCP server is hosted at `https://mcp.exa.ai/mcp`.
    ```bash
    BRIDGE="$(pwd)/dist/skills/mcp_bridge/bin"
 
-   ./bin/agentctl run mcp/install --input '{
+   ./agentctl run mcp/install --input '{
      "server_url": "https://mcp.exa.ai/mcp",
      "server_headers": {
        "Accept": "application/json, text/event-stream",
@@ -80,7 +80,7 @@ Example call:
 
 ```bash
 AGENTCTL_SKILL_PATH="$(pwd)/exa_skills" \
-  ./bin/agentctl run search --input '{
+  ./agentctl run search --input '{
     "query": "agentctl CAS integrity failures",
     "num_results": 10
   }' > exa_raw.json
@@ -130,7 +130,7 @@ feed it into `context/filter`.
      source: { text: . },
      budget: { target_tokens: 2000, max_chunks: 16 },
      llm: { provider: "groq", model: "llama-3.3-70b-versatile" }
-   }' exa_text.txt | ./bin/agentctl run context/filter --input-file -
+   }' exa_text.txt | ./agentctl run context/filter --input-file -
    ```
 
 3. The `context/filter` envelope will contain:
@@ -166,7 +166,7 @@ some-command-producing-text \
       budget: { target_tokens: 2000, max_chunks: 16 },
       llm: { provider: "groq", model: "llama-3.3-70b-versatile" }
     }' \
-  | ./bin/agentctl run context/filter --input-file -
+  | ./agentctl run context/filter --input-file -
 ```
 
 Notes:
@@ -181,8 +181,8 @@ valid `context/filter` input object, you can chain runs directly using
 `--input stdin`:
 
 ```bash
-./bin/agentctl run some/producer --input '{ ... }' \
-  | ./bin/agentctl run context/filter --input stdin
+./agentctl run some/producer --input '{ ... }' \
+  | ./agentctl run context/filter --input stdin
 ```
 
 In this pattern:

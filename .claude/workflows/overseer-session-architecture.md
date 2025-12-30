@@ -264,11 +264,11 @@ export AGENTCTL_LLM_API_KEY=$(grep OPENROUTER_API_KEY ~/.claude/.env | cut -d= -
 export AGENTCTL_LLM_MODEL=anthropic/claude-haiku-4-5
 
 # 2. Spawn subagents
-bin/agentctl agent spawn --role coder --prompt "You help with code tasks"
-bin/agentctl agent spawn --role analyzer --prompt "You analyze code quality"
+agentctl agent spawn --role coder --prompt "You help with code tasks"
+agentctl agent spawn --role analyzer --prompt "You analyze code quality"
 
 # 3. Start daemon in background
-bin/agentctl agent daemon &
+agentctl agent daemon &
 
 # 4. Claude Code takes over as overseer
 # (This happens in the conversation - Claude polls and coordinates)
@@ -280,7 +280,7 @@ bin/agentctl agent daemon &
 
 ```bash
 # Session context - survives compaction
-bin/agentctl bb post context --ns overseer --payload '{
+agentctl bb post context --ns overseer --payload '{
   "session_id": "2025-12-22-overseer",
   "started_at": "2025-12-22T11:00:00Z",
   "objective": "Implement multi-agent coordination",
@@ -289,7 +289,7 @@ bin/agentctl bb post context --ns overseer --payload '{
 }'
 
 # Decision log - for continuity
-bin/agentctl bb post decisions --ns overseer --payload '{
+agentctl bb post decisions --ns overseer --payload '{
   "decision_id": "dec-001",
   "question": "Which LLM provider?",
   "decision": "openrouter",
@@ -298,7 +298,7 @@ bin/agentctl bb post decisions --ns overseer --payload '{
 }'
 
 # Task status
-bin/agentctl bb post tasks --ns overseer --payload '{
+agentctl bb post tasks --ns overseer --payload '{
   "task_id": "task-123",
   "assigned_to": "coder-agent",
   "status": "in_progress",
@@ -312,13 +312,13 @@ When resuming a session (after compaction or new conversation):
 
 ```bash
 # 1. Load session context
-bin/agentctl bb list context --ns overseer
+agentctl bb list context --ns overseer
 
 # 2. Check agent status
-bin/agentctl agent list
+agentctl agent list
 
 # 3. Review pending messages
-bin/agentctl mailbox list overseer
+agentctl mailbox list overseer
 
 # 4. Resume coordination
 # Claude Code picks up from last state
@@ -330,23 +330,23 @@ bin/agentctl mailbox list overseer
 
 ```bash
 # Poll for messages (do this periodically)
-bin/agentctl mailbox poll overseer --timeout 30 --max 10
+agentctl mailbox poll overseer --timeout 30 --max 10
 
 # Send task to agent
-bin/agentctl mailbox send coder-agent \
+agentctl mailbox send coder-agent \
   --from overseer \
   --type overseer.task \
   --payload '{"task_id": "task-123", "description": "Fix the bug in X"}'
 
 # Check agent status
-bin/agentctl agent list
+agentctl agent list
 
 # Log decision to blackboard
-bin/agentctl bb post decisions --ns overseer \
+agentctl bb post decisions --ns overseer \
   --payload '{"decision": "...", "rationale": "..."}'
 
 # Checkpoint session
-bin/agentctl memory put session-checkpoint \
+agentctl memory put session-checkpoint \
   --name "overseer-$(date +%Y%m%d-%H%M)" \
   --summary "Session checkpoint" \
   --type session \
@@ -357,13 +357,13 @@ bin/agentctl memory put session-checkpoint \
 
 ```bash
 # Watch for agent events in real-time
-bin/agentctl agent watch
+agentctl agent watch
 
 # Watch blackboard updates
-bin/agentctl bb watch status --ns overseer
+agentctl bb watch status --ns overseer
 
 # Check task completion
-bin/agentctl todo list
+agentctl todo list
 ```
 
 ## Implementation Phases

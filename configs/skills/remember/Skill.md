@@ -30,7 +30,7 @@ When the user runs this command, save the memory to agentctl:
 4. Run the agentctl command:
 ```bash
 echo '{"version":1,"status":"ok","command":"memory/remember","data":{"content":"<the insight>"}}' | \
-  bin/agentctl memory put \
+  agentctl memory put \
     --name "<name>" \
     --type "<type>" \
     --summary "<the insight>" \

@@ -15,7 +15,7 @@ were made, and what gotchas were encountered.
 Find past sessions relevant to a natural language query:
 
 ```bash
-bin/agentctl run session/recall --input '{
+agentctl run session/recall --input '{
   "query": "authentication JWT refresh token",
   "limit": 5,
   "min_similarity": 0.5
@@ -74,7 +74,7 @@ Shows aggregate stats across all captured sessions.
 "How did I fix the database connection pooling issue?"
 
 ```bash
-bin/agentctl run session/recall --input '{"query": "database connection pool timeout"}'
+agentctl run session/recall --input '{"query": "database connection pool timeout"}'
 ```
 
 ### Find Similar Work
@@ -82,7 +82,7 @@ bin/agentctl run session/recall --input '{"query": "database connection pool tim
 "Show me sessions where I worked on API authentication"
 
 ```bash
-bin/agentctl run session/recall --input '{"query": "API authentication middleware"}'
+agentctl run session/recall --input '{"query": "API authentication middleware"}'
 ```
 
 ### Learn from Mistakes
@@ -90,7 +90,7 @@ bin/agentctl run session/recall --input '{"query": "API authentication middlewar
 "What gotchas did I encounter with React hooks?"
 
 ```bash
-bin/agentctl run session/recall --input '{"query": "React hooks gotchas errors"}'
+agentctl run session/recall --input '{"query": "React hooks gotchas errors"}'
 ```
 
 ### Cross-Project Learning
@@ -98,7 +98,7 @@ bin/agentctl run session/recall --input '{"query": "React hooks gotchas errors"}
 Find solutions from other projects:
 
 ```bash
-bin/agentctl run session/recall --input '{
+agentctl run session/recall --input '{
   "query": "GraphQL schema validation",
   "limit": 10
 }'

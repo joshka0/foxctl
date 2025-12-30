@@ -84,7 +84,7 @@ EOF
 export PATH="$PATH:/path/to/agentctl/bin"
 
 # Or install to a PATH directory
-sudo cp ./bin/agentctl /usr/local/bin/
+sudo cp ./agentctl /usr/local/bin/
 
 # Verify installation
 which agentctl
@@ -97,7 +97,7 @@ agentctl version
 
 **Solution**:
 ```bash
-chmod +x ./bin/agentctl
+chmod +x ./agentctl
 ```
 
 ---
@@ -637,7 +637,7 @@ ulimit -a
 **Solution**:
 ```bash
 # Remove quarantine attribute
-xattr -d com.apple.quarantine ./bin/agentctl
+xattr -d com.apple.quarantine ./agentctl
 
 # Or build from source instead of downloading binary
 make build

@@ -15,7 +15,7 @@ Save important context to both agentctl memory AND CLAUDE.md for persistence.
 
 2. **Save to agentctl memory**:
    ```bash
-   bin/agentctl memory put \
+   agentctl memory put \
      --name "<descriptive-name>" \
      --type "<type>" \
      --summary "<concise summary>" \
@@ -35,7 +35,7 @@ User: "remember that CGO builds need -tags=libsqlite3 to avoid duplicate symbols
 Actions:
 1. Save to memory:
    ```bash
-   bin/agentctl memory put \
+   agentctl memory put \
      --name "gotcha-cgo-sqlite-tags" \
      --type "gotcha" \
      --summary "CGO builds require -tags=libsqlite3 to avoid duplicate SQLite symbols" \

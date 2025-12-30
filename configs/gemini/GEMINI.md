@@ -17,12 +17,12 @@ agentctl is available for structured code analysis and automation. Use it for pr
 ### Running Skills
 ```bash
 # Basic usage
-bin/agentctl run <skill> --input '<json>'
+agentctl run <skill> --input '<json>'
 
 # Examples
-bin/agentctl run code/complexity --input '{"path": "src/"}'
-bin/agentctl run code/symbols --input '{"path": "main.go"}'
-bin/agentctl run text/grep --input '{"pattern": "TODO", "path": "."}'
+agentctl run code/complexity --input '{"path": "src/"}'
+agentctl run code/symbols --input '{"path": "main.go"}'
+agentctl run text/grep --input '{"pattern": "TODO", "path": "."}'
 ```
 
 ### Key Skills
@@ -45,10 +45,10 @@ bin/agentctl run text/grep --input '{"pattern": "TODO", "path": "."}'
 
 ### Task Management
 ```bash
-bin/agentctl todo add --title "Task" --description "Details"
-bin/agentctl todo list
-bin/agentctl todo active
-bin/agentctl todo complete --id <id> --notes "Done"
+agentctl todo add --title "Task" --description "Details"
+agentctl todo list
+agentctl todo active
+agentctl todo complete --id <id> --notes "Done"
 ```
 
 ### Output Format

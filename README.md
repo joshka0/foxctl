@@ -50,7 +50,7 @@ Think of agentctl as **Unix pipelines for AI agents**. It provides:
 git clone https://github.com/jkatigb/agentctl.git
 cd agentctl
 make build
-./bin/agentctl version
+./agentctl version
 
 # Build bundled skills
 make skills-build
@@ -363,7 +363,7 @@ See [docs/roadmap.md](docs/roadmap.md) for detailed timeline.
 ```bash
 # Build CLI
 make build
-# → ./bin/agentctl
+# → ./agentctl
 
 # Build skills
 make skills-build

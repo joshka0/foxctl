@@ -61,7 +61,7 @@ if vector.Enabled {
 
 ### Linux
 ```bash
-CGO_ENABLED=1 go build -tags vector -o agentctl ./cmd/agentctl
+CGO_ENABLED=1 go build -tags vector -o bin/agentctl ./cmd/agentctl
 ```
 
 ### macOS
@@ -69,13 +69,13 @@ CGO_ENABLED=1 go build -tags vector -o agentctl ./cmd/agentctl
 # Ensure Xcode command line tools are installed
 xcode-select --install
 
-CGO_ENABLED=1 go build -tags vector -o agentctl ./cmd/agentctl
+CGO_ENABLED=1 go build -tags vector -o bin/agentctl ./cmd/agentctl
 ```
 
 ### Windows
 ```bash
 # Requires MinGW or similar C compiler
-CGO_ENABLED=1 go build -tags vector -o agentctl.exe ./cmd/agentctl
+CGO_ENABLED=1 go build -tags vector -o bin/agentctl.exe ./cmd/agentctl
 ```
 
 ### Cross-Compilation
@@ -169,7 +169,7 @@ To build without vector support (default):
 
 ```bash
 # No CGO required
-CGO_ENABLED=0 go build -o agentctl ./cmd/agentctl
+CGO_ENABLED=0 go build -o bin/agentctl ./cmd/agentctl
 ```
 
 The codebase gracefully handles missing vector support:

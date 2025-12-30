@@ -1,7 +1,7 @@
 ---
 name: agentctl Friend
 description: Enhanced friend command that uses agentctl for structured context before consulting Gemini
-allowed-tools: Bash(bin/agentctl:*), Bash(gemini:*), Read
+allowed-tools: Bash(agentctl:*), Bash(gemini:*), Read
 argument-hint: "<query>"
 ---
 
@@ -16,11 +16,11 @@ Get Gemini's perspective using agentctl-gathered context.
    - `code/symbols` - Structure
    - `code/swe_grep` - Relevant snippets
 
-2. Log query: `bin/agentctl mailbox send gemini-queries --from claude-agent --type agent.ask`
+2. Log query: `agentctl mailbox send gemini-queries --from claude-agent --type agent.ask`
 
 3. Send to Gemini: `echo "$CONTEXT" | gemini -p "$ARGUMENTS"`
 
-4. Log response: `bin/agentctl mailbox send claude-queries --from gemini-agent --type agent.reply`
+4. Log response: `agentctl mailbox send claude-queries --from gemini-agent --type agent.reply`
 
 5. Present: agentctl findings + Gemini analysis + Claude synthesis
 

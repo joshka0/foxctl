@@ -2186,12 +2186,12 @@ go test -v ./test/integration/...
 
 1. Build: `go build -o bin/agentctl ./cmd/agentctl`
 2. Spawn agent:
-   `./bin/agentctl agent spawn --role coder --prompt "You are a coder"`
-3. Run daemon in background: `./bin/agentctl agent run <agent-id> &`
+   `./agentctl agent spawn --role coder --prompt "You are a coder"`
+3. Run daemon in background: `./agentctl agent run <agent-id> &`
 4. Send ask:
-   `./bin/agentctl agent ask <agent-id> --question "Hello" --wait --timeout 30s`
+   `./agentctl agent ask <agent-id> --question "Hello" --wait --timeout 30s`
 5. Verify reply envelope is printed.
-6. Kill agent: `./bin/agentctl agent kill <agent-id>`
+6. Kill agent: `./agentctl agent kill <agent-id>`
 7. Verify daemon process exits.
 
 - **Acceptance criteria**:

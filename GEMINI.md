@@ -9,7 +9,7 @@
 It uses "skills" (sandboxed tools) and structured JSON envelopes for communication.
 
 ## Build Instructions
-- **Build CLI**: `make build` (Output: `bin/agentctl`)
+- **Build CLI**: `make build` (Output: `agentctl`)
 - **Build Skills**: `make skills-build` (Output: `dist/skills/`)
 - **Test**: `make test`
 - **Lint**: `make lint`
@@ -18,18 +18,18 @@ It uses "skills" (sandboxed tools) and structured JSON envelopes for communicati
 
 ### Running Skills
 Skills are located in `skills/` (source) or `dist/skills/` (built).
-The CLI finds skills in standard paths. You might need to set `AGENTCTL_SKILL_PATH` if running from dev directories, but usually `bin/agentctl run <category>/<skill>` works if installed or if pointing to local sources.
+The CLI finds skills in standard paths. You might need to set `AGENTCTL_SKILL_PATH` if running from dev directories, but usually `agentctl run <category>/<skill>` works if installed or if pointing to local sources.
 
 **Common Commands:**
 ```bash
 # List files
-./bin/agentctl run fs/ls --path .
+./agentctl run fs/ls --path .
 
 # Read file
-./bin/agentctl run fs/read --path README.md
+./agentctl run fs/read --path README.md
 
 # Grep
-./bin/agentctl run text/grep --pattern "func main" --path .
+./agentctl run text/grep --pattern "func main" --path .
 ```
 
 **Input/Output:**
@@ -38,8 +38,8 @@ The CLI finds skills in standard paths. You might need to set `AGENTCTL_SKILL_PA
 - Look for `.data` in the JSON output for the actual result.
 
 ### Managing State
-- **Memory**: `./bin/agentctl memory ...`
-- **Jobs**: `./bin/agentctl jobs ...`
+- **Memory**: `./agentctl memory ...`
+- **Jobs**: `./agentctl jobs ...`
 
 ## Implemented Feature: MCP Tool Adapter
 
@@ -65,7 +65,7 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
 - **Usage**:
   ```bash
   # Install skills from a local python MCP server
-  ./bin/agentctl run mcp/install --input '{
+  ./agentctl run mcp/install --input '{
     "server_cmd": "python3",
     "server_args": ["/absolute/path/to/server.py"],
     "output_dir": "./my_skills",
@@ -74,7 +74,7 @@ We created a generic "bridge" binary (`skills/mcp_bridge`) that acts as an MCP C
   
   # Install skills from a remote MCP server (HTTP/SSE)
   # Example: Exa (requires Accept header for Streamable HTTP)
-  ./bin/agentctl run mcp/install --input '{
+  ./agentctl run mcp/install --input '{
     "server_url": "https://mcp.exa.ai/mcp",
     "server_headers": {"Accept": "application/json, text/event-stream"},
     "output_dir": "./exa_skills",

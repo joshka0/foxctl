@@ -55,7 +55,7 @@ This document describes how to survive context compaction and maintain continuit
 
 ```bash
 # Save important context before compaction
-bin/agentctl memory put session-context --payload '{
+agentctl memory put session-context --payload '{
   "session_id": "2025-12-22-daemon-tests",
   "key_decisions": [
     "daemon.Run has complexity 43 - needs refactoring",
@@ -71,7 +71,7 @@ bin/agentctl memory put session-context --payload '{
 }'
 
 # Retrieve at session start
-bin/agentctl memory get session-context
+agentctl memory get session-context
 ```
 
 **Auto-save hook** (add to `.claude/hooks/session-save.sh`):
@@ -87,16 +87,16 @@ bin/agentctl memory get session-context
 
 ```bash
 # At session start, check pending tasks
-bin/agentctl todo list --status pending
+agentctl todo list --status pending
 
 # When starting work
-bin/agentctl todo add --title "Implement feature X" --description "Context..."
+agentctl todo add --title "Implement feature X" --description "Context..."
 
 # During work - update progress
-bin/agentctl todo update --id <id> --notes "Progress: completed step 1"
+agentctl todo update --id <id> --notes "Progress: completed step 1"
 
 # At completion
-bin/agentctl todo complete --id <id> --notes "Final notes..."
+agentctl todo complete --id <id> --notes "Final notes..."
 ```
 
 **Benefits**:
@@ -120,16 +120,16 @@ At the start of each session:
 
 ```bash
 # Check for recent session memories
-bin/agentctl memory search "session"
+agentctl memory search "session"
 
 # Get last session context
-bin/agentctl memory get pre-compaction-latest
+agentctl memory get pre-compaction-latest
 
 # Show pending tasks
-bin/agentctl todo list --status pending
+agentctl todo list --status pending
 
 # Check mailbox for any pending messages
-bin/agentctl mailbox list claude-agent
+agentctl mailbox list claude-agent
 ```
 
 ## LLM Configuration for Daemon
@@ -194,7 +194,7 @@ export AGENTCTL_LLM_API_KEY=<your-groq-key>
 
 ```bash
 # Pattern 1: agentctl for structured data (fastest)
-result=$(bin/agentctl run code/complexity --input '{"path": "."}')
+result=$(agentctl run code/complexity --input '{"path": "."}')
 
 # Pattern 2: Gemini for async deep work
 echo "Complex question..." | gemini -p "Analyze thoroughly"
@@ -203,8 +203,8 @@ echo "Complex question..." | gemini -p "Analyze thoroughly"
 # Use Task tool with subagent_type for parallel work
 
 # Pattern 4: Daemon agents for background work
-bin/agentctl agent spawn --role analyzer --skills "code/complexity,code/symbols"
-bin/agentctl agent run <agent-id> &
+agentctl agent spawn --role analyzer --skills "code/complexity,code/symbols"
+agentctl agent run <agent-id> &
 ```
 
 ## Pre-warm Gemini Worker
@@ -225,7 +225,7 @@ WORKER_NS="gemini-worker"
 
 while true; do
   # Poll for messages (5s timeout)
-  msg=$(bin/agentctl mailbox poll $WORKER_NS --timeout 5 --max 1 2>/dev/null)
+  msg=$(agentctl mailbox poll $WORKER_NS --timeout 5 --max 1 2>/dev/null)
 
   if [[ $(echo "$msg" | jq -r '.data.count') -gt 0 ]]; then
     # Extract payload
@@ -237,13 +237,13 @@ while true; do
     response=$(echo "$query" | gemini -p "Answer concisely:")
 
     # Send reply
-    bin/agentctl mailbox send "$reply_to" \
+    agentctl mailbox send "$reply_to" \
       --from $WORKER_NS \
       --type agent.reply \
       --payload "{\"response\": $(echo "$response" | jq -Rs .)}"
 
     # Ack original message
-    bin/agentctl mailbox ack "$msg_id"
+    agentctl mailbox ack "$msg_id"
   fi
 done
 ```
@@ -259,13 +259,13 @@ nohup ~/.agentctl/workers/gemini-worker.sh &
 **Use from Claude**:
 ```bash
 # Send request to warm worker
-bin/agentctl mailbox send gemini-worker \
+agentctl mailbox send gemini-worker \
   --from claude-agent \
   --type agent.ask \
   --payload '{"query": "What refactoring approach for high complexity functions?"}'
 
 # Poll for response (worker responds in ~2s instead of 60s)
-bin/agentctl mailbox poll claude-agent --timeout 10
+agentctl mailbox poll claude-agent --timeout 10
 ```
 
 ## Compaction Survival Checklist
@@ -274,35 +274,35 @@ bin/agentctl mailbox poll claude-agent --timeout 10
 
 1. **Save session summary**:
    ```bash
-   bin/agentctl memory put session-$(date +%Y%m%d) --payload '{...}'
+   agentctl memory put session-$(date +%Y%m%d) --payload '{...}'
    ```
 
 2. **Complete or annotate tasks**:
    ```bash
-   bin/agentctl todo list | jq '.data.tasks[] | select(.status=="in_progress")'
+   agentctl todo list | jq '.data.tasks[] | select(.status=="in_progress")'
    # Update each with current status
    ```
 
 3. **Log key decisions to blackboard**:
    ```bash
-   bin/agentctl bb post decisions --payload '{"decision": "...", "rationale": "..."}'
+   agentctl bb post decisions --payload '{"decision": "...", "rationale": "..."}'
    ```
 
 ### After Compaction (session start)
 
 1. **Load session context**:
    ```bash
-   bin/agentctl memory get session-latest
+   agentctl memory get session-latest
    ```
 
 2. **Review pending tasks**:
    ```bash
-   bin/agentctl todo list --status pending
+   agentctl todo list --status pending
    ```
 
 3. **Check for messages**:
    ```bash
-   bin/agentctl mailbox list claude-agent
+   agentctl mailbox list claude-agent
    ```
 
 ## Implementation Priority

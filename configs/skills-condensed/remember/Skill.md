@@ -23,7 +23,7 @@ Save insights to agentctl memory.
 
 ```bash
 echo '{"version":1,"status":"ok","command":"memory/remember","data":{"content":"<insight>"}}' | \
-  bin/agentctl memory put --name "<name>" --type "<type>" --summary "<insight>" --file -
+  agentctl memory put --name "<name>" --type "<type>" --summary "<insight>" --file -
 ```
 
 ## Examples

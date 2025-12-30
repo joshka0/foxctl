@@ -32,7 +32,7 @@ This document demonstrates how agentctl serves as a coordination harness for Cla
 
 ```bash
 # Claude creates a task to track the work
-bin/agentctl todo add \
+agentctl todo add \
   --title "Review daemon complexity" \
   --description "Analyze daemon.go for refactoring opportunities"
 ```
@@ -52,7 +52,7 @@ Output:
 
 ```bash
 # Get complexity hotspots (fast: ~50ms)
-bin/agentctl run code/complexity --input '{
+agentctl run code/complexity --input '{
   "path": "internal/agent/daemon",
   "threshold": 10
 }'
@@ -80,7 +80,7 @@ Output:
 
 ```bash
 # Log the question we're about to ask
-bin/agentctl mailbox send gemini-queries \
+agentctl mailbox send gemini-queries \
   --from claude-agent \
   --type agent.ask \
   --payload '{
@@ -111,7 +111,7 @@ Recommendations from static analysis:
 ### Step 5: Log Gemini's Response
 
 ```bash
-bin/agentctl mailbox send claude-queries \
+agentctl mailbox send claude-queries \
   --from gemini-agent \
   --type agent.reply \
   --payload '{"response": "..."}'
@@ -120,7 +120,7 @@ bin/agentctl mailbox send claude-queries \
 ### Step 6: Complete Task
 
 ```bash
-bin/agentctl todo complete \
+agentctl todo complete \
   --id 01KD2S51X9... \
   --notes "Identified daemon.Run as primary refactoring target. Gemini suggests state machine pattern."
 ```
@@ -142,7 +142,7 @@ Usage from Claude Code:
 /agentctl-complexity
 
 # Or directly via Bash
-bin/agentctl run code/complexity --input '{"path": "."}'
+agentctl run code/complexity --input '{"path": "."}'
 ```
 
 ### 2. Mailbox for Communication Logging
@@ -157,10 +157,10 @@ bin/agentctl run code/complexity --input '{"path": "."}'
 Example: Query tracing
 ```bash
 # Before asking Gemini
-bin/agentctl mailbox send gemini-queries --from claude --payload '{"query": "..."}'
+agentctl mailbox send gemini-queries --from claude --payload '{"query": "..."}'
 
 # After getting response
-bin/agentctl mailbox send claude-queries --from gemini --payload '{"response": "..."}'
+agentctl mailbox send claude-queries --from gemini --payload '{"response": "..."}'
 ```
 
 ### 3. Task Tracking for Traceability
@@ -226,16 +226,16 @@ Test that the integration works:
 
 ```bash
 # 1. Create task
-bin/agentctl todo add --title "Integration test"
+agentctl todo add --title "Integration test"
 
 # 2. Run skill
-bin/agentctl run code/complexity --input '{"path": ".", "threshold": 20}'
+agentctl run code/complexity --input '{"path": ".", "threshold": 20}'
 
 # 3. Check mailbox
-bin/agentctl mailbox list test-agent
+agentctl mailbox list test-agent
 
 # 4. Complete task
-bin/agentctl todo list
+agentctl todo list
 ```
 
 All commands should return valid JSON envelopes with `"status": "ok"`.
