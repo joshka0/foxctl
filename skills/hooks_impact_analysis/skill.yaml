@@ -1,0 +1,38 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/impact_analysis
+  version: 0.1.0
+  description: "LSP-based impact analysis - find external dependencies of edited symbols"
+  tags: ["hooks", "lsp", "impact", "references"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_impact_analysis/hooks_impact_analysis
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: hooks/impact_analysis
+  parameters:
+    - name: tool_name
+      type: string
+      required: false
+      description: "Tool name from hook (Edit, Write, etc.)"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Tool input containing file_path"
+    - name: tool_response
+      type: object
+      required: false
+      description: "Tool response from hook"
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook output with decision and context"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

@@ -147,8 +147,21 @@ func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {
 		env = ensureEnvVar(env, "AGENTCTL_HOME", filepath.Join(home, ".agentctl"))
 	}
 
+	// Ensure AGENTCTL_BIN is available so skills can invoke agentctl.
+	// If not already set, use the current executable path.
+	if getEnvVar(env, "AGENTCTL_BIN") == "" {
+		if exe, err := os.Executable(); err == nil {
+			env = ensureEnvVar(env, "AGENTCTL_BIN", exe)
+		}
+	}
+
 	env = append(env, fmt.Sprintf("SKILL_NAME=%s", r.Manifest.Metadata.Name))
 	env = append(env, fmt.Sprintf("SKILL_VERSION=%s", r.Manifest.Metadata.Version))
+
+	// Disable CAS auto-migration for nested skill calls to reduce overhead.
+	// Migration only needs to run once at the top-level, not for every nested call.
+	env = ensureEnvVar(env, "AGENTCTL_CAS_AUTO_MIGRATE", "0")
+
 	cmd.Env = env
 
 	// Apply resource limits if specified (0 = no limit per Options field docs)

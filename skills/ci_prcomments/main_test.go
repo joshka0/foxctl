@@ -62,7 +62,7 @@ func TestBuildMarkdownReport_NoTasksSummaryRespectsErrorsOnly(t *testing.T) {
 }
 
 func TestBuildTasksList_EmptyWhenNoIssues(t *testing.T) {
-	tasks := buildTasksList(nil, nil, nil)
+	tasks := buildTasksList(nil, nil, nil, false)
 	if tasks == nil || len(tasks) != 0 {
 		t.Fatalf("expected empty tasks list, got %#v", tasks)
 	}
@@ -83,7 +83,7 @@ func TestBuildTasksList_IncludesMergeCiAndComments(t *testing.T) {
 		{ID: 1, Name: "lint", Conclusion: "failure", HTMLURL: "http://example.com"},
 	}
 
-	tasks := buildTasksList(conflicting, comments, checks)
+	tasks := buildTasksList(conflicting, comments, checks, false)
 	if len(tasks) != 3 {
 		t.Fatalf("expected 3 tasks (merge, ci, review), got %d: %#v", len(tasks), tasks)
 	}
@@ -109,7 +109,7 @@ func TestBuildTasksList_ClassifiesCodeRabbitComments(t *testing.T) {
 		},
 	}
 
-	tasks := buildTasksList(nil, comments, nil)
+	tasks := buildTasksList(nil, comments, nil, false)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task for CodeRabbit comment, got %d: %#v", len(tasks), tasks)
 	}

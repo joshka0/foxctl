@@ -16,7 +16,7 @@ func TestNewCICommand(t *testing.T) {
 		t.Fatalf("expected use ci, got %s", cmd.Use)
 	}
 	subs := cmd.Commands()
-	expected := []string{"status", "prcomments", "checks", "todos"}
+	expected := []string{"status", "prcomments", "checks", "todos", "comments", "results"}
 	if len(subs) != len(expected) {
 		t.Fatalf("expected %d subcommands, got %d", len(expected), len(subs))
 	}

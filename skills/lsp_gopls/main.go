@@ -25,7 +25,8 @@ import (
 )
 
 // defaultTimeout is the maximum time to wait for gopls operations.
-const defaultTimeout = 30 * time.Second
+// Increased from 30s to 60s to accommodate cold-start and large codebases.
+const defaultTimeout = 60 * time.Second
 
 // useDaemon controls whether to use the persistent daemon or CLI mode.
 // Daemon mode is faster but may have issues with some operations.

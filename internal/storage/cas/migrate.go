@@ -108,20 +108,37 @@ func autoMigrate(ctx context.Context, cfg Config, dst storage.CASStore) error {
 		return nil
 	}
 
-	// Check if destination already has content
+	// Check destination to estimate new objects to migrate
 	dstObjects, err := dst.List(ctx)
 	if err != nil {
 		return fmt.Errorf("cas: check destination: %w", err)
 	}
 
-	if len(dstObjects) > 0 {
-		// Destination already has content, skip migration
-		// This prevents repeated migration attempts
+	// Build a set of existing destination digests for quick lookup
+	dstDigests := make(map[string]struct{}, len(dstObjects))
+	for _, obj := range dstObjects {
+		dstDigests[obj.Digest] = struct{}{}
+	}
+
+	// Count objects that need migration (exist in source but not destination)
+	newCount := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && len(entry.Name()) == 64 {
+			digest := "sha256:" + entry.Name()
+			if _, exists := dstDigests[digest]; !exists {
+				newCount++
+			}
+		}
+	}
+
+	if newCount == 0 {
+		// All source objects already exist in destination
 		return nil
 	}
 
-	// Perform migration
-	fmt.Fprintf(os.Stderr, "cas: auto-migrating %d objects from %s\n", contentCount, cfg.Migration.SourcePath)
+	// Perform incremental migration
+	fmt.Fprintf(os.Stderr, "cas: auto-migrating %d new objects from %s (source: %d, dest: %d)\n",
+		newCount, cfg.Migration.SourcePath, contentCount, len(dstObjects))
 
 	result, err := MigrateFromFile(ctx, cfg.Migration.SourcePath, dst)
 	if err != nil {
@@ -136,10 +153,11 @@ func autoMigrate(ctx context.Context, cfg Config, dst storage.CASStore) error {
 
 // MigrationStatus checks if migration is needed and returns status.
 type MigrationStatus struct {
-	NeedsMigration bool   `json:"needs_migration"`
-	SourcePath     string `json:"source_path,omitempty"`
-	SourceObjects  int    `json:"source_objects,omitempty"`
-	DestObjects    int    `json:"dest_objects,omitempty"`
+	NeedsMigration  bool   `json:"needs_migration"`
+	SourcePath      string `json:"source_path,omitempty"`
+	SourceObjects   int    `json:"source_objects,omitempty"`
+	DestObjects     int    `json:"dest_objects,omitempty"`
+	PendingMigration int   `json:"pending_migration,omitempty"` // Objects in source not in dest
 }
 
 // CheckMigration checks if migration is needed without performing it.
@@ -162,9 +180,12 @@ func CheckMigration(ctx context.Context, cfg Config, dst storage.CASStore) (Migr
 		return status, fmt.Errorf("cas: check source: %w", err)
 	}
 
+	// Collect source digests
+	sourceDigests := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() && len(entry.Name()) == 64 {
 			status.SourceObjects++
+			sourceDigests = append(sourceDigests, "sha256:"+entry.Name())
 		}
 	}
 
@@ -175,8 +196,21 @@ func CheckMigration(ctx context.Context, cfg Config, dst storage.CASStore) (Migr
 	}
 	status.DestObjects = len(dstObjects)
 
-	// Migration is needed if source has content and destination is empty
-	status.NeedsMigration = status.SourceObjects > 0 && status.DestObjects == 0
+	// Build destination digest set
+	dstDigests := make(map[string]struct{}, len(dstObjects))
+	for _, obj := range dstObjects {
+		dstDigests[obj.Digest] = struct{}{}
+	}
+
+	// Count objects needing migration
+	for _, digest := range sourceDigests {
+		if _, exists := dstDigests[digest]; !exists {
+			status.PendingMigration++
+		}
+	}
+
+	// Migration is needed if there are objects in source not in destination
+	status.NeedsMigration = status.PendingMigration > 0
 
 	return status, nil
 }
