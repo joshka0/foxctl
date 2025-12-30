@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -120,10 +121,16 @@ func NewVoyageProvider(cfg VoyageConfig) (*VoyageProvider, error) {
 		timeout = 60 * time.Second
 	}
 
-	// Rate limiting defaults (free tier: 3 RPM)
+	// Rate limiting: check env var first, then config, then default
+	// AGENTCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
 	rateLimit := cfg.RateLimit
-	if rateLimit == 0 {
-		rateLimit = 3 // Default to free tier limit
+	if v := os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			rateLimit = n // 0 means disabled, >0 means limit
+		}
+	}
+	if rateLimit == 0 && os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT") == "" {
+		rateLimit = 3 // Default to free tier limit only if not explicitly set
 	}
 	rateWindow := cfg.RateWindow
 	if rateWindow == 0 {

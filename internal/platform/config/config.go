@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 )
 
 const (
@@ -114,7 +116,8 @@ type VectorSettings struct {
 	// Enabled controls whether native vector search is active (requires Turso/libsql)
 	Enabled bool `mapstructure:"enabled" json:"enabled"`
 
-	// Dimensions specifies the embedding vector dimensions (default: 3072 for Gemini)
+	// Dimensions specifies the embedding vector dimensions.
+	// Default: 1024 (Voyage). Override via AGENTCTL_VECTOR_DIMS or config file.
 	Dimensions int `mapstructure:"dimensions" json:"dimensions"`
 }
 
@@ -240,9 +243,9 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("cache.default_mode", "auto")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
-	v.SetDefault("embedding.provider", "gemini")
-	v.SetDefault("embedding.model", "gemini-embedding-001")
-	v.SetDefault("embedding.dimensions", 3072)
+	v.SetDefault("embedding.provider", "voyage")
+	v.SetDefault("embedding.model", "voyage-code-3")
+	v.SetDefault("embedding.dimensions", dbdriver.DefaultVectorDimensions)
 	v.SetDefault("openapi.plugin_path", filepath.Join(defaultHome, "plugins"))
 	v.SetDefault("indexing.post_review.enabled", false)
 	v.SetDefault("indexing.post_review.async", true)
@@ -252,7 +255,7 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("database.turso.url", "")
 	v.SetDefault("database.turso.auth_token", "")
 	v.SetDefault("database.vector.enabled", false)
-	v.SetDefault("database.vector.dimensions", 3072) // Match Gemini embedding dimensions
+	v.SetDefault("database.vector.dimensions", dbdriver.DefaultVectorDimensions)
 }
 
 func configureConfigFile(v *viper.Viper, l *loader, defaultHome string) {

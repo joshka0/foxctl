@@ -16,6 +16,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 )
@@ -1231,7 +1232,7 @@ func (s *Store) validateDimensionsOnOpen(ctx context.Context) {
 
 	expectedDims := cfg.Embedding.Dimensions
 	if expectedDims == 0 {
-		expectedDims = 3072 // default for gemini-embedding-001
+		expectedDims = dbdriver.GetDefaultVectorDimensions()
 	}
 
 	if err := s.ValidateDimensions(ctx, expectedDims); err != nil {

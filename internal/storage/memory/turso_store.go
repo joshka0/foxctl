@@ -48,7 +48,7 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 	// Ensure vector search is enabled
 	cfg.EnableVectorSearch = true
 	if cfg.VectorDimensions == 0 {
-		cfg.VectorDimensions = 3072 // Gemini embedding-001 dimensions
+		cfg.VectorDimensions = dbdriver.GetDefaultVectorDimensions()
 	}
 
 	// Create migration function that uses configured dimensions and default model
@@ -601,6 +601,198 @@ func (s *TursoStore) UpdateEmbedding(ctx context.Context, name, workspace string
 		return fmt.Errorf("memory: update embedding: %w", err)
 	}
 	return nil
+}
+
+// SearchSimilarGlobal finds entries similar to the given embedding across ALL workspaces.
+// This enables cross-workspace knowledge sharing when using a centralized Turso database.
+func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float32, limit int) ([]ScoredEntry, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	// Convert query embedding to dbdriver.Vector
+	vec := make(dbdriver.Vector, len(embedding))
+	copy(vec, embedding)
+
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if s.hasIndex {
+		// Use vector_top_k for fast indexed search across all workspaces
+		topKExpr := s.vh.VectorTopK("idx_memory_embedding_vec", vec, limit*2)
+		distExpr := s.vh.CosineSimilarity("m.embedding", vec)
+		query = fmt.Sprintf(`
+			SELECT m.id, m.name, m.type, m.workspace, m.summary, m.result, m.digests,
+				m.created_at, m.updated_at, m.last_accessed, m.access_count,
+				%s as distance
+			FROM %s vt
+			JOIN named_memory m ON m.rowid = vt.id`, distExpr, topKExpr)
+		rows, err = s.db.QueryContext(ctx, query)
+	} else {
+		// Fallback to full table scan with cosine distance (no workspace filter)
+		distExpr := s.vh.CosineSimilarity("embedding", vec)
+		query = fmt.Sprintf(`
+			SELECT id, name, type, workspace, summary, result, digests,
+				created_at, updated_at, last_accessed, access_count,
+				%s as distance
+			FROM named_memory
+			WHERE embedding IS NOT NULL
+			ORDER BY distance ASC
+			LIMIT ?`, distExpr)
+		rows, err = s.db.QueryContext(ctx, query, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memory: search similar global: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close global search rows") }()
+
+	var results []ScoredEntry
+	for rows.Next() {
+		var entry NamedEntry
+		var digestsJSON string
+		var createdAt, updatedAt, lastAccess string
+		var distance float64
+
+		err := rows.Scan(
+			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
+			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess,
+			&entry.AccessCount, &distance,
+		)
+		if err != nil {
+			continue
+		}
+
+		// Parse digests
+		_ = sqlutil.ScanJSON(digestsJSON, &entry.Digests)
+
+		// Parse timestamps
+		entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+
+		// Convert cosine distance to similarity
+		similarity := 1.0 - distance/2.0
+
+		results = append(results, ScoredEntry{
+			Entry: entry,
+			Score: similarity,
+		})
+	}
+
+	// Sort by similarity descending
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	// Apply limit
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, rows.Err()
+}
+
+// SearchSimilarMultiWorkspace finds entries similar to the given embedding in specified workspaces.
+// Useful for targeted cross-workspace search when you know which workspaces to query.
+func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces []string, embedding []float32, limit int) ([]ScoredEntry, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(workspaces) == 0 {
+		return nil, nil
+	}
+
+	// Convert query embedding to dbdriver.Vector
+	vec := make(dbdriver.Vector, len(embedding))
+	copy(vec, embedding)
+
+	// Build workspace IN clause
+	placeholders := make([]string, len(workspaces))
+	args := make([]any, len(workspaces)+1) // workspaces + limit
+	for i, ws := range workspaces {
+		placeholders[i] = "?"
+		args[i] = ws
+	}
+	args[len(workspaces)] = limit
+	inClause := strings.Join(placeholders, ", ")
+
+	var rows *sql.Rows
+	var err error
+
+	// Full table scan with workspace filter (index doesn't filter by workspace)
+	distExpr := s.vh.CosineSimilarity("embedding", vec)
+	query := fmt.Sprintf(`
+		SELECT id, name, type, workspace, summary, result, digests,
+			created_at, updated_at, last_accessed, access_count,
+			%s as distance
+		FROM named_memory
+		WHERE embedding IS NOT NULL AND workspace IN (%s)
+		ORDER BY distance ASC
+		LIMIT ?`, distExpr, inClause)
+	rows, err = s.db.QueryContext(ctx, query, args...)
+
+	if err != nil {
+		return nil, fmt.Errorf("memory: search similar multi-workspace: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close multi-workspace search rows") }()
+
+	var results []ScoredEntry
+	for rows.Next() {
+		var entry NamedEntry
+		var digestsJSON string
+		var createdAt, updatedAt, lastAccess string
+		var distance float64
+
+		err := rows.Scan(
+			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
+			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess,
+			&entry.AccessCount, &distance,
+		)
+		if err != nil {
+			continue
+		}
+
+		_ = sqlutil.ScanJSON(digestsJSON, &entry.Digests)
+		entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+
+		similarity := 1.0 - distance/2.0
+		results = append(results, ScoredEntry{
+			Entry: entry,
+			Score: similarity,
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, rows.Err()
+}
+
+// ListWorkspaces returns distinct workspace IDs in the store.
+func (s *TursoStore) ListWorkspaces(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace FROM named_memory ORDER BY workspace`)
+	if err != nil {
+		return nil, fmt.Errorf("memory: list workspaces: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close workspace rows") }()
+
+	var workspaces []string
+	for rows.Next() {
+		var ws string
+		if err := rows.Scan(&ws); err != nil {
+			continue
+		}
+		workspaces = append(workspaces, ws)
+	}
+	return workspaces, rows.Err()
 }
 
 // scoreEntry is defined in store.go - using same function for both SQLite and Turso

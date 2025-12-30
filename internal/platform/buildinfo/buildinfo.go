@@ -18,6 +18,7 @@ type Info struct {
 	Commit    string `json:"commit,omitempty"`
 	Date      string `json:"build_date,omitempty"`
 	GoVersion string `json:"go_version"`
+	CGO       bool   `json:"cgo,omitempty"`
 }
 
 // Current returns the build metadata for the running binary.
@@ -27,6 +28,7 @@ func Current() Info {
 		Commit:    Commit,
 		Date:      Date,
 		GoVersion: runtime.Version(),
+		CGO:       isCGO,
 	}
 
 	if info.Version == "" {
@@ -34,4 +36,9 @@ func Current() Info {
 	}
 
 	return info
+}
+
+// IsCGO returns true if the binary was built with CGO enabled.
+func IsCGO() bool {
+	return isCGO
 }

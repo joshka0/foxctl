@@ -12,6 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -42,11 +43,16 @@ Scopes and models:
   tasks     - Task descriptions with voyage-3.5 ($0.06/1M)
   sessions  - Session context with voyage-3.5 ($0.06/1M)
 
-All Voyage models use 1024 dimensions.`,
+All Voyage models use 1024 dimensions.
+
+Remote sync:
+  Use 'index sync push' to push local embeddings to remote Turso for
+  cross-workspace knowledge sharing.`,
 	}
 	cmd.AddCommand(
 		newIndexInitCommand(),
 		newIndexStatusCommand(),
+		newIndexSyncCommand(),
 	)
 	return cmd
 }
@@ -567,6 +573,423 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 		}
 
 		if err := store.SetEmbedding(ctx, sess.ID, embeddingBytes, modelSessions); err != nil {
+			continue
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+func newIndexSyncCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Sync embeddings with remote Turso database",
+		Long: `Sync local embeddings with a remote Turso database for cross-workspace
+knowledge sharing.
+
+This enables:
+  - Pushing local embeddings to a central Turso database
+  - Querying across embeddings from multiple workspaces
+  - Sharing knowledge between different development environments
+
+Requires TURSO_DATABASE_URL and TURSO_AUTH_TOKEN environment variables,
+or use --remote-url and --remote-token flags.`,
+	}
+	cmd.AddCommand(
+		newIndexSyncPushCommand(),
+		newIndexSyncQueryCommand(),
+	)
+	return cmd
+}
+
+func newIndexSyncPushCommand() *cobra.Command {
+	var workspace string
+	var remoteURL string
+	var remoteToken string
+	var scopes []string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "push",
+		Short: "Push local embeddings to remote Turso",
+		Long: `Push local embeddings from SQLite to a remote Turso database.
+
+This copies all embeddings from the local memory store to the remote Turso
+database, enabling cross-workspace similarity search.
+
+Environment variables:
+  TURSO_DATABASE_URL   - Remote Turso database URL
+  TURSO_AUTH_TOKEN     - Turso authentication token`,
+		Example: `  # Push all scopes to remote Turso (using env vars)
+  export TURSO_DATABASE_URL=libsql://your-db.turso.io
+  export TURSO_AUTH_TOKEN=your-token
+  agentctl index sync push
+
+  # Push only memory scope
+  agentctl index sync push --scope memory
+
+  # Push with explicit connection
+  agentctl index sync push --remote-url libsql://db.turso.io --remote-token xxx
+
+  # Dry run to see what would be pushed
+  agentctl index sync push --dry-run`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexSyncPush(cmd, workspace, remoteURL, remoteToken, scopes, dryRun)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Local workspace root directory")
+	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "Remote Turso database URL (or TURSO_DATABASE_URL)")
+	cmd.Flags().StringVar(&remoteToken, "remote-token", "", "Remote Turso auth token (or TURSO_AUTH_TOKEN)")
+	cmd.Flags().StringSliceVar(&scopes, "scope", []string{"memory"}, "Scopes to push (memory, sessions)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be pushed without making changes")
+
+	return cmd
+}
+
+func newIndexSyncQueryCommand() *cobra.Command {
+	var remoteURL string
+	var remoteToken string
+	var query string
+	var workspaces []string
+	var limit int
+	var global bool
+
+	cmd := &cobra.Command{
+		Use:   "query",
+		Short: "Query embeddings from remote Turso",
+		Long: `Query embeddings from a remote Turso database using semantic search.
+
+This enables cross-workspace knowledge search by querying a central
+Turso database that contains embeddings from multiple workspaces.`,
+		Example: `  # Query across all workspaces (global search)
+  agentctl index sync query --query "authentication middleware" --global
+
+  # Query specific workspaces
+  agentctl index sync query --query "API error handling" --workspaces project-a,project-b
+
+  # Limit results
+  agentctl index sync query --query "database migrations" --global --limit 5`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexSyncQuery(cmd, remoteURL, remoteToken, query, workspaces, limit, global)
+		},
+	}
+
+	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "Remote Turso database URL (or TURSO_DATABASE_URL)")
+	cmd.Flags().StringVar(&remoteToken, "remote-token", "", "Remote Turso auth token (or TURSO_AUTH_TOKEN)")
+	cmd.Flags().StringVar(&query, "query", "", "Search query text")
+	cmd.Flags().StringSliceVar(&workspaces, "workspaces", nil, "Filter to specific workspaces (comma-separated)")
+	cmd.Flags().IntVar(&limit, "limit", 10, "Maximum results to return")
+	cmd.Flags().BoolVar(&global, "global", false, "Search across all workspaces")
+	_ = cmd.MarkFlagRequired("query")
+
+	return cmd
+}
+
+func runIndexSyncPush(cmd *cobra.Command, workspace, remoteURL, remoteToken string, scopes []string, dryRun bool) error {
+	ctx := cmd.Context()
+	start := time.Now()
+
+	// Get remote connection info
+	if remoteURL == "" {
+		remoteURL = os.Getenv("TURSO_DATABASE_URL")
+	}
+	if remoteToken == "" {
+		remoteToken = os.Getenv("TURSO_AUTH_TOKEN")
+	}
+	if remoteURL == "" {
+		return fmt.Errorf("remote Turso URL required: set TURSO_DATABASE_URL or use --remote-url")
+	}
+	if remoteToken == "" {
+		return fmt.Errorf("remote Turso token required: set TURSO_AUTH_TOKEN or use --remote-token")
+	}
+
+	// Resolve workspace
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	// Load config
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Validate scopes
+	validScopes := map[string]bool{"memory": true, "sessions": true}
+	for _, s := range scopes {
+		if !validScopes[s] {
+			return fmt.Errorf("invalid scope %q: must be one of memory, sessions", s)
+		}
+	}
+
+	results := map[string]any{
+		"workspace": absWorkspace,
+		"remote":    remoteURL,
+		"scopes":    []map[string]any{},
+	}
+
+	scopeResults := []map[string]any{}
+
+	for _, scope := range scopes {
+		scopeStart := time.Now()
+		result := map[string]any{
+			"scope": scope,
+		}
+
+		switch scope {
+		case "memory":
+			count, err := syncMemoryToTurso(ctx, cfg, absWorkspace, remoteURL, remoteToken, dryRun)
+			result["count"] = count
+			if err != nil {
+				result["error"] = err.Error()
+			}
+		case "sessions":
+			count, err := syncSessionsToTurso(ctx, cfg, remoteURL, remoteToken, dryRun)
+			result["count"] = count
+			if err != nil {
+				result["error"] = err.Error()
+			}
+		}
+
+		result["duration_ms"] = time.Since(scopeStart).Milliseconds()
+		scopeResults = append(scopeResults, result)
+
+		if !dryRun {
+			if errMsg, ok := result["error"].(string); ok && errMsg != "" {
+				fmt.Fprintf(os.Stderr, "  [%s] Error: %s\n", scope, errMsg)
+			} else {
+				fmt.Fprintf(os.Stderr, "  [%s] Pushed %d items\n", scope, result["count"])
+			}
+		}
+	}
+
+	results["scopes"] = scopeResults
+	results["dry_run"] = dryRun
+	results["total_ms"] = time.Since(start).Milliseconds()
+
+	env := protocol.OK("index.sync.push", results, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runIndexSyncQuery(cmd *cobra.Command, remoteURL, remoteToken, query string, workspaces []string, limit int, global bool) error {
+	ctx := cmd.Context()
+	start := time.Now()
+
+	// Get remote connection info
+	if remoteURL == "" {
+		remoteURL = os.Getenv("TURSO_DATABASE_URL")
+	}
+	if remoteToken == "" {
+		remoteToken = os.Getenv("TURSO_AUTH_TOKEN")
+	}
+	if remoteURL == "" {
+		return fmt.Errorf("remote Turso URL required: set TURSO_DATABASE_URL or use --remote-url")
+	}
+	if remoteToken == "" {
+		return fmt.Errorf("remote Turso token required: set TURSO_AUTH_TOKEN or use --remote-token")
+	}
+
+	if !global && len(workspaces) == 0 {
+		return fmt.Errorf("either --global or --workspaces is required")
+	}
+
+	// Check for Voyage API key for query embedding
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	if voyageKey == "" {
+		return fmt.Errorf("VOYAGE_API_KEY required for generating query embedding")
+	}
+
+	// Load config for dimensions
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Generate query embedding
+	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
+		APIKey:        voyageKey,
+		Model:         modelMemory, // Use memory model for text queries
+		RateLimitWait: boolPtr(true),
+	})
+	if err != nil {
+		return fmt.Errorf("create voyage provider: %w", err)
+	}
+
+	embedding, err := provider.Embed(ctx, query)
+	if err != nil {
+		return fmt.Errorf("generate query embedding: %w", err)
+	}
+
+	// Open remote Turso store (OpenTurso handles zero dimensions via GetDefaultVectorDimensions)
+	store, err := memory.OpenTurso(ctx, dbdriver.TursoConfig{
+		URL:                remoteURL,
+		AuthToken:          remoteToken,
+		EnableVectorSearch: true,
+		VectorDimensions:   cfg.Embedding.Dimensions,
+	})
+	if err != nil {
+		return fmt.Errorf("connect to remote Turso: %w", err)
+	}
+	defer store.Close()
+
+	// Query based on scope
+	var results []memory.ScoredEntry
+	if global {
+		results, err = store.SearchSimilarGlobal(ctx, embedding, limit)
+	} else {
+		results, err = store.SearchSimilarMultiWorkspace(ctx, workspaces, embedding, limit)
+	}
+	if err != nil {
+		return fmt.Errorf("search: %w", err)
+	}
+
+	// Format results
+	formattedResults := make([]map[string]any, 0, len(results))
+	for _, r := range results {
+		formattedResults = append(formattedResults, map[string]any{
+			"name":      r.Entry.Name,
+			"workspace": r.Entry.Workspace,
+			"type":      r.Entry.Type,
+			"summary":   r.Entry.Summary,
+			"score":     r.Score,
+		})
+	}
+
+	data := map[string]any{
+		"query":       query,
+		"global":      global,
+		"workspaces":  workspaces,
+		"results":     formattedResults,
+		"count":       len(results),
+		"duration_ms": time.Since(start).Milliseconds(),
+	}
+
+	env := protocol.OK("index.sync.query", data, protocol.WithSource("cli"))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func syncMemoryToTurso(ctx context.Context, cfg config.Config, workspace, remoteURL, remoteToken string, dryRun bool) (int, error) {
+	storageDir := filepath.Join(cfg.Home, "storage")
+	casDir := cfg.Paths.CAS
+	if casDir == "" {
+		casDir = filepath.Join(cfg.Home, "cas")
+	}
+
+	// Open local SQLite store
+	localStore, err := memory.Open(ctx, storageDir, casDir)
+	if err != nil {
+		return 0, fmt.Errorf("open local store: %w", err)
+	}
+	defer localStore.Close()
+
+	// List memories with embeddings
+	memories, err := localStore.List(ctx, workspace, 10000) // Get all
+	if err != nil {
+		return 0, fmt.Errorf("list memories: %w", err)
+	}
+
+	if dryRun {
+		// Count memories with embeddings
+		count := 0
+		for _, mem := range memories {
+			emb, err := localStore.GetEmbedding(ctx, mem.Name, workspace)
+			if err == nil && len(emb) > 0 {
+				count++
+			}
+		}
+		return count, nil
+	}
+
+	// Open remote Turso store (OpenTurso handles zero dimensions via GetDefaultVectorDimensions)
+	remoteStore, err := memory.OpenTurso(ctx, dbdriver.TursoConfig{
+		URL:                remoteURL,
+		AuthToken:          remoteToken,
+		EnableVectorSearch: true,
+		VectorDimensions:   cfg.Embedding.Dimensions,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("open remote store: %w", err)
+	}
+	defer remoteStore.Close()
+
+	// Get model from metadata
+	model := "voyage-code-3" // default
+	if meta, _ := localStore.GetEmbeddingMetadata(ctx, workspace); meta != nil && meta.Model != "" {
+		model = meta.Model
+	}
+
+	// Push each memory with embedding
+	count := 0
+	for _, mem := range memories {
+		emb, err := localStore.GetEmbedding(ctx, mem.Name, workspace)
+		if err != nil || len(emb) == 0 {
+			continue // Skip memories without embeddings
+		}
+
+		_, err = remoteStore.SaveWithEmbedding(ctx, mem, emb, model)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    [warn] skip %s: %v\n", mem.Name, err)
+			continue
+		}
+		count++
+	}
+
+	return count, nil
+}
+
+func syncSessionsToTurso(ctx context.Context, cfg config.Config, remoteURL, remoteToken string, dryRun bool) (int, error) {
+	storageDir := filepath.Join(cfg.Home, "storage")
+
+	// Open local sessions store
+	localStore, err := sessions.Open(ctx, storageDir)
+	if err != nil {
+		return 0, fmt.Errorf("open local sessions store: %w", err)
+	}
+	defer localStore.Close()
+
+	// List sessions
+	opts := sessions.ListOptions{Limit: 10000}
+	allSessions, err := localStore.List(ctx, opts)
+	if err != nil {
+		return 0, fmt.Errorf("list sessions: %w", err)
+	}
+
+	if dryRun {
+		// Count sessions with embeddings
+		count := 0
+		for _, sess := range allSessions {
+			if len(sess.Embedding) > 0 {
+				count++
+			}
+		}
+		return count, nil
+	}
+
+	// Open remote Turso sessions store (OpenTurso handles zero dimensions via GetDefaultVectorDimensions)
+	remoteStore, err := sessions.OpenTurso(ctx, dbdriver.TursoConfig{
+		URL:                remoteURL,
+		AuthToken:          remoteToken,
+		EnableVectorSearch: true,
+		VectorDimensions:   cfg.Embedding.Dimensions,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("open remote sessions store: %w", err)
+	}
+	defer remoteStore.Close()
+
+	// Push sessions with embeddings
+	count := 0
+	for _, sess := range allSessions {
+		if len(sess.Embedding) == 0 {
+			continue
+		}
+
+		// Save session to remote (includes embedding via Session struct)
+		if _, err := remoteStore.Save(ctx, sess); err != nil {
+			fmt.Fprintf(os.Stderr, "    [warn] skip session %s: %v\n", sess.ID, err)
 			continue
 		}
 		count++

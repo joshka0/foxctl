@@ -37,7 +37,7 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 	// Ensure vector search is enabled
 	cfg.EnableVectorSearch = true
 	if cfg.VectorDimensions == 0 {
-		cfg.VectorDimensions = 3072 // Gemini embedding-001 dimensions
+		cfg.VectorDimensions = dbdriver.GetDefaultVectorDimensions()
 	}
 
 	// Create migration function that uses configured dimensions
@@ -184,6 +184,20 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	`, dimensions, now, now)
 	if err != nil {
 		return fmt.Errorf("insert sessions metadata: %w", err)
+	}
+
+	// Run column migrations for existing tables (safe to run multiple times)
+	columnMigrations := []struct {
+		column string
+		alter  string
+	}{
+		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT"},
+		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl'"},
+		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'"},
+	}
+	for _, m := range columnMigrations {
+		// Try to add the column - ignore error if it already exists
+		_, _ = db.ExecContext(ctx, m.alter)
 	}
 
 	// Create indexes
@@ -339,10 +353,13 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 		parentSessionID = session.ParentSessionID
 	}
 
-	// Build the query - handle embedding separately if present
+	// Build the query - handle embedding separately if present and valid
+	vectorStr := ""
 	if len(session.Embedding) > 0 {
-		// Convert binary embedding to vector string
-		vectorStr := blobToVectorString(session.Embedding)
+		vectorStr = blobToVectorString(session.Embedding)
+	}
+	if vectorStr != "" {
+		// Valid embedding - use vector query
 		query := fmt.Sprintf(`
 			INSERT INTO sessions (
 				id, workspace_path, project_name, git_branch, claude_version,
@@ -1526,6 +1543,234 @@ func (s *TursoStore) GetAncestorChain(ctx context.Context, sessionID string, max
 		sessions = append(sessions, session)
 	}
 	return sessions, rows.Err()
+}
+
+// SearchSimilarGlobal finds sessions similar to the given embedding across ALL workspaces.
+// This enables cross-workspace knowledge sharing when using a centralized Turso database.
+func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	// Convert query embedding to dbdriver.Vector
+	vec := make(dbdriver.Vector, len(queryEmbedding))
+	copy(vec, queryEmbedding)
+
+	var query string
+	var rows *sql.Rows
+	var err error
+
+	if s.hasIndex {
+		// Use vector_top_k for fast indexed search across all workspaces
+		topKExpr := s.vh.VectorTopK("idx_sessions_embedding_vec", vec, limit*2)
+		distExpr := s.vh.CosineSimilarity("s.embedding", vec)
+		query = fmt.Sprintf(`
+			SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+				s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
+				s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
+				s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.embedding_model,
+				s.parent_session_id, s.agent_id, s.status,
+				s.created_at, s.updated_at,
+				%s as distance
+			FROM %s vt
+			JOIN sessions s ON s.rowid = vt.id`, distExpr, topKExpr)
+		rows, err = s.db.QueryContext(ctx, query)
+	} else {
+		// Fallback to full table scan with cosine distance (no workspace filter)
+		distExpr := s.vh.CosineSimilarity("embedding", vec)
+		query = fmt.Sprintf(`
+			SELECT id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
+				parent_session_id, agent_id, status,
+				created_at, updated_at,
+				%s as distance
+			FROM sessions
+			WHERE embedding IS NOT NULL
+			ORDER BY distance ASC
+			LIMIT ?`, distExpr)
+		rows, err = s.db.QueryContext(ctx, query, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sessions: search similar global: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close global search rows") }()
+
+	var results []storage.SimilarSession
+	for rows.Next() {
+		var session Session
+		var projectName, gitBranch, clauveVersion, summary, toolsPattern sql.NullString
+		var endedAt, embeddingModel sql.NullString
+		var parentSessionID, agentID, status sql.NullString
+		var accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON string
+		var tagsJSON, keyFilesJSON string
+		var startedAtStr, createdAtStr, updatedAtStr string
+		var distance float64
+
+		err := rows.Scan(
+			&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
+			&startedAtStr, &endedAt, &summary, &accomplishedJSON, &decisionsJSON, &gotchasJSON, &userInsightsJSON,
+			&tagsJSON, &keyFilesJSON, &toolsPattern, &session.MessageCount, &session.UserTurns,
+			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embeddingModel,
+			&parentSessionID, &agentID, &status,
+			&createdAtStr, &updatedAtStr, &distance,
+		)
+		if err != nil {
+			continue
+		}
+
+		session.ProjectName = projectName.String
+		session.GitBranch = gitBranch.String
+		session.ClaudeVersion = clauveVersion.String
+		session.Summary = summary.String
+		session.ToolsPattern = toolsPattern.String
+		session.EmbeddingModel = embeddingModel.String
+		session.ParentSessionID = parentSessionID.String
+		session.AgentID = agentID.String
+		if session.AgentID == "" {
+			session.AgentID = "agentctl"
+		}
+		session.Status = status.String
+		if session.Status == "" {
+			session.Status = storage.SessionStatusOK
+		}
+
+		session.StartedAt, _ = sqlutil.ScanTimestamp(startedAtStr)
+		session.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
+		session.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr)
+		if endedAt.Valid {
+			session.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+		}
+
+		_ = sqlutil.ScanJSON(accomplishedJSON, &session.Accomplished)
+		_ = sqlutil.ScanJSON(decisionsJSON, &session.Decisions)
+		_ = sqlutil.ScanJSON(gotchasJSON, &session.Gotchas)
+		_ = sqlutil.ScanJSON(userInsightsJSON, &session.UserInsights)
+		_ = sqlutil.ScanJSON(tagsJSON, &session.Tags)
+		_ = sqlutil.ScanJSON(keyFilesJSON, &session.KeyFiles)
+
+		// Convert cosine distance to similarity (distance is 0 for identical, 2 for opposite)
+		similarity := 1.0 - distance
+
+		results = append(results, storage.SimilarSession{
+			Session:    session,
+			Similarity: similarity,
+		})
+	}
+
+	return results, rows.Err()
+}
+
+// SearchSimilarMultiWorkspace finds sessions similar to the given embedding in specified workspaces.
+// Useful for targeted cross-workspace search when you know which workspaces to query.
+func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces []string, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if len(workspaces) == 0 {
+		return nil, nil
+	}
+
+	// Convert query embedding to dbdriver.Vector
+	vec := make(dbdriver.Vector, len(queryEmbedding))
+	copy(vec, queryEmbedding)
+
+	// Build workspace IN clause
+	placeholders := make([]string, len(workspaces))
+	args := make([]any, len(workspaces)+1) // workspaces + limit
+	for i, ws := range workspaces {
+		placeholders[i] = "?"
+		args[i] = ws
+	}
+	args[len(workspaces)] = limit
+	inClause := strings.Join(placeholders, ", ")
+
+	var rows *sql.Rows
+	var err error
+
+	// Full table scan with workspace filter (index doesn't filter by workspace)
+	distExpr := s.vh.CosineSimilarity("embedding", vec)
+	query := fmt.Sprintf(`
+		SELECT id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
+			parent_session_id, agent_id, status,
+			created_at, updated_at,
+			%s as distance
+		FROM sessions
+		WHERE embedding IS NOT NULL AND workspace_path IN (%s)
+		ORDER BY distance ASC
+		LIMIT ?`, distExpr, inClause)
+	rows, err = s.db.QueryContext(ctx, query, args...)
+
+	if err != nil {
+		return nil, fmt.Errorf("sessions: search similar multi-workspace: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close multi-workspace search rows") }()
+
+	var results []storage.SimilarSession
+	for rows.Next() {
+		var session Session
+		var projectName, gitBranch, clauveVersion, summary, toolsPattern sql.NullString
+		var endedAt, embeddingModel sql.NullString
+		var parentSessionID, agentID, status sql.NullString
+		var accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON string
+		var tagsJSON, keyFilesJSON string
+		var startedAtStr, createdAtStr, updatedAtStr string
+		var distance float64
+
+		err := rows.Scan(
+			&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &clauveVersion,
+			&startedAtStr, &endedAt, &summary, &accomplishedJSON, &decisionsJSON, &gotchasJSON, &userInsightsJSON,
+			&tagsJSON, &keyFilesJSON, &toolsPattern, &session.MessageCount, &session.UserTurns,
+			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embeddingModel,
+			&parentSessionID, &agentID, &status,
+			&createdAtStr, &updatedAtStr, &distance,
+		)
+		if err != nil {
+			continue
+		}
+
+		session.ProjectName = projectName.String
+		session.GitBranch = gitBranch.String
+		session.ClaudeVersion = clauveVersion.String
+		session.Summary = summary.String
+		session.ToolsPattern = toolsPattern.String
+		session.EmbeddingModel = embeddingModel.String
+		session.ParentSessionID = parentSessionID.String
+		session.AgentID = agentID.String
+		if session.AgentID == "" {
+			session.AgentID = "agentctl"
+		}
+		session.Status = status.String
+		if session.Status == "" {
+			session.Status = storage.SessionStatusOK
+		}
+
+		session.StartedAt, _ = sqlutil.ScanTimestamp(startedAtStr)
+		session.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr)
+		session.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr)
+		if endedAt.Valid {
+			session.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+		}
+
+		_ = sqlutil.ScanJSON(accomplishedJSON, &session.Accomplished)
+		_ = sqlutil.ScanJSON(decisionsJSON, &session.Decisions)
+		_ = sqlutil.ScanJSON(gotchasJSON, &session.Gotchas)
+		_ = sqlutil.ScanJSON(userInsightsJSON, &session.UserInsights)
+		_ = sqlutil.ScanJSON(tagsJSON, &session.Tags)
+		_ = sqlutil.ScanJSON(keyFilesJSON, &session.KeyFiles)
+
+		similarity := 1.0 - distance
+		results = append(results, storage.SimilarSession{
+			Session:    session,
+			Similarity: similarity,
+		})
+	}
+
+	return results, rows.Err()
 }
 
 // GetEdges returns all edges for a session (both from and to).

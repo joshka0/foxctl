@@ -91,6 +91,11 @@ type Input struct {
 	Summarize      bool     `json:"summarize,omitempty"`       // Send results to LLM for synthesis
 	SummarizeModel string   `json:"summarize_model,omitempty"` // Override default LLM model
 
+	// Remote/cross-workspace options (requires Turso)
+	Remote     bool     `json:"remote,omitempty"`     // Use remote Turso database
+	Global     bool     `json:"global,omitempty"`     // Search across ALL workspaces (requires remote)
+	Workspaces []string `json:"workspaces,omitempty"` // Specific workspaces to search (requires remote)
+
 	// Reranking options (requires VOYAGE_API_KEY)
 	RerankEnabled bool   `json:"rerank_enabled,omitempty"` // Enable reranking (default: from env)
 	RerankTopK    int    `json:"rerank_top_k,omitempty"`   // Candidates to rerank (default: 50)
@@ -381,7 +386,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 				return
 			}
 
-			results, err := searchSessions(sourceCtx, cfg, storageRoot, queryEmbedding, in.Limit*2)
+			results, err := searchSessions(sourceCtx, cfg, storageRoot, queryEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeSessions,
 				results: results,
@@ -400,7 +405,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			results, hint, err := searchMemories(sourceCtx, cfg, storageRoot, casRoot, workspacePath, in.Query, queryEmbedding, in.Limit*2)
+			results, hint, err := searchMemories(sourceCtx, cfg, storageRoot, casRoot, workspacePath, in.Query, queryEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeMemories,
 				results: results,
@@ -701,23 +706,33 @@ type sessionSearcher interface {
 	Close() error
 }
 
+// globalSessionSearcher extends sessionSearcher with cross-workspace search capabilities.
+type globalSessionSearcher interface {
+	sessionSearcher
+	SearchSimilarGlobal(ctx context.Context, embedding []float32, limit int) ([]storage.SimilarSession, error)
+	SearchSimilarMultiWorkspace(ctx context.Context, workspaces []string, embedding []float32, limit int) ([]storage.SimilarSession, error)
+}
+
 // searchSessions searches sessions using vector similarity.
 // When Turso is configured with vector enabled, it uses TursoStore for cloud-native vector search.
-func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, queryEmbedding []float32, limit int) ([]Result, error) {
+// When in.Remote is true, it uses cross-workspace search capabilities.
+func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, queryEmbedding []float32, limit int, in *Input) ([]Result, error) {
 	var store sessionSearcher
 	var err error
 
-	// Use Turso only when driver is "turso" AND vector search is enabled
-	useTurso := cfg.Database.Driver == "turso" && cfg.Database.Vector.Enabled && cfg.Database.Turso.URL != ""
+	// Use Turso when:
+	// 1. Remote mode is requested (always use Turso for cross-workspace)
+	// 2. Driver is "turso" AND vector search is enabled
+	useTurso := in.Remote || (cfg.Database.Driver == "turso" && cfg.Database.Vector.Enabled && cfg.Database.Turso.URL != "")
 
 	if useTurso {
-		// Determine vector dimensions from config (default to embedding dimensions or 3072)
+		// Determine vector dimensions from config (default to embedding dimensions or 1024)
 		vectorDims := cfg.Database.Vector.Dimensions
 		if vectorDims == 0 {
 			vectorDims = cfg.Embedding.Dimensions
 		}
 		if vectorDims == 0 {
-			vectorDims = 3072 // Gemini embedding-001 default
+			vectorDims = dbdriver.GetDefaultVectorDimensions()
 		}
 
 		// Use Turso for cloud-native vector search
@@ -728,6 +743,10 @@ func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, 
 		}
 		store, err = sessions.OpenTurso(ctx, tursoCfg)
 		if err != nil {
+			if in.Remote {
+				// Remote mode requires Turso - fail if unavailable
+				return nil, fmt.Errorf("open turso sessions store (remote mode): %w", err)
+			}
 			// Fallback to local store if Turso fails
 			store, err = sessions.Open(ctx, storageRoot)
 			if err != nil {
@@ -743,8 +762,24 @@ func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, 
 	}
 	defer func() { errs.Ignore(store.Close(), "close session store") }()
 
-	// Use existing SearchSimilar method
-	similar, err := store.SearchSimilar(ctx, queryEmbedding, limit)
+	// Use appropriate search method based on remote options
+	var similar []storage.SimilarSession
+
+	if in.Remote && (in.Global || len(in.Workspaces) > 0) {
+		// Check if store supports global search
+		globalStore, ok := store.(globalSessionSearcher)
+		if !ok {
+			return nil, fmt.Errorf("session store does not support cross-workspace search; Turso required")
+		}
+
+		if in.Global {
+			similar, err = globalStore.SearchSimilarGlobal(ctx, queryEmbedding, limit)
+		} else {
+			similar, err = globalStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
+		}
+	} else {
+		similar, err = store.SearchSimilar(ctx, queryEmbedding, limit)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("search sessions: %w", err)
 	}
@@ -767,6 +802,7 @@ func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, 
 
 // searchMemories searches named memories using vector search (Turso) or BM25 text search (SQLite).
 // Uses Turso with native vector search when configured and embeddings are available.
+// When in.Remote is true, it uses cross-workspace search capabilities.
 // Returns results, optional hint (when vector search was skipped), and error.
 func searchMemories(
 	ctx context.Context,
@@ -774,20 +810,27 @@ func searchMemories(
 	storageRoot, casRoot, workspaceID, query string,
 	queryEmbedding []float32,
 	limit int,
+	in *Input,
 ) ([]Result, string, error) {
 	// Check if we should use Turso vector search
-	useTurso := cfg.Database.Driver == "turso" && cfg.Database.Vector.Enabled && cfg.Database.Turso.URL != "" && queryEmbedding != nil
+	// Use Turso when remote is requested OR when configured
+	useTurso := in.Remote || (cfg.Database.Driver == "turso" && cfg.Database.Vector.Enabled && cfg.Database.Turso.URL != "" && queryEmbedding != nil)
 
 	var scoredEntries []storage.ScoredEntry
 
 	if useTurso {
+		// Remote mode requires embeddings
+		if queryEmbedding == nil {
+			return nil, "memory remote search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY", nil
+		}
+
 		// Determine vector dimensions from config
 		vectorDims := cfg.Database.Vector.Dimensions
 		if vectorDims == 0 {
 			vectorDims = cfg.Embedding.Dimensions
 		}
 		if vectorDims == 0 {
-			vectorDims = 3072 // Gemini embedding-001 default
+			vectorDims = dbdriver.GetDefaultVectorDimensions()
 		}
 
 		// Use Turso for vector search
@@ -798,6 +841,10 @@ func searchMemories(
 		}
 		tursoStore, err := memory.OpenTurso(ctx, tursoCfg)
 		if err != nil {
+			if in.Remote {
+				// Remote mode requires Turso - fail if unavailable
+				return nil, "", fmt.Errorf("open turso memory store (remote mode): %w", err)
+			}
 			// Fallback to BM25 if Turso fails, with hint about the failure
 			hint := fmt.Sprintf("memory vector search unavailable: %v; using BM25 fallback", err)
 			results, bm25Err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
@@ -805,9 +852,19 @@ func searchMemories(
 		}
 		defer func() { errs.Ignore(tursoStore.Close(), "close turso memory store") }()
 
-		// Use vector search
-		scoredEntries, err = tursoStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
+		// Use appropriate search method based on remote options
+		if in.Remote && in.Global {
+			scoredEntries, err = tursoStore.SearchSimilarGlobal(ctx, queryEmbedding, limit)
+		} else if in.Remote && len(in.Workspaces) > 0 {
+			scoredEntries, err = tursoStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
+		} else {
+			scoredEntries, err = tursoStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
+		}
 		if err != nil {
+			if in.Remote {
+				// Remote mode - don't fallback to BM25
+				return nil, "", fmt.Errorf("memory remote search failed: %w", err)
+			}
 			// Fallback to BM25 on error, with hint about the failure
 			hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
 			results, bm25Err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
@@ -815,7 +872,8 @@ func searchMemories(
 		}
 
 		// Fallback to BM25 if vector search returns empty (may indicate missing vectors)
-		if len(scoredEntries) == 0 {
+		// Skip fallback for remote mode - empty results are valid
+		if len(scoredEntries) == 0 && !in.Remote {
 			hint := "memory vector search returned no results; trying BM25 fallback"
 			results, bm25Err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
 			if bm25Err != nil {

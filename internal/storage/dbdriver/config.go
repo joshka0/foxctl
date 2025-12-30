@@ -3,6 +3,8 @@ package dbdriver
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
 )
 
 // DriverType represents the database driver type
@@ -16,6 +18,24 @@ const (
 	// DriverTurso uses Turso cloud database with libSQL (cloud, replicated)
 	DriverTurso DriverType = "turso"
 )
+
+const (
+	// DefaultVectorDimensions is the fallback when no dimensions are configured.
+	// This can be overridden via AGENTCTL_VECTOR_DIMS environment variable.
+	// Common sizes: 384 (MiniLM), 768 (BERT), 1024 (Voyage), 1536 (OpenAI), 3072 (Gemini)
+	DefaultVectorDimensions = 1024
+)
+
+// GetDefaultVectorDimensions returns the default vector dimensions from environment
+// or the built-in default. This allows global configuration of embedding dimensions.
+func GetDefaultVectorDimensions() int {
+	if dimsStr := os.Getenv("AGENTCTL_VECTOR_DIMS"); dimsStr != "" {
+		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
+			return dims
+		}
+	}
+	return DefaultVectorDimensions
+}
 
 // Config holds database configuration
 type Config struct {
@@ -52,7 +72,8 @@ type LibSQLConfig struct {
 	// EnableVectorSearch enables vector search capabilities
 	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
 
-	// VectorDimensions specifies the dimension of vector embeddings (default: 3072 for Gemini)
+	// VectorDimensions specifies the dimension of vector embeddings.
+	// If 0, uses GetDefaultVectorDimensions() (configurable via AGENTCTL_VECTOR_DIMS).
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 }
 
@@ -75,8 +96,9 @@ type TursoConfig struct {
 	// EnableVectorSearch enables vector search capabilities (only for memory database)
 	EnableVectorSearch bool `json:"enable_vector_search" yaml:"enable_vector_search"`
 
-	// VectorDimensions specifies the dimension of vector embeddings (default: 3072 for Gemini)
-	// Common sizes: 384 (all-MiniLM-L6-v2), 768 (BERT), 1536 (OpenAI ada-002), 3072 (Gemini)
+	// VectorDimensions specifies the dimension of vector embeddings.
+	// If 0, uses GetDefaultVectorDimensions() (configurable via AGENTCTL_VECTOR_DIMS).
+	// Common sizes: 384 (MiniLM), 768 (BERT), 1024 (Voyage), 1536 (OpenAI), 3072 (Gemini)
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
 }
 
@@ -125,7 +147,7 @@ func DefaultLibSQLConfig(path string, enableVectors bool) Config {
 		LibSQL: LibSQLConfig{
 			Path:               path,
 			EnableVectorSearch: enableVectors,
-			VectorDimensions:   3072, // Default to Gemini gemini-embedding-001 dimensions
+			VectorDimensions:   GetDefaultVectorDimensions(),
 		},
 	}
 }
@@ -139,7 +161,7 @@ func DefaultTursoConfig(url, authToken, dbName string) Config {
 			AuthToken:          authToken,
 			DatabaseName:       dbName,
 			EnableVectorSearch: false,
-			VectorDimensions:   3072, // Default to Gemini gemini-embedding-001 dimensions
+			VectorDimensions:   GetDefaultVectorDimensions(),
 		},
 	}
 }

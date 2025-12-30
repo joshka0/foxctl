@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -110,9 +111,15 @@ func NewGeminiProvider(cfg GeminiConfig) (*GeminiProvider, error) {
 		dimensions = 768
 	}
 
-	// Rate limiting defaults based on model
+	// Rate limiting: check env var first, then config, then default
+	// AGENTCTL_EMBEDDING_RATE_LIMIT: 0 = disabled, >0 = requests per minute
 	rateLimit := cfg.RateLimit
-	if rateLimit == 0 {
+	if v := os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			rateLimit = n // 0 means disabled, >0 means limit
+		}
+	}
+	if rateLimit == 0 && os.Getenv("AGENTCTL_EMBEDDING_RATE_LIMIT") == "" {
 		// Default to free tier limits
 		if model == "text-embedding-004" {
 			rateLimit = 15 // 15 RPM for text-embedding-004

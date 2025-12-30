@@ -57,7 +57,35 @@ agentctl skills list
 # Workflows
 agentctl workflow run pre-impl-analysis --input '{"path": "."}'
 agentctl workflow list
+
+# Cross-Workspace Index Sync (Turso)
+agentctl index sync push --scope memory     # Push local embeddings to Turso
+agentctl index sync query --query "..." --global  # Search across all workspaces
 ```
+
+### Cross-Workspace Turso Sync
+
+Push local embeddings to a central Turso database for cross-workspace knowledge sharing:
+
+```bash
+# Set Turso credentials
+export TURSO_DATABASE_URL=libsql://your-db.turso.io
+export TURSO_AUTH_TOKEN=your-token
+
+# Push local memory embeddings to Turso
+agentctl index sync push --scope memory
+
+# Query across all workspaces globally
+agentctl index sync query --query "authentication middleware" --global
+
+# Query specific workspaces
+agentctl index sync query --query "API design" --workspaces project-a,project-b
+```
+
+**Requirements:**
+- CGO build (`make build-cgo`) for Turso support
+- `VOYAGE_API_KEY` for query embedding generation
+- `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for remote access
 
 ## Key Skills
 
@@ -76,14 +104,16 @@ agentctl workflow list
 
 ## Environment
 
-| Variable                   | Default       | Description                                      |
-| -------------------------- | ------------- | ------------------------------------------------ |
-| `AGENTCTL_TASK_GUARD_MODE` | `auto`        | `auto` or `strict`                               |
-| `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                                     |
-| `GEMINI_API_KEY`           | -             | For Gemini embeddings (3072 dimensions)          |
-| `VOYAGE_API_KEY`           | -             | For Voyage embeddings/reranking (1024 dimensions)|
-| `MISTRAL_API_KEY`          | -             | For Mistral/Codestral embeddings (1024 dimensions) |
-| `AGENTCTL_SEMANTIC_RERANK` | `0`           | Set to `1` to enable Voyage rerank-2.5 in hooks  |
+| Variable                      | Default       | Description                                          |
+| ----------------------------- | ------------- | ---------------------------------------------------- |
+| `AGENTCTL_TASK_GUARD_MODE`    | `auto`        | `auto` or `strict`                                   |
+| `AGENTCTL_HOME`               | `~/.agentctl` | Storage root                                         |
+| `VOYAGE_API_KEY`              | -             | For Voyage embeddings/reranking (1024 dimensions)    |
+| `GEMINI_API_KEY`              | -             | For Gemini embeddings (3072 dimensions)              |
+| `MISTRAL_API_KEY`             | -             | For Mistral/Codestral embeddings (1024 dimensions)   |
+| `AGENTCTL_VECTOR_DIMS`        | `1024`        | Global default vector dimensions (Voyage=1024)       |
+| `AGENTCTL_SEMANTIC_RERANK`    | `0`           | Set to `1` to enable Voyage rerank-2.5 in hooks      |
+| `AGENTCTL_EMBEDDING_RATE_LIMIT` | `3`         | Embedding RPM: 0=disabled (paid tier), >0=limit      |
 
 ### Scope-Based Embedding Models
 

@@ -120,9 +120,9 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
 	}
 
-	// Get vector dimensions (default: 3072 for Gemini gemini-embedding-001)
+	// Get vector dimensions (check per-database env var, then global default)
 	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
-	vectorDims := 3072 // default: Gemini gemini-embedding-001
+	vectorDims := GetDefaultVectorDimensions()
 	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
 			vectorDims = dims
@@ -164,9 +164,9 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, dbName string) Config {
 		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
 	}
 
-	// Get vector dimensions (default: 3072 for Gemini gemini-embedding-001)
+	// Get vector dimensions (check per-database env var, then global default)
 	dimsEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_DIMS", strings.ToUpper(prefix))
-	vectorDims := 3072 // default: Gemini gemini-embedding-001
+	vectorDims := GetDefaultVectorDimensions()
 	if dimsStr := os.Getenv(dimsEnv); dimsStr != "" {
 		if dims, err := strconv.Atoi(dimsStr); err == nil && dims > 0 {
 			vectorDims = dims
@@ -220,7 +220,7 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 	case DriverTurso:
 		dims := settings.VectorDimensions
 		if dims == 0 {
-			dims = 3072 // Default for Gemini
+			dims = GetDefaultVectorDimensions()
 		}
 		return Config{
 			Driver: DriverTurso,
@@ -236,7 +236,7 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 	case DriverLibSQL:
 		dims := settings.VectorDimensions
 		if dims == 0 {
-			dims = 3072
+			dims = GetDefaultVectorDimensions()
 		}
 		return Config{
 			Driver: DriverLibSQL,
@@ -270,6 +270,7 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 //
 // For vector search (memory database only):
 //   AGENTCTL_MEMORY_VECTOR_SEARCH=true   # Enable vector search
-//   AGENTCTL_MEMORY_VECTOR_DIMS=3072     # Vector dimensions (default: 3072 for Gemini)
+//   AGENTCTL_MEMORY_VECTOR_DIMS=1024     # Per-database dimensions override
+//   AGENTCTL_VECTOR_DIMS=1024            # Global default (1024 for Voyage, 3072 for Gemini)
 //
 // Where <DB> is one of: CACHE, JOBS, or MEMORY

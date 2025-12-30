@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
@@ -151,11 +152,15 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 	switch manifest.Distribution.Type {
 	case "exec":
 		// Check candidates in priority order:
-		// 1. Built artifact in bin/ subdirectory (dist/skills/<name>/bin/)
-		// 2. Source-tree skill directory itself (skills/<name>/ with main.go)
-		candidates := []string{
-			filepath.Join(dir, "bin"),
+		// 1. CGO binary (bin-cgo) if running CGO build - for Turso/native features
+		// 2. Standard binary (bin)
+		// 3. Source-tree skill directory itself (skills/<name>/ with main.go)
+		var candidates []string
+		if buildinfo.IsCGO() {
+			// CGO build: prefer bin-cgo, fall back to bin
+			candidates = append(candidates, filepath.Join(dir, "bin-cgo"))
 		}
+		candidates = append(candidates, filepath.Join(dir, "bin"))
 		// For source-tree skills, check if main.go exists (Go skill)
 		if _, err := os.Stat(filepath.Join(dir, "main.go")); err == nil {
 			candidates = append(candidates, dir)

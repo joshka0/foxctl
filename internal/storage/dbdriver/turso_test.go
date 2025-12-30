@@ -316,8 +316,8 @@ func TestConfigFromPlatformSettings(t *testing.T) {
 		VectorEnabled:  true,
 		// VectorDimensions: 0 (unset)
 	}, "memory")
-	if cfg.Turso.VectorDimensions != 3072 {
-		t.Errorf("Expected default 3072 dimensions, got %d", cfg.Turso.VectorDimensions)
+	if cfg.Turso.VectorDimensions != DefaultVectorDimensions {
+		t.Errorf("Expected default %d dimensions, got %d", DefaultVectorDimensions, cfg.Turso.VectorDimensions)
 	}
 
 	// Test LibSQL

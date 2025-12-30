@@ -18,7 +18,7 @@ GOLANGCI ?= golangci-lint
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo viewer snapshot tidy check skill skills-build skills-install skills-test completions
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init
 
 fmt:
 	@echo "Running gofumpt"
@@ -154,6 +154,12 @@ build-cgo:
 		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Date=$$DATE" \
 		-o bin/$(BINARY)-cgo ./cmd/agentctl
 
+build-all: build build-cgo
+	@echo "Built bin/$(BINARY) and bin/$(BINARY)-cgo"
+
+init: build-all skills-install-all
+	@./scripts/init.sh
+
 viewer:
 	@$(GO_CMD) build -trimpath -o bin/agentctl-viewer ./cmd/agentctl_viewer
 
@@ -201,7 +207,7 @@ endif
 
 skills-build:
 	@set -euo pipefail; \
-		echo "Building skills"; \
+		echo "Building skills (non-CGO)"; \
 		mkdir -p dist/skills; \
 		for dir in $(SKILL_DIRS); do \
 			name=$$(basename "$$dir"); \
@@ -219,6 +225,23 @@ skills-build:
 			fi; \
 		done
 
+skills-build-cgo:
+	@set -euo pipefail; \
+		echo "Building skills (CGO)"; \
+		mkdir -p dist/skills; \
+		for dir in $(SKILL_DIRS); do \
+			name=$$(basename "$$dir"); \
+			outdir="dist/skills/$$name"; \
+			mkdir -p "$$outdir"; \
+			if ls "$$dir"/*.go >/dev/null 2>&1; then \
+				echo " - $$name (cgo)"; \
+				$(GO_CMD_CGO) build -tags=libsqlite3 -o "$$outdir/bin-cgo" "./$$dir"; \
+			fi; \
+		done
+
+skills-build-all: skills-build skills-build-cgo
+	@echo "Built both non-CGO and CGO skill variants"
+
 skills-install: skills-build build
 	@set -euo pipefail; \
 		echo "Installing skills"; \
@@ -234,6 +257,28 @@ skills-install: skills-build build
 			fi; \
 		done; \
 		echo "Done. Run 'bin/agentctl skills list' to verify."
+
+# Install CGO skill binaries alongside non-CGO ones
+skills-install-cgo: skills-build-cgo
+	@set -euo pipefail; \
+		echo "Installing CGO skill binaries"; \
+		for dir in $(SKILL_DIRS); do \
+			name=$$(basename "$$dir"); \
+			manifest="$$dir/skill.yaml"; \
+			binaryCgo="dist/skills/$$name/bin-cgo"; \
+			if [ -f "$$manifest" ] && [ -f "$$binaryCgo" ]; then \
+				skillName=$$(grep -E '^  name:' "$$manifest" | head -1 | sed 's/.*name: *//'); \
+				destDir="$${HOME}/.agentctl/skills/$$skillName"; \
+				if [ -d "$$destDir" ]; then \
+					echo " - $$skillName (cgo)"; \
+					cp "$$binaryCgo" "$$destDir/bin-cgo"; \
+				fi; \
+			fi; \
+		done; \
+		echo "Done."
+
+skills-install-all: skills-install skills-install-cgo
+	@echo "Installed both non-CGO and CGO skill variants"
 
 skills-test:
 	@for dir in $(SKILL_DIRS); do \

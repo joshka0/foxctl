@@ -319,10 +319,18 @@ func storeMemoryEmbedding(ctx context.Context, name, workspace string, embedding
 
 // storeMemoryEmbeddingTurso stores embedding via Turso's native vector support.
 func storeMemoryEmbeddingTurso(ctx context.Context, cfg config.Config, name, workspace string, embedding []float32, model string) error {
-	// Get expected dimensions from config
+	// Get expected dimensions from config, with model-specific fallbacks
 	expectedDims := cfg.Embedding.Dimensions
 	if expectedDims == 0 {
-		expectedDims = 3072 // default for gemini-embedding-001
+		// Model-specific dimension defaults
+		switch model {
+		case "gemini-embedding-001":
+			expectedDims = 3072
+		case "text-embedding-004":
+			expectedDims = 768
+		default:
+			expectedDims = dbdriver.GetDefaultVectorDimensions()
+		}
 	}
 
 	// Validate dimensions before attempting Turso store

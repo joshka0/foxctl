@@ -59,6 +59,20 @@ signature:
       required: false
       default: rerank-2.5
       description: Reranking model (rerank-2.5, rerank-2, rerank-lite-1)
+    - name: remote
+      type: boolean
+      required: false
+      default: false
+      description: Use remote Turso database for cross-workspace search
+    - name: global
+      type: boolean
+      required: false
+      default: false
+      description: Search across ALL workspaces (requires remote=true)
+    - name: workspaces
+      type: array
+      required: false
+      description: Specific workspaces to search (requires remote=true)
   returns:
     - name: query
       type: string
@@ -93,9 +107,9 @@ signature:
       6. Extracts context hints from matching sessions
 
       Environment Variables:
-      - GEMINI_API_KEY: Enables vector search (sessions require it; symbols enhanced)
-      - EMBEDDING_PROVIDER: Provider name (default: "gemini")
-      - EMBEDDING_MODEL: Model name (default: "gemini-embedding-001")
+      - VOYAGE_API_KEY: Enables vector search (required for all scopes)
+      - TURSO_DATABASE_URL: Remote Turso database URL (required for remote=true)
+      - TURSO_AUTH_TOKEN: Remote Turso auth token (required for remote=true)
 
       Without an API key:
       - Symbol search works via BM25 text matching and ripgrep fallback
@@ -108,6 +122,13 @@ signature:
 
       Context hints surface relevant past solutions, gotchas, and decisions
       from sessions that solved similar problems.
+
+      Remote/Cross-Workspace Search:
+      When remote=true, the skill uses Turso for cross-workspace search:
+      - remote=true, global=true: Search across ALL workspaces
+      - remote=true, workspaces=["ws1","ws2"]: Search specific workspaces
+      - Requires TURSO_DATABASE_URL and TURSO_AUTH_TOKEN environment variables
+      - Embedding dimensions must match (all 1024 for Voyage)
     workflows:
       - id: search-all
         description: "Search all sources for a question"
@@ -126,6 +147,13 @@ signature:
           query: "database migration issues"
           scope: ["sessions"]
           include_context: true
+      - id: search-global
+        description: "Search across all workspaces"
+        example_input:
+          query: "authentication patterns"
+          remote: true
+          global: true
+          scope: ["sessions", "memories"]
 capabilities:
   network: "egress"
   filesystem:

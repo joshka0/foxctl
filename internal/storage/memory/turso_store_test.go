@@ -22,7 +22,7 @@ func TestTursoStoreIntegration(t *testing.T) {
 	cfg := dbdriver.TursoConfig{
 		URL:              url,
 		AuthToken:        token,
-		VectorDimensions: 3072,
+		VectorDimensions: 1024, // Voyage default
 	}
 
 	store, err := OpenTurso(ctx, cfg)
@@ -43,7 +43,7 @@ func TestTursoStoreIntegration(t *testing.T) {
 	// Test SaveWithEmbedding and SearchSimilar
 	t.Run("VectorOperations", func(t *testing.T) {
 		// Create test embedding with correct dimensions
-		testEmbedding := make([]float32, 3072)
+		testEmbedding := make([]float32, 1024)
 		for i := range testEmbedding {
 			testEmbedding[i] = float32(i) * 0.001
 		}
@@ -91,7 +91,7 @@ func TestTursoConfigWithDimensions(t *testing.T) {
 	cfg := dbdriver.TursoConfig{
 		URL:              url,
 		AuthToken:        token,
-		VectorDimensions: 3072,
+		VectorDimensions: 1024, // Voyage default
 	}
 
 	store, err := OpenTurso(ctx, cfg)
@@ -101,8 +101,8 @@ func TestTursoConfigWithDimensions(t *testing.T) {
 	defer store.Close()
 
 	// Verify store has correct dimensions
-	if store.vectorDimension != 3072 {
-		t.Errorf("Expected vector dimension 3072, got %d", store.vectorDimension)
+	if store.vectorDimension != 1024 {
+		t.Errorf("Expected vector dimension 1024, got %d", store.vectorDimension)
 	}
 }
 
@@ -118,7 +118,7 @@ func TestTursoEmbeddingDimensionMismatch(t *testing.T) {
 	cfg := dbdriver.TursoConfig{
 		URL:              url,
 		AuthToken:        token,
-		VectorDimensions: 3072,
+		VectorDimensions: 1024, // Voyage default
 	}
 
 	store, err := OpenTurso(ctx, cfg)
@@ -136,7 +136,7 @@ func TestTursoEmbeddingDimensionMismatch(t *testing.T) {
 	}
 
 	t.Run("WrongDimensionsSaveWithEmbedding", func(t *testing.T) {
-		// Create embedding with wrong dimensions (768 instead of 3072)
+		// Create embedding with wrong dimensions (768 instead of 1024)
 		wrongEmbedding := make([]float32, 768)
 		for i := range wrongEmbedding {
 			wrongEmbedding[i] = 0.01
@@ -169,7 +169,7 @@ func TestTursoConnectionFailure(t *testing.T) {
 	cfg := dbdriver.TursoConfig{
 		URL:              "libsql://invalid-database.example.com",
 		AuthToken:        "invalid-token",
-		VectorDimensions: 3072,
+		VectorDimensions: 1024, // Voyage default
 	}
 
 	_, err := OpenTurso(ctx, cfg)
@@ -189,11 +189,11 @@ func TestTursoDefaultDimensions(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test with zero dimensions (should default to 3072)
+	// Test with zero dimensions (should default to 1024 - Voyage)
 	cfg := dbdriver.TursoConfig{
 		URL:              url,
 		AuthToken:        token,
-		VectorDimensions: 0, // Should default to 3072
+		VectorDimensions: 0, // Should default to 1024
 	}
 
 	store, err := OpenTurso(ctx, cfg)
@@ -202,9 +202,9 @@ func TestTursoDefaultDimensions(t *testing.T) {
 	}
 	defer store.Close()
 
-	// Verify store defaulted to 3072
-	if store.vectorDimension != 3072 {
-		t.Errorf("Expected default vector dimension 3072, got %d", store.vectorDimension)
+	// Verify store defaulted to 1024 (Voyage)
+	if store.vectorDimension != 1024 {
+		t.Errorf("Expected default vector dimension 1024, got %d", store.vectorDimension)
 	}
 }
 

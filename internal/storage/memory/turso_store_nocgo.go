@@ -84,3 +84,18 @@ func (s *TursoStore) CreateVectorIndex(ctx context.Context) error {
 func (s *TursoStore) UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error {
 	return errors.New("turso store not available")
 }
+
+// SearchSimilarGlobal is a stub for cross-workspace global search.
+func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float32, limit int) ([]ScoredEntry, error) {
+	return nil, errors.New("turso store not available")
+}
+
+// SearchSimilarMultiWorkspace is a stub for multi-workspace search.
+func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces []string, embedding []float32, limit int) ([]ScoredEntry, error) {
+	return nil, errors.New("turso store not available")
+}
+
+// ListWorkspaces is a stub for listing all workspaces.
+func (s *TursoStore) ListWorkspaces(ctx context.Context) ([]string, error) {
+	return nil, errors.New("turso store not available")
+}

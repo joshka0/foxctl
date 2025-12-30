@@ -16,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/rs/zerolog"
 )
 
@@ -172,7 +173,15 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 		}
 		expectedDims = cfg.Embedding.Dimensions
 		if expectedDims == 0 {
-			expectedDims = 3072 // default for gemini-embedding-001
+			// Model-specific dimension defaults for Gemini
+			switch embeddingModel {
+			case "gemini-embedding-001":
+				expectedDims = 3072
+			case "text-embedding-004":
+				expectedDims = 768
+			default:
+				expectedDims = dbdriver.GetDefaultVectorDimensions()
+			}
 		}
 		log.Info().Str("provider", "gemini").Str("model", embeddingModel).Int("dims", expectedDims).Msg("using Gemini embeddings")
 	}
