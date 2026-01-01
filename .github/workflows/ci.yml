@@ -63,7 +63,7 @@ jobs:
   static-analysis:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,13 +90,13 @@ jobs:
 
       - name: Lint (golangci-lint)
         env:
-          GOTOOLCHAIN: go1.24.3
+          GOTOOLCHAIN: go1.25.0
         run: make lint
 
   unit-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,7 +121,7 @@ jobs:
   race-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -142,7 +142,7 @@ jobs:
   build:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -178,7 +178,7 @@ jobs:
   cgo-build-and-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -208,7 +208,7 @@ jobs:
   integration-tests:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -229,7 +229,7 @@ jobs:
   llm-planner-integration:
     runs-on: arc-runner-agentctl
     container:
-      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.24
+      image: ghcr.io/${{ github.repository_owner }}/agentctl-ci:go1.25
     env:
       AGENTCTL_ENABLE_LIVE_LLM_TESTS: "1"
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

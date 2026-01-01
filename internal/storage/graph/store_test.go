@@ -692,6 +692,314 @@ func TestNodeIDs(t *testing.T) {
 	})
 }
 
+func TestSearchNodes(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+
+	// Create nodes with various titles and paths
+	nodes := []Node{
+		{Workspace: workspace, NodeID: "file:src/auth/handler.go", NodeType: NodeTypeFile, Title: "Auth Handler", CurrentPath: "src/auth/handler.go", PageRank: 0.8, LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "file:src/auth/service.go", NodeType: NodeTypeFile, Title: "Auth Service", CurrentPath: "src/auth/service.go", PageRank: 0.6, LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "file:src/db/pool.go", NodeType: NodeTypeFile, Title: "Database Pool", CurrentPath: "src/db/pool.go", PageRank: 0.9, LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "task:123", NodeType: NodeTypeTask, Title: "Fix authentication bug", PageRank: 0.5, LastSeen: time.Now().UTC()},
+	}
+	for _, n := range nodes {
+		if err := store.UpsertNode(ctx, n); err != nil {
+			t.Fatalf("UpsertNode(%s) error = %v", n.NodeID, err)
+		}
+	}
+
+	// Search for "auth" - should find handler, service, and task
+	results, err := store.SearchNodes(ctx, workspace, "auth", 10)
+	if err != nil {
+		t.Fatalf("SearchNodes(auth) error = %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("SearchNodes(auth) returned %d results, want 3", len(results))
+	}
+
+	// Verify ordered by PageRank (handler: 0.8, service: 0.6, task: 0.5)
+	if len(results) >= 1 && results[0].NodeID != "file:src/auth/handler.go" {
+		t.Errorf("expected highest PageRank first, got %s", results[0].NodeID)
+	}
+
+	// Search for "database" - should find db/pool.go via title
+	results, err = store.SearchNodes(ctx, workspace, "database", 10)
+	if err != nil {
+		t.Fatalf("SearchNodes(database) error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("SearchNodes(database) returned %d results, want 1", len(results))
+	}
+
+	// Search for ".go" in path - should find all 3 files
+	results, err = store.SearchNodes(ctx, workspace, ".go", 10)
+	if err != nil {
+		t.Fatalf("SearchNodes(.go) error = %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("SearchNodes(.go) returned %d results, want 3", len(results))
+	}
+
+	// Search for non-existent term
+	results, err = store.SearchNodes(ctx, workspace, "xyz123", 10)
+	if err != nil {
+		t.Fatalf("SearchNodes(xyz123) error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("SearchNodes(xyz123) returned %d results, want 0", len(results))
+	}
+}
+
+func TestSearchNodes_CaseInsensitive(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+
+	if err := store.UpsertNode(ctx, Node{
+		Workspace:   workspace,
+		NodeID:      "file:Auth.go",
+		NodeType:    NodeTypeFile,
+		Title:       "Authentication Module",
+		CurrentPath: "Auth.go",
+		PageRank:    0.5,
+		LastSeen:    time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("UpsertNode() error = %v", err)
+	}
+
+	// Search with different cases
+	for _, term := range []string{"auth", "AUTH", "Auth", "AuTh"} {
+		results, err := store.SearchNodes(ctx, workspace, term, 10)
+		if err != nil {
+			t.Fatalf("SearchNodes(%s) error = %v", term, err)
+		}
+		if len(results) != 1 {
+			t.Errorf("SearchNodes(%s) returned %d results, want 1", term, len(results))
+		}
+	}
+}
+
+func TestGetEdgesBetween(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+
+	// Create nodes
+	nodes := []Node{
+		{Workspace: workspace, NodeID: "task:1", NodeType: NodeTypeTask, Title: "Task 1", LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "task:2", NodeType: NodeTypeTask, Title: "Task 2", LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "task:3", NodeType: NodeTypeTask, Title: "Task 3", LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "task:4", NodeType: NodeTypeTask, Title: "Task 4", LastSeen: time.Now().UTC()},
+	}
+	for _, n := range nodes {
+		if err := store.UpsertNode(ctx, n); err != nil {
+			t.Fatalf("UpsertNode(%s) error = %v", n.NodeID, err)
+		}
+	}
+
+	// Create edges: 1->2, 2->3, 3->4, 1->4
+	edges := []Edge{
+		{Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask, ToID: "task:2", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "task:2", FromType: NodeTypeTask, ToID: "task:3", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "task:3", FromType: NodeTypeTask, ToID: "task:4", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "task:1", FromType: NodeTypeTask, ToID: "task:4", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+	}
+	for _, e := range edges {
+		if err := store.UpsertEdge(ctx, e); err != nil {
+			t.Fatalf("UpsertEdge(%s->%s) error = %v", e.FromID, e.ToID, err)
+		}
+	}
+
+	// Get edges between {1, 2} - should find 1->2
+	result, err := store.GetEdgesBetween(ctx, workspace, []string{"task:1", "task:2"})
+	if err != nil {
+		t.Fatalf("GetEdgesBetween({1,2}) error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("GetEdgesBetween({1,2}) returned %d edges, want 1", len(result))
+	}
+
+	// Get edges between {1, 2, 3} - should find 1->2, 2->3
+	result, err = store.GetEdgesBetween(ctx, workspace, []string{"task:1", "task:2", "task:3"})
+	if err != nil {
+		t.Fatalf("GetEdgesBetween({1,2,3}) error = %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("GetEdgesBetween({1,2,3}) returned %d edges, want 2", len(result))
+	}
+
+	// Get edges between {1, 4} - should find 1->4
+	result, err = store.GetEdgesBetween(ctx, workspace, []string{"task:1", "task:4"})
+	if err != nil {
+		t.Fatalf("GetEdgesBetween({1,4}) error = %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("GetEdgesBetween({1,4}) returned %d edges, want 1", len(result))
+	}
+
+	// Get edges between all - should find all 4
+	result, err = store.GetEdgesBetween(ctx, workspace, []string{"task:1", "task:2", "task:3", "task:4"})
+	if err != nil {
+		t.Fatalf("GetEdgesBetween(all) error = %v", err)
+	}
+	if len(result) != 4 {
+		t.Errorf("GetEdgesBetween(all) returned %d edges, want 4", len(result))
+	}
+
+	// Get edges between empty set
+	result, err = store.GetEdgesBetween(ctx, workspace, []string{})
+	if err != nil {
+		t.Fatalf("GetEdgesBetween([]) error = %v", err)
+	}
+	if len(result) != 0 {
+		t.Errorf("GetEdgesBetween([]) returned %d edges, want 0", len(result))
+	}
+}
+
+func TestFindShortestPath(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+
+	// Create a graph:
+	//   1 -> 2 -> 3
+	//   |         ^
+	//   +-> 4 ----+
+	nodes := []Node{
+		{Workspace: workspace, NodeID: "n:1", NodeType: NodeTypeTask, Title: "Node 1", LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "n:2", NodeType: NodeTypeTask, Title: "Node 2", LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "n:3", NodeType: NodeTypeTask, Title: "Node 3", LastSeen: time.Now().UTC()},
+		{Workspace: workspace, NodeID: "n:4", NodeType: NodeTypeTask, Title: "Node 4", LastSeen: time.Now().UTC()},
+	}
+	for _, n := range nodes {
+		if err := store.UpsertNode(ctx, n); err != nil {
+			t.Fatalf("UpsertNode(%s) error = %v", n.NodeID, err)
+		}
+	}
+
+	edges := []Edge{
+		{Workspace: workspace, FromID: "n:1", FromType: NodeTypeTask, ToID: "n:2", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "n:2", FromType: NodeTypeTask, ToID: "n:3", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "n:1", FromType: NodeTypeTask, ToID: "n:4", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+		{Workspace: workspace, FromID: "n:4", FromType: NodeTypeTask, ToID: "n:3", ToType: NodeTypeTask, EdgeType: EdgeTypeDependsOn, CreatedAt: time.Now().UTC()},
+	}
+	for _, e := range edges {
+		if err := store.UpsertEdge(ctx, e); err != nil {
+			t.Fatalf("UpsertEdge(%s->%s) error = %v", e.FromID, e.ToID, err)
+		}
+	}
+
+	// Find path from 1 to 3 - should find two paths of length 3
+	paths, err := store.FindShortestPath(ctx, workspace, "n:1", "n:3", 5)
+	if err != nil {
+		t.Fatalf("FindShortestPath(1->3) error = %v", err)
+	}
+	if len(paths) != 2 {
+		t.Errorf("FindShortestPath(1->3) returned %d paths, want 2", len(paths))
+	}
+	for _, path := range paths {
+		if len(path) != 3 {
+			t.Errorf("expected path length 3, got %d: %v", len(path), path)
+		}
+		if path[0] != "n:1" || path[len(path)-1] != "n:3" {
+			t.Errorf("path should start with n:1 and end with n:3, got %v", path)
+		}
+	}
+
+	// Find path to self - should return single-element path
+	paths, err = store.FindShortestPath(ctx, workspace, "n:1", "n:1", 5)
+	if err != nil {
+		t.Fatalf("FindShortestPath(1->1) error = %v", err)
+	}
+	if len(paths) != 1 || len(paths[0]) != 1 {
+		t.Errorf("FindShortestPath(1->1) should return [[n:1]], got %v", paths)
+	}
+
+	// Find path with maxDepth=1 - should find direct neighbors only
+	paths, err = store.FindShortestPath(ctx, workspace, "n:1", "n:2", 1)
+	if err != nil {
+		t.Fatalf("FindShortestPath(1->2, depth=1) error = %v", err)
+	}
+	if len(paths) != 1 {
+		t.Errorf("FindShortestPath(1->2, depth=1) returned %d paths, want 1", len(paths))
+	}
+
+	// Find path to unreachable node (simulate by using non-existent node)
+	paths, err = store.FindShortestPath(ctx, workspace, "n:1", "n:999", 5)
+	if err != nil {
+		t.Fatalf("FindShortestPath(1->999) error = %v", err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("FindShortestPath(1->999) should return empty, got %v", paths)
+	}
+}
+
+func TestFindShortestPath_MaxDepthLimit(t *testing.T) {
+	store := setupTestStore(t)
+	defer store.Close()
+	ctx := context.Background()
+
+	workspace := "/test/workspace"
+
+	// Create a linear chain: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+	for i := 1; i <= 6; i++ {
+		nodeID := "n:" + string(rune('0'+i))
+		if err := store.UpsertNode(ctx, Node{
+			Workspace: workspace,
+			NodeID:    nodeID,
+			NodeType:  NodeTypeTask,
+			Title:     "Node " + string(rune('0'+i)),
+			LastSeen:  time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("UpsertNode(%s) error = %v", nodeID, err)
+		}
+	}
+
+	for i := 1; i < 6; i++ {
+		fromID := "n:" + string(rune('0'+i))
+		toID := "n:" + string(rune('0'+i+1))
+		if err := store.UpsertEdge(ctx, Edge{
+			Workspace: workspace,
+			FromID:    fromID,
+			FromType:  NodeTypeTask,
+			ToID:      toID,
+			ToType:    NodeTypeTask,
+			EdgeType:  EdgeTypeDependsOn,
+			CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("UpsertEdge(%s->%s) error = %v", fromID, toID, err)
+		}
+	}
+
+	// Path from 1 to 6 requires 5 hops - should work with maxDepth=5
+	paths, err := store.FindShortestPath(ctx, workspace, "n:1", "n:6", 5)
+	if err != nil {
+		t.Fatalf("FindShortestPath(1->6, depth=5) error = %v", err)
+	}
+	if len(paths) != 1 {
+		t.Errorf("FindShortestPath(1->6, depth=5) returned %d paths, want 1", len(paths))
+	}
+
+	// Path from 1 to 6 with maxDepth=3 - should fail to find
+	paths, err = store.FindShortestPath(ctx, workspace, "n:1", "n:6", 3)
+	if err != nil {
+		t.Fatalf("FindShortestPath(1->6, depth=3) error = %v", err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("FindShortestPath(1->6, depth=3) should return empty, got %d paths", len(paths))
+	}
+}
+
 // Helper function to set up a test store
 func setupTestStore(t *testing.T) *SQLiteStore {
 	t.Helper()

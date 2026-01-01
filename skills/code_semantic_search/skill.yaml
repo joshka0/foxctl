@@ -5,7 +5,7 @@ metadata:
   description: Unified semantic search across symbols, sessions, and memories with BM25 fallback
   version: 0.2.0
   author: agentctl
-  tags: [search, semantic, embedding, symbols, sessions, memories]
+  tags: [search, semantic, embedding, symbols, sessions, memories, codemaps]
 distribution:
   type: exec
   exec:
@@ -23,8 +23,8 @@ signature:
     - name: scope
       type: array
       required: false
-      default: ["symbols", "sessions", "memories"]
-      description: Sources to search (symbols, sessions, memories)
+      default: ["symbols", "sessions", "memories", "tasks", "codemaps"]
+      description: Sources to search (symbols, sessions, memories, tasks, codemaps)
     - name: workspace
       type: string
       required: false
@@ -97,6 +97,8 @@ signature:
       - symbols: Code symbols via retrieval.Generator (BM25 + vector + ripgrep)
       - sessions: Past Claude Code sessions with summaries/gotchas (vector search)
       - memories: Named memories with semantic content (BM25 text search)
+      - tasks: Task embeddings for work context (vector search)
+      - codemaps: Semantic codemaps showing code relationships (vector search)
 
       The search:
       1. Generates query embedding once (reused across sources)
@@ -154,6 +156,11 @@ signature:
           remote: true
           global: true
           scope: ["sessions", "memories"]
+      - id: search-codemaps
+        description: "Find relevant codemaps showing code relationships"
+        example_input:
+          query: "how does authentication connect to database"
+          scope: ["codemaps"]
 capabilities:
   network: "egress"
   filesystem:

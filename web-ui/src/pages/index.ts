@@ -8,3 +8,4 @@ export { SQLitePage } from "./SQLitePage";
 export { SearchPage } from "./SearchPage";
 export { MailboxPage } from "./MailboxPage";
 export { SessionsPage } from "./SessionsPage";
+export { CodemapsPage } from "./CodemapsPage";

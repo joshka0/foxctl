@@ -15,16 +15,20 @@ const (
 	ScopeSymbols EmbeddingScope = "symbols"
 
 	// ScopeMemory is for memories, gotchas, and learnings.
-	// Best model: voyage-3-large (highest quality text retrieval).
+	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeMemory EmbeddingScope = "memory"
 
 	// ScopeTasks is for task descriptions and notes.
-	// Best model: voyage-3.5 (good quality at lower cost).
+	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeTasks EmbeddingScope = "tasks"
 
 	// ScopeSessions is for session summaries and context.
-	// Best model: voyage-3.5 (good quality at lower cost).
+	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeSessions EmbeddingScope = "sessions"
+
+	// ScopeCodemaps is for semantic codemaps (code relationship maps).
+	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
+	ScopeCodemaps EmbeddingScope = "codemaps"
 
 	// ScopeDefault is the fallback scope for unspecified content.
 	ScopeDefault EmbeddingScope = "default"
@@ -33,17 +37,16 @@ const (
 // ScopeModelRecommendation returns the recommended Voyage model for a scope.
 // Returns (model, isCodeModel) where isCodeModel indicates if voyage-code-3 should be used.
 //
-// Recommendations based on benchmarks (Dec 2024):
-// - voyage-code-3: 13.80% better than OpenAI-v3-large on code retrieval
-// - voyage-3-large: Best text retrieval (nDCG@10: 0.837), $0.18/1M tokens
-// - voyage-3.5: Good text retrieval (nDCG@10: 0.816), $0.06/1M tokens (3x cheaper)
+// Model strategy (Jan 2025):
+// - voyage-code-3: Best for code retrieval (13.80% better than OpenAI), $0.18/1M
+// - voyage-3.5: Best price/performance for general text, $0.06/1M (3x cheaper than voyage-3-large)
+//
+// All models use 1024 dimensions by default, ensuring storage compatibility.
 func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel bool) {
 	switch scope {
 	case ScopeSymbols:
 		return "voyage-code-3", true
-	case ScopeMemory:
-		return "voyage-3-large", false
-	case ScopeTasks, ScopeSessions:
+	case ScopeMemory, ScopeCodemaps, ScopeTasks, ScopeSessions:
 		return "voyage-3.5", false
 	default:
 		return "voyage-3.5", false
@@ -64,7 +67,7 @@ func ScopeInputType(scope EmbeddingScope, isQuery bool) string {
 func ScopePricePerMillionTokens(scope EmbeddingScope) float64 {
 	model, _ := ScopeModelRecommendation(scope)
 	switch model {
-	case "voyage-code-3", "voyage-3-large":
+	case "voyage-code-3":
 		return 0.18
 	case "voyage-3.5":
 		return 0.06
@@ -82,6 +85,7 @@ func AllScopes() []EmbeddingScope {
 		ScopeMemory,
 		ScopeTasks,
 		ScopeSessions,
+		ScopeCodemaps,
 	}
 }
 

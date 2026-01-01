@@ -12,12 +12,14 @@ import {
   Search,
   Settings,
   MessageSquare,
+  Map,
 } from "lucide-react";
 
 const navigation = [
   { name: "Jobs", href: "/jobs", icon: Briefcase },
   { name: "Tasks", href: "/tasks", icon: ListTodo },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
+  { name: "Codemaps", href: "/codemaps", icon: Map },
   { name: "Stats", href: "/stats", icon: BarChart3 },
   { name: "Insights", href: "/insights", icon: Lightbulb },
   { name: "Mailbox", href: "/mailbox", icon: Mail },

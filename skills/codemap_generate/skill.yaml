@@ -1,0 +1,41 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: codemap/generate
+  version: 0.1.0
+  description: "Generate semantic codemaps using an AI agent to explore and map code relationships"
+  tags: ["codemap", "semantic", "agent", "code-understanding", "exploration"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: codemap/generate
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "Natural language query describing what to map (e.g., 'map connections between authentication and database')"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace path (defaults to current directory)"
+    - name: depth
+      type: integer
+      required: false
+      default: 2
+      minimum: 1
+      maximum: 5
+      description: "Exploration depth: 1=quick, 2=standard, 3=detailed, 4=deep, 5=exhaustive"
+returns:
+  - name: codemap
+    type: object
+    description: "Semantic codemap with title, description, and traces"
+capabilities:
+  network: "egress"  # Needs LLM API access
+  filesystem:
+    - type: workdir
+  pure: false  # Agent-driven, non-deterministic

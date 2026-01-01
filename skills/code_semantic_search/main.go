@@ -78,6 +78,7 @@ const (
 	ScopeSessions = "sessions"
 	ScopeMemories = "memories"
 	ScopeTasks    = "tasks"
+	ScopeCodemaps = "codemaps"
 )
 
 // Input is the expected JSON input.
@@ -213,7 +214,7 @@ func parseInput(r *os.File) (*Input, error) {
 
 	// Apply defaults
 	if len(in.Scope) == 0 {
-		in.Scope = []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks}
+		in.Scope = []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
 	}
 	if in.Limit <= 0 {
 		in.Limit = DefaultLimit
@@ -241,10 +242,10 @@ func parseInput(r *os.File) (*Input, error) {
 	}
 
 	// Validate scope values
-	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true}
+	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true}
 	for _, s := range in.Scope {
 		if !validScopes[s] {
-			return nil, fmt.Errorf("invalid scope: %s (valid: symbols, sessions, memories, tasks)", s)
+			return nil, fmt.Errorf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps)", s)
 		}
 	}
 
@@ -295,45 +296,62 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	// This ensures consistency with code/incremental_index which indexes under the actual path
 	workspaceID := workspacePath
 
-	// Create embedding provider (provider-agnostic: config + env overrides)
-	embedProvider, embedHint := createEmbedProvider(cfg)
-	if embedHint != "" {
-		out.Stats.Hint = embedHint
-	}
-
-	// Generate query embedding once if provider available (reuse across sources)
-	var queryEmbedding []float32
-	if embedProvider != nil {
-		start := time.Now()
-		queryEmbedding, err = embedProvider.Embed(searchCtx, in.Query)
-		if err != nil {
-			// Non-fatal: continue with BM25-only for sources that support it
-			out.Stats.Hint = fmt.Sprintf("embedding failed: %v; using BM25-only", err)
-			embedProvider = nil // Disable vector search
-		} else {
-			out.Stats.EmbeddingDimensions = len(queryEmbedding)
-			out.Stats.SourceLatencies["embedding"] = int(time.Since(start).Milliseconds())
-
-			// Validate embedding dimensions match provider (prevents corrupted vector searches)
-			// Provider knows its own dimensions: Voyage = 1024, Gemini = 3072
-			expectedDims := embedProvider.Dimensions()
-			if len(queryEmbedding) != expectedDims {
-				out.Stats.Hint = fmt.Sprintf("dimension mismatch: query=%d, provider expects %d; check embedding configuration", len(queryEmbedding), expectedDims)
-				queryEmbedding = nil // Disable vector search to prevent corrupted results
-				embedProvider = nil
-			}
-		}
-	}
-
-	// Build scope set
+	// Build scope set first (needed for scoped embeddings)
 	scopeSet := make(map[string]bool)
 	for _, s := range in.Scope {
 		scopeSet[s] = true
 	}
 
+	// Detect provider and get scope-specific model configuration
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+
+	var providerName string
+	if voyageKey != "" {
+		providerName = "voyage"
+	} else if geminiKey != "" {
+		providerName = "gemini"
+	}
+
+	// Generate scope-specific query embeddings in parallel
+	// Model selection is configurable via EMBEDDING_MODEL_CODE and EMBEDDING_MODEL_TEXT
+	var scopedEmb scopedEmbeddings
+	var embedProvider semantic.EmbeddingProvider // Keep for backward compat with some functions
+	var codeModel, textModel string
+
+	if providerName != "" {
+		codeModel, textModel = embeddingModelConfig(providerName)
+
+		start := time.Now()
+		var embErr error
+		scopedEmb, embErr = generateScopedEmbeddings(searchCtx, in.Query, scopeSet, codeModel, textModel)
+		if embErr != nil {
+			out.Stats.Hint = fmt.Sprintf("embedding failed: %v; using BM25-only", embErr)
+		} else {
+			// Report embedding stats (use text embedding dims, or code if text not generated)
+			if len(scopedEmb.text) > 0 {
+				out.Stats.EmbeddingDimensions = len(scopedEmb.text)
+			} else if len(scopedEmb.code) > 0 {
+				out.Stats.EmbeddingDimensions = len(scopedEmb.code)
+			}
+			out.Stats.SourceLatencies["embedding"] = int(time.Since(start).Milliseconds())
+
+			// Create a code provider for backward compat with searchSymbolsWithRetrieval
+			if len(scopedEmb.code) > 0 {
+				embedProvider, _ = createProviderWithModel(codeModel)
+			}
+		}
+	} else {
+		out.Stats.Hint = "no embedding API key set; set VOYAGE_API_KEY or GEMINI_API_KEY for vector search"
+	}
+
+	// Use appropriate embedding per scope
+	queryEmbedding := scopedEmb.code // For symbols scope
+	textEmbedding := scopedEmb.text  // For memory, tasks, sessions, codemaps scopes
+
 	// Parallel search across enabled scopes
 	var wg sync.WaitGroup
-	resultsCh := make(chan sourceResults, 4) // symbols, sessions, memories, tasks
+	resultsCh := make(chan sourceResults, 5) // symbols, sessions, memories, tasks, codemaps
 
 	// Search symbols using retrieval.Generator (BM25 + semantic + ripgrep)
 	if scopeSet[ScopeSymbols] {
@@ -373,8 +391,8 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			// Session search requires embeddings for vector similarity
-			if queryEmbedding == nil {
+			// Session search requires embeddings for vector similarity (uses text model)
+			if textEmbedding == nil {
 				// Graceful skip: no embeddings available
 				resultsCh <- sourceResults{
 					source:  ScopeSessions,
@@ -386,7 +404,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 				return
 			}
 
-			results, err := searchSessions(sourceCtx, cfg, storageRoot, queryEmbedding, in.Limit*2, in)
+			results, err := searchSessions(sourceCtx, cfg, storageRoot, textEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeSessions,
 				results: results,
@@ -405,7 +423,19 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			results, hint, err := searchMemories(sourceCtx, cfg, storageRoot, casRoot, workspacePath, in.Query, queryEmbedding, in.Limit*2, in)
+			// Memory search requires embeddings for vector similarity (uses text model)
+			if textEmbedding == nil {
+				resultsCh <- sourceResults{
+					source:  ScopeMemories,
+					results: nil,
+					err:     nil,
+					latency: time.Since(start),
+					hint:    "memory search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY",
+				}
+				return
+			}
+
+			results, hint, err := searchMemories(sourceCtx, cfg, storageRoot, casRoot, workspacePath, in.Query, textEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeMemories,
 				results: results,
@@ -425,21 +455,52 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			// Task search requires embeddings for vector similarity
-			if queryEmbedding == nil {
+			// Task search requires embeddings for vector similarity (uses text model)
+			if textEmbedding == nil {
 				resultsCh <- sourceResults{
 					source:  ScopeTasks,
 					results: nil,
 					err:     nil,
 					latency: time.Since(start),
-					hint:    "task search requires embeddings; set GEMINI_API_KEY",
+					hint:    "task search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY",
 				}
 				return
 			}
 
-			results, err := searchTasks(sourceCtx, cfg, storageRoot, casRoot, workspacePath, queryEmbedding, in.Limit*2)
+			results, err := searchTasks(sourceCtx, cfg, storageRoot, casRoot, workspacePath, textEmbedding, in.Limit*2)
 			resultsCh <- sourceResults{
 				source:  ScopeTasks,
+				results: results,
+				err:     err,
+				latency: time.Since(start),
+			}
+		}()
+	}
+
+	// Search codemaps (stored in named_memory with type="codemap")
+	if scopeSet[ScopeCodemaps] {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
+			defer sourceCancel()
+
+			// Codemap search requires embeddings for vector similarity (uses text model)
+			if textEmbedding == nil {
+				resultsCh <- sourceResults{
+					source:  ScopeCodemaps,
+					results: nil,
+					err:     nil,
+					latency: time.Since(start),
+					hint:    "codemap search requires embeddings; set VOYAGE_API_KEY or GEMINI_API_KEY",
+				}
+				return
+			}
+
+			results, err := searchCodemaps(sourceCtx, storageRoot, casRoot, workspacePath, textEmbedding, in.Limit*2)
+			resultsCh <- sourceResults{
+				source:  ScopeCodemaps,
 				results: results,
 				err:     err,
 				latency: time.Since(start),
@@ -545,85 +606,174 @@ type sourceResults struct {
 	hint    string // Optional hint when source unavailable but not an error
 }
 
-// createEmbedProvider creates an embedding provider based on environment variables.
-// Returns the provider (or nil if unavailable) and an optional hint message.
+// scopedEmbeddings holds query embeddings for different scope groups.
+// Code scopes may use a different model than text scopes.
+type scopedEmbeddings struct {
+	code []float32 // For symbols scope
+	text []float32 // For memory, tasks, sessions, codemaps
+}
+
+// embeddingModelConfig returns the models to use for code and text scopes.
+// Configuration priority: env vars > defaults per provider.
 //
-// Config + Environment:
-//   - embedding.provider / EMBEDDING_PROVIDER (voyage, gemini)
-//   - embedding.model / EMBEDDING_MODEL
-//   - embedding.dimensions (optional informational)
-//   - VOYAGE_API_KEY (required for Voyage - preferred for code search)
-//   - GEMINI_API_KEY (required for Gemini)
+// Environment variables:
+//   - EMBEDDING_MODEL_CODE: Model for symbols scope (default: voyage-code-3 for Voyage)
+//   - EMBEDDING_MODEL_TEXT: Model for text scopes (default: voyage-3.5 for Voyage)
+//   - EMBEDDING_MODEL: Fallback for both if scope-specific not set
 //
-// Provider priority: explicit config > VOYAGE_API_KEY > GEMINI_API_KEY
-// Dimensions: Voyage = 1024, Gemini = 3072
-// IMPORTANT: Query embeddings must match stored embeddings. Prefer Voyage for code search.
-func createEmbedProvider(cfg config.Config) (semantic.EmbeddingProvider, string) {
+// For Gemini, all scopes use the same model (no code-specific model available).
+func embeddingModelConfig(providerName string) (codeModel, textModel string) {
+	// Check for scope-specific overrides first
+	codeModel = os.Getenv("EMBEDDING_MODEL_CODE")
+	textModel = os.Getenv("EMBEDDING_MODEL_TEXT")
+
+	// Fall back to generic EMBEDDING_MODEL
+	fallback := os.Getenv("EMBEDDING_MODEL")
+
+	// Apply provider-specific defaults
+	switch providerName {
+	case "voyage":
+		if codeModel == "" {
+			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
+				codeModel = fallback
+			} else {
+				codeModel = "voyage-code-3" // Best for code retrieval
+			}
+		}
+		if textModel == "" {
+			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
+				textModel = fallback
+			} else {
+				textModel = "voyage-3.5" // Best price/performance for text
+			}
+		}
+	case "gemini":
+		// Gemini uses same model for all scopes
+		model := "gemini-embedding-001"
+		if fallback != "" && strings.HasPrefix(fallback, "gemini-") {
+			model = fallback
+		}
+		if codeModel == "" {
+			codeModel = model
+		}
+		if textModel == "" {
+			textModel = model
+		}
+	}
+
+	return codeModel, textModel
+}
+
+// createProviderWithModel creates an embedding provider with a specific model.
+// Supports both Voyage and Gemini based on available API keys.
+func createProviderWithModel(model string) (semantic.EmbeddingProvider, error) {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 
-	// Determine provider: explicit env > auto-detect by API key > config default
-	// Priority: VOYAGE_API_KEY > GEMINI_API_KEY (matches semantic-index command)
-	providerName := os.Getenv("EMBEDDING_PROVIDER")
-	if providerName == "" {
-		// Auto-detect based on available API keys (prefer Voyage for code search)
-		if voyageKey != "" {
-			providerName = "voyage"
-		} else if geminiKey != "" {
-			providerName = "gemini"
-		} else if cfg.Embedding.Provider != "" {
-			providerName = cfg.Embedding.Provider
-		} else {
-			return nil, "no embedding API key set; set VOYAGE_API_KEY or GEMINI_API_KEY for vector search"
-		}
-	}
-
-	// Model: env > config (but provider-specific defaults take precedence below)
-	model := cfg.Embedding.Model
-	if env := os.Getenv("EMBEDDING_MODEL"); env != "" {
-		model = env
-	}
-
-	switch providerName {
-	case "voyage":
+	// Determine provider from model name or API key availability
+	if strings.HasPrefix(model, "voyage-") {
 		if voyageKey == "" {
-			return nil, "VOYAGE_API_KEY not set; using BM25-only search"
+			return nil, fmt.Errorf("VOYAGE_API_KEY not set for model %s", model)
 		}
-		// Use Voyage default if model is empty or is a Gemini model (from config defaults)
-		if model == "" || strings.HasPrefix(model, "gemini-") {
-			model = "voyage-code-3" // Best for code (1024 dims, 200M free tokens)
-		}
-
-		provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
+		return semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey: voyageKey,
 			Model:  model,
 		})
-		if err != nil {
-			return nil, fmt.Sprintf("failed to create Voyage provider: %v; using BM25-only", err)
-		}
-		return provider, ""
-
-	case "gemini":
+	} else if strings.HasPrefix(model, "gemini-") {
 		if geminiKey == "" {
-			return nil, "GEMINI_API_KEY not set; using BM25-only search"
+			return nil, fmt.Errorf("GEMINI_API_KEY not set for model %s", model)
 		}
-		// Use Gemini default if model is empty or is a Voyage model
-		if model == "" || strings.HasPrefix(model, "voyage-") {
-			model = "gemini-embedding-001" // 3072 dims
-		}
-
-		provider, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
+		return semantic.NewGeminiProvider(semantic.GeminiConfig{
 			APIKey: geminiKey,
 			Model:  model,
 		})
-		if err != nil {
-			return nil, fmt.Sprintf("failed to create Gemini provider: %v; using BM25-only", err)
-		}
-		return provider, ""
-
-	default:
-		return nil, fmt.Sprintf("unknown embedding provider: %s; use voyage or gemini", providerName)
 	}
+
+	// Auto-detect provider from API keys
+	if voyageKey != "" {
+		return semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey: voyageKey,
+			Model:  model,
+		})
+	} else if geminiKey != "" {
+		return semantic.NewGeminiProvider(semantic.GeminiConfig{
+			APIKey: geminiKey,
+			Model:  model,
+		})
+	}
+
+	return nil, fmt.Errorf("no embedding API key available")
+}
+
+// generateScopedEmbeddings creates query embeddings for the requested scopes.
+// Only generates embeddings for scope groups that are actually requested.
+// Uses scope-specific models: code model for symbols, text model for others.
+func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[string]bool, codeModel, textModel string) (scopedEmbeddings, error) {
+	var emb scopedEmbeddings
+	var wg sync.WaitGroup
+	var codeErr, textErr error
+
+	// Check if code scope is requested
+	needsCode := scopeSet[ScopeSymbols]
+	// Check if any text scope is requested
+	needsText := scopeSet[ScopeSessions] || scopeSet[ScopeMemories] || scopeSet[ScopeTasks] || scopeSet[ScopeCodemaps]
+
+	// Optimization: if both models are the same, only generate one embedding
+	if needsCode && needsText && codeModel == textModel {
+		provider, err := createProviderWithModel(codeModel)
+		if err != nil {
+			return emb, err
+		}
+		embedding, err := provider.Embed(ctx, query)
+		if err != nil {
+			return emb, err
+		}
+		emb.code = embedding
+		emb.text = embedding
+		return emb, nil
+	}
+
+	// Generate code embedding if needed
+	if needsCode {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			provider, err := createProviderWithModel(codeModel)
+			if err != nil {
+				codeErr = err
+				return
+			}
+			emb.code, codeErr = provider.Embed(ctx, query)
+		}()
+	}
+
+	// Generate text embedding if needed
+	if needsText {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			provider, err := createProviderWithModel(textModel)
+			if err != nil {
+				textErr = err
+				return
+			}
+			emb.text, textErr = provider.Embed(ctx, query)
+		}()
+	}
+
+	wg.Wait()
+
+	// Return first error encountered (if any)
+	if codeErr != nil && textErr != nil {
+		return emb, fmt.Errorf("code: %v; text: %v", codeErr, textErr)
+	}
+	if codeErr != nil {
+		return emb, codeErr
+	}
+	if textErr != nil {
+		return emb, textErr
+	}
+	return emb, nil
 }
 
 // searchSymbolsWithRetrieval uses the retrieval.Generator for symbol search.
@@ -1058,6 +1208,11 @@ func normalizeTaskID(taskID string) string {
 	return fmt.Sprintf("task:%s", taskID)
 }
 
+func normalizeCodemapID(codemapID string) string {
+	// Format: codemap:<id>
+	return fmt.Sprintf("codemap:%s", codemapID)
+}
+
 // searchTasks searches task embeddings using vector similarity.
 func searchTasks(
 	ctx context.Context,
@@ -1147,6 +1302,83 @@ func searchTasks(
 	return results, nil
 }
 
+// searchCodemaps searches codemap embeddings using vector similarity.
+// Codemaps are stored in named_memory with type="codemap".
+func searchCodemaps(
+	ctx context.Context,
+	storageRoot, casRoot, workspaceID string,
+	queryEmbedding []float32,
+	limit int,
+) ([]Result, error) {
+	// Open memory store (codemap embeddings are stored in named_memory)
+	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open memory store: %w", err)
+	}
+	defer memStore.Close()
+
+	// Search for similar entries
+	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2)
+	if err != nil {
+		return nil, fmt.Errorf("vector search codemaps: %w", err)
+	}
+
+	// Filter to only codemap entries
+	results := make([]Result, 0, len(scoredEntries))
+	rank := 1
+	for _, scored := range scoredEntries {
+		entry := scored.Entry
+
+		// Only process codemap entries
+		if entry.Type != "codemap" {
+			continue
+		}
+
+		// Extract codemap ID from name: "codemap://<id>" or just use name
+		codemapID := entry.Name
+		if strings.HasPrefix(entry.Name, "codemap://") {
+			codemapID = strings.TrimPrefix(entry.Name, "codemap://")
+		}
+
+		// Build snippet from codemap data
+		snippet := entry.Summary
+		if snippet == "" && entry.Result != nil {
+			// Try to extract title and description from result JSON
+			var data map[string]any
+			if json.Unmarshal(entry.Result, &data) == nil {
+				if title, ok := data["title"].(string); ok {
+					snippet = title
+				}
+				if desc, ok := data["description"].(string); ok {
+					if snippet != "" {
+						snippet += " - " + desc
+					} else {
+						snippet = desc
+					}
+				}
+			}
+		}
+
+		result := Result{
+			Source:     "codemap",
+			ID:         normalizeCodemapID(codemapID),
+			Name:       entry.Name,
+			Summary:    truncate(entry.Summary, 200),
+			Snippet:    truncate(snippet, 300),
+			Similarity: scored.Score,
+			SourceRank: rank,
+		}
+		results = append(results, result)
+		rank++
+
+		if rank > limit {
+			break
+		}
+	}
+
+	return results, nil
+}
+
 func getSessionName(s storage.Session) string {
 	if s.Summary != "" {
 		// Use first line of summary as name
@@ -1174,6 +1406,7 @@ func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float
 	sourceWeights := map[string]float64{
 		ScopeSymbols:  1.0,
 		ScopeTasks:    0.95, // Tasks are high-value for understanding work context
+		ScopeCodemaps: 0.95, // Codemaps provide rich relationship context
 		ScopeSessions: 0.9,
 		ScopeMemories: 0.7,
 	}

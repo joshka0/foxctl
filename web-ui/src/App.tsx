@@ -11,6 +11,7 @@ import {
   SearchPage,
   MailboxPage,
   SessionsPage,
+  CodemapsPage,
 } from "@/pages";
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
           <Route path="blackboard" element={<PlaceholderPage title="Blackboard" />} />
           <Route path="sqlite" element={<SQLitePage />} />
           <Route path="search" element={<SearchPage />} />
+          <Route path="codemaps" element={<CodemapsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

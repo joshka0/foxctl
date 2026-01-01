@@ -218,6 +218,43 @@ export interface SessionSearchResult {
   match?: string;
 }
 
+// Codemaps
+export interface Codemap {
+  id: string;
+  title: string;
+  description: string;
+  query: string;
+  workspace: string;
+  file_count: number;
+  symbol_count: number;
+  traces: CodemapTrace[];
+  created_at: string;
+}
+
+export interface CodemapTrace {
+  number: number;
+  title: string;
+  summary: string;
+  tree: string;
+  annotations: CodemapAnnotation[];
+}
+
+export interface CodemapAnnotation {
+  label: string;
+  title: string;
+  description: string;
+  path: string;
+}
+
+export interface CodemapListItem {
+  id: string;
+  title: string;
+  query: string;
+  file_count: number;
+  symbol_count: number;
+  created_at: string;
+}
+
 // API Response types
 export interface APIResponse<T> {
   data: T;

@@ -878,6 +878,154 @@ app.put("/api/sessions/:id/messages/:index", (req, res) => {
   }
 });
 
+// Codemaps - list all codemaps from memory store
+app.get("/api/codemaps", (req, res) => {
+  const workspace = getWorkspace(req);
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+
+  const memoryDB = join(AGENTCTL_HOME, "storage", "memory.db");
+
+  try {
+    const db = openDB(memoryDB);
+
+    let query = `
+      SELECT name, summary, workspace, created_at, result
+      FROM named_entries
+      WHERE type = 'codemap'
+    `;
+    const params = [];
+
+    if (workspace) {
+      query += ` AND workspace = ?`;
+      params.push(workspace);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const rows = db.prepare(query).all(...params);
+    db.close();
+
+    const codemaps = rows.map((row) => {
+      // Parse the result JSON to extract codemap details
+      let parsed = {};
+      try {
+        parsed = JSON.parse(row.result || "{}");
+      } catch {}
+
+      // Extract ID from name (codemap://xxx -> xxx)
+      const id = row.name.replace("codemap://", "");
+
+      return {
+        id,
+        title: parsed.title || parsed.Title || row.summary?.split(" - ")[0] || id,
+        query: parsed.query || parsed.Query || "",
+        file_count: parsed.file_count || parsed.FileCount || 0,
+        symbol_count: parsed.symbol_count || parsed.SymbolCount || 0,
+        created_at: row.created_at,
+      };
+    });
+
+    res.json({ codemaps });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Codemaps - search via semantic search (must be before :id route)
+app.get("/api/codemaps/search", (req, res) => {
+  const q = req.query.q || "";
+  const limit = parseInt(req.query.limit) || 20;
+
+  if (!q) {
+    return res.json({ results: [] });
+  }
+
+  const input = { query: q, limit, scope: ["codemaps"] };
+  const result = runSkill("code/semantic_search", input);
+  res.json({ results: result.data?.results || [] });
+});
+
+// Codemaps - get single codemap
+app.get("/api/codemaps/:id", (req, res) => {
+  const memoryDB = join(AGENTCTL_HOME, "storage", "memory.db");
+  const codemapName = `codemap://${req.params.id}`;
+
+  try {
+    const db = openDB(memoryDB);
+
+    const row = db
+      .prepare(`SELECT name, summary, workspace, created_at, result FROM named_entries WHERE name = ?`)
+      .get(codemapName);
+
+    db.close();
+
+    if (!row) {
+      return res.status(404).json({ error: "Codemap not found" });
+    }
+
+    // Parse the result JSON
+    let codemap = {};
+    try {
+      codemap = JSON.parse(row.result || "{}");
+    } catch {}
+
+    // Normalize field names (Go uses PascalCase, frontend expects snake_case)
+    const normalized = {
+      id: req.params.id,
+      title: codemap.title || codemap.Title || "",
+      description: codemap.description || codemap.Description || "",
+      query: codemap.query || codemap.Query || "",
+      workspace: row.workspace || codemap.workspace || codemap.Workspace || "",
+      file_count: codemap.file_count || codemap.FileCount || 0,
+      symbol_count: codemap.symbol_count || codemap.SymbolCount || 0,
+      traces: (codemap.traces || codemap.Traces || []).map((t) => ({
+        number: t.number || t.Number || 0,
+        title: t.title || t.Title || "",
+        summary: t.summary || t.Summary || "",
+        tree: t.tree || t.Tree || "",
+        annotations: (t.annotations || t.Annotations || []).map((a) => ({
+          label: a.label || a.Label || "",
+          title: a.title || a.Title || "",
+          description: a.description || a.Description || "",
+          path: a.path || a.Path || "",
+        })),
+      })),
+      created_at: row.created_at,
+    };
+
+    res.json(normalized);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Codemaps - delete
+app.delete("/api/codemaps/:id", (req, res) => {
+  const memoryDB = join(AGENTCTL_HOME, "storage", "memory.db");
+  const codemapName = `codemap://${req.params.id}`;
+
+  // Note: We need write access for delete
+  // Open a new connection with write access
+  try {
+    const db = new Database(memoryDB);
+
+    const result = db
+      .prepare(`DELETE FROM named_entries WHERE name = ?`)
+      .run(codemapName);
+
+    db.close();
+
+    if (result.changes === 0) {
+      return res.status(404).json({ error: "Codemap not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`API server running on http://localhost:${PORT}`);
 });

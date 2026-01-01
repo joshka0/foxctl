@@ -31,7 +31,7 @@ Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 
 | Event            | Hook                       | Purpose                                                                        |
 | ---------------- | -------------------------- | ------------------------------------------------------------------------------ |
-| PreToolUse       | `semantic-search`          | Vector search on Grep/Glob (symbols, sessions, memories, tasks)                |
+| PreToolUse       | `semantic-search`          | Vector search on Grep/Glob (symbols, sessions, memories, tasks, codemaps)      |
 | PreToolUse       | `file-memory-recall`       | Surfaces memories/gotchas before editing                                       |
 | PreToolUse       | `task-guard`               | Ensures task exists for writes                                                 |
 | PostToolUse      | `read-context-suggestions` | Suggests context_ripgrep for symbols after reading code (full function bodies) |
@@ -143,7 +143,8 @@ Voyage AI is the recommended provider for embeddings (based on Dec 2024 benchmar
 | Scope      | Content Type    | Model            | Price/1M | Rationale                             |
 | ---------- | --------------- | ---------------- | -------- | ------------------------------------- |
 | `symbols`  | Code            | `voyage-code-3`  | $0.18    | 13.80% better than OpenAI on code     |
-| `memory`   | Gotchas/notes   | `voyage-3-large` | $0.18    | Best text retrieval (nDCG@10: 0.837)  |
+| `memory`   | Gotchas/notes   | `voyage-3.5`     | $0.06    | Good quality at 3x cost savings       |
+| `codemaps` | Semantic maps   | `voyage-3.5`     | $0.06    | Matches memory - semantic text        |
 | `tasks`    | Task desc       | `voyage-3.5`     | $0.06    | Good quality at 1/3 cost              |
 | `sessions` | Session context | `voyage-3.5`     | $0.06    | Good quality at 1/3 cost              |
 

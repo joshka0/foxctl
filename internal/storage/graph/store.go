@@ -51,6 +51,11 @@ type Store interface {
 	GetAllEdges(ctx context.Context, workspace string) ([]Edge, error)
 	GetAllNodes(ctx context.Context, workspace string) ([]Node, error)
 	BulkUpdatePageRank(ctx context.Context, workspace string, ranks map[string]float64) error
+
+	// Search and path operations (for semantic codemaps)
+	SearchNodes(ctx context.Context, workspace, term string, limit int) ([]Node, error)
+	GetEdgesBetween(ctx context.Context, workspace string, nodeIDs []string) ([]Edge, error)
+	FindShortestPath(ctx context.Context, workspace, fromID, toID string, maxDepth int) ([][]string, error)
 }
 
 // SQLiteStore implements Store using SQLite.
@@ -827,4 +832,147 @@ func (s *SQLiteStore) scanEdges(rows *sql.Rows) ([]Edge, error) {
 		edges = append(edges, edge)
 	}
 	return edges, rows.Err()
+}
+
+// SearchNodes finds nodes matching a term in node_id, title, or current_path.
+// Results are ordered by PageRank descending.
+func (s *SQLiteStore) SearchNodes(ctx context.Context, workspace, term string, limit int) ([]Node, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// Case-insensitive search across node_id, title, and current_path
+	query := `
+	SELECT workspace, node_id, node_type, title, current_path, pagerank, in_degree, out_degree, last_seen, metadata, created_at, updated_at
+	FROM graph_nodes
+	WHERE workspace = ?
+	  AND (node_id LIKE '%' || ? || '%' COLLATE NOCASE
+	    OR title LIKE '%' || ? || '%' COLLATE NOCASE
+	    OR current_path LIKE '%' || ? || '%' COLLATE NOCASE)
+	ORDER BY pagerank DESC
+	LIMIT ?
+	`
+
+	rows, err := s.db.QueryContext(ctx, query, workspace, term, term, term, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanNodes(rows)
+}
+
+// GetEdgesBetween returns edges where both from_id and to_id are within the given nodeIDs set.
+func (s *SQLiteStore) GetEdgesBetween(ctx context.Context, workspace string, nodeIDs []string) ([]Edge, error) {
+	if len(nodeIDs) == 0 {
+		return nil, nil
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(nodeIDs))
+	args := make([]any, 0, 1+2*len(nodeIDs))
+	args = append(args, workspace)
+
+	for i, id := range nodeIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	// Add nodeIDs again for the to_id IN clause
+	for _, id := range nodeIDs {
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(`
+	SELECT id, workspace, from_id, from_type, to_id, to_type, edge_type, weight, created_at, ttl_days, metadata
+	FROM graph_edges
+	WHERE workspace = ?
+	  AND from_id IN (%s)
+	  AND to_id IN (%s)
+	`, inClause, inClause)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return s.scanEdges(rows)
+}
+
+// FindShortestPath finds the shortest path(s) between two nodes using BFS.
+// Returns paths as slices of node IDs. maxDepth limits search depth (default 5).
+// Returns nil if no path exists within maxDepth.
+func (s *SQLiteStore) FindShortestPath(ctx context.Context, workspace, fromID, toID string, maxDepth int) ([][]string, error) {
+	if maxDepth <= 0 {
+		maxDepth = 5
+	}
+	if fromID == toID {
+		return [][]string{{fromID}}, nil
+	}
+
+	// BFS state
+	type pathState struct {
+		nodeID string
+		path   []string
+	}
+
+	visited := make(map[string]bool)
+	queue := []pathState{{nodeID: fromID, path: []string{fromID}}}
+	visited[fromID] = true
+
+	var shortestPaths [][]string
+	shortestLen := 0
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		// Stop if we've exceeded shortest path length found
+		if shortestLen > 0 && len(current.path) > shortestLen {
+			break
+		}
+
+		// Stop if we've exceeded max depth
+		if len(current.path) > maxDepth {
+			continue
+		}
+
+		// Get neighbors (both directions)
+		neighbors, err := s.GetNeighbors(ctx, workspace, current.nodeID, NeighborOptions{
+			Direction: "both",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("get neighbors for %s: %w", current.nodeID, err)
+		}
+
+		for _, neighbor := range neighbors {
+			neighborID := neighbor.Node.NodeID
+
+			// Found target
+			if neighborID == toID {
+				newPath := make([]string, len(current.path)+1)
+				copy(newPath, current.path)
+				newPath[len(current.path)] = toID
+
+				if shortestLen == 0 || len(newPath) <= shortestLen {
+					shortestLen = len(newPath)
+					shortestPaths = append(shortestPaths, newPath)
+				}
+				continue
+			}
+
+			// Continue BFS if not visited and within depth
+			if !visited[neighborID] && len(current.path) < maxDepth {
+				visited[neighborID] = true
+				newPath := make([]string, len(current.path)+1)
+				copy(newPath, current.path)
+				newPath[len(current.path)] = neighborID
+				queue = append(queue, pathState{nodeID: neighborID, path: newPath})
+			}
+		}
+	}
+
+	return shortestPaths, nil
 }

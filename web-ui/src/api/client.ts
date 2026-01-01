@@ -314,3 +314,37 @@ export function subscribeToEvents(
 
   return () => eventSource.close();
 }
+
+// Codemaps
+export async function getCodemaps(params?: {
+  workspace?: string;
+  limit?: number;
+}): Promise<{ codemaps: import("../types").CodemapListItem[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.workspace) searchParams.set("workspace", params.workspace);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/codemaps${query ? `?${query}` : ""}`);
+}
+
+export async function getCodemap(
+  id: string
+): Promise<import("../types").Codemap> {
+  return request(`/api/codemaps/${encodeURIComponent(id)}`);
+}
+
+export async function deleteCodemap(id: string): Promise<void> {
+  return requestVoid(`/api/codemaps/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function searchCodemaps(params: {
+  query: string;
+  limit?: number;
+}): Promise<{ results: import("../types").SearchResult[] }> {
+  const searchParams = new URLSearchParams();
+  searchParams.set("q", params.query);
+  if (params.limit) searchParams.set("limit", String(params.limit));
+  return request(`/api/codemaps/search?${searchParams.toString()}`);
+}

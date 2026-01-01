@@ -25,6 +25,9 @@ export const queryKeys = {
   session: (id: string) => ["sessions", id] as const,
   sessionMessages: (id: string, params?: { limit?: number; offset?: number }) => ["sessions", id, "messages", params] as const,
   sessionSearch: (params: { pattern: string; limit?: number }) => ["sessions", "search", params] as const,
+  codemaps: (params?: { workspace?: string; limit?: number }) => ["codemaps", params] as const,
+  codemap: (id: string) => ["codemaps", id] as const,
+  codemapSearch: (params: { query: string; limit?: number }) => ["codemaps", "search", params] as const,
 };
 
 // Jobs
@@ -177,6 +180,30 @@ export function useSessionSearch(params: { pattern: string; limit?: number }) {
     queryKey: queryKeys.sessionSearch(params),
     queryFn: () => api.searchSessions(params),
     enabled: !!params.pattern,
+  });
+}
+
+// Codemaps
+export function useCodemaps(params?: { workspace?: string; limit?: number }) {
+  return useQuery({
+    queryKey: queryKeys.codemaps(params),
+    queryFn: () => api.getCodemaps(params),
+  });
+}
+
+export function useCodemap(id: string) {
+  return useQuery({
+    queryKey: queryKeys.codemap(id),
+    queryFn: () => api.getCodemap(id),
+    enabled: !!id,
+  });
+}
+
+export function useCodemapSearch(params: { query: string; limit?: number }) {
+  return useQuery({
+    queryKey: queryKeys.codemapSearch(params),
+    queryFn: () => api.searchCodemaps(params),
+    enabled: !!params.query,
   });
 }
 
