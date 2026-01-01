@@ -180,6 +180,53 @@ See `docs/observability/wide-events.md` for full documentation.
 - Observability: `~/.agentctl/observability/events/` (NDJSON event logs)
 - Backups: `~/.agentctl/backups/` (includes observability component)
 
+## TypeScript Packages (GUI/TUI/API)
+
+The `packages/` directory contains TypeScript applications for viewing agentctl data:
+
+```
+packages/
+├── data/     # Shared API client + types (@agentctl/data)
+├── gui/      # Web GUI - React/Vite/Tailwind (@agentctl/gui)
+│   └── server/index.js  # API server (Express, port 8090)
+└── tui/      # Terminal UI - OpenTUI (@agentctl/tui)
+```
+
+### Running the Viewers
+
+```bash
+# Install dependencies (from repo root)
+bun install
+
+# Start API server + Web GUI (concurrent)
+make ts-dev-gui
+# or: bun run dev:all
+
+# Start TUI (connect to running API server)
+AGENTCTL_API_URL=http://localhost:8090 bun run --cwd packages/tui dev
+
+# Individual commands
+bun run dev:server   # API server only (port 8090)
+bun run dev:gui      # Web GUI only (needs server)
+bun run dev:tui      # TUI only (needs server)
+```
+
+### TUI Views (keyboard shortcuts)
+
+| Key | View         | Description                           |
+| --- | ------------ | ------------------------------------- |
+| 1   | Jobs         | Job queue with status, timing         |
+| 2   | Tasks        | Task list with dependencies           |
+| 3   | Insights     | PageRank, critical path, cycles       |
+| 4   | Mailbox      | Actor messages with priority          |
+| 5   | Reservations | File locks (exclusive/shared)         |
+| 6   | Stats        | Job statistics dashboard              |
+| 7   | Blackboard   | Key-value store browser               |
+| 8   | SQLite       | Direct SQL query interface            |
+| 9   | Search       | Full-text search                      |
+
+Navigation: `j/k` (up/down), `[/]` (prev/next view), `r` (refresh), `q` (quit)
+
 ## Development
 
 ```bash

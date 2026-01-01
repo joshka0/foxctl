@@ -3,6 +3,12 @@
 /dist/
 /coverage/
 
+# Node/Bun
+node_modules/
+bun.lockb
+packages/*/dist/
+web-ui/dist/
+
 # Go build output
 *.test
 *.out

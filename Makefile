@@ -174,6 +174,26 @@ web-build: web-templ
 web-run: web-build
 	@./bin/agentctl-web
 
+# TypeScript/Bun targets
+.PHONY: ts-install ts-dev-tui ts-dev-gui ts-build ts-typecheck
+
+ts-install:
+	@command -v bun >/dev/null 2>&1 || { echo "bun not installed. See: https://bun.sh"; exit 1; }
+	@bun install
+
+ts-dev-tui: ts-install
+	@cd packages/tui && bun run dev
+
+# Starts both API server and GUI (dev:all = server + vite)
+ts-dev-gui: ts-install
+	@cd packages/gui && bun run dev:all
+
+ts-build: ts-install
+	@bun run build
+
+ts-typecheck: ts-install
+	@bun run typecheck
+
 # Build and install a single skill: make skill SKILL=todo
 # This is the preferred way to rebuild a skill during development
 skill:

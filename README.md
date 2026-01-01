@@ -401,6 +401,10 @@ agentctl/
 │   ├── todo/
 │   ├── wasi_echo/
 │   └── http_openapi/
+├── packages/               # TypeScript applications (Bun workspace)
+│   ├── data/               # Shared API client (@agentctl/data)
+│   ├── gui/                # Web dashboard (@agentctl/gui) + API server
+│   └── tui/                # Terminal UI (@agentctl/tui, OpenTUI)
 ├── docs/
 │   ├── spec/               # Specifications
 │   ├── refactoring/        # Implementation specs
