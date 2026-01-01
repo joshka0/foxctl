@@ -4,72 +4,8 @@
 package types
 
 import (
-	"encoding/json"
-	"fmt"
-	"strconv"
-	"strings"
 	"time"
 )
-
-// Duration wraps time.Duration to provide human-readable JSON marshaling.
-// Marshals to strings like "30s", "5m", "1h30m".
-// Unmarshals from both strings ("30s") and numeric nanoseconds (30000000000) for backward compatibility.
-type Duration time.Duration
-
-// MarshalJSON implements json.Marshaler with human-readable duration strings.
-func (d Duration) MarshalJSON() ([]byte, error) {
-	return json.Marshal(time.Duration(d).String())
-}
-
-// UnmarshalJSON implements json.Unmarshaler, accepting both strings and numeric nanoseconds.
-func (d *Duration) UnmarshalJSON(b []byte) error {
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-
-	switch val := v.(type) {
-	case string:
-		// Handle human-readable strings like "30s", "5m", "1h30m"
-		parsed, err := time.ParseDuration(val)
-		if err != nil {
-			return fmt.Errorf("invalid duration string %q: %w", val, err)
-		}
-		*d = Duration(parsed)
-	case float64:
-		// Handle numeric nanoseconds for backward compatibility
-		*d = Duration(time.Duration(int64(val)))
-	default:
-		return fmt.Errorf("invalid duration type %T", v)
-	}
-	return nil
-}
-
-// Duration returns the underlying time.Duration.
-func (d Duration) Duration() time.Duration {
-	return time.Duration(d)
-}
-
-// String returns the string representation.
-func (d Duration) String() string {
-	return time.Duration(d).String()
-}
-
-// ParseDuration parses a duration string into Duration.
-func ParseDuration(s string) (Duration, error) {
-	// Try standard Go duration first
-	if d, err := time.ParseDuration(s); err == nil {
-		return Duration(d), nil
-	}
-
-	// Try numeric nanoseconds
-	s = strings.TrimSpace(s)
-	if ns, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return Duration(time.Duration(ns)), nil
-	}
-
-	return 0, fmt.Errorf("invalid duration: %s", s)
-}
 
 // AgentRole defines the type of agent (coder, planner, reviewer, etc.).
 type AgentRole string
@@ -256,7 +192,7 @@ type AgentConfig struct {
 	MaxIterations int `json:"max_iterations,omitempty"`
 
 	// Timeout is the maximum execution time.
-	Timeout Duration `json:"timeout,omitempty"`
+	Timeout time.Duration `json:"timeout,omitempty,format:units"`
 
 	// LLMProvider specifies which LLM to use (e.g., "gemini", "openai").
 	LLMProvider string `json:"llm_provider,omitempty"`
@@ -313,7 +249,7 @@ type ToolCall struct {
 	Error string `json:"error,omitempty"`
 
 	// Duration is how long the tool call took.
-	Duration Duration `json:"duration"`
+	Duration time.Duration `json:"duration,format:units"`
 
 	// Timestamp is when the call was made.
 	Timestamp time.Time `json:"timestamp"`

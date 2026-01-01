@@ -64,8 +64,8 @@ skill_input=$(jq -nc \
   }'
 )
 
-# Call session/save skill
-result="$(printf '%s' "$skill_input" | "$AGENTCTL_BIN" run session/save --input-file - 2>/dev/null)" || {
+# Call session/save skill with --ephemeral for faster execution
+result="$(printf '%s' "$skill_input" | "$AGENTCTL_BIN" run session/save --ephemeral --input-file - 2>/dev/null)" || {
   # On error, don't block compaction
   echo '{}'
   exit 0

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/daemon"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/runservice"
@@ -61,9 +62,25 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 
+	// Daemon mode: execute via persistent daemon for faster hook execution
+	if flags.Daemon {
+		return executeViaDaemon(ctx, cmd, skillName, data, opts)
+	}
+
 	executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 	executor.SetAsyncRunner(defaultAsyncRunner)
 	defer executor.Close()
+
+	// Ephemeral mode: skip job persistence for faster execution
+	if opts.Ephemeral {
+		if err := executor.ExecuteEphemeral(data); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return writeTimeoutError(cmd, skillName, timeout)
+			}
+			return err
+		}
+		return nil
+	}
 
 	if done, err := executor.TryServeCache(data); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -147,4 +164,36 @@ func writeTimeoutError(cmd *cobra.Command, skill string, timeout time.Duration) 
 	}
 
 	return context.DeadlineExceeded
+}
+
+// executeViaDaemon runs a skill via the daemon for faster execution.
+// Falls back to normal execution if the daemon is not available.
+func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string, input []byte, opts runservice.RunOptions) error {
+	client := daemon.NewClient()
+
+	// Check if daemon is running
+	if !client.IsRunning() {
+		// Fall back to ephemeral mode with warning
+		fmt.Fprintf(cmd.ErrOrStderr(), "daemon not running, falling back to ephemeral mode\n")
+		opts.Ephemeral = true
+		cfg := config.MustFromContext(cmd.Context())
+		handle, err := findSkill(cfg, skillName)
+		if err != nil {
+			return err
+		}
+		// Use the timeout-wrapped context for fallback execution
+		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		defer executor.Close()
+		return executor.ExecuteEphemeral(input)
+	}
+
+	// Execute via daemon
+	result, err := client.Run(skillName, input, opts.Workspace, opts.Ephemeral)
+	if err != nil {
+		return fmt.Errorf("daemon execution failed: %w", err)
+	}
+
+	// Write result to stdout
+	_, err = cmd.OutOrStdout().Write(result.Output)
+	return err
 }

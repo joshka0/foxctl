@@ -106,6 +106,22 @@ func GetDaemon(ctx context.Context, workspace string) (*Daemon, error) {
 	return d, nil
 }
 
+// IsDaemonReady returns true if a gopls daemon is already running for the workspace.
+// Unlike GetDaemon, this does NOT start the daemon if it's not running.
+// Use this to avoid cold-start delays in performance-sensitive code paths like hooks.
+func IsDaemonReady(workspace string) bool {
+	daemonMu.Lock()
+	defer daemonMu.Unlock()
+
+	if globalDaemon == nil {
+		return false
+	}
+	if globalDaemon.workspace != workspace {
+		return false
+	}
+	return globalDaemon.isAlive()
+}
+
 // startDaemon spawns a new gopls process.
 // Note: First request will be slow (~30-40s) as gopls loads packages.
 // Subsequent requests reusing the same daemon are much faster (~100ms).

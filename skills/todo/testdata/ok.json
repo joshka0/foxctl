@@ -19,6 +19,5 @@
     "duration_ms": 123,
     "source": "run",
     "runner": "exec"
-  },
-  "error": {}
+  }
 }

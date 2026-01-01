@@ -18,13 +18,13 @@ type WorkerConfig struct {
 	BatchSize int `json:"batch_size" yaml:"batch_size"`
 
 	// PollInterval is how often to check for new jobs when idle.
-	PollInterval time.Duration `json:"poll_interval" yaml:"poll_interval"`
+	PollInterval time.Duration `json:"poll_interval,format:units" yaml:"poll_interval"`
 
 	// RateLimitRPS is the max requests per second to the embedding provider.
 	RateLimitRPS float64 `json:"rate_limit_rps" yaml:"rate_limit_rps"`
 
 	// ShutdownTimeout is how long to wait for graceful shutdown.
-	ShutdownTimeout time.Duration `json:"shutdown_timeout" yaml:"shutdown_timeout"`
+	ShutdownTimeout time.Duration `json:"shutdown_timeout,format:units" yaml:"shutdown_timeout"`
 }
 
 // DefaultWorkerConfig returns sensible defaults.

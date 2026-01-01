@@ -238,7 +238,7 @@ func (a *DspyActor) initializeDspyAgent(cfg DspyActorConfig) error {
 		maxIterations = 10
 	}
 
-	timeout := cfg.AgentConfig.Timeout.Duration()
+	timeout := cfg.AgentConfig.Timeout
 	if timeout <= 0 {
 		timeout = 30 * time.Minute
 	}
@@ -425,8 +425,8 @@ func (a *DspyActor) handleAsk(ctx context.Context, msg *Message) (*Message, erro
 
 	// Apply timeout
 	timeout := 10 * time.Minute
-	if a.agentConfig.Timeout.Duration() > 0 {
-		timeout = a.agentConfig.Timeout.Duration()
+	if a.agentConfig.Timeout > 0 {
+		timeout = a.agentConfig.Timeout
 	}
 	turnCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -492,8 +492,8 @@ func (a *DspyActor) handleCmd(ctx context.Context, msg *Message) (*Message, erro
 		}
 
 		timeout := 10 * time.Minute
-		if a.agentConfig.Timeout.Duration() > 0 {
-			timeout = a.agentConfig.Timeout.Duration()
+		if a.agentConfig.Timeout > 0 {
+			timeout = a.agentConfig.Timeout
 		}
 		turnCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()

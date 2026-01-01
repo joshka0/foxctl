@@ -21,8 +21,8 @@ const (
 // Config configures the retry behavior.
 type Config struct {
 	MaxAttempts  int           `json:"max_attempts"`
-	InitialDelay time.Duration `json:"initial_delay"`
-	MaxDelay     time.Duration `json:"max_delay"`
+	InitialDelay time.Duration `json:"initial_delay,format:units"`
+	MaxDelay     time.Duration `json:"max_delay,format:units"`
 	Multiplier   float64       `json:"multiplier"`
 	Jitter       *bool         `json:"jitter"`
 }

@@ -69,7 +69,7 @@ type Candidate struct {
 // Limits controls the ranking process.
 type Limits struct {
 	MaxCandidates int           `json:"max_candidates,omitempty"`
-	Timeout       time.Duration `json:"timeout_ms,omitempty"`
+	Timeout       time.Duration `json:"timeout_ms,omitempty,format:units"`
 }
 
 // Output is the skill output structure.

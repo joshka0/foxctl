@@ -22,6 +22,9 @@
 
 set -euo pipefail
 
+# Ensure child processes are killed when this script is terminated (e.g., by Claude Code timeout)
+trap 'kill $(jobs -p) 2>/dev/null || true' SIGTERM SIGINT EXIT
+
 # Configuration
 AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
 
@@ -41,8 +44,8 @@ hook_input=$(printf '%s' "$payload" | jq -c --arg ws "$workspace_root" '{
   tool_input: (.tool_input // {})
 }')
 
-# Call agentctl skill
-result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run hooks/task_guard --input-file - 2>/dev/null)" || {
+# Call agentctl skill with --ephemeral for faster execution (skip job persistence)
+result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run hooks/task_guard --ephemeral --input-file - 2>/dev/null)" || {
   # On error, allow the operation to proceed (fail-open)
   echo '{}' 
   exit 0

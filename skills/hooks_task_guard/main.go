@@ -222,6 +222,11 @@ func fail(command, code string, err error) {
 // createModifiedEdge creates a graph edge from task to file when modified.
 // This enables PageRank to flow from tasks to the files they touch.
 func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, taskID, filePath string) {
+	// Early exit if no file path - avoids unnecessary graph.Open() overhead
+	if filePath == "" {
+		return
+	}
+
 	// Open graph store (fail silently - graph is optional)
 	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
 	if err != nil {

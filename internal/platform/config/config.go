@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/viper"
@@ -55,8 +56,8 @@ type StorageSettings struct {
 
 // MemorySettings influence cache + named memory behavior.
 type MemorySettings struct {
-	AutoCacheTTL      time.Duration `mapstructure:"auto_cache_ttl" json:"auto_cache_ttl"`
-	DefaultNamedTTL   time.Duration `mapstructure:"default_named_ttl" json:"default_named_ttl"`
+	AutoCacheTTL      time.Duration `mapstructure:"auto_cache_ttl" json:"auto_cache_ttl,format:units"`
+	DefaultNamedTTL   time.Duration `mapstructure:"default_named_ttl" json:"default_named_ttl,format:units"`
 	AutoLoadWorkspace bool          `mapstructure:"auto_load_workspace" json:"auto_load_workspace"`
 }
 
@@ -102,6 +103,12 @@ type TursoSettings struct {
 }
 
 // MarshalJSON implements json.Marshaler to redact the AuthToken field.
+// TODO(jsonv2): Migrate to MarshalerTo when encoding/json/v2 is stable:
+//
+//	func (t TursoSettings) MarshalJSONTo(enc *jsontext.Encoder) error {
+//	    ...
+//	    return json.MarshalEncode(enc, redacted)
+//	}
 func (t TursoSettings) MarshalJSON() ([]byte, error) {
 	type Alias TursoSettings
 	redacted := Alias(t)
@@ -183,6 +190,33 @@ func WithConfigFile(path string) Option {
 	return func(l *loader) {
 		l.configFile = path
 	}
+}
+
+// Cached config for daemon mode - avoids re-loading config on every request.
+var (
+	cachedConfig    Config
+	cachedConfigErr error
+	configOnce      sync.Once
+)
+
+// LoadCached returns the cached configuration, loading it on first call.
+// This is useful for daemon mode where we want to avoid re-loading config
+// on every request (~5-10ms overhead per load).
+//
+// Note: This caches the first successful load. If you need to reload config
+// (e.g., after editing config.yaml), restart the daemon.
+func LoadCached(ctx context.Context, opts ...Option) (Config, error) {
+	configOnce.Do(func() {
+		cachedConfig, cachedConfigErr = Load(ctx, opts...)
+	})
+	return cachedConfig, cachedConfigErr
+}
+
+// ResetCachedConfig clears the cached config (for testing only).
+func ResetCachedConfig() {
+	configOnce = sync.Once{}
+	cachedConfig = Config{}
+	cachedConfigErr = nil
 }
 
 // Load returns the hydrated configuration by applying defaults, config file, and env overrides.

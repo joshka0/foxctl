@@ -45,18 +45,18 @@ func (v Vector) String() string {
 	return "[" + strings.Join(parts, ",") + "]"
 }
 
-// MarshalJSON marshals the vector to JSON
+// MarshalJSON implements json.Marshaler for Vector
 func (v Vector) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]float32(v))
 }
 
-// UnmarshalJSON unmarshals JSON to a vector
+// UnmarshalJSON implements json.Unmarshaler for Vector
 func (v *Vector) UnmarshalJSON(data []byte) error {
 	var floats []float32
 	if err := json.Unmarshal(data, &floats); err != nil {
 		return err
 	}
-	*v = Vector(floats)
+	*v = floats
 	return nil
 }
 

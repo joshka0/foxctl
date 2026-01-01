@@ -25,6 +25,9 @@
 
 set -euo pipefail
 
+# Ensure child processes are killed when this script is terminated (e.g., by Claude Code timeout)
+trap 'kill $(jobs -p) 2>/dev/null || true' SIGTERM SIGINT EXIT
+
 # Disable with AGENTCTL_IMPACT_DISABLED=1
 if [[ "${AGENTCTL_IMPACT_DISABLED:-}" == "1" ]]; then
   echo '{}'
@@ -118,7 +121,7 @@ input_json=$(jq -nc --arg path "$file_path" --argjson max "$MAX_SYMBOLS" '{
   include_private: false,
   max_results: $max
 }')
-symbols_result=$("$AGENTCTL_BIN" run code/symbols --input "$input_json" 2>/dev/null) || {
+symbols_result=$("$AGENTCTL_BIN" run code/symbols --ephemeral --input "$input_json" 2>/dev/null) || {
   echo '{}'
   exit 0
 }
@@ -184,7 +187,7 @@ while IFS= read -r symbol; do
     go)
       # For interfaces: get implementations
       if [[ "$sym_type" == "interface" ]]; then
-        impl_result=$("$AGENTCTL_BIN" run lsp/gopls --input "$(echo "$lsp_input" | jq '. + {operation: "implementation"}')" 2>/dev/null) || true
+        impl_result=$("$AGENTCTL_BIN" run lsp/gopls --ephemeral --input "$(echo "$lsp_input" | jq '. + {operation: "implementation"}')" 2>/dev/null) || true
         if [[ -n "$impl_result" ]]; then
           impl_list=$(echo "$impl_result" | jq -r --arg self "$abs_file_path" '
             .data.locations // [] | map(select(.file != $self)) | .[:'$MAX_REFS'] |
@@ -197,12 +200,12 @@ while IFS= read -r symbol; do
       fi
 
       # Get references
-      refs_result=$("$AGENTCTL_BIN" run lsp/gopls --input "$(echo "$lsp_input" | jq '. + {operation: "references"}')" 2>/dev/null) || true
+      refs_result=$("$AGENTCTL_BIN" run lsp/gopls --ephemeral --input "$(echo "$lsp_input" | jq '. + {operation: "references"}')" 2>/dev/null) || true
       refs_raw=$(echo "$refs_result" | jq -r '.data.locations // [] | map(.file + ":" + (.line | tostring)) | .[]')
       ;;
     *)
       # For other languages, use their LSP skill
-      refs_result=$("$AGENTCTL_BIN" run "$lsp_skill" --input "$(echo "$lsp_input" | jq '. + {operation: "references"}')" 2>/dev/null) || true
+      refs_result=$("$AGENTCTL_BIN" run "$lsp_skill" --ephemeral --input "$(echo "$lsp_input" | jq '. + {operation: "references"}')" 2>/dev/null) || true
       refs_raw=$(echo "$refs_result" | jq -r '.data.locations // [] | map(.file + ":" + (.line | tostring)) | .[]')
       ;;
   esac

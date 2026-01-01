@@ -111,7 +111,7 @@ type OptimizationResult struct {
 	Candidates []ScoredPrompt `json:"candidates,omitempty"`
 
 	// Duration is how long optimization took.
-	Duration time.Duration `json:"duration"`
+	Duration time.Duration `json:"duration,format:units"`
 
 	// Mode is the optimization mode used.
 	Mode string `json:"mode"`

@@ -1,6 +1,8 @@
 # Go 1.25 JSON v2 Migration Plan
 
-> Status: **Planning** | Target: Go 1.25 (experimental via `GOEXPERIMENT=jsonv2`)
+> Status: **Phase 1-4 Complete** | Target: Go 1.25 (experimental via `GOEXPERIMENT=jsonv2`)
+>
+> Completed: 2026-01-01 | Branch: `feat/jsonv2-migration`
 
 ## Overview
 
@@ -207,68 +209,77 @@ json.Marshal(value, json.OmitEmptyWithLegacyDefinition(true))
 
 ---
 
-### Phase 4: Future Opportunities
+### Phase 4: Forward Compatibility
 
-#### 4.1 Add `unknown` Field for Forward Compatibility
+#### 4.1 Add `unknown` Field for Forward Compatibility ✅
 
-Capture unknown JSON fields instead of silently dropping them:
+Added `unknown` fields to 11 external API response types to capture new fields
+when APIs evolve:
 
+| Provider | Types Updated |
+|----------|---------------|
+| OpenAI/Groq/OpenRouter | `openAIResponse` |
+| Voyage AI | `voyageEmbedResponse`, `voyageRerankResponse` |
+| Google Gemini | `geminiEmbedResponse`, `geminiBatchEmbedResponse` |
+| Mistral | `mistralEmbedResponse` |
+| Codestral | `codestralEmbedResponse` |
+| GitHub | `PRInfo`, `CheckRun`, `JobDetails`, `JobStep` |
+
+**Pattern used:**
 ```go
-type APIResponse struct {
-    ID      string         `json:"id"`
-    Name    string         `json:"name"`
-    Unknown map[string]any `json:",unknown"`  // Captures extra fields
-}
+_ map[string]any `json:",unknown"` // Captures unknown fields for forward compatibility
 ```
 
-**Use case:** API clients receiving new fields from updated servers.
+#### 4.2 Evaluate `inline` for Embedded Structs ✅
 
-#### 4.2 Consider `inline` for Embedded Structs
+**Analysis result:** No suitable candidates found.
 
-Flatten embedded struct fields to parent level:
+The codebase already follows good practices:
+- Explicit field naming over anonymous embedding
+- Semantic grouping with intentional nesting
+- Clear JSON structure mirroring conceptual organization
 
-```go
-// Current
-type Envelope struct {
-    Meta Meta `json:"meta"`  // Output: {"meta":{"ts":"..."}}
-}
-
-// With inline
-type Envelope struct {
-    Meta `json:",inline"`    // Output: {"ts":"..."}
-}
-```
-
-**Warning:** This is a breaking API change - only use if intentional.
+**Recommendation:** Do not apply `inline` - current structure is semantically sound.
 
 ---
 
 ## File Summary
 
-### Files to Modify
+### Files Modified
 
-| File | Changes |
-|------|---------|
-| `internal/domain/envelope/envelope.go` | Add `omitzero` to Error field |
-| `internal/agent/types/types.go` | Delete Duration type (45 lines) |
-| `internal/storage/dbdriver/vector.go` | Delete Vector marshaler (13 lines) |
-| `internal/platform/config/config.go` | Migrate to MarshalerTo |
-| `skills/hooks_impact_analysis/main.go` | Add `format:units` |
-| `skills/code_llm_search/main.go` | Add `format:units` |
-| `internal/domain/backup/backup.go` | Add `format:units` |
-| `internal/indexing/embedding/worker.go` | Add `format:units` (2 fields) |
-| `internal/openapi/retry/retry.go` | Add `format:units` (2 fields) |
-| `internal/agent/optimization/reflection.go` | Add `format:units` |
-| `internal/agent/optimization/prompt_optimizer.go` | Add `format:units` |
+| Phase | File | Changes |
+|-------|------|---------|
+| 1 | `skills/hooks_impact_analysis/main.go` | Add `format:units` |
+| 1 | `skills/code_llm_search/main.go` | Add `format:units` |
+| 1 | `internal/domain/backup/backup.go` | Add `format:units` |
+| 1 | `internal/indexing/embedding/worker.go` | Add `format:units` (2 fields) |
+| 1 | `internal/openapi/retry/retry.go` | Add `format:units` (2 fields) |
+| 1 | `internal/agent/optimization/reflection.go` | Add `format:units` |
+| 1 | `internal/agent/optimization/prompt_optimizer.go` | Add `format:units` |
+| 1 | `internal/platform/config/config.go` | Add `format:units` (2 fields) |
+| 2 | `internal/domain/envelope/envelope.go` | Add `omitzero` to Error field |
+| 2 | `internal/agent/types/types.go` | Delete Duration type (68 lines) |
+| 2 | `internal/storage/dbdriver/vector.go` | Delete Vector marshaler (14 lines) |
+| 2 | `internal/platform/config/config.go` | Add TODO for MarshalerTo |
+| 3 | `internal/platform/jsoncompat/compat.go` | Created - compatibility docs |
+| 4 | `internal/planning/llm/openai.go` | Add `unknown` field |
+| 4 | `internal/indexing/semantic/provider_voyage.go` | Add `unknown` field |
+| 4 | `internal/indexing/semantic/provider_gemini.go` | Add `unknown` fields (2) |
+| 4 | `internal/indexing/semantic/provider_mistral.go` | Add `unknown` field |
+| 4 | `internal/indexing/semantic/provider_codestral.go` | Add `unknown` field |
+| 4 | `internal/indexing/rerank/voyage.go` | Add `unknown` field |
+| 4 | `skills/ci_github_checks/main.go` | Add `unknown` fields (4) |
 
-### Estimated Impact
+### Final Impact
 
 | Metric | Value |
 |--------|-------|
-| Files modified | 11 |
-| Lines removed | ~60 |
+| Files modified | 18 |
+| Lines removed | ~82 |
+| Lines added | ~30 |
 | Custom marshalers removed | 2 |
-| Duration fields updated | 9 |
+| Duration fields updated | 11 |
+| Forward-compat fields added | 11 |
 
 ---
 

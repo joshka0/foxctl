@@ -48,7 +48,7 @@ type ToolReflection struct {
 	SuccessRate float64 `json:"success_rate"`
 
 	// AvgDuration is the average duration of tool calls.
-	AvgDuration time.Duration `json:"avg_duration"`
+	AvgDuration time.Duration `json:"avg_duration,format:units"`
 
 	// Notes are observations about tool usage.
 	Notes []string `json:"notes,omitempty"`

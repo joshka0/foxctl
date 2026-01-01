@@ -219,7 +219,7 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 		WorkspaceID:   workspace,
 		ActorID:       fmt.Sprintf("dspy:%s", dspyRole),
 		MaxIterations: dspyMaxIter,
-		Timeout:       types.Duration(time.Duration(dspyTimeoutMins) * time.Minute),
+		Timeout:       time.Duration(dspyTimeoutMins) * time.Minute,
 		LLMProvider:   dspyLLMProvider,
 		LLMModel:      dspyLLMModel,
 		LLMAPIKey:     agentAPIKey, // From AGENTCTL_LLM_API_KEY or GEMINI_API_KEY

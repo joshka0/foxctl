@@ -20,6 +20,8 @@ type runCommandFlags struct {
 	InputFile       string
 	Async           bool
 	Dedupe          bool
+	Ephemeral       bool
+	Daemon          bool
 	CacheMode       string
 	Workspace       string
 	WorkspaceSet    bool
@@ -34,6 +36,8 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 	cmd.Flags().StringVar(&flags.InputFile, "input-file", "", "Path to JSON input file ('-' for stdin)")
 	cmd.Flags().BoolVar(&flags.Async, "async", false, "Submit job and return immediately")
 	cmd.Flags().BoolVar(&flags.Dedupe, "dedupe", false, "Reuse existing job with same args_hash")
+	cmd.Flags().BoolVar(&flags.Ephemeral, "ephemeral", false, "Skip job persistence for faster execution (for hooks)")
+	cmd.Flags().BoolVar(&flags.Daemon, "daemon", false, "Execute via daemon for faster hook execution")
 	cmd.Flags().StringVar(&flags.CacheMode, "cache", "", "Cache mode: auto|off|only (default from config)")
 	cmd.Flags().StringVar(&flags.Workspace, "workspace", "", "Workspace override (default: auto-detect)")
 	cmd.Flags().StringVar(&flags.RememberName, "remember", "", "Save successful result as named memory")
@@ -84,6 +88,7 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 		Input:           input,
 		Async:           flags.Async,
 		Dedupe:          flags.Dedupe,
+		Ephemeral:       flags.Ephemeral,
 		CacheMode:       cacheMode,
 		Workspace:       ws,
 		RememberName:    flags.RememberName,

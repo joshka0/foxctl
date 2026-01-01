@@ -128,8 +128,8 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = r.config.DefaultMaxIterations
 	}
-	if cfg.Timeout.Duration() <= 0 {
-		cfg.Timeout = types.Duration(r.config.DefaultTimeout)
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = r.config.DefaultTimeout
 	}
 	if cfg.LLMProvider == "" {
 		cfg.LLMProvider = r.config.LLMProvider
@@ -224,7 +224,7 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 	// Create the ReActAgent with options
 	opts := []react.Option{
 		react.WithMaxIterations(cfg.MaxIterations),
-		react.WithTimeout(cfg.Timeout.Duration()),
+		react.WithTimeout(cfg.Timeout),
 	}
 
 	// Create agent ID based on config
@@ -423,7 +423,7 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	}()
 
 	// Apply timeout
-	ctx, cancel := context.WithTimeout(ctx, session.Config.Timeout.Duration())
+	ctx, cancel := context.WithTimeout(ctx, session.Config.Timeout)
 	defer cancel()
 
 	// Build the task prompt based on config

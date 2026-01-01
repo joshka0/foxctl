@@ -126,7 +126,7 @@ type Result struct {
 	// BytesProcessed is the total bytes processed.
 	BytesProcessed int64 `json:"bytes_processed"`
 	// Duration is how long the operation took.
-	Duration time.Duration `json:"duration"`
+	Duration time.Duration `json:"duration,format:units"`
 	// Warnings contains any non-fatal issues encountered.
 	Warnings []string `json:"warnings,omitempty"`
 }

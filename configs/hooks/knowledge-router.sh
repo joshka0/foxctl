@@ -17,8 +17,9 @@ AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
 INPUT=$(cat)
 
 # Run the knowledge_router skill and extract hook_output from envelope
-# Redirect stderr to /dev/null to suppress "job ... state ok" line
-result="$(echo "$INPUT" | "$AGENTCTL_BIN" run hooks/knowledge_router --input-file - 2>/dev/null)" || {
+# Use --ephemeral for faster execution (skip job persistence)
+# Redirect stderr to /dev/null to suppress status messages
+result="$(echo "$INPUT" | "$AGENTCTL_BIN" run hooks/knowledge_router --ephemeral --input-file - 2>/dev/null)" || {
   # On error, return empty (fail-open)
   echo '{}'
   exit 0

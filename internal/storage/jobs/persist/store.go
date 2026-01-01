@@ -113,8 +113,13 @@ func (s *sqlStore) Get(ctx context.Context, id string) (types.Job, error) {
 }
 
 func (s *sqlStore) InsertJob(ctx context.Context, job types.Job) error {
+	// Use INSERT OR IGNORE to handle rare ULID collisions from concurrent processes.
+	// Each process has its own entropy source, so if multiple processes call ulid.Make()
+	// at the same millisecond, they could theoretically produce the same ID.
+	// When this happens (rows == 0), we treat the existing job as valid since
+	// the caller will proceed with their job ID which already exists in the DB.
 	_, err := s.db.ExecContext(ctx, `
-        INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)
+        INSERT OR IGNORE INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,
 		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt))
 	if err != nil {

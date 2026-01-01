@@ -80,7 +80,7 @@ func init() {
 type Config struct {
 	MaxSymbols int           `json:"max_symbols"`
 	MaxRefs    int           `json:"max_refs"`
-	Timeout    time.Duration `json:"timeout"`
+	Timeout    time.Duration `json:"timeout,format:units"`
 	Disabled   bool          `json:"disabled"`
 }
 
@@ -263,6 +263,13 @@ func run(ctx context.Context, rc *runner.RunnerContext, appCfg config.Config, in
 		workspace = detectWorkspace(absPath)
 	}
 	fmt.Fprintf(os.Stderr, "impact_analysis: workspace=%s\n", workspace)
+
+	// For Go files, skip if gopls isn't warm (avoid 30-40s cold start).
+	// Users get impact analysis "for free" after using any LSP feature.
+	if lang.Name == "go" && !gopls.IsDaemonReady(workspace) {
+		fmt.Fprintf(os.Stderr, "impact_analysis: gopls not ready for workspace %s, skipping\n", workspace)
+		return emitNone(rc, "gopls not warm")
+	}
 
 	// Get symbols from file
 	symbols, err := getSymbols(ctx, absPath, cfg.MaxSymbols, workspace)

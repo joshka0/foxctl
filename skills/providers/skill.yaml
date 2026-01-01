@@ -1,0 +1,199 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: providers/config
+  version: 0.1.0
+  description: "Manage AI coding assistant configs across Claude, OpenCode, Codex, Factory, Gemini"
+  tags: ["providers", "config", "mcp", "skills", "settings", "sync"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/providers/providers
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: providers/config
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      enum: ["list", "get", "set", "add-mcp", "remove-mcp", "add-skill", "remove-skill", "sync", "export", "import"]
+      description: |
+        Operation to perform:
+        - list: List all providers and their config status
+        - get: Get config for a provider
+        - set: Set a config value
+        - add-mcp: Add MCP server to provider(s)
+        - remove-mcp: Remove MCP server from provider(s)
+        - add-skill: Symlink a skill to provider's skill directory
+        - remove-skill: Remove skill symlink
+        - sync: Sync MCP/settings between providers
+        - export: Export config to file
+        - import: Import config from file
+    - name: provider
+      type: string
+      required: false
+      enum: ["claude", "opencode", "codex", "factory", "gemini", "all"]
+      description: "Target provider (default: claude, use 'all' for all providers)"
+    - name: mcp
+      type: object
+      required: false
+      description: "MCP server config for add-mcp operation"
+      properties:
+        name:
+          type: string
+          description: "Server name/ID"
+        command:
+          type: string
+          description: "Command to run (for stdio servers)"
+        args:
+          type: array
+          description: "Command arguments"
+        env:
+          type: object
+          description: "Environment variables"
+        type:
+          type: string
+          enum: ["stdio", "http", "sse"]
+          description: "Server type (default: stdio)"
+        url:
+          type: string
+          description: "URL for http/sse servers"
+        scope:
+          type: string
+          enum: ["user", "project"]
+          description: "Scope (default: user)"
+    - name: skill
+      type: object
+      required: false
+      description: "Skill config for add-skill operation"
+      properties:
+        name:
+          type: string
+          description: "Skill name"
+        source:
+          type: string
+          description: "Source path to symlink from"
+    - name: setting
+      type: object
+      required: false
+      description: "Setting for set operation"
+      properties:
+        key:
+          type: string
+          description: "Setting key (dot notation: permissions.deny)"
+        value:
+          type: any
+          description: "Setting value"
+    - name: sync_config
+      type: object
+      required: false
+      description: "Config for sync operation"
+      properties:
+        from:
+          type: string
+          description: "Source provider"
+        to:
+          type: array
+          description: "Target providers"
+        what:
+          type: array
+          enum: ["mcp", "settings", "skills", "all"]
+          description: "What to sync"
+    - name: file
+      type: string
+      required: false
+      description: "File path for export/import operations"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Preview changes without applying"
+  returns:
+    - name: providers
+      type: array
+      description: "Provider status/configs"
+    - name: changes
+      type: array
+      description: "Changes made or to be made (dry_run)"
+    - name: errors
+      type: array
+      description: "Any errors encountered"
+  help:
+    short: "Manage AI assistant configs across providers"
+    long: |
+      Unified configuration management for AI coding assistants.
+
+      **Supported Providers:**
+      - claude: ~/.claude.json, ~/.claude/{skills,hooks,commands}/
+      - codex: ~/.codex/config.toml, ~/.codex/skills/ (SKILL.md format)
+      - opencode: ~/.config/opencode/opencode.json, ~/.config/opencode/agent/
+      - factory: ~/.factory/{config,settings,mcp}.json, ~/.factory/{droids,commands}/
+      - gemini: ~/.gemini/settings.json
+
+      **List all providers:**
+      ```json
+      {"operation": "list"}
+      ```
+
+      **Add MCP server to Claude:**
+      ```json
+      {
+        "operation": "add-mcp",
+        "provider": "claude",
+        "mcp": {
+          "name": "github",
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-github"],
+          "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"}
+        }
+      }
+      ```
+
+      **Add MCP to all providers:**
+      ```json
+      {
+        "operation": "add-mcp",
+        "provider": "all",
+        "mcp": {"name": "filesystem", "command": "..."}
+      }
+      ```
+
+      **Sync MCP servers from Claude to others:**
+      ```json
+      {
+        "operation": "sync",
+        "sync_config": {
+          "from": "claude",
+          "to": ["opencode", "factory", "gemini"],
+          "what": ["mcp"]
+        }
+      }
+      ```
+
+      **Add skill symlink:**
+      ```json
+      {
+        "operation": "add-skill",
+        "provider": "claude",
+        "skill": {
+          "name": "agentctl-smart-edit",
+          "source": "/path/to/configs/skills-condensed/agentctl-smart-edit"
+        }
+      }
+      ```
+
+      **Export config:**
+      ```json
+      {
+        "operation": "export",
+        "provider": "claude",
+        "file": "claude-config-backup.json"
+      }
+      ```
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+  pure: false

@@ -59,8 +59,8 @@ skill_input=$(jq -nc \
   }'
 )
 
-# Call session/restore skill
-result="$(printf '%s' "$skill_input" | "$AGENTCTL_BIN" run session/restore --input-file - 2>/dev/null)" || {
+# Call session/restore skill with --ephemeral for faster execution
+result="$(printf '%s' "$skill_input" | "$AGENTCTL_BIN" run session/restore --ephemeral --input-file - 2>/dev/null)" || {
   # On error, proceed without restored context
   echo '{}'
   exit 0

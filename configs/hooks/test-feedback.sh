@@ -10,6 +10,9 @@
 
 set -euo pipefail
 
+# Ensure child processes are killed when this script is terminated (e.g., by Claude Code timeout)
+trap 'kill $(jobs -p) 2>/dev/null || true' SIGTERM SIGINT EXIT
+
 # Resolve agentctl binary
 AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
 
@@ -17,8 +20,9 @@ AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
 INPUT=$(cat)
 
 # Run the test_feedback skill and extract hook_output from envelope
-# Redirect stderr to /dev/null to suppress "job ... state ok" line
-result="$(echo "$INPUT" | "$AGENTCTL_BIN" run hooks/test_feedback --input-file - 2>/dev/null)" || {
+# Use --ephemeral for faster execution (skip job persistence)
+# Redirect stderr to /dev/null to suppress status messages
+result="$(echo "$INPUT" | "$AGENTCTL_BIN" run hooks/test_feedback --ephemeral --input-file - 2>/dev/null)" || {
   # On error, return empty (fail-open)
   echo '{}'
   exit 0

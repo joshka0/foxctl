@@ -54,7 +54,7 @@ input_json=$(jq -nc --arg pattern "$pattern" --arg path "$search_path" --argjson
   path: $path,
   max_results: $max_results
 }')
-result=$("$AGENTCTL_BIN" run code/context_ripgrep --input "$input_json" 2>/dev/null) || {
+result=$("$AGENTCTL_BIN" run code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
   echo '{}'
   exit 0
 }

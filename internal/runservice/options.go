@@ -47,6 +47,11 @@ type RunOptions struct {
 	// SessionID is the AI coding tool session ID for trajectory tracking.
 	// Resolved from environment variables if not set explicitly.
 	SessionID string
+
+	// Ephemeral skips job persistence for faster execution.
+	// Used by hooks where job history is not needed.
+	// Cache reads are still allowed for deduplication, but cache writes are skipped.
+	Ephemeral bool
 }
 
 // Validate checks if the RunOptions are valid and returns an error if not.
@@ -66,6 +71,15 @@ func (o *RunOptions) Validate() error {
 	}
 	if o.Async && o.RememberName != "" {
 		return fmt.Errorf("--remember cannot be used with --async")
+	}
+	if o.Ephemeral && o.Async {
+		return fmt.Errorf("--ephemeral cannot be combined with --async")
+	}
+	if o.Ephemeral && o.Dedupe {
+		return fmt.Errorf("--ephemeral cannot be combined with --dedupe")
+	}
+	if o.Ephemeral && o.RememberName != "" {
+		return fmt.Errorf("--ephemeral cannot be combined with --remember")
 	}
 
 	switch o.CacheMode {

@@ -87,7 +87,7 @@ input_json=$(jq -nc \
     rerank_enabled: $rerank
   }')
 
-result=$("$AGENTCTL_BIN" run code/semantic_search --input "$input_json" 2>/dev/null) || {
+result=$("$AGENTCTL_BIN" run code/semantic_search --ephemeral --input "$input_json" 2>/dev/null) || {
   echo '{}'
   exit 0
 }
