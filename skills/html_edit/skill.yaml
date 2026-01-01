@@ -1,0 +1,305 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: html/edit
+  version: 0.1.0
+  description: "Precise DOM-aware HTML editing using CSS selectors"
+  tags: ["html", "dom", "edit", "css-selector", "web"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/html_edit/html_edit
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: html/edit
+  parameters:
+    - name: path
+      type: string
+      required: true
+      description: "HTML file to edit (absolute or relative to workspace)"
+    - name: operations
+      type: array
+      required: true
+      description: "Array of DOM operations to apply"
+      items:
+        type: object
+        properties:
+          type:
+            type: string
+            enum: ["select", "insert", "replace", "update_attr", "delete", "wrap", "unwrap", "structure", "extract"]
+            description: |
+              Operation type:
+              - select: Query elements and return info (no modification)
+              - insert: Insert HTML before/after/prepend/append to matched elements
+              - replace: Replace element content or entire element
+              - update_attr: Add, modify, or remove attributes
+              - delete: Remove matched elements
+              - wrap: Wrap matched elements with new HTML
+              - unwrap: Remove wrapper element, keeping children
+              - structure: Get DOM tree outline (tags, ids, classes - no content)
+              - extract: Get full HTML content of matched elements
+          selector:
+            type: string
+            description: "CSS selector to target elements (e.g., '#header', '.nav-item', 'div.content > p')"
+          position:
+            type: string
+            enum: ["before", "after", "prepend", "append"]
+            description: "Insert position (for type='insert'): before/after element, or prepend/append as child"
+          html:
+            type: string
+            description: "HTML content to insert, replace with, or wrap with (for insert/replace/wrap)"
+          inner:
+            type: boolean
+            default: false
+            description: "For replace: true = replace inner HTML only, false = replace entire element"
+          attributes:
+            type: object
+            description: "Attributes to set (for type='update_attr'). Use null value to remove an attribute."
+          nth:
+            type: integer
+            description: "Only affect the nth matched element (1-indexed). If omitted, affects all matches."
+          limit:
+            type: integer
+            description: "Maximum number of elements to affect. If omitted, affects all matches."
+          max_depth:
+            type: integer
+            description: "Maximum depth for structure tree (0 = unlimited, default: 10)"
+          include_parent:
+            type: integer
+            description: "For extract: include N parent levels for context (default: 0)"
+          max_length:
+            type: integer
+            description: "For extract: max length per extracted element in chars (default: 10000)"
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: "Preview changes without modifying the file"
+    - name: format_output
+      type: boolean
+      required: false
+      default: null
+      description: "null/omit = preserve structure, true = pretty-print, false = minified. Note: DOM parsing normalizes HTML regardless of this setting."
+    - name: context_lines
+      type: integer
+      required: false
+      default: 3
+      description: "Number of context lines in diff output"
+  returns:
+    - name: path
+      type: string
+    - name: edited
+      type: boolean
+      description: "Whether file was modified (false if dry_run)"
+    - name: operations_applied
+      type: integer
+      description: "Number of operations that matched and were applied"
+    - name: elements_affected
+      type: integer
+      description: "Total number of elements affected across all operations"
+    - name: diff
+      type: string
+      description: "Unified diff of changes"
+    - name: results
+      type: array
+      description: "Per-operation results with match counts and details"
+  help:
+    short: "Edit HTML files precisely using CSS selectors and DOM operations."
+    long: |
+      Use this skill to make precise edits to HTML files using CSS selectors to target
+      specific elements. This is much more reliable than text-based search/replace for
+      HTML because it understands the DOM structure.
+
+      **Query Elements** (type: "select"):
+      Find elements and get info without modifying:
+      ```json
+      {"type": "select", "selector": "nav.main-nav > ul > li"}
+      ```
+      Returns: matched element count, tag names, attributes, text content preview
+
+      **Insert Content** (type: "insert"):
+      Insert HTML at specific positions relative to matched elements:
+      ```json
+      {
+        "type": "insert",
+        "selector": "#content",
+        "position": "append",
+        "html": "<section class=\"new-section\"><h2>New Section</h2></section>"
+      }
+      ```
+      Positions:
+      - `before`: Insert as previous sibling
+      - `after`: Insert as next sibling
+      - `prepend`: Insert as first child
+      - `append`: Insert as last child
+
+      **Replace Content** (type: "replace"):
+      Replace element content or the entire element:
+      ```json
+      {
+        "type": "replace",
+        "selector": ".hero-title",
+        "html": "<h1 class=\"hero-title\">New Title</h1>",
+        "inner": false
+      }
+      ```
+      - `inner: true`: Replace only the inner HTML (children)
+      - `inner: false`: Replace the entire element including its tag
+
+      **Update Attributes** (type: "update_attr"):
+      Add, modify, or remove attributes:
+      ```json
+      {
+        "type": "update_attr",
+        "selector": "button.submit",
+        "attributes": {
+          "disabled": "disabled",
+          "data-loading": "true",
+          "onclick": null
+        }
+      }
+      ```
+      Use `null` as the value to remove an attribute.
+
+      **Delete Elements** (type: "delete"):
+      Remove matched elements from the DOM:
+      ```json
+      {"type": "delete", "selector": ".deprecated-banner"}
+      ```
+
+      **Wrap Elements** (type: "wrap"):
+      Wrap matched elements with new HTML:
+      ```json
+      {
+        "type": "wrap",
+        "selector": "img.gallery",
+        "html": "<figure class=\"image-figure\"></figure>"
+      }
+      ```
+      The matched element becomes a child of the wrapper.
+
+      **Unwrap Elements** (type: "unwrap"):
+      Remove a wrapper element but keep its children:
+      ```json
+      {"type": "unwrap", "selector": ".unnecessary-wrapper"}
+      ```
+
+      **Structure** (type: "structure"):
+      Get a tree outline of the DOM structure (useful for large files):
+      ```json
+      {"type": "structure"}
+      ```
+      Returns a tree like:
+      ```
+      html
+      ├── head
+      │   ├── title
+      │   └── meta (5)
+      └── body
+          ├── header#main-header
+          │   └── nav.main-nav
+          ├── main#content
+          │   ├── section.hero
+          │   └── section.features (12 children)
+          └── footer
+      ```
+      Options:
+      - `selector`: Start from a specific element instead of root
+      - `max_depth`: Limit tree depth (default: 10)
+
+      **Extract** (type: "extract"):
+      Get the full HTML content of matched elements:
+      ```json
+      {"type": "extract", "selector": ".hero", "include_parent": 1}
+      ```
+      Options:
+      - `include_parent`: Include N parent levels for context
+      - `max_length`: Truncate each match to N chars (default: 10000)
+      - `limit`: Max elements to extract (default: 10)
+
+      **Targeting Specific Matches**:
+      Use `nth` to target a specific match (1-indexed):
+      ```json
+      {"type": "delete", "selector": "p", "nth": 1}
+      ```
+      Use `limit` to cap the number of affected elements:
+      ```json
+      {"type": "update_attr", "selector": "a", "limit": 5, "attributes": {"target": "_blank"}}
+      ```
+
+      **Dry Run Mode**:
+      Preview all changes without modifying the file:
+      ```json
+      {
+        "path": "index.html",
+        "dry_run": true,
+        "operations": [...]
+      }
+      ```
+
+      **Note on HTML Normalization**:
+      This skill parses HTML into a DOM tree for precise manipulation. As a result,
+      the output HTML will be normalized (e.g., self-closing tags, attribute ordering,
+      entity encoding). The semantic content remains identical. For text-based
+      search/replace that preserves exact formatting, use `text/replace` instead.
+
+    workflows:
+      - id: add-section
+        description: "Add a new section to a page"
+        example_input:
+          path: "index.html"
+          dry_run: true
+          operations:
+            - type: "insert"
+              selector: "#main-content"
+              position: "append"
+              html: "<section id=\"new-feature\"><h2>New Feature</h2><p>Description here</p></section>"
+      - id: update-nav-links
+        description: "Add target blank to external links"
+        example_input:
+          path: "index.html"
+          operations:
+            - type: "update_attr"
+              selector: "a[href^='http']"
+              attributes:
+                target: "_blank"
+                rel: "noopener noreferrer"
+      - id: replace-hero
+        description: "Replace the hero section content"
+        example_input:
+          path: "landing.html"
+          dry_run: true
+          operations:
+            - type: "replace"
+              selector: ".hero"
+              inner: true
+              html: "<h1>Welcome!</h1><p>New hero content</p>"
+      - id: cleanup-deprecated
+        description: "Remove deprecated elements"
+        example_input:
+          path: "index.html"
+          operations:
+            - type: "delete"
+              selector: ".deprecated, [data-deprecated='true']"
+      - id: view-structure
+        description: "Get DOM structure overview of a large HTML file"
+        example_input:
+          path: "index.html"
+          operations:
+            - type: "structure"
+              max_depth: 5
+      - id: extract-section
+        description: "Extract a specific section with parent context"
+        example_input:
+          path: "index.html"
+          operations:
+            - type: "extract"
+              selector: ".hero"
+              include_parent: 1
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

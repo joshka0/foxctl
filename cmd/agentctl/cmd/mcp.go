@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 // mcpServerConfig holds configuration for backend MCP servers.
@@ -47,7 +48,7 @@ func newMCPCommand() *cobra.Command {
 		Short: "MCP server facade for Claude Code",
 		Long: `Run agentctl as an MCP server that provides a curated set of tools,
 proxying requests to backend MCP servers (tavily, exa, context7, perplexity,
-expo, supabase, playwright).
+expo, supabase, playwright) and exposing local agentctl skills (html_edit).
 
 This reduces token overhead by exposing simplified tool schemas.`,
 	}
@@ -395,6 +396,68 @@ func registerTools(s *server.MCPServer) {
 		),
 		handleBrowserContent,
 	)
+
+	// === Local Skill Tools (HTML Editing) ===
+
+	// html_select - Query HTML elements
+	s.AddTool(
+		mcp.NewTool("html_select",
+			mcp.WithDescription("Query HTML elements using CSS selectors. Returns matched element info without modifying the file."),
+			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
+			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector (e.g., '#header', '.nav-item', 'div.content > p')")),
+		),
+		handleHTMLSelect,
+	)
+
+	// html_insert - Insert HTML content
+	s.AddTool(
+		mcp.NewTool("html_insert",
+			mcp.WithDescription("Insert HTML content relative to matched elements."),
+			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
+			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for target elements")),
+			mcp.WithString("position", mcp.Required(), mcp.Description("Insert position: 'before', 'after', 'prepend', or 'append'")),
+			mcp.WithString("html", mcp.Required(), mcp.Description("HTML content to insert")),
+			mcp.WithBoolean("dry_run", mcp.Description("Preview changes without modifying file")),
+		),
+		handleHTMLInsert,
+	)
+
+	// html_replace - Replace HTML content
+	s.AddTool(
+		mcp.NewTool("html_replace",
+			mcp.WithDescription("Replace matched elements or their inner content."),
+			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
+			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for elements to replace")),
+			mcp.WithString("html", mcp.Required(), mcp.Description("Replacement HTML content")),
+			mcp.WithBoolean("inner", mcp.Description("Replace only inner HTML, not entire element (default: false)")),
+			mcp.WithBoolean("dry_run", mcp.Description("Preview changes without modifying file")),
+		),
+		handleHTMLReplace,
+	)
+
+	// html_delete - Delete HTML elements
+	s.AddTool(
+		mcp.NewTool("html_delete",
+			mcp.WithDescription("Delete matched elements from the DOM."),
+			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
+			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for elements to delete")),
+			mcp.WithBoolean("dry_run", mcp.Description("Preview changes without modifying file")),
+		),
+		handleHTMLDelete,
+	)
+
+	// html_set_attr - Update HTML attributes
+	s.AddTool(
+		mcp.NewTool("html_set_attr",
+			mcp.WithDescription("Set or remove attributes on matched elements. Use empty string to remove an attribute."),
+			mcp.WithString("path", mcp.Required(), mcp.Description("HTML file path")),
+			mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for target elements")),
+			mcp.WithString("attr", mcp.Required(), mcp.Description("Attribute name to set")),
+			mcp.WithString("value", mcp.Description("Attribute value (omit or empty string to remove)")),
+			mcp.WithBoolean("dry_run", mcp.Description("Preview changes without modifying file")),
+		),
+		handleHTMLSetAttr,
+	)
 }
 
 // Tool handlers
@@ -721,6 +784,177 @@ func handleBrowserContent(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	}
 
 	return callBackend(ctx, "playwright", "browser_get_content", contentArgs)
+}
+
+// Local skill handlers (HTML)
+
+func handleHTMLSelect(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	path, _ := args["path"].(string)
+	selector, _ := args["selector"].(string)
+
+	if path == "" || selector == "" {
+		return mcp.NewToolResultError("path and selector are required"), nil
+	}
+
+	return callLocalSkill(ctx, "html/edit", map[string]any{
+		"path": path,
+		"operations": []map[string]any{
+			{"type": "select", "selector": selector},
+		},
+	})
+}
+
+func handleHTMLInsert(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	path, _ := args["path"].(string)
+	selector, _ := args["selector"].(string)
+	position, _ := args["position"].(string)
+	html, _ := args["html"].(string)
+	dryRun, _ := args["dry_run"].(bool)
+
+	if path == "" || selector == "" || position == "" || html == "" {
+		return mcp.NewToolResultError("path, selector, position, and html are required"), nil
+	}
+
+	return callLocalSkill(ctx, "html/edit", map[string]any{
+		"path":    path,
+		"dry_run": dryRun,
+		"operations": []map[string]any{
+			{"type": "insert", "selector": selector, "position": position, "html": html},
+		},
+	})
+}
+
+func handleHTMLReplace(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	path, _ := args["path"].(string)
+	selector, _ := args["selector"].(string)
+	html, _ := args["html"].(string)
+	inner, _ := args["inner"].(bool)
+	dryRun, _ := args["dry_run"].(bool)
+
+	if path == "" || selector == "" || html == "" {
+		return mcp.NewToolResultError("path, selector, and html are required"), nil
+	}
+
+	return callLocalSkill(ctx, "html/edit", map[string]any{
+		"path":    path,
+		"dry_run": dryRun,
+		"operations": []map[string]any{
+			{"type": "replace", "selector": selector, "html": html, "inner": inner},
+		},
+	})
+}
+
+func handleHTMLDelete(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	path, _ := args["path"].(string)
+	selector, _ := args["selector"].(string)
+	dryRun, _ := args["dry_run"].(bool)
+
+	if path == "" || selector == "" {
+		return mcp.NewToolResultError("path and selector are required"), nil
+	}
+
+	return callLocalSkill(ctx, "html/edit", map[string]any{
+		"path":    path,
+		"dry_run": dryRun,
+		"operations": []map[string]any{
+			{"type": "delete", "selector": selector},
+		},
+	})
+}
+
+func handleHTMLSetAttr(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	path, _ := args["path"].(string)
+	selector, _ := args["selector"].(string)
+	attr, _ := args["attr"].(string)
+	value, hasValue := args["value"].(string)
+	dryRun, _ := args["dry_run"].(bool)
+
+	if path == "" || selector == "" || attr == "" {
+		return mcp.NewToolResultError("path, selector, and attr are required"), nil
+	}
+
+	// Build attributes map - nil value means remove
+	attributes := map[string]any{}
+	if hasValue && value != "" {
+		attributes[attr] = value
+	} else {
+		attributes[attr] = nil // Remove attribute
+	}
+
+	return callLocalSkill(ctx, "html/edit", map[string]any{
+		"path":    path,
+		"dry_run": dryRun,
+		"operations": []map[string]any{
+			{"type": "update_attr", "selector": selector, "attributes": attributes},
+		},
+	})
+}
+
+// callLocalSkill executes a local agentctl skill and returns the result.
+func callLocalSkill(ctx context.Context, skillName string, input map[string]any) (*mcp.CallToolResult, error) {
+	// Load config
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+
+	// Find the skill
+	handle, err := findSkill(cfg, skillName)
+	if err != nil {
+		return mcp.NewToolResultError("find skill " + skillName + ": " + err.Error()), nil
+	}
+
+	// Marshal input to JSON
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return mcp.NewToolResultError("marshal input: " + err.Error()), nil
+	}
+
+	// Resolve workspace context for skill execution
+	runCtx := resolveWorkspaceContext(ctx, "")
+
+	// Execute the skill
+	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
+	if err != nil {
+		errMsg := err.Error()
+		if len(stderr) > 0 {
+			errMsg += "\nstderr: " + string(stderr)
+		}
+		return mcp.NewToolResultError("execute skill: " + errMsg), nil
+	}
+
+	// Parse the envelope response
+	var envelope struct {
+		Status  string         `json:"status"`
+		Command string         `json:"command"`
+		Data    map[string]any `json:"data"`
+		Error   struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(stdout, &envelope); err != nil {
+		// Return raw output if not a valid envelope
+		return mcp.NewToolResultText(string(stdout)), nil
+	}
+
+	if envelope.Status == "error" {
+		return mcp.NewToolResultError(envelope.Error.Message), nil
+	}
+
+	// Format the data as readable output
+	result, err := json.MarshalIndent(envelope.Data, "", "  ")
+	if err != nil {
+		return mcp.NewToolResultText(string(stdout)), nil
+	}
+
+	return mcp.NewToolResultText(string(result)), nil
 }
 
 // Backend communication

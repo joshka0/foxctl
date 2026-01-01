@@ -1,8 +1,9 @@
 module github.com/jkatigb/agentctl
 
-go 1.25
+go 1.25.0
 
 require (
+	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/XiaoConstantine/dspy-go v0.74.0
 	github.com/XiaoConstantine/mcp-go v0.3.1
 	github.com/bmatcuk/doublestar/v4 v4.9.1
@@ -28,6 +29,7 @@ require (
 	github.com/tetratelabs/wazero v1.7.0
 	github.com/tursodatabase/go-libsql v0.0.0-20251025125656-00da49cd4a6e
 	golang.org/x/crypto v0.45.0
+	golang.org/x/net v0.47.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/text v0.32.0
 	gonum.org/v1/gonum v0.16.0
@@ -55,6 +57,7 @@ require (
 	github.com/alexkohler/prealloc v1.0.0 // indirect
 	github.com/alingse/asasalint v0.0.11 // indirect
 	github.com/alingse/nilnesserr v0.2.0 // indirect
+	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.19.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/ashanbrown/forbidigo v1.6.0 // indirect

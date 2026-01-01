@@ -47,5 +47,10 @@ func hasMarker(dir, name string) bool {
 	if err != nil {
 		return false
 	}
+	// .agentctl must be a directory, but .git can be either a directory
+	// (normal repo) or a file (git worktree pointing to main repo)
+	if name == ".git" {
+		return true // exists as file or directory
+	}
 	return info.IsDir()
 }

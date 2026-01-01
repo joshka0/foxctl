@@ -1,9 +1,13 @@
 ---
 name: agentctl Mobile
-description: Unified mobile simulator automation for iOS and Android - list devices, install apps, take screenshots, interact with UI, and debug Expo apps.
+description: Mobile simulator automation with agentctl - iOS Simulator and Android Emulator control. Use when asked to take screenshots, tap buttons, interact with mobile app, debug Expo, or test on device.
 ---
 
 # Mobile Automation
+
+Use this skill for iOS/Android simulator control, Expo development, and mobile testing.
+
+**Trigger phrases**: "take a screenshot", "tap on", "swipe", "mobile app", "simulator", "emulator", "Expo", "test on device", "launch the app", "what's on screen"
 
 Cross-platform mobile control via `agentctl run mobile`.
 
