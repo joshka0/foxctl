@@ -198,24 +198,35 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 	// Ensure trace ID for observability
 	ctx, traceID := observability.EnsureTraceID(ctx)
 
-	// Build wide event for skill execution
-	eventBuilder := observability.NewEvent(observability.OpSkillRun).
-		WithTraceID(traceID).
-		WithComponent(observability.ComponentSkill).
-		WithCommand(opts.Manifest.Metadata.Name).
-		WithJobID(opts.JobID).
-		WithData("skill_version", opts.Manifest.Metadata.Version).
-		EnrichFromEnv()
-
-	// Add workspace if available
-	if ws := e.jobWorkspace(opts.JobID); ws != "" {
-		eventBuilder = eventBuilder.WithWorkspace(ws)
+	// Build wide event for skill execution in background to avoid blocking on
+	// cloud metadata lookups (AWS/GCP/Azure) which can timeout in non-cloud environments.
+	type enrichResult struct {
+		builder *observability.EventBuilder
 	}
+	enrichCh := make(chan enrichResult, 1)
+	go func() {
+		builder := observability.NewEvent(observability.OpSkillRun).
+			WithTraceID(traceID).
+			WithComponent(observability.ComponentSkill).
+			WithCommand(opts.Manifest.Metadata.Name).
+			WithJobID(opts.JobID).
+			WithData("skill_version", opts.Manifest.Metadata.Version).
+			EnrichFromEnv()
+		// Add workspace if available
+		if ws := e.jobWorkspace(opts.JobID); ws != "" {
+			builder = builder.WithWorkspace(ws)
+		}
+		enrichCh <- enrichResult{builder: builder}
+	}()
 
 	stdout, stderr, runErr := e.runSkill(ctx, opts.Manifest, opts.ArtifactPath, opts.Input)
 	duration := time.Since(start)
 	metrics.Global().RecordExecutionTime(duration)
 	e.writeStderrLog(opts.JobID, stderr)
+
+	// Wait for enrichment to complete (runs in parallel with skill execution)
+	enriched := <-enrichCh
+	eventBuilder := enriched.builder
 
 	if runErr != nil {
 		// Emit error event

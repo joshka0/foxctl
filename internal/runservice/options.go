@@ -55,7 +55,7 @@ func (o *RunOptions) Validate() error {
 		return fmt.Errorf("options cannot be nil")
 	}
 	if o.CacheMode == "" {
-		o.CacheMode = cache.ModeAuto
+		o.CacheMode = cache.ModeOff
 	}
 	if o.SkillName == "" {
 		return fmt.Errorf("skill name cannot be empty")

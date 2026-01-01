@@ -60,6 +60,7 @@ type Store struct {
 	ttl             time.Duration
 	path            string
 	mu              sync.Mutex
+	evictDone       chan struct{} // signals async eviction completed
 }
 
 // Stats aliases the shared cache stats type.
@@ -97,15 +98,23 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 		artifactManager: artifactMgr,
 		ttl:             opts.AutoTTL,
 		path:            dbPath,
+		evictDone:       make(chan struct{}),
 	}
-	if err := store.evictExpired(ctx); err != nil {
-		return nil, err
-	}
+	// Evict expired entries asynchronously to avoid blocking startup.
+	// This moves cache maintenance off the critical path.
+	go func() {
+		defer close(store.evictDone)
+		errs.Ignore(store.evictExpired(context.Background()), "cache: async eviction")
+	}()
 	return store, nil
 }
 
-// Close releases resources.
+// Close releases resources. It waits for any async eviction to complete before closing.
 func (s *Store) Close() error {
+	// Wait for async eviction to complete before closing DB
+	if s.evictDone != nil {
+		<-s.evictDone
+	}
 	return s.db.Close()
 }
 

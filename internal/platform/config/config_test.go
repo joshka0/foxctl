@@ -33,8 +33,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Memory.AutoCacheTTL.Hours() != 24 {
 		t.Fatalf("expected auto cache ttl 24h got %s", cfg.Memory.AutoCacheTTL)
 	}
-	if cfg.Cache.DefaultMode != "auto" {
-		t.Fatalf("expected default cache mode auto got %s", cfg.Cache.DefaultMode)
+	if cfg.Cache.DefaultMode != "off" {
+		t.Fatalf("expected default cache mode off got %s", cfg.Cache.DefaultMode)
 	}
 	if cfg.Logging.Level != "info" {
 		t.Fatalf("expected default logging level info got %s", cfg.Logging.Level)

@@ -299,7 +299,8 @@ func invokeSweGrep(ctx context.Context, rc *runner.RunnerContext, in Input, cand
 
 	// Execute swe_grep skill with JSON input via stdin to avoid command-line length limits
 	// (some systems limit argv to ~128KB, but JSON input can be much larger with many candidates)
-	cmd := exec.CommandContext(ctx, agentctlBin, "run", "code/swe_grep")
+	// NOTE: --input-file - is required to read JSON from stdin; without it, agentctl run ignores stdin
+	cmd := exec.CommandContext(ctx, agentctlBin, "run", "code/swe_grep", "--input-file", "-")
 	cmd.Dir = workspace // Run from workspace root so relative paths resolve correctly
 	cmd.Stdin = bytes.NewReader(inputJSON)
 

@@ -240,7 +240,7 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("memory.auto_cache_ttl", "24h")
 	v.SetDefault("memory.default_named_ttl", "720h") // 30d
 	v.SetDefault("memory.auto_load_workspace", true)
-	v.SetDefault("cache.default_mode", "auto")
+	v.SetDefault("cache.default_mode", "off")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "text")
 	v.SetDefault("embedding.provider", "voyage")

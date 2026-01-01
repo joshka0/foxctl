@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
@@ -34,9 +35,18 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 		errs.Ignore(db.Close(), "close sqlite db after busy_timeout failure")
 		return nil, fmt.Errorf("sqliteutil: set busy_timeout: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
-		errs.Ignore(db.Close(), "close sqlite db after WAL failure")
-		return nil, fmt.Errorf("sqliteutil: enable wal: %w", err)
+	// Check if WAL is already enabled to avoid acquiring exclusive lock unnecessarily.
+	// This prevents blocking for busy_timeout (5s) if the DB is held open by readers.
+	var mode string
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode;").Scan(&mode); err != nil {
+		errs.Ignore(db.Close(), "close sqlite db after journal_mode check failure")
+		return nil, fmt.Errorf("sqliteutil: check journal_mode: %w", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL;`); err != nil {
+			errs.Ignore(db.Close(), "close sqlite db after WAL failure")
+			return nil, fmt.Errorf("sqliteutil: enable wal: %w", err)
+		}
 	}
 	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON;`); err != nil {
 		errs.Ignore(db.Close(), "close sqlite db after foreign_keys failure")
