@@ -203,6 +203,12 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 	type enrichResult struct {
 		builder *observability.EventBuilder
 	}
+	baseBuilder := observability.NewEvent(observability.OpSkillRun).
+		WithTraceID(traceID).
+		WithComponent(observability.ComponentSkill).
+		WithCommand(opts.Manifest.Metadata.Name).
+		WithJobID(opts.JobID).
+		WithData("skill_version", opts.Manifest.Metadata.Version)
 	enrichCh := make(chan enrichResult, 1)
 	go func() {
 		builder := observability.NewEvent(observability.OpSkillRun).
@@ -225,8 +231,15 @@ func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byt
 	e.writeStderrLog(opts.JobID, stderr)
 
 	// Wait for enrichment to complete (runs in parallel with skill execution)
-	enriched := <-enrichCh
-	eventBuilder := enriched.builder
+	eventBuilder := baseBuilder
+	select {
+	case enriched := <-enrichCh:
+		if enriched.builder != nil {
+			eventBuilder = enriched.builder
+		}
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+	}
 
 	if runErr != nil {
 		// Emit error event

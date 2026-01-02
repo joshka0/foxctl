@@ -110,7 +110,7 @@ func (l *ClaudeMaxLLM) loadTokens() error {
 }
 
 func (l *ClaudeMaxLLM) saveTokens() error {
-	if err := os.MkdirAll(filepath.Dir(l.tokenPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(l.tokenPath), 0o700); err != nil {
 		return err
 	}
 
@@ -119,7 +119,7 @@ func (l *ClaudeMaxLLM) saveTokens() error {
 		return err
 	}
 
-	return os.WriteFile(l.tokenPath, data, 0600)
+	return os.WriteFile(l.tokenPath, data, 0o600)
 }
 
 func (l *ClaudeMaxLLM) refreshTokens(ctx context.Context) error {

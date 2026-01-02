@@ -402,4 +402,3 @@ func fetchBlackboard(ns, topic string, limit int) ([]blackboardRecord, error) {
 	}
 	return envelope.Data.Records, nil
 }
-

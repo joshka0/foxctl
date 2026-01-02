@@ -68,11 +68,11 @@ func newFSReadCommand() *cobra.Command {
 	}
 
 	cmd.Flags().IntVar(&maxBytes, "max-bytes", 0, "Override preview byte limit (<= inline_output_kb)")
-	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace override for caching/memory")
+	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace override for memory")
 	cmd.Flags().StringVar(&rememberName, "remember", "", "Save successful result as named memory")
 	cmd.Flags().StringVar(&rememberType, "remember-type", "result", "Memory type label for --remember")
 	cmd.Flags().StringVar(&rememberSummary, "remember-summary", "", "Summary to record with remembered result")
-	cmd.Flags().StringVar(&cacheMode, "cache", "", "Cache mode: auto|off|only (default from config)")
+	cmd.Flags().StringVar(&cacheMode, "cache", "", "Cache mode (disabled; must be off)")
 	return cmd
 }
 

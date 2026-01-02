@@ -1,5 +1,4 @@
 //go:build sqlite_mattn
-// +build sqlite_mattn
 
 package mailbox
 

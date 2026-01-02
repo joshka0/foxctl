@@ -122,12 +122,12 @@ type Symbol struct {
 
 // Impact represents the impact analysis result for a symbol.
 type Impact struct {
-	Symbol      string   `json:"symbol"`
-	SymbolType  string   `json:"symbol_type"`
-	RefCount    int      `json:"ref_count"`
-	RefFiles    []string `json:"ref_files"`
-	ImplCount   int      `json:"impl_count,omitempty"`
-	ImplFiles   []string `json:"impl_files,omitempty"`
+	Symbol     string   `json:"symbol"`
+	SymbolType string   `json:"symbol_type"`
+	RefCount   int      `json:"ref_count"`
+	RefFiles   []string `json:"ref_files"`
+	ImplCount  int      `json:"impl_count,omitempty"`
+	ImplFiles  []string `json:"impl_files,omitempty"`
 }
 
 // Language represents a supported language with its LSP skill.
@@ -700,7 +700,7 @@ func shouldDebounce(filePath string) bool {
 }
 
 func touchDebounce(filePath string) {
-	_ = os.MkdirAll(debounceDir, 0755)
+	_ = os.MkdirAll(debounceDir, 0o755)
 	hash := hashPath(filePath)
 	markerPath := filepath.Join(debounceDir, hash)
 

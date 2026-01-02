@@ -55,11 +55,13 @@ Timeout time.Duration `json:"timeout,omitempty,format:units"`
 
 ### Phase 2: High-Impact Improvements
 
-#### 2.1 Add `omitzero` to ErrorFields
+#### 2.1 Keep `error` always present (no `omitzero`)
 
 **File:** `internal/domain/envelope/envelope.go:52`
 
-**Problem:** Error field always serializes as `{}` even on success responses.
+**Problem:** With jsonv2, using `omitzero` on `error` would omit the field on
+success responses, which breaks the Core Profile v1 envelope contract and
+existing consumers.
 
 **Current output:**
 ```json
@@ -72,15 +74,15 @@ Timeout time.Duration `json:"timeout,omitempty,format:units"`
 Error   ErrorFields `json:"error"`
 
 // After
-Error   ErrorFields `json:"error,omitzero"`
+Error   ErrorFields `json:"error"`
 ```
 
 **Result output:**
 ```json
-{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"..."}}
+{"version":1,"status":"ok","command":"test","data":{},"meta":{"ts":"..."},"error":{}}
 ```
 
-**Impact:** Every envelope in the system gets cleaner output.
+**Impact:** Envelope output remains stable across jsonv1/jsonv2.
 
 ---
 
@@ -257,7 +259,7 @@ The codebase already follows good practices:
 | 1 | `internal/agent/optimization/reflection.go` | Add `format:units` |
 | 1 | `internal/agent/optimization/prompt_optimizer.go` | Add `format:units` |
 | 1 | `internal/platform/config/config.go` | Add `format:units` (2 fields) |
-| 2 | `internal/domain/envelope/envelope.go` | Add `omitzero` to Error field |
+| 2 | `internal/domain/envelope/envelope.go` | Keep `error` always present (do not use `omitzero`) |
 | 2 | `internal/agent/types/types.go` | Delete Duration type (68 lines) |
 | 2 | `internal/storage/dbdriver/vector.go` | Delete Vector marshaler (14 lines) |
 | 2 | `internal/platform/config/config.go` | Add TODO for MarshalerTo |

@@ -1,6 +1,6 @@
 # Phase 5.1 — Auto-Cache & Cache Keys
 
-**Status:** In Progress\
+**Status:** Disabled (cache is currently off-only)\
 **Last Updated:** 2025-11-30
 
 ---
@@ -60,6 +60,9 @@ func BuildKey(manifest skill.Manifest, input []byte, extraDigests []string) (str
 ---
 
 ## 3. Cache Modes
+
+Cache is currently disabled in the reference implementation. Only `off` is
+supported.
 
 ### Spec
 

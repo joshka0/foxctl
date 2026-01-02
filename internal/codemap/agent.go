@@ -149,9 +149,9 @@ func (a *Agent) Generate(ctx context.Context, opts GenerateOptions) (*Codemap, e
 	// Create the dspy-go ReAct agent with native function calling
 	maxIterations := depthToMaxIterations(opts.Depth)
 	funcCallConfig := interceptors.FunctionCallingConfig{
-		ToolRegistry:       dspyToolRegistry,
-		StrictMode:         false, // Allow LLM to respond with text if needed
-		IncludeFinishTool:  false, // We have our own finish_codemap tool
+		ToolRegistry:      dspyToolRegistry,
+		StrictMode:        false, // Allow LLM to respond with text if needed
+		IncludeFinishTool: false, // We have our own finish_codemap tool
 	}
 	agent := react.NewReActAgent(
 		"codemap-agent",
@@ -540,5 +540,7 @@ Rules:
    complete codemap JSON. This is the ONLY way to complete the task. Do NOT use "Finish".`
 
 // init suppresses unused import warning for errgroup
-var _ = errgroup.Group{}
-var _ = strings.TrimSpace
+var (
+	_ = errgroup.Group{}
+	_ = strings.TrimSpace
+)

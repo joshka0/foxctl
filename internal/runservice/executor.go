@@ -24,9 +24,6 @@ type Executor struct {
 
 	options RunOptions
 
-	cacheStore storage.CacheStore
-	cacheKey   string
-
 	jobStore storage.JobStore
 
 	trajCapture *trajectorycapture.RunCapture
@@ -53,10 +50,6 @@ func (e *Executor) SetAsyncRunner(r AsyncRunner) {
 
 // Close releases any resources held by the executor.
 func (e *Executor) Close() {
-	if e.cacheStore != nil {
-		errs.Ignore(e.cacheStore.Close(), "close cache store")
-		e.cacheStore = nil
-	}
 	if e.jobStore != nil {
 		errs.Ignore(e.jobStore.Close(), "close job store")
 		e.jobStore = nil

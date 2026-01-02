@@ -228,7 +228,7 @@ func runDaemonStatus(cmd *cobra.Command, quiet bool) error {
 			os.Exit(1)
 		}
 		return writeJSON(cmd.OutOrStdout(), map[string]any{
-			"status":  "ok",
+			"status": "ok",
 			"data": map[string]any{
 				"running": false,
 				"socket":  daemon.SocketPath(),
@@ -255,12 +255,12 @@ func runDaemonStatus(cmd *cobra.Command, quiet bool) error {
 	return writeJSON(cmd.OutOrStdout(), map[string]any{
 		"status": "ok",
 		"data": map[string]any{
-			"running":        true,
-			"pid":            status.PID,
-			"started_at":     status.StartedAt,
-			"uptime_seconds": status.UptimeSeconds,
-			"requests":       status.RequestCount,
-			"socket":         daemon.SocketPath(),
+			"running":         true,
+			"pid":             status.PID,
+			"started_at":      status.StartedAt,
+			"uptime_seconds":  status.UptimeSeconds,
+			"requests":        status.RequestCount,
+			"socket":          daemon.SocketPath(),
 			"warm_workspaces": status.WarmWorkspaces,
 		},
 	})

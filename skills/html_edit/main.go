@@ -24,11 +24,11 @@ import (
 )
 
 type input struct {
-	Path           string      `json:"path"`
-	Operations     []operation `json:"operations"`
-	DryRun         bool        `json:"dry_run"`
-	FormatOutput   *bool       `json:"format_output"`   // nil = preserve original, true = pretty print, false = minify
-	ContextLines   int         `json:"context_lines"`
+	Path         string      `json:"path"`
+	Operations   []operation `json:"operations"`
+	DryRun       bool        `json:"dry_run"`
+	FormatOutput *bool       `json:"format_output"` // nil = preserve original, true = pretty print, false = minify
+	ContextLines int         `json:"context_lines"`
 }
 
 type operation struct {

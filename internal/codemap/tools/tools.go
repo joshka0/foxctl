@@ -208,10 +208,10 @@ func (r *Registry) readFile(ctx context.Context, args map[string]any) (*models.C
 	selectedLines := lines[startLine-1 : endLine]
 
 	return successResult(map[string]any{
-		"path":       path,
-		"content":    strings.Join(selectedLines, "\n"),
-		"start_line": startLine,
-		"end_line":   endLine,
+		"path":        path,
+		"content":     strings.Join(selectedLines, "\n"),
+		"start_line":  startLine,
+		"end_line":    endLine,
 		"total_lines": len(lines),
 	}), nil
 }

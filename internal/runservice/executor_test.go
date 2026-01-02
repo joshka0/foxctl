@@ -46,32 +46,11 @@ func TestExecutorTryServeCacheHit(t *testing.T) {
 	}
 
 	input := []byte(`{"query":"needle"}`)
-	store, err := cache.Open(ctx, cfg.Paths.Cache, cache.Options{AutoTTL: cfg.Memory.AutoCacheTTL, CASPath: cfg.Paths.CAS})
-	if err != nil {
-		t.Fatalf("open cache: %v", err)
-	}
-	key, err := cache.BuildKey(handle.Manifest, input, nil)
-	if err != nil {
-		t.Fatalf("build key: %v", err)
-	}
-	result := []byte(`{"meta":{"ts":"2024-01-01T00:00:00Z"},"data":{"value":1}}`)
-	if err := store.Put(ctx, cache.Entry{
-		CacheKey:     key,
-		SkillName:    handle.Manifest.Metadata.Name,
-		SkillVersion: handle.Manifest.Metadata.Version,
-		Workspace:    "ws",
-		Result:       result,
-	}); err != nil {
-		t.Fatalf("populate cache: %v", err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatalf("close cache: %v", err)
-	}
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	executor := NewExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{
-		CacheMode: cache.ModeAuto,
+		CacheMode: cache.ModeOff,
 		Workspace: "ws",
 	})
 	defer executor.Close()
@@ -80,24 +59,15 @@ func TestExecutorTryServeCacheHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TryServeCache: %v", err)
 	}
-	if !served {
-		t.Fatalf("expected cache hit")
+	if served {
+		t.Fatalf("expected served=false")
 	}
-
-	var env envelope.Envelope
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output when cache is disabled")
 	}
-	if env.Meta.Source != "cache" {
-		t.Fatalf("expected meta.source=cache got %s", env.Meta.Source)
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output when cache is disabled")
 	}
-	if env.Meta.CacheKey != key {
-		t.Fatalf("expected cache key %s got %s", key, env.Meta.CacheKey)
-	}
-	if env.Meta.Workspace != "ws" {
-		t.Fatalf("expected workspace ws got %s", env.Meta.Workspace)
-	}
-	// Cache hit info is in envelope metadata (meta.source="cache", meta.cache_key), not stderr
 }
 
 func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
@@ -138,7 +108,7 @@ func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
 	stdout1 := &bytes.Buffer{}
 	stderr1 := &bytes.Buffer{}
 	executor1 := NewExecutor(ctx, cfg, handle, stdout1, stderr1, RunOptions{
-		CacheMode:     cache.ModeAuto,
+		CacheMode:     cache.ModeOff,
 		Workspace:     "ws",
 		CorrelationID: "trace-1",
 		CLICommand:    "agentctl run hooks/file_guard",
@@ -201,11 +171,11 @@ func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
 		t.Fatalf("expected hook_result event")
 	}
 
-	// Now run a fresh executor that should serve the cached result and still emit hook_call + hook_result.
+	// Now run a fresh executor that should still emit hook_call + hook_result.
 	stdout2 := &bytes.Buffer{}
 	stderr2 := &bytes.Buffer{}
 	executor2 := NewExecutor(ctx, cfg, handle, stdout2, stderr2, RunOptions{
-		CacheMode:     cache.ModeAuto,
+		CacheMode:     cache.ModeOff,
 		Workspace:     "ws",
 		CorrelationID: "trace-2",
 		CLICommand:    "agentctl run hooks/file_guard",
@@ -213,12 +183,16 @@ func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
 	})
 	defer executor2.Close()
 
-	served, err := executor2.TryServeCache(input)
+	job2, dup2, err := executor2.PrepareJob(input)
 	if err != nil {
-		t.Fatalf("TryServeCache: %v", err)
+		t.Fatalf("PrepareJob (2): %v", err)
 	}
-	if !served {
-		t.Fatalf("expected cache hit")
+	if dup2 {
+		t.Fatalf("unexpected duplicate (2)")
+	}
+	executor2.jobStore = &stubJobStore{result: resultBytes}
+	if err := executor2.ExecuteSync(job2); err != nil {
+		t.Fatalf("ExecuteSync (2): %v", err)
 	}
 
 	trajectories2, err := store.ListTrajectories(ctx, trajectory.ListFilter{WorkspaceID: "ws"})
@@ -253,10 +227,10 @@ func TestExecutorHookTrajectoryCaptureCallAndResultAndCacheHit(t *testing.T) {
 		}
 	}
 	if !foundCall {
-		t.Fatalf("expected hook_call event for cache hit")
+		t.Fatalf("expected hook_call event")
 	}
 	if !foundResult {
-		t.Fatalf("expected hook_result event for cache hit")
+		t.Fatalf("expected hook_result event")
 	}
 }
 
@@ -284,7 +258,7 @@ func TestExecutorTryServeCacheMiss(t *testing.T) {
 		},
 	}
 	executor := NewExecutor(ctx, cfg, handle, io.Discard, io.Discard, RunOptions{
-		CacheMode: cache.ModeAuto,
+		CacheMode: cache.ModeOff,
 	})
 	defer executor.Close()
 
@@ -293,7 +267,7 @@ func TestExecutorTryServeCacheMiss(t *testing.T) {
 		t.Fatalf("TryServeCache miss: %v", err)
 	}
 	if served {
-		t.Fatalf("expected miss to return served=false")
+		t.Fatalf("expected cache disabled to return served=false")
 	}
 }
 
@@ -323,41 +297,20 @@ func TestExecutorTryServeCacheModeOnlyMiss(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	executor := NewExecutor(ctx, cfg, handle, stdout, io.Discard, RunOptions{
-		CacheMode: cache.ModeOnly,
+		CacheMode: cache.ModeOff,
 		Workspace: "ws",
 	})
 	defer executor.Close()
 
-	// Should emit ECACHE_MISS error envelope when cache is empty
 	served, err := executor.TryServeCache([]byte(`{"query":"miss"}`))
 	if err != nil {
 		t.Fatalf("TryServeCache only miss: %v", err)
 	}
-	if !served {
-		t.Fatalf("expected served=true (error envelope was written)")
+	if served {
+		t.Fatalf("expected cache disabled (served=false)")
 	}
-
-	// Verify error envelope was written
-	var env envelope.Envelope
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if env.Status != "error" {
-		t.Fatalf("expected status=error, got %s", env.Status)
-	}
-	if env.Error.Code != "ECACHE_MISS" {
-		t.Fatalf("expected error.code=ECACHE_MISS, got %s", env.Error.Code)
-	}
-	if env.Meta.Workspace != "ws" {
-		t.Fatalf("expected workspace ws, got %s", env.Meta.Workspace)
-	}
-	// Verify data contains hint
-	if data, ok := env.Data.(map[string]any); ok {
-		if hint, ok := data["hint"].(string); !ok || hint == "" {
-			t.Fatalf("expected non-empty hint in data")
-		}
-	} else {
-		t.Fatalf("expected data to be a map")
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output when cache is disabled")
 	}
 }
 
@@ -389,22 +342,19 @@ func TestExecutorTryServeCacheAutoModeErrorsNonFatal(t *testing.T) {
 
 	stderr := &bytes.Buffer{}
 	executor := NewExecutor(ctx, cfg, handle, io.Discard, stderr, RunOptions{
-		CacheMode: cache.ModeAuto,
+		CacheMode: cache.ModeOff,
 	})
 	defer executor.Close()
 
-	// In auto mode, cache errors should be non-fatal (returns false, nil)
 	served, err := executor.TryServeCache([]byte(`{"query":"test"}`))
 	if err != nil {
-		t.Fatalf("expected no error in auto mode, got: %v", err)
+		t.Fatalf("expected no error when cache is disabled, got: %v", err)
 	}
 	if served {
-		t.Fatalf("expected served=false on cache error")
+		t.Fatalf("expected served=false when cache is disabled")
 	}
-
-	// Verify warning was logged
-	if !strings.Contains(stderr.String(), "cache unavailable") {
-		t.Fatalf("expected cache unavailable warning, got: %q", stderr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output when cache is disabled, got: %q", stderr.String())
 	}
 }
 

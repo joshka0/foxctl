@@ -2,15 +2,26 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/daemon"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/spf13/cobra"
 )
+
+type daemonClient interface {
+	IsRunning() bool
+	Run(skill string, input []byte, workspace string, ephemeral bool) (*daemon.RunResult, error)
+}
+
+var defaultNewDaemonClient = func() daemonClient { return daemon.NewClient() }
+
+var newDaemonClient = defaultNewDaemonClient
 
 func newRunCommand() *cobra.Command {
 	var flags runCommandFlags
@@ -169,7 +180,7 @@ func writeTimeoutError(cmd *cobra.Command, skill string, timeout time.Duration) 
 // executeViaDaemon runs a skill via the daemon for faster execution.
 // Falls back to normal execution if the daemon is not available.
 func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string, input []byte, opts runservice.RunOptions) error {
-	client := daemon.NewClient()
+	client := newDaemonClient()
 
 	// Check if daemon is running
 	if !client.IsRunning() {
@@ -190,10 +201,44 @@ func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string,
 	// Execute via daemon
 	result, err := client.Run(skillName, input, opts.Workspace, opts.Ephemeral)
 	if err != nil {
-		return fmt.Errorf("daemon execution failed: %w", err)
+		fmt.Fprintf(cmd.ErrOrStderr(), "daemon execution failed, falling back to ephemeral mode\n")
+		opts.Ephemeral = true
+		cfg := config.MustFromContext(cmd.Context())
+		handle, findErr := findSkill(cfg, skillName)
+		if findErr != nil {
+			return findErr
+		}
+		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		defer executor.Close()
+		return executor.ExecuteEphemeral(input)
 	}
 
-	// Write result to stdout
+	var env envelope.Envelope
+	if unmarshalErr := json.Unmarshal(result.Output, &env); unmarshalErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "daemon returned invalid output, falling back to ephemeral mode\n")
+		opts.Ephemeral = true
+		cfg := config.MustFromContext(cmd.Context())
+		handle, findErr := findSkill(cfg, skillName)
+		if findErr != nil {
+			return findErr
+		}
+		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		defer executor.Close()
+		return executor.ExecuteEphemeral(input)
+	}
+	if validateErr := protocol.Validate(env); validateErr != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "daemon returned invalid envelope, falling back to ephemeral mode\n")
+		opts.Ephemeral = true
+		cfg := config.MustFromContext(cmd.Context())
+		handle, findErr := findSkill(cfg, skillName)
+		if findErr != nil {
+			return findErr
+		}
+		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		defer executor.Close()
+		return executor.ExecuteEphemeral(input)
+	}
+
 	_, err = cmd.OutOrStdout().Write(result.Output)
 	return err
 }

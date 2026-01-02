@@ -10,7 +10,7 @@ func TestDetectWithGitDirectory(t *testing.T) {
 	// Create temp dir with .git directory (normal repo)
 	root := t.TempDir()
 	gitDir := filepath.Join(root, ".git")
-	if err := os.Mkdir(gitDir, 0755); err != nil {
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
 		t.Fatalf("failed to create .git directory: %v", err)
 	}
 
@@ -22,7 +22,7 @@ func TestDetectWithGitDirectory(t *testing.T) {
 
 	// Detect from subdirectory should also find root
 	subdir := filepath.Join(root, "src", "pkg")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatalf("failed to create subdir: %v", err)
 	}
 	result = Detect(subdir)
@@ -37,7 +37,7 @@ func TestDetectWithGitWorktreeFile(t *testing.T) {
 	gitFile := filepath.Join(root, ".git")
 	// Git worktrees have a .git file containing: gitdir: /path/to/main/.git/worktrees/name
 	content := []byte("gitdir: /some/main/repo/.git/worktrees/feature-branch\n")
-	if err := os.WriteFile(gitFile, content, 0644); err != nil {
+	if err := os.WriteFile(gitFile, content, 0o644); err != nil {
 		t.Fatalf("failed to create .git file: %v", err)
 	}
 
@@ -49,7 +49,7 @@ func TestDetectWithGitWorktreeFile(t *testing.T) {
 
 	// Detect from subdirectory should also find root
 	subdir := filepath.Join(root, "internal", "pkg")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatalf("failed to create subdir: %v", err)
 	}
 	result = Detect(subdir)
@@ -62,7 +62,7 @@ func TestDetectWithAgentctlDirectory(t *testing.T) {
 	// Create temp dir with .agentctl directory
 	root := t.TempDir()
 	agentctlDir := filepath.Join(root, ".agentctl")
-	if err := os.Mkdir(agentctlDir, 0755); err != nil {
+	if err := os.Mkdir(agentctlDir, 0o755); err != nil {
 		t.Fatalf("failed to create .agentctl directory: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestDetectNoMarker(t *testing.T) {
 	// Create temp dir without any markers
 	root := t.TempDir()
 	subdir := filepath.Join(root, "some", "deep", "path")
-	if err := os.MkdirAll(subdir, 0755); err != nil {
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatalf("failed to create subdir: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestHasMarkerAgentctlMustBeDirectory(t *testing.T) {
 
 	// .agentctl as file should NOT be detected
 	agentctlFile := filepath.Join(root, ".agentctl")
-	if err := os.WriteFile(agentctlFile, []byte("not a dir"), 0644); err != nil {
+	if err := os.WriteFile(agentctlFile, []byte("not a dir"), 0o644); err != nil {
 		t.Fatalf("failed to create .agentctl file: %v", err)
 	}
 
@@ -136,7 +136,7 @@ func TestHasMarkerAgentctlMustBeDirectory(t *testing.T) {
 
 	// Clean up and create as directory
 	os.Remove(agentctlFile)
-	if err := os.Mkdir(agentctlFile, 0755); err != nil {
+	if err := os.Mkdir(agentctlFile, 0o755); err != nil {
 		t.Fatalf("failed to create .agentctl directory: %v", err)
 	}
 

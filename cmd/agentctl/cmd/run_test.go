@@ -42,6 +42,8 @@ func withEnv(env []string, key, value string) []string {
 
 func installTextGrepSkill(t *testing.T) config.Config {
 	t.Helper()
+	orig := newDaemonClient
+	t.Cleanup(func() { newDaemonClient = orig })
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 

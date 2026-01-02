@@ -49,7 +49,7 @@ type Envelope struct {
 	Command string      `json:"command"`
 	Data    any         `json:"data,omitempty"`
 	Meta    Meta        `json:"meta"`
-	Error   ErrorFields `json:"error,omitzero"`
+	Error   ErrorFields `json:"error"`
 }
 
 // Meta captures timestamps and other metadata for responses.

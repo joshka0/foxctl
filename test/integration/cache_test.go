@@ -20,8 +20,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 )
 
-// TestCacheHitSameInput verifies that running a skill twice with identical input
-// produces a cache hit on the second run with correct envelope annotations.
+// TestCacheHitSameInput verifies that caching is currently disabled even if
+// a cache entry exists.
 func TestCacheHitSameInput(t *testing.T) {
 	t.Parallel()
 
@@ -87,7 +87,7 @@ func TestCacheHitSameInput(t *testing.T) {
 		t.Fatalf("close cache: %v", err)
 	}
 
-	// Second run: should hit cache
+	// Second run: cache is disabled, so no hit should occur
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	executor := runservice.NewExecutor(ctx, cfg, handle, stdout, stderr, runservice.RunOptions{
@@ -100,44 +100,15 @@ func TestCacheHitSameInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TryServeCache: %v", err)
 	}
-	if !served {
-		t.Fatalf("expected cache hit")
+	if served {
+		t.Fatalf("expected served=false (cache disabled)")
 	}
-
-	// Verify envelope annotations
-	var env envelope.Envelope
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-
-	if env.Status != "ok" {
-		t.Errorf("expected status=ok, got %s", env.Status)
-	}
-	if env.Meta.Source != "cache" {
-		t.Errorf("expected meta.source=cache, got %s", env.Meta.Source)
-	}
-	if env.Meta.CacheKey != key {
-		t.Errorf("expected meta.cache_key=%s, got %s", key, env.Meta.CacheKey)
-	}
-	if env.Meta.Workspace != "ws" {
-		t.Errorf("expected meta.workspace=ws, got %s", env.Meta.Workspace)
-	}
-	if env.Meta.SkillVer != "1.0.0" {
-		t.Errorf("expected meta.skill_version=1.0.0, got %s", env.Meta.SkillVer)
-	}
-
-	// Verify data preserved
-	if data, ok := env.Data.(map[string]any); ok {
-		if data["result"] != "first-run" {
-			t.Errorf("expected data.result=first-run, got %v", data["result"])
-		}
-	} else {
-		t.Errorf("expected data to be a map")
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output (cache disabled)")
 	}
 }
 
-// TestCacheMissDifferentInput verifies that different inputs produce different cache keys
-// and don't hit each other's cached results.
+// TestCacheMissDifferentInput verifies that different inputs produce different cache keys.
 func TestCacheMissDifferentInput(t *testing.T) {
 	t.Parallel()
 
@@ -202,7 +173,7 @@ func TestCacheMissDifferentInput(t *testing.T) {
 		t.Fatalf("close cache: %v", err)
 	}
 
-	// Query with input2 - should be a miss
+	// Query with input2 - cache is disabled, should be a miss
 	input2 := []byte(`{"query":"value-two"}`)
 	stdout := &bytes.Buffer{}
 	executor := runservice.NewExecutor(ctx, cfg, handle, stdout, bytes.NewBuffer(nil), runservice.RunOptions{
@@ -216,7 +187,10 @@ func TestCacheMissDifferentInput(t *testing.T) {
 		t.Fatalf("TryServeCache: %v", err)
 	}
 	if served {
-		t.Fatalf("expected cache miss for different input")
+		t.Fatalf("expected served=false (cache disabled)")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no output (cache disabled)")
 	}
 
 	// Verify keys are different
@@ -314,7 +288,8 @@ func TestCacheModeOff(t *testing.T) {
 	}
 }
 
-// TestCacheModeOnlyMiss verifies that --cache=only returns error envelope on miss.
+// TestCacheModeOnlyMiss verifies that cache-only mode does not emit a cache miss
+// envelope because caching is disabled.
 func TestCacheModeOnlyMiss(t *testing.T) {
 	t.Parallel()
 
@@ -340,7 +315,7 @@ func TestCacheModeOnlyMiss(t *testing.T) {
 	handle := runservice.SkillHandle{Manifest: manifest}
 	input := []byte(`{"query":"not-in-cache"}`)
 
-	// Query with ModeOnly on empty cache - should emit ECACHE_MISS
+	// Query with ModeOnly on empty cache - cache is disabled
 	stdout := &bytes.Buffer{}
 	executor := runservice.NewExecutor(ctx, cfg, handle, stdout, bytes.NewBuffer(nil), runservice.RunOptions{
 		CacheMode: cache.ModeOnly,
@@ -352,20 +327,11 @@ func TestCacheModeOnlyMiss(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TryServeCache: %v", err)
 	}
-	if !served {
-		t.Fatalf("expected served=true (error envelope written)")
+	if served {
+		t.Fatalf("expected served=false (cache disabled)")
 	}
-
-	var env envelope.Envelope
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-
-	if env.Status != "error" {
-		t.Errorf("expected status=error, got %s", env.Status)
-	}
-	if env.Error.Code != "ECACHE_MISS" {
-		t.Errorf("expected error.code=ECACHE_MISS, got %s", env.Error.Code)
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output (cache disabled)")
 	}
 }
 

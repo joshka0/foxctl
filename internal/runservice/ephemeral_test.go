@@ -63,7 +63,7 @@ func TestExecuteEphemeral_SkipsJobStore(t *testing.T) {
 	}
 }
 
-func TestExecuteEphemeral_StillServesFromCache(t *testing.T) {
+func TestExecuteEphemeral_DoesNotServeFromCacheWhenOff(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -118,30 +118,21 @@ func TestExecuteEphemeral_StillServesFromCache(t *testing.T) {
 	stderr := &bytes.Buffer{}
 	executor := NewExecutor(ctx, cfg, handle, stdout, stderr, RunOptions{
 		Ephemeral:     true,
-		CacheMode:     cache.ModeAuto,
+		CacheMode:     cache.ModeOff,
 		Workspace:     "ws",
 		CorrelationID: "trace-ephemeral-cache",
 	})
 	defer executor.Close()
 
-	// Execute ephemeral - should serve from cache
-	err = executor.ExecuteEphemeral(input)
+	served, err := executor.TryServeCache(input)
 	if err != nil {
-		t.Fatalf("ExecuteEphemeral: %v", err)
+		t.Fatalf("TryServeCache: %v", err)
 	}
-
-	// Verify cache hit
-	var env envelope.Envelope
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v", err)
+	if served {
+		t.Fatalf("expected served=false")
 	}
-	if env.Meta.Source != "cache" {
-		t.Fatalf("expected meta.source=cache, got %s", env.Meta.Source)
-	}
-
-	// Verify job store was never opened (cache hit bypasses execution)
-	if executor.jobStore != nil {
-		t.Fatal("expected jobStore to be nil when serving from cache")
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output when cache is disabled")
 	}
 }
 
@@ -393,7 +384,7 @@ func TestAnnotateEphemeral_InvalidJSON(t *testing.T) {
 	}
 }
 
-// TestExecutorCloseEphemeral tests that CloseEphemeral only closes cache store
+// TestExecutorCloseEphemeral tests that CloseEphemeral is a no-op when cache is disabled
 func TestExecutorCloseEphemeral(t *testing.T) {
 	t.Parallel()
 
@@ -419,24 +410,11 @@ func TestExecutorCloseEphemeral(t *testing.T) {
 
 	executor := NewExecutor(ctx, cfg, handle, io.Discard, io.Discard, RunOptions{
 		Ephemeral: true,
-		CacheMode: cache.ModeAuto,
+		CacheMode: cache.ModeOff,
 	})
 
-	// Open cache store by calling TryServeCache
-	_, _ = executor.TryServeCache([]byte(`{"key":"value"}`))
-
-	// Verify cache store was opened
-	if executor.cacheStore == nil {
-		t.Skip("cache store not opened - skipping close test")
-	}
-
-	// Close ephemeral
+	// Close ephemeral - should be a no-op when cache is disabled
 	executor.CloseEphemeral()
-
-	// Verify cache store was closed
-	if executor.cacheStore != nil {
-		t.Fatal("expected cacheStore to be nil after CloseEphemeral")
-	}
 
 	// Verify jobStore was never opened
 	if executor.jobStore != nil {

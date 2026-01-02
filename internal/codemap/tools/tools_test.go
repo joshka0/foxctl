@@ -28,7 +28,7 @@ func TestReadFile(t *testing.T) {
 	// Create test file
 	testFile := filepath.Join(tmpDir, "test.txt")
 	content := "line1\nline2\nline3\nline4\nline5"
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(content), 0o644); err != nil {
 		t.Fatalf("write test file: %v", err)
 	}
 

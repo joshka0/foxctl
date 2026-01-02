@@ -68,8 +68,8 @@ type JobDetails struct {
 	Conclusion  string    `json:"conclusion"`
 	StartedAt   string    `json:"started_at"`
 	CompletedAt string    `json:"completed_at"`
-	Steps   []JobStep `json:"steps"`
-	HTMLURL string    `json:"html_url"`
+	Steps       []JobStep `json:"steps"`
+	HTMLURL     string    `json:"html_url"`
 }
 
 type JobStep struct {

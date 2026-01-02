@@ -391,7 +391,7 @@ agentctl openapi test <memory:<name>> [--op=<operationId>|--tag=<tag>]  # smoke 
 agentctl openapi generate <memory:<name>> [--install] [--group-by=tag|path]  # optional Tier-2 codegen
 
 # execution
-agentctl run <skill> [--flags...] [--cache=auto|off|only] \
+agentctl run <skill> [--flags...] [--cache=off] \
   [--input=stdin|sha256:<hex>] [--remember=<name>] [--ttl=<dur>] [--workspace=<path>]
 # generic OpenAPI
 agentctl run http/openapi --spec=memory:github --operationId=listRepos --params='{"path":{"username":"octocat"},"query":{"per_page":100}}' [--dry_run]
@@ -478,37 +478,12 @@ cache_key = sha256(
 
 ### 8.2 Modes
 
-| Mode   | Behavior                                                                                       |
-| ------ | ---------------------------------------------------------------------------------------------- |
-| `auto` | Read-through + write-through (default). Cache errors are **non-fatal**: log and treat as miss. |
-| `off`  | Skip cache entirely (no read, no write).                                                       |
-| `only` | Read-only; emit error envelope with `ECACHE_MISS` on miss.                                     |
+Cache is currently disabled in the reference implementation. The CLI only
+accepts `--cache=off` (or omitting the flag).
 
-**Mode semantics:**
-
-- **`auto`:** On cache hit, return result with `meta.source:"cache"` and
-  `meta.cache_key`. On miss, execute skill and persist result. On cache store
-  errors (e.g., storage unavailable), log warning to stderr and proceed as if
-  cache miss.
-- **`off`:** Never open or query the cache store. Useful for debugging or
-  forcing fresh execution.
-- **`only`:** Query cache; on hit return as `auto`. On miss, emit an error
-  envelope:
-  ```json
-  {
-    "version": 1,
-    "status": "error",
-    "command": "<skill_name>",
-    "error": {
-      "code": "ECACHE_MISS",
-      "message": "cache miss for key <cache_key>"
-    },
-    "data": {
-      "cache_key": "<cache_key>",
-      "hint": "No cached result exists. Run with --cache=auto to execute the skill and populate the cache."
-    }
-  }
-  ```
+| Mode  | Behavior                                 |
+| ----- | ---------------------------------------- |
+| `off` | Skip cache entirely (no read, no write). |
 
 ### 8.3 Cache hit annotation
 

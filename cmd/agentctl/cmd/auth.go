@@ -24,10 +24,10 @@ import (
 )
 
 const (
-	claudeAuthURL   = "https://claude.ai/oauth/authorize"
-	claudeTokenURL  = "https://console.anthropic.com/v1/oauth/token"
-	claudeClientID  = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-	claudeRedirectURI = "http://localhost:54545/callback"
+	claudeAuthURL      = "https://claude.ai/oauth/authorize"
+	claudeTokenURL     = "https://console.anthropic.com/v1/oauth/token"
+	claudeClientID     = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+	claudeRedirectURI  = "http://localhost:54545/callback"
 	claudeCallbackPort = 54545
 )
 
@@ -257,7 +257,7 @@ func runClaudeLogin(cmd *cobra.Command, noBrowser bool) error {
 		return err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(tokenPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(tokenPath), 0o700); err != nil {
 		return fmt.Errorf("create auth directory: %w", err)
 	}
 
@@ -266,7 +266,7 @@ func runClaudeLogin(cmd *cobra.Command, noBrowser bool) error {
 		return fmt.Errorf("marshal token: %w", err)
 	}
 
-	if err := os.WriteFile(tokenPath, tokenData, 0600); err != nil {
+	if err := os.WriteFile(tokenPath, tokenData, 0o600); err != nil {
 		return fmt.Errorf("write token file: %w", err)
 	}
 

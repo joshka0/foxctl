@@ -1704,7 +1704,6 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 		ORDER BY distance ASC
 		LIMIT ?`, distExpr, inClause)
 	rows, err = s.db.QueryContext(ctx, query, args...)
-
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search similar multi-workspace: %w", err)
 	}

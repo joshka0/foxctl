@@ -7,7 +7,6 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
 
@@ -155,12 +154,9 @@ func (e *Executor) IsEphemeral() bool {
 
 // Close releases any resources held by the executor.
 // For ephemeral execution, this is typically a no-op since we don't open
-// job stores, but we still need to close the cache store if opened.
+// job stores, cache stores, or trajectory capture.
 func (e *Executor) CloseEphemeral() {
-	if e.cacheStore != nil {
-		errs.Ignore(e.cacheStore.Close(), "close cache store")
-		e.cacheStore = nil
-	}
-	// Note: We don't close jobStore or trajCapture in ephemeral mode
-	// because they were never opened
+	// Note: Caching is disabled, so no cache store cleanup needed.
+	// We don't close jobStore or trajCapture in ephemeral mode
+	// because they were never opened.
 }

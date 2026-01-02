@@ -46,8 +46,8 @@ type Comment struct {
 	CreatedAt time.Time `json:"created_at"`
 	Path      string    `json:"path,omitempty"`
 	Line      *int      `json:"line,omitempty"`
-	Resolved  bool      `json:"resolved,omitempty"`  // Thread is resolved/addressed
-	Outdated  bool      `json:"outdated,omitempty"`  // Comment is on outdated code
+	Resolved  bool      `json:"resolved,omitempty"` // Thread is resolved/addressed
+	Outdated  bool      `json:"outdated,omitempty"` // Comment is on outdated code
 }
 
 type User struct {

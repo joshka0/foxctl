@@ -8,6 +8,7 @@ node_modules/
 bun.lockb
 packages/*/dist/
 web-ui/dist/
+web-ui/.vite/
 
 # Go build output
 *.test
@@ -134,3 +135,4 @@ pr*.txt
 .opencode/
 .opencode/*
 .opencode/**
+skills/providers/providers

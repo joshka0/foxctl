@@ -49,9 +49,9 @@ type Service struct {
 	requestCount atomic.Int64
 
 	// Shutdown coordination
-	shutdownCh    chan struct{}
-	shutdownOnce  sync.Once
-	wg            sync.WaitGroup
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
+	wg           sync.WaitGroup
 }
 
 // NewService creates a new daemon service.
@@ -84,7 +84,7 @@ func (s *Service) Run(ctx context.Context) error {
 	_ = os.Remove(socketPath)
 
 	// Ensure socket directory exists
-	if err := os.MkdirAll(filepath.Dir(socketPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
 		return fmt.Errorf("create socket directory: %w", err)
 	}
 
@@ -96,7 +96,7 @@ func (s *Service) Run(ctx context.Context) error {
 	s.listener = listener
 
 	// Set socket permissions (user-only)
-	if err := os.Chmod(socketPath, 0600); err != nil {
+	if err := os.Chmod(socketPath, 0o600); err != nil {
 		listener.Close()
 		return fmt.Errorf("chmod socket: %w", err)
 	}
@@ -313,16 +313,7 @@ func (s *Service) handleRun(ctx context.Context, params json.RawMessage) (*RunRe
 		return nil, errors.New("skill is required")
 	}
 
-	start := time.Now()
-
-	// TODO: Implement actual skill execution via runservice
-	// For now, return a placeholder that shows the daemon is working
-	result := &RunResult{
-		Output:   json.RawMessage(`{"status":"ok","data":{"daemon":true}}`),
-		Duration: float64(time.Since(start).Microseconds()) / 1000,
-	}
-
-	return result, nil
+	return nil, fmt.Errorf("daemon run is not available; run without --daemon")
 }
 
 // WarmParams are the parameters for the warm method.
@@ -388,10 +379,10 @@ func (s *Service) writeError(conn net.Conn, id, code, message string) {
 
 func (s *Service) writePIDFile() error {
 	pidPath := PIDPath()
-	if err := os.MkdirAll(filepath.Dir(pidPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(pidPath), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0600)
+	return os.WriteFile(pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0o600)
 }
 
 func (s *Service) removePIDFile() {

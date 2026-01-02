@@ -38,7 +38,7 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 	cmd.Flags().BoolVar(&flags.Dedupe, "dedupe", false, "Reuse existing job with same args_hash")
 	cmd.Flags().BoolVar(&flags.Ephemeral, "ephemeral", false, "Skip job persistence for faster execution (for hooks)")
 	cmd.Flags().BoolVar(&flags.Daemon, "daemon", false, "Execute via daemon for faster hook execution")
-	cmd.Flags().StringVar(&flags.CacheMode, "cache", "", "Cache mode: auto|off|only (default from config)")
+	cmd.Flags().StringVar(&flags.CacheMode, "cache", "", "Cache mode (disabled; must be off)")
 	cmd.Flags().StringVar(&flags.Workspace, "workspace", "", "Workspace override (default: auto-detect)")
 	cmd.Flags().StringVar(&flags.RememberName, "remember", "", "Save successful result as named memory")
 	cmd.Flags().StringVar(&flags.RememberType, "remember-type", "result", "Memory type for --remember")
@@ -123,17 +123,12 @@ func resolveSessionID() string {
 
 func parseCacheMode(flagValue, defaultValue string) (cache.Mode, error) {
 	mode := strings.TrimSpace(flagValue)
+	_ = defaultValue
 	if mode == "" {
-		mode = defaultValue
-	}
-	switch strings.ToLower(mode) {
-	case "", "auto":
-		return cache.ModeAuto, nil
-	case "off":
 		return cache.ModeOff, nil
-	case "only":
-		return cache.ModeOnly, nil
-	default:
-		return cache.ModeOff, fmt.Errorf("invalid cache mode %q (expected auto|off|only)", mode)
 	}
+	if strings.EqualFold(mode, string(cache.ModeOff)) {
+		return cache.ModeOff, nil
+	}
+	return cache.ModeOff, fmt.Errorf("cache is disabled (expected --cache=off)")
 }

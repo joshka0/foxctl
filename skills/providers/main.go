@@ -21,15 +21,15 @@ import (
 
 // Provider represents a supported AI coding assistant.
 type Provider struct {
-	Name        string   `json:"name"`
-	ConfigPath  string   `json:"config_path"`
-	ConfigType  string   `json:"config_type"` // json, toml
-	SkillsPath  string   `json:"skills_path,omitempty"`
-	HooksPath   string   `json:"hooks_path,omitempty"`
-	CommandsPath string  `json:"commands_path,omitempty"`
-	MCPKey      string   `json:"mcp_key"` // key in config for MCP servers
-	Installed   bool     `json:"installed"`
-	Version     string   `json:"version,omitempty"`
+	Name         string `json:"name"`
+	ConfigPath   string `json:"config_path"`
+	ConfigType   string `json:"config_type"` // json, toml
+	SkillsPath   string `json:"skills_path,omitempty"`
+	HooksPath    string `json:"hooks_path,omitempty"`
+	CommandsPath string `json:"commands_path,omitempty"`
+	MCPKey       string `json:"mcp_key"` // key in config for MCP servers
+	Installed    bool   `json:"installed"`
+	Version      string `json:"version,omitempty"`
 }
 
 // Providers registry
@@ -44,19 +44,19 @@ var providers = map[string]Provider{
 		MCPKey:       "mcpServers",
 	},
 	"codex": {
-		Name:        "codex",
-		ConfigPath:  "~/.codex/config.toml",
-		ConfigType:  "toml",
-		SkillsPath:  "~/.codex/skills",
-		MCPKey:      "mcp_servers",
+		Name:       "codex",
+		ConfigPath: "~/.codex/config.toml",
+		ConfigType: "toml",
+		SkillsPath: "~/.codex/skills",
+		MCPKey:     "mcp_servers",
 	},
 	"opencode": {
-		Name:        "opencode",
-		ConfigPath:  "~/.config/opencode/opencode.json",
-		ConfigType:  "json",
-		SkillsPath:  "~/.config/opencode/agent",
+		Name:         "opencode",
+		ConfigPath:   "~/.config/opencode/opencode.json",
+		ConfigType:   "json",
+		SkillsPath:   "~/.config/opencode/agent",
 		CommandsPath: "~/.config/opencode/commands",
-		MCPKey:      "mcpServers",
+		MCPKey:       "mcpServers",
 	},
 	"factory": {
 		Name:         "factory",
@@ -67,22 +67,22 @@ var providers = map[string]Provider{
 		MCPKey:       "mcpServers", // Actually in mcp.json
 	},
 	"gemini": {
-		Name:        "gemini",
-		ConfigPath:  "~/.gemini/settings.json",
-		ConfigType:  "json",
-		MCPKey:      "mcpServers",
+		Name:       "gemini",
+		ConfigPath: "~/.gemini/settings.json",
+		ConfigType: "json",
+		MCPKey:     "mcpServers",
 	},
 }
 
 type input struct {
-	Operation  string      `json:"operation"`
-	Provider   string      `json:"provider"`
-	MCP        *mcpConfig  `json:"mcp,omitempty"`
-	Skill      *skillConfig `json:"skill,omitempty"`
+	Operation  string         `json:"operation"`
+	Provider   string         `json:"provider"`
+	MCP        *mcpConfig     `json:"mcp,omitempty"`
+	Skill      *skillConfig   `json:"skill,omitempty"`
 	Setting    *settingConfig `json:"setting,omitempty"`
-	SyncConfig *syncConfig `json:"sync_config,omitempty"`
-	File       string      `json:"file,omitempty"`
-	DryRun     bool        `json:"dry_run"`
+	SyncConfig *syncConfig    `json:"sync_config,omitempty"`
+	File       string         `json:"file,omitempty"`
+	DryRun     bool           `json:"dry_run"`
 }
 
 type mcpConfig struct {
@@ -460,7 +460,7 @@ func addSkill(providerName string, skill *skillConfig, dryRun bool) (*output, er
 		}
 
 		// Ensure skills directory exists
-		if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 			errors = append(errors, fmt.Sprintf("%s: %v", pName, err))
 			continue
 		}
@@ -724,7 +724,7 @@ func exportConfig(providerName string, filePath string) (*output, error) {
 		return nil, err
 	}
 
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
 		return nil, err
 	}
 
@@ -771,7 +771,7 @@ func importConfig(providerName string, filePath string, dryRun bool) (*output, e
 	path := expandPath(p.ConfigPath)
 
 	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
 
@@ -911,7 +911,7 @@ func setNestedValue(m map[string]interface{}, key string, value interface{}) {
 
 func writeConfig(path string, cfg map[string]interface{}, configType string) error {
 	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 
@@ -933,7 +933,7 @@ func writeConfig(path string, cfg map[string]interface{}, configType string) err
 		}
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o644)
 }
 
 func expandPath(path string) string {

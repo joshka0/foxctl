@@ -31,6 +31,25 @@ func TestOKSetsDefaults(t *testing.T) {
 	}
 }
 
+func TestOKMarshalIncludesErrorField(t *testing.T) {
+	env := OK("agentctl.test", map[string]any{"ok": true})
+	data, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	v, ok := m["error"]
+	if !ok {
+		t.Fatalf("expected top-level error field to be present")
+	}
+	if _, ok := v.(map[string]any); !ok {
+		t.Fatalf("expected error to be an object, got %T", v)
+	}
+}
+
 func TestErrorRequiresCode(t *testing.T) {
 	env := OK("cmd", nil)
 	env.Status = StatusError

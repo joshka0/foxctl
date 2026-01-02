@@ -18,12 +18,11 @@ import (
 func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 	h := newCASHarness(t)
 
-	t.Run("text-grep cache lifecycle", func(t *testing.T) {
+	t.Run("text-grep memory workflow", func(t *testing.T) {
 		env, _ := withRunExecutor(h.ctx, t, []string{
 			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
 			"--remember", "grep-first",
 			"--workspace", h.workdir,
-			"--cache", "auto",
 			"text/grep",
 		})
 		h.assertCASArtifact(t, env)
@@ -36,10 +35,11 @@ func TestEndToEndCacheMemoryWorkflow(t *testing.T) {
 		env2, _ := withRunExecutor(h.ctx, t, []string{
 			"--input", fmt.Sprintf(`{"path":%q,"pattern":"needle"}`, h.samplePath),
 			"--workspace", h.workdir,
-			"--cache", "auto",
 			"text/grep",
 		})
-		assertCacheHit(t, env2)
+		if env2.Meta.Source == "cache" {
+			t.Fatalf("expected cache to be disabled")
+		}
 	})
 
 	t.Run("openapi memory relevance", func(t *testing.T) {
@@ -227,13 +227,6 @@ func (h *casHarness) assertRelevantContains(t *testing.T, payload []byte, name s
 		}
 	}
 	t.Fatalf("expected %s in relevant entries: %#v", name, entries)
-}
-
-func assertCacheHit(t *testing.T, env envelope.Envelope) {
-	t.Helper()
-	if env.Meta.Source != "cache" {
-		t.Fatalf("expected cache hit, got source=%s", env.Meta.Source)
-	}
 }
 
 func assertCommand(t *testing.T, env envelope.Envelope, command string) {

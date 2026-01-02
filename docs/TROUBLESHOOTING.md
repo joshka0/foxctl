@@ -319,16 +319,11 @@ agentctl cas list | grep <digest>
 
 **Solution**:
 ```bash
-# Check cache mode
-agentctl run <skill> --cache auto  # Default
+# Cache is currently disabled
+agentctl run <skill> --cache off
 
-# Verify cache status
+# Check memory status
 agentctl memory stats
-
-# Clear cache and retry
-agentctl memory clear-cache --confirm
-
-# Check if inputs changed (cache key is input-dependent)
 ```
 
 ### Issue: `memory not found`
@@ -805,7 +800,7 @@ agentctl skills list  # Should be empty
 
 **Problem**: Old results returned despite changes.
 
-**Solution**: Use `--cache off` or clear cache.
+**Solution**: Use `--cache off`.
 
 ### 4. Secrets in command history
 

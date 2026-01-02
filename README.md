@@ -176,14 +176,12 @@ agentctl jobs cancel <job-id>
 
 Two memory types:
 
-1. **Auto-cache** (24h TTL): Recent skill executions automatically cached
+1. **Auto-cache** (24h TTL): Currently disabled
 2. **Named memory**: Explicitly saved, persistent, workspace-scoped
 
 ```bash
-# Cache modes
-agentctl run fs/ls --cache auto   # Use cache if available (default)
-agentctl run fs/ls --cache only   # Error if not cached
-agentctl run fs/ls --cache off    # Skip cache
+# Cache mode
+agentctl run fs/ls --cache off    # Cache is currently disabled
 
 # Named memory with metadata
 agentctl memory save api-spec \

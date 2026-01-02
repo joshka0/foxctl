@@ -21,9 +21,19 @@ func TestRunOptions_Validate(t *testing.T) {
 			opts: runservice.RunOptions{
 				SkillName: "test-skill",
 				Input:     []byte(`{}`),
-				CacheMode: cache.ModeAuto,
+				CacheMode: cache.ModeOff,
 			},
 			wantErr: false,
+		},
+		{
+			name: "cache mode auto rejected",
+			opts: runservice.RunOptions{
+				SkillName: "test-skill",
+				Input:     []byte(`{}`),
+				CacheMode: cache.ModeAuto,
+			},
+			wantErr: true,
+			errMsg:  "cache is disabled (expected --cache=off)",
 		},
 		{
 			name: "empty skill name",
@@ -43,7 +53,7 @@ func TestRunOptions_Validate(t *testing.T) {
 				CacheMode: cache.ModeOnly,
 			},
 			wantErr: true,
-			errMsg:  "--cache=only cannot be combined with --async",
+			errMsg:  "cache is disabled (expected --cache=off)",
 		},
 		{
 			name: "async with remember",
@@ -62,7 +72,7 @@ func TestRunOptions_Validate(t *testing.T) {
 				SkillName: "test-skill",
 				Input:     []byte(`{}`),
 				Async:     true,
-				CacheMode: cache.ModeAuto,
+				CacheMode: cache.ModeOff,
 			},
 			wantErr: false,
 		},

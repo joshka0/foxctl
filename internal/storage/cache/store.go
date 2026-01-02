@@ -113,7 +113,10 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 func (s *Store) Close() error {
 	// Wait for async eviction to complete before closing DB
 	if s.evictDone != nil {
-		<-s.evictDone
+		select {
+		case <-s.evictDone:
+		case <-time.After(2 * time.Second):
+		}
 	}
 	return s.db.Close()
 }

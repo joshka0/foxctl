@@ -153,11 +153,11 @@ func autoMigrate(ctx context.Context, cfg Config, dst storage.CASStore) error {
 
 // MigrationStatus checks if migration is needed and returns status.
 type MigrationStatus struct {
-	NeedsMigration  bool   `json:"needs_migration"`
-	SourcePath      string `json:"source_path,omitempty"`
-	SourceObjects   int    `json:"source_objects,omitempty"`
-	DestObjects     int    `json:"dest_objects,omitempty"`
-	PendingMigration int   `json:"pending_migration,omitempty"` // Objects in source not in dest
+	NeedsMigration   bool   `json:"needs_migration"`
+	SourcePath       string `json:"source_path,omitempty"`
+	SourceObjects    int    `json:"source_objects,omitempty"`
+	DestObjects      int    `json:"dest_objects,omitempty"`
+	PendingMigration int    `json:"pending_migration,omitempty"` // Objects in source not in dest
 }
 
 // CheckMigration checks if migration is needed without performing it.

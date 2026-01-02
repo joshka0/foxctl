@@ -65,6 +65,9 @@ func (o *RunOptions) Validate() error {
 	if o.SkillName == "" {
 		return fmt.Errorf("skill name cannot be empty")
 	}
+	if o.CacheMode != cache.ModeOff {
+		return fmt.Errorf("cache is disabled (expected --cache=off)")
+	}
 
 	if o.Async && o.CacheMode == cache.ModeOnly {
 		return fmt.Errorf("--cache=only cannot be combined with --async")
@@ -80,12 +83,6 @@ func (o *RunOptions) Validate() error {
 	}
 	if o.Ephemeral && o.RememberName != "" {
 		return fmt.Errorf("--ephemeral cannot be combined with --remember")
-	}
-
-	switch o.CacheMode {
-	case cache.ModeAuto, cache.ModeOff, cache.ModeOnly:
-	default:
-		return fmt.Errorf("invalid cache mode: %v", o.CacheMode)
 	}
 
 	return nil
