@@ -10,6 +10,242 @@ agentctl has a rich foundation with **87 skills**, a **reactive actor system**, 
 
 ---
 
+## Research Summary
+
+This section captures findings from deep exploration of six system areas.
+
+### 1. OpenTUI Architecture
+
+**Location**: `packages/tui/`, `packages/data/`, `packages/gui/server/`
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| TUI | React 19 + @opentui/core | Terminal rendering at 30 FPS |
+| Data Client | TypeScript + fetch | API abstraction (`@agentctl/data`) |
+| API Server | Express.js (port 8090) | Backend aggregation layer |
+
+**Current Views (9 total)**:
+- Jobs, Tasks, Insights, Mailbox, Reservations, Stats, Blackboard, SQLite, Search
+- Navigation: Number keys (1-9), `j/k` for cursor, `r` refresh, `q` quit
+
+**Key Files**:
+- `packages/tui/src/App.tsx` - View orchestrator with keyboard handling
+- `packages/tui/src/views/*.tsx` - Individual view components
+- `packages/tui/src/hooks/useData.ts` - Data fetching hooks (useJobs, useTasks, etc.)
+- `packages/data/src/client.ts` - 40+ API functions
+- `packages/gui/server/index.js` - Express server (1000+ LOC, 38 endpoints)
+
+**Extension Pattern**:
+1. Create view component in `src/views/`
+2. Export from `src/views/index.ts`
+3. Add to `App.tsx` (header, keyboard, render switch)
+4. Add hook in `useData.ts`
+5. Add client function in `@agentctl/data`
+
+**Real-time**: SSE via `subscribeToEvents()` - currently placeholder, needs full implementation.
+
+---
+
+### 2. DSPy Integration
+
+**Location**: `internal/actor/dspy_actor.go`, `internal/storage/trajectory/`, `skills/session_export_dspy/`
+
+**Architecture**:
+```
+DspyActor (wraps dspy-go ReActAgent)
+    ↓
+Trajectory Capture (episodes + outcomes)
+    ↓
+Session Export (JSONL/JSON/CSV)
+    ↓
+Learnable Scorer (weight adaptation)
+```
+
+**Key Components**:
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| DspyActor | `internal/actor/dspy_actor.go` (592 lines) | LLM-driven agent runtime |
+| Trajectory Types | `internal/storage/trajectory/types.go` (347 lines) | Episode schema |
+| Feedback Collector | `internal/agent/optimization/feedback.go` (174 lines) | Human ratings |
+| Learnable Scorer | `internal/agent/optimization/learnable_scorer.go` (453 lines) | Weight learning |
+| Session Export | `skills/session_export_dspy/main.go` (319 lines) | DSPy format export |
+
+**DSPy Example Format**:
+```json
+{
+  "input": { "user_request": "...", "context": "...", "files": [...] },
+  "output": { "response": "...", "tools_used": [...], "files_edited": [...] },
+  "metadata": { "session_id": "...", "turn_index": 0, "has_error": false }
+}
+```
+
+**Optimization Skills (7 total)**:
+- `optimize/feedback`, `optimize/patterns`, `optimize/reflect`
+- `optimize/bootstrap`, `optimize/weights`, `optimize/analyze`, `optimize/from-feedback`
+
+**Scorer Weights (learnable)**:
+- CriticalPath: 0.30, PageRank: 0.20, AdminMail: 0.25, OverseerMail: 0.15, Recency: 0.10
+
+---
+
+### 3. Actor/Orchestration System
+
+**Location**: `internal/actor/`
+
+**Core Actors**:
+
+| Actor | File | Purpose |
+|-------|------|---------|
+| Supervisor | `supervisor.go` | Lifecycle management, restart with backoff |
+| Watcher | `watcher.go` | 50ms reactive notifications via SQLite triggers |
+| EventBus | `event_bus.go` | Pub/sub with selective persistence |
+| DspyActor | `dspy_actor.go` | LLM-driven agents (coder, planner, reviewer) |
+| BaseActor | `base_actor.go` | Common handler registration, timer management |
+
+**Message Types**:
+- `agent.ask` - Agent requests decision
+- `agent.reply` - Response to ask
+- `agent.result` - Task completion
+- `agent.error` - Error with recovery
+- `overseer.task` - Assignment from overseer
+- `overseer.decision` - Decision to agent
+
+**Spawn Protocol** (`internal/agent/tools/spawn_tools.go`):
+- Depth-constrained hierarchy (global + local MaxDepth)
+- `spawn.request` → overseer evaluation → `spawn.response`
+- Parent tracking via `Agent.ParentID`
+
+**Key Specs**:
+- `docs/spec/agent_hierarchy.md` - Spawn protocol
+- `docs/spec/overseer_profile.md` - Overseer responsibilities
+- `docs/designs/reactive-actor-system.md` - Event-driven design
+
+---
+
+### 4. Memory & Embedding Architecture
+
+**Location**: `internal/storage/memory/`, `internal/indexing/`
+
+**3-Tier Progressive Memory**:
+```
+Tier 1: Embeddings (50ms)     → Fast vector lookup
+Tier 2: Summaries (200ms)     → Chunk-level search
+Tier 3: Full Conversations    → On-demand JSONL decompression
+```
+
+**Embedding Providers**:
+
+| Provider | Models | Dimensions | Use Case |
+|----------|--------|------------|----------|
+| Voyage AI | voyage-code-3, voyage-3.5 | 1024 | Code (symbols), Text (memory) |
+| Gemini | text-embedding-004, gemini-embedding-001 | 768-3072 | Alternative |
+| Codestral | Mistral code model | 1024 | Code alternative |
+
+**Scope-Based Model Selection**:
+- `symbols` → voyage-code-3 (13.8% better on code)
+- `memory`, `sessions`, `tasks`, `codemaps` → voyage-3.5 (cost-effective)
+
+**Storage Backends**:
+- SQLite (local): `~/.agentctl/storage/memory.db`
+- Turso (remote): Native F32_BLOB vectors, `vector_top_k()` for fast search
+
+**Key Files**:
+- `internal/storage/memory/store.go` - SQLite MemoryStore
+- `internal/storage/memory/turso_store.go` - Turso with vector search
+- `internal/indexing/embedding/worker.go` - Background embedding processor
+- `internal/indexing/semantic/provider_voyage.go` - Voyage API client
+
+**Embedding Pipeline**:
+```
+File Change → Hook → Enqueue Job → Worker Claims → Provider API → Store Vector
+```
+
+---
+
+### 5. Skill Ecosystem
+
+**Location**: `skills/`, `internal/domain/skill/`, `internal/execution/`
+
+**Scale**: 87 skills across 25+ categories
+
+**Categories**:
+- **Code**: symbols, complexity, semantic_search, swe_grep, smart_write, context_ripgrep
+- **Filesystem**: read, write, find, tree, apply_edit
+- **Session**: capture, recall, export_dspy, summarize, feedback
+- **Optimize**: feedback, patterns, reflect, bootstrap, weights
+- **Mobile**: ios, android, expo
+- **LSP**: gopls, pylsp, tsserver
+- **MCP**: bridge (external tool integration)
+
+**Execution Models**:
+
+| Type | Runtime | Network | Use Case |
+|------|---------|---------|----------|
+| EXEC | Native binary | Configurable | Performance-critical |
+| WASI | wazero (WebAssembly) | None (sandboxed) | Security-isolated |
+
+**Workflow Engine** (`internal/workflow/`):
+- DAG-based scheduling
+- Parallel execution within batches
+- Template expressions for data flow: `{{.stepID.data.field}}`
+- Error handling: fail, continue, retry
+
+**Manifest Structure**:
+```yaml
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/symbols
+distribution:
+  type: exec
+signature:
+  command: code/symbols
+  parameters: [...]
+capabilities:
+  network: "none"
+  filesystem: [workdir]
+```
+
+---
+
+### 6. Daemon & API Server
+
+**Daemon** (`internal/daemon/`):
+- Unix socket: `/tmp/agentctl-{uid}.sock`
+- Pre-loaded SQLite pool for sub-50ms hook latency
+- JSON-RPC-like protocol: `status`, `run`, `warm`, `shutdown`
+- CLI: `agentctl daemon start|stop|status`
+
+**Express API Server** (`packages/gui/server/index.js`):
+- Port 8090, CORS + cookie parsing
+- Read-only SQLite access (better-sqlite3)
+- 38 endpoints across jobs, tasks, stats, sessions, search, sqlite
+- Workspace isolation via cookies (`agentctl_workspace`)
+
+**Data Flow**:
+```
+CLI/Hooks → Daemon (Unix Socket) → Storage (SQLite)
+                                       ↑
+TUI/GUI → Express API (HTTP:8090) ─────┘
+```
+
+**Authentication**: Cookie-based workspace selection (no JWT/OAuth)
+
+---
+
+### Key Integration Opportunities
+
+Based on research, the highest-impact integrations are:
+
+1. **SSE Event Stream**: Wire actor events (agent.thinking, tool_call, ask) to Express → TUI
+2. **Interactive Session Mode**: New `agentctl session start --interactive` with TUI bridge
+3. **Memory Panel**: Surface `code/semantic_search` results in dedicated view
+4. **Feedback Widget**: Inline 1-5 rating → `trajectory.outcome.human_rating`
+5. **Agent Hierarchy View**: Visualize spawned agents with mailbox activity
+
+---
+
 ## Current State vs Target State
 
 | Current State | Target State |
