@@ -330,25 +330,35 @@ type SessionStore interface {
 	DeleteChunks(ctx context.Context, sessionID string) error
 	SetArchivePath(ctx context.Context, sessionID, archivePath string) error
 	GetArchivePath(ctx context.Context, sessionID string) (string, error)
+
+	// Context window operations (for granular sub-session retrieval)
+	SaveContextWindow(ctx context.Context, window ContextWindow) (ContextWindow, error)
+	SaveContextWindows(ctx context.Context, windows []ContextWindow) error
+	GetContextWindows(ctx context.Context, sessionID string) ([]ContextWindow, error)
+	GetContextWindow(ctx context.Context, sessionID string, windowIndex int) (ContextWindow, error)
+	UpdateWindowSummary(ctx context.Context, windowID string, summary string, embedding []byte, model string) error
+	SearchContextWindows(ctx context.Context, embedding []float32, limit int) ([]ScoredContextWindow, error)
+	DeleteContextWindows(ctx context.Context, sessionID string) error
 }
 
 // SessionChunk represents a chunk of a session for deep retrieval.
 type SessionChunk struct {
-	ID             string    `json:"id"`
-	SessionID      string    `json:"session_id"`
-	ChunkIndex     int       `json:"chunk_index"`
-	ChunkType      string    `json:"chunk_type"` // 'user_request', 'assistant_response', 'tool_output', 'error'
-	ContentHash    string    `json:"content_hash"`
-	ContentPreview string    `json:"content_preview,omitempty"`
-	ByteOffset     int64     `json:"byte_offset"`
-	ByteLength     int64     `json:"byte_length"`
-	ToolsUsed      []string  `json:"tools_used,omitempty"`
-	FilesTouched   []string  `json:"files_touched,omitempty"`
-	HasError       bool      `json:"has_error"`
-	ErrorType      string    `json:"error_type,omitempty"`
-	Embedding      []byte    `json:"embedding,omitempty"`
-	EmbeddingModel string    `json:"embedding_model,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	SessionID          string    `json:"session_id"`
+	ChunkIndex         int       `json:"chunk_index"`
+	ChunkType          string    `json:"chunk_type"` // 'user_request', 'assistant_response', 'tool_output', 'error', 'compact_boundary'
+	ContentHash        string    `json:"content_hash"`
+	ContentPreview     string    `json:"content_preview,omitempty"`
+	ByteOffset         int64     `json:"byte_offset"`
+	ByteLength         int64     `json:"byte_length"`
+	ToolsUsed          []string  `json:"tools_used,omitempty"`
+	FilesTouched       []string  `json:"files_touched,omitempty"`
+	HasError           bool      `json:"has_error"`
+	ErrorType          string    `json:"error_type,omitempty"`
+	ContextWindowIndex int       `json:"context_window_index"` // Which context window this chunk belongs to
+	Embedding          []byte    `json:"embedding,omitempty"`
+	EmbeddingModel     string    `json:"embedding_model,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 // ScoredChunk couples a chunk with a relevance score.
@@ -364,4 +374,30 @@ type ChunkListOptions struct {
 	ErrorsOnly bool
 	Limit      int
 	Offset     int
+}
+
+// ContextWindow represents a compaction-bounded work span within a session.
+// Each window captures the state between compaction events, enabling granular
+// progressive memory retrieval at a finer level than whole sessions.
+type ContextWindow struct {
+	ID               string    `json:"id"`
+	SessionID        string    `json:"session_id"`
+	WindowIndex      int       `json:"window_index"`       // 0, 1, 2... per session
+	StartedAt        time.Time `json:"started_at"`         // First message timestamp in window
+	EndedAt          time.Time `json:"ended_at"`           // compact_boundary timestamp (or session end)
+	PreCompactTokens int       `json:"pre_compact_tokens"` // From compactMetadata.preTokens
+	Trigger          string    `json:"trigger"`            // 'auto' or 'manual'
+	ChunkStart       int       `json:"chunk_start"`        // First chunk_index in window
+	ChunkEnd         int       `json:"chunk_end"`          // Last chunk_index in window
+	MessageCount     int       `json:"message_count"`      // Messages in this window
+	Summary          string    `json:"summary,omitempty"`  // Per-window summary (optional)
+	Embedding        []byte    `json:"embedding,omitempty"`
+	EmbeddingModel   string    `json:"embedding_model,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+// ScoredContextWindow couples a context window with a relevance score.
+type ScoredContextWindow struct {
+	Window     ContextWindow `json:"window"`
+	Similarity float64       `json:"similarity"`
 }

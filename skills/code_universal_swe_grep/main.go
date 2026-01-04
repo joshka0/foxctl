@@ -214,8 +214,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 
 // generateCandidates uses the retrieval package to generate candidates.
 func generateCandidates(ctx context.Context, rc *runner.RunnerContext, in Input) ([]retrieval.Candidate, error) {
-	// Open memory store
-	store, err := memory.Open(ctx, rc.Config.Paths.Cache, rc.Config.Paths.CAS)
+	// Open memory store (uses Storage.Root for persistent data)
+	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
 		return nil, fmt.Errorf("open memory store: %w", err)
 	}

@@ -3,11 +3,15 @@ package cmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -18,6 +22,127 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
+
+const (
+	// maxInlineResponseBytes is the maximum size for inline responses (2KB)
+	maxInlineResponseBytes = 2048
+)
+
+// storeToCAS stores content in the CAS and returns the digest.
+// Returns the digest in "sha256:hex" format.
+func storeToCAS(ctx context.Context, content []byte, contentType string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	// Compute digest
+	h := sha256.Sum256(content)
+	digest := "sha256:" + hex.EncodeToString(h[:])
+
+	// Get CAS root from config or default
+	home := os.Getenv("AGENTCTL_HOME")
+	if home == "" {
+		userHome, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("get user home dir: %w", err)
+		}
+		home = filepath.Join(userHome, ".agentctl")
+	}
+	casRoot := filepath.Join(home, "cas", "sha256")
+
+	// Ensure directory exists
+	if err := os.MkdirAll(casRoot, 0o755); err != nil {
+		return "", fmt.Errorf("create CAS dir: %w", err)
+	}
+
+	// Write content (skip if already exists - content-addressed)
+	hexDigest := hex.EncodeToString(h[:])
+	objPath := filepath.Join(casRoot, hexDigest)
+	if _, err := os.Stat(objPath); os.IsNotExist(err) {
+		if err := os.WriteFile(objPath, content, 0o644); err != nil {
+			return "", fmt.Errorf("write CAS object: %w", err)
+		}
+	}
+
+	return digest, nil
+}
+
+// truncateLargeResponse checks if a tool result exceeds the size limit.
+// If so, stores the full content in CAS and returns a truncated result with reference.
+// This specifically targets web search and extract tools (exa, tavily).
+func truncateLargeResponse(ctx context.Context, result *mcp.CallToolResult, toolName string) *mcp.CallToolResult {
+	if result == nil || len(result.Content) == 0 {
+		return result
+	}
+
+	// Only apply to web/search tools
+	webTools := map[string]bool{
+		"web_search":         true,
+		"web_search_general": true,
+		"web_extract":        true,
+		"web_crawl":          true,
+		"web_map":            true,
+		"ask":                true,
+		"code_search":        true,
+	}
+	if !webTools[toolName] {
+		return result
+	}
+
+	// Calculate total content size
+	var totalSize int
+	var textContents []mcp.TextContent
+	for _, content := range result.Content {
+		if tc, ok := content.(mcp.TextContent); ok {
+			totalSize += len(tc.Text)
+			textContents = append(textContents, tc)
+		}
+	}
+
+	// If under limit, return as-is
+	if totalSize <= maxInlineResponseBytes {
+		return result
+	}
+
+	// Combine all text content
+	var fullText strings.Builder
+	for _, tc := range textContents {
+		fullText.WriteString(tc.Text)
+		fullText.WriteString("\n")
+	}
+	fullContent := fullText.String()
+
+	// Store in CAS
+	digest, err := storeToCAS(ctx, []byte(fullContent), "text/plain")
+	if err != nil {
+		// On error, just return original (don't fail the tool call)
+		return result
+	}
+
+	// Create truncated response
+	truncatedText := fullContent
+	if len(truncatedText) > maxInlineResponseBytes {
+		truncatedText = truncatedText[:maxInlineResponseBytes]
+		for len(truncatedText) > 0 && !utf8.ValidString(truncatedText) {
+			truncatedText = truncatedText[:len(truncatedText)-1]
+		}
+	}
+
+	// Calculate total pages for the note
+	totalPages := (totalSize + maxInlineResponseBytes - 1) / maxInlineResponseBytes
+
+	note := fmt.Sprintf("\n\n---\n⚠️ Response truncated (%d bytes total, %d pages). Full output stored in CAS: %s\nRead page 2: agentctl cas read %s --page 2",
+		totalSize, totalPages, digest, digest)
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			mcp.TextContent{
+				Type: "text",
+				Text: truncatedText + note,
+			},
+		},
+		IsError: result.IsError,
+	}
+}
 
 // mcpServerConfig holds configuration for backend MCP servers.
 type mcpServerConfig struct {
@@ -974,6 +1099,9 @@ func callBackend(ctx context.Context, backendName, toolName string, args map[str
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("call "+toolName, err), nil
 	}
+
+	// Apply truncation for large web/search responses
+	result = truncateLargeResponse(ctx, result, toolName)
 
 	return result, nil
 }

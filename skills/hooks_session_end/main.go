@@ -132,8 +132,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		}
 	}
 
-	// Save metrics to memory store
-	memStore, err := memory.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	// Save metrics to memory store (uses Storage.Root for persistent data)
+	memStore, err := memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err == nil {
 		defer memStore.Close()
 

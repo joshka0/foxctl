@@ -52,6 +52,13 @@ Tier 1: Embeddings (fast lookup)
 │ "This relates to session X about authentication refactor"   │
 └─────────────────────────────────────────────────────────────┘
                            ↓ if relevant
+Tier 1.5: Context Windows (sub-session granularity)
+┌─────────────────────────────────────────────────────────────┐
+│ Window 0 (123K tokens): Initial auth implementation         │
+│ Window 1 (89K tokens): Token refresh and race condition fix │
+│ Window 2 (45K tokens): Testing and cleanup                  │
+└─────────────────────────────────────────────────────────────┘
+                           ↓ if need more detail
 Tier 2: Summaries (medium detail)
 ┌─────────────────────────────────────────────────────────────┐
 │ Key decisions: Used JWT, stored in httpOnly cookie          │
@@ -65,6 +72,29 @@ Tier 3: Full conversation (on-demand)
 │ The error message and how it was resolved                   │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Context Windows (Tier 1.5)
+
+Claude Code sessions can span multiple compaction events. When Claude compacts
+its context, it emits a `compact_boundary` marker in the JSONL:
+
+```json
+{
+  "type": "system",
+  "subtype": "compact_boundary",
+  "content": "Conversation compacted",
+  "timestamp": "2026-01-02T20:44:11.358Z",
+  "compactMetadata": {
+    "trigger": "auto",
+    "preTokens": 123433
+  }
+}
+```
+
+Context windows subdivide sessions at these boundaries, enabling:
+- **Granular retrieval**: Find specific work spans within long sessions
+- **Token-aware context**: Know how much context was used per window
+- **Better RAG**: Search at window level instead of whole-session level
 
 ## Data Source
 
@@ -477,6 +507,14 @@ Phase 4: JSONL Archive & Deep Retrieval ✅
     ├── session/deep-dive skill for full conversation access
     ├── Chunk-level embeddings for precise retrieval
     └── Lazy loading: Tier 1 (summary) → Tier 2 (turns) → Tier 3 (full JSONL)
+
+Phase 4.1: Context Windows (Tier 1.5) ✅
+    ├── Detect compact_boundary markers in JSONL
+    ├── session_context_windows table with token counts
+    ├── session/archive skill extracts windows during parsing
+    ├── Chunks tagged with context_window_index
+    ├── agentctl sessions windows <id> CLI command
+    └── Enables sub-session granularity retrieval
 ```
 
 ---
@@ -534,6 +572,36 @@ CREATE INDEX idx_chunks_error ON session_chunks(session_id) WHERE has_error = TR
 CREATE INDEX idx_chunks_files ON session_chunks(files_touched);
 ```
 
+### Schema: session_context_windows
+
+```sql
+CREATE TABLE session_context_windows (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    window_index INTEGER NOT NULL,           -- 0, 1, 2... per session
+    started_at TEXT,                         -- First message timestamp in window
+    ended_at TEXT,                           -- compact_boundary timestamp
+    pre_compact_tokens INTEGER,              -- From compactMetadata.preTokens
+    trigger TEXT,                            -- 'auto' or 'manual'
+    chunk_start INTEGER,                     -- First chunk_index in window
+    chunk_end INTEGER,                       -- Last chunk_index in window
+    message_count INTEGER,                   -- Messages in this window
+    summary TEXT,                            -- Per-window summary (optional)
+    embedding BLOB,                          -- Per-window embedding (optional)
+    embedding_model TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    UNIQUE(session_id, window_index)
+);
+
+CREATE INDEX idx_context_windows_session ON session_context_windows(session_id);
+CREATE INDEX idx_context_windows_ended ON session_context_windows(ended_at DESC);
+```
+
+Context windows are detected and created by the `session/archive` skill when it
+parses JSONL files. Each `compact_boundary` marker triggers a new window.
+Sessions without any compaction events are treated as a single window (index 0).
+
 ### Skills
 
 | Skill | Description |
@@ -545,11 +613,15 @@ CREATE INDEX idx_chunks_files ON session_chunks(files_touched);
 ### CLI Commands
 
 ```bash
-# Archive a session (copies JSONL, indexes chunks)
+# Archive a session (copies JSONL, indexes chunks, detects context windows)
 agentctl sessions archive <session-id>
 
 # Archive all unarchived sessions
 agentctl sessions archive --all
+
+# List context windows for a session
+agentctl sessions windows <session-id>
+agentctl sessions windows <session-id> --show-chunks
 
 # Deep search across all sessions
 agentctl sessions deep-search "race condition mutex"
@@ -574,8 +646,15 @@ User query: "How did I fix the JWT refresh race condition?"
                     │ need more detail?
                     ▼
 ┌─────────────────────────────────────────────────────────────┐
+│ Tier 1.5: Context window search (~100ms)                    │
+│ session/windows → Window 1 (89K tokens): token refresh work │
+│                   chunks 45-120, trigger=auto               │
+└─────────────────────────────────────────────────────────────┘
+                    │ narrow to specific chunks?
+                    ▼
+┌─────────────────────────────────────────────────────────────┐
 │ Tier 2: Chunk-level search (~200ms)                         │
-│ session/search-chunks → Chunks 45-48: mutex implementation  │
+│ session/search-chunks → Chunks 78-81: mutex implementation  │
 └─────────────────────────────────────────────────────────────┘
                     │ need exact code?
                     ▼
@@ -619,6 +698,8 @@ sessions:
 - [ ] Works offline with local embedding model (future)
 - [x] Full conversation retrieval via JSONL archives (Phase 4)
 - [x] Chunk-level semantic search for precise retrieval (Phase 4)
+- [x] Context windows detected from compact_boundary markers (Phase 4.1)
+- [x] Sub-session granularity via context window queries (Phase 4.1)
 
 ---
 

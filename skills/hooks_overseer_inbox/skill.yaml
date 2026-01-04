@@ -1,0 +1,53 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/overseer_inbox
+  version: 0.1.0
+  description: "Claude Code hook that surfaces mailbox messages to overseer for human-in-the-loop coordination"
+  tags: ["hook", "mailbox", "overseer", "human-in-the-loop", "pre-tool-use"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_overseer_inbox/overseer_inbox
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: hooks/overseer_inbox
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event type (e.g., PreToolUse)"
+    - name: workspace_root
+      type: string
+      required: true
+      description: "Absolute path to workspace root"
+    - name: session_id
+      type: string
+      required: false
+      description: "Claude session identifier"
+    - name: tool_name
+      type: string
+      required: false
+      description: "Name of the tool being used"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Raw JSON input to the tool"
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook output with decision, context containing messages, and metadata"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+env:
+  - name: AGENTCTL_OVERSEER_RECIPIENT
+    description: "Recipient to monitor for messages (default: 'overseer', use '*' for broadcast)"
+    default: "overseer"
+  - name: AGENTCTL_OVERSEER_AUTOACK
+    description: "Set to '0' to disable auto-ack of displayed messages (default: '1')"
+    default: "1"

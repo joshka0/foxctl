@@ -24,6 +24,25 @@ import type {
   SessionSearchResult,
   Codemap,
   CodemapListItem,
+  CASObject,
+  CASReadResult,
+  SSEEvent,
+  MemoryEntry,
+  MemoryEntryDetail,
+  MemoryTypeCount,
+  Agent,
+  AgentState,
+  Trajectory,
+  TrajectoryEvent,
+  UserRequest,
+  ConsoleSession,
+  ConsoleSessionCreate,
+  ConsoleSendRequest,
+  ConsoleSendResponse,
+  ConsoleCancelRequest,
+  ConsoleCancelResponse,
+  ConsoleFeedbackRequest,
+  ConsoleFeedbackResponse,
 } from "./types";
 
 // Get API base URL - works in both Vite (browser) and Bun environments
@@ -362,10 +381,330 @@ export async function searchCodemaps(params: {
   return request(`/api/codemaps/search?${searchParams.toString()}`);
 }
 
+// ============================================================================
+// CAS (Content Addressable Storage)
+// ============================================================================
+
+export async function listCASObjects(): Promise<{ objects: CASObject[] }> {
+  return request("/api/cas");
+}
+
+export async function readCASObject(params: {
+  digest: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<CASReadResult> {
+  const searchParams = new URLSearchParams();
+  if (params.page) searchParams.set("page", String(params.page));
+  if (params.pageSize) searchParams.set("pageSize", String(params.pageSize));
+
+  const queryString = searchParams.toString();
+  const url = `/api/cas/${encodeURIComponent(params.digest)}${queryString ? `?${queryString}` : ""}`;
+  return request(url);
+}
+
+// ============================================================================
+// Memory (named_memory from memory.db)
+// ============================================================================
+
+export async function getMemoryEntries(params?: {
+  type?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{
+  memories: MemoryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}> {
+  const searchParams = new URLSearchParams();
+  if (params?.type) searchParams.set("type", params.type);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.offset) searchParams.set("offset", String(params.offset));
+  const query = searchParams.toString();
+  return request(`/api/memory${query ? `?${query}` : ""}`);
+}
+
+export async function getMemoryTypes(): Promise<{
+  types: MemoryTypeCount[];
+}> {
+  return request("/api/memory/types");
+}
+
+export async function getMemoryEntry(id: string): Promise<MemoryEntryDetail> {
+  return request(`/api/memory/${encodeURIComponent(id)}`);
+}
+
+export async function saveMemory(params: {
+  name: string;
+  type: string;
+  summary?: string;
+  data?: unknown;
+}): Promise<{ success: boolean; id?: string; error?: string }> {
+  return request("/api/memory", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
+export async function pinMemory(
+  id: string
+): Promise<{ success: boolean; pinned: boolean; pinned_at: string | null }> {
+  return request(`/api/memory/${encodeURIComponent(id)}/pin`, {
+    method: "POST",
+  });
+}
+
+export async function deleteMemory(
+  id: string
+): Promise<{ success: boolean; deleted: string }> {
+  return request(`/api/memory/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+// ============================================================================
+// Agents
+// ============================================================================
+
+export async function getAgents(params?: {
+  state?: AgentState;
+  limit?: number;
+}): Promise<{
+  agents: Agent[];
+  total: number;
+}> {
+  const searchParams = new URLSearchParams();
+  if (params?.state) searchParams.set("state", params.state);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/agents${query ? `?${query}` : ""}`);
+}
+
+export async function getAgent(id: string): Promise<{ agent: Agent }> {
+  return request(`/api/agents/${encodeURIComponent(id)}`);
+}
+
+// Spawn a new agent
+export interface SpawnAgentParams {
+  ns: string;
+  role?: string;
+  parent_id?: string;
+  prompt?: string;
+  skills_allow?: string;
+  policy?: string;
+  share_bb?: "all" | "scoped" | "none";
+  llm_provider?: string;
+  llm_model?: string;
+}
+
+export async function spawnAgent(params: SpawnAgentParams): Promise<{
+  agent: {
+    id: string;
+    ns: string;
+    role: string;
+    state: string;
+    parent_id: string | null;
+  };
+}> {
+  return request("/api/agents", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+// Stop/kill an agent
+export async function stopAgent(id: string): Promise<{
+  stopped: boolean;
+  agent_id: string;
+  previous_state: string;
+}> {
+  return request(`/api/agents/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+// Update agent state
+export async function updateAgentState(
+  id: string,
+  state: AgentState
+): Promise<{
+  updated: boolean;
+  agent_id: string;
+  state: string;
+}> {
+  return request(`/api/agents/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state }),
+  });
+}
+
+// Send a message to a specific agent
+export async function sendAgentMessage(
+  agentId: string,
+  params: {
+    subject: string;
+    body?: string;
+    kind?: string;
+    priority?: number;
+    sender?: string;
+  }
+): Promise<{
+  message_id: string;
+  recipient: string;
+  status: string;
+}> {
+  return request(`/api/agents/${encodeURIComponent(agentId)}/message`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+// ============================================================================
+// Mailbox Messaging
+// ============================================================================
+
+// Send a message via mailbox
+export interface SendMailboxMessageParams {
+  recipient: string;
+  subject: string;
+  body?: string;
+  kind?: string;
+  priority?: number;
+  sender?: string;
+  ack_required?: boolean;
+  headers?: Record<string, string>;
+}
+
+export async function sendMailboxMessage(
+  params: SendMailboxMessageParams
+): Promise<{
+  message_id: string;
+  status: string;
+}> {
+  return request("/api/mailbox/send", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+// Acknowledge a mailbox message (mark as read/handled)
+export async function acknowledgeMessage(
+  messageId: string,
+  actorId?: string
+): Promise<{
+  acknowledged: boolean;
+  message_id: string;
+}> {
+  return request(`/api/mailbox/${encodeURIComponent(messageId)}/ack`, {
+    method: "POST",
+    body: JSON.stringify({ actor_id: actorId }),
+  });
+}
+
+// ============================================================================
+// Trajectories
+// ============================================================================
+
+export async function getTrajectories(params?: {
+  status?: string;
+  agent_role?: string;
+  limit?: number;
+}): Promise<{
+  trajectories: Trajectory[];
+  total: number;
+}> {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.agent_role) searchParams.set("agent_role", params.agent_role);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/trajectories${query ? `?${query}` : ""}`);
+}
+
+export async function getTrajectoryEvents(
+  trajectoryId: string,
+  params?: { kind?: string; limit?: number }
+): Promise<{ events: TrajectoryEvent[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.kind) searchParams.set("kind", params.kind);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(
+    `/api/trajectories/${encodeURIComponent(trajectoryId)}/events${query ? `?${query}` : ""}`
+  );
+}
+
+// Trajectory feedback (DSPy training)
+export interface TrajectoryFeedback {
+  rating: number;
+  comment?: string | null;
+  recorded_at?: string;
+}
+
+export async function getTrajectoryFeedback(
+  trajectoryId: string
+): Promise<{ feedback: TrajectoryFeedback | null }> {
+  return request(`/api/trajectories/${encodeURIComponent(trajectoryId)}/feedback`);
+}
+
+export async function submitTrajectoryFeedback(
+  trajectoryId: string,
+  params: { rating: number; comment?: string }
+): Promise<{
+  success: boolean;
+  trajectory_id: string;
+  rating: number;
+  comment: string | null;
+  recorded_at: string;
+}> {
+  return request(`/api/trajectories/${encodeURIComponent(trajectoryId)}/feedback`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+// Scorer weights (learnable scoring system)
+export interface ScorerWeights {
+  critical_path: number;
+  page_rank: number;
+  admin_mail: number;
+  overseer_mail: number;
+  recency: number;
+  version: number;
+  last_updated: string | null;
+}
+
+export interface WeightUpdate {
+  previous_weights: ScorerWeights | null;
+  new_weights: ScorerWeights | null;
+  timestamp: string;
+  reason: string;
+  sample_size: number;
+}
+
+export async function getScorerWeights(): Promise<{
+  weights: ScorerWeights;
+  history: WeightUpdate[];
+}> {
+  return request("/api/weights");
+}
+
+export async function getUserRequests(params?: {
+  limit?: number;
+}): Promise<{ requests: UserRequest[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/user-requests${query ? `?${query}` : ""}`);
+}
+
 // SSE for real-time updates (browser only)
 export function subscribeToEvents(
-  onMessage: (event: { type: string; data: unknown }) => void,
-  onError?: (error: Event) => void
+  onMessage: (event: SSEEvent) => void,
+  onError?: (error: Event) => void,
+  onConnected?: () => void
 ): () => void {
   if (typeof EventSource === "undefined") {
     console.warn("EventSource not available in this environment");
@@ -376,7 +715,107 @@ export function subscribeToEvents(
 
   eventSource.onmessage = (event) => {
     try {
-      const data = JSON.parse(event.data);
+      const data = JSON.parse(event.data) as SSEEvent;
+      if (data.type === "connected") {
+        onConnected?.();
+      }
+      onMessage(data);
+    } catch {
+      // Ignore parse errors
+    }
+  };
+
+  eventSource.onerror = (error) => {
+    onError?.(error);
+  };
+
+  return () => eventSource.close();
+}
+
+// ============================================================================
+// Console Sessions
+// ============================================================================
+
+export async function getConsoles(params?: {
+  limit?: number;
+}): Promise<{ consoles: ConsoleSession[]; total: number }> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/consoles${query ? `?${query}` : ""}`);
+}
+
+export async function createConsole(
+  data: ConsoleSessionCreate
+): Promise<ConsoleSession> {
+  return request("/api/consoles", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getConsole(id: string): Promise<ConsoleSession> {
+  return request(`/api/consoles/${encodeURIComponent(id)}`);
+}
+
+export async function deleteConsole(id: string): Promise<void> {
+  return requestVoid(`/api/consoles/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function sendConsoleMessage(
+  consoleId: string,
+  data: ConsoleSendRequest
+): Promise<ConsoleSendResponse> {
+  return request(`/api/consoles/${encodeURIComponent(consoleId)}/send`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function cancelConsoleRequest(
+  consoleId: string,
+  data?: ConsoleCancelRequest
+): Promise<ConsoleCancelResponse> {
+  return request(`/api/consoles/${encodeURIComponent(consoleId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(data || {}),
+  });
+}
+
+export async function submitConsoleFeedback(
+  consoleId: string,
+  data: ConsoleFeedbackRequest
+): Promise<ConsoleFeedbackResponse> {
+  return request(`/api/consoles/${encodeURIComponent(consoleId)}/feedback`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+// SSE for console-specific events (browser only)
+export function subscribeToConsoleEvents(
+  consoleId: string,
+  onMessage: (event: SSEEvent) => void,
+  onError?: (error: Event) => void,
+  onConnected?: () => void
+): () => void {
+  if (typeof EventSource === "undefined") {
+    console.warn("EventSource not available in this environment");
+    return () => {};
+  }
+
+  const eventSource = new EventSource(
+    `${API_BASE}/api/consoles/${encodeURIComponent(consoleId)}/events`
+  );
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data) as SSEEvent;
+      if (data.type === "connected") {
+        onConnected?.();
+      }
       onMessage(data);
     } catch {
       // Ignore parse errors

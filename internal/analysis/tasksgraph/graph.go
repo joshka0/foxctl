@@ -16,6 +16,7 @@ import (
 // NodeMetrics holds computed metrics for a single task node.
 type NodeMetrics struct {
 	TaskID            string  `json:"task_id"`
+	Title             string  `json:"title"`
 	PageRank          float64 `json:"pagerank"`
 	CriticalPathScore int     `json:"critical_path_score"`
 	InDegree          int     `json:"in_degree"`
@@ -61,10 +62,12 @@ func (a *analyzer) Analyze(taskList []tasks.Task, workspaceID string) (Insights,
 	// Build ID -> numeric ID mapping for gonum
 	idToNode := make(map[string]int64)
 	nodeToID := make(map[int64]string)
+	idToTitle := make(map[string]string)
 	for i, t := range taskList {
 		nodeID := int64(i)
 		idToNode[t.ID] = nodeID
 		nodeToID[nodeID] = t.ID
+		idToTitle[t.ID] = t.Title
 	}
 
 	// Build directed graph
@@ -131,6 +134,7 @@ func (a *analyzer) Analyze(taskList []tasks.Task, workspaceID string) (Insights,
 		nodeID := idToNode[t.ID]
 		metrics := NodeMetrics{
 			TaskID:            t.ID,
+			Title:             idToTitle[t.ID],
 			PageRank:          pageRanks[nodeID],
 			CriticalPathScore: criticalPaths[t.ID],
 			InDegree:          inDegree[nodeID],

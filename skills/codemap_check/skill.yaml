@@ -1,0 +1,62 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: codemap/check
+  version: 0.1.0
+  description: "Check codemap staleness by detecting changes to referenced files since creation"
+  tags: ["codemap", "staleness", "git", "maintenance"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: codemap/check
+  parameters:
+    - name: codemap_id
+      type: string
+      required: true
+      description: "ID of the codemap to check (e.g., '01KXXXXXX')"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace path (defaults to current directory)"
+    - name: include_diff
+      type: boolean
+      required: false
+      default: false
+      description: "Include git diff summary for changed files"
+    - name: regenerate
+      type: boolean
+      required: false
+      default: false
+      description: "Automatically regenerate the codemap if stale (uses original query)"
+returns:
+  - name: is_stale
+    type: boolean
+    description: "True if any referenced files have changed"
+  - name: staleness_score
+    type: number
+    description: "0.0 = fresh, 1.0 = completely stale"
+  - name: changed_files
+    type: array
+    description: "List of files that changed with commit counts"
+  - name: recommendation
+    type: string
+    description: "Suggested action: none, update, or regenerate"
+  - name: summary
+    type: string
+    description: "Human-readable staleness summary"
+  - name: regenerated
+    type: boolean
+    description: "True if codemap was regenerated"
+  - name: new_codemap_id
+    type: string
+    description: "ID of the newly generated codemap (if regenerated)"
+capabilities:
+  filesystem:
+    - type: workdir
+  network: "none"
+  pure: false

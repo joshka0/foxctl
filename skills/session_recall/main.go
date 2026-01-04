@@ -20,17 +20,19 @@ import (
 
 // Input defines the skill input parameters.
 type Input struct {
-	Query         string  `json:"query"`
-	Limit         int     `json:"limit,omitempty"`
-	MinSimilarity float64 `json:"min_similarity,omitempty"`
-	Workspace     string  `json:"workspace,omitempty"`
-	Project       string  `json:"project,omitempty"`
+	Query             string  `json:"query"`
+	Limit             int     `json:"limit,omitempty"`
+	MinSimilarity     float64 `json:"min_similarity,omitempty"`
+	Workspace         string  `json:"workspace,omitempty"`
+	Project           string  `json:"project,omitempty"`
+	WindowGranularity bool    `json:"window_granularity,omitempty"` // Search at context window level instead of session
 }
 
 // Output defines the skill output.
 type Output struct {
 	Query               string         `json:"query"`
-	Matches             []SessionMatch `json:"matches"`
+	Matches             []SessionMatch `json:"matches,omitempty"`
+	WindowMatches       []WindowMatch  `json:"window_matches,omitempty"` // Populated when window_granularity is true
 	TotalWithEmbeddings int            `json:"total_with_embeddings"`
 	Status              string         `json:"status"`
 	Message             string         `json:"message"`
@@ -50,6 +52,19 @@ type SessionMatch struct {
 	KeyFiles     []string `json:"key_files,omitempty"`
 	Similarity   float64  `json:"similarity"`
 	StartedAt    string   `json:"started_at,omitempty"`
+}
+
+// WindowMatch represents a matched context window with similarity score.
+type WindowMatch struct {
+	SessionID        string  `json:"session_id"`
+	WindowIndex      int     `json:"window_index"`
+	Trigger          string  `json:"trigger,omitempty"`
+	PreCompactTokens int     `json:"pre_compact_tokens,omitempty"`
+	Summary          string  `json:"summary,omitempty"`
+	MessageCount     int     `json:"message_count"`
+	StartedAt        string  `json:"started_at,omitempty"`
+	EndedAt          string  `json:"ended_at,omitempty"`
+	Similarity       float64 `json:"similarity"`
 }
 
 const (
@@ -136,6 +151,7 @@ func main() {
 	if voyageKey != "" {
 		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey:        voyageKey,
+			Model:         "voyage-3.5", // Must match model used in session_archive for window embeddings
 			RateLimitWait: boolPtr(true),
 		})
 		if err != nil {
@@ -152,67 +168,110 @@ func main() {
 		}
 	}
 
-	// Search for similar sessions
-	results, err := sessionStore.SearchSimilar(ctx, queryEmbedding, input.Limit*2) // Get extra to filter
-	if err != nil {
-		fail("ERUNTIME", fmt.Errorf("search similar sessions: %w", err), "Check session store integrity")
-	}
+	var output Output
+	output.Query = input.Query
 
-	// Filter and convert results
-	matches := make([]SessionMatch, 0)
-	for _, r := range results {
-		// Apply minimum similarity threshold
-		if r.Similarity < input.MinSimilarity {
-			continue
+	if input.WindowGranularity {
+		// Search at context window level for more granular retrieval
+		windowResults, err := sessionStore.SearchContextWindows(ctx, queryEmbedding, input.Limit*2)
+		if err != nil {
+			fail("ERUNTIME", fmt.Errorf("search context windows: %w", err), "Check session store integrity")
 		}
 
-		// Apply workspace filter if specified
-		if input.Workspace != "" && r.Session.WorkspacePath != input.Workspace {
-			continue
+		windowMatches := make([]WindowMatch, 0)
+		for _, r := range windowResults {
+			if r.Similarity < input.MinSimilarity {
+				continue
+			}
+
+			match := WindowMatch{
+				SessionID:        r.Window.SessionID,
+				WindowIndex:      r.Window.WindowIndex,
+				Trigger:          r.Window.Trigger,
+				PreCompactTokens: r.Window.PreCompactTokens,
+				Summary:          r.Window.Summary,
+				MessageCount:     r.Window.MessageCount,
+				Similarity:       r.Similarity,
+			}
+
+			if !r.Window.StartedAt.IsZero() {
+				match.StartedAt = r.Window.StartedAt.Format(time.RFC3339)
+			}
+			if !r.Window.EndedAt.IsZero() {
+				match.EndedAt = r.Window.EndedAt.Format(time.RFC3339)
+			}
+
+			windowMatches = append(windowMatches, match)
+
+			if len(windowMatches) >= input.Limit {
+				break
+			}
 		}
 
-		// Apply project filter if specified
-		if input.Project != "" && r.Session.ProjectName != input.Project {
-			continue
+		output.WindowMatches = windowMatches
+		output.TotalWithEmbeddings = len(windowResults)
+		output.Status = "ok"
+		output.Message = fmt.Sprintf("Found %d relevant context windows for query", len(windowMatches))
+
+		if len(windowMatches) == 0 {
+			output.Status = "no_matches"
+			output.Message = "No context windows matched the query above the similarity threshold"
+		}
+	} else {
+		// Search at session level (default)
+		results, err := sessionStore.SearchSimilar(ctx, queryEmbedding, input.Limit*2)
+		if err != nil {
+			fail("ERUNTIME", fmt.Errorf("search similar sessions: %w", err), "Check session store integrity")
 		}
 
-		match := SessionMatch{
-			SessionID:    r.Session.ID,
-			ProjectName:  r.Session.ProjectName,
-			GitBranch:    r.Session.GitBranch,
-			Summary:      r.Session.Summary,
-			Accomplished: r.Session.Accomplished,
-			Decisions:    r.Session.Decisions,
-			Gotchas:      r.Session.Gotchas,
-			UserInsights: r.Session.UserInsights,
-			Tags:         r.Session.Tags,
-			KeyFiles:     r.Session.KeyFiles,
-			Similarity:   r.Similarity,
+		matches := make([]SessionMatch, 0)
+		for _, r := range results {
+			if r.Similarity < input.MinSimilarity {
+				continue
+			}
+
+			if input.Workspace != "" && r.Session.WorkspacePath != input.Workspace {
+				continue
+			}
+
+			if input.Project != "" && r.Session.ProjectName != input.Project {
+				continue
+			}
+
+			match := SessionMatch{
+				SessionID:    r.Session.ID,
+				ProjectName:  r.Session.ProjectName,
+				GitBranch:    r.Session.GitBranch,
+				Summary:      r.Session.Summary,
+				Accomplished: r.Session.Accomplished,
+				Decisions:    r.Session.Decisions,
+				Gotchas:      r.Session.Gotchas,
+				UserInsights: r.Session.UserInsights,
+				Tags:         r.Session.Tags,
+				KeyFiles:     r.Session.KeyFiles,
+				Similarity:   r.Similarity,
+			}
+
+			if !r.Session.StartedAt.IsZero() {
+				match.StartedAt = r.Session.StartedAt.Format(time.RFC3339)
+			}
+
+			matches = append(matches, match)
+
+			if len(matches) >= input.Limit {
+				break
+			}
 		}
 
-		if !r.Session.StartedAt.IsZero() {
-			match.StartedAt = r.Session.StartedAt.Format(time.RFC3339)
+		output.Matches = matches
+		output.TotalWithEmbeddings = len(results)
+		output.Status = "ok"
+		output.Message = fmt.Sprintf("Found %d relevant sessions for query", len(matches))
+
+		if len(matches) == 0 {
+			output.Status = "no_matches"
+			output.Message = "No sessions matched the query above the similarity threshold"
 		}
-
-		matches = append(matches, match)
-
-		// Stop at limit
-		if len(matches) >= input.Limit {
-			break
-		}
-	}
-
-	output := Output{
-		Query:               input.Query,
-		Matches:             matches,
-		TotalWithEmbeddings: len(results),
-		Status:              "ok",
-		Message:             fmt.Sprintf("Found %d relevant sessions for query", len(matches)),
-	}
-
-	if len(matches) == 0 {
-		output.Status = "no_matches"
-		output.Message = "No sessions matched the query above the similarity threshold"
 	}
 
 	env := envelope.OK(command, output)

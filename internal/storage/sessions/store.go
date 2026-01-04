@@ -54,6 +54,12 @@ type ScoredChunk = storage.ScoredChunk
 // ChunkListOptions aliases the shared chunk list options type.
 type ChunkListOptions = storage.ChunkListOptions
 
+// ContextWindow aliases the shared context window type.
+type ContextWindow = storage.ContextWindow
+
+// ScoredContextWindow aliases the shared scored context window type.
+type ScoredContextWindow = storage.ScoredContextWindow
+
 // Session status constants (re-exported for convenience)
 const (
 	StatusRunning  = storage.SessionStatusRunning
@@ -946,8 +952,8 @@ func (s *Store) SaveChunk(ctx context.Context, chunk SessionChunk) (SessionChunk
 INSERT INTO session_chunks (
 	id, session_id, chunk_index, chunk_type, content_hash, content_preview,
 	byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
-	embedding, embedding_model, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	context_window_index, embedding, embedding_model, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	chunk_type = excluded.chunk_type,
 	content_hash = excluded.content_hash,
@@ -958,11 +964,12 @@ ON CONFLICT(id) DO UPDATE SET
 	files_touched = excluded.files_touched,
 	has_error = excluded.has_error,
 	error_type = excluded.error_type,
+	context_window_index = excluded.context_window_index,
 	embedding = excluded.embedding,
 	embedding_model = excluded.embedding_model`,
 		chunk.ID, chunk.SessionID, chunk.ChunkIndex, chunk.ChunkType, chunk.ContentHash,
 		chunk.ContentPreview, chunk.ByteOffset, chunk.ByteLength, toolsUsedJSON, filesTouchedJSON,
-		boolToInt(chunk.HasError), chunk.ErrorType, chunk.Embedding, chunk.EmbeddingModel,
+		boolToInt(chunk.HasError), chunk.ErrorType, chunk.ContextWindowIndex, chunk.Embedding, chunk.EmbeddingModel,
 		sqlutil.FormatTimestamp(chunk.CreatedAt),
 	)
 	if err != nil {
@@ -983,8 +990,8 @@ func (s *Store) SaveChunks(ctx context.Context, chunks []SessionChunk) error {
 INSERT INTO session_chunks (
 	id, session_id, chunk_index, chunk_type, content_hash, content_preview,
 	byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
-	embedding, embedding_model, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	context_window_index, embedding, embedding_model, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	chunk_type = excluded.chunk_type,
 	content_hash = excluded.content_hash,
@@ -995,6 +1002,7 @@ ON CONFLICT(id) DO UPDATE SET
 	files_touched = excluded.files_touched,
 	has_error = excluded.has_error,
 	error_type = excluded.error_type,
+	context_window_index = excluded.context_window_index,
 	embedding = excluded.embedding,
 	embedding_model = excluded.embedding_model`)
 	if err != nil {
@@ -1013,7 +1021,7 @@ ON CONFLICT(id) DO UPDATE SET
 		_, err := stmt.ExecContext(ctx,
 			chunk.ID, chunk.SessionID, chunk.ChunkIndex, chunk.ChunkType, chunk.ContentHash,
 			chunk.ContentPreview, chunk.ByteOffset, chunk.ByteLength, toolsUsedJSON, filesTouchedJSON,
-			boolToInt(chunk.HasError), chunk.ErrorType, chunk.Embedding, chunk.EmbeddingModel,
+			boolToInt(chunk.HasError), chunk.ErrorType, chunk.ContextWindowIndex, chunk.Embedding, chunk.EmbeddingModel,
 			sqlutil.FormatTimestamp(chunk.CreatedAt),
 		)
 		if err != nil {
@@ -1036,7 +1044,7 @@ func (s *Store) GetChunks(ctx context.Context, sessionID string, limit int) ([]S
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, session_id, chunk_index, chunk_type, content_hash, content_preview,
        byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
-       embedding, embedding_model, created_at
+       embedding, embedding_model, context_window_index, created_at
 FROM session_chunks
 WHERE session_id = ?
 ORDER BY chunk_index ASC
@@ -1054,7 +1062,7 @@ func (s *Store) GetChunk(ctx context.Context, sessionID string, chunkIndex int) 
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, session_id, chunk_index, chunk_type, content_hash, content_preview,
        byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
-       embedding, embedding_model, created_at
+       embedding, embedding_model, context_window_index, created_at
 FROM session_chunks
 WHERE session_id = ? AND chunk_index = ?`, sessionID, chunkIndex)
 
@@ -1070,7 +1078,7 @@ func (s *Store) SearchChunks(ctx context.Context, embedding []float32, limit int
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, session_id, chunk_index, chunk_type, content_hash, content_preview,
        byte_offset, byte_length, tools_used, files_touched, has_error, error_type,
-       embedding, embedding_model, created_at
+       embedding, embedding_model, context_window_index, created_at
 FROM session_chunks
 WHERE embedding IS NOT NULL`)
 	if err != nil {
@@ -1140,6 +1148,273 @@ func (s *Store) GetArchivePath(ctx context.Context, sessionID string) (string, e
 		return "", nil
 	}
 	return path.String, nil
+}
+
+// --- Context Window Operations ---
+
+// SaveContextWindow inserts or updates a context window.
+func (s *Store) SaveContextWindow(ctx context.Context, window ContextWindow) (ContextWindow, error) {
+	now := timeutil.NowUTC()
+	if window.CreatedAt.IsZero() {
+		window.CreatedAt = now
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO session_context_windows (
+	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id, window_index) DO UPDATE SET
+	started_at = excluded.started_at,
+	ended_at = excluded.ended_at,
+	pre_compact_tokens = excluded.pre_compact_tokens,
+	trigger = excluded.trigger,
+	chunk_start = excluded.chunk_start,
+	chunk_end = excluded.chunk_end,
+	message_count = excluded.message_count,
+	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
+	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`,
+		window.ID, window.SessionID, window.WindowIndex,
+		sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
+		window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,
+		window.MessageCount, window.Summary, window.Embedding, window.EmbeddingModel,
+		sqlutil.FormatTimestamp(window.CreatedAt),
+	)
+	if err != nil {
+		return ContextWindow{}, fmt.Errorf("sessions: save context window: %w", err)
+	}
+	return window, nil
+}
+
+// SaveContextWindows inserts multiple context windows in a batch.
+func (s *Store) SaveContextWindows(ctx context.Context, windows []ContextWindow) error {
+	if len(windows) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sessions: begin window tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO session_context_windows (
+	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id, window_index) DO UPDATE SET
+	started_at = excluded.started_at,
+	ended_at = excluded.ended_at,
+	pre_compact_tokens = excluded.pre_compact_tokens,
+	trigger = excluded.trigger,
+	chunk_start = excluded.chunk_start,
+	chunk_end = excluded.chunk_end,
+	message_count = excluded.message_count,
+	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
+	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`)
+	if err != nil {
+		return fmt.Errorf("sessions: prepare window stmt: %w", err)
+	}
+	defer stmt.Close()
+
+	now := timeutil.NowUTC()
+	for _, window := range windows {
+		if window.CreatedAt.IsZero() {
+			window.CreatedAt = now
+		}
+
+		_, err := stmt.ExecContext(ctx,
+			window.ID, window.SessionID, window.WindowIndex,
+			sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
+			window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,
+			window.MessageCount, window.Summary, window.Embedding, window.EmbeddingModel,
+			sqlutil.FormatTimestamp(window.CreatedAt),
+		)
+		if err != nil {
+			return fmt.Errorf("sessions: save window batch: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sessions: commit window tx: %w", err)
+	}
+	return nil
+}
+
+// GetContextWindows retrieves all context windows for a session.
+func (s *Store) GetContextWindows(ctx context.Context, sessionID string) ([]ContextWindow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+       trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+FROM session_context_windows
+WHERE session_id = ?
+ORDER BY window_index ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: get context windows: %w", err)
+	}
+	defer rows.Close()
+
+	return scanContextWindows(rows)
+}
+
+// GetContextWindow retrieves a specific context window by session and index.
+func (s *Store) GetContextWindow(ctx context.Context, sessionID string, windowIndex int) (ContextWindow, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+       trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+FROM session_context_windows
+WHERE session_id = ? AND window_index = ?`, sessionID, windowIndex)
+
+	return scanContextWindow(row)
+}
+
+// UpdateWindowSummary updates the summary and embedding for a context window.
+func (s *Store) UpdateWindowSummary(ctx context.Context, windowID string, summary string, embedding []byte, model string) error {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE session_context_windows SET
+	summary = ?,
+	embedding = ?,
+	embedding_model = ?
+WHERE id = ?`, summary, embedding, model, windowID)
+	if err != nil {
+		return fmt.Errorf("sessions: update window summary: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SearchContextWindows searches context windows by embedding similarity.
+func (s *Store) SearchContextWindows(ctx context.Context, queryEmbedding []float32, limit int) ([]ScoredContextWindow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+       trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+FROM session_context_windows
+WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: search context windows: %w", err)
+	}
+	defer rows.Close()
+
+	windows, err := scanContextWindows(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate similarities and sort
+	var scored []ScoredContextWindow
+	for _, window := range windows {
+		if len(window.Embedding) == 0 {
+			continue
+		}
+		windowEmb := deserializeEmbedding(window.Embedding)
+		if len(windowEmb) == 0 {
+			continue
+		}
+		sim := cosineSimilarity(queryEmbedding, windowEmb)
+		scored = append(scored, ScoredContextWindow{Window: window, Similarity: sim})
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].Similarity > scored[j].Similarity
+	})
+
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+
+	return scored, nil
+}
+
+// DeleteContextWindows removes all context windows for a session.
+func (s *Store) DeleteContextWindows(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_context_windows WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return fmt.Errorf("sessions: delete context windows: %w", err)
+	}
+	return nil
+}
+
+// scanContextWindow scans a single context window from a row.
+func scanContextWindow(row scannable) (ContextWindow, error) {
+	var window ContextWindow
+	var startedAt, endedAt, createdAt sql.NullString
+	var trigger, summary, embeddingModel sql.NullString
+	var chunkStart, chunkEnd, messageCount sql.NullInt64
+
+	err := row.Scan(
+		&window.ID, &window.SessionID, &window.WindowIndex,
+		&startedAt, &endedAt, &window.PreCompactTokens,
+		&trigger, &chunkStart, &chunkEnd, &messageCount,
+		&summary, &window.Embedding, &embeddingModel, &createdAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ContextWindow{}, ErrNotFound
+		}
+		return ContextWindow{}, fmt.Errorf("sessions: scan context window: %w", err)
+	}
+
+	if startedAt.Valid {
+		ts, _ := sqlutil.ScanTimestamp(startedAt.String)
+		window.StartedAt = ts
+	}
+	if endedAt.Valid {
+		ts, _ := sqlutil.ScanTimestamp(endedAt.String)
+		window.EndedAt = ts
+	}
+	if createdAt.Valid {
+		ts, _ := sqlutil.ScanTimestamp(createdAt.String)
+		window.CreatedAt = ts
+	}
+	if trigger.Valid {
+		window.Trigger = trigger.String
+	}
+	if summary.Valid {
+		window.Summary = summary.String
+	}
+	if embeddingModel.Valid {
+		window.EmbeddingModel = embeddingModel.String
+	}
+	if chunkStart.Valid {
+		window.ChunkStart = int(chunkStart.Int64)
+	}
+	if chunkEnd.Valid {
+		window.ChunkEnd = int(chunkEnd.Int64)
+	}
+	if messageCount.Valid {
+		window.MessageCount = int(messageCount.Int64)
+	}
+
+	return window, nil
+}
+
+// scanContextWindows scans multiple context windows from rows.
+func scanContextWindows(rows *sql.Rows) ([]ContextWindow, error) {
+	var windows []ContextWindow
+	for rows.Next() {
+		window, err := scanContextWindow(rows)
+		if err != nil {
+			return nil, err
+		}
+		windows = append(windows, window)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessions: context windows rows error: %w", err)
+	}
+	return windows, nil
 }
 
 // EmbeddingMetadata tracks embedding configuration for sessions.
@@ -1247,11 +1522,12 @@ func scanChunk(row scannable) (SessionChunk, error) {
 	var errorType sql.NullString
 	var hasError int
 	var embeddingModel sql.NullString
+	var contextWindowIndex sql.NullInt64
 
 	err := row.Scan(
 		&chunk.ID, &chunk.SessionID, &chunk.ChunkIndex, &chunk.ChunkType, &chunk.ContentHash,
 		&contentPreview, &chunk.ByteOffset, &chunk.ByteLength, &toolsUsed, &filesTouched,
-		&hasError, &errorType, &chunk.Embedding, &embeddingModel, &createdAt,
+		&hasError, &errorType, &chunk.Embedding, &embeddingModel, &contextWindowIndex, &createdAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1270,6 +1546,9 @@ func scanChunk(row scannable) (SessionChunk, error) {
 	}
 	if embeddingModel.Valid {
 		chunk.EmbeddingModel = embeddingModel.String
+	}
+	if contextWindowIndex.Valid {
+		chunk.ContextWindowIndex = int(contextWindowIndex.Int64)
 	}
 
 	if createdAt.Valid {
@@ -1555,6 +1834,46 @@ CREATE TABLE IF NOT EXISTS embedding_metadata (
 `
 	if _, err := db.ExecContext(ctx, metadataDDL); err != nil {
 		return fmt.Errorf("sessions: create embedding_metadata: %w", err)
+	}
+
+	// Create context_windows table for granular sub-session retrieval
+	// Each window represents work between compaction boundaries
+	contextWindowsDDL := `
+CREATE TABLE IF NOT EXISTS session_context_windows (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	window_index INTEGER NOT NULL,
+	started_at TEXT,
+	ended_at TEXT,
+	pre_compact_tokens INTEGER DEFAULT 0,
+	trigger TEXT,
+	chunk_start INTEGER,
+	chunk_end INTEGER,
+	message_count INTEGER DEFAULT 0,
+	summary TEXT,
+	embedding BLOB,
+	embedding_model TEXT,
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+	UNIQUE(session_id, window_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_context_windows_session ON session_context_windows(session_id);
+CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(ended_at DESC);
+`
+	if _, err := db.ExecContext(ctx, contextWindowsDDL); err != nil {
+		return fmt.Errorf("sessions: create context_windows: %w", err)
+	}
+
+	// Add context_window_index column to session_chunks if it doesn't exist
+	var cwColCount int
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_chunks') WHERE name = 'context_window_index'")
+	if err := row.Scan(&cwColCount); err == nil && cwColCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE session_chunks ADD COLUMN context_window_index INTEGER DEFAULT 0"); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sessions: add context_window_index column: %w", err)
+			}
+		}
 	}
 
 	return nil

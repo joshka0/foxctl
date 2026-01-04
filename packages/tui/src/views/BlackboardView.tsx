@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useBlackboard } from "../hooks/useData";
+import { WINDOWED_LIST_HEIGHT } from "../constants";
 import type { BlackboardRecord } from "@agentctl/data";
 
 interface RecordRowProps {
@@ -113,7 +114,10 @@ function RecordDetail({ record }: RecordDetailProps) {
 
 export function BlackboardView() {
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const [namespace, setNamespace] = useState("default");
+
+  const LIST_HEIGHT = WINDOWED_LIST_HEIGHT;
 
   const { data: records, isLoading, error, refetch } = useBlackboard({
     ns: namespace,
@@ -128,35 +132,43 @@ export function BlackboardView() {
     namespaces.unshift("default");
   }
 
+  const updateCursor = (newCursor: number) => {
+    if (!records) return;
+    setCursor(newCursor);
+    if (newCursor < scrollOffset) {
+      setScrollOffset(newCursor);
+    } else if (newCursor >= scrollOffset + LIST_HEIGHT) {
+      setScrollOffset(newCursor - LIST_HEIGHT + 1);
+    }
+  };
+
   useKeyboard((e) => {
+    if (!records) return;
     switch (e.name) {
       case "up":
       case "k":
-        setCursor((c) => Math.max(0, c - 1));
+        updateCursor(Math.max(0, cursor - 1));
         break;
       case "down":
       case "j":
-        if (records) {
-          setCursor((c) => Math.min(Math.max(0, records.length - 1), c + 1));
-        }
+        updateCursor(Math.min(Math.max(0, records.length - 1), cursor + 1));
         break;
       case "n": {
         // Cycle namespace
         const idx = namespaces.indexOf(namespace);
         setNamespace(namespaces[(idx + 1) % namespaces.length] || "default");
         setCursor(0);
+        setScrollOffset(0);
         break;
       }
       case "r":
         refetch();
         break;
       case "g":
-        setCursor(0);
+        updateCursor(0);
         break;
       case "G":
-        if (records) {
-          setCursor(Math.max(0, records.length - 1));
-        }
+        updateCursor(Math.max(0, records.length - 1));
         break;
     }
   });
@@ -203,11 +215,11 @@ export function BlackboardView() {
               <text fg="#888888">No records in namespace '{namespace}'</text>
             </box>
           ) : (
-            records.map((rec, i) => (
+            records.slice(scrollOffset, scrollOffset + LIST_HEIGHT).map((rec, i) => (
               <RecordRow
                 key={rec.id}
                 record={rec}
-                selected={i === cursor}
+                selected={i + scrollOffset === cursor}
               />
             ))
           )}

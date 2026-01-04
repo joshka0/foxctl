@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/daemon"
@@ -73,12 +74,20 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 	ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
 	defer cancel()
 
+	// Setup output formatter if --format or --jq specified
+	formatter := NewOutputFormatter(cmd.OutOrStdout(), flags.Format, flags.JQ)
+	stdout := formatter.Writer()
+
 	// Daemon mode: execute via persistent daemon for faster hook execution
 	if flags.Daemon {
-		return executeViaDaemon(ctx, cmd, skillName, data, opts)
+		err := executeViaDaemonWithWriter(ctx, cmd, skillName, data, opts, stdout)
+		if flushErr := formatter.Flush(); flushErr != nil && err == nil {
+			return flushErr
+		}
+		return err
 	}
 
-	executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+	executor := runservice.NewExecutor(ctx, cfg, handle, stdout, cmd.ErrOrStderr(), opts)
 	executor.SetAsyncRunner(defaultAsyncRunner)
 	defer executor.Close()
 
@@ -90,7 +99,7 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 			}
 			return err
 		}
-		return nil
+		return formatter.Flush()
 	}
 
 	if done, err := executor.TryServeCache(data); err != nil {
@@ -99,7 +108,7 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 		}
 		return err
 	} else if done {
-		return nil
+		return formatter.Flush()
 	}
 
 	job, isDuplicate, err := executor.PrepareJob(data)
@@ -116,7 +125,7 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 			}
 			return err
 		}
-		return nil
+		return formatter.Flush()
 	}
 	if opts.Async {
 		if err := executor.SubmitAsync(job); err != nil {
@@ -125,7 +134,7 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 			}
 			return err
 		}
-		return nil
+		return formatter.Flush()
 	}
 	if err := executor.ExecuteSync(job); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -133,7 +142,9 @@ func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags)
 		}
 		return err
 	}
-	return nil
+
+	// Flush formatter to apply any transformations
+	return formatter.Flush()
 }
 
 func writeRunValidationError(cmd *cobra.Command, skill string, cause error) error {
@@ -177,9 +188,9 @@ func writeTimeoutError(cmd *cobra.Command, skill string, timeout time.Duration) 
 	return context.DeadlineExceeded
 }
 
-// executeViaDaemon runs a skill via the daemon for faster execution.
+// executeViaDaemonWithWriter runs a skill via the daemon with a custom writer.
 // Falls back to normal execution if the daemon is not available.
-func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string, input []byte, opts runservice.RunOptions) error {
+func executeViaDaemonWithWriter(ctx context.Context, cmd *cobra.Command, skillName string, input []byte, opts runservice.RunOptions, stdout io.Writer) error {
 	client := newDaemonClient()
 
 	// Check if daemon is running
@@ -193,7 +204,7 @@ func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string,
 			return err
 		}
 		// Use the timeout-wrapped context for fallback execution
-		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		executor := runservice.NewExecutor(ctx, cfg, handle, stdout, cmd.ErrOrStderr(), opts)
 		defer executor.Close()
 		return executor.ExecuteEphemeral(input)
 	}
@@ -208,7 +219,7 @@ func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string,
 		if findErr != nil {
 			return findErr
 		}
-		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		executor := runservice.NewExecutor(ctx, cfg, handle, stdout, cmd.ErrOrStderr(), opts)
 		defer executor.Close()
 		return executor.ExecuteEphemeral(input)
 	}
@@ -222,7 +233,7 @@ func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string,
 		if findErr != nil {
 			return findErr
 		}
-		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		executor := runservice.NewExecutor(ctx, cfg, handle, stdout, cmd.ErrOrStderr(), opts)
 		defer executor.Close()
 		return executor.ExecuteEphemeral(input)
 	}
@@ -234,11 +245,11 @@ func executeViaDaemon(ctx context.Context, cmd *cobra.Command, skillName string,
 		if findErr != nil {
 			return findErr
 		}
-		executor := runservice.NewExecutor(ctx, cfg, handle, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
+		executor := runservice.NewExecutor(ctx, cfg, handle, stdout, cmd.ErrOrStderr(), opts)
 		defer executor.Close()
 		return executor.ExecuteEphemeral(input)
 	}
 
-	_, err = cmd.OutOrStdout().Write(result.Output)
+	_, err = stdout.Write(result.Output)
 	return err
 }

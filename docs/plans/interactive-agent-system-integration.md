@@ -42,7 +42,7 @@ This section captures findings from deep exploration of six system areas.
 4. Add hook in `useData.ts`
 5. Add client function in `@agentctl/data`
 
-**Real-time**: SSE via `subscribeToEvents()` - currently placeholder, needs full implementation.
+**Real-time**: `@agentctl/data.subscribeToEvents()` expects an `/api/events` SSE endpoint; GUI wires this via `useSSE`, but `packages/gui/server/index.js` does not currently implement `/api/events` and the TUI does not yet subscribe.
 
 ---
 
@@ -80,9 +80,9 @@ Learnable Scorer (weight adaptation)
 }
 ```
 
-**Optimization Skills (7 total)**:
+**Optimization Skills (6 total)**:
 - `optimize/feedback`, `optimize/patterns`, `optimize/reflect`
-- `optimize/bootstrap`, `optimize/weights`, `optimize/analyze`, `optimize/from-feedback`
+- `optimize/bootstrap`, `optimize/weights`, `optimize/analyze`
 
 **Scorer Weights (learnable)**:
 - CriticalPath: 0.30, PageRank: 0.20, AdminMail: 0.25, OverseerMail: 0.15, Recency: 0.10
@@ -103,13 +103,15 @@ Learnable Scorer (weight adaptation)
 | DspyActor | `dspy_actor.go` | LLM-driven agents (coder, planner, reviewer) |
 | BaseActor | `base_actor.go` | Common handler registration, timer management |
 
-**Message Types**:
-- `agent.ask` - Agent requests decision
-- `agent.reply` - Response to ask
-- `agent.result` - Task completion
-- `agent.error` - Error with recovery
-- `overseer.task` - Assignment from overseer
-- `overseer.decision` - Decision to agent
+**Mailbox message types** (`internal/domain/agent/mailbox.go`):
+  - `agent.ask` - Request expecting a response
+  - `agent.reply` - Response to `agent.ask`
+  - `agent.cmd` - Fire-and-forget command
+  - `agent.event` - Notification/heartbeat
+  - `console.ask` - User request from console
+  - `console.reply` - Final response to console
+  - `console.event` - Streaming update to console
+  - `console.cmd` - Console control command (e.g., cancel)
 
 **Spawn Protocol** (`internal/agent/tools/spawn_tools.go`):
 - Depth-constrained hierarchy (global + local MaxDepth)
@@ -238,8 +240,8 @@ TUI/GUI → Express API (HTTP:8090) ─────┘
 
 Based on research, the highest-impact integrations are:
 
-1. **SSE Event Stream**: Wire actor events (agent.thinking, tool_call, ask) to Express → TUI
-2. **Interactive Session Mode**: New `agentctl session start --interactive` with TUI bridge
+1. **SSE Event Stream**: Implement `/api/events` in Express to emit coarse invalidation events (`job|task|mailbox|blackboard`) for TUI/GUI; optionally extend later with rich agent/console events.
+2. **Interactive Session Mode**: Re-use `agentctl console attach` / console sessions (`console.*` mailbox messages) as the interactive bridge.
 3. **Memory Panel**: Surface `code/semantic_search` results in dedicated view
 4. **Feedback Widget**: Inline 1-5 rating → `trajectory.outcome.human_rating`
 5. **Agent Hierarchy View**: Visualize spawned agents with mailbox activity
@@ -266,9 +268,9 @@ Based on research, the highest-impact integrations are:
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────────┐  │
 │  │ OpenTUI     │  │ Web GUI     │  │ CLI (agentctl)              │  │
-│  │ (Terminal)  │  │ (Browser)   │  │ • session start --interactive│
-│  │ • AgentView │  │ • AgentView │  │ • run --watch               │  │
-│  │ • MemoryView│  │ • MemoryView│  │ • feedback                  │  │
+│  │ (Terminal)  │  │ (Browser)   │  │ • console attach --actor ...│
+│  │ • AgentView │  │ • AgentView │  │ • agent watch <agent-id>    │  │
+│  │ • MemoryView│  │ • MemoryView│  │ • actorsys logs <ns> --follow│ │
 │  │ • Orchestr. │  │ • Orchestr. │  │                             │  │
 │  └──────┬──────┘  └──────┬──────┘  └──────────────┬──────────────┘  │
 │         │                │                        │                  │
@@ -279,13 +281,11 @@ Based on research, the highest-impact integrations are:
 ├─────────────────────────────────────────────────────────────────────┤
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │ Express API Server (port 8090)                               │   │
-│  │ ├── /api/agents/* (spawn, list, kill, status)               │   │
-│  │ ├── /api/sessions/* (interactive session control)           │   │
-│  │ ├── /api/memory/* (recall, search, pin)                     │   │
-│  │ ├── /api/trajectory/* (capture, rate, feedback)             │   │
-│  │ └── /api/events (SSE stream)                                │   │
-│  │      • agent.thinking, agent.tool_call, agent.ask           │   │
-│  │      • memory.recalled, feedback.collected                  │   │
+│  │ ├── /api/{jobs,tasks,stats,insights,mailbox,...} (existing)  │   │
+│  │ ├── /api/sessions/* (captured sessions browsing; existing)   │   │
+│  │ ├── /api/events (SSE stream; missing today)                  │   │
+│  │ │    • type: "job"|"task"|"mailbox"|"blackboard"             │   │
+│  │ └── /api/{agents,consoles,memory,trajectory}/* (proposed)    │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                          │                                           │
 ├──────────────────────────┼──────────────────────────────────────────┤
@@ -298,12 +298,10 @@ Based on research, the highest-impact integrations are:
 │  │ ├── Watcher (50ms reactive notifications)                  │    │
 │  │ ├── EventBus (pub/sub with selective persistence)          │    │
 │  │ └── Actors:                                                │    │
-│  │     ├── OverseerActor (planning, coordination)             │    │
-│  │     ├── DspyActor (LLM-driven via dspy-go)                │    │
-│  │     │   ├── CoderHandler                                   │    │
-│  │     │   ├── PlannerHandler                                 │    │
-│  │     │   └── ReviewerHandler                                │    │
-│  │     └── UserProxyActor (NEW: bridges TUI input)           │    │
+│  │     └── DspyActor (LLM-driven via dspy-go)                │    │
+│  │         ├── CoderHandler                                   │    │
+│  │         ├── PlannerHandler                                 │    │
+│  │         └── ReviewerHandler                                │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │                          │                                           │
 ├──────────────────────────┼──────────────────────────────────────────┤
@@ -343,8 +341,8 @@ Based on research, the highest-impact integrations are:
 │  │ 87 Skills across 25+ categories                                │ │
 │  │ ├── code/* (symbols, complexity, semantic_search, swe_grep)   │ │
 │  │ ├── fs/* (read, write, find, tree)                            │ │
-│  │ ├── session/* (capture, recall, export-dspy)                  │ │
-│  │ ├── optimize/* (feedback, patterns, weights)                  │ │
+│  │ ├── session/* (capture, recall, export_dspy)                  │ │
+│  │ ├── optimize/* (feedback, patterns, reflect, bootstrap, weights, analyze) │ │
 │  │ ├── mobile/* (ios, android, expo)                             │ │
 │  │ ├── lsp/* (gopls, pylsp, tsserver)                            │ │
 │  │ ├── mcp/* (bridge to external tools)                          │ │
@@ -406,7 +404,7 @@ Based on research, the highest-impact integrations are:
 ```
 
 **New Views**:
-- **AgentView** (key: `0` or `a`) - Interactive agent session
+- **AgentView** (key: `0`) - Interactive agent session
 - **MemoryView** - Progressive context panel
 - **OrchestrationView** - Agent hierarchy visualization
 
@@ -433,13 +431,11 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 - After each agent action, prompt for optional quick rating (1-5 keys)
 - `f` key opens feedback modal
 - Ratings flow directly to `trajectory.outcome.human_rating`
-- Background worker runs `optimize/from-feedback` periodically
+- Background worker runs `agentctl optimize session analyze` periodically
 
 ### 3. Subagent Orchestration → Visual Hierarchy
 
 **Current**: Overseer coordinates via mailbox (invisible to user)
-
-**Target**: Orchestration dashboard with human-in-loop
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -454,8 +450,8 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 │ MAILBOX ACTIVITY                                            │
 │ ─────────────────                                           │
 │ [12:34:56] coder-01 → overseer: agent.ask "Should I..."    │
-│ [12:34:55] overseer → coder-01: overseer.task "Fix JWT..." │
-│ [12:34:50] reviewer-01 → overseer: agent.result "LGTM"     │
+│ [12:34:55] overseer → coder-01: agent.cmd "Fix JWT..."     │
+│ [12:34:50] reviewer-01 → overseer: agent.event "LGTM"      │
 ├─────────────────────────────────────────────────────────────┤
 │ [s]pawn agent  [k]ill agent  [m]essage  [e]scalate to user │
 └─────────────────────────────────────────────────────────────┘
@@ -515,16 +511,382 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 
 | Task | Effort | Impact |
 |------|--------|--------|
-| `agentctl session start --interactive` | Medium | High |
+| `agentctl console attach` | Medium | High |
 | TUI <-> DspyActor bridge | High | Critical |
 | Human-in-loop for `agent.ask` | Medium | High |
 | Inline feedback collection | Low | High |
 
 **New components**:
-- Interactive session mode in daemon
-- WebSocket or SSE agent event stream
+- Console session API surface (list/attach/send/poll or SSE)
 - Feedback capture UI widget
-- UserProxyActor for bridging TUI input
+
+---
+
+## Phase 2 Deep Dive: Interactive Agent Sessions
+
+### Current State Analysis
+
+**What Already Exists:**
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| Console CLI commands | ✅ Complete | `cmd/agentctl/cmd/console.go` (attach, list, rm) |
+| Console store (SQLite) | ✅ Complete | `internal/storage/console/store.go` |
+| DspyActor runtime | ✅ Complete | `internal/actor/dspy_actor.go` (agent.* handlers) |
+| Console message types | ⚠️ Defined only | `internal/domain/agent/mailbox.go` |
+| Trajectory capture | ✅ Complete | `internal/storage/trajectory/` |
+| HumanRating field | ✅ Complete | `Outcome.HumanRating *int` (1-5 scale) |
+| Agent spawn protocol | ✅ Complete | `internal/agent/tools/spawn_tools.go` |
+| SSE endpoint | ❌ Missing | `packages/gui/server/index.js` |
+| Console view TUI | ❌ Missing | `packages/tui/src/views/` |
+
+**What Needs Building:**
+
+1. **DspyActor console handlers** - Bridge console.* messages to agent execution
+2. **SSE /api/events endpoint** - Real-time event streaming to TUI
+3. **Console API endpoints** - REST surface for TUI interaction
+4. **ConsoleView TUI component** - Interactive agent session UI
+5. **Feedback widget** - 1-5 star rating inline
+
+---
+
+### Implementation Tasks
+
+#### Task 2.1: DspyActor Console Handlers
+
+**Goal**: Enable DspyActor to receive user input and stream results
+
+**Files to modify**: `internal/actor/dspy_actor.go`
+
+**New handlers to add:**
+```go
+// Register in NewDspyActor()
+actor.RegisterHandler("console.ask", actor.handleConsoleAsk)
+actor.RegisterHandler("console.cmd", actor.handleConsoleCmd)
+
+// handleConsoleAsk - Execute user request with streaming
+func (a *DspyActor) handleConsoleAsk(ctx context.Context, msg *actor.Message) (*actor.Message, error) {
+    // 1. Extract prompt from msg.Data
+    // 2. Create trajectory with RootRequestID = msg.ID
+    // 3. Execute ReAct agent (same as handleAsk)
+    // 4. During execution, emit console.event for each iteration:
+    //    - thought, action, observation, tool_result
+    // 5. On completion, send console.reply with final answer
+    // 6. Record trajectory outcome
+}
+
+// handleConsoleCmd - Control execution
+func (a *DspyActor) handleConsoleCmd(ctx context.Context, msg *actor.Message) (*actor.Message, error) {
+    // Handle: cancel, pause, timeout, resume
+    // Store command in actor state, check in ReAct loop
+}
+```
+
+**Streaming mechanism:**
+```go
+// During ReAct execution, emit events
+a.sendConsoleEvent(msg.From, &ConsoleEventPayload{
+    Type:        "thought",
+    Content:     thoughtText,
+    Iteration:   i,
+    TrajectoryID: traj.ID,
+})
+```
+
+**Effort**: Medium-High (2-3 days)
+
+---
+
+#### Task 2.2: SSE Event Endpoint
+
+**Goal**: Real-time event streaming from Express API to TUI
+
+**Files to modify**: `packages/gui/server/index.js`
+
+**Implementation:**
+```javascript
+// Add SSE endpoint
+app.get('/api/events', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+
+  // Subscribe to SQLite changes via polling or triggers
+  const interval = setInterval(() => {
+    // Check for new events in:
+    // - jobs (state changes)
+    // - tasks (status changes)
+    // - mailbox (new messages)
+    // - blackboard (key updates)
+    // - trajectory_events (agent progress)
+
+    const events = checkForNewEvents(lastEventId);
+    events.forEach(event => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    });
+  }, 100); // 100ms polling
+
+  req.on('close', () => clearInterval(interval));
+});
+```
+
+**Event types:**
+```typescript
+type SSEEvent =
+  | { type: "job"; data: { id: string; state: string } }
+  | { type: "task"; data: { id: string; status: string } }
+  | { type: "mailbox"; data: { actor: string; message_id: string } }
+  | { type: "blackboard"; data: { ns: string; topic: string } }
+  | { type: "console.event"; data: ConsoleEventPayload }
+  | { type: "console.reply"; data: ConsoleReplyPayload };
+```
+
+**Effort**: Low-Medium (1-2 days)
+
+---
+
+#### Task 2.3: Console REST API
+
+**Goal**: HTTP endpoints for TUI to interact with console sessions
+
+**Files to modify**: `packages/gui/server/index.js`, `packages/data/src/client.ts`
+
+**New endpoints:**
+```
+GET  /api/consoles                - List console sessions
+POST /api/consoles                - Create/attach console session
+GET  /api/consoles/:id            - Get console session details
+DELETE /api/consoles/:id          - Delete console session
+
+POST /api/consoles/:id/send       - Send console.ask message
+GET  /api/consoles/:id/events     - SSE stream for this console only
+POST /api/consoles/:id/cancel     - Send console.cmd cancel
+POST /api/consoles/:id/feedback   - Record trajectory feedback
+```
+
+**Send endpoint handler:**
+```javascript
+app.post('/api/consoles/:id/send', async (req, res) => {
+  const { prompt, context } = req.body;
+  const consoleId = req.params.id;
+
+  // 1. Get console session → actor_id
+  // 2. Create console.ask message
+  // 3. Insert into mailbox for actor
+  // 4. Return message_id for tracking
+
+  res.json({ message_id: newMessageId, status: 'sent' });
+});
+```
+
+**Effort**: Medium (2 days)
+
+---
+
+#### Task 2.4: ConsoleView TUI Component
+
+**Goal**: Interactive agent session UI in terminal
+
+**Files to create**: `packages/tui/src/views/ConsoleView.tsx`
+
+**Layout:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ CONSOLE SESSION: coder-01                    [connected] [P:3]  │
+├─────────────────────────────────────────────────────────────────┤
+│ HISTORY                                                         │
+│ ─────────                                                       │
+│ [12:34:56] USER: Fix the JWT refresh race condition             │
+│ [12:34:57] AGENT: Searching for token refresh patterns...       │
+│ [12:34:58] TOOL: code/swe_grep (3 results)                      │
+│ [12:34:59] AGENT: Found issue in auth/jwt.ts:123                │
+│ [12:35:00] TOOL: fs/read auth/jwt.ts                            │
+│ [12:35:01] AGENT: Applying mutex pattern...                     │
+│ [12:35:02] TOOL: code/smart_write auth/jwt.ts                   │
+│ [12:35:03] RESULT: Fixed race condition with sync.Mutex         │
+│                                                                 │
+│ [Rating: ★★★★☆] [Feedback: Good approach]                      │
+├─────────────────────────────────────────────────────────────────┤
+│ > Type your message... (Enter to send, Esc to cancel)           │
+├─────────────────────────────────────────────────────────────────┤
+│ [1-5]rate [c]ancel [h]istory [m]emory [Enter]send              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key features:**
+- SSE subscription for real-time updates
+- Input field with Enter to send
+- 1-5 number keys for quick rating after each response
+- Cancel button sends console.cmd
+- Memory panel toggle shows recalled context
+- Scroll through history with j/k
+
+**State management:**
+```typescript
+interface ConsoleState {
+  consoleId: string;
+  actorId: string;
+  connected: boolean;
+  history: ConsoleEvent[];
+  inputValue: string;
+  isProcessing: boolean;
+  currentTrajectoryId: string | null;
+  lastRating: number | null;
+}
+```
+
+**Effort**: High (3-4 days)
+
+---
+
+#### Task 2.5: Inline Feedback Widget
+
+**Goal**: Quick 1-5 star rating after each agent response
+
+**Files to modify**: `packages/tui/src/views/ConsoleView.tsx`
+
+**Behavior:**
+1. After `console.reply` received, show rating prompt
+2. User presses 1-5 key for quick rating
+3. Optionally press `f` for text feedback modal
+4. Rating sent to `/api/consoles/:id/feedback`
+5. Stored in `trajectory.outcome.human_rating`
+
+**Feedback flow:**
+```
+console.reply → Show rating prompt → User presses 1-5
+                                          ↓
+                               POST /api/consoles/:id/feedback
+                                          ↓
+                               trajectory.outcome.human_rating = N
+                                          ↓
+                               Background: optimize/feedback runs
+```
+
+**API handler:**
+```javascript
+app.post('/api/consoles/:id/feedback', async (req, res) => {
+  const { trajectory_id, rating, feedback_text } = req.body;
+
+  // Update trajectory outcome
+  db.prepare(`
+    UPDATE trajectories
+    SET outcome = json_set(
+      COALESCE(outcome, '{}'),
+      '$.human_rating', ?,
+      '$.feedback', ?,
+      '$.recorded_at', ?
+    )
+    WHERE id = ?
+  `).run(rating, feedback_text, new Date().toISOString(), trajectory_id);
+
+  res.json({ success: true });
+});
+```
+
+**Effort**: Low (1 day)
+
+---
+
+#### Task 2.6: Human-in-Loop for agent.ask
+
+**Goal**: Intercept agent.ask messages for human review before overseer responds
+
+**Files to modify**:
+- `configs/hooks/overseer-inbox.sh` (or new hook)
+- `packages/tui/src/views/OrchestrationView.tsx`
+
+**Mechanism:**
+1. When agent sends `agent.ask` to overseer, hook surfaces it
+2. TUI OrchestrationView shows pending questions with priority
+3. Human can:
+   - **Answer directly**: Type response, send as `agent.reply`
+   - **Delegate to overseer**: Press `d` to let overseer handle
+   - **Modify and delegate**: Edit question, then delegate
+
+**Hook enhancement:**
+```bash
+# In overseer-inbox.sh or new agent-ask-intercept.sh
+# Check for agent.ask messages to overseer
+# Set a short delay (e.g., 5s) before auto-delegating
+# If human responds within delay, use their answer
+```
+
+**TUI integration:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PENDING QUESTIONS (2)                                           │
+├─────────────────────────────────────────────────────────────────┤
+│ [P1] coder-01 asks: "Should I use mutex or channel for sync?"   │
+│      Context: auth/jwt.ts race condition fix                    │
+│      [a]nswer  [d]elegate  [v]iew context                       │
+│                                                                 │
+│ [P2] reviewer-01 asks: "Is this error handling sufficient?"     │
+│      Context: review of auth.ts changes                         │
+│      [a]nswer  [d]elegate  [v]iew context                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Effort**: Medium (2 days)
+
+---
+
+### Implementation Order
+
+```
+Week 1:
+├── Day 1-2: Task 2.2 - SSE Event Endpoint
+├── Day 3-4: Task 2.3 - Console REST API
+└── Day 5: Task 2.5 - Feedback Widget (API part)
+
+Week 2:
+├── Day 1-3: Task 2.1 - DspyActor Console Handlers
+├── Day 4-5: Task 2.4 - ConsoleView TUI (basic)
+
+Week 3:
+├── Day 1-2: Task 2.4 - ConsoleView TUI (polish)
+├── Day 3-4: Task 2.6 - Human-in-Loop agent.ask
+└── Day 5: Integration testing + bug fixes
+```
+
+---
+
+### Success Criteria
+
+| Metric | Target |
+|--------|--------|
+| Input → Agent response start | <100ms |
+| Console.event streaming latency | <50ms |
+| SSE connection stability | 99%+ uptime |
+| Feedback collection rate | >30% of interactions |
+| Human-in-loop response window | 5-10s configurable |
+
+---
+
+### Dependencies
+
+**From Phase 1 (✅ Complete):**
+- AgentView, MemoryView, OrchestrationView TUI components
+- Sessions/Agents/Trajectories API endpoints
+- Enter key detail views
+
+**External:**
+- dspy-go library (already integrated)
+- Voyage/Gemini API keys (for memory recall)
+
+---
+
+### Risk Mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| SSE connection drops | Auto-reconnect with exponential backoff |
+| DspyActor hangs | Configurable timeout + console.cmd cancel |
+| Feedback fatigue | Make ratings optional, 1-key shortcuts |
+| Message ordering | Use trajectory_id + sequence numbers |
+| Memory pressure | Limit history buffer, paginate old events |
 
 ### Phase 3: Progressive Memory UI
 
@@ -575,32 +937,33 @@ User Prompt → Agent Action → [Feedback UI] → Trajectory DB
 ### New API Endpoints Required
 
 ```
-POST /api/agents/spawn           - Create new agent
-GET  /api/agents                 - List active agents
-GET  /api/agents/:id             - Agent detail + status
-POST /api/agents/:id/message     - Send message to agent
-DELETE /api/agents/:id           - Kill agent
+GET  /api/events                 - SSE stream for real-time updates (missing today)
+     Events: job, task, mailbox, blackboard
 
-GET  /api/sessions/active        - Get current interactive session
-POST /api/sessions/start         - Start interactive session
-POST /api/sessions/input         - Send user input
-POST /api/sessions/feedback      - Submit feedback
+GET  /api/consoles               - List console sessions (interactive)
+POST /api/consoles/attach        - Create/reuse console session
+POST /api/consoles/:id/input     - Send user input (console.ask)
+GET  /api/consoles/:id/events    - Poll/SSE for console.event/console.reply
 
-GET  /api/memory/recalled        - Get currently recalled memories
-POST /api/memory/pin             - Pin a memory
-POST /api/memory/add             - Add new memory
-GET  /api/memory/search          - Semantic search
+POST /api/agents/spawn           - Create new agent (proposed)
+GET  /api/agents                 - List active agents (proposed)
+GET  /api/agents/:id             - Agent detail + status (proposed)
+POST /api/agents/:id/message     - Send message to agent (proposed)
+DELETE /api/agents/:id           - Kill agent (proposed)
 
-GET  /api/events                 - SSE stream for real-time updates
-     Events: agent.thinking, agent.tool_call, agent.ask,
-             agent.result, memory.recalled, feedback.collected
+GET  /api/memory/recalled        - Get currently recalled memories (proposed)
+POST /api/memory/pin             - Pin a memory (proposed)
+POST /api/memory/add             - Add new memory (proposed)
+GET  /api/memory/search          - Semantic search (proposed)
+
+POST /api/trajectory/feedback    - Submit feedback (proposed)
 ```
 
 ### New TUI Views
 
 | View | Key | Purpose |
 |------|-----|---------|
-| AgentView | `0` or `a` | Interactive agent session |
+| AgentView | `0` | Interactive agent session |
 | MemoryView | `m` | Progressive context panel |
 | OrchestrationView | `o` | Agent hierarchy + mailbox |
 | TrajectoryView | `t` | Live trajectory capture |
@@ -608,27 +971,12 @@ GET  /api/events                 - SSE stream for real-time updates
 ### Event Types for SSE
 
 ```typescript
-interface AgentEvent {
-  type: 'agent.thinking' | 'agent.tool_call' | 'agent.ask' |
-        'agent.result' | 'agent.error' | 'agent.spawn';
-  agent_id: string;
-  session_id: string;
-  timestamp: string;
-  data: any;
-}
-
-interface MemoryEvent {
-  type: 'memory.recalled' | 'memory.added' | 'memory.pinned';
-  scope: 'symbols' | 'memory' | 'sessions' | 'tasks' | 'codemaps';
-  entries: Array<{ id: string; name: string; similarity: number }>;
-}
-
-interface FeedbackEvent {
-  type: 'feedback.collected';
-  trajectory_id: string;
-  rating: number;
-  note?: string;
-}
+// Matches @agentctl/data.subscribeToEvents() and packages/gui/src/api/hooks.ts useSSE().
+type SSEEvent =
+  | { type: "job"; data: { id?: string; state?: string } }
+  | { type: "task"; data: { id?: string } }
+  | { type: "mailbox"; data: { actor?: string; message_id?: string } }
+  | { type: "blackboard"; data: { ns?: string; topic?: string } };
 ```
 
 ---
@@ -655,7 +1003,7 @@ interface FeedbackEvent {
 - 87 skills (skills/*)
 
 ### New Components Required
-- UserProxyActor (bridges TUI input to actor system)
+- Console session API surface (bridges TUI input to console sessions)
 - SSE event broadcaster
 - Interactive session manager
 - Feedback collection API

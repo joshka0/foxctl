@@ -114,9 +114,96 @@ function MessageDetail({ message }: MessageDetailProps) {
   );
 }
 
+// Full-screen message viewer
+interface MessageFullViewProps {
+  message: MailboxMessage;
+  onClose: () => void;
+}
+
+function MessageFullView({ message, onClose }: MessageFullViewProps) {
+  useKeyboard((e) => {
+    switch (e.name) {
+      case "escape":
+      case "q":
+        onClose();
+        break;
+    }
+  });
+
+  return (
+    <box flexDirection="column" width="100%" height="100%">
+      {/* Header */}
+      <box height={2} paddingLeft={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+        <text fg="#aa77ff">
+          <b>MESSAGE</b>
+          <span fg="#666666"> | {message.id.slice(0, 24)}...</span>
+        </text>
+        <text fg="#666666">q/Esc: close</text>
+      </box>
+
+      {/* Message metadata */}
+      <box height={7} paddingLeft={1} paddingTop={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+        <box flexDirection="row">
+          <text>
+            <b fg="#666666">From: </b>
+            <span fg="#00ffff">{message.sender}</span>
+          </text>
+          <text fg="#666666">{"  |  "}</text>
+          <text>
+            <b fg="#666666">To: </b>
+            <span fg="#888888">{message.recipient}</span>
+          </text>
+        </box>
+        <text>
+          <b fg="#666666">Subject: </b>
+          <span fg="#ffffff">{message.subject}</span>
+        </text>
+        <box flexDirection="row">
+          <text>
+            <b fg="#666666">Priority: </b>
+            <span fg={priorityColor(message.priority)}>P{message.priority}</span>
+          </text>
+          <text fg="#666666">{"  |  "}</text>
+          <text>
+            <b fg="#666666">Kind: </b>
+            <span fg="#888888">{message.kind}</span>
+          </text>
+          <text fg="#666666">{"  |  "}</text>
+          <text>
+            <b fg="#666666">Status: </b>
+            <span fg={message.status === "unread" ? "#00ff00" : "#888888"}>{message.status}</span>
+          </text>
+        </box>
+        <text>
+          <b fg="#666666">Created: </b>
+          <span fg="#888888">{message.created_at}</span>
+        </text>
+      </box>
+
+      {/* Body */}
+      <box flexGrow={1} flexDirection="column" padding={1} overflow="scroll">
+        <text fg="#ffff00">
+          <b>Body:</b>
+        </text>
+        <box paddingTop={1}>
+          {message.body ? (
+            <text fg="#cccccc">{message.body}</text>
+          ) : (
+            <text fg="#666666">(no body)</text>
+          )}
+        </box>
+      </box>
+    </box>
+  );
+}
+
 export function MailboxView() {
   const [actorIdx, setActorIdx] = useState(0);
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [showFullView, setShowFullView] = useState(false);
+
+  const LIST_HEIGHT = 8; // Each row is 2 lines high
 
   const actor = ACTORS[actorIdx];
   const { data: messages, isLoading, error, refetch } = useMailbox({
@@ -126,33 +213,48 @@ export function MailboxView() {
 
   const selectedMessage = messages?.[cursor];
 
+  const updateCursor = (newCursor: number) => {
+    if (!messages) return;
+    setCursor(newCursor);
+    if (newCursor < scrollOffset) {
+      setScrollOffset(newCursor);
+    } else if (newCursor >= scrollOffset + LIST_HEIGHT) {
+      setScrollOffset(newCursor - LIST_HEIGHT + 1);
+    }
+  };
+
   useKeyboard((e) => {
+    if (showFullView) return; // Full view handles its own keys
+    if (!messages) return;
+
     switch (e.name) {
       case "up":
       case "k":
-        setCursor((c) => Math.max(0, c - 1));
+        updateCursor(Math.max(0, cursor - 1));
         break;
       case "down":
       case "j":
-        if (messages) {
-          setCursor((c) => Math.min(Math.max(0, messages.length - 1), c + 1));
+        updateCursor(Math.min(Math.max(0, messages.length - 1), cursor + 1));
+        break;
+      case "return":
+        if (selectedMessage) {
+          setShowFullView(true);
         }
         break;
       case "a":
         // Cycle actor
         setActorIdx((i) => (i + 1) % ACTORS.length);
         setCursor(0);
+        setScrollOffset(0);
         break;
       case "r":
         refetch();
         break;
       case "g":
-        setCursor(0);
+        updateCursor(0);
         break;
       case "G":
-        if (messages) {
-          setCursor(Math.max(0, messages.length - 1));
-        }
+        updateCursor(Math.max(0, messages.length - 1));
         break;
     }
   });
@@ -174,6 +276,16 @@ export function MailboxView() {
     );
   }
 
+  // Show full view when Enter is pressed
+  if (showFullView && selectedMessage) {
+    return (
+      <MessageFullView
+        message={selectedMessage}
+        onClose={() => setShowFullView(false)}
+      />
+    );
+  }
+
   return (
     <box flexDirection="row" width="100%" height="100%">
       {/* Message list */}
@@ -181,7 +293,7 @@ export function MailboxView() {
         <box height={2} paddingLeft={1}>
           <text fg="#aa77ff">
             <b>Mailbox: {actor}</b>
-            <span fg="#666666"> ({messages?.length || 0} messages)</span>
+            <span fg="#666666"> ({messages?.length || 0} messages) | Enter: full view</span>
           </text>
           <text fg="#666666">{"  "}Press 'a' to cycle actors</text>
         </box>
@@ -191,11 +303,11 @@ export function MailboxView() {
               <text fg="#888888">No messages for {actor}</text>
             </box>
           ) : (
-            messages.map((msg, i) => (
+            messages.slice(scrollOffset, scrollOffset + LIST_HEIGHT).map((msg, i) => (
               <MessageRow
                 key={msg.id}
                 message={msg}
-                selected={i === cursor}
+                selected={i + scrollOffset === cursor}
               />
             ))
           )}

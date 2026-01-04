@@ -1123,6 +1123,282 @@ func (s *TursoStore) DeleteChunks(ctx context.Context, sessionID string) error {
 	return err
 }
 
+// --- Context Window Operations ---
+
+// SaveContextWindow inserts or updates a context window.
+func (s *TursoStore) SaveContextWindow(ctx context.Context, window ContextWindow) (ContextWindow, error) {
+	now := timeutil.NowUTC()
+	if window.CreatedAt.IsZero() {
+		window.CreatedAt = now
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO session_context_windows (
+	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id, window_index) DO UPDATE SET
+	started_at = excluded.started_at,
+	ended_at = excluded.ended_at,
+	pre_compact_tokens = excluded.pre_compact_tokens,
+	trigger = excluded.trigger,
+	chunk_start = excluded.chunk_start,
+	chunk_end = excluded.chunk_end,
+	message_count = excluded.message_count,
+	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
+	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`,
+		window.ID, window.SessionID, window.WindowIndex,
+		sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
+		window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,
+		window.MessageCount, window.Summary, window.Embedding, window.EmbeddingModel,
+		sqlutil.FormatTimestamp(window.CreatedAt),
+	)
+	if err != nil {
+		return ContextWindow{}, fmt.Errorf("sessions: save context window: %w", err)
+	}
+	return window, nil
+}
+
+// SaveContextWindows inserts multiple context windows in a batch.
+func (s *TursoStore) SaveContextWindows(ctx context.Context, windows []ContextWindow) error {
+	if len(windows) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sessions: begin window tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO session_context_windows (
+	id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+	trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(session_id, window_index) DO UPDATE SET
+	started_at = excluded.started_at,
+	ended_at = excluded.ended_at,
+	pre_compact_tokens = excluded.pre_compact_tokens,
+	trigger = excluded.trigger,
+	chunk_start = excluded.chunk_start,
+	chunk_end = excluded.chunk_end,
+	message_count = excluded.message_count,
+	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
+	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`)
+	if err != nil {
+		return fmt.Errorf("sessions: prepare window stmt: %w", err)
+	}
+	defer stmt.Close()
+
+	now := timeutil.NowUTC()
+	for _, window := range windows {
+		if window.CreatedAt.IsZero() {
+			window.CreatedAt = now
+		}
+
+		_, err := stmt.ExecContext(ctx,
+			window.ID, window.SessionID, window.WindowIndex,
+			sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
+			window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,
+			window.MessageCount, window.Summary, window.Embedding, window.EmbeddingModel,
+			sqlutil.FormatTimestamp(window.CreatedAt),
+		)
+		if err != nil {
+			return fmt.Errorf("sessions: save window batch: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sessions: commit window tx: %w", err)
+	}
+	return nil
+}
+
+// GetContextWindows retrieves all context windows for a session.
+func (s *TursoStore) GetContextWindows(ctx context.Context, sessionID string) ([]ContextWindow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+       trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+FROM session_context_windows
+WHERE session_id = ?
+ORDER BY window_index ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: get context windows: %w", err)
+	}
+	defer rows.Close()
+
+	return scanContextWindowsRows(rows)
+}
+
+// GetContextWindow retrieves a specific context window by session and index.
+func (s *TursoStore) GetContextWindow(ctx context.Context, sessionID string, windowIndex int) (ContextWindow, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+       trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+FROM session_context_windows
+WHERE session_id = ? AND window_index = ?`, sessionID, windowIndex)
+
+	return scanContextWindowRow(row)
+}
+
+// UpdateWindowSummary updates the summary and embedding for a context window.
+func (s *TursoStore) UpdateWindowSummary(ctx context.Context, windowID string, summary string, embedding []byte, model string) error {
+	result, err := s.db.ExecContext(ctx, `
+UPDATE session_context_windows SET
+	summary = ?,
+	embedding = ?,
+	embedding_model = ?
+WHERE id = ?`, summary, embedding, model, windowID)
+	if err != nil {
+		return fmt.Errorf("sessions: update window summary: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SearchContextWindows searches context windows by embedding similarity.
+func (s *TursoStore) SearchContextWindows(ctx context.Context, queryEmbedding []float32, limit int) ([]ScoredContextWindow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+       trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+FROM session_context_windows
+WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0`)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: search context windows: %w", err)
+	}
+	defer rows.Close()
+
+	windows, err := scanContextWindowsRows(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate similarities and sort
+	var scored []ScoredContextWindow
+	for _, window := range windows {
+		if len(window.Embedding) == 0 {
+			continue
+		}
+		windowEmb := deserializeEmbedding(window.Embedding)
+		if len(windowEmb) == 0 {
+			continue
+		}
+		sim := cosineSimilarity(queryEmbedding, windowEmb)
+		scored = append(scored, ScoredContextWindow{Window: window, Similarity: sim})
+	}
+
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].Similarity > scored[j].Similarity
+	})
+
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+
+	return scored, nil
+}
+
+// DeleteContextWindows removes all context windows for a session.
+func (s *TursoStore) DeleteContextWindows(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_context_windows WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return fmt.Errorf("sessions: delete context windows: %w", err)
+	}
+	return nil
+}
+
+// scanContextWindowRow scans a single context window from a row.
+func scanContextWindowRow(row *sql.Row) (ContextWindow, error) {
+	var window ContextWindow
+	var startedAt, endedAt, createdAt sql.NullString
+	var trigger, summary, embeddingModel sql.NullString
+	var chunkStart, chunkEnd, messageCount sql.NullInt64
+
+	err := row.Scan(
+		&window.ID, &window.SessionID, &window.WindowIndex,
+		&startedAt, &endedAt, &window.PreCompactTokens,
+		&trigger, &chunkStart, &chunkEnd, &messageCount,
+		&summary, &window.Embedding, &embeddingModel, &createdAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ContextWindow{}, ErrNotFound
+		}
+		return ContextWindow{}, fmt.Errorf("sessions: scan context window: %w", err)
+	}
+
+	if startedAt.Valid {
+		window.StartedAt, _ = sqlutil.ScanTimestamp(startedAt.String)
+	}
+	if endedAt.Valid {
+		window.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+	}
+	if createdAt.Valid {
+		window.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt.String)
+	}
+	window.Trigger = trigger.String
+	window.Summary = summary.String
+	window.EmbeddingModel = embeddingModel.String
+	window.ChunkStart = int(chunkStart.Int64)
+	window.ChunkEnd = int(chunkEnd.Int64)
+	window.MessageCount = int(messageCount.Int64)
+
+	return window, nil
+}
+
+// scanContextWindowsRows scans multiple context windows from rows.
+func scanContextWindowsRows(rows *sql.Rows) ([]ContextWindow, error) {
+	var windows []ContextWindow
+	for rows.Next() {
+		var window ContextWindow
+		var startedAt, endedAt, createdAt sql.NullString
+		var trigger, summary, embeddingModel sql.NullString
+		var chunkStart, chunkEnd, messageCount sql.NullInt64
+
+		err := rows.Scan(
+			&window.ID, &window.SessionID, &window.WindowIndex,
+			&startedAt, &endedAt, &window.PreCompactTokens,
+			&trigger, &chunkStart, &chunkEnd, &messageCount,
+			&summary, &window.Embedding, &embeddingModel, &createdAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("sessions: scan context windows: %w", err)
+		}
+
+		if startedAt.Valid {
+			window.StartedAt, _ = sqlutil.ScanTimestamp(startedAt.String)
+		}
+		if endedAt.Valid {
+			window.EndedAt, _ = sqlutil.ScanTimestamp(endedAt.String)
+		}
+		if createdAt.Valid {
+			window.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt.String)
+		}
+		window.Trigger = trigger.String
+		window.Summary = summary.String
+		window.EmbeddingModel = embeddingModel.String
+		window.ChunkStart = int(chunkStart.Int64)
+		window.ChunkEnd = int(chunkEnd.Int64)
+		window.MessageCount = int(messageCount.Int64)
+
+		windows = append(windows, window)
+	}
+	return windows, rows.Err()
+}
+
 // SetArchivePath sets the raw JSONL archive path.
 func (s *TursoStore) SetArchivePath(ctx context.Context, sessionID, archivePath string) error {
 	result, err := s.db.ExecContext(ctx, `

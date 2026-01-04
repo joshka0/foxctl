@@ -110,13 +110,33 @@ echo ""
 # 5. Setup Claude Code integration
 echo -e "${BLUE}5. Setting up Claude Code integration...${NC}"
 
-# Copy hooks if they exist
-if [[ -d "$REPO_ROOT/.claude/hooks" ]]; then
-    mkdir -p "$CLAUDE_DIR/hooks"
-    # Note: Don't overwrite user customizations, just ensure structure exists
-    success "Claude hooks directory ready at $CLAUDE_DIR/hooks"
+# Create hooks directory
+mkdir -p "$CLAUDE_DIR/hooks"
+
+# Symlink agentctl hooks folder
+HOOKS_SOURCE="$REPO_ROOT/configs/hooks"
+HOOKS_TARGET="$CLAUDE_DIR/hooks/agentctl"
+
+if [[ -d "$HOOKS_SOURCE" ]]; then
+    # Remove existing symlink (including broken ones) or directory
+    # Note: -L checks for symlink regardless of whether target exists
+    if [[ -L "$HOOKS_TARGET" ]]; then
+        rm "$HOOKS_TARGET"
+    elif [[ -e "$HOOKS_TARGET" ]]; then
+        # Only warn and remove if it's a real directory (not a symlink)
+        warn "Removing existing agentctl hooks directory"
+        rm -rf "$HOOKS_TARGET"
+    fi
+
+    # Resolve source to absolute path for reliable symlinks
+    # This ensures the symlink works even if cwd changes
+    HOOKS_SOURCE_ABS="$(cd "$HOOKS_SOURCE" && pwd)"
+
+    # Create symlink to hooks folder using absolute path
+    ln -s "$HOOKS_SOURCE_ABS" "$HOOKS_TARGET"
+    success "Symlinked agentctl hooks -> $HOOKS_TARGET"
 else
-    info "No hooks to copy (repo .claude/hooks not found)"
+    warn "No hooks to symlink (configs/hooks not found)"
 fi
 
 # Copy skills manifest reference

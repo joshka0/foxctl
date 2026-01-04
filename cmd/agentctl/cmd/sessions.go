@@ -43,6 +43,7 @@ manually with:
 		newSessionsCaptureCommand(),
 		newSessionsSummarizeCommand(),
 		newSessionsImportCommand(),
+		newSessionsWindowsCommand(),
 		// Lineage commands
 		newSessionsNewCommand(),
 		newSessionsResumeCommand(),
@@ -1134,6 +1135,116 @@ Examples:
 	cmd.Flags().StringVar(&status, "status", "ok", "Status to set (ok, error, canceled)")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (default: cwd)")
 	cmd.Flags().StringVar(&agentID, "agent-id", "", "Agent identifier (default: agentctl)")
+	return cmd
+}
+
+func newSessionsWindowsCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "windows <session-id>",
+		Short: "List context windows for a session",
+		Long: `List context windows (compaction-bounded work spans) for a session.
+
+Context windows are created when Claude Code compacts its conversation context.
+Each window represents a coherent span of work before a compaction boundary,
+enabling granular retrieval within long sessions.
+
+Examples:
+  agentctl sessions windows 01HXYZ...
+  agentctl sessions windows 01HXYZ... --show-chunks`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sessionID := args[0]
+			showChunks, _ := cmd.Flags().GetBool("show-chunks")
+
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
+					// Verify session exists
+					session, err := store.Get(ctx, sessionID)
+					if err != nil {
+						if errors.Is(err, sessions.ErrNotFound) {
+							return sessionscmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.sessions.windows", sessionID)
+						}
+						return err
+					}
+
+					// Get context windows
+					windows, err := store.GetContextWindows(ctx, sessionID)
+					if err != nil {
+						return fmt.Errorf("get context windows: %w", err)
+					}
+
+					type windowEntry struct {
+						ID               string    `json:"id"`
+						WindowIndex      int       `json:"window_index"`
+						StartedAt        time.Time `json:"started_at,omitempty"`
+						EndedAt          time.Time `json:"ended_at,omitempty"`
+						PreCompactTokens int       `json:"pre_compact_tokens,omitempty"`
+						Trigger          string    `json:"trigger,omitempty"`
+						ChunkStart       int       `json:"chunk_start"`
+						ChunkEnd         int       `json:"chunk_end"`
+						MessageCount     int       `json:"message_count"`
+						Summary          string    `json:"summary,omitempty"`
+						HasEmbedding     bool      `json:"has_embedding"`
+					}
+
+					entries := make([]windowEntry, len(windows))
+					for i, w := range windows {
+						entries[i] = windowEntry{
+							ID:               w.ID,
+							WindowIndex:      w.WindowIndex,
+							StartedAt:        w.StartedAt,
+							EndedAt:          w.EndedAt,
+							PreCompactTokens: w.PreCompactTokens,
+							Trigger:          w.Trigger,
+							ChunkStart:       w.ChunkStart,
+							ChunkEnd:         w.ChunkEnd,
+							MessageCount:     w.MessageCount,
+							Summary:          truncateSummary(w.Summary, 80),
+							HasEmbedding:     len(w.Embedding) > 0,
+						}
+					}
+
+					payload := struct {
+						SessionID   string        `json:"session_id"`
+						ProjectName string        `json:"project_name,omitempty"`
+						Windows     []windowEntry `json:"windows"`
+						Count       int           `json:"count"`
+					}{
+						SessionID:   sessionID,
+						ProjectName: session.ProjectName,
+						Windows:     entries,
+						Count:       len(entries),
+					}
+
+					// Optionally show chunk counts
+					if showChunks && len(windows) > 0 {
+						// Get total chunk count for context
+						chunks, err := store.GetChunks(ctx, sessionID, 0)
+						if err == nil {
+							payload := struct {
+								SessionID   string        `json:"session_id"`
+								ProjectName string        `json:"project_name,omitempty"`
+								Windows     []windowEntry `json:"windows"`
+								Count       int           `json:"count"`
+								TotalChunks int           `json:"total_chunks"`
+							}{
+								SessionID:   sessionID,
+								ProjectName: session.ProjectName,
+								Windows:     entries,
+								Count:       len(entries),
+								TotalChunks: len(chunks),
+							}
+							return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.windows", payload)
+						}
+					}
+
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.windows", payload)
+				})
+			})
+		},
+	}
+
+	cmd.Flags().Bool("show-chunks", false, "Include total chunk count in output")
 	return cmd
 }
 

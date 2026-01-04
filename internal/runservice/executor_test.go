@@ -406,8 +406,11 @@ func TestExecutorRememberStoresMemory(t *testing.T) {
 			Cache: filepath.Join(tmp, "cache"),
 			CAS:   filepath.Join(tmp, "cas"),
 		},
+		Storage: config.StorageSettings{
+			Root: filepath.Join(tmp, "storage"),
+		},
 	}
-	for _, dir := range []string{cfg.Paths.Cache, cfg.Paths.CAS} {
+	for _, dir := range []string{cfg.Paths.Cache, cfg.Paths.CAS, cfg.Storage.Root} {
 		if err := ensureDir(dir); err != nil {
 			t.Fatalf("ensure dir: %v", err)
 		}
@@ -431,7 +434,7 @@ func TestExecutorRememberStoresMemory(t *testing.T) {
 		t.Fatalf("remember: %v", err)
 	}
 
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}

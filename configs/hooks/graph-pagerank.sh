@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
-# graph-pagerank.sh - Stop hook to recalculate graph metrics
+# graph-pagerank.sh - Stop hook to recalculate graph metrics (ASYNC)
 #
-# Runs at session end to recalculate node degrees and (when available)
-# PageRank scores for the workspace's dependency graph.
+# Runs at session end to recalculate node degrees and PageRank scores.
 #
-# Currently performs:
-#   - Recalculate in_degree/out_degree for all nodes
-#   - Report graph stats
-#
-# TODO: Add actual PageRank computation when graph/pagerank skill is added
+# ASYNC: This hook immediately returns and runs computation in background.
+# Stop hooks don't need to block - the session is ending anyway.
 #
 # Environment:
 #   AGENTCTL_BIN - Path to agentctl binary
 #   AGENTCTL_GRAPH_PAGERANK_DISABLED - Set to "1" to disable
-#   AGENTCTL_GRAPH_PAGERANK_DEBUG - Set to "1" for debug output
+#   AGENTCTL_GRAPH_PAGERANK_SYNC - Set to "1" to force synchronous execution
 
 set -euo pipefail
-
-DEBUG="${AGENTCTL_GRAPH_PAGERANK_DEBUG:-}"
 
 # Check if disabled
 if [[ "${AGENTCTL_GRAPH_PAGERANK_DISABLED:-}" == "1" ]]; then
@@ -38,9 +32,7 @@ fi
 # Workspace from environment
 workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
-[[ -n "$DEBUG" ]] && echo "DEBUG: Recalculating graph metrics for workspace: $workspace" >&2
-
-# Recalculate degrees via cleanup operation
+# Build cleanup input for degree recalculation
 cleanup_input=$(jq -nc \
   --arg ws "$workspace" \
   '{
@@ -53,23 +45,20 @@ cleanup_input=$(jq -nc \
     }
   }')
 
-if result=$(printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null); then
-  [[ -n "$DEBUG" ]] && echo "DEBUG: Degree recalculation complete" >&2
+# ASYNC: Run in background unless SYNC mode requested
+if [[ "${AGENTCTL_GRAPH_PAGERANK_SYNC:-}" != "1" ]]; then
+  LOG_DIR="${HOME}/.agentctl/logs/hooks"
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  LOG_FILE="$LOG_DIR/graph-pagerank-$(date +%Y%m%d-%H%M%S).log"
 
-  # Get updated stats
-  stats_input=$(jq -nc --arg ws "$workspace" '{operation: "stats", workspace: $ws}')
-  stats=$(printf '%s' "$stats_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null) || stats=""
-
-  if [[ -n "$stats" ]]; then
-    node_count=$(printf '%s' "$stats" | jq -r '.data.total_nodes // 0')
-    edge_count=$(printf '%s' "$stats" | jq -r '.data.total_edges // 0')
-    avg_pagerank=$(printf '%s' "$stats" | jq -r '.data.avg_pagerank // 0')
-
-    [[ -n "$DEBUG" ]] && echo "DEBUG: Graph stats - nodes: $node_count, edges: $edge_count, avg_pr: $avg_pagerank" >&2
-  fi
-else
-  [[ -n "$DEBUG" ]] && echo "DEBUG: Graph cleanup failed" >&2
+  # Spawn in background and exit immediately
+  (
+    printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1
+  ) &
+  disown
+  exit 0
 fi
 
-# Stop hooks don't return JSON, just exit cleanly
+# SYNC mode (for debugging)
+printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null || true
 exit 0

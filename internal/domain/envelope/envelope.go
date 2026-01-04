@@ -89,6 +89,27 @@ type MemoryRef struct {
 	Workspace string `json:"workspace,omitempty"`
 }
 
+// CASHint provides user-friendly guidance for retrieving large outputs from CAS.
+// This is included in the envelope data when output is truncated and stored in CAS.
+type CASHint struct {
+	// Digest is the CAS content address (e.g., "sha256:abc123...")
+	Digest string `json:"digest"`
+	// TotalBytes is the full size of the stored content
+	TotalBytes int64 `json:"total_bytes"`
+	// ContentType describes the content format (e.g., "application/json", "text/plain")
+	ContentType string `json:"content_type,omitempty"`
+	// PageCount is the number of pages if content supports pagination
+	PageCount int `json:"page_count,omitempty"`
+	// PageSize is the number of items per page
+	PageSize int `json:"page_size,omitempty"`
+	// ReadCommand is a shell command to retrieve the full content
+	ReadCommand string `json:"read_command,omitempty"`
+	// GetCommand is an alternative command for raw content retrieval
+	GetCommand string `json:"get_command,omitempty"`
+	// IsBinary indicates if the content is binary (non-text)
+	IsBinary bool `json:"is_binary,omitempty"`
+}
+
 // ErrorFields captures error metadata when status != ok.
 type ErrorFields struct {
 	Code    string `json:"code,omitempty"`

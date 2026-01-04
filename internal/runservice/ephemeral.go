@@ -7,6 +7,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution"
+	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
 
@@ -31,10 +32,23 @@ func (e *Executor) ExecuteEphemeral(input []byte) error {
 	skillExecutor := execution.NewRunnerExecutor()
 	start := time.Now()
 
-	result, err := skillExecutor.Execute(e.ctx, execution.ExecuteOptions{
+	// Add workspace to context so skill runners can read it via workspace.FromContext
+	ctx := e.ctx
+	if e.options.Workspace != "" {
+		ctx = workspace.WithContext(ctx, e.options.Workspace)
+	}
+
+	// Build extra env vars for this execution (avoids race condition with os.Setenv)
+	var extraEnv []string
+	if e.options.NoCAS {
+		extraEnv = append(extraEnv, "AGENTCTL_NO_CAS=1")
+	}
+
+	result, err := skillExecutor.Execute(ctx, execution.ExecuteOptions{
 		Manifest:     e.handle.Manifest,
 		ArtifactPath: e.handle.ArtifactPath,
 		Input:        input,
+		ExtraEnv:     extraEnv,
 	})
 	if err != nil {
 		return fmt.Errorf("ephemeral execution failed: %w", err)

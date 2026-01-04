@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useTasks } from "../hooks/useData";
+import { WINDOWED_LIST_HEIGHT } from "../constants";
 import type { TaskSummary } from "@agentctl/data";
 
 interface TaskRowProps {
@@ -10,27 +11,27 @@ interface TaskRowProps {
   selected: boolean;
 }
 
-function TaskRow({ task, index, selected }: TaskRowProps) {
+function TaskRow({ task, selected }: TaskRowProps) {
   const bg = selected ? "#444444" : undefined;
   const cursor = selected ? "> " : "  ";
 
   // Score color gradient from red (low) to green (high)
+  const score = task.score ?? 0;
   const scoreColor =
-    task.score >= 0.8
+    score >= 0.8
       ? "#00ff00"
-      : task.score >= 0.5
+      : score >= 0.5
         ? "#ffff00"
         : "#ff8800";
 
   return (
     <box backgroundColor={bg} flexDirection="column" paddingBottom={1}>
-      <text fg="#ffffff">
+      <text fg={selected ? "#ffffff" : "#cccccc"}>
         {cursor}
-        <span fg={scoreColor}>[{task.score.toFixed(2)}]</span>
+        <span fg={scoreColor}>[{score.toFixed(2)}]</span>
         {"  "}
         {task.title}
       </text>
-      <text fg="#666666">{"    "}{task.id.slice(0, 32)}</text>
     </box>
   );
 }
@@ -64,7 +65,7 @@ function TaskDetail({ task }: TaskDetailProps) {
       </text>
       <text>
         <b fg="#666666">Score: </b>
-        <span fg="#ffaa00">{task.score.toFixed(4)}</span>
+        <span fg="#ffaa00">{(task.score ?? 0).toFixed(4)}</span>
       </text>
       {task.status && (
         <text>
@@ -87,30 +88,42 @@ function TaskDetail({ task }: TaskDetailProps) {
 
 export function TasksView() {
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const { data, isLoading, error, refetch } = useTasks({ limit: 50 });
+
+  const LIST_HEIGHT = WINDOWED_LIST_HEIGHT;
 
   const tasks = data?.tasks || [];
   const stats = data?.stats;
   const selectedTask = tasks[cursor];
 
+  const updateCursor = (newCursor: number) => {
+    setCursor(newCursor);
+    if (newCursor < scrollOffset) {
+      setScrollOffset(newCursor);
+    } else if (newCursor >= scrollOffset + LIST_HEIGHT) {
+      setScrollOffset(newCursor - LIST_HEIGHT + 1);
+    }
+  };
+
   useKeyboard((e) => {
     switch (e.name) {
       case "up":
       case "k":
-        setCursor((c) => Math.max(0, c - 1));
+        updateCursor(Math.max(0, cursor - 1));
         break;
       case "down":
       case "j":
-        setCursor((c) => Math.min(Math.max(0, tasks.length - 1), c + 1));
+        updateCursor(Math.min(Math.max(0, tasks.length - 1), cursor + 1));
         break;
       case "r":
         refetch();
         break;
       case "g":
-        setCursor(0);
+        updateCursor(0);
         break;
       case "G":
-        setCursor(Math.max(0, tasks.length - 1));
+        updateCursor(Math.max(0, tasks.length - 1));
         break;
     }
   });
@@ -143,28 +156,25 @@ export function TasksView() {
   return (
     <box flexDirection="row" width="100%" height="100%">
       {/* Task list */}
-      <box width="50%" flexDirection="column">
-        <box height={1} paddingLeft={1}>
+      <box width="45%" flexDirection="column" borderStyle="single" borderColor="#333333" border={["right"]}>
+        <box height={3} paddingLeft={1} paddingTop={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
           <text fg="#aa77ff">
-            <b>Task Recommendations</b>
+            <b>TASK LIST</b>
             <span fg="#666666"> ({tasks.length})</span>
           </text>
-        </box>
-        {stats && (
-          <box height={1} paddingLeft={1}>
+          {stats && (
             <text fg="#666666">
-              Total: {stats.total} | Pending: {stats.pending} | In Progress: {stats.in_progress}
+              P:{stats.pending} | IP:{stats.in_progress} | C:{stats.completed}
             </text>
-          </box>
-        )}
-        <text> </text>
+          )}
+        </box>
         <box flexGrow={1} flexDirection="column" overflow="hidden">
-          {tasks.map((task, i) => (
+          {tasks.slice(scrollOffset, scrollOffset + LIST_HEIGHT).map((task, i) => (
             <TaskRow
               key={task.id}
               task={task}
-              index={i}
-              selected={i === cursor}
+              index={i + scrollOffset}
+              selected={i + scrollOffset === cursor}
             />
           ))}
         </box>

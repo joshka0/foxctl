@@ -8,6 +8,15 @@
     "dev:server": "bun run --cwd packages/gui server",
     "dev:all": "bun run --cwd packages/gui dev:all",
     "build": "bun run --filter '*' build",
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --filter '*' typecheck",
+    "typecheck:fast": "tsgo --noEmit",
+    "lint": "oxlint packages/",
+    "lint:fix": "oxlint packages/ --fix",
+    "check": "bun run lint && bun run typecheck:fast"
+  },
+  "devDependencies": {
+    "//tsgo": "native-preview provides 10x faster typecheck via `bun run typecheck:fast`. Experimental but stable for dev-only use. Falls back to standard tsc via `bun run typecheck`.",
+    "@typescript/native-preview": "7.0.0-dev.20260103.1",
+    "oxlint": "1.36.0"
   }
 }

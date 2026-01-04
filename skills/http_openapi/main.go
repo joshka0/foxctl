@@ -100,7 +100,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	var memStore storage.MemoryStore
 	if strings.HasPrefix(in.Spec, "memory:") {
 		var err error
-		memStore, err = memory.Open(ctx, rc.Config.Paths.Cache, rc.Config.Paths.CAS)
+		memStore, err = memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 		if err != nil {
 			return &client.Error{
 				Code:    "ERUNTIME",

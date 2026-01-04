@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# graph-cleanup.sh - Stop hook to clean up the dependency graph
+# graph-cleanup.sh - Stop hook to clean up the dependency graph (ASYNC)
 #
 # Runs at session end to perform graph maintenance:
 #   - Remove expired edges (past TTL)
 #   - Remove dangling edges (pointing to non-existent nodes)
 #
+# ASYNC: This hook immediately returns and runs cleanup in background.
+# Stop hooks don't need to block - the session is ending anyway.
+#
 # Environment:
 #   AGENTCTL_BIN - Path to agentctl binary
 #   AGENTCTL_GRAPH_CLEANUP_DISABLED - Set to "1" to disable
-#   AGENTCTL_GRAPH_CLEANUP_DEBUG - Set to "1" for debug output
+#   AGENTCTL_GRAPH_CLEANUP_SYNC - Set to "1" to force synchronous execution
 
 set -euo pipefail
-
-DEBUG="${AGENTCTL_GRAPH_CLEANUP_DEBUG:-}"
 
 # Check if disabled
 if [[ "${AGENTCTL_GRAPH_CLEANUP_DISABLED:-}" == "1" ]]; then
@@ -33,9 +34,7 @@ fi
 # Workspace from environment
 workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
-[[ -n "$DEBUG" ]] && echo "DEBUG: Running graph cleanup for workspace: $workspace" >&2
-
-# Run cleanup: expired + dangling edges
+# Build cleanup input
 cleanup_input=$(jq -nc \
   --arg ws "$workspace" \
   '{
@@ -48,18 +47,20 @@ cleanup_input=$(jq -nc \
     }
   }')
 
-if result=$(printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null); then
-  expired=$(printf '%s' "$result" | jq -r '.data.expired_edges_removed // 0')
-  dangling=$(printf '%s' "$result" | jq -r '.data.dangling_edges_removed // 0')
+# ASYNC: Run in background unless SYNC mode requested
+if [[ "${AGENTCTL_GRAPH_CLEANUP_SYNC:-}" != "1" ]]; then
+  LOG_DIR="${HOME}/.agentctl/logs/hooks"
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  LOG_FILE="$LOG_DIR/graph-cleanup-$(date +%Y%m%d-%H%M%S).log"
 
-  total=$((expired + dangling))
-
-  if [[ $total -gt 0 ]]; then
-    [[ -n "$DEBUG" ]] && echo "DEBUG: Cleaned up $expired expired + $dangling dangling edges" >&2
-  fi
-else
-  [[ -n "$DEBUG" ]] && echo "DEBUG: Graph cleanup failed" >&2
+  # Spawn in background and exit immediately
+  (
+    printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1
+  ) &
+  disown
+  exit 0
 fi
 
-# Stop hooks don't return JSON, just exit cleanly
+# SYNC mode (for debugging)
+printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null || true
 exit 0

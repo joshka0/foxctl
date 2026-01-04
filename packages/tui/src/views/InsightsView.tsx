@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useInsights } from "../hooks/useData";
+import { WINDOWED_LIST_HEIGHT } from "../constants";
 import type { GraphNode } from "@agentctl/data";
 
 interface NodeRowProps {
@@ -10,7 +11,7 @@ interface NodeRowProps {
   selected: boolean;
 }
 
-function NodeRow({ node, index, selected }: NodeRowProps) {
+function NodeRow({ node, selected }: NodeRowProps) {
   const bg = selected ? "#444444" : undefined;
   const cursor = selected ? "> " : "  ";
 
@@ -22,9 +23,10 @@ function NodeRow({ node, index, selected }: NodeRowProps) {
         ? "#ffaa00"
         : "#00ff00";
 
-  const idDisplay = node.task_id.length > 16
-    ? node.task_id.slice(0, 16) + "..."
-    : node.task_id.padEnd(19);
+  const titleDisplay = node.title || node.task_id;
+  const display = titleDisplay.length > 40
+    ? titleDisplay.slice(0, 37) + "..."
+    : titleDisplay;
 
   return (
     <box height={1} backgroundColor={bg}>
@@ -34,7 +36,7 @@ function NodeRow({ node, index, selected }: NodeRowProps) {
         {"  "}
         <span fg="#00ffff">{String(node.critical_path_score).padStart(3)}</span>
         {"  "}
-        <span fg="#888888">{idDisplay}</span>
+        <span fg={node.title ? "#ffffff" : "#666666"}>{display}</span>
       </text>
     </box>
   );
@@ -95,31 +97,43 @@ function NodeDetail({ node }: NodeDetailProps) {
 
 export function InsightsView() {
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const { data, isLoading, error, refetch } = useInsights();
+
+  const LIST_HEIGHT = WINDOWED_LIST_HEIGHT;
 
   const nodes = data?.nodes || [];
   const cycles = data?.cycles || [];
   const topoOrder = data?.topological_order || [];
   const selectedNode = nodes[cursor];
 
+  const updateCursor = (newCursor: number) => {
+    setCursor(newCursor);
+    if (newCursor < scrollOffset) {
+      setScrollOffset(newCursor);
+    } else if (newCursor >= scrollOffset + LIST_HEIGHT) {
+      setScrollOffset(newCursor - LIST_HEIGHT + 1);
+    }
+  };
+
   useKeyboard((e) => {
     switch (e.name) {
       case "up":
       case "k":
-        setCursor((c) => Math.max(0, c - 1));
+        updateCursor(Math.max(0, cursor - 1));
         break;
       case "down":
       case "j":
-        setCursor((c) => Math.min(Math.max(0, nodes.length - 1), c + 1));
+        updateCursor(Math.min(Math.max(0, nodes.length - 1), cursor + 1));
         break;
       case "r":
         refetch();
         break;
       case "g":
-        setCursor(0);
+        updateCursor(0);
         break;
       case "G":
-        setCursor(Math.max(0, nodes.length - 1));
+        updateCursor(Math.max(0, nodes.length - 1));
         break;
     }
   });
@@ -144,17 +158,18 @@ export function InsightsView() {
   return (
     <box flexDirection="column" width="100%" height="100%">
       {/* Overview stats */}
-      <box height={3} paddingLeft={1} paddingTop={1}>
-        <text fg="#aa77ff">
-          <b>Task Graph Insights</b>
-        </text>
-        <text fg="#666666">
-          {"  "}Nodes: {nodes.length} | Cycles: {cycles.length} | Topo Order:{" "}
-          {topoOrder.length}
-        </text>
+      <box height={3} paddingLeft={1} paddingTop={1} borderStyle="single" borderColor="#333333" border={["bottom"]}>
+        <box flexDirection="row" justifyContent="space-between">
+          <text fg="#aa77ff">
+            <b>TASK GRAPH INSIGHTS</b>
+          </text>
+          <text fg="#666666">
+            Nodes: {nodes.length} | Cycles: {cycles.length} | Topo: {topoOrder.length} {"  "}
+          </text>
+        </box>
         {cycles.length > 0 && (
           <text fg="#ff0000">
-            {"  "}Circular dependencies detected!
+            Circular dependencies detected!
           </text>
         )}
       </box>
@@ -165,7 +180,7 @@ export function InsightsView() {
         <box width="55%" flexDirection="column">
           <box height={1} paddingLeft={1}>
             <text fg="#666666">
-              {"  "}PR{"      "}CP{"   "}Task ID
+              {"  "}PR{"      "}CP{"   "}Task Name
             </text>
           </box>
           <box flexGrow={1} flexDirection="column" overflow="hidden">
@@ -174,12 +189,12 @@ export function InsightsView() {
                 <text fg="#888888">No graph nodes. Add tasks with dependencies!</text>
               </box>
             ) : (
-              nodes.map((node, i) => (
+              nodes.slice(scrollOffset, scrollOffset + LIST_HEIGHT).map((node, i) => (
                 <NodeRow
                   key={node.task_id}
                   node={node}
-                  index={i}
-                  selected={i === cursor}
+                  index={i + scrollOffset}
+                  selected={i + scrollOffset === cursor}
                 />
               ))
             )}

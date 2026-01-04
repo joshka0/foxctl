@@ -170,6 +170,7 @@ func newCIStatusCommand() *cobra.Command {
 	var format string
 	var skipCache bool
 	var dataOnly bool
+	var noCAS bool
 	var helpJSON bool
 
 	cmd := &cobra.Command{
@@ -190,7 +191,7 @@ func newCIStatusCommand() *cobra.Command {
 			if strings.TrimSpace(pr) == "" {
 				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 66.")
 			}
-			return runCIStatus(cmd, pr, owner, repo, format, skipCache, dataOnly)
+			return runCIStatus(cmd, pr, owner, repo, format, skipCache, dataOnly, noCAS)
 		},
 	}
 
@@ -201,11 +202,12 @@ func newCIStatusCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute skills")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the command")
 	return cmd
 }
 
-func runCIStatus(cmd *cobra.Command, pr, owner, repo, format string, skipCache, dataOnly bool) error {
+func runCIStatus(cmd *cobra.Command, pr, owner, repo, format string, skipCache, dataOnly, noCAS bool) error {
 	// Auto-detect owner/repo from git if not provided
 	owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
 
@@ -230,10 +232,10 @@ func runCIStatus(cmd *cobra.Command, pr, owner, repo, format string, skipCache, 
 	}
 
 	// Call ci/github_checks
-	checksEnv, checksErr := runCISkillForEnvelope(cmd, "ci/github_checks", checksPayload, skipCache)
+	checksEnv, checksErr := runCISkillForEnvelopeWithOpts(cmd, "ci/github_checks", checksPayload, skipCache, noCAS)
 
 	// Call ci/prcomments
-	commentsEnv, commentsErr := runCISkillForEnvelope(cmd, "ci/prcomments", commentsPayload, skipCache)
+	commentsEnv, commentsErr := runCISkillForEnvelopeWithOpts(cmd, "ci/prcomments", commentsPayload, skipCache, noCAS)
 
 	// Build unified status from results
 	status := buildCIStatus(checksEnv, checksErr, commentsEnv, commentsErr)
@@ -467,6 +469,7 @@ func newCIPRCommentsCommand() *cobra.Command {
 	var skipCache bool
 	var dataOnly bool
 	var noComments bool
+	var noCAS bool
 	var helpJSON bool
 
 	cmd := &cobra.Command{
@@ -516,7 +519,7 @@ func newCIPRCommentsCommand() *cobra.Command {
 			if outputPath != "" {
 				payload["output_path"] = outputPath
 			}
-			return runCISkill(cmd, "ci/prcomments", payload, skipCache, dataOnly, noComments)
+			return runCISkill(cmd, "ci/prcomments", payload, skipCache, dataOnly, noComments, noCAS)
 		},
 	}
 
@@ -531,6 +534,7 @@ func newCIPRCommentsCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Omit raw comments array from data when used with --data-only")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
 }
@@ -543,6 +547,7 @@ func newCIChecksCommand() *cobra.Command {
 	var errorsOnly bool
 	var skipCache bool
 	var dataOnly bool
+	var noCAS bool
 	var helpJSON bool
 
 	cmd := &cobra.Command{
@@ -579,7 +584,7 @@ func newCIChecksCommand() *cobra.Command {
 			if mode != "" {
 				payload["mode"] = mode
 			}
-			return runCISkill(cmd, "ci/github_checks", payload, skipCache, dataOnly, false)
+			return runCISkill(cmd, "ci/github_checks", payload, skipCache, dataOnly, false, noCAS)
 		},
 	}
 
@@ -591,6 +596,7 @@ func newCIChecksCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the skill")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
 }
@@ -601,6 +607,7 @@ func newCITodosCommand() *cobra.Command {
 	var repo string
 	var storePath string
 	var skipCache bool
+	var noCAS bool
 	var helpJSON bool
 
 	cmd := &cobra.Command{
@@ -634,7 +641,7 @@ func newCITodosCommand() *cobra.Command {
 			if repo != "" {
 				payload["repo"] = repo
 			}
-			env, err := runCISkillForEnvelope(cmd, "ci/prcomments", payload, skipCache)
+			env, err := runCISkillForEnvelopeWithOpts(cmd, "ci/prcomments", payload, skipCache, noCAS)
 			if err != nil {
 				return err
 			}
@@ -670,6 +677,7 @@ func newCITodosCommand() *cobra.Command {
 	cmd.Flags().StringVar(&storePath, "store", "", "Path to todo store (default: ~/.agentctl/todo/tasks.json)")
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the ci/prcomments skill")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
 }
@@ -682,6 +690,7 @@ func newCICommentsCommand() *cobra.Command {
 	var skipCache bool
 	var dataOnly bool
 	var showAll bool
+	var noCAS bool
 
 	cmd := &cobra.Command{
 		Use:   "comments",
@@ -716,7 +725,7 @@ func newCICommentsCommand() *cobra.Command {
 				payload["repo"] = repo
 			}
 
-			env, err := runCISkillForEnvelope(cmd, "ci/prcomments", payload, skipCache)
+			env, err := runCISkillForEnvelopeWithOpts(cmd, "ci/prcomments", payload, skipCache, noCAS)
 			if err != nil {
 				return err
 			}
@@ -782,6 +791,7 @@ func newCICommentsCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} for AI consumption")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
 	return cmd
 }
 
@@ -792,6 +802,7 @@ func newCIResultsCommand() *cobra.Command {
 	var failedOnly bool
 	var skipCache bool
 	var dataOnly bool
+	var noCAS bool
 
 	cmd := &cobra.Command{
 		Use:   "results",
@@ -819,7 +830,7 @@ func newCIResultsCommand() *cobra.Command {
 				payload["repo"] = repo
 			}
 
-			return runCISkill(cmd, "ci/github_checks", payload, skipCache, dataOnly, false)
+			return runCISkill(cmd, "ci/github_checks", payload, skipCache, dataOnly, false, noCAS)
 		},
 	}
 
@@ -830,6 +841,7 @@ func newCIResultsCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} for AI consumption")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
 	return cmd
 }
 
@@ -851,7 +863,7 @@ type ciHelpMetadata struct {
 	Examples []string     `json:"examples,omitempty"`
 }
 
-func runCISkillForEnvelope(cmd *cobra.Command, skillName string, payload map[string]any, skipCache bool) (envelope.Envelope, error) {
+func runCISkillForEnvelopeWithOpts(cmd *cobra.Command, skillName string, payload map[string]any, skipCache, noCAS bool) (envelope.Envelope, error) {
 	cfg, err := config.Load(cmd.Context())
 	if err != nil {
 		return envelope.Envelope{}, err
@@ -871,6 +883,9 @@ func runCISkillForEnvelope(cmd *cobra.Command, skillName string, payload map[str
 	args := []string{"--input", string(input)}
 	if skipCache {
 		args = append(args, "--cache", "off")
+	}
+	if noCAS {
+		args = append(args, "--no-cas")
 	}
 	args = append(args, skillName)
 	runCmd.SetArgs(args)
@@ -955,7 +970,7 @@ func createTodoFromCITask(cmd *cobra.Command, tm map[string]any, storePath strin
 	return runTodoSkillFunc(cmd, payload)
 }
 
-func runCISkill(cmd *cobra.Command, skillName string, payload map[string]any, skipCache, dataOnly, noComments bool) error {
+func runCISkill(cmd *cobra.Command, skillName string, payload map[string]any, skipCache, dataOnly, noComments, noCAS bool) error {
 	cfg, err := config.Load(cmd.Context())
 	if err != nil {
 		return err
@@ -979,6 +994,9 @@ func runCISkill(cmd *cobra.Command, skillName string, payload map[string]any, sk
 	args := []string{"--input", string(input)}
 	if skipCache {
 		args = append(args, "--cache", "off")
+	}
+	if noCAS {
+		args = append(args, "--no-cas")
 	}
 	args = append(args, skillName)
 	runCmd.SetArgs(args)

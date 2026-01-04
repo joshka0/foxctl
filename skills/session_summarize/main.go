@@ -137,7 +137,7 @@ func getProviders() []LLMProvider {
 		models := os.Getenv("OPENROUTER_MODELS")
 		if models == "" {
 			// Default: devstral (free, fast, good at code)
-			models = "mistralai/devstral-2505:free"
+			models = "minimax/minimax-m2.1"
 		}
 		for _, model := range strings.Split(models, ",") {
 			model = strings.TrimSpace(model)

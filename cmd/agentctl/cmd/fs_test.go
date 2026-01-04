@@ -100,7 +100,7 @@ func TestFSReadCommandRemember(t *testing.T) {
 		workspacePath = workdir
 	}
 
-	store, err := memstore.Open(context.Background(), cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(context.Background(), cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}

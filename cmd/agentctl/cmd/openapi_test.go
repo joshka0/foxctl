@@ -22,7 +22,7 @@ func TestOpenAPIImportCommandStoresSpec(t *testing.T) {
 	if _, err := cas.NewStore(cfg.Paths.CAS); err != nil {
 		t.Fatalf("cas store: %v", err)
 	}
-	memStore, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	memStore, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("memory open: %v", err)
 	}

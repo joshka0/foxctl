@@ -162,8 +162,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		}
 	}
 
-	// Open memory store
-	store, err := memory.Open(ctx, rc.Config.Paths.Cache, rc.Config.Paths.CAS)
+	// Open memory store (uses Storage.Root for persistent data)
+	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
 		return fmt.Errorf("open memory store: %w", err)
 	}

@@ -78,3 +78,36 @@ type EventData struct {
 	CacheHits int            `json:"cache_hits,omitempty"`
 	Custom    map[string]any `json:"custom,omitempty"`
 }
+
+// ConsoleAskData represents user input from console.
+type ConsoleAskData struct {
+	AskID     string         `json:"ask_id"`
+	Prompt    string         `json:"prompt"`
+	Context   map[string]any `json:"context,omitempty"`
+	ConsoleID string         `json:"console_id,omitempty"`
+}
+
+// ConsoleReplyData represents final response to console.
+type ConsoleReplyData struct {
+	AskID    string         `json:"ask_id"`
+	Response string         `json:"response"`
+	Status   string         `json:"status"` // ok, error, cancelled
+	Metrics  map[string]any `json:"metrics,omitempty"`
+}
+
+// ConsoleEventData represents streaming update during execution.
+type ConsoleEventData struct {
+	AskID     string `json:"ask_id"`
+	Kind      string `json:"kind"` // thought, tool_call, tool_result, progress
+	Content   string `json:"content"`
+	Seq       int    `json:"seq"`
+	Iteration int    `json:"iteration,omitempty"`
+	ToolName  string `json:"tool_name,omitempty"`
+}
+
+// ConsoleCmdData represents control commands.
+type ConsoleCmdData struct {
+	CmdID  string `json:"cmd_id"`
+	Action string `json:"action"` // cancel, pause, resume
+	AskID  string `json:"ask_id,omitempty"`
+}

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useSQLiteDatabases, useSQLiteTables, useSQLiteData } from "../hooks/useData";
+import { WINDOWED_LIST_HEIGHT } from "../constants";
 
 type Pane = "databases" | "tables" | "data";
 
@@ -16,13 +17,41 @@ function formatBytes(bytes: number): string {
 export function SQLiteView() {
   const [activePane, setActivePane] = useState<Pane>("databases");
   const [dbCursor, setDbCursor] = useState(0);
+  const [dbScroll, setDbScroll] = useState(0);
   const [tableCursor, setTableCursor] = useState(0);
+  const [tableScroll, setTableScroll] = useState(0);
   const [dataCursor, setDataCursor] = useState(0);
+  const [dataScroll, setDataScroll] = useState(0);
 
-  const { data: databases, isLoading: dbLoading, error: dbError } = useSQLiteDatabases();
+  const LIST_HEIGHT = WINDOWED_LIST_HEIGHT;
+
+  const formatError = (error: any): string => {
+    if (!error) return "";
+    try {
+      if (typeof error.message === "string" && error.message.startsWith("{")) {
+        const parsed = JSON.parse(error.message);
+        return parsed.error || parsed.message || error.message;
+      }
+      return error.message;
+    } catch {
+      return error.message;
+    }
+  };
+
+  const {
+    data: databases,
+    isLoading: dbLoading,
+    error: dbError,
+    refetch: refetchDbs,
+  } = useSQLiteDatabases();
   const selectedDb = databases?.[dbCursor];
 
-  const { data: tables, isLoading: tablesLoading } = useSQLiteTables(selectedDb?.name);
+  const {
+    data: tables,
+    isLoading: tablesLoading,
+    error: tablesError,
+    refetch: refetchTables,
+  } = useSQLiteTables(selectedDb?.name);
   const selectedTable = tables?.[tableCursor];
 
   const { data: tableData, isLoading: dataLoading } = useSQLiteData(
@@ -32,6 +61,11 @@ export function SQLiteView() {
   );
 
   useKeyboard((e) => {
+    if (e.name === "r") {
+      refetchDbs();
+      refetchTables();
+      return;
+    }
     // Pane navigation
     if (e.name === "h" || e.name === "left") {
       setActivePane((p) =>
@@ -50,17 +84,18 @@ export function SQLiteView() {
       return;
     }
 
-    // Cursor navigation within active pane
-    const moveCursor = (
-      current: number,
-      max: number,
-      setCursor: (fn: (n: number) => number) => void,
-      direction: "up" | "down"
+    // Cursor navigation with scrolling
+    const updateCursor = (
+      newCursor: number,
+      setCursor: (n: number) => void,
+      scrollOffset: number,
+      setScrollOffset: (n: number) => void
     ) => {
-      if (direction === "up") {
-        setCursor((c) => Math.max(0, c - 1));
-      } else {
-        setCursor((c) => Math.min(Math.max(0, max - 1), c + 1));
+      setCursor(newCursor);
+      if (newCursor < scrollOffset) {
+        setScrollOffset(newCursor);
+      } else if (newCursor >= scrollOffset + LIST_HEIGHT) {
+        setScrollOffset(newCursor - LIST_HEIGHT + 1);
       }
     };
 
@@ -68,23 +103,35 @@ export function SQLiteView() {
       case "up":
       case "k":
         if (activePane === "databases" && databases) {
-          moveCursor(dbCursor, databases.length, setDbCursor, "up");
+          const next = Math.max(0, dbCursor - 1);
+          updateCursor(next, setDbCursor, dbScroll, setDbScroll);
           setTableCursor(0);
+          setTableScroll(0);
+          setDataCursor(0);
+          setDataScroll(0);
         } else if (activePane === "tables" && tables) {
-          moveCursor(tableCursor, tables.length, setTableCursor, "up");
+          const next = Math.max(0, tableCursor - 1);
+          updateCursor(next, setTableCursor, tableScroll, setTableScroll);
         } else if (activePane === "data" && tableData?.rows) {
-          moveCursor(dataCursor, tableData.rows.length, setDataCursor, "up");
+          const next = Math.max(0, dataCursor - 1);
+          updateCursor(next, setDataCursor, dataScroll, setDataScroll);
         }
         break;
       case "down":
       case "j":
         if (activePane === "databases" && databases) {
-          moveCursor(dbCursor, databases.length, setDbCursor, "down");
+          const next = Math.min(Math.max(0, databases.length - 1), dbCursor + 1);
+          updateCursor(next, setDbCursor, dbScroll, setDbScroll);
           setTableCursor(0);
+          setTableScroll(0);
+          setDataCursor(0);
+          setDataScroll(0);
         } else if (activePane === "tables" && tables) {
-          moveCursor(tableCursor, tables.length, setTableCursor, "down");
+          const next = Math.min(Math.max(0, tables.length - 1), tableCursor + 1);
+          updateCursor(next, setTableCursor, tableScroll, setTableScroll);
         } else if (activePane === "data" && tableData?.rows) {
-          moveCursor(dataCursor, tableData.rows.length, setDataCursor, "down");
+          const next = Math.min(Math.max(0, tableData.rows.length - 1), dataCursor + 1);
+          updateCursor(next, setDataCursor, dataScroll, setDataScroll);
         }
         break;
       case "escape":
@@ -160,14 +207,14 @@ export function SQLiteView() {
             </text>
           </box>
           <box flexGrow={1} flexDirection="column" overflow="hidden">
-            {databases.map((db, i) => (
+            {databases.slice(dbScroll, dbScroll + LIST_HEIGHT).map((db, i) => (
               <box
                 key={db.name}
                 height={1}
-                backgroundColor={i === dbCursor ? "#333333" : undefined}
+                backgroundColor={i + dbScroll === dbCursor ? "#333333" : undefined}
               >
-                <text fg={i === dbCursor ? "#ffffff" : "#888888"}>
-                  {i === dbCursor ? "> " : "  "}
+                <text fg={i + dbScroll === dbCursor ? "#ffffff" : "#888888"}>
+                  {i + dbScroll === dbCursor ? "> " : "  "}
                   {db.name}
                   <span fg="#666666"> {formatBytes(db.size)}</span>
                 </text>
@@ -193,22 +240,27 @@ export function SQLiteView() {
             <box padding={1}>
               <text fg="#666666">Loading...</text>
             </box>
+          ) : tablesError ? (
+            <box padding={1}>
+              <text fg="#ff0000">Error: {formatError(tablesError)}</text>
+            </box>
           ) : !tables || tables.length === 0 ? (
             <box padding={1}>
-              <text fg="#666666">No tables</text>
+              <text fg="#666666">No tables found</text>
+              <text fg="#444444">in {selectedDb?.name}</text>
             </box>
           ) : (
             <box flexGrow={1} flexDirection="column" overflow="hidden">
-              {tables.map((table, i) => (
+              {tables.slice(tableScroll, tableScroll + LIST_HEIGHT).map((table, i) => (
                 <box
                   key={table.name}
                   height={1}
-                  backgroundColor={i === tableCursor ? "#333333" : undefined}
+                  backgroundColor={i + tableScroll === tableCursor ? "#333333" : undefined}
                 >
-                  <text fg={i === tableCursor ? "#ffffff" : "#888888"}>
-                    {i === tableCursor ? "> " : "  "}
+                  <text fg={i + tableScroll === tableCursor ? "#ffffff" : "#888888"}>
+                    {i + tableScroll === tableCursor ? "> " : "  "}
                     {table.name}
-                    <span fg="#666666"> ({table.row_count})</span>
+                    <span fg="#444444"> ({table.row_count})</span>
                   </text>
                 </box>
               ))}
@@ -262,14 +314,14 @@ export function SQLiteView() {
               </box>
               {/* Data rows */}
               <box flexGrow={1} flexDirection="column" overflow="hidden">
-                {tableData.rows.slice(0, 20).map((row, i) => (
+                {tableData.rows.slice(dataScroll, dataScroll + LIST_HEIGHT).map((row, i) => (
                   <box
                     key={i}
                     height={1}
-                    backgroundColor={i === dataCursor ? "#333333" : undefined}
+                    backgroundColor={i + dataScroll === dataCursor ? "#333333" : undefined}
                     paddingLeft={1}
                   >
-                    <text fg={i === dataCursor ? "#ffffff" : "#888888"}>
+                    <text fg={i + dataScroll === dataCursor ? "#ffffff" : "#888888"}>
                       {tableData.columns
                         .slice(0, 5)
                         .map((col) => {
@@ -286,10 +338,10 @@ export function SQLiteView() {
                     </text>
                   </box>
                 ))}
-                {tableData.rows.length > 20 && (
+                {tableData.rows.length > LIST_HEIGHT && (
                   <box height={1} paddingLeft={1}>
                     <text fg="#666666">
-                      ... and {tableData.rows.length - 20} more rows
+                      ... Row {dataCursor + 1} of {tableData.rows.length}
                     </text>
                   </box>
                 )}

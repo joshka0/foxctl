@@ -122,6 +122,8 @@ func newTodoListCommand() *cobra.Command {
 	var status string
 	var sortBy string
 	var includeMetrics bool
+	var format string
+	var jq string
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -129,14 +131,23 @@ func newTodoListCommand() *cobra.Command {
 		Long: `List tasks from the store with optional PageRank prioritization.
 
 Examples:
-  # Simple list
+  # Simple list (JSON)
   agentctl todo list
 
+  # Pretty table output
+  agentctl todo list -f table
+
+  # Compact one-liner format
+  agentctl todo list --status pending -f compact
+
   # Ranked by PageRank (most depended-upon first)
-  agentctl todo list --ranked
+  agentctl todo list --ranked -f table
 
   # Pending tasks sorted by critical path
   agentctl todo list --status pending --sort-by critical_path
+
+  # Extract just titles with jq
+  agentctl todo list --jq '.data.tasks[].title'
 
   # Full metrics for all tasks
   agentctl todo list --ranked --include-metrics`,
@@ -164,7 +175,7 @@ Examples:
 			if workspaceID != "" {
 				payload["workspace_id"] = workspaceID
 			}
-			return runTodoSkill(cmd, payload)
+			return runTodoSkillWithFormat(cmd, payload, format, jq)
 		},
 	}
 
@@ -173,6 +184,8 @@ Examples:
 	cmd.Flags().StringVar(&status, "status", "", "Filter by status: pending, in_progress, completed, blocked")
 	cmd.Flags().StringVar(&sortBy, "sort-by", "", "Sort by: created_at, pagerank, critical_path")
 	cmd.Flags().BoolVar(&includeMetrics, "include-metrics", false, "Include full graph metrics (degrees, critical path)")
+	cmd.Flags().StringVarP(&format, "format", "f", "", "Output format: json (default), table, compact")
+	cmd.Flags().StringVar(&jq, "jq", "", "jq expression to filter/transform output")
 	return cmd
 }
 
@@ -374,6 +387,10 @@ Examples:
 }
 
 func runTodoSkill(cmd *cobra.Command, payload map[string]any) error {
+	return runTodoSkillWithFormat(cmd, payload, "", "")
+}
+
+func runTodoSkillWithFormat(cmd *cobra.Command, payload map[string]any, format, jq string) error {
 	cfg, err := config.Load(cmd.Context())
 	if err != nil {
 		return err
@@ -402,7 +419,17 @@ func runTodoSkill(cmd *cobra.Command, payload map[string]any) error {
 	runCmd.SetContext(cmd.Context())
 	runCmd.SetOut(cmd.OutOrStdout())
 	runCmd.SetErr(cmd.ErrOrStderr())
-	runCmd.SetArgs([]string{"--input", string(input), "todo/manage"})
+
+	args := []string{"--input", string(input)}
+	if format != "" {
+		args = append(args, "--format", format)
+	}
+	if jq != "" {
+		args = append(args, "--jq", jq)
+	}
+	args = append(args, "todo/manage")
+
+	runCmd.SetArgs(args)
 	return runCmd.Execute()
 }
 

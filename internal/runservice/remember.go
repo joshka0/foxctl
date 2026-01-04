@@ -38,7 +38,7 @@ func rememberResult(ctx context.Context, cfg config.Config, opts RememberOptions
 	if name == "" {
 		return fmt.Errorf("memory name cannot be empty")
 	}
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		return err
 	}

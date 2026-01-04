@@ -7,6 +7,7 @@
 node_modules/
 bun.lockb
 packages/*/dist/
+packages/*/*.tsbuildinfo
 web-ui/dist/
 web-ui/.vite/
 
@@ -26,9 +27,10 @@ web-ui/.vite/
 *.token
 *.key
 
-# Dev binaries (root directory)
+# Dev binaries and symlinks (root directory)
 # Created by running `go build ./skills/X` without -o flag from repo root
 # Use `make skills-build` instead which outputs to dist/skills/
+/opentui
 /mcp_bridge
 /mcp_install
 /code_swe_grep
@@ -136,3 +138,4 @@ pr*.txt
 .opencode/*
 .opencode/**
 skills/providers/providers
+*.db

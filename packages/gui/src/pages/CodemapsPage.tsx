@@ -39,7 +39,6 @@ import {
   Tag,
   Code,
 } from "lucide-react";
-import type { CodemapListItem, Codemap } from "@/types";
 
 export function CodemapsPage() {
   const [page, setPage] = useState(0);

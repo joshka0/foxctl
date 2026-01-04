@@ -1,7 +1,8 @@
 // Reservations View - File reservations/locks
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useReservations } from "../hooks/useData";
+import { WINDOWED_LIST_HEIGHT } from "../constants";
 import type { Reservation } from "@agentctl/data";
 
 function modeColor(mode: string): string {
@@ -93,7 +94,10 @@ function ReservationDetail({ reservation }: ReservationDetailProps) {
 
 export function ReservationsView() {
   const [cursor, setCursor] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
   const { data: reservations, isLoading, error, refetch } = useReservations();
+
+  const LIST_HEIGHT = WINDOWED_LIST_HEIGHT; // Number of visible rows (each row is 2 lines high, so 16 lines total)
 
   const selectedReservation = reservations?.[cursor];
 
@@ -101,31 +105,54 @@ export function ReservationsView() {
   const exclusiveCount = reservations?.filter((r) => r.mode === "exclusive").length || 0;
   const sharedCount = reservations?.filter((r) => r.mode === "shared").length || 0;
 
+  const updateCursor = (newCursor: number) => {
+    if (!reservations) return;
+    setCursor(newCursor);
+    if (newCursor < scrollOffset) {
+      setScrollOffset(newCursor);
+    } else if (newCursor >= scrollOffset + LIST_HEIGHT) {
+      setScrollOffset(newCursor - LIST_HEIGHT + 1);
+    }
+  };
+
   useKeyboard((e) => {
+    if (!reservations) return;
     switch (e.name) {
       case "up":
       case "k":
-        setCursor((c) => Math.max(0, c - 1));
+        updateCursor(Math.max(0, cursor - 1));
         break;
       case "down":
       case "j":
-        if (reservations) {
-          setCursor((c) => Math.min(reservations.length - 1, c + 1));
-        }
+        updateCursor(Math.min(reservations.length - 1, cursor + 1));
         break;
       case "r":
         refetch();
         break;
       case "g":
-        setCursor(0);
+        updateCursor(0);
         break;
       case "G":
-        if (reservations) {
-          setCursor(reservations.length - 1);
-        }
+        updateCursor(reservations.length - 1);
         break;
     }
   });
+
+  useEffect(() => {
+    if (!reservations) return;
+    const maxCursor = Math.max(0, reservations.length - 1);
+    const nextCursor = Math.min(cursor, maxCursor);
+    setCursor(nextCursor);
+    setScrollOffset((s) => {
+      const maxScroll = Math.max(0, reservations.length - LIST_HEIGHT);
+      const clampedScroll = Math.min(s, maxScroll);
+      if (nextCursor < clampedScroll) return nextCursor;
+      if (nextCursor >= clampedScroll + LIST_HEIGHT) {
+        return Math.max(0, nextCursor - LIST_HEIGHT + 1);
+      }
+      return clampedScroll;
+    });
+  }, [cursor, reservations?.length]);
 
   if (isLoading && !reservations) {
     return (
@@ -166,11 +193,11 @@ export function ReservationsView() {
               <text fg="#888888">No active reservations</text>
             </box>
           ) : (
-            reservations.map((res, i) => (
+            reservations.slice(scrollOffset, scrollOffset + LIST_HEIGHT).map((res, i) => (
               <ReservationRow
                 key={res.id}
                 reservation={res}
-                selected={i === cursor}
+                selected={i + scrollOffset === cursor}
               />
             ))
           )}

@@ -78,7 +78,7 @@ func TestMemoryRecentAndCacheCommands(t *testing.T) {
 func TestMemoryListAndGetCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
 	ctx := context.Background()
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestMemoryPutCommand(t *testing.T) {
 		"--workspace", cfg.Home,
 		"--data", payload,
 	)
-	store, err := memstore.Open(context.Background(), cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(context.Background(), cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestMemoryPutCommand(t *testing.T) {
 func TestMemorySearchAndRelevantCommands(t *testing.T) {
 	cfg := setupMemoryTestEnv(t)
 	ctx := context.Background()
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMemoryStatsCommand(t *testing.T) {
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	mStore, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	mStore, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestMemoryDeleteSuccess(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a memory entry first
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("open memory store: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestMemoryDeleteSuccess(t *testing.T) {
 	}
 
 	// Verify it's actually gone
-	store, err = memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err = memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		t.Fatalf("reopen memory store: %v", err)
 	}
@@ -416,7 +416,7 @@ func setupMemoryTestEnv(t *testing.T) config.Config {
 	if err != nil {
 		t.Fatalf("config load: %v", err)
 	}
-	dirs := []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills}
+	dirs := []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills, cfg.Storage.Root}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)

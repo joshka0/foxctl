@@ -31,6 +31,12 @@ type ExecuteOptions struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
+	// ExtraEnv contains additional environment variables to pass to the skill.
+	// These are added to the child process environment without modifying the
+	// parent process, avoiding race conditions with concurrent executions.
+	// Format: []string{"KEY=value", "KEY2=value2"}
+	ExtraEnv []string
+
 	// Resource limits (future use)
 	MaxMemoryBytes uint64
 	MaxCPUSeconds  uint64

@@ -18,7 +18,7 @@ GOLANGCI ?= golangci-lint
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck
 
 fmt:
 	@echo "Running gofumpt"
@@ -141,6 +141,7 @@ build:
 		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Commit=$$COMMIT \
 		-X github.com/jkatigb/agentctl/internal/platform/buildinfo.Date=$$DATE" \
 		-o bin/$(BINARY) ./cmd/agentctl
+	@$(GO_CMD) build -trimpath -ldflags="-s -w" -o bin/agentctl-mail ./cmd/agentctl-mail
 
 build-cgo:
 	@set -euo pipefail; \
@@ -163,6 +164,9 @@ init: build-all skills-install-all
 viewer:
 	@$(GO_CMD) build -trimpath -o bin/agentctl-viewer ./cmd/agentctl_viewer
 
+install-mail:
+	@./scripts/install-mail.sh
+
 # Web UI targets
 web-templ:
 	@command -v templ >/dev/null 2>&1 || { echo "templ not installed. Run: go install github.com/a-h/templ/cmd/templ@latest"; exit 1; }
@@ -175,11 +179,17 @@ web-run: web-build
 	@./bin/agentctl-web
 
 # TypeScript/Bun targets
-.PHONY: ts-install ts-dev-tui ts-dev-gui ts-build ts-typecheck
+.PHONY: ts-install ts-dev-tui ts-dev-gui ts-build ts-typecheck ts-typecheck-fast ts-lint ts-lint-fix ts-check
 
 ts-install:
 	@command -v bun >/dev/null 2>&1 || { echo "bun not installed. See: https://bun.sh"; exit 1; }
 	@bun install
+
+# Build the standalone TUI binary
+ts-build-tui: ts-install
+	@mkdir -p bin
+	@bun build --compile --minify packages/tui/src/index.tsx --outfile bin/agentctl-tui
+	@echo "Built bin/agentctl-tui"
 
 ts-dev-tui: ts-install
 	@cd packages/tui && bun run dev
@@ -188,11 +198,34 @@ ts-dev-tui: ts-install
 ts-dev-gui: ts-install
 	@cd packages/gui && bun run dev:all
 
+# Runs both API server and TUI binary together
+ts-tui: ts-build-tui
+	@echo "Starting API server and TUI..."
+	@bun run --cwd packages/gui server > /dev/null 2>&1 & \
+	SERVER_PID=$$!; \
+	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT; \
+	AGENTCTL_API_URL=http://localhost:8090 ./bin/agentctl-tui
+
 ts-build: ts-install
 	@bun run build
 
 ts-typecheck: ts-install
 	@bun run typecheck
+
+# Fast TypeScript check using tsgo (10x faster than tsc)
+ts-typecheck-fast: ts-install
+	@bun run typecheck:fast
+
+# Lint TypeScript packages using oxlint (fast Rust-based linter)
+ts-lint: ts-install
+	@bun run lint
+
+ts-lint-fix: ts-install
+	@bun run lint:fix
+
+# Combined check: lint + typecheck (fast)
+ts-check: ts-install
+	@bun run check
 
 # Build and install a single skill: make skill SKILL=todo
 # This is the preferred way to rebuild a skill during development

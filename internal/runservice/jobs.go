@@ -2,6 +2,7 @@ package runservice
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -126,6 +127,27 @@ func (e *Executor) SubmitAsync(job jobs.Job) error {
 
 // ExecuteSync runs the skill synchronously and applies persistence side effects.
 func (e *Executor) ExecuteSync(job jobs.Job) error {
+	// Set no-CAS mode in environment if requested (disables output truncation)
+	//
+	// KNOWN LIMITATION: This uses os.Setenv which affects the entire process.
+	// In rare cases where multiple concurrent agentctl processes run with
+	// different NoCAS settings, there could be a race condition. This is
+	// acceptable because:
+	//   1. CLI is typically used sequentially (one command at a time)
+	//   2. Hooks run serially within a Claude Code session
+	//   3. The race only affects concurrent invocations with different NoCAS settings
+	//
+	// A complete fix would require passing ExtraEnv through the jobs.Store and
+	// executor.Executor chain, which is invasive. The ephemeral execution path
+	// (used by hooks) does not have this limitation since it passes ExtraEnv
+	// directly to the runner.
+	//
+	// TODO: Refactor executor chain to support ExtraEnv for full race-freedom.
+	if e.options.NoCAS {
+		os.Setenv("AGENTCTL_NO_CAS", "1")
+		defer os.Unsetenv("AGENTCTL_NO_CAS")
+	}
+
 	result, runErr := e.jobStore.ExecutePreparedSkill(e.ctx, job.ID, e.handle.ManifestPath, e.handle.ArtifactPath)
 	_, getErr := e.jobStore.Get(e.ctx, job.ID)
 	if getErr != nil {

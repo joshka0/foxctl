@@ -52,8 +52,9 @@ func WithCacheStore(ctx context.Context, cfg config.Config, fn func(storage.Cach
 }
 
 // WithMemoryStore opens the named memory store for the provided configuration and ensures cleanup.
+// NOTE: Memory is stored in storage/ (not cache/) because it's persistent user data.
 func WithMemoryStore(ctx context.Context, cfg config.Config, fn func(storage.MemoryStore) error) error {
-	store, err := memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+	store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		return fmt.Errorf("open memory store: %w", err)
 	}

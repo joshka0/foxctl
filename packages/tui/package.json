@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.tsx",
   "scripts": {
-    "dev": "bun run src/index.tsx",
+    "dev": "cross-env AGENTCTL_API_URL=http://localhost:8090 bun run src/index.tsx",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -17,6 +17,7 @@
   "devDependencies": {
     "@types/bun": "^1.2.0",
     "@types/react": "^19.0.0",
+    "cross-env": "^7.0.3",
     "typescript": "^5.9.3"
   }
 }

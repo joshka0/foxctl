@@ -29,6 +29,9 @@ type runCommandFlags struct {
 	RememberType    string
 	RememberSummary string
 	Timeout         time.Duration
+	Format          string // Output format: json, table, compact, or jq expression
+	JQ              string // jq expression to apply to output
+	NoCAS           bool   // Disable CAS truncation - return full output inline
 }
 
 func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
@@ -44,6 +47,9 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 	cmd.Flags().StringVar(&flags.RememberType, "remember-type", "result", "Memory type for --remember")
 	cmd.Flags().StringVar(&flags.RememberSummary, "remember-summary", "", "Summary to record for remembered result")
 	cmd.Flags().DurationVar(&flags.Timeout, "timeout", runservice.DefaultTimeout, "Maximum execution time (e.g., 30s, 2m, 5m)")
+	cmd.Flags().StringVarP(&flags.Format, "format", "f", "", "Output format: json (default), table, compact")
+	cmd.Flags().StringVar(&flags.JQ, "jq", "", "jq expression to filter/transform JSON output (e.g., '.data.tasks[]')")
+	cmd.Flags().BoolVar(&flags.NoCAS, "no-cas", false, "Disable CAS truncation - return full output inline (may be large)")
 }
 
 func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags, input []byte) (runservice.RunOptions, error) {
@@ -96,6 +102,7 @@ func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags,
 		RememberSummary: flags.RememberSummary,
 		Timeout:         flags.Timeout,
 		SessionID:       resolveSessionID(),
+		NoCAS:           flags.NoCAS,
 	}
 	if err := opts.Validate(); err != nil {
 		return runservice.RunOptions{}, err

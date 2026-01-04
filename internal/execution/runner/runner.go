@@ -53,6 +53,9 @@ type RunOptions struct {
 	Manifest     skill.Manifest
 	ArtifactPath string
 	Input        []byte
+	// ExtraEnv contains additional environment variables to pass to the skill.
+	// Format: []string{"KEY=value", "KEY2=value2"}
+	ExtraEnv []string
 }
 
 // RunWithOptions executes the appropriate runtime for a manifest using structured options.
@@ -63,11 +66,15 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 		r := execrunner.Runner{Manifest: opts.Manifest, Binary: opts.ArtifactPath}
 		// exec inherits os.Environ(), so session vars pass through automatically (propagate=false)
 		r.Options.Env = buildSkillEnv(os.Environ(), ws, false)
+		// Append extra env vars (these override any existing values)
+		r.Options.Env = append(r.Options.Env, opts.ExtraEnv...)
 		return r.Run(ctx, opts.Input)
 	case "wasi":
 		r := wasirunner.Runner{Manifest: opts.Manifest, ModulePath: opts.ArtifactPath}
 		// WASI starts with empty env, so we must explicitly propagate session vars (propagate=true)
 		r.Options.Env = buildSkillEnv(nil, ws, true)
+		// Append extra env vars
+		r.Options.Env = append(r.Options.Env, opts.ExtraEnv...)
 		return r.Run(ctx, opts.Input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported distribution type %q", opts.Manifest.Distribution.Type)

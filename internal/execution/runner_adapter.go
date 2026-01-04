@@ -29,6 +29,7 @@ func (e *RunnerExecutor) Execute(ctx context.Context, opts ExecuteOptions) (*Res
 		Manifest:     manifest,
 		ArtifactPath: opts.ArtifactPath,
 		Input:        opts.Input,
+		ExtraEnv:     opts.ExtraEnv,
 	})
 
 	// Determine exit code

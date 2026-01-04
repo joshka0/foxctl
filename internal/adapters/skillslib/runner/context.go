@@ -33,6 +33,7 @@ type RunnerContext struct {
 	SessionID     string // AI coding tool session ID (tool-agnostic)
 	AgentID       string // Agent identifier (default: agentctl)
 	Workspace     string // Current workspace path
+	NoCAS         bool   // Disable CAS truncation - return full output inline
 }
 
 // ResolveSessionID returns the session ID from environment variables.
@@ -116,6 +117,9 @@ func NewRunnerContext(cfg config.Config, stdout io.Writer) (*RunnerContext, erro
 		agentID = "agentctl"
 	}
 
+	// Check for no-CAS mode (disables truncation)
+	noCAS := os.Getenv("AGENTCTL_NO_CAS") == "1"
+
 	return &RunnerContext{
 		Config:        cfg,
 		CASStore:      store,
@@ -127,6 +131,7 @@ func NewRunnerContext(cfg config.Config, stdout io.Writer) (*RunnerContext, erro
 		SessionID:     ResolveSessionIDWithFallback(workspace, cfg.Home),
 		AgentID:       agentID,
 		Workspace:     workspace,
+		NoCAS:         noCAS,
 	}, nil
 }
 
@@ -203,4 +208,57 @@ func extractArtifact(m map[string]any) string {
 		return digest
 	}
 	return ""
+}
+
+// ShouldTruncate returns true if the data size exceeds the inline limit and NoCAS is not set.
+// Skills should use this to decide whether to store large outputs in CAS.
+func (rc *RunnerContext) ShouldTruncate(dataSize int) bool {
+	if rc.NoCAS {
+		return false
+	}
+	inlineLimit := rc.InlineKB * 1024
+	return inlineLimit > 0 && dataSize > inlineLimit
+}
+
+// InlineLimit returns the maximum inline output size in bytes.
+func (rc *RunnerContext) InlineLimit() int {
+	return rc.InlineKB * 1024
+}
+
+// BuildCASHint creates a user-friendly CAS hint for the given artifact.
+// It provides commands to retrieve the full content and metadata about the stored data.
+//
+// Parameters:
+//   - artifact: the stored CAS artifact with digest, size, and content type
+//   - linesPerPage: number of lines per page for pagination (converted to bytes internally)
+//
+// The function converts linesPerPage to bytes (~80 bytes per line heuristic) for the
+// --page-size flag. Pagination uses --page and --page-size (bytes), not line-based limits.
+func BuildCASHint(artifact Artifact, linesPerPage int) envelope.CASHint {
+	hint := envelope.CASHint{
+		Digest:      artifact.Digest,
+		TotalBytes:  artifact.Size,
+		ContentType: artifact.Kind,
+		ReadCommand: fmt.Sprintf("agentctl cas read %s", artifact.Digest),
+		GetCommand:  fmt.Sprintf("agentctl cas get %s", artifact.Digest),
+	}
+
+	// Calculate pagination if applicable
+	// Convert linesPerPage to bytes (~80 bytes per line for typical text/JSON)
+	if linesPerPage > 0 && artifact.Size > 0 {
+		bytesPerPage := linesPerPage * 80 // ~80 bytes per line heuristic
+		if int(artifact.Size) > bytesPerPage {
+			hint.PageCount = (int(artifact.Size) + bytesPerPage - 1) / bytesPerPage
+			hint.PageSize = bytesPerPage
+			// Use --page-size (bytes) for pagination; user can add --page N to navigate
+			hint.ReadCommand = fmt.Sprintf("agentctl cas read %s --page-size %d", artifact.Digest, bytesPerPage)
+		}
+	}
+
+	// Detect binary content
+	if artifact.Kind != "" && !strings.HasPrefix(artifact.Kind, "text/") && artifact.Kind != "application/json" {
+		hint.IsBinary = true
+	}
+
+	return hint
 }

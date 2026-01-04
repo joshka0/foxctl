@@ -1,37 +1,19 @@
 #!/usr/bin/env bash
-# session-capture.sh - Claude Code Stop hook for capturing conversation sessions
+# session-capture.sh - Claude Code Stop hook for capturing conversation sessions (ASYNC)
 #
-# This script captures the Claude Code conversation session and stores it in
-# agentctl's sessions.db. It extracts high-signal content for later recall.
-#
-# Usage in .claude/settings.json:
-#   {
-#     "hooks": {
-#       "Stop": [
-#         {
-#           "matcher": "",
-#           "hooks": [
-#             {
-#               "type": "command",
-#               "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-capture.sh",
-#               "timeout": 10
-#             }
-#           ]
-#         }
-#       ]
-#     }
-#   }
+# ASYNC: This hook returns immediately and captures session in background.
+# Stop hooks don't need to block - the session is ending anyway.
 #
 # Environment variables:
 #   AGENTCTL_BIN - Path to agentctl binary
 #   AGENTCTL_SESSION_CAPTURE_DISABLED - Set to "1" to disable capture
+#   AGENTCTL_SESSION_CAPTURE_SYNC - Set to "1" for synchronous execution
 #   CEREBRAS_API_KEY - Required for summarization (optional)
 
 set -euo pipefail
 
 # Check if capture is disabled
 if [[ "${AGENTCTL_SESSION_CAPTURE_DISABLED:-}" == "1" ]]; then
-  echo '{}'
   exit 0
 fi
 
@@ -43,18 +25,14 @@ elif command -v agentctl &>/dev/null; then
 elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/agentctl" ]]; then
   AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/agentctl"
 else
-  # Can't find agentctl - exit silently
-  echo '{}'
   exit 0
 fi
 
-# Read and discard hook input from stdin (Stop hook provides minimal data)
+# Read and discard hook input from stdin
 cat >/dev/null
 
 # Workspace from environment
 workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-
-# Session ID if available
 session_id="${CLAUDE_SESSION_ID:-}"
 
 # Build skill input for capture
@@ -67,35 +45,44 @@ capture_input=$(jq -nc \
   }'
 )
 
-# Call session/capture skill
-capture_result="$(printf '%s' "$capture_input" | "$AGENTCTL_BIN" run session/capture --input-file - 2>/dev/null)" || {
-  # On error, don't block session stop
-  echo '{}'
-  exit 0
-}
+# ASYNC: Run in background unless SYNC mode requested
+if [[ "${AGENTCTL_SESSION_CAPTURE_SYNC:-}" != "1" ]]; then
+  LOG_DIR="${HOME}/.agentctl/logs/hooks"
+  mkdir -p "$LOG_DIR" 2>/dev/null || true
+  LOG_FILE="$LOG_DIR/session-capture-$(date +%Y%m%d-%H%M%S).log"
 
-# Check if capture was successful
+  # Spawn in background and exit immediately
+  (
+    capture_result="$(printf '%s' "$capture_input" | "$AGENTCTL_BIN" run session/capture --input-file - 2>&1)" || true
+    echo "$capture_result" >> "$LOG_FILE"
+
+    # If CEREBRAS_API_KEY is set, also summarize
+    if [[ -n "${CEREBRAS_API_KEY:-}" ]]; then
+      captured_session_id=$(printf '%s' "$capture_result" | jq -r '.data.session_id // ""' 2>/dev/null)
+      if [[ -n "$captured_session_id" ]]; then
+        summarize_input=$(jq -nc --arg session_id "$captured_session_id" '{session_id: $session_id}')
+        printf '%s' "$summarize_input" | "$AGENTCTL_BIN" run session/summarize --input-file - >> "$LOG_FILE" 2>&1 || true
+      fi
+    fi
+  ) &
+  disown
+  exit 0
+fi
+
+# SYNC mode: Original blocking behavior
+capture_result="$(printf '%s' "$capture_input" | "$AGENTCTL_BIN" run session/capture --input-file - 2>/dev/null)" || exit 0
+
 capture_status=$(printf '%s' "$capture_result" | jq -r '.data.status // "error"')
 captured_session_id=$(printf '%s' "$capture_result" | jq -r '.data.session_id // ""')
 
 if [[ "$capture_status" != "captured" && "$capture_status" != "exists" ]]; then
-  # Capture failed, exit silently
-  echo '{}'
   exit 0
 fi
 
 # If CEREBRAS_API_KEY is set, also summarize
 if [[ -n "${CEREBRAS_API_KEY:-}" && -n "$captured_session_id" ]]; then
-  summarize_input=$(jq -nc \
-    --arg session_id "$captured_session_id" \
-    '{
-      session_id: $session_id
-    }'
-  )
-
-  # Call session/summarize skill (async, don't wait)
+  summarize_input=$(jq -nc --arg session_id "$captured_session_id" '{session_id: $session_id}')
   printf '%s' "$summarize_input" | "$AGENTCTL_BIN" run session/summarize --input-file - &>/dev/null &
 fi
 
-# Stop hook doesn't need special output
-echo '{}'
+exit 0

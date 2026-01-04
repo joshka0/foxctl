@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -26,6 +28,7 @@ func newCASCommand() *cobra.Command {
 		newCASPutCommand(),
 		newCASHeadCommand(),
 		newCASGetCommand(),
+		newCASReadCommand(),
 		newCASListCommand(),
 		newCASPinCommand(),
 		newCASUnpinCommand(),
@@ -153,6 +156,134 @@ func newCASGetCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "File to write (default: <digest hex>)")
+	return cmd
+}
+
+func newCASReadCommand() *cobra.Command {
+	var (
+		page       int
+		pageSize   int
+		allowLarge bool
+	)
+
+	const maxReadableBytes int64 = 10 * 1024 * 1024 // 10 MiB safety guard
+	cmd := &cobra.Command{
+		Use:   "read <digest>",
+		Short: "Read text content from CAS with pagination",
+		Long: `Read content from a CAS object with automatic pagination.
+
+Use --page to retrieve specific pages of large content.
+Default page size is 2048 bytes (2KB) to stay within context limits.
+
+Examples:
+  agentctl cas read sha256:abc123              # Read first page
+  agentctl cas read sha256:abc123 --page 2     # Read second page
+  agentctl cas read sha256:abc123 --page-size 4096  # Larger pages`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if pageSize <= 0 {
+				return fmt.Errorf("page-size must be > 0")
+			}
+
+			cfg, err := commandConfig(cmd.Context())
+			if err != nil {
+				return err
+			}
+			store, err := cas.NewStore(cfg.Paths.CAS)
+			if err != nil {
+				return err
+			}
+
+			// Get metadata first for size info
+			obj, err := store.Head(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if obj.Size > maxReadableBytes && !allowLarge {
+				return fmt.Errorf("cas: object is %d bytes (> %d) — re-run with --allow-large to proceed", obj.Size, maxReadableBytes)
+			}
+			kind := strings.ToLower(obj.Kind)
+			if kind != "" && !(strings.HasPrefix(kind, "text/") || strings.Contains(kind, "utf-8") || strings.Contains(kind, "json")) {
+				return fmt.Errorf("cas: object kind %q is not text; use `agentctl cas get` to download binary content", obj.Kind)
+			}
+
+			// Read content
+			rc, _, err := store.Get(cmd.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			defer func() {
+				errs.Ignore(rc.Close(), "close cas reader")
+			}()
+
+			// Calculate pagination from metadata size
+			totalSize := obj.Size
+			totalPages := int((totalSize + int64(pageSize) - 1) / int64(pageSize))
+			if totalPages == 0 {
+				totalPages = 1
+			}
+
+			// Validate page number
+			if page < 1 {
+				page = 1
+			}
+			if page > totalPages {
+				page = totalPages
+			}
+
+			// Seek to page offset by discarding bytes up to the page start
+			offset := int64(page-1) * int64(pageSize)
+			if offset > 0 {
+				if _, err := io.CopyN(io.Discard, rc, offset); err != nil && !errors.Is(err, io.EOF) {
+					return fmt.Errorf("cas: seek to page offset: %w", err)
+				}
+			}
+
+			remaining := int64(pageSize)
+			if offset+remaining > totalSize {
+				remaining = totalSize - offset
+			}
+
+			pageContent := ""
+			if remaining > 0 {
+				buf := make([]byte, remaining)
+				n, readErr := io.ReadFull(rc, buf)
+				if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+					return fmt.Errorf("cas: read page: %w", readErr)
+				}
+				buf = buf[:n]
+				if !utf8.Valid(buf) {
+					return fmt.Errorf("cas: content is not valid UTF-8; use `agentctl cas get` for binary data")
+				}
+				pageContent = string(buf)
+			}
+
+			// Build response
+			data := map[string]any{
+				"digest":       args[0],
+				"content":      pageContent,
+				"page":         page,
+				"total_pages":  totalPages,
+				"page_size":    pageSize,
+				"total_bytes":  totalSize,
+				"content_type": obj.Kind,
+			}
+
+			// Add navigation hints
+			if page < totalPages {
+				data["next_page"] = page + 1
+				data["next_command"] = fmt.Sprintf("agentctl cas read %s --page %d", args[0], page+1)
+			}
+			if page > 1 {
+				data["prev_page"] = page - 1
+			}
+
+			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.read", data, protocol.WithSource("run"))
+		},
+	}
+	cmd.Flags().IntVar(&page, "page", 1, "Page number to retrieve (1-indexed)")
+	cmd.Flags().IntVar(&pageSize, "page-size", 2048, "Bytes per page (default: 2048)")
+	cmd.Flags().BoolVar(&allowLarge, "allow-large", false, "Allow reading objects larger than 10MB (may be slow)")
 	return cmd
 }
 

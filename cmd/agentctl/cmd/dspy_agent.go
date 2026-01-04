@@ -131,7 +131,7 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 			WorkspaceRoot:         workspaceRoot,
 			TrajectoryStorageRoot: cfg.Storage.Root,
 			OpenMemoryStore: func(ctx context.Context) (storage.MemoryStore, error) {
-				return memstore.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+				return memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 			},
 		}
 

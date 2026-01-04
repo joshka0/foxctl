@@ -52,6 +52,10 @@ type RunOptions struct {
 	// Used by hooks where job history is not needed.
 	// Cache reads are still allowed for deduplication, but cache writes are skipped.
 	Ephemeral bool
+
+	// NoCAS disables CAS truncation - returns full output inline instead of storing
+	// in CAS. Use when you need immediate access to all output data.
+	NoCAS bool
 }
 
 // Validate checks if the RunOptions are valid and returns an error if not.

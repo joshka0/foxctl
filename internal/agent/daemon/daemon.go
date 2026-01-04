@@ -208,7 +208,10 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}
 
-	// 6. Enter poll loop
+	// 6. Initialize cancel context for console message handling
+	cancelCtx := NewCancelContext()
+
+	// 7. Enter poll loop
 	pollTicker := time.NewTicker(opts.PollInterval)
 	defer pollTicker.Stop()
 
@@ -283,6 +286,13 @@ func Run(ctx context.Context, opts Options) error {
 					procErr = handleEvent(ctx, logger, msg)
 				case agent.MessageTypeReply:
 					logger.Info().Str("msg_id", msg.ID).Msg("received reply")
+				case agent.MessageTypeConsoleAsk:
+					procErr = handleConsoleAsk(ctx, logger, msg, dspyAgent, mailboxStore, currentAgent.Policy, optCtx, cancelCtx)
+				case agent.MessageTypeConsoleCmd:
+					procErr = handleConsoleCmd(ctx, logger, msg, cancelCtx)
+				case agent.MessageTypeConsoleReply, agent.MessageTypeConsoleEvent:
+					// These are outbound messages, should not be received
+					logger.Debug().Str("msg_id", msg.ID).Str("type", string(msg.Type)).Msg("received console response message")
 				default:
 					logger.Warn().Str("type", string(msg.Type)).Msg("unknown message type")
 				}

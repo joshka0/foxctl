@@ -3,6 +3,9 @@ import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useSearch } from "../hooks/useData";
 
+interface SearchViewProps {
+  onExit?: () => void;
+}
 function sourceColor(source: string): string {
   switch (source) {
     case "symbols":
@@ -22,7 +25,7 @@ function sourceColor(source: string): string {
   }
 }
 
-export function SearchView() {
+export function SearchView({ onExit }: SearchViewProps) {
   const [query, setQuery] = useState("");
   const [inputMode, setInputMode] = useState(true);
   const [cursor, setCursor] = useState(0);
@@ -51,7 +54,11 @@ export function SearchView() {
         return;
       }
       if (e.name === "escape") {
-        setQuery("");
+        if (query.length === 0 && onExit) {
+          onExit();
+        } else {
+          setQuery("");
+        }
         return;
       }
       // Handle printable characters (raw is the actual character typed)

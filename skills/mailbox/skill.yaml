@@ -1,0 +1,66 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: mailbox/manage
+  version: 0.1.0
+  description: "Manage workspace mailbox: send messages, check inbox, acknowledge, reserve/release files"
+  tags: ["mailbox", "coordination", "messaging", "reservations"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/mailbox/manage
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: mailbox/manage
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: send|inbox|ack|reserve|release|list_reservations"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Workspace ID (defaults to current directory)"
+    - name: send
+      type: object
+      required: false
+      description: "Send payload (sender, recipient, subject, body, kind, priority, ack_required)"
+    - name: inbox
+      type: object
+      required: false
+      description: "Inbox query (actor_id, task_id, stream, only_unread, limit)"
+    - name: ack
+      type: object
+      required: false
+      description: "Ack payload (actor_id, message_ids)"
+    - name: reserve
+      type: object
+      required: false
+      description: "Reserve payload (actor_id, paths, mode, ttl_seconds)"
+    - name: release
+      type: object
+      required: false
+      description: "Release payload (actor_id, paths, reservation_ids)"
+returns:
+  - name: summary
+    type: string
+    description: "Human-readable summary of the operation"
+  - name: message_id
+    type: string
+    description: "ID of the sent message (send operation)"
+  - name: messages
+    type: array
+    description: "Retrieved messages (inbox operation)"
+  - name: granted
+    type: array
+    description: "Granted reservations (reserve operation)"
+  - name: conflicts
+    type: array
+    description: "Conflicting reservations (reserve operation)"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -53,6 +55,11 @@ type DspyActor struct {
 
 	// replySender is injected by supervisor for sending replies
 	sendReply func(ctx context.Context, msg *Message) error
+
+	// cancelMu protects cancelFuncs map
+	cancelMu sync.Mutex
+	// cancelFuncs maps askID to cancel function for in-flight console asks
+	cancelFuncs map[string]context.CancelFunc
 }
 
 // DspyActorConfig holds configuration for creating a DspyActor.
@@ -107,6 +114,7 @@ func NewDspyActor(cfg DspyActorConfig, opts ...DspyActorOption) (*DspyActor, err
 		BaseActor:   baseActor,
 		agentConfig: cfg.AgentConfig,
 		logger:      cfg.Logger,
+		cancelFuncs: make(map[string]context.CancelFunc),
 	}
 
 	// Apply options
@@ -142,6 +150,10 @@ func NewDspyActor(cfg DspyActorConfig, opts ...DspyActorOption) (*DspyActor, err
 	actor.RegisterHandler("agent.ask", actor.handleAsk)
 	actor.RegisterHandler("agent.cmd", actor.handleCmd)
 	actor.RegisterHandler("agent.event", actor.handleEvent)
+
+	// Register console handlers
+	actor.RegisterHandler("console.ask", actor.handleConsoleAsk)
+	actor.RegisterHandler("console.cmd", actor.handleConsoleCmd)
 
 	return actor, nil
 }
@@ -527,6 +539,187 @@ func (a *DspyActor) handleEvent(ctx context.Context, msg *Message) (*Message, er
 		Msg("received agent event")
 
 	return nil, nil
+}
+
+// handleConsoleAsk processes a console.ask message from TUI/API.
+func (a *DspyActor) handleConsoleAsk(ctx context.Context, msg *Message) (*Message, error) {
+	// Parse envelope
+	var env struct {
+		Data agentdomain.ConsoleAskData `json:"data"`
+	}
+	if err := json.Unmarshal(msg.Body, &env); err != nil {
+		return nil, fmt.Errorf("unmarshal console ask: %w", err)
+	}
+	askData := env.Data
+
+	// Get correlation ID from header or use ask ID
+	correlID := msg.Headers["correlation"]
+	if correlID == "" {
+		correlID = askData.AskID
+	}
+
+	// Create cancellable context with timeout
+	timeout := 10 * time.Minute
+	if a.agentConfig.Timeout > 0 {
+		timeout = a.agentConfig.Timeout
+	}
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+
+	// Track cancel function for this ask
+	a.cancelMu.Lock()
+	a.cancelFuncs[askData.AskID] = cancel
+	a.cancelMu.Unlock()
+
+	defer func() {
+		a.cancelMu.Lock()
+		delete(a.cancelFuncs, askData.AskID)
+		a.cancelMu.Unlock()
+		cancel()
+	}()
+
+	startTime := time.Now()
+
+	// Build prompt with memory context
+	prompt := askData.Prompt
+	if a.shortTermMem != nil {
+		if memCtx, err := a.shortTermMem.GetContext(ctx, a.ID()); err == nil && memCtx != "" {
+			prompt = memCtx + "\n\n---\n\n" + prompt
+		}
+	}
+
+	// Emit start event
+	a.emitConsoleEvent(msg.FromNS, askData.AskID, correlID, 1, 0, "progress", "Starting execution...")
+
+	// Execute dspy-go turn
+	input := map[string]any{"task": prompt}
+	resultMap, err := a.dspyAgent.Execute(execCtx, input)
+
+	// Determine response and status
+	var response string
+	var status string
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			response = "Cancelled by user"
+			status = "cancelled"
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			response = "Execution timed out"
+			status = "error"
+		} else {
+			response = fmt.Sprintf("Error: %v", err)
+			status = "error"
+		}
+	} else {
+		response = extractResult(resultMap)
+		status = "ok"
+	}
+
+	// Emit completion event
+	a.emitConsoleEvent(msg.FromNS, askData.AskID, correlID, 2, 0, "progress",
+		fmt.Sprintf("Completed in %v", time.Since(startTime).Round(time.Millisecond)))
+
+	// Record in memory
+	if a.shortTermMem != nil && status == "ok" {
+		turn := memory.Turn{Role: "assistant", Content: response, Timestamp: time.Now()}
+		if err := a.shortTermMem.AppendTurn(ctx, a.ID(), turn); err != nil {
+			a.logger.Warn().Err(err).Msg("failed to append turn to memory")
+		}
+	}
+
+	// Build console.reply
+	replyData := agentdomain.ConsoleReplyData{
+		AskID:    askData.AskID,
+		Response: response,
+		Status:   status,
+		Metrics: map[string]any{
+			"duration_ms": time.Since(startTime).Milliseconds(),
+		},
+	}
+	replyEnv := envelope.OK("console.reply", replyData)
+	replyPayload, err := json.Marshal(replyEnv)
+	if err != nil {
+		return nil, fmt.Errorf("marshal console reply: %w", err)
+	}
+
+	return &Message{
+		ID:        ulid.Make().String(),
+		Subject:   "console.reply",
+		Body:      replyPayload,
+		CreatedAt: time.Now(),
+		Headers:   map[string]string{"correlation": correlID},
+	}, nil
+}
+
+// handleConsoleCmd processes a console.cmd message (e.g., cancel).
+func (a *DspyActor) handleConsoleCmd(ctx context.Context, msg *Message) (*Message, error) {
+	var env struct {
+		Data agentdomain.ConsoleCmdData `json:"data"`
+	}
+	if err := json.Unmarshal(msg.Body, &env); err != nil {
+		return nil, fmt.Errorf("unmarshal console cmd: %w", err)
+	}
+	cmdData := env.Data
+
+	switch cmdData.Action {
+	case "cancel":
+		// Find and cancel the in-flight ask
+		askID := cmdData.AskID
+		if askID == "" {
+			askID = msg.Headers["ask_id"]
+		}
+		if askID == "" {
+			a.logger.Warn().Msg("cancel command missing ask_id")
+			return nil, nil
+		}
+
+		a.cancelMu.Lock()
+		if cancel, ok := a.cancelFuncs[askID]; ok {
+			cancel()
+			a.logger.Info().Str("ask_id", askID).Msg("cancelled console ask")
+		} else {
+			a.logger.Warn().Str("ask_id", askID).Msg("no in-flight ask to cancel")
+		}
+		a.cancelMu.Unlock()
+
+	default:
+		a.logger.Warn().Str("action", cmdData.Action).Msg("unknown console command")
+	}
+
+	return nil, nil // Commands are fire-and-forget
+}
+
+// emitConsoleEvent sends a console.event message to the caller.
+func (a *DspyActor) emitConsoleEvent(toNS, askID, correlID string, seq, iteration int, kind, content string) {
+	if a.sendReply == nil {
+		return
+	}
+
+	eventData := agentdomain.ConsoleEventData{
+		AskID:     askID,
+		Kind:      kind,
+		Content:   content,
+		Seq:       seq,
+		Iteration: iteration,
+	}
+	eventEnv := envelope.OK("console.event", eventData)
+	payload, err := json.Marshal(eventEnv)
+	if err != nil {
+		a.logger.Warn().Err(err).Msg("failed to marshal console event")
+		return
+	}
+
+	eventMsg := &Message{
+		ID:        ulid.Make().String(),
+		Subject:   "console.event",
+		Body:      payload,
+		ToNS:      toNS,
+		FromNS:    a.Namespace(),
+		CreatedAt: time.Now(),
+		Headers:   map[string]string{"correlation": correlID, "ask_id": askID},
+	}
+
+	if err := a.sendReply(context.Background(), eventMsg); err != nil {
+		a.logger.Warn().Err(err).Msg("failed to send console event")
+	}
 }
 
 // extractResult extracts the result string from a dspy-go execution result.
