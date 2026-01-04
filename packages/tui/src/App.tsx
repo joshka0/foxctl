@@ -84,25 +84,17 @@ function Header({ currentView }: HeaderProps) {
 
   return (
     <box height={1} flexDirection="row" justifyContent="space-between">
-      <text fg="#00ff00">
-        <b>agentctl-viewer</b>
-      </text>
+      <text fg="#00ff00" bold>agentctl-viewer</text>
       <box flexDirection="row">
-        {views.map((v) => (
-          <text key={v.key} fg={currentView === v.key ? "#00ff00" : "#666666"}>
-            {currentView === v.key ? (
-              <b>
-                {" "}
-                [{v.shortcut}]{v.label}
-              </b>
-            ) : (
-              <>
-                {" "}
-                [{v.shortcut}]{v.label}
-              </>
-            )}
-          </text>
-        ))}
+        {views.map((v) => {
+          const isActive = currentView === v.key;
+          const label = ` [${v.shortcut}]${v.label}`;
+          return isActive ? (
+            <text key={v.key} fg="#00ff00" bold>{label}</text>
+          ) : (
+            <text key={v.key} fg="#666666">{label}</text>
+          );
+        })}
       </box>
     </box>
   );
@@ -207,11 +199,12 @@ export function App() {
         break;
       case "q":
         if (e.ctrl) {
-          process.exit(0);
+          // Delay exit slightly to allow cleanup
+          setTimeout(() => process.exit(0), 50);
         }
         // Regular q only quits from non-input views
         if (view !== "search" && view !== "console") {
-          process.exit(0);
+          setTimeout(() => process.exit(0), 50);
         }
         break;
       case "[":
