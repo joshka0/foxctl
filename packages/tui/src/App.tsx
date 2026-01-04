@@ -84,13 +84,13 @@ function Header({ currentView }: HeaderProps) {
 
   return (
     <box height={1} flexDirection="row" justifyContent="space-between">
-      <text fg="#00ff00" bold>agentctl-viewer</text>
+      <text fg="#00ff00"><b>agentctl-viewer</b></text>
       <box flexDirection="row">
         {views.map((v) => {
           const isActive = currentView === v.key;
           const label = ` [${v.shortcut}]${v.label}`;
           return isActive ? (
-            <text key={v.key} fg="#00ff00" bold>{label}</text>
+            <text key={v.key} fg="#00ff00"><b>{label}</b></text>
           ) : (
             <text key={v.key} fg="#666666">{label}</text>
           );
