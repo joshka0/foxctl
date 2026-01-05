@@ -26,6 +26,7 @@ import {
   getSessions,
   getSession,
   getSessionMessages,
+  getSessionContextWindows,
   getAgents,
   getAgent,
   spawnAgent,
@@ -606,6 +607,21 @@ export function useSessionMessages(
       };
     },
     [sessionId, params?.limit, params?.offset]
+  );
+}
+
+// Session Context Windows
+export function useSessionContextWindows(sessionId: string | undefined) {
+  return useQuery(
+    async () => {
+      if (!sessionId) return undefined;
+      const result = await getSessionContextWindows(sessionId);
+      return {
+        context_windows: result.context_windows,
+        total: result.total,
+      };
+    },
+    [sessionId]
   );
 }
 

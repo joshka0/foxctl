@@ -22,6 +22,7 @@ import type {
   Session,
   SessionMessage,
   SessionSearchResult,
+  ContextWindow,
   Codemap,
   CodemapListItem,
   CASObject,
@@ -347,6 +348,15 @@ export async function searchSessions(params: {
   searchParams.set("pattern", params.pattern);
   if (params.limit) searchParams.set("limit", String(params.limit));
   return request(`/api/sessions/search?${searchParams.toString()}`);
+}
+
+export async function getSessionContextWindows(
+  id: string
+): Promise<{
+  context_windows: ContextWindow[];
+  total: number;
+}> {
+  return request(`/api/sessions/${encodeURIComponent(id)}/context-windows`);
 }
 
 // Codemaps

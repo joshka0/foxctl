@@ -1,0 +1,19 @@
+{
+  "name": "agentctl-opencode-hooks",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "OpenCode plugins for agentctl integration",
+  "main": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "bun build ./index.ts --outdir dist"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "latest",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}

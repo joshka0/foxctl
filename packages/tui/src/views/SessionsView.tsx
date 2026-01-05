@@ -1,9 +1,9 @@
 // Sessions View - Browse Claude Code sessions with summaries
 import { useState } from "react";
 import { useKeyboard } from "@opentui/react";
-import { useSessions, useSessionMessages } from "../hooks/useData";
+import { useSessions, useSessionMessages, useSessionContextWindows } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
-import type { Session, SessionMessage } from "@agentctl/data";
+import type { Session, SessionMessage, ContextWindow } from "@agentctl/data";
 
 function statusColor(status: string): string {
   switch (status) {
@@ -94,6 +94,73 @@ function SessionRow({ session, selected }: SessionRowProps) {
   );
 }
 
+// Format token count nicely
+function formatTokens(tokens: number): string {
+  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
+  return String(tokens);
+}
+
+// Trigger color based on type
+function triggerColor(trigger: string): string {
+  switch (trigger) {
+    case "auto":
+      return "#00ffff";
+    case "manual":
+      return "#ffff00";
+    default:
+      return "#888888";
+  }
+}
+
+interface ContextWindowsDisplayProps {
+  sessionId: string;
+}
+
+function ContextWindowsDisplay({ sessionId }: ContextWindowsDisplayProps) {
+  const { data, isLoading, error } = useSessionContextWindows(sessionId);
+
+  if (isLoading) {
+    return <text fg="#666666">Loading context windows...</text>;
+  }
+
+  if (error || !data) {
+    return null;
+  }
+
+  const windows = data.context_windows || [];
+  if (windows.length === 0) {
+    return (
+      <text fg="#666666">No context windows (single context)</text>
+    );
+  }
+
+  return (
+    <box flexDirection="column">
+      <text fg="#00aaff">
+        <b>Context Windows ({windows.length}):</b>
+      </text>
+      <box paddingLeft={1} paddingTop={1} flexDirection="column">
+        {windows.map((w: ContextWindow) => (
+          <box key={w.id} height={1} flexDirection="row">
+            <text fg="#888888">
+              <span fg="#666666">[{w.window_index}]</span>
+              {" "}
+              <span fg={triggerColor(w.trigger)}>{w.trigger.padEnd(6)}</span>
+              {" "}
+              <span fg="#aa77ff">{formatTokens(w.pre_compact_tokens)} tokens</span>
+              {" "}
+              <span fg="#666666">{w.message_count} msgs</span>
+              {" "}
+              <span fg="#444444">chunks {w.chunk_start}-{w.chunk_end}</span>
+            </text>
+          </box>
+        ))}
+      </box>
+    </box>
+  );
+}
+
 interface SessionDetailProps {
   session: Session | undefined;
 }
@@ -173,6 +240,10 @@ function SessionDetail({ session }: SessionDetailProps) {
           {session.agent_id.slice(0, 24)}
         </text>
       )}
+
+      <text> </text>
+      <ContextWindowsDisplay sessionId={session.id} />
+
       <text> </text>
       <text fg="#aa77ff">
         <b>Summary:</b>

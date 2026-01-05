@@ -51,6 +51,8 @@ type Service struct {
 	// Shutdown coordination
 	shutdownCh   chan struct{}
 	shutdownOnce sync.Once
+	shutdownMu   sync.Mutex // protects shutdown state for acceptLoop
+	isShutdown   bool       // set to true when shutdownCh is closed
 	wg           sync.WaitGroup
 }
 
@@ -123,6 +125,9 @@ func (s *Service) Run(ctx context.Context) error {
 // Shutdown gracefully shuts down the daemon.
 func (s *Service) Shutdown(ctx context.Context) error {
 	s.shutdownOnce.Do(func() {
+		s.shutdownMu.Lock()
+		s.isShutdown = true
+		s.shutdownMu.Unlock()
 		close(s.shutdownCh)
 	})
 
@@ -177,7 +182,16 @@ func (s *Service) acceptLoop(ctx context.Context) {
 			}
 		}
 
+		// Atomically check shutdown and add to wait group to avoid race with Shutdown()
+		s.shutdownMu.Lock()
+		if s.isShutdown {
+			s.shutdownMu.Unlock()
+			conn.Close()
+			return
+		}
 		s.wg.Add(1)
+		s.shutdownMu.Unlock()
+
 		go func() {
 			defer s.wg.Done()
 			s.handleConnection(ctx, conn)

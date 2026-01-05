@@ -3,8 +3,37 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import { execSync, spawn } from "child_process";
 import { readdirSync, statSync, readFileSync, existsSync, writeFileSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, dirname } from "path";
 import { homedir } from "os";
+import { fileURLToPath } from "url";
+
+// Load .env file from project root (3 levels up from server/index.js)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const envPath = join(__dirname, "..", "..", "..", ".env");
+if (existsSync(envPath)) {
+  const envContent = readFileSync(envPath, "utf-8");
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim();
+    // Skip comments and empty lines
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    // Skip export prefixed lines (just remove the prefix)
+    const cleanLine = trimmed.startsWith("export ") ? trimmed.slice(7) : trimmed;
+    const eqIndex = cleanLine.indexOf("=");
+    if (eqIndex === -1) continue;
+    const key = cleanLine.slice(0, eqIndex).trim();
+    let value = cleanLine.slice(eqIndex + 1).trim();
+    // Remove surrounding quotes if present
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    // Only set if not already defined (env takes precedence)
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+  console.log(`Loaded environment from ${envPath}`);
+}
 
 // Detect Bun and use native sqlite driver if available
 let Database;
@@ -78,6 +107,77 @@ function runSkill(skill, input) {
 // Track running agent daemons
 const runningDaemons = new Map(); // actor_id -> { pid, startedAt }
 
+// Detect best available LLM provider from environment
+// Priority: Anthropic OAuth (future) > OpenRouter > Groq > Gemini > OpenAI
+// TODO: Implement Anthropic OAuth via Claude CLI wrapper for Max subscription users
+// See: CLAUDE.md "Claude Max OAuth" section for details
+function detectLLMProvider() {
+  // Provider configurations with their env keys and default models
+  // Models updated Jan 2026
+  const providers = [
+    {
+      name: "openrouter",
+      envKey: "OPENROUTER_API_KEY",
+      modelEnv: "OPENROUTER_MODEL",
+      // Free agentic/coding models: devstral, minimax-m2.1, mimo-v2-flash, deepseek-r1
+      defaultModel: "minimax/minimax-m2.1", // Fast, efficient for coding/agents
+    },
+    {
+      name: "groq",
+      envKey: "GROQ_API_KEY",
+      modelEnv: "GROQ_MODEL",
+      defaultModel: "qwen/qwen3-32b", // Fast inference on Groq
+    },
+    {
+      name: "gemini",
+      envKey: "GEMINI_API_KEY",
+      modelEnv: "GEMINI_MODEL",
+      defaultModel: "gemini-3-flash-preview", // Latest as of Dec 2025
+    },
+    {
+      name: "anthropic",
+      envKey: "ANTHROPIC_API_KEY",
+      modelEnv: "ANTHROPIC_MODEL",
+      defaultModel: "claude-haiku-4-5", // Direct API (not Max subscription)
+    },
+    {
+      name: "openai",
+      envKey: "OPENAI_API_KEY",
+      modelEnv: "OPENAI_MODEL",
+      defaultModel: "gpt-5.2", // Latest for coding/agentic
+    },
+  ];
+
+  // Check for explicit provider override
+  const explicitProvider = process.env.AGENTCTL_LLM_PROVIDER;
+  const explicitKey = process.env.AGENTCTL_LLM_API_KEY;
+  const explicitModel = process.env.AGENTCTL_LLM_MODEL;
+
+  if (explicitProvider && explicitKey) {
+    return {
+      provider: explicitProvider,
+      apiKey: explicitKey,
+      model: explicitModel || providers.find(p => p.name === explicitProvider)?.defaultModel || "default",
+    };
+  }
+
+  // Auto-detect from available keys
+  for (const p of providers) {
+    const apiKey = process.env[p.envKey];
+    if (apiKey) {
+      const model = process.env[p.modelEnv] || p.defaultModel;
+      console.log(`Auto-detected LLM provider: ${p.name} (model: ${model})`);
+      return {
+        provider: p.name,
+        apiKey,
+        model,
+      };
+    }
+  }
+
+  return null; // No provider found
+}
+
 // Ensure agent exists in agents.db and spawn daemon if needed
 function ensureAgentDaemon(actorId, workspace = "") {
   const dbPath = join(AGENTCTL_HOME, "storage", "agents.db");
@@ -128,6 +228,13 @@ function ensureAgentDaemon(actorId, workspace = "") {
       return { agentId: existing.id, status: "daemon_spawned" };
     }
 
+    // Detect LLM provider
+    const llmConfig = detectLLMProvider();
+    if (!llmConfig) {
+      console.warn("No LLM provider configured. Set GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or AGENTCTL_LLM_API_KEY");
+      return { error: "No LLM provider configured. Set an API key in .env or environment." };
+    }
+
     // Create new agent record
     const agentId = generateId();
     const now = new Date().toISOString();
@@ -139,13 +246,16 @@ function ensureAgentDaemon(actorId, workspace = "") {
     });
 
     db.prepare(`
-      INSERT INTO agents (id, namespace, role, prompt, state, skills_allow, policy, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO agents (id, namespace, role, prompt, llm_provider, llm_model, llm_api_key, state, skills_allow, policy, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       agentId,
       actorId, // namespace = actor_id
       "console", // role
       "You are an interactive console agent. Help the user with their queries.", // prompt
+      llmConfig.provider,
+      llmConfig.model,
+      llmConfig.apiKey,
       "pending", // state
       JSON.stringify(["*"]), // skills_allow - all skills
       defaultPolicy,
@@ -155,6 +265,8 @@ function ensureAgentDaemon(actorId, workspace = "") {
 
     db.close();
     db = null;
+
+    console.log(`Created agent ${agentId} with provider: ${llmConfig.provider}, model: ${llmConfig.model}`);
 
     // Spawn daemon for the new agent
     spawnAgentDaemon(agentId, actorId);
@@ -1058,6 +1170,41 @@ app.put("/api/sessions/:id/messages/:index", (req, res) => {
     atomicWriteFileSync(session.raw_jsonl_path, lines.join("\n") + "\n");
 
     res.json({ success: true, index: messageIndex });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Sessions - get context windows for a session
+app.get("/api/sessions/:id/context-windows", (req, res) => {
+  const sessionsDB = join(AGENTCTL_HOME, "storage", "sessions.db");
+
+  try {
+    const db = openDB(sessionsDB);
+
+    // Check if table exists first
+    const tableExists = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='session_context_windows'`)
+      .get();
+
+    if (!tableExists) {
+      db.close();
+      return res.json({ context_windows: [], total: 0 });
+    }
+
+    const contextWindows = db
+      .prepare(
+        `SELECT id, session_id, window_index, started_at, ended_at,
+                pre_compact_tokens, trigger, chunk_start, chunk_end,
+                message_count, summary, created_at
+         FROM session_context_windows
+         WHERE session_id = ?
+         ORDER BY window_index ASC`
+      )
+      .all(req.params.id);
+
+    db.close();
+    res.json({ context_windows: contextWindows, total: contextWindows.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2426,6 +2573,8 @@ app.delete("/api/consoles/:id", (req, res) => {
 });
 
 // POST /api/consoles/:id/send - Send console.ask message
+// NOTE: This sends directly to mailbox.db (not board_messages) because the agent daemon
+// polls from the mailbox table, not the board_messages table used by mailbox/manage skill.
 app.post("/api/consoles/:id/send", (req, res) => {
   const { prompt, context } = req.body;
   const consoleId = req.params.id;
@@ -2434,59 +2583,75 @@ app.post("/api/consoles/:id/send", (req, res) => {
     return res.status(400).json({ error: "prompt is required" });
   }
 
-  const dbPath = join(AGENTCTL_HOME, "storage", "agents.db");
+  const agentsDbPath = join(AGENTCTL_HOME, "storage", "agents.db");
+  const mailboxDbPath = join(AGENTCTL_HOME, "storage", "mailbox.db");
 
   try {
     // Get console session to find actor_id
-    const db = openDB(dbPath);
-    const console = db.prepare(`
+    const agentsDb = openDB(agentsDbPath);
+    const consoleSession = agentsDb.prepare(`
       SELECT actor_id, session_id, workspace FROM console_sessions WHERE console_id = ?
     `).get(consoleId);
-    db.close();
+    agentsDb.close();
 
-    if (!console) {
+    if (!consoleSession) {
       return res.status(404).json({ error: "Console not found" });
     }
 
-    // Use mailbox skill to send console.ask message
+    // Generate IDs
     const askId = generateId();
     const messageId = generateId();
+    const now = Math.floor(Date.now() / 1000);
 
-    const input = {
-      operation: "send",
-      send: {
-        sender: consoleId,
-        recipient: console.actor_id,
-        subject: "console.ask",
-        body: JSON.stringify({
-          status: "ok",
-          command: "console.ask",
-          data: {
-            ask_id: askId,
-            prompt: prompt,
-            context: context || {},
-            console_id: consoleId,
-          }
-        }),
-        priority: 1,
-        kind: "console.ask",
-        headers: {
-          correlation: askId,
-          ask_id: askId,
-          console_id: consoleId,
-        }
+    // Build the envelope payload (matching agent.ConsoleAskData structure)
+    const payload = JSON.stringify({
+      status: "ok",
+      command: "console.ask",
+      data: {
+        ask_id: askId,
+        prompt: prompt,
+        context: context || {},
+        console_id: consoleId,
       }
-    };
+    });
 
-    const result = runSkill("mailbox/manage", input);
+    // Build headers
+    const headers = JSON.stringify({
+      correlation: askId,
+      ask_id: askId,
+      console_id: consoleId,
+    });
 
-    if (result.error) {
-      return res.status(500).json({ error: result.error });
-    }
+    const mailboxDb = new Database(mailboxDbPath);
+
+    // Insert message into mailbox table
+    // - from_ns: the console ID (sender)
+    // - to_ns: the actor_id (agent namespace that daemon polls)
+    // - type: "console.ask" (matches agent.MessageTypeConsoleAsk)
+    mailboxDb.prepare(`
+      INSERT INTO mailbox (id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      messageId,
+      consoleId,                    // from_ns
+      consoleSession.actor_id,      // to_ns (agent namespace)
+      "console.ask",                // type (MessageTypeConsoleAsk)
+      300000,                       // ttl_ms (5 minutes)
+      headers,
+      payload,
+      now,                          // visible_at
+      0,                            // attempt
+      now,                          // ts
+      consoleSession.session_id || null,
+      consoleSession.workspace || "",
+      null                          // agent_id
+    );
+
+    mailboxDb.close();
 
     // Update last_attached_at
     try {
-      const dbWrite = new Database(dbPath);
+      const dbWrite = new Database(agentsDbPath);
       dbWrite.prepare(`
         UPDATE console_sessions SET last_attached_at = ? WHERE console_id = ?
       `).run(new Date().toISOString(), consoleId);
@@ -2496,7 +2661,7 @@ app.post("/api/consoles/:id/send", (req, res) => {
     }
 
     res.json({
-      message_id: result.data?.id || messageId,
+      message_id: messageId,
       ask_id: askId,
       status: "sent",
     });
@@ -2571,56 +2736,93 @@ function broadcastConsoleEvent(consoleId, type, data = {}) {
 }
 
 // POST /api/consoles/:id/cancel - Send console.cmd cancel
+// NOTE: This sends directly to mailbox.db (not board_messages) because the agent daemon
+// polls from the mailbox table.
 app.post("/api/consoles/:id/cancel", (req, res) => {
   const consoleId = req.params.id;
   const { ask_id } = req.body;
 
-  const dbPath = join(AGENTCTL_HOME, "storage", "agents.db");
+  const agentsDbPath = join(AGENTCTL_HOME, "storage", "agents.db");
+  const mailboxDbPath = join(AGENTCTL_HOME, "storage", "mailbox.db");
 
   try {
     // Get console session to find actor_id
-    const db = openDB(dbPath);
-    const consoleSession = db.prepare(`
+    const agentsDb = openDB(agentsDbPath);
+    const consoleSession = agentsDb.prepare(`
       SELECT actor_id FROM console_sessions WHERE console_id = ?
     `).get(consoleId);
-    db.close();
+    agentsDb.close();
 
     if (!consoleSession) {
       return res.status(404).json({ error: "Console not found" });
     }
 
-    // Use mailbox skill to send console.cmd message
+    // Generate IDs
     const cmdId = generateId();
+    const messageId = generateId();
+    const now = Math.floor(Date.now() / 1000);
 
-    const input = {
-      operation: "send",
-      send: {
-        sender: consoleId,
-        recipient: consoleSession.actor_id,
-        subject: "console.cmd",
-        body: JSON.stringify({
-          status: "ok",
-          command: "console.cmd",
-          data: {
-            cmd_id: cmdId,
-            action: "cancel",
-            ask_id: ask_id || "",
-          }
-        }),
-        priority: 0, // High priority for cancel
-        kind: "console.cmd",
-        headers: {
-          ask_id: ask_id || "",
-          console_id: consoleId,
-        }
+    // Build the envelope payload (matching agent.ConsoleCmdData structure)
+    const payload = JSON.stringify({
+      status: "ok",
+      command: "console.cmd",
+      data: {
+        cmd_id: cmdId,
+        action: "cancel",
+        ask_id: ask_id || "",
       }
-    };
+    });
 
-    const result = runSkill("mailbox/manage", input);
+    // Build headers
+    const headers = JSON.stringify({
+      ask_id: ask_id || "",
+      console_id: consoleId,
+    });
 
-    if (result.error) {
-      return res.status(500).json({ error: result.error });
-    }
+    // Open mailbox.db with write access
+    const mailboxDb = new Database(mailboxDbPath);
+
+    // Ensure mailbox table exists
+    mailboxDb.exec(`
+      CREATE TABLE IF NOT EXISTS mailbox (
+        id TEXT PRIMARY KEY,
+        from_ns TEXT NOT NULL,
+        to_ns TEXT NOT NULL,
+        type TEXT NOT NULL,
+        ttl_ms INTEGER NOT NULL DEFAULT 0,
+        headers TEXT,
+        payload TEXT,
+        visible_at INTEGER NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        ts INTEGER NOT NULL,
+        session_id TEXT,
+        workspace TEXT,
+        agent_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mailbox_to_ns_visible ON mailbox(to_ns, visible_at);
+    `);
+
+    // Insert cancel command into mailbox table
+    mailboxDb.prepare(`
+      INSERT INTO mailbox (id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      messageId,
+      consoleId,                    // from_ns
+      consoleSession.actor_id,      // to_ns (agent namespace)
+      "console.cmd",                // type (MessageTypeConsoleCmd)
+      60000,                        // ttl_ms (1 minute - cancel commands expire faster)
+      headers,
+      payload,
+      now,                          // visible_at
+      0,                            // attempt
+      now,                          // ts
+      null,                         // session_id
+      "",                           // workspace
+      null                          // agent_id
+    );
+
+    mailboxDb.close();
 
     res.json({
       cmd_id: cmdId,
@@ -3089,14 +3291,40 @@ function runMigrations() {
   if (existsSync(memoryDB)) {
     const db = new Database(memoryDB);
     try {
-      // Add pinned_at column for memory pinning feature
       db.exec(`ALTER TABLE named_memory ADD COLUMN pinned_at TEXT DEFAULT NULL`);
       console.log("Migration: added pinned_at column to named_memory");
     } catch {
-      // Column already exists - this is expected on subsequent startups
+      // Column already exists
     }
     db.close();
   }
+
+  const mailboxDbPath = join(AGENTCTL_HOME, "storage", "mailbox.db");
+  const mailboxDb = new Database(mailboxDbPath);
+  try {
+    mailboxDb.exec(`
+      CREATE TABLE IF NOT EXISTS mailbox (
+        id TEXT PRIMARY KEY,
+        from_ns TEXT NOT NULL,
+        to_ns TEXT NOT NULL,
+        type TEXT NOT NULL,
+        ttl_ms INTEGER NOT NULL DEFAULT 0,
+        headers TEXT,
+        payload TEXT,
+        visible_at INTEGER NOT NULL,
+        attempt INTEGER NOT NULL DEFAULT 0,
+        ts INTEGER NOT NULL,
+        session_id TEXT,
+        workspace TEXT,
+        agent_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mailbox_to_ns_visible ON mailbox(to_ns, visible_at);
+    `);
+    console.log("Migration: ensured mailbox table exists");
+  } catch (err) {
+    console.error("Migration: mailbox table error:", err.message);
+  }
+  mailboxDb.close();
 }
 
 // Run migrations before starting server

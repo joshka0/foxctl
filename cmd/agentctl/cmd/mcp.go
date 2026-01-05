@@ -334,13 +334,14 @@ func loadBackendConfig(path string) error {
 }
 
 func registerTools(s *server.MCPServer) {
-	// web_search - Simplified tavily-search (drops huge country enum)
+	// web_search - Unified search across providers (exa, tavily, perplexity)
 	s.AddTool(
 		mcp.NewTool("web_search",
 			mcp.WithDescription("Search the web for current information. Returns relevant results with snippets."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Search query")),
 			mcp.WithNumber("max_results", mcp.Description("Max results to return (default: 10, max: 20)")),
 			mcp.WithString("topic", mcp.Description("Topic: 'general' or 'news'")),
+			mcp.WithString("provider", mcp.Description("Search provider: 'exa' (default), 'tavily', or 'perplexity'. Override with AGENTCTL_SEARCH_PROVIDER env var.")),
 		),
 		handleWebSearch,
 	)
@@ -612,11 +613,34 @@ func handleWebSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
 		topic = t
 	}
 
-	return callBackend(ctx, "tavily", "tavily-search", map[string]any{
-		"query":       query,
-		"max_results": int(maxResults),
-		"topic":       topic,
-	})
+	// Check for provider override (env var or arg)
+	provider := os.Getenv("AGENTCTL_SEARCH_PROVIDER")
+	if p, ok := args["provider"].(string); ok && p != "" {
+		provider = p
+	}
+	if provider == "" {
+		provider = "exa" // Default to exa
+	}
+
+	switch provider {
+	case "tavily":
+		return callBackend(ctx, "tavily", "tavily-search", map[string]any{
+			"query":       query,
+			"max_results": int(maxResults),
+			"topic":       topic,
+		})
+	case "perplexity":
+		return callBackend(ctx, "perplexity", "perplexity_ask", map[string]any{
+			"messages": []map[string]string{
+				{"role": "user", "content": query},
+			},
+		})
+	default: // exa
+		return callBackend(ctx, "exa", "web_search_exa", map[string]any{
+			"query":      query,
+			"numResults": int(maxResults),
+		})
+	}
 }
 
 func handleWebExtract(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

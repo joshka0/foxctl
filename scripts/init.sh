@@ -146,6 +146,73 @@ if [[ -d "$REPO_ROOT/.claude/skills" ]]; then
 fi
 echo ""
 
+# 5b. Setup OpenCode plugin integration
+echo -e "${BLUE}5b. Setting up OpenCode plugin integration...${NC}"
+
+OPENCODE_CONFIG_DIR="${HOME}/.config/opencode"
+OPENCODE_HOOKS_SOURCE="$REPO_ROOT/configs/opencode-hooks"
+
+if [[ -d "$OPENCODE_HOOKS_SOURCE" ]]; then
+    # Create OpenCode config directory
+    mkdir -p "$OPENCODE_CONFIG_DIR"
+
+    # Resolve source to absolute path
+    OPENCODE_HOOKS_SOURCE_ABS="$(cd "$OPENCODE_HOOKS_SOURCE" && pwd)"
+
+    # Create or update package.json with file:// dependency
+    OPENCODE_PKG="$OPENCODE_CONFIG_DIR/package.json"
+    if [[ -f "$OPENCODE_PKG" ]]; then
+        # Check if agentctl-opencode-hooks is already in package.json
+        if grep -q '"agentctl-opencode-hooks"' "$OPENCODE_PKG"; then
+            success "OpenCode package.json already has agentctl-opencode-hooks"
+        else
+            # Add the dependency using jq if available, otherwise warn
+            if command -v jq &>/dev/null; then
+                jq --arg path "file://$OPENCODE_HOOKS_SOURCE_ABS" \
+                   '.dependencies["agentctl-opencode-hooks"] = $path' \
+                   "$OPENCODE_PKG" > "${OPENCODE_PKG}.tmp" && mv "${OPENCODE_PKG}.tmp" "$OPENCODE_PKG"
+                success "Added agentctl-opencode-hooks to OpenCode package.json"
+            else
+                warn "jq not found. Manually add to $OPENCODE_PKG:"
+                echo "    \"agentctl-opencode-hooks\": \"file://$OPENCODE_HOOKS_SOURCE_ABS\""
+            fi
+        fi
+    else
+        # Create new package.json
+        cat > "$OPENCODE_PKG" <<EOF
+{
+  "dependencies": {
+    "agentctl-opencode-hooks": "file://$OPENCODE_HOOKS_SOURCE_ABS"
+  }
+}
+EOF
+        success "Created OpenCode package.json with agentctl-opencode-hooks"
+    fi
+
+    # Run bun install to link the plugin
+    if command -v bun &>/dev/null; then
+        (cd "$OPENCODE_CONFIG_DIR" && bun install --silent 2>/dev/null)
+        success "Installed OpenCode plugin dependencies"
+    else
+        warn "bun not found. Run: cd $OPENCODE_CONFIG_DIR && bun install"
+    fi
+
+    # Check if plugin is in opencode.json plugin array
+    OPENCODE_JSON="$OPENCODE_CONFIG_DIR/opencode.json"
+    if [[ -f "$OPENCODE_JSON" ]]; then
+        if grep -q '"agentctl-opencode-hooks"' "$OPENCODE_JSON"; then
+            success "OpenCode config has agentctl-opencode-hooks in plugin array"
+        else
+            warn "Add 'agentctl-opencode-hooks' to plugin array in $OPENCODE_JSON"
+        fi
+    else
+        info "OpenCode config not found at $OPENCODE_JSON"
+    fi
+else
+    warn "No OpenCode hooks to install (configs/opencode-hooks not found)"
+fi
+echo ""
+
 # 6. Validate .env
 echo -e "${BLUE}6. Checking environment configuration...${NC}"
 

@@ -481,3 +481,19 @@ export interface ConsoleFeedbackResponse {
   feedback_id?: string;
   rating: number;
 }
+
+// Context Window types (from session_context_windows table)
+export interface ContextWindow {
+  id: string;
+  session_id: string;
+  window_index: number; // 0, 1, 2... per session
+  started_at: string; // First message timestamp in window
+  ended_at: string; // compact_boundary timestamp (or session end)
+  pre_compact_tokens: number; // From compactMetadata.preTokens
+  trigger: string; // 'auto' or 'manual'
+  chunk_start: number; // First chunk_index in window
+  chunk_end: number; // Last chunk_index in window
+  message_count: number; // Messages in this window
+  summary?: string; // Per-window summary (optional)
+  created_at: string;
+}
