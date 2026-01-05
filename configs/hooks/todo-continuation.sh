@@ -63,7 +63,7 @@ ALL_RESULT=$("$AGENTCTL" run todo/manage --input "$ALL_TASKS_INPUT" 2>/dev/null)
 # Also calculate ready status (all dependencies completed)
 # Build ID->Title map and enriched tasks
 ENRICHED_TASKS=$(echo "$ALL_RESULT" | jq -c '
-  .data.tasks as $all |
+  (.data.tasks // []) as $all |
   # Build ID -> Title mapping
   ($all | map({key: .id, value: .title}) | from_entries) as $id_to_title |
   # Build set of completed task IDs
@@ -86,7 +86,7 @@ ENRICHED_TASKS=$(echo "$ALL_RESULT" | jq -c '
 ')
 
 # Extract ID->Title map for execution order
-ID_TO_TITLE=$(echo "$ALL_RESULT" | jq -c '.data.tasks | map({key: .id, value: .title}) | from_entries')
+ID_TO_TITLE=$(echo "$ALL_RESULT" | jq -c '(.data.tasks // []) | map({key: .id, value: .title}) | from_entries')
 
 # Separate into pending and in_progress
 PENDING_TASKS=$(echo "$ENRICHED_TASKS" | jq -c '[.[] | select(.status == "pending")]')

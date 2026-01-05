@@ -68,6 +68,8 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 		r.Options.Env = buildSkillEnv(os.Environ(), ws, false)
 		// Append extra env vars (these override any existing values)
 		r.Options.Env = append(r.Options.Env, opts.ExtraEnv...)
+		// Set working directory to workspace so skills can detect git repo, etc.
+		r.Options.WorkDir = ws
 		return r.Run(ctx, opts.Input)
 	case "wasi":
 		r := wasirunner.Runner{Manifest: opts.Manifest, ModulePath: opts.ArtifactPath}
@@ -75,6 +77,8 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 		r.Options.Env = buildSkillEnv(nil, ws, true)
 		// Append extra env vars
 		r.Options.Env = append(r.Options.Env, opts.ExtraEnv...)
+		// Set working directory to workspace so skills can detect git repo, etc.
+		r.Options.WorkDir = ws
 		return r.Run(ctx, opts.Input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported distribution type %q", opts.Manifest.Distribution.Type)

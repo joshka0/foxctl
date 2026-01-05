@@ -266,6 +266,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 func detectRepo(ctx context.Context) (string, string, error) {
 	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	// Try running from AGENTCTL_WORKSPACE if set (fallback for MCP/daemon mode)
+	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
+		cmd.Dir = ws
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return "", "", fmt.Errorf("detect repo: %w", err)

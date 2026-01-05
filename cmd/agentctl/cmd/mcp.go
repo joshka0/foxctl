@@ -7,10 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/client"
@@ -19,6 +24,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
+	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
@@ -26,7 +32,20 @@ import (
 const (
 	// maxInlineResponseBytes is the maximum size for inline responses (2KB)
 	maxInlineResponseBytes = 2048
+
+	// defaultPIDFile is the default location for the MCP daemon PID file
+	defaultPIDFile = "~/.agentctl/mcp-daemon.pid"
+
+	// shutdownTimeout is the maximum time to wait for graceful shutdown
+	shutdownTimeout = 10 * time.Second
 )
+
+// daemonState tracks the running daemon state
+type daemonState struct {
+	pidFile   string
+	startTime time.Time
+	addr      string
+}
 
 // storeToCAS stores content in the CAS and returns the digest.
 // Returns the digest in "sha256:hex" format.
@@ -183,12 +202,20 @@ This reduces token overhead by exposing simplified tool schemas.`,
 }
 
 func newMCPServeCommand() *cobra.Command {
-	var configFile string
+	var (
+		configFile   string
+		httpAddr     string
+		enableSkills bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the MCP server (stdio transport)",
-		Long: `Start agentctl as an MCP server using stdio transport.
+		Short: "Start the MCP server",
+		Long: `Start agentctl as an MCP server using stdio or HTTP/SSE transport.
+
+By default, uses stdio transport for Claude Code integration.
+Use --http to run as an HTTP daemon with SSE transport.
+Use --skills to expose all agentctl skills as MCP tools.
 
 Configure backend MCP servers via --config or environment variables:
   TAVILY_API_KEY     - Tavily API key (web search, extract, crawl, map)
@@ -198,31 +225,57 @@ Configure backend MCP servers via --config or environment variables:
   SUPABASE_URL       - Supabase project URL (required for supabase tools)
   SUPABASE_KEY       - Supabase service role key (required for supabase tools)
 
-Example usage in Claude's mcp.json:
+Example usage in Claude's mcp.json (stdio):
   {
     "mcpServers": {
       "agentctl": {
         "command": "/path/to/agentctl",
-        "args": ["mcp", "serve"]
+        "args": ["mcp", "serve", "--skills"]
+      }
+    }
+  }
+
+Example usage with HTTP/SSE daemon:
+  # Start daemon
+  agentctl mcp serve --http :8091 --skills
+
+  # Configure in mcp.json
+  {
+    "mcpServers": {
+      "agentctl": {
+        "url": "http://localhost:8091/sse"
       }
     }
   }`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runMCPServer(cmd.Context(), configFile)
+			return runMCPServer(cmd.Context(), mcpServerOptions{
+				configFile:   configFile,
+				httpAddr:     httpAddr,
+				enableSkills: enableSkills,
+			})
 		},
 	}
 
 	cmd.Flags().StringVar(&configFile, "config", "", "Path to backend MCP servers config file")
+	cmd.Flags().StringVar(&httpAddr, "http", "", "HTTP address for SSE daemon mode (e.g., :8091)")
+	cmd.Flags().BoolVar(&enableSkills, "skills", false, "Expose all agentctl skills as MCP tools")
 	return cmd
 }
 
-func runMCPServer(ctx context.Context, configFile string) error {
+// mcpServerOptions holds configuration for the MCP server.
+type mcpServerOptions struct {
+	configFile   string
+	httpAddr     string
+	enableSkills bool
+}
+
+func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
 	// Initialize backend configurations from environment
 	initBackendConfigs()
 
 	// Load config file if provided
-	if configFile != "" {
-		if err := loadBackendConfig(configFile); err != nil {
+	if opts.configFile != "" {
+		if err := loadBackendConfig(opts.configFile); err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
 	}
@@ -232,14 +285,190 @@ func runMCPServer(ctx context.Context, configFile string) error {
 		server.WithToolCapabilities(true),
 	)
 
-	// Register curated tools with simplified schemas
+	// Register curated tools with simplified schemas (external MCP proxies + html)
 	registerTools(s)
+
+	// Register all agentctl skills as MCP tools
+	if opts.enableSkills {
+		cfg, err := config.Load(ctx)
+		if err != nil {
+			return fmt.Errorf("load config for skills: %w", err)
+		}
+		if err := registerSkillTools(ctx, s, cfg); err != nil {
+			return fmt.Errorf("register skill tools: %w", err)
+		}
+	}
 
 	// Cleanup on exit
 	defer backends.closeAll()
 
-	// Start stdio server (blocks until client disconnects)
+	// Start server (SSE or stdio)
+	if opts.httpAddr != "" {
+		return runSSEDaemon(ctx, s, opts.httpAddr)
+	}
+
+	// Default: stdio transport (blocks until client disconnects)
 	return server.ServeStdio(s)
+}
+
+// runSSEDaemon starts the MCP server as an HTTP/SSE daemon with:
+// - PID file to prevent duplicate instances
+// - Health check endpoint
+// - Graceful shutdown on SIGTERM/SIGINT
+func runSSEDaemon(ctx context.Context, s *server.MCPServer, addr string) error {
+	// Resolve PID file path
+	pidFile := expandPath(defaultPIDFile)
+
+	// Check if daemon already running
+	if existingPID, running := isDaemonRunning(pidFile); running {
+		// Try to connect to existing daemon
+		healthURL := fmt.Sprintf("http://localhost%s/health", extractPort(addr))
+		if resp, err := http.Get(healthURL); err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				fmt.Fprintf(os.Stderr, "MCP daemon already running (PID %d) at %s\n", existingPID, addr)
+				fmt.Fprintf(os.Stderr, "Use existing daemon or kill PID %d to restart\n", existingPID)
+				return nil
+			}
+		}
+		// Stale PID file - remove it
+		os.Remove(pidFile)
+	}
+
+	// Write PID file
+	if err := writePIDFile(pidFile); err != nil {
+		return fmt.Errorf("write PID file: %w", err)
+	}
+	defer os.Remove(pidFile)
+
+	// Create SSE server
+	sseServer := server.NewSSEServer(s)
+
+	// Create HTTP mux with health endpoint
+	mux := http.NewServeMux()
+
+	// Health check endpoint
+	state := &daemonState{
+		pidFile:   pidFile,
+		startTime: time.Now(),
+		addr:      addr,
+	}
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		healthResponse := map[string]any{
+			"status":     "ok",
+			"pid":        os.Getpid(),
+			"uptime_sec": int(time.Since(state.startTime).Seconds()),
+			"addr":       state.addr,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(healthResponse); err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		}
+	})
+
+	// Mount SSE server routes
+	mux.Handle("/sse", sseServer.SSEHandler())
+	mux.Handle("/message", sseServer.MessageHandler())
+
+	// Create HTTP server
+	httpServer := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	// Set up graceful shutdown
+	shutdownCh := make(chan os.Signal, 1)
+	signal.Notify(shutdownCh, syscall.SIGTERM, syscall.SIGINT)
+
+	// Start server in goroutine
+	errCh := make(chan error, 1)
+	go func() {
+		fmt.Fprintf(os.Stderr, "Starting MCP SSE daemon on %s (PID %d)\n", addr, os.Getpid())
+		fmt.Fprintf(os.Stderr, "Health: http://%s/health\n", addr)
+		fmt.Fprintf(os.Stderr, "SSE: http://%s/sse\n", addr)
+		fmt.Fprintf(os.Stderr, "Message: http://%s/message\n", addr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	// Wait for shutdown signal or error
+	select {
+	case sig := <-shutdownCh:
+		fmt.Fprintf(os.Stderr, "\nReceived %s, shutting down gracefully...\n", sig)
+	case err := <-errCh:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		fmt.Fprintf(os.Stderr, "\nContext cancelled, shutting down...\n")
+	}
+
+	// Graceful shutdown
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "Shutdown error: %v\n", err)
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "MCP daemon stopped\n")
+	return nil
+}
+
+// expandPath expands ~ to home directory
+func expandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, path[2:])
+		}
+	}
+	return path
+}
+
+// extractPort extracts the port from an address like ":8091" or "0.0.0.0:8091"
+func extractPort(addr string) string {
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		return addr[idx:]
+	}
+	return addr
+}
+
+// writePIDFile writes the current process ID to the PID file
+func writePIDFile(path string) error {
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+// isDaemonRunning checks if a daemon is already running based on PID file
+func isDaemonRunning(pidFile string) (int, bool) {
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return 0, false
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, false
+	}
+
+	// Check if process exists
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return pid, false
+	}
+
+	// On Unix, FindProcess always succeeds - need to send signal 0 to check
+	if err := process.Signal(syscall.Signal(0)); err != nil {
+		return pid, false
+	}
+
+	return pid, true
 }
 
 func initBackendConfigs() {
@@ -1226,6 +1455,277 @@ func extractLibraryID(result *mcp.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+// ============================================================================
+// Dynamic Skill Registration
+// ============================================================================
+
+// registerSkillTools discovers all agentctl skills and registers them as MCP tools.
+func registerSkillTools(ctx context.Context, s *server.MCPServer, cfg config.Config) error {
+	// Discover all skill manifests
+	manifests, err := discoverSkills(cfg)
+	if err != nil {
+		return fmt.Errorf("discover skills: %w", err)
+	}
+
+	// Track registered tools to avoid duplicates with curated tools
+	registered := make(map[string]bool)
+
+	for _, manifest := range manifests {
+		toolName := skillNameToToolName(manifest.Metadata.Name)
+
+		// Skip if already registered (curated tools take precedence)
+		if registered[toolName] {
+			continue
+		}
+
+		// Convert skill manifest to MCP tool
+		tool, handler := skillToMCPTool(cfg, manifest)
+		s.AddTool(tool, handler)
+		registered[toolName] = true
+	}
+
+	fmt.Fprintf(os.Stderr, "Registered %d skill tools\n", len(registered))
+	return nil
+}
+
+// discoverSkills finds all skill manifests in the configured paths.
+func discoverSkills(cfg config.Config) ([]skill.Manifest, error) {
+	var manifests []skill.Manifest
+	seen := make(map[string]bool)
+
+	// Search paths: AGENTCTL_SKILLS_PATH, ~/.agentctl/skills, ./skills
+	searchPaths := []string{cfg.Paths.Skills}
+	if env := os.Getenv("AGENTCTL_SKILLS_PATH"); env != "" {
+		searchPaths = append(filepath.SplitList(env), searchPaths...)
+	}
+	if pwd, err := os.Getwd(); err == nil {
+		searchPaths = append(searchPaths, filepath.Join(pwd, "skills"))
+	}
+
+	for _, root := range searchPaths {
+		if root == "" {
+			continue
+		}
+		if _, err := os.Stat(root); os.IsNotExist(err) {
+			continue
+		}
+
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil // Skip inaccessible directories
+			}
+			if d.IsDir() || filepath.Base(path) != "skill.yaml" {
+				return nil
+			}
+
+			manifest, err := skill.LoadManifest(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", path, err)
+				return nil
+			}
+
+			// Dedupe by skill name
+			if seen[manifest.Metadata.Name] {
+				return nil
+			}
+			seen[manifest.Metadata.Name] = true
+			manifests = append(manifests, manifest)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return manifests, nil
+}
+
+// skillNameToToolName converts skill name (e.g., "code/complexity") to MCP tool name.
+// MCP tool names should use underscores, not slashes.
+func skillNameToToolName(name string) string {
+	return strings.ReplaceAll(name, "/", "_")
+}
+
+// skillToMCPTool converts a skill manifest to an MCP tool definition and handler.
+func skillToMCPTool(cfg config.Config, manifest skill.Manifest) (mcp.Tool, server.ToolHandlerFunc) {
+	toolName := skillNameToToolName(manifest.Metadata.Name)
+
+	// Build MCP tool options from skill signature
+	opts := []mcp.ToolOption{
+		mcp.WithDescription(manifest.Metadata.Description),
+	}
+
+	// Add parameters from skill signature
+	for _, param := range manifest.Signature.Parameters {
+		paramOpts := skillParamToMCPOpts(param)
+		opts = append(opts, paramOpts...)
+	}
+
+	tool := mcp.NewTool(toolName, opts...)
+
+	// Create handler that executes the skill
+	handler := createSkillHandler(cfg, manifest)
+
+	return tool, handler
+}
+
+// skillParamToMCPOpts converts a skill parameter to MCP tool options.
+func skillParamToMCPOpts(param skill.Parameter) []mcp.ToolOption {
+	var opts []mcp.ToolOption
+
+	// Build property options
+	var propOpts []mcp.PropertyOption
+	if param.Required {
+		propOpts = append(propOpts, mcp.Required())
+	}
+	if param.Description != "" {
+		propOpts = append(propOpts, mcp.Description(param.Description))
+	}
+	if len(param.Enum) > 0 {
+		propOpts = append(propOpts, mcp.Enum(param.Enum...))
+	}
+
+	// Map skill types to MCP types
+	switch param.Type {
+	case "string":
+		opts = append(opts, mcp.WithString(param.Name, propOpts...))
+	case "integer", "int":
+		opts = append(opts, mcp.WithNumber(param.Name, propOpts...))
+	case "number", "float":
+		opts = append(opts, mcp.WithNumber(param.Name, propOpts...))
+	case "boolean", "bool":
+		opts = append(opts, mcp.WithBoolean(param.Name, propOpts...))
+	case "array":
+		opts = append(opts, mcp.WithArray(param.Name, propOpts...))
+	case "object":
+		opts = append(opts, mcp.WithObject(param.Name, propOpts...))
+	default:
+		// Default to string for unknown types
+		opts = append(opts, mcp.WithString(param.Name, propOpts...))
+	}
+
+	return opts
+}
+
+// createSkillHandler creates an MCP tool handler that executes the given skill.
+func createSkillHandler(cfg config.Config, manifest skill.Manifest) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Find the skill (may need to locate artifact)
+		handle, err := findSkill(cfg, manifest.Metadata.Name)
+		if err != nil {
+			return mcp.NewToolResultError("find skill: " + err.Error()), nil
+		}
+
+		// Extract arguments from request
+		args := getArgs(req)
+
+		// Marshal to JSON for skill input
+		inputBytes, err := json.Marshal(args)
+		if err != nil {
+			return mcp.NewToolResultError("marshal input: " + err.Error()), nil
+		}
+
+		// Resolve workspace context
+		runCtx := resolveWorkspaceContext(ctx, "")
+
+		// Execute the skill
+		stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
+		if err != nil {
+			errMsg := err.Error()
+			if len(stderr) > 0 {
+				errMsg += "\nstderr: " + string(stderr)
+			}
+			return mcp.NewToolResultError("execute skill: " + errMsg), nil
+		}
+
+		// Parse the envelope response
+		var envelope struct {
+			Status  string         `json:"status"`
+			Command string         `json:"command"`
+			Data    map[string]any `json:"data"`
+			Meta    map[string]any `json:"meta"`
+			Error   struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		if err := json.Unmarshal(stdout, &envelope); err != nil {
+			// Return raw output if not a valid envelope
+			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
+		}
+
+		if envelope.Status == "error" {
+			return mcp.NewToolResultError(envelope.Error.Message), nil
+		}
+
+		// Format the data as readable output
+		result, err := json.MarshalIndent(envelope.Data, "", "  ")
+		if err != nil {
+			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
+		}
+
+		// Apply output limiting with structured pagination
+		return truncateSkillOutput(ctx, string(result), manifest.Metadata.Name)
+	}
+}
+
+// truncateSkillOutput checks if skill output exceeds size limit.
+// If so, stores full content in CAS and returns structured result with pagination.
+func truncateSkillOutput(ctx context.Context, content string, skillName string) (*mcp.CallToolResult, error) {
+	totalSize := len(content)
+
+	// If under limit, return as-is
+	if totalSize <= maxInlineResponseBytes {
+		return mcp.NewToolResultText(content), nil
+	}
+
+	// Store full content in CAS
+	digest, err := storeToCAS(ctx, []byte(content), "application/json")
+	if err != nil {
+		// On CAS error, still truncate but without digest
+		truncated := content[:maxInlineResponseBytes]
+		for len(truncated) > 0 && !utf8.ValidString(truncated) {
+			truncated = truncated[:len(truncated)-1]
+		}
+		return mcp.NewToolResultText(truncated + "\n\n---\n⚠️ Output truncated (CAS storage failed)"), nil
+	}
+
+	// Calculate pagination info
+	totalPages := (totalSize + maxInlineResponseBytes - 1) / maxInlineResponseBytes
+
+	// Truncate content for inline display
+	truncated := content[:maxInlineResponseBytes]
+	for len(truncated) > 0 && !utf8.ValidString(truncated) {
+		truncated = truncated[:len(truncated)-1]
+	}
+
+	// Return structured result with pagination metadata
+	structuredData := map[string]any{
+		"content":   truncated,
+		"truncated": true,
+		"pagination": map[string]any{
+			"total_bytes":  totalSize,
+			"total_pages":  totalPages,
+			"current_page": 1,
+			"page_size":    maxInlineResponseBytes,
+			"has_more":     true,
+		},
+		"artifact": map[string]any{
+			"digest":       digest,
+			"content_type": "application/json",
+			"retrieval":    fmt.Sprintf("agentctl cas read %s --page 2", digest),
+		},
+	}
+
+	// Create human-readable fallback text
+	fallbackText := fmt.Sprintf("%s\n\n---\n⚠️ Output truncated (%d bytes, %d pages)\nFull output: %s\nRead more: agentctl cas read %s --page 2",
+		truncated, totalSize, totalPages, digest, digest)
+
+	// Use structured content for better client handling
+	return mcp.NewToolResultStructured(structuredData, fallbackText), nil
 }
 
 func init() {
