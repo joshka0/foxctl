@@ -1,0 +1,128 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: memory/query
+  description: Query memories with type filtering, file association, and semantic search
+  version: 0.1.0
+  author: agentctl
+  tags: [memory, search, gotcha, decision, pattern, embedding]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: memory/query
+  parameters:
+    - name: query
+      type: string
+      required: false
+      description: Natural language or text query to search for
+    - name: file
+      type: string
+      required: false
+      description: Filter memories associated with this file path
+    - name: types
+      type: string
+      required: false
+      description: Comma-separated memory types to filter (gotcha, decision, pattern, edit, codemap, etc.)
+    - name: workspace
+      type: string
+      required: false
+      description: Workspace path (defaults to current directory)
+    - name: limit
+      type: integer
+      required: false
+      default: 10
+      description: Maximum number of results to return per page (max 100)
+    - name: offset
+      type: integer
+      required: false
+      default: 0
+      description: Offset for pagination (skip this many results)
+    - name: min_similarity
+      type: number
+      required: false
+      default: 0.3
+      description: Minimum similarity threshold for vector search (0-1)
+    - name: include_content
+      type: boolean
+      required: false
+      default: false
+      description: Include full memory content in results (can be large)
+  returns:
+    - name: memories
+      type: array
+      description: Matching memory entries with metadata and scores
+    - name: pagination
+      type: object
+      description: Pagination info (total, offset, limit, has_more)
+    - name: stats
+      type: object
+      description: Search statistics (total, filtered, search method used)
+  help:
+    short: "Query memories by type, file, or semantic similarity"
+    long: |
+      memory/query provides filtered access to the agentctl memory store,
+      designed for plugin/hook integration where you need to surface relevant
+      context before operations.
+
+      Use Cases:
+      - Recall gotchas before editing a file
+      - Find past decisions related to a topic
+      - Surface patterns for similar code
+      - Get file-specific context for AI assistants
+
+      Search Methods:
+      1. If query is provided: semantic vector search (requires VOYAGE_API_KEY/GEMINI_API_KEY)
+      2. If only file is provided: filter by file association
+      3. If only types is provided: filter by memory type
+      4. Combinations are AND-ed together
+
+      Memory Types:
+      - gotcha: Lessons learned, pitfalls to avoid
+      - decision: Architecture/design decisions with rationale
+      - pattern: Code patterns to follow or avoid
+      - edit: Recent file edits (auto-captured)
+      - code_symbol: Indexed code symbols
+      - codemap: Semantic codemaps
+      - result: Generic skill results
+      - task_embedding: Task context
+
+      File Association:
+      Memories can be associated with files through:
+      - Explicit file path in memory metadata
+      - File references in memory content (auto-detected)
+      - Directory prefix matching (e.g., "src/" matches "src/foo/bar.go")
+
+      Examples:
+      - Query gotchas for a file: { "file": "internal/storage/memory/store.go", "types": "gotcha,decision" }
+      - Search patterns semantically: { "query": "error handling patterns", "types": "pattern" }
+      - Get all decisions: { "types": "decision", "limit": 20 }
+    workflows:
+      - id: file-gotchas
+        description: "Get gotchas before editing a file"
+        example_input:
+          file: "internal/storage/memory/store.go"
+          types: "gotcha,decision"
+          limit: 5
+      - id: search-patterns
+        description: "Find relevant patterns semantically"
+        example_input:
+          query: "authentication middleware"
+          types: "pattern"
+          limit: 10
+      - id: recent-decisions
+        description: "List recent architecture decisions"
+        example_input:
+          types: "decision"
+          limit: 20
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

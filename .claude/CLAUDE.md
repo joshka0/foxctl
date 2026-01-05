@@ -344,6 +344,32 @@ echo "$context" | gemini -p "Refactoring priorities?"
 
 ## Gotchas
 
+### Claude Max OAuth (Future Enhancement)
+
+**Discovery:** Claude Max subscription uses **OAuth authentication**, not API keys.
+The dspy-go library used by agent daemons requires traditional API keys.
+
+**Current workaround:** Use OpenRouter with Claude models:
+```bash
+# In .env
+OPENROUTER_API_KEY=sk-or-...
+CLAUDE_MAX_MODEL=claude-haiku-4-5  # or claude-opus-4-5
+```
+
+**Future TODO:** Implement Anthropic OAuth provider that wraps the Claude CLI:
+- Remove `ANTHROPIC_API_KEY` to force subscription auth
+- Set `CLAUDE_CODE_ENTRYPOINT=max-alias` and `CLAUDE_USE_SUBSCRIPTION=true`
+- Spawn `claude --print` as subprocess for LLM calls
+- This would allow free usage via Max subscription
+
+**Environment for CLI wrapper (when implemented):**
+```bash
+CLAUDE_CODE_ENTRYPOINT=max-alias
+CLAUDE_USE_SUBSCRIPTION=true
+CLAUDE_BYPASS_BALANCE_CHECK=true
+# Remove ANTHROPIC_API_KEY to force OAuth
+```
+
 ### Build Commands
 
 **NEVER run `go build ./...`** - causes 266 duplicate SQLite symbol errors due

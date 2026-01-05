@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -159,6 +160,7 @@ func newMemoryPutCommand() *cobra.Command {
 				if !json.Valid(payload) {
 					return fmt.Errorf("payload must be valid JSON envelope")
 				}
+				payload = injectDefaultFileForGotchaTypes(payload, typ, ws)
 				if summary == "" {
 					summary = summarizeResult(payload)
 				}
@@ -190,6 +192,52 @@ func newMemoryPutCommand() *cobra.Command {
 	cmd.Flags().StringVar(&file, "file", "", "Path to JSON envelope ('-' for stdin)")
 	cmd.Flags().StringVar(&data, "data", "", "Inline JSON envelope")
 	return cmd
+}
+
+func injectDefaultFileForGotchaTypes(payload []byte, typ, workspace string) []byte {
+	if typ != "gotcha" && typ != "decision" && typ != "pattern" {
+		return payload
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(payload, &data); err != nil {
+		return payload
+	}
+
+	if _, hasFile := data["file"]; hasFile {
+		return payload
+	}
+
+	defaultFile := findDefaultGotchaFile(workspace)
+	if defaultFile == "" {
+		return payload
+	}
+
+	data["file"] = defaultFile
+	modified, err := json.Marshal(data)
+	if err != nil {
+		return payload
+	}
+	return modified
+}
+
+func findDefaultGotchaFile(workspace string) string {
+	workspaceClaude := filepath.Join(workspace, "CLAUDE.md")
+	if _, err := os.Stat(workspaceClaude); err == nil {
+		return "CLAUDE.md"
+	}
+
+	workspaceAgents := filepath.Join(workspace, "AGENTS.md")
+	if _, err := os.Stat(workspaceAgents); err == nil {
+		return "AGENTS.md"
+	}
+
+	homeClaude := filepath.Join(os.Getenv("HOME"), ".claude", "CLAUDE.md")
+	if _, err := os.Stat(homeClaude); err == nil {
+		return "CLAUDE.md"
+	}
+
+	return "CLAUDE.md"
 }
 
 func newMemorySaveCommand() *cobra.Command {

@@ -495,3 +495,77 @@ func (s *stubJobStore) TailProgress(_ context.Context, _ string, _ bool, _ io.Wr
 func (s *stubJobStore) ExecutePreparedSkill(_ context.Context, _ string, _ string, _ string) ([]byte, error) {
 	return s.result, nil
 }
+
+func TestEnforceOutputLimit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tmp := t.TempDir()
+	cfg := config.Config{
+		Home:           tmp,
+		InlineOutputKB: 1,
+		Paths: config.Paths{
+			CAS: filepath.Join(tmp, "cas"),
+		},
+	}
+	if err := ensureDir(cfg.Paths.CAS); err != nil {
+		t.Fatalf("ensure dir: %v", err)
+	}
+
+	handle := SkillHandle{
+		Manifest: skill.Manifest{
+			Metadata: skill.Metadata{Name: "test/skill", Version: "1.0.0"},
+		},
+	}
+
+	stderr := &bytes.Buffer{}
+	executor := NewExecutor(ctx, cfg, handle, io.Discard, stderr, RunOptions{})
+	defer executor.Close()
+
+	smallEnv := `{"version":1,"status":"ok","command":"test","data":{"msg":"small"},"meta":{},"error":{}}`
+	result := executor.enforceOutputLimit(ctx, []byte(smallEnv), "job-small")
+	if string(result) != smallEnv {
+		t.Fatalf("small output should not be modified, got: %s", string(result))
+	}
+
+	largeData := strings.Repeat("x", 2*1024)
+	largeEnv := `{"version":1,"status":"ok","command":"test","data":{"content":"` + largeData + `","summary":"test summary"},"meta":{},"error":{}}`
+	result = executor.enforceOutputLimit(ctx, []byte(largeEnv), "job-large")
+	if len(result) >= len(largeEnv) {
+		t.Fatalf("large output should be truncated, got %d bytes (original %d)", len(result), len(largeEnv))
+	}
+
+	var wrapped map[string]any
+	if err := json.Unmarshal(result, &wrapped); err != nil {
+		t.Fatalf("unmarshal wrapped: %v", err)
+	}
+
+	data, ok := wrapped["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected data map in wrapper")
+	}
+	artifact, ok := data["artifact"].(string)
+	if !ok || !strings.HasPrefix(artifact, "sha256:") {
+		t.Fatalf("expected artifact digest in wrapper, got: %v", data["artifact"])
+	}
+
+	meta, ok := wrapped["meta"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected meta map in wrapper")
+	}
+	if meta["truncated"] != true {
+		t.Fatalf("expected truncated=true in meta")
+	}
+
+	summary, ok := data["summary"].(string)
+	if !ok || summary == "" {
+		t.Fatalf("expected summary in wrapper, got: %v", data["summary"])
+	}
+	if !strings.Contains(summary, "test summary") {
+		t.Fatalf("expected original summary to be preserved, got: %s", summary)
+	}
+
+	if !strings.Contains(stderr.String(), "exceeded") {
+		t.Fatalf("expected warning in stderr, got: %s", stderr.String())
+	}
+}

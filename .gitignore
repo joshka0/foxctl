@@ -123,6 +123,10 @@ skills/graph_pagerank/graph_pagerank
 skills/hooks_session_end/hooks_session_end
 skills/optimize_from_feedback/optimize_from_feedback
 skills/session_feedback/session_feedback
+skills/memory_query/memory_query
+skills/memory_query/bin
+skills/codemap_list/bin
+skills/codemap_get/bin
 
 # Temp files
 test_*.go
@@ -138,4 +142,4 @@ pr*.txt
 .opencode/*
 .opencode/**
 skills/providers/providers
-*.db
+*.db/agentctl

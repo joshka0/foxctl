@@ -1,0 +1,424 @@
+// Package main implements the memory/query skill for filtered memory access.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
+)
+
+const Command = "memory/query"
+
+const (
+	ErrCodeInput   = "EARG"
+	ErrCodeRuntime = "ERUNTIME"
+)
+
+const (
+	DefaultLimit         = 10
+	DefaultMinSimilarity = 0.3
+	DefaultTimeout       = 5 * time.Second
+)
+
+type Input struct {
+	Query          string  `json:"query,omitempty"`
+	File           string  `json:"file,omitempty"`
+	Types          string  `json:"types,omitempty"`
+	Workspace      string  `json:"workspace,omitempty"`
+	Limit          int     `json:"limit,omitempty"`
+	Offset         int     `json:"offset,omitempty"`
+	MinSimilarity  float64 `json:"min_similarity,omitempty"`
+	IncludeContent bool    `json:"include_content,omitempty"`
+}
+
+type Output struct {
+	Memories   []MemoryResult `json:"memories"`
+	Pagination Pagination     `json:"pagination"`
+	Stats      QueryStats     `json:"stats"`
+}
+
+type Pagination struct {
+	Total   int  `json:"total"`
+	Offset  int  `json:"offset"`
+	Limit   int  `json:"limit"`
+	HasMore bool `json:"has_more"`
+}
+
+type MemoryResult struct {
+	Name      string  `json:"name"`
+	Type      string  `json:"type"`
+	Summary   string  `json:"summary"`
+	File      string  `json:"file,omitempty"`
+	Score     float64 `json:"score"`
+	CreatedAt string  `json:"created_at,omitempty"`
+	UpdatedAt string  `json:"updated_at,omitempty"`
+	Content   any     `json:"content,omitempty"`
+}
+
+type QueryStats struct {
+	TotalFound   int    `json:"total_found"`
+	Filtered     int    `json:"filtered"`
+	SearchMethod string `json:"search_method"`
+	LatencyMS    int    `json:"latency_ms"`
+	TypesFilter  string `json:"types_filter,omitempty"`
+	FileFilter   string `json:"file_filter,omitempty"`
+	Hint         string `json:"hint,omitempty"`
+}
+
+func main() {
+	ctx := context.Background()
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		fail(ErrCodeRuntime, err)
+	}
+
+	in, err := parseInput(os.Stdin)
+	if err != nil {
+		fail(ErrCodeInput, err)
+	}
+
+	out, err := query(ctx, cfg, in)
+	if err != nil {
+		fail(ErrCodeRuntime, err)
+	}
+
+	env := envelope.OK(Command, out)
+	if err := json.NewEncoder(os.Stdout).Encode(env); err != nil {
+		fail(ErrCodeRuntime, err)
+	}
+}
+
+func parseInput(r *os.File) (*Input, error) {
+	var in Input
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return nil, fmt.Errorf("invalid JSON input: %w", err)
+	}
+
+	if in.Query == "" && in.File == "" && in.Types == "" {
+		return nil, fmt.Errorf("at least one of query, file, or types must be provided")
+	}
+
+	if in.Limit <= 0 {
+		in.Limit = DefaultLimit
+	}
+	if in.Limit > 100 {
+		in.Limit = 100
+	}
+	if in.Offset < 0 {
+		in.Offset = 0
+	}
+	if in.MinSimilarity <= 0 {
+		in.MinSimilarity = DefaultMinSimilarity
+	}
+	if in.Workspace == "" {
+		if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
+			in.Workspace = ws
+		} else {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get working directory: %w", err)
+			}
+			in.Workspace = cwd
+		}
+	}
+
+	return &in, nil
+}
+
+func query(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	start := time.Now()
+	out := &Output{
+		Memories: []MemoryResult{},
+		Pagination: Pagination{
+			Offset: in.Offset,
+			Limit:  in.Limit,
+		},
+		Stats: QueryStats{
+			TypesFilter: in.Types,
+			FileFilter:  in.File,
+		},
+	}
+
+	var typeFilters []string
+	if in.Types != "" {
+		for _, t := range strings.Split(in.Types, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				typeFilters = append(typeFilters, t)
+			}
+		}
+	}
+
+	agentctlHome := os.Getenv("AGENTCTL_HOME")
+	if agentctlHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("determine home directory: %w", err)
+		}
+		agentctlHome = filepath.Join(home, ".agentctl")
+	}
+	storageRoot := filepath.Join(agentctlHome, "storage")
+	casRoot := filepath.Join(agentctlHome, "cas")
+
+	workspacePath := in.Workspace
+	if absPath, err := filepath.Abs(workspacePath); err == nil {
+		workspacePath = absPath
+	}
+
+	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open memory store: %w", err)
+	}
+	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+
+	var scoredEntries []storage.ScoredEntry
+
+	if in.Query != "" {
+		scoredEntries, err = searchWithEmbeddings(ctx, memStore, workspacePath, in)
+		if err != nil {
+			out.Stats.Hint = fmt.Sprintf("vector search failed: %v; using BM25", err)
+			scoredEntries, err = memStore.Search(ctx, workspacePath, in.Query, in.Limit*3)
+			if err != nil {
+				return nil, fmt.Errorf("search memories: %w", err)
+			}
+			out.Stats.SearchMethod = "bm25"
+		} else {
+			out.Stats.SearchMethod = "vector"
+		}
+	} else {
+		entries, err := memStore.List(ctx, workspacePath, in.Limit*3)
+		if err != nil {
+			return nil, fmt.Errorf("list memories: %w", err)
+		}
+		for _, entry := range entries {
+			scoredEntries = append(scoredEntries, storage.ScoredEntry{
+				Entry: entry,
+				Score: 1.0,
+			})
+		}
+		out.Stats.SearchMethod = "filter"
+	}
+
+	out.Stats.TotalFound = len(scoredEntries)
+
+	filtered := make([]storage.ScoredEntry, 0, len(scoredEntries))
+	for _, scored := range scoredEntries {
+		entry := scored.Entry
+
+		if entry.Type == "symbol" || entry.Type == "code_symbol" {
+			continue
+		}
+
+		if len(typeFilters) > 0 {
+			typeMatch := false
+			for _, t := range typeFilters {
+				if entry.Type == t {
+					typeMatch = true
+					break
+				}
+			}
+			if !typeMatch {
+				continue
+			}
+		}
+
+		if in.File != "" {
+			if !isFileAssociated(entry, in.File) {
+				continue
+			}
+		}
+
+		if in.Query != "" && scored.Score < in.MinSimilarity {
+			continue
+		}
+
+		filtered = append(filtered, scored)
+	}
+
+	out.Stats.Filtered = len(filtered)
+	out.Pagination.Total = len(filtered)
+	out.Pagination.HasMore = in.Offset+in.Limit < len(filtered)
+
+	endIdx := in.Offset + in.Limit
+	if endIdx > len(filtered) {
+		endIdx = len(filtered)
+	}
+	if in.Offset < len(filtered) {
+		filtered = filtered[in.Offset:endIdx]
+	} else {
+		filtered = nil
+	}
+
+	for _, scored := range filtered {
+		entry := scored.Entry
+		result := MemoryResult{
+			Name:    entry.Name,
+			Type:    entry.Type,
+			Summary: truncate(entry.Summary, 500),
+			Score:   scored.Score,
+		}
+
+		if !entry.CreatedAt.IsZero() {
+			result.CreatedAt = entry.CreatedAt.Format(time.RFC3339)
+		}
+		if !entry.UpdatedAt.IsZero() {
+			result.UpdatedAt = entry.UpdatedAt.Format(time.RFC3339)
+		}
+
+		result.File = extractFileFromEntry(entry)
+
+		if in.IncludeContent && entry.Result != nil {
+			var content any
+			if json.Unmarshal(entry.Result, &content) == nil {
+				result.Content = content
+			}
+		}
+
+		out.Memories = append(out.Memories, result)
+	}
+
+	out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
+
+	if len(out.Memories) == 0 && out.Stats.Hint == "" {
+		if in.Query != "" {
+			out.Stats.Hint = "no matching memories found; try a broader query or different types"
+		} else {
+			out.Stats.Hint = "no memories match the filters; check types and file path"
+		}
+	}
+
+	return out, nil
+}
+
+func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, workspacePath string, in *Input) ([]storage.ScoredEntry, error) {
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+
+	if voyageKey == "" && geminiKey == "" {
+		return nil, fmt.Errorf("no embedding API key (VOYAGE_API_KEY or GEMINI_API_KEY)")
+	}
+
+	var provider semantic.EmbeddingProvider
+	var err error
+
+	if voyageKey != "" {
+		model := os.Getenv("EMBEDDING_MODEL_TEXT")
+		if model == "" {
+			model = "voyage-3.5"
+		}
+		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey: voyageKey,
+			Model:  model,
+		})
+	} else {
+		model := os.Getenv("EMBEDDING_MODEL")
+		if model == "" {
+			model = "gemini-embedding-001"
+		}
+		provider, err = semantic.NewGeminiProvider(semantic.GeminiConfig{
+			APIKey: geminiKey,
+			Model:  model,
+		})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create embedding provider: %w", err)
+	}
+
+	embedding, err := provider.Embed(ctx, in.Query)
+	if err != nil {
+		return nil, fmt.Errorf("generate query embedding: %w", err)
+	}
+
+	results, err := memStore.SearchSimilar(ctx, workspacePath, embedding, in.Limit*3)
+	if err != nil {
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+
+	return results, nil
+}
+
+func isFileAssociated(entry storage.NamedEntry, filePath string) bool {
+	filePath = normalizePath(filePath)
+
+	if strings.Contains(strings.ToLower(entry.Name), strings.ToLower(filePath)) {
+		return true
+	}
+
+	if strings.Contains(strings.ToLower(entry.Summary), strings.ToLower(filePath)) {
+		return true
+	}
+
+	if entry.Result != nil {
+		var data map[string]any
+		if json.Unmarshal(entry.Result, &data) == nil {
+			for _, key := range []string{"file", "path", "file_path", "filePath"} {
+				if val, ok := data[key].(string); ok {
+					if strings.Contains(strings.ToLower(val), strings.ToLower(filePath)) {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	if strings.HasPrefix(strings.ToLower(filePath), strings.ToLower(normalizePath(entry.Name))) {
+		return true
+	}
+
+	return false
+}
+
+func extractFileFromEntry(entry storage.NamedEntry) string {
+	if strings.HasPrefix(entry.Name, "edit:") {
+		parts := strings.SplitN(entry.Name, ":", 3)
+		if len(parts) >= 2 {
+			return parts[1]
+		}
+	}
+
+	if entry.Result != nil {
+		var data map[string]any
+		if json.Unmarshal(entry.Result, &data) == nil {
+			for _, key := range []string{"file", "path", "file_path", "filePath"} {
+				if val, ok := data[key].(string); ok && val != "" {
+					return val
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func normalizePath(p string) string {
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	return p
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
+func fail(code string, err error) {
+	env := envelope.Error(Command, code, err.Error(), nil)
+	_ = json.NewEncoder(os.Stdout).Encode(env)
+	os.Exit(1)
+}

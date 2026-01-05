@@ -1,0 +1,60 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: codemap/list
+  version: 0.1.0
+  description: "List codemaps with pagination and size limits to prevent context explosion"
+  tags: ["codemap", "list", "pagination", "memory"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: codemap/list
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace path (defaults to current directory)"
+    - name: limit
+      type: integer
+      required: false
+      default: 10
+      description: "Maximum number of codemaps to return per page"
+    - name: offset
+      type: integer
+      required: false
+      default: 0
+      description: "Offset for pagination (skip this many results)"
+    - name: query
+      type: string
+      required: false
+      description: "Filter codemaps by title/description (semantic search if embeddings available)"
+    - name: summary_only
+      type: boolean
+      required: false
+      default: true
+      description: "Return only summaries (not full content) to save context"
+    - name: max_summary_chars
+      type: integer
+      required: false
+      default: 200
+      description: "Maximum characters per summary (truncate longer)"
+  returns:
+    - name: codemaps
+      type: array
+      description: "List of codemap entries (summary or full based on summary_only)"
+    - name: pagination
+      type: object
+      description: "Pagination info: total, offset, limit, has_more"
+    - name: stats
+      type: object
+      description: "Query statistics"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

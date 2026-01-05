@@ -1,0 +1,50 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: codemap/get
+  version: 0.1.0
+  description: "Retrieve a single codemap by ID with full content (traces, files, description)"
+  tags: ["codemap", "get", "memory"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: codemap/get
+  parameters:
+    - name: id
+      type: string
+      required: true
+      description: "Codemap ID/name to retrieve (e.g., 'codemap://my-codemap' or 'my-codemap')"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace path (defaults to current directory)"
+    - name: include_traces
+      type: boolean
+      required: false
+      default: true
+      description: "Include full trace details in output"
+    - name: max_trace_content
+      type: integer
+      required: false
+      default: 500
+      description: "Maximum characters per trace content (truncate longer)"
+  returns:
+    - name: codemap
+      type: object
+      description: "Full codemap content with title, description, files, and traces"
+    - name: found
+      type: boolean
+      description: "Whether the codemap was found"
+    - name: stats
+      type: object
+      description: "Query statistics"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true
