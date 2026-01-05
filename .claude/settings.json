@@ -252,6 +252,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/todo-continuation.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/plan-sync.sh",
             "timeout": 5
           },

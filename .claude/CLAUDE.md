@@ -42,6 +42,7 @@ Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 | SessionStart     | `session-restore`          | Restores context on compact/resume                                             |
 | UserPromptSubmit | `memory-detector`          | Detects save/recall/todo patterns                                              |
 | UserPromptSubmit | `skill-advisor`            | Suggests agentctl skills based on prompt patterns                              |
+| Stop             | `todo-continuation`        | Blocks stop if tasks remain; injects PageRank-prioritized continuation prompt  |
 | Stop             | `plan-sync`                | Syncs plans to tasks                                                           |
 
 ### Human-in-the-Loop: Overseer Inbox
@@ -179,9 +180,12 @@ agentctl run code/symbols --input '...' -f table
 
 ## Environment
 
-| Variable                      | Default       | Description                                          |
-| ----------------------------- | ------------- | ---------------------------------------------------- |
-| `AGENTCTL_TASK_GUARD_MODE`    | `auto`        | `auto` or `strict`                                   |
+| Variable                              | Default       | Description                                          |
+| ------------------------------------- | ------------- | ---------------------------------------------------- |
+| `AGENTCTL_TASK_GUARD_MODE`            | `auto`        | `auto` or `strict`                                   |
+| `AGENTCTL_TODO_CONTINUATION_DISABLED` | `0`           | Set to `1` to disable todo continuation enforcement  |
+| `AGENTCTL_TODO_CONTINUATION_MIN_PENDING` | `1`        | Minimum pending tasks to trigger continuation        |
+| `AGENTCTL_TODO_CONTINUATION_TOP_N`    | `3`           | Number of top tasks to show in continuation prompt   |
 | `AGENTCTL_HOME`               | `~/.agentctl` | Storage root                                         |
 | `VOYAGE_API_KEY`              | -             | For Voyage embeddings/reranking (1024 dimensions)    |
 | `GEMINI_API_KEY`              | -             | For Gemini embeddings (3072 dimensions)              |
