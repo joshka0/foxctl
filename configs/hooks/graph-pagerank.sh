@@ -45,6 +45,9 @@ cleanup_input=$(jq -nc \
     }
   }')
 
+# Build PageRank input
+pagerank_input=$(jq -nc --arg ws "$workspace" '{ workspace: $ws }')
+
 # ASYNC: Run in background unless SYNC mode requested
 if [[ "${AGENTCTL_GRAPH_PAGERANK_SYNC:-}" != "1" ]]; then
   LOG_DIR="${HOME}/.agentctl/logs/hooks"
@@ -53,7 +56,10 @@ if [[ "${AGENTCTL_GRAPH_PAGERANK_SYNC:-}" != "1" ]]; then
 
   # Spawn in background and exit immediately
   (
+    # First recalculate degrees
     printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1
+    # Then compute PageRank
+    printf '%s' "$pagerank_input" | "$AGENTCTL_BIN" run graph/pagerank --input-file - >> "$LOG_FILE" 2>&1
   ) &
   disown
   exit 0
@@ -61,4 +67,5 @@ fi
 
 # SYNC mode (for debugging)
 printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null || true
+printf '%s' "$pagerank_input" | "$AGENTCTL_BIN" run graph/pagerank --input-file - 2>/dev/null || true
 exit 0

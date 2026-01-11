@@ -10,29 +10,54 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/rs/zerolog"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
+	state := t.TempDir()
+	casPath := filepath.Join(state, "cas")
+	casStore, err := cas.NewStore(casPath)
+	if err != nil {
+		t.Fatalf("open cas: %v", err)
+	}
+
+	pv, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		t.Fatalf("path validator: %v", err)
+	}
+
 	cfg := config.Config{
-		Home:           workspace,
+		Home:           state,
 		InlineOutputKB: 32,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   workspace + "/cas",
-			Jobs:  workspace + "/jobs",
-			Cache: workspace + "/cache",
+			CAS:   casPath,
+			Jobs:  filepath.Join(state, "jobs"),
+			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
-	if err != nil {
-		t.Fatalf("runner context: %v", err)
+
+	return &skillmain.RunContext{
+		Config:        cfg,
+		CASStore:      casStore,
+		Workspace:     workspace,
+		Logger:        zerolog.Nop(),
+		PathValidator: pv,
+		Validator:     validator.New(),
+		Stdout:        stdout,
+		Now:           time.Now,
+		InlineKB:      cfg.InlineOutputKB,
+		MaxPreview:    100,
 	}
-	return rc
 }
 
 func TestAnalyzeGoFile(t *testing.T) {
@@ -70,10 +95,10 @@ func complex(x int) int {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestRunContext(t, stdout, work)
 	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Path:         "main.go",
 		AnalysisMode: "hotspots",
 		Metric:       "cyclomatic",
@@ -134,14 +159,14 @@ func TestAnalyzeDirectory(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestRunContext(t, stdout, work)
 	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Path:         ".",
 		AnalysisMode: "hotspots",
 		Metric:       "cyclomatic",
-		Threshold:    0,
+		Threshold:    1, // Use 1 since 0 defaults to 10 and simple functions have complexity=1
 		Language:     "auto",
 		MaxResults:   100,
 	}

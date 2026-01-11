@@ -7,17 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 type input struct {
@@ -36,30 +33,23 @@ type testResult struct {
 	Coverage float64 `json:"coverage_percent,omitempty"`
 }
 
-func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("test/run", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("test/run", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
+const command = "test/run"
 
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("test/run", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("test/run", "ERUNTIME", err)
-	}
+func main() {
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Set defaults
+	if in.Path == "" {
+		in.Path = "./..."
+	}
+	if in.Mode == "" {
+		in.Mode = "test"
+	}
+	if in.Timeout == "" {
+		in.Timeout = "10m"
+	}
 	// Validate path
 	testPath, err := resolveTestPath(rc, in.Path)
 	if err != nil {
@@ -110,7 +100,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	// Store full output as artifact if substantial
 	if stdout.Len() > 5000 {
-		artifact, err := runner.PersistBuffer(ctx, rc, &stdout, "text/plain", "test_output")
+		artifact, err := skillout.PersistBuffer(ctx, rc, &stdout, "text/plain", "test_output")
 		if err == nil && artifact.Digest != "" {
 			data["artifact"] = artifact.Digest
 		}
@@ -118,30 +108,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["output_preview"] = truncate(stdout.String(), 1000)
 	}
 
-	return rc.Emit("test/run", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, command, data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.Path == "" {
-		in.Path = "./..."
-	}
-	if in.Mode == "" {
-		in.Mode = "test"
-	}
-	if in.Timeout == "" {
-		in.Timeout = "10m"
-	}
-	return in, nil
-}
-
-func resolveTestPath(rc *runner.RunnerContext, path string) (string, error) {
+func resolveTestPath(rc *skillmain.RunContext, path string) (string, error) {
 	if path == "" || path == "./..." {
 		return path, nil
 	}
@@ -318,8 +288,3 @@ func truncate(s string, limit int) string {
 	return s[:limit] + "... (truncated)"
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit test/run failure")
-	os.Exit(1)
-}

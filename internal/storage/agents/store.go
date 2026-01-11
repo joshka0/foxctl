@@ -79,14 +79,19 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
-	var created, heartbeat string
+	var created string
+	var parentID, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	if err := row.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
 		return agent.Agent{}, fmt.Errorf("agents: get: %w", err)
 	}
+
+	a.ParentID = parentID.String
+	a.Role = role.String
+	a.Prompt = prompt.String
 
 	// Parse skills_allow
 	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
@@ -104,8 +109,8 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	if err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
 	}
-	if heartbeat != "" {
-		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat)
+	if heartbeat.Valid && heartbeat.String != "" {
+		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
 		if err != nil {
 			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
 		}
@@ -126,14 +131,19 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
-	var created, heartbeat string
+	var created string
+	var parentID, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	if err := row.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
 		return agent.Agent{}, fmt.Errorf("agents: get by ns: %w", err)
 	}
+
+	a.ParentID = parentID.String
+	a.Role = role.String
+	a.Prompt = prompt.String
 
 	// Parse skills_allow
 	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
@@ -151,8 +161,8 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 	if err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
 	}
-	if heartbeat != "" {
-		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat)
+	if heartbeat.Valid && heartbeat.String != "" {
+		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
 		if err != nil {
 			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
 		}
@@ -312,11 +322,16 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	var a agent.Agent
 	var skillsJSON, policyJSON string
-	var created, heartbeat string
+	var created string
+	var parentID, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	if err := rows.Scan(&a.ID, &a.ParentID, &a.Namespace, &a.Role, &a.Prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
+	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
+
+	a.ParentID = parentID.String
+	a.Role = role.String
+	a.Prompt = prompt.String
 
 	// Parse skills_allow
 	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
@@ -334,8 +349,8 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	if err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
 	}
-	if heartbeat != "" {
-		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat)
+	if heartbeat.Valid && heartbeat.String != "" {
+		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
 		if err != nil {
 			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
 		}

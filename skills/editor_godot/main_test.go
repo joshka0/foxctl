@@ -3,11 +3,42 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/skills/editor_godot/handlers"
 )
+
+// applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).
+func applyDefaultsAndValidate(in *handlers.Input) error {
+	// Validate required field
+	if strings.TrimSpace(in.Action) == "" {
+		return fmt.Errorf("action is required")
+	}
+	// Apply defaults
+	if in.Host == "" {
+		in.Host = "127.0.0.1"
+	}
+	if in.Port == 0 {
+		in.Port = 7777
+	}
+	return nil
+}
+
+// parseInput is a test helper that parses JSON, applies defaults, and validates.
+func parseInput(r io.Reader) (handlers.Input, error) {
+	in, err := skilltest.ParseInput[handlers.Input](r)
+	if err != nil {
+		return in, err
+	}
+	if err := applyDefaultsAndValidate(&in); err != nil {
+		return in, err
+	}
+	return in, nil
+}
 
 func TestParseInput(t *testing.T) {
 	tests := []struct {

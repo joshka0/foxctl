@@ -31,4 +31,4 @@ agentctl run code/complexity --input '{"path": ".", "analysis_mode": "hotspots"}
 - **21-50**: High complexity, consider refactoring
 - **51+**: Very high risk, should refactor
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-complexity/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-complexity/Skill.md`

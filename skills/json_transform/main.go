@@ -6,17 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"reflect"
 	"sort"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "json/transform"
 
 type input struct {
 	Operation string `json:"operation"`
@@ -28,77 +27,42 @@ type input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("json/transform", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("json/transform", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("json/transform", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("json/transform", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(_ context.Context, rc *runner.RunnerContext, in input) error {
+func run(_ context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate required fields
+	if err := oputil.Require(in.Operation, "operation"); err != nil {
+		return err
+	}
+	if err := oputil.Require(in.Input, "input"); err != nil {
+		return err
+	}
+
+	// Apply defaults
+	if in.Indent <= 0 {
+		in.Indent = 2
+	}
+
 	// Parse input JSON
 	var data any
 	if err := json.Unmarshal([]byte(in.Input), &data); err != nil {
 		return fmt.Errorf("invalid JSON input: %w", err)
 	}
 
-	var result map[string]any
-
-	switch in.Operation {
-	case "extract":
-		result = extractOperation(data, in.Path)
-	case "merge":
-		result = mergeOperation(data, in.MergeWith)
-	case "validate":
-		result = validateOperation(data)
-	case "format":
-		result = formatOperation(data, in.Indent, in.Compact)
-	case "keys":
-		result = keysOperation(data)
-	default:
-		return fmt.Errorf("invalid operation: %s", in.Operation)
+	// Dispatch operation
+	result, err := oputil.NewSwitch(in.Operation).
+		Case("extract", func() (map[string]any, error) { return extractOperation(data, in.Path), nil }).
+		Case("merge", func() (map[string]any, error) { return mergeOperation(data, in.MergeWith), nil }).
+		Case("validate", func() (map[string]any, error) { return validateOperation(data), nil }).
+		Case("format", func() (map[string]any, error) { return formatOperation(data, in.Indent, in.Compact), nil }).
+		Case("keys", func() (map[string]any, error) { return keysOperation(data), nil }).
+		Run()
+	if err != nil {
+		return err
 	}
 
-	return rc.Emit("json/transform", result, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	if in.Operation == "" {
-		return input{}, fmt.Errorf("operation is required")
-	}
-
-	if in.Input == "" {
-		return input{}, fmt.Errorf("input is required")
-	}
-
-	if in.Indent <= 0 {
-		in.Indent = 2
-	}
-
-	return in, nil
+	return skillout.Emit(rc, command, result)
 }
 
 func extractOperation(data any, path string) map[string]any {
@@ -398,8 +362,3 @@ func calculateDepth(data any) int {
 	}
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit json/transform failure")
-	os.Exit(1)
-}

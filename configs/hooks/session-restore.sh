@@ -72,11 +72,28 @@ hook_output="$(printf '%s' "$result" | jq -c '.data.hook_output // {}')"
 # Check if we have context to inject
 context=$(printf '%s' "$hook_output" | jq -r '.context // ""')
 
+anchor_input=$(jq -nc --arg ws "$workspace" '{operation: "get", workspace: $ws}')
+if anchor_result=$(printf '%s' "$anchor_input" | "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace" --input-file - 2>/dev/null); then
+  anchor_main=$(printf '%s' "$anchor_result" | jq -r '.data.anchor.main_prompt // ""' 2>/dev/null || echo "")
+  anchor_q=$(printf '%s' "$anchor_result" | jq -r '.data.anchor.pending_question // ""' 2>/dev/null || echo "")
+else
+  anchor_main=""
+  anchor_q=""
+fi
+
+if [[ -n "$anchor_main" && "$anchor_main" != "null" ]]; then
+  anchor_block=$'## Session Anchor\n\n**Goal:** '
+  anchor_block+="${anchor_main}"
+  if [[ -n "$anchor_q" && "$anchor_q" != "null" ]]; then
+    anchor_block+=$'\n\n**Pending:** '
+    anchor_block+="${anchor_q}"
+  fi
+  context="${anchor_block}"$'\n\n'"${context}"
+fi
+
 if [[ -n "$context" && "$context" != "null" ]]; then
   # Return the context for injection
-  printf '%s' "$hook_output" | jq -c '{
-    context: .context
-  }'
+  jq -nc --arg context "$context" '{context: $context}'
 else
   # No context to inject
   echo '{}'

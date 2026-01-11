@@ -65,7 +65,7 @@ sql_escape() {
 }
 
 # Get relative path from workspace
-rel_path="${file_path#$workspace/}"
+rel_path="${file_path#"$workspace"/}"
 
 # FAST PATH: Direct sqlite3 query for active task (avoids spawning agentctl process)
 DB_PATH="$HOME/.agentctl/storage/tasks.db"
@@ -115,7 +115,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
   (
     echo "Linking $rel_path to task $task_id ($task_title)" >> "$LOG_FILE"
 
-    # Create file node (upsert)
+    # Create file node (upsert) - note: node_id uses "file:" prefix per graph conventions
     file_node_input=$(jq -nc \
       --arg path "$rel_path" \
       --arg ws "$workspace" \
@@ -123,7 +123,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
         operation: "add_node",
         workspace: $ws,
         add_node: {
-          node_id: $path,
+          node_id: ("file:" + $path),
           node_type: "file",
           title: $path,
           current_path: $path,
@@ -132,7 +132,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
       }')
     printf '%s' "$file_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
 
-    # Create task node (upsert)
+    # Create task node (upsert) - note: node_id uses "task:" prefix per graph conventions
     task_node_input=$(jq -nc \
       --arg id "$task_id" \
       --arg title "$task_title" \
@@ -141,7 +141,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
         operation: "add_node",
         workspace: $ws,
         add_node: {
-          node_id: $id,
+          node_id: ("task:" + $id),
           node_type: "task",
           title: $title,
           metadata: {}
@@ -149,7 +149,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
       }')
     printf '%s' "$task_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
 
-    # Create "modifies" edge
+    # Create "modifies" edge - note: from_id/to_id use prefixed node IDs
     edge_input=$(jq -nc \
       --arg task_id "$task_id" \
       --arg file_path "$rel_path" \
@@ -158,9 +158,9 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
         operation: "add_edge",
         workspace: $ws,
         add_edge: {
-          from_id: $task_id,
+          from_id: ("task:" + $task_id),
           from_type: "task",
-          to_id: $file_path,
+          to_id: ("file:" + $file_path),
           to_type: "file",
           edge_type: "modifies",
           weight: 1.0,
@@ -178,7 +178,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
 fi
 
 # SYNC mode: Original blocking behavior
-# Create file node (upsert)
+# Create file node (upsert) - note: node_id uses "file:" prefix per graph conventions
 file_node_input=$(jq -nc \
   --arg path "$rel_path" \
   --arg ws "$workspace" \
@@ -186,7 +186,7 @@ file_node_input=$(jq -nc \
     operation: "add_node",
     workspace: $ws,
     add_node: {
-      node_id: $path,
+      node_id: ("file:" + $path),
       node_type: "file",
       title: $path,
       current_path: $path,
@@ -196,7 +196,7 @@ file_node_input=$(jq -nc \
 
 printf '%s' "$file_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - &>/dev/null || true
 
-# Create task node (upsert)
+# Create task node (upsert) - note: node_id uses "task:" prefix per graph conventions
 task_node_input=$(jq -nc \
   --arg id "$task_id" \
   --arg title "$task_title" \
@@ -205,7 +205,7 @@ task_node_input=$(jq -nc \
     operation: "add_node",
     workspace: $ws,
     add_node: {
-      node_id: $id,
+      node_id: ("task:" + $id),
       node_type: "task",
       title: $title,
       metadata: {}
@@ -214,7 +214,7 @@ task_node_input=$(jq -nc \
 
 printf '%s' "$task_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - &>/dev/null || true
 
-# Create "modifies" edge
+# Create "modifies" edge - note: from_id/to_id use prefixed node IDs
 edge_input=$(jq -nc \
   --arg task_id "$task_id" \
   --arg file_path "$rel_path" \
@@ -223,9 +223,9 @@ edge_input=$(jq -nc \
     operation: "add_edge",
     workspace: $ws,
     add_edge: {
-      from_id: $task_id,
+      from_id: ("task:" + $task_id),
       from_type: "task",
-      to_id: $file_path,
+      to_id: ("file:" + $file_path),
       to_type: "file",
       edge_type: "modifies",
       weight: 1.0,

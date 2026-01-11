@@ -18,23 +18,45 @@ signature:
     - name: event
       type: string
       required: true
-      description: "Hook event type (Stop)"
+      description: "Hook event type (SessionEnd or legacy Stop)"
     - name: workspace_root
       type: string
-      required: true
+      required: false
       description: "Absolute path to workspace root"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
     - name: session_id
       type: string
       required: false
       description: "Claude session identifier"
+    - name: actor_id
+      type: string
+      required: false
+      description: "Actor identifier"
     - name: transcript_path
       type: string
       required: false
       description: "Path to conversation transcript"
-returns:
-  - name: hook_output
-    type: object
-    description: "Hook output with session metrics"
+  help:
+    short: "Capture session metrics at end of a session."
+    long: |
+      Use hooks/session_end to collect session metrics on SessionEnd events.
+      Example commands:
+        agentctl run hooks/session_end --input '{"event":"SessionEnd","workspace_root":"/workspace/project","session_id":"abc123"}'
+        agentctl skills run hooks/session_end --event SessionEnd --workspace_root /workspace/project --session_id abc123
+    workflows:
+      - id: session-stop
+        description: "Capture metrics on Stop."
+        example_input:
+          event: "SessionEnd"
+          workspace_root: "/workspace/project"
+          session_id: "abc123"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Hook output with session metrics"
 capabilities:
   network: "none"
   filesystem:

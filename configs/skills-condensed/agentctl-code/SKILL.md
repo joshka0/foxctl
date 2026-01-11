@@ -33,4 +33,4 @@ agentctl run code/git --input '{"action": "log", "count": 10}'
 agentctl run code/git --input '{"action": "blame", "path": "main.go"}'
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-code/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-code/Skill.md`

@@ -4,17 +4,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
@@ -30,30 +26,10 @@ type input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace
 	if workspace == "" {
@@ -65,7 +41,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	}
 
 	// Open trajectory store
-	trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
+	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open trajectory store: %w", err)
 	}
@@ -84,7 +60,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	}
 }
 
-func addFeedback(ctx context.Context, rc *runner.RunnerContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
+func addFeedback(ctx context.Context, rc *skillmain.RunContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
 	if in.TrajectoryID == "" {
 		return fmt.Errorf("trajectory_id is required for add action")
 	}
@@ -104,7 +80,7 @@ func addFeedback(ctx context.Context, rc *runner.RunnerContext, collector *optim
 		return fmt.Errorf("record feedback: %w", err)
 	}
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"feedback": map[string]any{
 			"trajectory_id": in.TrajectoryID,
 			"rating":        in.Rating,
@@ -112,10 +88,10 @@ func addFeedback(ctx context.Context, rc *runner.RunnerContext, collector *optim
 			"timestamp":     feedback.Timestamp,
 		},
 		"message": "feedback recorded successfully",
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	})
 }
 
-func getFeedbackStats(ctx context.Context, rc *runner.RunnerContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
+func getFeedbackStats(ctx context.Context, rc *skillmain.RunContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
 	if in.Role == "" {
 		return fmt.Errorf("role is required for stats action")
 	}
@@ -131,7 +107,7 @@ func getFeedbackStats(ctx context.Context, rc *runner.RunnerContext, collector *
 		ratingDist[fmt.Sprintf("%d", rating)] = count
 	}
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"stats": map[string]any{
 			"total_feedback":      stats.TotalFeedback,
 			"average_rating":      stats.AverageRating,
@@ -140,11 +116,5 @@ func getFeedbackStats(ctx context.Context, rc *runner.RunnerContext, collector *
 		},
 		"workspace": workspace,
 		"role":      in.Role,
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
+	})
 }

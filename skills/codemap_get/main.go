@@ -1,30 +1,21 @@
+// Package main implements the codemap/get skill.
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
-var ErrCodemapNotFound = errors.New("codemap not found")
-
-const Command = "codemap/get"
-
-const (
-	ErrCodeInput    = "EARG"
-	ErrCodeRuntime  = "ERUNTIME"
-	ErrCodeNotFound = "ENOTFOUND"
-)
+const command = "codemap/get"
 
 const (
 	DefaultMaxTraceContent = 500
@@ -32,8 +23,7 @@ const (
 )
 
 type Input struct {
-	ID              string `json:"id"`
-	Workspace       string `json:"workspace,omitempty"`
+	ID              string `json:"id" validate:"required"`
 	IncludeTraces   *bool  `json:"include_traces,omitempty"`
 	MaxTraceContent int    `json:"max_trace_content,omitempty"`
 }
@@ -85,37 +75,11 @@ type StoredTrace struct {
 }
 
 func main() {
-	ctx := context.Background()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail(ErrCodeInput, err)
-	}
-
-	out, err := getCodemap(ctx, in)
-	if err != nil {
-		if errors.Is(err, ErrCodemapNotFound) {
-			fail(ErrCodeNotFound, err)
-		}
-		fail(ErrCodeRuntime, err)
-	}
-
-	env := envelope.OK(Command, out)
-	if err := json.NewEncoder(os.Stdout).Encode(env); err != nil {
-		fail(ErrCodeRuntime, err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r *os.File) (*Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return nil, fmt.Errorf("invalid JSON input: %w", err)
-	}
-
-	if in.ID == "" {
-		return nil, fmt.Errorf("id is required")
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
 	if in.MaxTraceContent <= 0 {
 		in.MaxTraceContent = DefaultMaxTraceContent
 	}
@@ -123,22 +87,7 @@ func parseInput(r *os.File) (*Input, error) {
 		defaultTrue := true
 		in.IncludeTraces = &defaultTrue
 	}
-	if in.Workspace == "" {
-		if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-			in.Workspace = ws
-		} else {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get working directory: %w", err)
-			}
-			in.Workspace = cwd
-		}
-	}
 
-	return &in, nil
-}
-
-func getCodemap(ctx context.Context, in *Input) (*Output, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
@@ -147,25 +96,9 @@ func getCodemap(ctx context.Context, in *Input) (*Output, error) {
 		Found: false,
 	}
 
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("determine home directory: %w", err)
-		}
-		agentctlHome = filepath.Join(home, ".agentctl")
-	}
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	casRoot := filepath.Join(agentctlHome, "cas")
-
-	workspacePath := in.Workspace
-	if absPath, err := filepath.Abs(workspacePath); err == nil {
-		workspacePath = absPath
-	}
-
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return fmt.Errorf("open memory store: %w", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
@@ -178,9 +111,9 @@ func getCodemap(ctx context.Context, in *Input) (*Output, error) {
 	}
 
 	// List all codemaps and find matching one
-	entries, err := memStore.List(ctx, workspacePath, 500)
+	entries, err := memStore.List(ctx, rc.Workspace, 500)
 	if err != nil {
-		return nil, fmt.Errorf("list memories: %w", err)
+		return fmt.Errorf("list memories: %w", err)
 	}
 
 	var foundEntry *storage.NamedEntry
@@ -201,7 +134,7 @@ func getCodemap(ctx context.Context, in *Input) (*Output, error) {
 
 	if foundEntry == nil {
 		out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
-		return out, nil
+		return skillout.Emit(rc, command, out)
 	}
 
 	out.Found = true
@@ -248,7 +181,7 @@ func getCodemap(ctx context.Context, in *Input) (*Output, error) {
 	}
 
 	out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
-	return out, nil
+	return skillout.Emit(rc, command, out)
 }
 
 func truncate(s string, maxLen int) string {
@@ -260,10 +193,4 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen-3]) + "..."
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
-	_ = json.NewEncoder(os.Stdout).Encode(env)
-	os.Exit(1)
 }

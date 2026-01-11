@@ -2,9 +2,9 @@ apiVersion: agentctl/v1
 kind: Skill
 metadata:
   name: plan/sync
-  version: 0.1.0
-  description: "Sync Claude Code plans from ~/.claude/plans/ and optionally import as tasks"
-  tags: ["plan", "sync", "tasks", "claude-code"]
+  version: 0.2.0
+  description: "Sync plans/todos from Claude Code (~/.claude/plans/) or OpenCode (.opencode/storage/todo/) and optionally import as tasks"
+  tags: ["plan", "sync", "tasks", "claude-code", "opencode"]
 distribution:
   type: exec
   exec:
@@ -19,6 +19,14 @@ signature:
       type: string
       required: false
       description: "Project workspace path (defaults to cwd)"
+    - name: workspace_root
+      type: string
+      required: false
+      description: "Project workspace path (alias of workspace)"
+    - name: session_id
+      type: string
+      required: false
+      description: "Optional session_id to scope created tasks"
     - name: plan_file
       type: string
       required: false
@@ -35,25 +43,52 @@ signature:
       type: boolean
       required: false
       description: "Re-sync even if content hash unchanged"
-returns:
-  - name: plans_processed
-    type: integer
-    description: "Number of plans processed"
-  - name: plans_changed
-    type: integer
-    description: "Number of plans with changes"
-  - name: tasks_created
-    type: integer
-    description: "Number of tasks created"
-  - name: dry_run
-    type: boolean
-    description: "Whether this was a dry run"
-  - name: results
-    type: array
-    description: "Per-plan sync results"
-  - name: message
-    type: string
-    description: "Human-readable summary"
+    - name: provider
+      type: string
+      required: false
+      description: "Provider to use: 'claude' or 'opencode' (auto-detected if omitted)"
+  help:
+    short: "Sync plans and optionally import tasks."
+    long: |
+      Use plan/sync to ingest Claude Code or OpenCode plans and optionally create tasks.
+      Example commands:
+        agentctl run plan/sync --input '{"workspace":"./","dry_run":true}'
+        agentctl run plan/sync --workspace ./ --dry_run
+        agentctl run plan/sync --input '{"workspace":"./","import_tasks":true}'
+        agentctl run plan/sync --workspace ./ --import_tasks
+    workflows:
+      - id: sync-preview
+        description: "Preview plan sync."
+        example_input:
+          workspace: "./"
+          dry_run: true
+      - id: sync-import
+        description: "Sync and import tasks."
+        example_input:
+          workspace: "./"
+          import_tasks: true
+  returns:
+    - name: plans_processed
+      type: integer
+      description: "Number of plans processed"
+    - name: plans_changed
+      type: integer
+      description: "Number of plans with changes"
+    - name: tasks_created
+      type: integer
+      description: "Number of tasks created"
+    - name: dry_run
+      type: boolean
+      description: "Whether this was a dry run"
+    - name: provider
+      type: string
+      description: "Provider used (claude or opencode)"
+    - name: results
+      type: array
+      description: "Per-plan sync results"
+    - name: message
+      type: string
+      description: "Human-readable summary"
 capabilities:
   network: "none"
   filesystem:

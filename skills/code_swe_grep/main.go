@@ -21,8 +21,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
@@ -150,59 +150,23 @@ const (
 // Input is the expected JSON input per spec §5.2.
 type Input struct {
 	WorkspaceID string      `json:"workspace_id"`
-	Question    string      `json:"question"`
-	Candidates  []Candidate `json:"candidates"`
+	Question    string      `json:"question" validate:"required"`
+	Candidates  []Candidate `json:"candidates" validate:"required,min=1"`
 	Limits      Limits      `json:"limits,omitempty"`
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		if ve, ok := err.(*ValidationError); ok {
-			fail(ve.Code, err)
-		} else {
-			fail(ErrCodeArg, err)
-		}
-	}
-
-	if err := run(ctx, cfg, rc, in); err != nil {
-		if ve, ok := err.(*ValidationError); ok {
-			fail(ve.Code, err)
-		}
-		fail(ErrCodeRuntime, err)
-	}
+	skillmain.Main(Command, run)
 }
 
-// parseInput decodes and validates input from stdin.
-func parseInput(r io.Reader) (Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return Input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	// Validate required fields per spec §5.2
+// run is the main skill logic.
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply workspace default
 	if in.WorkspaceID == "" {
-		return Input{}, fmt.Errorf("workspace_id is required")
-	}
-	if in.Question == "" {
-		return Input{}, fmt.Errorf("question is required")
+		in.WorkspaceID = rc.PathValidator.Workspace()
 	}
 
-	// Check candidates
+	// Validate candidates have usable paths
 	usable := 0
 	for _, c := range in.Candidates {
 		if c.Path != "" {
@@ -210,13 +174,13 @@ func parseInput(r io.Reader) (Input, error) {
 		}
 	}
 	if usable == 0 {
-		return Input{}, &ValidationError{
+		return &ValidationError{
 			Code:    ErrCodeNoCandidates,
 			Message: "no usable candidates (all paths empty)",
 		}
 	}
 
-	// Normalize limits (zero/negative treated as unset, will use defaults later)
+	// Normalize limits
 	if in.Limits.MaxFiles < 0 {
 		in.Limits.MaxFiles = 0
 	}
@@ -227,11 +191,6 @@ func parseInput(r io.Reader) (Input, error) {
 		in.Limits.MaxBytesPerFile = 0
 	}
 
-	return in, nil
-}
-
-// run is the main skill logic.
-func run(ctx context.Context, cfg config.Config, rc *runner.RunnerContext, in Input) error {
 	start := time.Now()
 
 	// Apply default limits
@@ -271,7 +230,10 @@ func run(ctx context.Context, cfg config.Config, rc *runner.RunnerContext, in In
 
 	// Search for related sessions when embeddings are available
 	// This provides context hints from past sessions that solved similar problems
-	if relatedSessions, hint := searchRelatedSessions(ctx, cfg, in.WorkspaceID, in.Question, DefaultMaxRelatedSessions); len(relatedSessions) > 0 {
+	// Use actual workspace path from runner context for filtering (not the input workspace_id
+	// which may be a logical name rather than an absolute path)
+	workspacePath := rc.PathValidator.Workspace()
+	if relatedSessions, hint := searchRelatedSessions(ctx, rc.Config, workspacePath, in.Question, DefaultMaxRelatedSessions); len(relatedSessions) > 0 {
 		data["related_sessions"] = relatedSessions
 	} else if hint != "" {
 		// Surface non-fatal hint when session context is unavailable
@@ -323,10 +285,7 @@ func run(ctx context.Context, cfg config.Config, rc *runner.RunnerContext, in In
 	// Best-effort event logging; error is not actionable.
 	_ = observability.WriteSweGrepEvent(ctx, ev) //nolint:errcheck
 
-	return rc.Emit(Command, data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, Command, data)
 }
 
 func fatalErrorForFileResults(results []FileResult) *ValidationError {
@@ -971,7 +930,7 @@ func makeInlinePreviews(snippets []Snippet) []SnippetPreview {
 
 // persistSnippetsArtifact writes full snippets as NDJSON to CAS.
 
-func inlineThresholdBytes(rc *runner.RunnerContext) int {
+func inlineThresholdBytes(rc *skillmain.RunContext) int {
 	if rc == nil {
 		return DefaultInlineKB * 1024
 	}
@@ -997,19 +956,19 @@ func trimPreviewsToFit(data map[string]any, previews []SnippetPreview, threshold
 	return tmp, nil
 }
 
-func persistSnippetsArtifact(ctx context.Context, rc *runner.RunnerContext, snippets []Snippet) (runner.Artifact, error) {
+func persistSnippetsArtifact(ctx context.Context, rc *skillmain.RunContext, snippets []Snippet) (skillmain.Artifact, error) {
 	if len(snippets) == 0 {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
 	for _, s := range snippets {
 		if err := enc.Encode(s); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode snippet: %w", err)
+			return skillmain.Artifact{}, fmt.Errorf("encode snippet: %w", err)
 		}
 	}
-	return runner.PersistBuffer(ctx, rc, buf, ArtifactKind, "code_swe_grep")
+	return skillmain.PersistBuffer(ctx, rc, buf, ArtifactKind, "code_swe_grep")
 }
 
 // countLines counts the number of lines in content.
@@ -1051,7 +1010,7 @@ func applyDefaultLimits(l Limits) Limits {
 
 // processFiles validates and reads candidate files up to limits.
 // It opens files immediately after validation to eliminate TOCTOU race conditions.
-func processFiles(ctx context.Context, rc *runner.RunnerContext, candidates []Candidate, limits Limits) []FileResult {
+func processFiles(ctx context.Context, rc *skillmain.RunContext, candidates []Candidate, limits Limits) []FileResult {
 	results := make([]FileResult, 0, len(candidates))
 	filesProcessed := 0
 
@@ -1326,49 +1285,36 @@ func searchRelatedSessions(ctx context.Context, cfg config.Config, workspaceID, 
 
 // createEmbeddingProvider creates an embedding provider from config/env.
 // Returns provider (or nil) and a hint when unavailable.
+// Prefers Voyage with ScopeModelRecommendation for consistency.
 func createEmbeddingProvider(cfg config.Config) (semantic.EmbeddingProvider, string) {
-	providerName := cfg.Embedding.Provider
-	if env := os.Getenv("EMBEDDING_PROVIDER"); env != "" {
-		providerName = env
-	}
-	if providerName == "" {
-		providerName = "gemini"
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+
+	if voyageKey == "" && geminiKey == "" {
+		return nil, "no embedding API key set (VOYAGE_API_KEY or GEMINI_API_KEY); session context disabled (BM25-only)"
 	}
 
-	model := cfg.Embedding.Model
-	if env := os.Getenv("EMBEDDING_MODEL"); env != "" {
-		model = env
-	}
-	if model == "" {
-		model = "gemini-embedding-001"
-	}
-
-	switch providerName {
-	case "gemini":
-		apiKey := os.Getenv("GEMINI_API_KEY")
-		if apiKey == "" {
-			return nil, "GEMINI_API_KEY not set; session context disabled (BM25-only)"
-		}
-		provider, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey: apiKey,
+	// Prefer Voyage with scope-based model selection
+	if voyageKey != "" {
+		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSessions)
+		provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey: voyageKey,
 			Model:  model,
 		})
 		if err != nil {
-			return nil, fmt.Sprintf("failed to create embedding provider: %v; session context disabled", err)
+			return nil, fmt.Sprintf("failed to create Voyage provider: %v; session context disabled", err)
 		}
 		return provider, ""
-	default:
-		return nil, fmt.Sprintf("unknown embedding provider: %s; session context disabled", providerName)
 	}
+
+	// Gemini fallback (not recommended - dimension mismatch with Voyage)
+	provider, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
+		APIKey: geminiKey,
+		Model:  "gemini-embedding-001",
+	})
+	if err != nil {
+		return nil, fmt.Sprintf("failed to create Gemini provider: %v; session context disabled", err)
+	}
+	return provider, ""
 }
 
-// fail emits an error envelope and exits.
-func fail(code string, err error) {
-	hint := map[string]string{
-		"suggestion": "check input arguments, file permissions, and ensure candidate files exist",
-		"command":    Command,
-	}
-	env := envelope.Error(Command, code, err.Error(), hint)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit "+Command+" failure")
-	os.Exit(1)
-}

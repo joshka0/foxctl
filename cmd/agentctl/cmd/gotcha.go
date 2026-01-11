@@ -92,7 +92,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "Custom name (default: auto-generated)")
-	cmd.Flags().StringVar(&typ, "type", "gotcha", "Type: gotcha, decision, pattern")
+	cmd.Flags().StringVar(&typ, "type", "gotcha", "Type: gotcha, decision, pattern, user_pref, time_sink")
 	cmd.Flags().StringVar(&file, "file", "", "Associated file (default: CLAUDE.md or AGENTS.md)")
 	cmd.Flags().StringVar(&detail, "detail", "", "Additional detail/context")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace path")
@@ -154,7 +154,7 @@ func newGotchaListCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&typ, "type", "gotcha,decision,pattern", "Filter by type(s)")
+	cmd.Flags().StringVar(&typ, "type", "gotcha,decision,pattern,user_pref,time_sink", "Filter by type(s)")
 	cmd.Flags().StringVar(&file, "file", "", "Filter by associated file")
 	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum entries")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace path")

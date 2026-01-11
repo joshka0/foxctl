@@ -80,7 +80,7 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/smart-grep.sh",
-            "timeout": 5
+            "timeout": 8
           },
           {
             "type": "command",
@@ -127,6 +127,21 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event PostToolUse",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/hooks-error-drain.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
         "matcher": "Read|Bash|Grep|Glob|Task",
         "hooks": [
           {
@@ -143,6 +158,11 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/read-context-suggestions.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/counsel-suggest.sh",
+            "timeout": 2
           }
         ]
       },
@@ -240,6 +260,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event SessionStart",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/session-restore.sh",
             "timeout": 5
           }
@@ -253,7 +278,7 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/todo-continuation.sh",
-            "timeout": 10
+            "timeout": 60
           },
           {
             "type": "command",
@@ -285,8 +310,18 @@
     ],
     "UserPromptSubmit": [
       {
-        "matcher": "",
+        "matcher": "*",
         "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event UserPromptSubmit",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/session-restore-postcompact.sh",
+            "timeout": 30
+          },
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/memory-detector.sh",
@@ -296,6 +331,45 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/configs/hooks/skill-advisor.sh",
             "timeout": 1
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/anchor-detect.sh",
+            "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/counsel-detect.sh",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/context-detect.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event SubagentStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/configs/hooks/claude/agentctl-hook.sh --event SubagentStop",
+            "timeout": 5
           }
         ]
       }

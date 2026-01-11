@@ -522,7 +522,7 @@ export function SessionsPage() {
                                 <Wrench className="h-4 w-4 text-orange-500" />
                                 <span className="font-mono text-sm">{tool.name}</span>
                               </div>
-                              {tool.input && (
+                              {tool.input != null && (
                                 <pre className="text-xs mt-2 overflow-x-auto">
                                   {JSON.stringify(tool.input, null, 2)}
                                 </pre>

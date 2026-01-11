@@ -22,6 +22,7 @@ type runCommandFlags struct {
 	Dedupe          bool
 	Ephemeral       bool
 	Daemon          bool
+	Examples        bool
 	CacheMode       string
 	Workspace       string
 	WorkspaceSet    bool
@@ -41,6 +42,7 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 	cmd.Flags().BoolVar(&flags.Dedupe, "dedupe", false, "Reuse existing job with same args_hash")
 	cmd.Flags().BoolVar(&flags.Ephemeral, "ephemeral", false, "Skip job persistence for faster execution (for hooks)")
 	cmd.Flags().BoolVar(&flags.Daemon, "daemon", false, "Execute via daemon for faster hook execution")
+	cmd.Flags().BoolVar(&flags.Examples, "examples", false, "Show example usage (optionally for a specific skill)")
 	cmd.Flags().StringVar(&flags.CacheMode, "cache", "", "Cache mode (disabled; must be off)")
 	cmd.Flags().StringVar(&flags.Workspace, "workspace", "", "Workspace override (default: auto-detect)")
 	cmd.Flags().StringVar(&flags.RememberName, "remember", "", "Save successful result as named memory")
@@ -49,7 +51,7 @@ func bindRunFlags(cmd *cobra.Command, flags *runCommandFlags) {
 	cmd.Flags().DurationVar(&flags.Timeout, "timeout", runservice.DefaultTimeout, "Maximum execution time (e.g., 30s, 2m, 5m)")
 	cmd.Flags().StringVarP(&flags.Format, "format", "f", "", "Output format: json (default), table, compact")
 	cmd.Flags().StringVar(&flags.JQ, "jq", "", "jq expression to filter/transform JSON output (e.g., '.data.tasks[]')")
-	cmd.Flags().BoolVar(&flags.NoCAS, "no-cas", false, "Disable CAS truncation - return full output inline (may be large)")
+	cmd.Flags().BoolVar(&flags.NoCAS, "no-cas", true, "Disable CAS truncation - return full output inline (may be large)")
 }
 
 func buildRunOptions(cfg config.Config, skillName string, flags runCommandFlags, input []byte) (runservice.RunOptions, error) {

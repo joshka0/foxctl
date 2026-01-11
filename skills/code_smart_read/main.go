@@ -1,0 +1,364 @@
+// Package main implements the code/smart_read skill.
+// It provides intelligent file reading with auto-selection, context-aware
+// extraction, and multiple rendering modes.
+//
+// This skill is the entry point for the Code Context Funnel:
+//
+//	smart_read → swe_grep (evidence) → counsel (analysis)
+//	    ↓                ↓                    ↓
+//	"what to read"   "what's relevant"   "what does it mean"
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/rs/zerolog"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/codecontext"
+	"github.com/jkatigb/agentctl/internal/codecontext/guard"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/retrieval"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
+)
+
+const command = "code/smart_read"
+
+// Default limits.
+const (
+	DefaultMaxFiles        = 8
+	DefaultMaxBytesPerFile = 200 * 1024 // 200KB
+	DefaultMaxSnippets     = 50
+	DefaultContextLines    = 5
+	DefaultTimeout         = 30 * time.Second
+)
+
+// Input is the expected JSON input.
+type Input struct {
+	// Query is the natural-language question guiding file selection.
+	Query string `json:"query" validate:"required"`
+
+	// Files are explicit file paths to read (optional).
+	// If empty and AutoFiles is true, files are auto-selected.
+	Files []string `json:"files,omitempty"`
+
+	// AutoFiles enables automatic file selection based on query.
+	// Uses retrieval.Generator to find relevant files.
+	AutoFiles *bool `json:"auto_files,omitempty"`
+
+	// MaxFiles limits the number of files to process.
+	MaxFiles int `json:"max_files,omitempty"`
+
+	// Mode determines how content is extracted and rendered.
+	// Options: "general" (snippets), "structure" (API shape), "flow" (control flow)
+	Mode string `json:"mode,omitempty"`
+
+	// MaxBytesPerFile limits bytes read per file.
+	MaxBytesPerFile int `json:"max_bytes_per_file,omitempty"`
+
+	// ContextLines is the number of lines to include around matches.
+	ContextLines int `json:"context_lines,omitempty"`
+}
+
+// Output is the skill output.
+type Output struct {
+	// Evidence contains the extracted code snippets.
+	Evidence *codecontext.Evidence `json:"evidence"`
+
+	// Candidates lists files that were considered (when auto_files=true).
+	Candidates []CandidateInfo `json:"candidates,omitempty"`
+
+	// SecretFindings contains any detected secrets (redacted).
+	SecretFindings []SecretFinding `json:"secret_findings,omitempty"`
+
+	// Stats provides metrics about the extraction process.
+	Stats Stats `json:"stats"`
+}
+
+// SecretFinding represents a detected secret in the output.
+type SecretFinding struct {
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	Pattern  string `json:"pattern"`
+	Severity string `json:"severity"`
+	Masked   string `json:"masked"`
+}
+
+// CandidateInfo describes a candidate file.
+type CandidateInfo struct {
+	Path   string  `json:"path"`
+	Score  float64 `json:"score"`
+	Source string  `json:"source"`
+}
+
+// Stats provides metrics about the extraction process.
+type Stats struct {
+	LatencyMS       int    `json:"latency_ms"`
+	FilesConsidered int    `json:"files_considered"`
+	FilesProcessed  int    `json:"files_processed"`
+	SnippetsFound   int    `json:"snippets_found"`
+	Mode            string `json:"mode"`
+	SelectionMethod string `json:"selection_method"` // "explicit", "auto"
+}
+
+func main() {
+	skillmain.Main(command, run)
+}
+
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	start := time.Now()
+	logger := rc.Logger.With().Str("skill", command).Logger()
+
+	// Apply defaults
+	if in.AutoFiles == nil {
+		defaultTrue := true
+		in.AutoFiles = &defaultTrue
+	}
+	if in.MaxFiles <= 0 {
+		in.MaxFiles = DefaultMaxFiles
+	}
+	if in.MaxBytesPerFile <= 0 {
+		in.MaxBytesPerFile = DefaultMaxBytesPerFile
+	}
+	if in.ContextLines <= 0 {
+		in.ContextLines = DefaultContextLines
+	}
+	if in.Mode == "" {
+		in.Mode = "general"
+	}
+
+	// Map mode to RenderMode
+	renderMode := mapMode(in.Mode)
+
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
+
+	out := &Output{
+		Stats: Stats{
+			Mode: in.Mode,
+		},
+	}
+
+	// Determine candidates
+	var candidates []codecontext.Candidate
+
+	if len(in.Files) > 0 {
+		// Explicit files provided
+		out.Stats.SelectionMethod = "explicit"
+		for _, f := range in.Files {
+			candidates = append(candidates, codecontext.Candidate{
+				Path:     f,
+				Priority: 1.0,
+			})
+		}
+		logger.Debug().Int("count", len(candidates)).Msg("using explicit files")
+	} else if *in.AutoFiles {
+		// Auto-select files using retrieval
+		out.Stats.SelectionMethod = "auto"
+		selected, err := autoSelectFiles(ctx, rc, in.Query, in.MaxFiles, logger)
+		if err != nil {
+			logger.Warn().Err(err).Msg("auto-selection failed, using empty candidates")
+		} else {
+			candidates = selected.candidates
+			out.Candidates = selected.info
+			logger.Debug().Int("count", len(candidates)).Msg("auto-selected files")
+		}
+	}
+
+	out.Stats.FilesConsidered = len(candidates)
+
+	// Collect evidence using codecontext
+	evidence, err := codecontext.Collect(ctx, codecontext.CollectOpts{
+		Candidates:      candidates,
+		Query:           in.Query,
+		PathValidator:   rc.PathValidator,
+		MaxFiles:        in.MaxFiles,
+		MaxSnippets:     DefaultMaxSnippets,
+		MaxBytesPerFile: in.MaxBytesPerFile,
+		ContextLines:    in.ContextLines,
+		Mode:            renderMode,
+	})
+	if err != nil {
+		return fmt.Errorf("collect evidence: %w", err)
+	}
+
+	out.Evidence = evidence
+	out.Stats.FilesProcessed = evidence.Stats.FilesProcessed
+	out.Stats.SnippetsFound = evidence.Stats.SnippetsExtracted
+
+	// Scan evidence for secrets
+	secretFindings, hasHighSeverity := scanForSecrets(ctx, evidence, logger)
+	out.SecretFindings = secretFindings
+
+	// Block if high-severity secrets detected
+	if hasHighSeverity {
+		out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
+		// Still emit but with error indication in the findings
+		// The caller can decide how to handle high-severity secrets
+		logger.Warn().Int("count", len(secretFindings)).Msg("high-severity secrets detected in evidence")
+	}
+
+	out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
+
+	return skillout.Emit(rc, command, out)
+}
+
+// autoSelectResult holds the result of auto-selection.
+type autoSelectResult struct {
+	candidates []codecontext.Candidate
+	info       []CandidateInfo
+}
+
+// autoSelectFiles uses retrieval.Generator to find relevant files.
+func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, logger zerolog.Logger) (*autoSelectResult, error) {
+	// Open memory store for retrieval
+	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	if err != nil {
+		return nil, fmt.Errorf("open memory store: %w", err)
+	}
+	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+
+	// Create embedding provider (optional - retrieval falls back to ripgrep)
+	var embedProvider semantic.EmbeddingProvider
+	embedder, err := semantic.NewEmbedder(semantic.ScopeSymbols)
+	if err == nil {
+		embedProvider = &embedderAdapter{embedder: embedder}
+	} else {
+		logger.Debug().Err(err).Msg("embedding provider unavailable, using ripgrep only")
+	}
+
+	// Create generator
+	gen := retrieval.NewGenerator(memStore, embedProvider, rc.Workspace, logger)
+
+	// Generate candidates
+	result, err := gen.Generate(ctx, rc.Workspace, query, retrieval.Options{
+		MaxTotalCandidates:   maxFiles,
+		MaxSymbolCandidates:  maxFiles,
+		MaxSemanticCandidates: maxFiles / 2,
+		MaxRipgrepCandidates: maxFiles,
+		EnableSymbols:        true,
+		EnableSemantic:       embedProvider != nil,
+		EnableRipgrep:        true,
+		MinTotalCandidates:   3,
+		SymbolWeight:         1.0,
+		SemanticWeight:       0.8,
+		RipgrepWeight:        0.6,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("generate candidates: %w", err)
+	}
+
+	// Convert to codecontext.Candidate
+	candidates := make([]codecontext.Candidate, 0, len(result.Candidates))
+	info := make([]CandidateInfo, 0, len(result.Candidates))
+
+	for _, c := range result.Candidates {
+		candidates = append(candidates, codecontext.Candidate{
+			Path:     c.Path,
+			SymbolID: c.SymbolID,
+			LineHint: c.Line,
+			Priority: c.Score,
+		})
+		info = append(info, CandidateInfo{
+			Path:   c.Path,
+			Score:  c.Score,
+			Source: c.Source,
+		})
+	}
+
+	return &autoSelectResult{
+		candidates: candidates,
+		info:       info,
+	}, nil
+}
+
+// mapMode converts input mode string to codecontext.RenderMode.
+func mapMode(mode string) codecontext.RenderMode {
+	switch mode {
+	case "structure":
+		return codecontext.ModeStructure
+	case "flow":
+		return codecontext.ModeFlow
+	case "masked":
+		return codecontext.ModeMasked
+	default:
+		return codecontext.ModeSnippets
+	}
+}
+
+// embedderAdapter adapts *Embedder to EmbeddingProvider interface.
+// The Embedder returns EmbedResult (with Vec, Model, etc.) but EmbeddingProvider
+// expects just []float32 from Embed().
+type embedderAdapter struct {
+	embedder *semantic.Embedder
+}
+
+func (a *embedderAdapter) Embed(ctx context.Context, text string) ([]float32, error) {
+	result, err := a.embedder.Embed(ctx, text)
+	if err != nil {
+		return nil, err
+	}
+	return result.Vec, nil
+}
+
+func (a *embedderAdapter) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	results, err := a.embedder.EmbedBatch(ctx, texts)
+	if err != nil {
+		return nil, err
+	}
+	vecs := make([][]float32, len(results))
+	for i, r := range results {
+		vecs[i] = r.Vec
+	}
+	return vecs, nil
+}
+
+func (a *embedderAdapter) Model() string {
+	return a.embedder.Model()
+}
+
+func (a *embedderAdapter) Dimensions() int {
+	return a.embedder.Dimensions()
+}
+
+// scanForSecrets scans all evidence snippets for secrets.
+// Returns the findings and whether any high-severity secrets were detected.
+func scanForSecrets(ctx context.Context, evidence *codecontext.Evidence, logger zerolog.Logger) ([]SecretFinding, bool) {
+	if evidence == nil || len(evidence.Snippets) == 0 {
+		return nil, false
+	}
+
+	scanner := guard.New(guard.Opts{Mode: guard.ModeBlock})
+	var findings []SecretFinding
+	hasHighSeverity := false
+
+	for _, snippet := range evidence.Snippets {
+		result := scanner.ScanString(ctx, snippet.File, snippet.Text)
+
+		if result.HasFindings() {
+			for _, f := range result.Findings {
+				findings = append(findings, SecretFinding{
+					File:     snippet.File,
+					Line:     snippet.StartLine + f.Line - 1, // Adjust to absolute line number
+					Pattern:  f.Pattern,
+					Severity: string(f.Severity),
+					Masked:   f.Masked,
+				})
+
+				if f.Severity == guard.SeverityHigh {
+					hasHighSeverity = true
+				}
+			}
+		}
+	}
+
+	if len(findings) > 0 {
+		logger.Debug().Int("count", len(findings)).Bool("high_severity", hasHighSeverity).Msg("secrets detected in evidence")
+	}
+
+	return findings, hasHighSeverity
+}

@@ -1,6 +1,7 @@
 // Orchestration View - Agent hierarchy + mailbox activity + pending questions (human-in-loop)
 import { useState, useCallback, useMemo } from "react";
 import { useKeyboard } from "@opentui/react";
+import { useTimeoutManager } from "../hooks/useTimeoutManager";
 import {
   useAgents,
   useMailbox,
@@ -559,6 +560,8 @@ export function OrchestrationView() {
     }
   };
 
+  const setManagedTimeout = useTimeoutManager();
+
   // Handle answering a question - send agent.reply message
   const handleAnswerSubmit = useCallback(async () => {
     if (!selectedQuestion || !answerText.trim()) return;
@@ -575,10 +578,10 @@ export function OrchestrationView() {
       // Acknowledge the original question
       await acknowledge(selectedQuestion.id);
       setStatusMessage(`Answered: ${selectedQuestion.sender}`);
-      setTimeout(() => setStatusMessage(""), 3000);
+      setManagedTimeout(() => setStatusMessage(""), 3000);
     } catch (err) {
       setStatusMessage(`Error: ${err instanceof Error ? err.message : "Failed to send"}`);
-      setTimeout(() => setStatusMessage(""), 5000);
+      setManagedTimeout(() => setStatusMessage(""), 5000);
     }
     setAnswerMode(false);
     setAnswerText("");
@@ -592,10 +595,10 @@ export function OrchestrationView() {
       // Acknowledge the message (marks as handled, overseer will auto-respond)
       await acknowledge(selectedQuestion.id, "delegated");
       setStatusMessage(`Delegated to overseer: ${selectedQuestion.subject}`);
-      setTimeout(() => setStatusMessage(""), 3000);
+      setManagedTimeout(() => setStatusMessage(""), 3000);
     } catch (err) {
       setStatusMessage(`Error: ${err instanceof Error ? err.message : "Failed to delegate"}`);
-      setTimeout(() => setStatusMessage(""), 5000);
+      setManagedTimeout(() => setStatusMessage(""), 5000);
     }
     refetchMessages();
   }, [selectedQuestion, acknowledge, refetchMessages]);
@@ -609,11 +612,11 @@ export function OrchestrationView() {
     try {
       await stopSelectedAgent(selectedAgent.id);
       setStatusMessage(`Stopped agent: ${selectedAgent.ns}`);
-      setTimeout(() => setStatusMessage(""), 3000);
+      setManagedTimeout(() => setStatusMessage(""), 3000);
       refetchAgents();
     } catch (err) {
       setStatusMessage(`Error: ${err instanceof Error ? err.message : "Failed to stop"}`);
-      setTimeout(() => setStatusMessage(""), 5000);
+      setManagedTimeout(() => setStatusMessage(""), 5000);
     }
   }, [selectedAgent, stopSelectedAgent, refetchAgents]);
 

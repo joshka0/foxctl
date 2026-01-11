@@ -28,3 +28,16 @@ signature:
       type: number
       required: false
       description: "Convergence tolerance (default 1e-6)"
+  help:
+    short: "Compute PageRank scores for the dependency graph."
+    long: |
+      Use graph/pagerank to recompute PageRank scores for graph nodes.
+      Example commands:
+        agentctl run graph/pagerank --input '{"workspace":"./","damping_factor":0.85}'
+        agentctl skills run graph/pagerank --workspace ./ --damping_factor 0.85
+    workflows:
+      - id: recompute
+        description: "Recompute PageRank for the current workspace."
+        example_input:
+          workspace: "./"
+          damping_factor: 0.85

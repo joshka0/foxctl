@@ -47,3 +47,18 @@ signature:
       type: object
       required: false
       description: Arguments to pass to the tool
+  help:
+    short: "Bridge to an MCP server tool."
+    long: |
+      Use mcp/bridge to invoke a tool on a running MCP server.
+      Example commands:
+        agentctl run mcp/bridge --input '{"server_url":"http://localhost:8080/sse","tool_name":"search","tool_args":{"query":"example"}}'
+        agentctl skills run mcp/bridge --server_url http://localhost:8080/sse --tool_name search --tool_args '{"query":"example"}'
+    workflows:
+      - id: bridge-tool
+        description: "Call a tool on an MCP server."
+        example_input:
+          server_url: "http://localhost:8080/sse"
+          tool_name: "search"
+          tool_args:
+            query: "example"

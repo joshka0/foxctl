@@ -65,7 +65,6 @@ result=$("$AGENTCTL_BIN" run code/symbols --input "$input_json" 2>/dev/null) || 
 # Extract symbols
 symbols=$(echo "$result" | jq -r '.data.preview // []')
 symbol_count=$(echo "$symbols" | jq 'length')
-type_counts=$(echo "$result" | jq -r '.data.type_counts // {}')
 
 if [[ "$symbol_count" -eq 0 ]]; then
   echo '{}'
@@ -83,7 +82,6 @@ context="## File Structure: $filename
 # Group by type
 structs=$(echo "$symbols" | jq '[.[] | select(.type == "struct" or .type == "class" or .type == "interface")]')
 functions=$(echo "$symbols" | jq '[.[] | select(.type == "function" or .type == "method")]')
-types=$(echo "$symbols" | jq '[.[] | select(.type == "type")]')
 vars=$(echo "$symbols" | jq '[.[] | select(.type == "var" or .type == "const")]')
 
 # Add types/structs section

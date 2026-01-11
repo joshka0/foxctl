@@ -44,4 +44,4 @@ agentctl run code/swe_grep --input '{
 
 Large results stored in CAS: `agentctl cas get sha256:...`
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-swe-grep/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-swe-grep/Skill.md`

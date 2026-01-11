@@ -453,6 +453,8 @@ func parseAgentRole(role string) types.AgentRole {
 		return types.RoleReviewer
 	case "fixer":
 		return types.RoleFixer
+	case "verifier":
+		return types.RoleVerifier
 	default:
 		return types.RoleCoder
 	}

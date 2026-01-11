@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -465,7 +466,7 @@ func (idx *Indexer) indexFileForJob(ctx context.Context, args JobArgs, file JobF
 	// Determine language (use provided or detect)
 	language := file.Language
 	if language == "" {
-		language = detectLanguage(file.Path)
+		language = fsutil.DetectLanguage(file.Path)
 	}
 
 	// Compute digest if not provided
@@ -666,43 +667,6 @@ func (idx *Indexer) classifyError(err error) string {
 	}
 
 	return ErrCodeSemanticIndexNotFound
-}
-
-// detectLanguage attempts to detect the language from file extension.
-func detectLanguage(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".py":
-		return "python"
-	case ".js":
-		return "javascript"
-	case ".ts":
-		return "typescript"
-	case ".rs":
-		return "rust"
-	case ".java":
-		return "java"
-	case ".c", ".h":
-		return "c"
-	case ".cpp", ".cc", ".hpp":
-		return "cpp"
-	case ".rb":
-		return "ruby"
-	case ".md":
-		return "markdown"
-	case ".json":
-		return "json"
-	case ".yaml", ".yml":
-		return "yaml"
-	case ".toml":
-		return "toml"
-	case ".sh", ".bash":
-		return "shell"
-	default:
-		return "text"
-	}
 }
 
 // computeDigest computes a SHA-256 digest of the content.

@@ -9,7 +9,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,20 +16,20 @@ import (
 	"sort"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-type input struct {
+// Input defines the input parameters for code/complexity.
+type Input struct {
 	Path         string `json:"path"`
-	AnalysisMode string `json:"analysis_mode"`
-	Metric       string `json:"metric"`
-	Threshold    int    `json:"threshold"`
-	Language     string `json:"language"`
+	AnalysisMode string `json:"analysis_mode" validate:"omitempty,oneof=hotspots overview"`
+	Metric       string `json:"metric" validate:"omitempty,oneof=cyclomatic cognitive"`
+	Threshold    int    `json:"threshold" validate:"gte=0"`
+	Language     string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript"`
 	IncludeTests bool   `json:"include_tests"`
-	MaxResults   int    `json:"max_results"`
+	MaxResults   int    `json:"max_results" validate:"gte=0"`
 }
 
 type complexityResult struct {
@@ -56,30 +55,27 @@ type aggregateStats struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/complexity", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/complexity", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/complexity", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/complexity", "ERUNTIME", err)
-	}
+	skillmain.Main("code/complexity", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
+	if in.AnalysisMode == "" {
+		in.AnalysisMode = "hotspots"
+	}
+	if in.Metric == "" {
+		in.Metric = "cyclomatic"
+	}
+	if in.Threshold <= 0 {
+		in.Threshold = 10
+	}
+	if in.Language == "" {
+		in.Language = "auto"
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 100
+	}
+
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
 	if in.Path != "" {
@@ -141,10 +137,22 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	stats := calculateStats(results)
 
 	// Prepare preview and artifact
-	preview, truncated := preparePreview(results, rc.MaxPreview)
-	artifact, err := persistResultsArtifact(ctx, rc, results, truncated)
-	if err != nil {
-		return err
+	preview, truncated := skillout.PreparePreview(results, rc.MaxPreview)
+
+	var artifactDigest string
+	if truncated {
+		buf := &bytes.Buffer{}
+		enc := json.NewEncoder(buf)
+		for _, r := range results {
+			if err := enc.Encode(r); err != nil {
+				return fmt.Errorf("encode result: %w", err)
+			}
+		}
+		artifact, err := skillout.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_complexity")
+		if err != nil {
+			return err
+		}
+		artifactDigest = artifact.Digest
 	}
 
 	data := map[string]any{
@@ -155,37 +163,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"results":       preview,
 		"statistics":    stats,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
+	if artifactDigest != "" {
+		data["artifact"] = artifactDigest
 	}
 
-	return rc.Emit("code/complexity", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, "code/complexity", data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.AnalysisMode == "" {
-		in.AnalysisMode = "hotspots"
-	}
-	if in.Metric == "" {
-		in.Metric = "cyclomatic"
-	}
-	if in.Threshold <= 0 {
-		in.Threshold = 10
-	}
-	if in.Language == "" {
-		in.Language = "auto"
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 100
-	}
-	return in, nil
-}
-
-func analyzeDirectory(dir, workspace string, in input) ([]complexityResult, error) {
+func analyzeDirectory(dir, workspace string, in Input) ([]complexityResult, error) {
 	var results []complexityResult
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -193,7 +178,7 @@ func analyzeDirectory(dir, workspace string, in input) ([]complexityResult, erro
 			return nil
 		}
 
-		if strings.HasPrefix(d.Name(), ".") || isCommonExclude(d.Name()) {
+		if strings.HasPrefix(d.Name(), ".") || fsutil.IsCommonExclude(d.Name()) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -204,11 +189,11 @@ func analyzeDirectory(dir, workspace string, in input) ([]complexityResult, erro
 			return nil
 		}
 
-		if !in.IncludeTests && isTestFile(d.Name()) {
+		if !in.IncludeTests && fsutil.IsTestFile(d.Name()) {
 			return nil
 		}
 
-		lang := detectLanguage(in.Language, filepath.Ext(path))
+		lang := fsutil.DetectLanguageWithHint(in.Language, path)
 		if lang == "" {
 			return nil
 		}
@@ -225,8 +210,8 @@ func analyzeDirectory(dir, workspace string, in input) ([]complexityResult, erro
 	return results, err
 }
 
-func analyzeFile(path, workspace string, in input) ([]complexityResult, error) {
-	lang := detectLanguage(in.Language, filepath.Ext(path))
+func analyzeFile(path, workspace string, in Input) ([]complexityResult, error) {
+	lang := fsutil.DetectLanguageWithHint(in.Language, path)
 	if lang == "" {
 		return nil, fmt.Errorf("unsupported file type")
 	}
@@ -243,7 +228,7 @@ func analyzeFile(path, workspace string, in input) ([]complexityResult, error) {
 	}
 }
 
-func analyzeGoFile(path, workspace string, _ input) ([]complexityResult, error) {
+func analyzeGoFile(path, workspace string, _ Input) ([]complexityResult, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -251,7 +236,7 @@ func analyzeGoFile(path, workspace string, _ input) ([]complexityResult, error) 
 	}
 
 	var results []complexityResult
-	relPath := relativeTo(workspace, path)
+	relPath := fsutil.RelativeTo(workspace, path)
 
 	for _, decl := range file.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok {
@@ -479,13 +464,13 @@ func calculateGoNestingDepth(fn *ast.FuncDecl) int {
 	return maxDepth
 }
 
-func analyzePythonFile(path, workspace string, _ input) ([]complexityResult, error) {
+func analyzePythonFile(path, workspace string, _ Input) ([]complexityResult, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	relPath := relativeTo(workspace, path)
+	relPath := fsutil.RelativeTo(workspace, path)
 	lines := strings.Split(string(content), "\n")
 
 	// Enhanced regex patterns for Python
@@ -575,13 +560,13 @@ func analyzePythonFile(path, workspace string, _ input) ([]complexityResult, err
 	return results, nil
 }
 
-func analyzeJSFile(path, workspace string, _ input) ([]complexityResult, error) {
+func analyzeJSFile(path, workspace string, _ Input) ([]complexityResult, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	relPath := relativeTo(workspace, path)
+	relPath := fsutil.RelativeTo(workspace, path)
 	lines := strings.Split(string(content), "\n")
 
 	// Enhanced regex patterns for JS/TS
@@ -742,78 +727,4 @@ func calculateStats(results []complexityResult) aggregateStats {
 
 	stats.AverageComplexity = float64(total) / float64(len(results))
 	return stats
-}
-
-func detectLanguage(requested, ext string) string {
-	if requested != "auto" {
-		return requested
-	}
-	langMap := map[string]string{
-		".go":  "go",
-		".py":  "python",
-		".js":  "javascript",
-		".ts":  "typescript",
-		".jsx": "javascript",
-		".tsx": "typescript",
-	}
-	return langMap[ext]
-}
-
-func isTestFile(name string) bool {
-	name = strings.ToLower(name)
-	return strings.HasSuffix(name, "_test.go") ||
-		strings.HasSuffix(name, "_test.py") ||
-		strings.Contains(name, ".test.") ||
-		strings.Contains(name, ".spec.")
-}
-
-func isCommonExclude(name string) bool {
-	excludes := []string{
-		".git", ".svn", "node_modules", "vendor", "__pycache__",
-		".venv", "venv", "dist", "build", "target",
-	}
-	for _, exclude := range excludes {
-		if name == exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
-func preparePreview(results []complexityResult, limit int) ([]complexityResult, bool) {
-	if len(results) <= limit {
-		return results, false
-	}
-	return results[:limit], true
-}
-
-func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, results []complexityResult, truncated bool) (runner.Artifact, error) {
-	if !truncated {
-		return runner.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode result: %w", err)
-		}
-	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_complexity")
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/complexity failure")
-	os.Exit(1)
 }

@@ -15,6 +15,7 @@ import (
 	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -34,7 +35,7 @@ The actor system provides:
 - Supervisor: Manages actor lifecycles and message routing
 - Watcher: Reactive notifications from SQLite triggers
 - EventBus: Cross-actor event distribution
-- DspyActor: dspy-go ReActAgent as reactive actors`,
+- AgentActor: dspy-go ReActAgent as reactive actors`,
 }
 
 var actorSysSupervisorCmd = &cobra.Command{
@@ -59,7 +60,7 @@ var actorSysSupervisorStatusCmd = &cobra.Command{
 var actorSysSpawnCmd = &cobra.Command{
 	Use:   "spawn",
 	Short: "Spawn a new actor",
-	Long:  "Spawn a new DspyActor with specified role and namespace",
+	Long:  "Spawn a new AgentActor with specified role and namespace",
 	RunE:  runActorSysSpawn,
 }
 
@@ -163,7 +164,7 @@ func init() {
 
 	// Spawn flags
 	actorSysSpawnCmd.Flags().StringVar(&spawnActorNamespace, "namespace", "", "Actor namespace (required)")
-	actorSysSpawnCmd.Flags().StringVar(&spawnActorRole, "role", "coder", "Actor role (coder|planner|reviewer)")
+	actorSysSpawnCmd.Flags().StringVar(&spawnActorRole, "role", "coder", "Actor role (coder|planner|reviewer|fixer|verifier)")
 	actorSysSpawnCmd.Flags().StringVar(&spawnActorLLMProvider, "llm-provider", "gemini", "LLM provider")
 	actorSysSpawnCmd.Flags().StringVar(&spawnActorLLMModel, "llm-model", "", "LLM model (defaults based on provider)")
 	actorSysSpawnCmd.Flags().StringVar(&spawnActorWorkspace, "workspace", "", "Workspace root path")
@@ -231,9 +232,20 @@ func runActorSysSupervisorStart(cmd *cobra.Command, _ []string) error {
 		return writeActorSysError(cmd, "actorsys/supervisor/start", "failed to create actor system: "+err.Error())
 	}
 
+	// Create hooks dispatcher for actors
+	var hookDispatcher hooks.Dispatcher
+	hooksCfg, err := hooks.LoadConfigWithDefaults(cfg.Storage.Root)
+	if err != nil {
+		// Hooks are optional - log warning but continue
+		log := zerolog.New(os.Stderr).With().Timestamp().Logger()
+		log.Warn().Err(err).Msg("failed to load hooks config, continuing without hooks")
+	} else if hooksCfg != nil {
+		hookDispatcher = hooks.NewDispatcherWithRegistry(hooksCfg, cfg.Paths.Skills)
+	}
+
 	// Respawn registered actors if enabled
 	if supervisorRespawnRegistered {
-		if err := respawnRegisteredActors(ctx, cfg, system); err != nil {
+		if err := respawnRegisteredActors(ctx, cfg, system, hookDispatcher); err != nil {
 			// Log warning but don't fail startup
 			log := zerolog.New(os.Stderr).With().Timestamp().Logger()
 			log.Warn().Err(err).Msg("failed to respawn registered actors")
@@ -336,10 +348,10 @@ func runActorSysSpawn(cmd *cobra.Command, _ []string) error {
 
 	// Validate role
 	switch spawnActorRole {
-	case "coder", "planner", "reviewer":
+	case "coder", "planner", "reviewer", "fixer", "verifier":
 		// Valid
 	default:
-		return writeActorSysError(cmd, "actorsys/spawn", fmt.Sprintf("invalid role: %s (must be coder|planner|reviewer)", spawnActorRole))
+		return writeActorSysError(cmd, "actorsys/spawn", fmt.Sprintf("invalid role: %s (must be coder|planner|reviewer|fixer|verifier)", spawnActorRole))
 	}
 
 	// Open registry store
@@ -728,7 +740,7 @@ func openActorRegistryDB(storageRoot string) (*sql.DB, error) {
 	return sql.Open("sqlite3", dbPath)
 }
 
-func respawnRegisteredActors(ctx context.Context, cfg config.Config, system *actor.System) error {
+func respawnRegisteredActors(ctx context.Context, cfg config.Config, system *actor.System, hookDispatcher hooks.Dispatcher) error {
 	db, err := openActorRegistryDB(cfg.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open registry db: %w", err)
@@ -754,8 +766,11 @@ func respawnRegisteredActors(ctx context.Context, cfg config.Config, system *act
 	actors = append(actors, registered...)
 
 	for _, rec := range actors {
-		// Create DspyActor from record
-		dspyCfg := actor.DspyActorConfig{
+		// Create AgentActor from record
+		// Note: ActorID flows through AgentConfig.ActorID → hook.Input.ActorID
+		// Session ID is generated per-actor in onStart; environment session bridging
+		// happens at hook level, not actor level (hooks can read CLAUDE_SESSION_ID etc.)
+		agentCfg := actor.AgentActorConfig{
 			ActorConfig: rec.Config,
 			AgentConfig: agenttypes.AgentConfig{
 				Role:    agenttypes.AgentRole(rec.Role),
@@ -763,19 +778,20 @@ func respawnRegisteredActors(ctx context.Context, cfg config.Config, system *act
 			},
 			LLMProvider:   "gemini", // Default, should be stored in config
 			WorkspaceRoot: cfg.Storage.Root,
+			Hooks:         hookDispatcher, // Wire hooks dispatcher
 		}
 
 		logger := zerolog.New(os.Stderr).With().
 			Str("actor", rec.Namespace).
 			Logger()
 
-		dspyActor, err := actor.NewDspyActor(dspyCfg, actor.WithDspyLogger(logger))
+		agentActor, err := actor.NewAgentActor(agentCfg, actor.WithAgentLogger(logger))
 		if err != nil {
 			logger.Warn().Err(err).Msg("failed to create actor")
 			continue
 		}
 
-		if err := system.Register(ctx, dspyActor); err != nil {
+		if err := system.Register(ctx, agentActor); err != nil {
 			logger.Warn().Err(err).Msg("failed to register actor")
 			continue
 		}

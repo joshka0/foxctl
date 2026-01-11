@@ -4,16 +4,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
@@ -26,34 +22,15 @@ type input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if in.Role == "" {
-		fail("EARG", fmt.Errorf("role is required"))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate required fields
+	if in.Role == "" {
+		return fmt.Errorf("role is required")
+	}
+
 	// Resolve workspace
 	workspace := in.Workspace
 	if workspace == "" {
@@ -65,13 +42,13 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	}
 
 	// Open stores
-	trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
+	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open trajectory store: %w", err)
 	}
 	defer trajStore.Close()
 
-	patternStore, err := optimization.OpenPatternStore(ctx, cfg.Storage.Root)
+	patternStore, err := optimization.OpenPatternStore(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open pattern store: %w", err)
 	}
@@ -87,14 +64,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			return fmt.Errorf("reflect on trajectory: %w", err)
 		}
 
-		return rc.Emit(command, map[string]any{
+		return skillout.Emit(rc, command, map[string]any{
 			"reflection": map[string]any{
 				"trajectory_id": reflection.TrajectoryID,
 				"strengths":     reflection.Strengths,
 				"weaknesses":    reflection.Weaknesses,
 				"suggestions":   reflection.Suggestions,
 			},
-		}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+		})
 	}
 
 	// Generate summary across trajectories
@@ -137,7 +114,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		}
 	}
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"summary": map[string]any{
 			"total_trajectories":      summary.TotalTrajectories,
 			"successful_trajectories": summary.SuccessfulTrajectories,
@@ -147,11 +124,5 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		"improvements": improvementList,
 		"workspace":    absWorkspace,
 		"role":         in.Role,
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
+	})
 }

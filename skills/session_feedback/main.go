@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/oklog/ulid/v2"
 )
@@ -59,17 +59,13 @@ type Output struct {
 const command = "session/feedback"
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("EPARSE", fmt.Errorf("decode input: %w", err))
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate required fields
-	if input.Rating < 1 || input.Rating > 5 {
-		fail("EINVALID", fmt.Errorf("rating must be between 1 and 5, got %d", input.Rating))
+	if in.Rating < 1 || in.Rating > 5 {
+		return skillerr.Arg(fmt.Sprintf("rating must be between 1 and 5, got %d", in.Rating))
 	}
 
 	validOutcomes := map[string]bool{
@@ -78,39 +74,22 @@ func main() {
 		"failure":   true,
 		"abandoned": true,
 	}
-	if !validOutcomes[input.Outcome] {
-		fail("EINVALID", fmt.Errorf("outcome must be one of: success, partial, failure, abandoned; got %q", input.Outcome))
+	if !validOutcomes[in.Outcome] {
+		return skillerr.Arg(fmt.Sprintf("outcome must be one of: success, partial, failure, abandoned; got %q", in.Outcome))
 	}
 
-	// Default workspace to current directory
-	if input.Workspace == "" {
-		if wd, err := os.Getwd(); err == nil {
-			input.Workspace = wd
-		}
-	}
+	// Default workspace
+	in.Workspace = sessionkit.WorkspaceOrDefault(in.Workspace, rc.Workspace)
 
-	// Resolve session ID from input or environment
-	sessionID := input.SessionID
-	if sessionID == "" {
-		sessionID = resolveSessionID()
-	}
+	// Resolve session ID
+	sessionID := sessionkit.ResolveSessionID(in.Workspace, in.SessionID)
 
-	// Get agentctl home
-	home := os.Getenv("AGENTCTL_HOME")
-	if home == "" {
-		homeDir, _ := os.UserHomeDir()
-		home = filepath.Join(homeDir, ".agentctl")
-	}
-
-	// Open memory store
-	cachePath := filepath.Join(home, "cache")
-	casPath := filepath.Join(home, "cas")
-
-	memStore, err := memory.Open(ctx, cachePath, casPath)
+	// Open memory store in cache
+	memStore, cleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open memory store: %w", err))
+		return skillerr.IO("open memory store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+	defer cleanup()
 
 	// Generate feedback ID
 	feedbackID := ulid.Make().String()
@@ -119,30 +98,30 @@ func main() {
 	feedback := SessionFeedback{
 		FeedbackID:      feedbackID,
 		SessionID:       sessionID,
-		Workspace:       input.Workspace,
-		Rating:          input.Rating,
-		Outcome:         input.Outcome,
-		WhatWorked:      input.WhatWorked,
-		WhatDidntWork:   input.WhatDidntWork,
-		Blockers:        input.Blockers,
-		Suggestions:     input.Suggestions,
-		TaskID:          input.TaskID,
-		ToolsUsed:       input.ToolsUsed,
-		DurationMinutes: input.DurationMinutes,
-		Notes:           input.Notes,
+		Workspace:       in.Workspace,
+		Rating:          in.Rating,
+		Outcome:         in.Outcome,
+		WhatWorked:      in.WhatWorked,
+		WhatDidntWork:   in.WhatDidntWork,
+		Blockers:        in.Blockers,
+		Suggestions:     in.Suggestions,
+		TaskID:          in.TaskID,
+		ToolsUsed:       in.ToolsUsed,
+		DurationMinutes: in.DurationMinutes,
+		Notes:           in.Notes,
 		Timestamp:       timeutil.NowUTC(),
 	}
 
 	// Serialize feedback
 	feedbackJSON, err := json.Marshal(feedback)
 	if err != nil {
-		fail("ERUNTIME", fmt.Errorf("marshal feedback: %w", err))
+		return skillerr.Runtime("marshal feedback", skillerr.WithCause(err))
 	}
 
 	// Build summary
-	summaryText := fmt.Sprintf("Session feedback: %s (%d/5)", input.Outcome, input.Rating)
-	if input.TaskID != "" {
-		summaryText = fmt.Sprintf("Session feedback for task %s: %s (%d/5)", input.TaskID, input.Outcome, input.Rating)
+	summaryText := fmt.Sprintf("Session feedback: %s (%d/5)", in.Outcome, in.Rating)
+	if in.TaskID != "" {
+		summaryText = fmt.Sprintf("Session feedback for task %s: %s (%d/5)", in.TaskID, in.Outcome, in.Rating)
 	}
 
 	// Store in memory with type "session_feedback"
@@ -150,45 +129,20 @@ func main() {
 	_, err = memStore.SaveResult(ctx, memory.SaveOptions{
 		Name:      memoryName,
 		Type:      "session_feedback",
-		Workspace: input.Workspace,
+		Workspace: in.Workspace,
 		Summary:   summaryText,
 		Result:    feedbackJSON,
 		SessionID: sessionID,
 	})
 	if err != nil {
-		fail("EIO", fmt.Errorf("save feedback: %w", err))
+		return skillerr.IO("save feedback", skillerr.WithCause(err))
 	}
 
 	// Output result
 	output := Output{
 		FeedbackID: feedbackID,
-		Message:    fmt.Sprintf("Feedback recorded: %s (%s, %d/5)", feedbackID, input.Outcome, input.Rating),
+		Message:    fmt.Sprintf("Feedback recorded: %s (%s, %d/5)", feedbackID, in.Outcome, in.Rating),
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/feedback result")
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/feedback failure")
-	os.Exit(1)
-}
-
-// resolveSessionID returns the session ID from environment variables.
-// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
-// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
-func resolveSessionID() string {
-	for _, key := range []string{
-		"AGENTCTL_SESSION_ID",
-		"CLAUDE_SESSION_ID",
-		"OPENCODE_SESSION_ID",
-		"CURSOR_SESSION_ID",
-		"TERM_SESSION_ID",
-	} {
-		if sid := os.Getenv(key); sid != "" {
-			return sid
-		}
-	}
-	return ""
+	return skillout.Emit(rc, command, output)
 }

@@ -10,10 +10,17 @@ Vector-based semantic search across multiple content types using Voyage AI embed
 ## Quick Usage
 
 ```bash
+# JSON output (default)
 agentctl run code/semantic_search --input '{
   "query": "authentication middleware",
   "scope": ["symbols", "memories", "codemaps"],
   "limit": 10
+}'
+
+# Tree view - shows related files grouped by directory
+agentctl run code/semantic_search --input '{
+  "query": "authentication middleware",
+  "format": "tree"
 }'
 ```
 
@@ -34,6 +41,7 @@ agentctl run code/semantic_search --input '{
 | `query` | string | required | Natural language search query |
 | `scope` | string[] | all scopes | Content types to search |
 | `limit` | int | 10 | Max results per scope |
+| `format` | string | json | Output: `json` or `tree` (directory tree of related files) |
 | `path` | string | workspace | Directory to scope symbol search |
 | `threshold` | float | 0.0 | Minimum similarity score (0-1) |
 
@@ -95,6 +103,36 @@ agentctl run code/semantic_search --input '{
   "query": "database connection pooling",
   "scope": ["symbols", "memories", "sessions"]
 }'
+```
+
+### Tree View of Related Files
+
+Show semantically related files grouped by directory structure:
+
+```bash
+agentctl run code/semantic_search --input '{
+  "query": "embedding vector search",
+  "scope": ["symbols"],
+  "format": "tree"
+}'
+```
+
+Output:
+```
+.
+├── internal/
+│   ├── indexing/
+│   │   └── semantic/
+│   │       ├── indexer.go
+│   │       └── provider_voyage.go
+│   └── storage/
+│       └── vector/
+│           └── store.go
+└── skills/
+    └── code_semantic_search/
+        └── main.go
+
+📂 5 related files
 ```
 
 ## Output Format

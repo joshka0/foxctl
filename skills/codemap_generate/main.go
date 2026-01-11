@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codemap"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -20,6 +20,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
+
+const command = "codemap/generate"
 
 func init() {
 	// Configure dspy-go to log to stderr instead of stdout
@@ -38,45 +40,16 @@ type input struct {
 }
 
 func main() {
-	// Load .env files before anything else
-	config.LoadDotEnv()
-
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("codemap/generate", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("codemap/generate", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("codemap/generate", "EARG", err)
-	}
-
-	if err := run(ctx, rc, &cfg, in); err != nil {
-		fail("codemap/generate", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r *os.File) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return in, fmt.Errorf("decode input: %w", err)
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Query == "" {
-		return in, fmt.Errorf("query is required")
+		return fmt.Errorf("query is required")
 	}
-	return in, nil
-}
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg *config.Config, in input) error {
+	cfg := rc.Config
+
 	// Resolve workspace
 	workspace := in.Workspace
 	if workspace == "" {
@@ -131,22 +104,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg *config.Config, in i
 	}
 
 	// Store codemap with embedding for semantic search
-	if err := storeCodemapWithEmbedding(ctx, cfg, result, workspace); err != nil {
+	if err := storeCodemapWithEmbedding(ctx, &cfg, result, workspace); err != nil {
 		// Log error but don't fail - codemap was generated successfully
 		fmt.Fprintf(os.Stderr, "warning: failed to store codemap embedding: %v\n", err)
 	}
 
-	// Output envelope
-	env := envelope.OK("codemap/generate", result)
-	return json.NewEncoder(os.Stdout).Encode(env)
-}
-
-func fail(cmd, code string, err error) {
-	env := envelope.Error(cmd, code, err.Error(), nil)
-	if encErr := json.NewEncoder(os.Stdout).Encode(env); encErr != nil {
-		fmt.Fprintf(os.Stderr, "failed to encode error envelope: %v (original error: %v)\n", encErr, err)
-	}
-	os.Exit(1)
+	return skillout.Emit(rc, command, result)
 }
 
 // storeCodemapWithEmbedding saves the codemap to memory store with an embedding

@@ -35,16 +35,29 @@ signature:
       type: string
       required: false
       description: "Output format: json, prompt"
-returns:
-  - name: examples
-    type: array
-    description: "Generated few-shot examples"
-  - name: formatted
-    type: string
-    description: "Examples formatted for prompt injection"
-  - name: stats
-    type: object
-    description: "Statistics about available examples"
+  help:
+    short: "Generate few-shot examples from trajectories."
+    long: |
+      Use optimize/bootstrap to generate few-shot examples for a role.
+      Example commands:
+        agentctl run optimize/bootstrap --input '{"role":"coder","max_examples":5}'
+        agentctl skills run optimize/bootstrap --role coder --max_examples 5
+    workflows:
+      - id: bootstrap-examples
+        description: "Generate example prompts."
+        example_input:
+          role: "coder"
+          max_examples: 5
+  returns:
+    - name: examples
+      type: array
+      description: "Generated few-shot examples"
+    - name: formatted
+      type: string
+      description: "Examples formatted for prompt injection"
+    - name: stats
+      type: object
+      description: "Statistics about available examples"
 capabilities:
   network: "none"
   filesystem:

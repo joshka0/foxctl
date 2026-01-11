@@ -1,0 +1,71 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/subagent_start
+  version: 0.1.0
+  description: "Handle SubagentStart events to inject capability briefings"
+  tags: ["hook", "subagent", "lifecycle"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_subagent_start/hooks_subagent_start
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: hooks/subagent_start
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event name (SubagentStart)"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Subagent payload with name/type"
+    - name: hook_config
+      type: object
+      required: false
+      description: "Hook-specific configuration"
+  help:
+    short: "Handle subagent start events"
+    long: |
+      The subagent_start hook handles SubagentStart events to:
+
+      1. Infer the agent profile from the subagent name
+      2. Generate a capability briefing via agent/handbook
+      3. Inject the briefing into the subagent's context
+
+      Profile inference patterns:
+      - explorer, navigator, investigate → explorer
+      - reviewer, architect, analyze, audit → reviewer
+      - implementer, coder, fixer, developer → implementer
+      - (no match) → unrestricted
+
+      The briefing includes:
+      - Profile description and capabilities
+      - List of allowed agentctl skills with examples
+      - Rules and guidelines for the agent
+
+      Example hook config in .claude/settings.json:
+        "SubagentStart": [{
+          "matcher": "explorer|reviewer|implementer",
+          "hooks": [{
+            "type": "command",
+            "command": "agentctl run hooks/subagent_start --ephemeral"
+          }]
+        }]
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook output with context injection"
+  - name: profile
+    type: string
+    description: "Inferred agent profile"
+  - name: briefing
+    type: string
+    description: "Generated capability briefing"
+capabilities:
+  network: "none"
+  filesystem: []
+  pure: false

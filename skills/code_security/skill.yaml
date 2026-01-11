@@ -47,6 +47,27 @@ signature:
       required: false
       default: 100
       description: "Maximum number of results"
+  help:
+    short: "Scan code for common security issues."
+    long: |
+      Use code/security to scan for secrets, injection risks, and unsafe crypto.
+      Example commands:
+        agentctl run code/security --input '{"path":"./src","scan_mode":"scan","severity_threshold":"medium"}'
+        agentctl skills run code/security --path ./src --scan_mode scan --severity_threshold medium
+        agentctl run code/security --input '{"path":"./src","scan_mode":"secrets"}'
+        agentctl skills run code/security --path ./src --scan_mode secrets
+    workflows:
+      - id: scan-all
+        description: "Scan for security issues."
+        example_input:
+          path: "./src"
+          scan_mode: "scan"
+          severity_threshold: "medium"
+      - id: scan-secrets
+        description: "Scan for secrets only."
+        example_input:
+          path: "./src"
+          scan_mode: "secrets"
 returns:
   - name: vulnerabilities
     type: array

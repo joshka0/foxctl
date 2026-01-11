@@ -14,11 +14,14 @@ import (
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
+
+const command = "mcp/bridge"
 
 type input struct {
 	ServerCmd     string            `json:"server_cmd"`
@@ -61,28 +64,29 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+	config.LoadDotEnv()
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("mcp/bridge", "ERUNTIME", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("load config", err))
 	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := skillmain.BuildRunContext(cfg, os.Stdout)
 	if err != nil {
-		fail("mcp/bridge", "ERUNTIME", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("build context", err))
 	}
 	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
+		errs.Ignore(rc.Close(), "run context close")
 	}()
 
 	in, err := parseInput(os.Stdin, serverCmd, serverURL, toolName, serverArgs, serverEnv, serverHeaders)
 	if err != nil {
-		fail("mcp/bridge", "EARG", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
 	}
 	if err := run(ctx, rc, in); err != nil {
-		fail("mcp/bridge", "ERUNTIME", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	var mcpClient *client.Client
 	var err error
 
@@ -164,10 +168,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"content":  toolResult.Content,
 	}
 
-	return rc.Emit("mcp/bridge", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, command, data)
 }
 
 func parseInput(r io.Reader, cmdFlag, urlFlag, toolFlag string, argsFlag, envFlag, headersFlag []string) (input, error) {
@@ -220,10 +221,4 @@ func parseInput(r io.Reader, cmdFlag, urlFlag, toolFlag string, argsFlag, envFla
 		return input{}, fmt.Errorf("tool_name is required")
 	}
 	return in, nil
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit mcp/bridge failure")
-	os.Exit(1)
 }

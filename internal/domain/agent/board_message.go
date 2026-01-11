@@ -22,6 +22,9 @@ type BoardMessageStatus string
 const (
 	// BoardMessageStatusUnread is the initial status for new messages.
 	BoardMessageStatusUnread BoardMessageStatus = "unread"
+	// BoardMessageStatusSurfaced indicates the message has been surfaced into AI context
+	// (e.g., by an automatic hook) but not explicitly read by a user/tool.
+	BoardMessageStatusSurfaced BoardMessageStatus = "surfaced"
 	// BoardMessageStatusRead indicates the message has been read.
 	BoardMessageStatusRead BoardMessageStatus = "read"
 	// BoardMessageStatusAcked indicates the message has been acknowledged.
@@ -91,7 +94,10 @@ type InboxFilter struct {
 	TaskID      string `json:"task_id,omitempty"`
 	Stream      string `json:"stream,omitempty"`
 	OnlyUnread  bool   `json:"only_unread,omitempty"`
-	Limit       int    `json:"limit,omitempty"`
+	// OnlyUnsurfaced returns only messages that have not yet been surfaced into context.
+	// Practically: status == "unread". Intended for automatic context injectors.
+	OnlyUnsurfaced bool `json:"only_unsurfaced,omitempty"`
+	Limit          int  `json:"limit,omitempty"`
 }
 
 // DefaultStream is the default stream for messages.

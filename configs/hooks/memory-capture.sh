@@ -39,7 +39,7 @@ fi
 
 # Get workspace and relative path
 workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-rel_path="${file_path#$workspace/}"
+rel_path="${file_path#"$workspace"/}"
 
 # Extract change context (old_string/new_string for Edit, content preview for Write)
 change_type=""
@@ -56,7 +56,6 @@ case "$tool_name" in
     # Extract full content to compute actual length
     content_full=$(printf '%s' "$payload" | jq -r '.tool_input.content // ""')
     content_len=${#content_full}
-    content_preview=$(printf '%s' "$content_full" | head -c 100)
     change_type="write"
     change_summary="wrote ${content_len} chars"
     ;;
@@ -67,7 +66,9 @@ case "$tool_name" in
 esac
 
 # Build memory envelope
-memory_name="edit:${rel_path}:$(date +%s)"
+# Note: Using deterministic name (no timestamp) so memory-embed.sh can find it
+# This means repeated edits to same file update the existing memory entry
+memory_name="edit:${rel_path}"
 memory_summary="$change_type $rel_path: $change_summary"
 
 memory_envelope=$(jq -nc \

@@ -2,12 +2,44 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 )
+
+// applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).
+func applyDefaultsAndValidate(in *input, workspace string) error {
+	// Validate required field
+	if in.File == "" {
+		return fmt.Errorf("file is required")
+	}
+	// Apply defaults
+	if in.WorkspaceID == "" {
+		in.WorkspaceID = workspace
+	}
+	if in.Symbols == nil {
+		t := true
+		in.Symbols = &t
+	}
+	return nil
+}
+
+// parseInput is a test helper that parses JSON, applies defaults, and validates.
+func parseInput(r io.Reader, workspace string) (input, error) {
+	in, err := skilltest.ParseInput[input](r)
+	if err != nil {
+		return in, err
+	}
+	if err := applyDefaultsAndValidate(&in, workspace); err != nil {
+		return in, err
+	}
+	return in, nil
+}
 
 func TestDetectLanguage(t *testing.T) {
 	tests := []struct {

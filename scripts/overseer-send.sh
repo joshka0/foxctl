@@ -50,25 +50,98 @@ find_mail_binary() {
   return 1
 }
 
-MAIL_BIN=$(find_mail_binary) || {
-  echo "Error: agentctl-mail not found. Build it with: make build" >&2
-  exit 1
-}
+MAIL_BIN="$(find_mail_binary 2>/dev/null || true)"
 
-# Pass through all arguments to agentctl-mail
-# Map --ack to proper flag format if needed
-args=()
+if [[ -n "${MAIL_BIN:-}" ]]; then
+  args=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      -a)
+        args+=("--ack")
+        shift
+        ;;
+      *)
+        args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  exec "$MAIL_BIN" "${args[@]}"
+fi
+
+AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
+if ! command -v "$AGENTCTL_BIN" &>/dev/null; then
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_bin="$script_dir/../bin/agentctl"
+  if [[ -x "$repo_bin" ]]; then
+    AGENTCTL_BIN="$repo_bin"
+  else
+    echo "Error: agentctl not found" >&2
+    exit 1
+  fi
+fi
+
+if ! command -v jq &>/dev/null; then
+  echo "Error: jq not found" >&2
+  exit 1
+fi
+
+priority=3
+ack_required=false
+positionals=()
+
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -a)
-      args+=("--ack")
+    -p|--priority)
+      priority="${2:-3}"
+      shift 2
+      ;;
+    -a|--ack)
+      ack_required=true
       shift
       ;;
+    -h|--help)
+      echo "Usage: overseer-send.sh [-p NUM] [-a] <subject> <body>" >&2
+      exit 0
+      ;;
     *)
-      args+=("$1")
+      positionals+=("$1")
       shift
       ;;
   esac
 done
 
-exec "$MAIL_BIN" "${args[@]}"
+if [[ ${#positionals[@]} -lt 2 ]]; then
+  echo "Error: subject and body are required" >&2
+  exit 1
+fi
+
+subject="${positionals[0]}"
+body="${positionals[1]}"
+
+workspace_id="${OPENCODE_PROJECT_DIR:-${CLAUDE_PROJECT_DIR:-$(pwd)}}"
+
+payload=$(jq -nc \
+  --arg ws "$workspace_id" \
+  --arg sender "human" \
+  --arg recipient "overseer" \
+  --arg subject "$subject" \
+  --arg body "$body" \
+  --argjson priority "$priority" \
+  --argjson ack_required "$ack_required" \
+  '{
+    operation: "send",
+    workspace_id: $ws,
+    send: {
+      sender: $sender,
+      recipient: $recipient,
+      subject: $subject,
+      body: $body,
+      priority: $priority,
+      ack_required: $ack_required
+    }
+  }'
+)
+
+exec "$AGENTCTL_BIN" run mailbox/manage --input "$payload"

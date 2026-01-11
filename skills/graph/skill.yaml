@@ -107,6 +107,32 @@ signature:
       type: object
       required: false
       description: "Additional metadata for nodes/edges"
+  help:
+    short: "Manage dependency graph nodes and edges."
+    long: |
+      Use graph/manage to add nodes, connect edges, or query relationships.
+      Example commands:
+        agentctl run graph/manage --input '{"operation":"add_node","node_id":"task:123","node_type":"task","title":"Implement feature"}'
+        agentctl skills run graph/manage --operation add_node --node_id task:123 --node_type task --title "Implement feature"
+        agentctl run graph/manage --input '{"operation":"add_edge","from_id":"task:123","from_type":"task","to_id":"file:main.go","to_type":"file","edge_type":"modifies"}'
+        agentctl skills run graph/manage --operation add_edge --from_id task:123 --from_type task --to_id file:main.go --to_type file --edge_type modifies
+    workflows:
+      - id: add-node
+        description: "Add a task node."
+        example_input:
+          operation: "add_node"
+          node_id: "task:123"
+          node_type: "task"
+          title: "Implement feature"
+      - id: add-edge
+        description: "Connect a task to a file."
+        example_input:
+          operation: "add_edge"
+          from_id: "task:123"
+          from_type: "task"
+          to_id: "file:main.go"
+          to_type: "file"
+          edge_type: "modifies"
 returns:
   - name: result
     type: object

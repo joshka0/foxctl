@@ -43,6 +43,29 @@ signature:
       required: false
       default: false
       description: "Create parent directories if they don't exist"
+  help:
+    short: "Write or append content to a file."
+    long: |
+      Use fs/write to create, overwrite, or append to files in the workspace.
+      Example commands:
+        agentctl run fs/write --input '{"path":"./notes.txt","content":"Hello","mode":"overwrite"}'
+        agentctl skills run fs/write --path ./notes.txt --content "Hello" --mode overwrite
+        agentctl run fs/write --input '{"path":"./logs/output.txt","content":"Line","mode":"append","create_dirs":true}'
+        agentctl skills run fs/write --path ./logs/output.txt --content "Line" --mode append --create_dirs
+    workflows:
+      - id: write-overwrite
+        description: "Overwrite a file with new content."
+        example_input:
+          path: "./notes.txt"
+          content: "Hello"
+          mode: "overwrite"
+      - id: write-append
+        description: "Append content and create directories if needed."
+        example_input:
+          path: "./logs/output.txt"
+          content: "Line"
+          mode: "append"
+          create_dirs: true
 returns:
   - name: result
     type: object

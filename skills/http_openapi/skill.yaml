@@ -38,6 +38,32 @@ signature:
       type: boolean
       required: false
       default: true
+  help:
+    short: "Plan an OpenAPI request without network access."
+    long: |
+      Use http/openapi to generate a request plan from basic OpenAPI inputs.
+      Example commands:
+        agentctl run http/openapi --input '{"base_url":"https://api.example.com","path":"/repos/octocat/hello","method":"GET","dry_run":true}'
+        agentctl skills run http/openapi --base_url https://api.example.com --path /repos/octocat/hello --method GET --dry_run
+        agentctl run http/openapi --input '{"base_url":"https://api.example.com","path":"/issues","method":"POST","body":{"title":"Bug"},"dry_run":true}'
+        agentctl skills run http/openapi --base_url https://api.example.com --path /issues --method POST --body '{"title":"Bug"}' --dry_run
+    workflows:
+      - id: get-request
+        description: "Plan a GET request."
+        example_input:
+          base_url: "https://api.example.com"
+          path: "/repos/octocat/hello"
+          method: "GET"
+          dry_run: true
+      - id: post-request
+        description: "Plan a POST request with a JSON body."
+        example_input:
+          base_url: "https://api.example.com"
+          path: "/issues"
+          method: "POST"
+          body:
+            title: "Bug"
+          dry_run: true
 returns:
   - name: request_plan
     type: object

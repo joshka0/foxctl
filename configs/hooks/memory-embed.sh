@@ -8,7 +8,7 @@
 # 1. MCP memory tools with set/append operations
 # 2. Edit/Write when AGENTCTL_MEMORY_CAPTURE=1 (chains with memory-capture.sh)
 #
-# Auto-enabled when GEMINI_API_KEY is set. Disable with AGENTCTL_MEMORY_EMBED=0.
+# Auto-enabled when VOYAGE_API_KEY or GEMINI_API_KEY is set. Disable with AGENTCTL_MEMORY_EMBED=0.
 #
 # Phase 4: Automatic Embedding Updates
 # See: docs/designs/unified_semantic_search.md
@@ -16,7 +16,8 @@
 set -euo pipefail
 
 # Check for API key (required for embeddings) - auto-enable when set
-if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+# VOYAGE is preferred, GEMINI is fallback
+if [[ -z "${VOYAGE_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
   echo '{"decision":"approve"}'
   exit 0
 fi
@@ -75,9 +76,9 @@ if [[ "${AGENTCTL_MEMORY_CAPTURE:-0}" == "1" ]]; then
 
       if [[ -n "$file_path" ]]; then
         workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
-        rel_path="${file_path#$workspace/}"
-        # Memory name matches what memory-capture.sh creates
-        memory_name="edit:${rel_path}:$(date +%s)"
+        rel_path="${file_path#"$workspace"/}"
+        # Memory name matches what memory-capture.sh creates (deterministic, no timestamp)
+        memory_name="edit:${rel_path}"
 
         # Small delay to ensure memory-capture.sh has stored the entry
         (

@@ -49,6 +49,28 @@ signature:
       enum: ["tree", "list", "json"]
       default: "tree"
       description: "Output format"
+  help:
+    short: "Visualize a directory tree with depth and format controls."
+    long: |
+      Use fs/tree to inspect a directory structure with optional depth and
+      formatting options.
+      Example commands:
+        agentctl run fs/tree --input '{"path":".","max_depth":2}'
+        agentctl skills run fs/tree --path . --max_depth 2
+        agentctl run fs/tree --input '{"path":"./src","format":"list","pattern":"*.go"}'
+        agentctl skills run fs/tree --path ./src --format list --pattern '*.go'
+    workflows:
+      - id: tree-basic
+        description: "Show a shallow tree for the current directory."
+        example_input:
+          path: "."
+          max_depth: 2
+      - id: tree-filtered
+        description: "List only Go files under src."
+        example_input:
+          path: "./src"
+          format: "list"
+          pattern: "*.go"
 returns:
   - name: tree
     type: object

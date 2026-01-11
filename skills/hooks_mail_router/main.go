@@ -5,17 +5,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -26,46 +24,37 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("hooks/mail_router", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("hooks/mail_router", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("hooks/mail_router", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("hooks/mail_router", "ERUNTIME", err)
-	}
+	skillmain.Main("hooks/mail_router", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in hook.Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
+	paths := sessionkit.ResolvePaths(rc.Config)
+
 	// Get workspace ID
-	workspaceID := in.WorkspaceRoot
+	workspaceID := in.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = in.WorkspaceRoot
+	}
 	if workspaceID == "" {
 		// Fallback to current directory; error is not actionable.
 		workspaceID, _ = os.Getwd() //nolint:errcheck
 	}
 
 	// Get actor ID from environment or derive from session
-	actorID := os.Getenv("AGENTCTL_AGENT_NAME")
+	actorID := in.ActorID
+	if actorID == "" {
+		actorID = os.Getenv("AGENTCTL_AGENT_ID")
+	}
+	if actorID == "" {
+		actorID = os.Getenv("AGENTCTL_AGENT_NAME")
+	}
 	if actorID == "" {
 		actorID = fmt.Sprintf("actor:agent:%s", in.SessionID)
 	}
 
 	// Get active task ID if available
 	taskID := ""
-	taskStore, err := tasks.Open(ctx, cfg.Storage.Root)
+	taskStore, err := tasks.Open(ctx, paths.StorageRoot)
 	if err == nil {
 		defer taskStore.Close()
 		// Best-effort active task lookup; errors are ignored.
@@ -75,11 +64,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Open board store
-	boardStore, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)
 	if err != nil {
 		// If we can't open the store, just emit no-op output
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionNone,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionNone,
 			Reason:   "mail_router: could not open board store",
 		})
 	}
@@ -87,24 +76,25 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 	// Query inbox for relevant messages
 	filter := agent.InboxFilter{
-		WorkspaceID: workspaceID,
-		ActorID:     actorID,
-		TaskID:      taskID,
-		OnlyUnread:  true,
-		Limit:       MaxMessagesInContext * 2, // Get extra to filter
+		WorkspaceID:    workspaceID,
+		ActorID:        actorID,
+		TaskID:         taskID,
+		OnlyUnread:     true,                     // includes surfaced, but...
+		OnlyUnsurfaced: true,                     // ...hooks only want never-shown messages
+		Limit:          MaxMessagesInContext * 2, // Get extra to filter
 	}
 
 	messages, err := boardStore.Inbox(ctx, filter)
 	if err != nil {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionNone,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionNone,
 			Reason:   "mail_router: inbox query failed",
 		})
 	}
 
 	if len(messages) == 0 {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionNone,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionNone,
 			Reason:   "no unread messages",
 		})
 	}
@@ -112,21 +102,37 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// Build context string with priority messages
 	contextStr := buildMailContext(messages)
 
-	// Mark surfaced messages as read
+	// Mark surfaced messages as surfaced (NOT read).
+	// We mark all plan events (since they are always rendered), plus up to MaxMessagesInContext other messages.
 	if len(messages) > 0 {
 		ids := make([]string, 0, minInt(len(messages), MaxMessagesInContext))
-		for i, m := range messages {
-			if i >= MaxMessagesInContext {
+
+		// Plan events: always included in context, so mark all of them as surfaced
+		for _, m := range messages {
+			if isPlanEvent(m.Subject) {
+				ids = append(ids, m.ID)
+			}
+		}
+
+		// Other messages: cap at MaxMessagesInContext
+		otherCount := 0
+		for _, m := range messages {
+			if isPlanEvent(m.Subject) {
+				continue
+			}
+			if otherCount >= MaxMessagesInContext {
 				break
 			}
 			ids = append(ids, m.ID)
+			otherCount++
 		}
-		// Best-effort mark as read; error is not actionable.
-		_, _ = boardStore.MarkRead(ctx, workspaceID, actorID, ids) //nolint:errcheck
+
+		// Best-effort; errors are not actionable.
+		_, _ = boardStore.MarkSurfaced(ctx, workspaceID, actorID, ids) //nolint:errcheck
 	}
 
-	return emitOutput(rc, hook.Output{
-		Decision: hook.DecisionNone, // Advisory only
+	return emitOutput(rc, hooks.Output{
+		Decision: hooks.DecisionNone, // Advisory only
 		Reason:   fmt.Sprintf("surfaced %d messages", minInt(len(messages), MaxMessagesInContext)),
 		Context:  contextStr,
 		Meta: map[string]any{
@@ -264,20 +270,11 @@ func formatSender(sender string) string {
 	return sender
 }
 
-func emitOutput(rc *runner.RunnerContext, output hook.Output) error {
+func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
 	data := map[string]any{
 		"hook_output": output,
 	}
-	return rc.Emit("hooks/mail_router", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	return skillout.Emit(rc, "hooks/mail_router", data)
 }
 
 func minInt(a, b int) int {

@@ -68,4 +68,4 @@ agentctl run providers/config --input '{
 | `dry_run` | Preview changes without applying |
 | `provider` | Target: `claude`, `codex`, `opencode`, `factory`, `gemini`, or `all` |
 
-Full docs: `~/repos/personal/agentctl/skills/providers/skill.yaml`
+Full docs: `~/.agentctl/share/configs/providers/skills.json`

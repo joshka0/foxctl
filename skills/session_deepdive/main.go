@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -54,62 +55,49 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("EPARSE", fmt.Errorf("decode input: %w", err), "Ensure valid JSON on stdin")
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	if in.SessionID == "" {
+		return skillerr.Arg("session_id is required")
 	}
 
-	if input.SessionID == "" {
-		fail("EARG", fmt.Errorf("session_id is required"), "Provide session_id in input JSON")
-	}
-
-	if input.Limit <= 0 {
-		input.Limit = defaultLimit
-	}
-
-	// Get agentctl home
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			// Fall back to temp dir if home dir is unavailable
-			homeDir = os.TempDir()
-		}
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
+	if in.Limit <= 0 {
+		in.Limit = defaultLimit
 	}
 
 	// Open sessions store
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	sessionStore, err := sessions.Open(ctx, storageRoot)
+	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open sessions store: %w", err), "Check that storage directory exists and is accessible")
+		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(sessionStore.Close(), "close sessions store") }()
+	defer cleanup()
 
 	// Get archive path
-	archivePath, err := sessionStore.GetArchivePath(ctx, input.SessionID)
+	archivePath, err := sessionStore.GetArchivePath(ctx, in.SessionID)
 	if err != nil {
-		fail("ENOTFOUND", fmt.Errorf("session not found: %w", err), "Check session_id is correct and session exists")
+		return skillerr.Arg("session not found",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Check session_id is correct and session exists"))
 	}
 	if archivePath == "" {
-		fail("ENOTFOUND", fmt.Errorf("session has not been archived; run session/archive first"), "Run session/archive skill first to create archive")
+		return skillerr.Arg("session has not been archived",
+			skillerr.WithHint("Run session/archive skill first to create archive"))
 	}
 
 	// Determine which chunks to retrieve
 	var targetIndices []int
 
-	if input.ChunkIndex > 0 {
-		targetIndices = []int{input.ChunkIndex}
-	} else if len(input.ChunkIndices) > 0 {
-		targetIndices = input.ChunkIndices
+	if in.ChunkIndex > 0 {
+		targetIndices = []int{in.ChunkIndex}
+	} else if len(in.ChunkIndices) > 0 {
+		targetIndices = in.ChunkIndices
 	} else {
 		// Get chunks from database
-		chunks, err := sessionStore.GetChunks(ctx, input.SessionID, input.Limit)
+		chunks, err := sessionStore.GetChunks(ctx, in.SessionID, in.Limit)
 		if err != nil {
-			fail("EIO", fmt.Errorf("get chunks: %w", err), "Database query failed; check storage is accessible")
+			return skillerr.IO("get chunks", skillerr.WithCause(err))
 		}
 		for _, c := range chunks {
 			targetIndices = append(targetIndices, c.ChunkIndex)
@@ -118,22 +106,20 @@ func main() {
 
 	if len(targetIndices) == 0 {
 		output := Output{
-			SessionID:   input.SessionID,
+			SessionID:   in.SessionID,
 			ArchivePath: archivePath,
 			Chunks:      []ChunkDetail{},
 			TotalFound:  0,
 			Status:      "no_chunks",
 			Message:     "No chunks found for this session",
 		}
-		env := envelope.OK(command, output)
-		errs.Ignore(envelope.Write(os.Stdout, env), "emit session/deep-dive result")
-		return
+		return skillout.Emit(rc, command, output)
 	}
 
 	// Get chunk metadata from database
 	chunkMap := make(map[int]sessions.SessionChunk)
 	for _, idx := range targetIndices {
-		chunk, err := sessionStore.GetChunk(ctx, input.SessionID, idx)
+		chunk, err := sessionStore.GetChunk(ctx, in.SessionID, idx)
 		if err == nil {
 			chunkMap[idx] = chunk
 		}
@@ -142,7 +128,8 @@ func main() {
 	// Read raw content from archive
 	rawContents, err := readChunksFromArchive(archivePath, targetIndices)
 	if err != nil {
-		fail("EIO", fmt.Errorf("read archive: %w", err), "Failed to read archive file; check file exists and is accessible")
+		return skillerr.IO("read archive", skillerr.WithCause(err),
+			skillerr.WithHint("Failed to read archive file; check file exists and is accessible"))
 	}
 
 	// Build output
@@ -171,7 +158,7 @@ func main() {
 	}
 
 	output := Output{
-		SessionID:   input.SessionID,
+		SessionID:   in.SessionID,
 		ArchivePath: archivePath,
 		Chunks:      details,
 		TotalFound:  len(details),
@@ -179,8 +166,7 @@ func main() {
 		Message:     fmt.Sprintf("Retrieved %d chunks from archive", len(details)),
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/deep-dive result")
+	return skillout.Emit(rc, command, output)
 }
 
 // readChunksFromArchive reads specific lines from a gzipped JSONL file.
@@ -230,14 +216,4 @@ func readChunksFromArchive(archivePath string, indices []int) (map[int]json.RawM
 	}
 
 	return results, nil
-}
-
-func fail(code string, err error, hint string) {
-	var data map[string]any
-	if hint != "" {
-		data = map[string]any{"hint": hint}
-	}
-	env := envelope.Error(command, code, err.Error(), data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/deep-dive failure")
-	os.Exit(1)
 }

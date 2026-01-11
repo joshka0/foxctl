@@ -3,8 +3,9 @@ package timeutil
 
 import (
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 // ParseRFC3339Nano parses a time string in RFC3339Nano format.
@@ -22,12 +23,33 @@ func ParseRFC3339Nano(s string) (time.Time, error) {
 // WARNING: Zero times (0001-01-01) can hide database corruption issues.
 // Callers should validate that returned times are not zero when data integrity is critical.
 func MustParseRFC3339Nano(s string) time.Time {
-	t, err := time.Parse(time.RFC3339Nano, s)
-	if err != nil {
-		// Log warning to help detect database corruption early
-		log.Printf("timeutil: failed to parse timestamp %q: %v (returning zero time)", s, err)
+	if s == "" {
+		return time.Time{}
 	}
-	return t
+
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err == nil {
+		return t
+	}
+
+	layouts := [...]string{
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsed, parseErr := time.Parse(layout, s); parseErr == nil {
+			return parsed
+		}
+	}
+
+	// Log warning to help detect database corruption early.
+	log.Warn().
+		Str("timestamp", s).
+		Err(err).
+		Msg("timeutil: failed to parse timestamp, returning zero time")
+	return time.Time{}
 }
 
 // FormatRFC3339Nano formats a time in RFC3339Nano format.

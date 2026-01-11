@@ -3,21 +3,19 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
 // Input defines the skill input parameters.
 type Input struct {
-	SessionID  string `json:"session_id"`
+	SessionID  string `json:"session_id" validate:"required"`
 	ErrorsOnly bool   `json:"errors_only,omitempty"`
 	Limit      int    `json:"limit,omitempty"`
 }
@@ -74,56 +72,42 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("DECODE_ERROR", fmt.Errorf("decode input: %w", err))
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	if in.Limit <= 0 {
+		in.Limit = defaultLimit
 	}
 
-	if input.SessionID == "" {
-		fail("INVALID_INPUT", fmt.Errorf("session_id is required"))
-	}
-
-	if input.Limit <= 0 {
-		input.Limit = defaultLimit
-	}
-
-	// Get agentctl home
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		homeDir, _ := os.UserHomeDir()
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
-	}
-
-	// Open sessions store
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	sessionStore, err := sessions.Open(ctx, storageRoot)
+	// Open sessions store using sessionkit
+	store, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		fail("STORE_ERROR", fmt.Errorf("open sessions store: %w", err))
+		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(sessionStore.Close(), "close sessions store") }()
+	defer cleanup()
 
 	// Get session metadata
-	session, err := sessionStore.Get(ctx, input.SessionID)
+	session, err := store.Get(ctx, in.SessionID)
 	if err != nil {
-		fail("NOT_FOUND", fmt.Errorf("session not found: %w", err))
+		return skillerr.Runtime("session not found",
+			skillerr.WithCause(err),
+			skillerr.WithData("session_id", in.SessionID))
 	}
 
 	// Get turns
 	var turns []storage.SessionTurn
-	if input.ErrorsOnly {
-		turns, err = sessionStore.GetTurnsWithErrors(ctx, input.SessionID)
+	if in.ErrorsOnly {
+		turns, err = store.GetTurnsWithErrors(ctx, in.SessionID)
 	} else {
 		opts := storage.SessionTurnListOptions{
-			SessionID: input.SessionID,
-			Limit:     input.Limit,
+			SessionID: in.SessionID,
+			Limit:     in.Limit,
 		}
-		turns, err = sessionStore.GetTurns(ctx, input.SessionID, opts)
+		turns, err = store.GetTurns(ctx, in.SessionID, opts)
 	}
 	if err != nil {
-		fail("QUERY_ERROR", fmt.Errorf("get turns: %w", err))
+		return skillerr.Runtime("get turns", skillerr.WithCause(err))
 	}
 
 	// Convert to output format
@@ -183,7 +167,7 @@ func main() {
 	}
 
 	output := Output{
-		SessionID:  input.SessionID,
+		SessionID:  in.SessionID,
 		Session:    sessionInfo,
 		Turns:      turnInfos,
 		TotalTurns: len(turnInfos),
@@ -197,12 +181,5 @@ func main() {
 		output.Message = "No turns found for this session (turns may not have been extracted yet)"
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/expand result")
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/expand failure")
-	os.Exit(1)
+	return skillout.Emit(rc, command, output)
 }

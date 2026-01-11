@@ -195,7 +195,7 @@ func newMemoryPutCommand() *cobra.Command {
 }
 
 func injectDefaultFileForGotchaTypes(payload []byte, typ, workspace string) []byte {
-	if typ != "gotcha" && typ != "decision" && typ != "pattern" {
+	if typ != "gotcha" && typ != "decision" && typ != "pattern" && typ != "user_pref" && typ != "time_sink" {
 		return payload
 	}
 

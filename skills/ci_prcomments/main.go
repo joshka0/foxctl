@@ -18,25 +18,24 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/rs/zerolog"
 )
 
 // logger is the package-level structured logger that writes JSON to stderr.
 var logger = zerolog.New(os.Stderr).With().Str("component", "ci_prcomments").Timestamp().Logger()
 
-type input struct {
-	PR              string `json:"pr"`
-	Owner           string `json:"owner"`
-	Repo            string `json:"repo"`
-	WithContext     bool   `json:"with_context"`
-	Format          string `json:"format"`
-	OutputPath      string `json:"output_path"`
-	ErrorsOnly      bool   `json:"errors_only"`
-	IncludeResolved bool   `json:"include_resolved"` // Include resolved/addressed comments (default: false)
+// Input defines the skill input parameters.
+type Input struct {
+	PR              string `json:"pr" validate:"required"`
+	Owner           string `json:"owner,omitempty"`
+	Repo            string `json:"repo,omitempty"`
+	WithContext     bool   `json:"with_context,omitempty"`
+	Format          string `json:"format,omitempty"`
+	OutputPath      string `json:"output_path,omitempty"`
+	ErrorsOnly      bool   `json:"errors_only,omitempty"`
+	IncludeResolved bool   `json:"include_resolved,omitempty"` // Include resolved/addressed comments (default: false)
 }
 
 type Comment struct {
@@ -120,34 +119,21 @@ type TaskItem struct {
 	Outdated      bool   `json:"outdated,omitempty"`
 }
 
-func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ci/prcomments", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ci/prcomments", "ERUNTIME", err)
-	}
-	defer func() {
-		errors.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("ci/prcomments", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("ci/prcomments", "ERUNTIME", err)
-	}
+// PRReview represents a GitHub PR review with body content.
+type PRReview struct {
+	ID        int       `json:"id"`
+	User      User      `json:"user"`
+	Body      string    `json:"body"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"submitted_at"`
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func main() {
+	skillmain.Main("ci/prcomments", run)
+}
+
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	prRef := strings.TrimSpace(in.PR)
-	if prRef == "" {
-		return fmt.Errorf("pr is required")
-	}
 
 	format := strings.ToLower(strings.TrimSpace(in.Format))
 	if format == "" {
@@ -224,6 +210,18 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		logger.Warn().Err(err).Str("operation", "get-review-comments").Int("pr", prNum).Msg("failed to get review comments")
 	}
 
+	// Fetch PR reviews for CodeRabbit "Fix all issues with AI Agents" content
+	var codeRabbitAIPrompt string
+	prReviews, err := getPRReviews(client, token, owner, repo, prNum)
+	if err != nil {
+		logger.Warn().Err(err).Str("operation", "get-pr-reviews").Int("pr", prNum).Msg("failed to get PR reviews")
+	} else {
+		codeRabbitAIPrompt = extractCodeRabbitAIAgentPrompts(prReviews)
+		if codeRabbitAIPrompt != "" {
+			logger.Info().Str("operation", "extract-ai-prompt").Int("pr", prNum).Int("length", len(codeRabbitAIPrompt)).Msg("found CodeRabbit AI agent prompt")
+		}
+	}
+
 	// Fetch resolved/outdated status via GraphQL and merge into review comments
 	threadStatuses, err := getReviewThreadStatuses(client, token, owner, repo, prNum)
 	if err != nil {
@@ -274,6 +272,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"with_context":        in.WithContext,
 	}
 
+	// Add CodeRabbit "Fix all issues with AI Agents" consolidated prompt if available
+	if codeRabbitAIPrompt != "" {
+		data["coderabbit_ai_prompt"] = codeRabbitAIPrompt
+		data["has_coderabbit_ai_prompt"] = true
+	}
+
 	if in.OutputPath != "" {
 		validated, err := rc.PathValidator.ValidatePath(in.OutputPath)
 		if err != nil {
@@ -290,7 +294,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 	if truncated {
 		buf := bytes.NewBufferString(markdown)
-		artifact, err := runner.PersistBuffer(ctx, rc, buf, "text/markdown", "ci_prcomments")
+		artifact, err := skillout.PersistBuffer(ctx, rc, buf, "text/markdown", "ci_prcomments")
 		if err == nil && artifact.Digest != "" {
 			data["markdown_artifact"] = artifact.Digest
 		}
@@ -300,7 +304,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["comments"] = allComments
 	}
 
-	return rc.Emit("ci/prcomments", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, "ci/prcomments", data)
 }
 
 func detectRepo(ctx context.Context) (string, string, error) {
@@ -410,6 +414,84 @@ func getReviewComments(client *http.Client, token, owner, repo string, prNum int
 		return nil, err
 	}
 	return comments, nil
+}
+
+// getPRReviews fetches all reviews for a PR (includes the review body with summary comments).
+func getPRReviews(client *http.Client, token, owner, repo string, prNum int) ([]PRReview, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/reviews", owner, repo, prNum)
+	var reviews []PRReview
+	if err := githubGET(client, token, url, &reviews); err != nil {
+		return nil, err
+	}
+	return reviews, nil
+}
+
+// extractCodeRabbitAIAgentPrompts extracts the "🤖 Fix all issues with AI Agents" content from CodeRabbit reviews.
+// Returns the consolidated fix instructions if found, or empty string if not present.
+func extractCodeRabbitAIAgentPrompts(reviews []PRReview) string {
+	for _, review := range reviews {
+		if !strings.Contains(review.User.Login, "coderabbit") {
+			continue
+		}
+		prompt := extractAIAgentPromptFromBody(review.Body)
+		if prompt != "" {
+			return prompt
+		}
+	}
+	return ""
+}
+
+// extractAIAgentPromptFromBody extracts the content from the "🤖 Fix all issues with AI Agents" details section.
+func extractAIAgentPromptFromBody(body string) string {
+	// Look for the details block with the AI Agents summary
+	// Format: <details><summary>🤖 Fix all issues with AI Agents</summary>```...```</details>
+	markers := []string{
+		"🤖 Fix all issues with AI Agents",
+		"Fix all issues with AI Agents",
+	}
+
+	for _, marker := range markers {
+		idx := strings.Index(body, marker)
+		if idx == -1 {
+			continue
+		}
+
+		// Find the content after the summary tag
+		afterMarker := body[idx+len(marker):]
+
+		// Look for the code block that contains the instructions
+		codeStart := strings.Index(afterMarker, "```")
+		if codeStart == -1 {
+			continue
+		}
+
+		// Skip past the opening ``` and any language identifier
+		codeContent := afterMarker[codeStart+3:]
+		// Skip the optional language identifier on the first line
+		if newlineIdx := strings.Index(codeContent, "\n"); newlineIdx != -1 {
+			firstLine := codeContent[:newlineIdx]
+			// If first line is short (like "text" or empty), it's a language identifier
+			if len(strings.TrimSpace(firstLine)) < 20 && !strings.Contains(firstLine, "@") {
+				codeContent = codeContent[newlineIdx+1:]
+			}
+		}
+
+		// Find the closing ```
+		codeEnd := strings.Index(codeContent, "```")
+		if codeEnd == -1 {
+			// Try to find </details> as fallback
+			codeEnd = strings.Index(codeContent, "</details>")
+			if codeEnd == -1 {
+				continue
+			}
+		}
+
+		content := strings.TrimSpace(codeContent[:codeEnd])
+		if content != "" {
+			return content
+		}
+	}
+	return ""
 }
 
 // ReviewThreadStatus maps comment IDs to their resolved/outdated status from GraphQL API.
@@ -1304,8 +1386,3 @@ func classifyGreptileTask(cleanBody string) (severity, summary string) {
 	return severity, summary
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errors.Ignore(envelope.Write(os.Stdout, env), "emit ci/prcomments failure")
-	os.Exit(1)
-}

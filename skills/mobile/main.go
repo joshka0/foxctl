@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -15,13 +14,11 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-const skillName = "mobile"
+const command = "mobile"
 
 type input struct {
 	Platform  string `json:"platform,omitempty"`
@@ -48,48 +45,17 @@ type UnifiedDevice struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("EARG", err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults (moved from parseInput)
 	if in.Operation == "" {
-		return input{}, fmt.Errorf("operation is required")
+		return fmt.Errorf("operation is required")
 	}
-
 	if in.Platform == "" {
 		in.Platform = "auto"
 	}
-
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Check tool availability
 	hasIDB := checkTool("idb")
 	hasADB := checkTool("adb")
@@ -131,7 +97,7 @@ func checkTool(name string) bool {
 }
 
 // listAllDevices lists devices from both iOS and Android.
-func listAllDevices(ctx context.Context, rc *runner.RunnerContext, hasIDB, hasADB bool) error {
+func listAllDevices(ctx context.Context, rc *skillmain.RunContext, hasIDB, hasADB bool) error {
 	var allDevices []UnifiedDevice
 
 	// Get iOS simulators
@@ -251,7 +217,7 @@ func listAndroidDevices(ctx context.Context) ([]UnifiedDevice, error) {
 }
 
 // runIOS dispatches to iOS-specific operations.
-func runIOS(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func runIOS(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	switch in.Operation {
 	case "list_devices":
 		return iosListDevices(ctx, rc)
@@ -283,7 +249,7 @@ func runIOS(ctx context.Context, rc *runner.RunnerContext, in input) error {
 }
 
 // runAndroid dispatches to Android-specific operations.
-func runAndroid(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func runAndroid(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	switch in.Operation {
 	case "list_devices":
 		return androidListDevices(ctx, rc)
@@ -323,7 +289,7 @@ func idbCommand(ctx context.Context, udid string, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "idb", args...)
 }
 
-func iosListDevices(ctx context.Context, rc *runner.RunnerContext) error {
+func iosListDevices(ctx context.Context, rc *skillmain.RunContext) error {
 	devices, err := listIOSDevices(ctx)
 	if err != nil {
 		return err
@@ -336,7 +302,7 @@ func iosListDevices(ctx context.Context, rc *runner.RunnerContext) error {
 	})
 }
 
-func iosDeviceInfo(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func iosDeviceInfo(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	cmd := idbCommand(ctx, udid, "describe", "--json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -351,7 +317,7 @@ func iosDeviceInfo(ctx context.Context, rc *runner.RunnerContext, udid string) e
 	})
 }
 
-func iosInstall(ctx context.Context, rc *runner.RunnerContext, udid, app string) error {
+func iosInstall(ctx context.Context, rc *skillmain.RunContext, udid, app string) error {
 	if app == "" {
 		return fmt.Errorf("app path is required")
 	}
@@ -367,7 +333,7 @@ func iosInstall(ctx context.Context, rc *runner.RunnerContext, udid, app string)
 	})
 }
 
-func iosLaunch(ctx context.Context, rc *runner.RunnerContext, udid, bundleID string) error {
+func iosLaunch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
 		return fmt.Errorf("bundle ID is required")
 	}
@@ -383,7 +349,7 @@ func iosLaunch(ctx context.Context, rc *runner.RunnerContext, udid, bundleID str
 	})
 }
 
-func iosTerminate(ctx context.Context, rc *runner.RunnerContext, udid, bundleID string) error {
+func iosTerminate(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
 		return fmt.Errorf("bundle ID is required")
 	}
@@ -399,7 +365,7 @@ func iosTerminate(ctx context.Context, rc *runner.RunnerContext, udid, bundleID 
 	})
 }
 
-func iosScreenshot(ctx context.Context, rc *runner.RunnerContext, udid, outputPath string) error {
+func iosScreenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath string) error {
 	if outputPath == "" {
 		outputPath = fmt.Sprintf("/tmp/ios_screenshot_%d.png", time.Now().UnixNano())
 	}
@@ -411,7 +377,7 @@ func iosScreenshot(ctx context.Context, rc *runner.RunnerContext, udid, outputPa
 	if err != nil {
 		return fmt.Errorf("read screenshot: %w", err)
 	}
-	artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(data), "image/png", "mobile_screenshot")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(data), "image/png", "mobile_screenshot")
 	if err != nil {
 		return fmt.Errorf("persist screenshot: %w", err)
 	}
@@ -424,7 +390,7 @@ func iosScreenshot(ctx context.Context, rc *runner.RunnerContext, udid, outputPa
 	})
 }
 
-func iosTap(ctx context.Context, rc *runner.RunnerContext, udid string, x, y int) error {
+func iosTap(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) error {
 	cmd := idbCommand(ctx, udid, "ui", "tap", strconv.Itoa(x), strconv.Itoa(y))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("idb ui tap: %w", err)
@@ -438,7 +404,7 @@ func iosTap(ctx context.Context, rc *runner.RunnerContext, udid string, x, y int
 	})
 }
 
-func iosSwipe(ctx context.Context, rc *runner.RunnerContext, udid string, x1, y1, x2, y2 int) error {
+func iosSwipe(ctx context.Context, rc *skillmain.RunContext, udid string, x1, y1, x2, y2 int) error {
 	cmd := idbCommand(ctx, udid, "ui", "swipe",
 		strconv.Itoa(x1), strconv.Itoa(y1),
 		strconv.Itoa(x2), strconv.Itoa(y2))
@@ -454,7 +420,7 @@ func iosSwipe(ctx context.Context, rc *runner.RunnerContext, udid string, x1, y1
 	})
 }
 
-func iosTypeText(ctx context.Context, rc *runner.RunnerContext, udid, text string) error {
+func iosTypeText(ctx context.Context, rc *skillmain.RunContext, udid, text string) error {
 	if text == "" {
 		return fmt.Errorf("text is required")
 	}
@@ -470,7 +436,7 @@ func iosTypeText(ctx context.Context, rc *runner.RunnerContext, udid, text strin
 	})
 }
 
-func iosUITree(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func iosUITree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	cmd := idbCommand(ctx, udid, "ui", "describe-all", "--json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -501,19 +467,19 @@ func iosUITree(ctx context.Context, rc *runner.RunnerContext, udid string) error
 		"truncated": truncated,
 	}
 	if truncated {
-		if artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/json", "mobile_ui_tree"); err == nil {
+		if artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/json", "mobile_ui_tree"); err == nil {
 			result["artifact"] = artifact.Digest
 		}
 	}
 	return emit(rc, result)
 }
 
-func iosLogs(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func iosLogs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	logCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := idbCommand(logCtx, udid, "log", "--style", "json")
 	output, _ := cmd.Output()                                                                                    // Timeout expected, ignore error
-	artifact, _ := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/x-ndjson", "mobile_logs") // Best-effort persist
+	artifact, _ := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/x-ndjson", "mobile_logs") // Best-effort persist
 	lines := strings.Split(string(output), "\n")
 	preview := lines
 	if len(lines) > 50 {
@@ -527,7 +493,7 @@ func iosLogs(ctx context.Context, rc *runner.RunnerContext, udid string) error {
 	})
 }
 
-func iosOpenURL(ctx context.Context, rc *runner.RunnerContext, udid, url string) error {
+func iosOpenURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) error {
 	if url == "" {
 		return fmt.Errorf("url is required")
 	}
@@ -552,7 +518,7 @@ func adbCommand(ctx context.Context, serial string, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "adb", args...)
 }
 
-func androidListDevices(ctx context.Context, rc *runner.RunnerContext) error {
+func androidListDevices(ctx context.Context, rc *skillmain.RunContext) error {
 	devices, err := listAndroidDevices(ctx)
 	if err != nil {
 		return err
@@ -565,7 +531,7 @@ func androidListDevices(ctx context.Context, rc *runner.RunnerContext) error {
 	})
 }
 
-func androidDeviceInfo(ctx context.Context, rc *runner.RunnerContext, serial string) error {
+func androidDeviceInfo(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	properties := make(map[string]string)
 	props := []string{
 		"ro.product.model", "ro.product.brand", "ro.build.version.release",
@@ -591,7 +557,7 @@ func androidDeviceInfo(ctx context.Context, rc *runner.RunnerContext, serial str
 	})
 }
 
-func androidInstall(ctx context.Context, rc *runner.RunnerContext, serial, apk string) error {
+func androidInstall(ctx context.Context, rc *skillmain.RunContext, serial, apk string) error {
 	if apk == "" {
 		return fmt.Errorf("APK path is required")
 	}
@@ -608,7 +574,7 @@ func androidInstall(ctx context.Context, rc *runner.RunnerContext, serial, apk s
 	})
 }
 
-func androidLaunch(ctx context.Context, rc *runner.RunnerContext, serial, pkg string) error {
+func androidLaunch(ctx context.Context, rc *skillmain.RunContext, serial, pkg string) error {
 	if pkg == "" {
 		return fmt.Errorf("package name is required")
 	}
@@ -634,7 +600,7 @@ func androidLaunch(ctx context.Context, rc *runner.RunnerContext, serial, pkg st
 	})
 }
 
-func androidTerminate(ctx context.Context, rc *runner.RunnerContext, serial, pkg string) error {
+func androidTerminate(ctx context.Context, rc *skillmain.RunContext, serial, pkg string) error {
 	if pkg == "" {
 		return fmt.Errorf("package name is required")
 	}
@@ -650,7 +616,7 @@ func androidTerminate(ctx context.Context, rc *runner.RunnerContext, serial, pkg
 	})
 }
 
-func androidScreenshot(ctx context.Context, rc *runner.RunnerContext, serial, outputPath string) error {
+func androidScreenshot(ctx context.Context, rc *skillmain.RunContext, serial, outputPath string) error {
 	if outputPath == "" {
 		outputPath = fmt.Sprintf("/tmp/android_screenshot_%d.png", time.Now().UnixNano())
 	}
@@ -660,7 +626,7 @@ func androidScreenshot(ctx context.Context, rc *runner.RunnerContext, serial, ou
 		return fmt.Errorf("adb screencap: %w", err)
 	}
 	_ = os.WriteFile(outputPath, output, 0o644) // Best-effort local copy
-	artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "image/png", "mobile_screenshot")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "image/png", "mobile_screenshot")
 	if err != nil {
 		return fmt.Errorf("persist screenshot: %w", err)
 	}
@@ -673,7 +639,7 @@ func androidScreenshot(ctx context.Context, rc *runner.RunnerContext, serial, ou
 	})
 }
 
-func androidTap(ctx context.Context, rc *runner.RunnerContext, serial string, x, y int) error {
+func androidTap(ctx context.Context, rc *skillmain.RunContext, serial string, x, y int) error {
 	cmd := adbCommand(ctx, serial, "shell", "input", "tap", strconv.Itoa(x), strconv.Itoa(y))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("adb input tap: %w", err)
@@ -687,7 +653,7 @@ func androidTap(ctx context.Context, rc *runner.RunnerContext, serial string, x,
 	})
 }
 
-func androidSwipe(ctx context.Context, rc *runner.RunnerContext, serial string, x1, y1, x2, y2 int) error {
+func androidSwipe(ctx context.Context, rc *skillmain.RunContext, serial string, x1, y1, x2, y2 int) error {
 	cmd := adbCommand(ctx, serial, "shell", "input", "swipe",
 		strconv.Itoa(x1), strconv.Itoa(y1),
 		strconv.Itoa(x2), strconv.Itoa(y2), "300")
@@ -703,7 +669,7 @@ func androidSwipe(ctx context.Context, rc *runner.RunnerContext, serial string, 
 	})
 }
 
-func androidTypeText(ctx context.Context, rc *runner.RunnerContext, serial, text string) error {
+func androidTypeText(ctx context.Context, rc *skillmain.RunContext, serial, text string) error {
 	if text == "" {
 		return fmt.Errorf("text is required")
 	}
@@ -745,7 +711,7 @@ type UINode struct {
 	Children    []UINode `xml:"node"`
 }
 
-func androidUITree(ctx context.Context, rc *runner.RunnerContext, serial string) error {
+func androidUITree(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	remotePath := "/sdcard/window_dump.xml"
 	cmd := adbCommand(ctx, serial, "shell", "uiautomator", "dump", remotePath)
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -796,20 +762,20 @@ func androidUITree(ctx context.Context, rc *runner.RunnerContext, serial string)
 		"truncated": truncated,
 	}
 	if truncated {
-		if artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/xml", "mobile_ui_tree"); err == nil {
+		if artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/xml", "mobile_ui_tree"); err == nil {
 			result["artifact"] = artifact.Digest
 		}
 	}
 	return emit(rc, result)
 }
 
-func androidLogs(ctx context.Context, rc *runner.RunnerContext, serial string) error {
+func androidLogs(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	cmd := adbCommand(ctx, serial, "logcat", "-d", "-t", "500")
 	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Errorf("adb logcat: %w", err)
 	}
-	artifact, _ := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "mobile_logs")
+	artifact, _ := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "mobile_logs")
 	lines := strings.Split(string(output), "\n")
 	preview := lines
 	if len(lines) > 50 {
@@ -823,7 +789,7 @@ func androidLogs(ctx context.Context, rc *runner.RunnerContext, serial string) e
 	})
 }
 
-func androidOpenURL(ctx context.Context, rc *runner.RunnerContext, serial, url string) error {
+func androidOpenURL(ctx context.Context, rc *skillmain.RunContext, serial, url string) error {
 	if url == "" {
 		return fmt.Errorf("url is required")
 	}
@@ -841,15 +807,6 @@ func androidOpenURL(ctx context.Context, rc *runner.RunnerContext, serial, url s
 
 // ==================== Helpers ====================
 
-func emit(rc *runner.RunnerContext, data map[string]any) error {
-	return rc.Emit(skillName, data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(skillName, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
-	os.Exit(1)
+func emit(rc *skillmain.RunContext, data map[string]any) error {
+	return skillout.Emit(rc, command, data)
 }

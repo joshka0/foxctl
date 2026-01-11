@@ -20,10 +20,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/rs/zerolog"
 
+	wsutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -76,7 +76,7 @@ func main() {
 	// Detect workspace
 	ws := *workspace
 	if ws == "" {
-		ws = detectWorkspace()
+		ws = wsutil.Detect("")
 	}
 	if ws == "" {
 		logger.Error().
@@ -165,51 +165,5 @@ func parseKind(s string) agent.BoardMessageKind {
 		return agent.BoardMessageKindReviewRequest
 	default:
 		return agent.BoardMessageKindInstruction
-	}
-}
-
-// detectWorkspace returns the workspace root using a detection chain:
-//  1. AGENTCTL_WORKSPACE - set by agentctl runner
-//  2. CLAUDE_PROJECT_DIR - set by Claude Code
-//  3. Git root detection from current directory
-//  4. Current working directory (last resort)
-func detectWorkspace() string {
-	// 1. AGENTCTL_WORKSPACE (highest priority - set by agentctl)
-	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-		return ws
-	}
-
-	// 2. CLAUDE_PROJECT_DIR (set by Claude Code)
-	if projDir := os.Getenv("CLAUDE_PROJECT_DIR"); projDir != "" {
-		return projDir
-	}
-
-	// Get current working directory for remaining checks
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-
-	// 3. Git root detection
-	if gitRoot := findGitRoot(cwd); gitRoot != "" {
-		return gitRoot
-	}
-
-	// 4. Current working directory (last resort)
-	return cwd
-}
-
-// findGitRoot walks up from the given path to find the .git directory.
-func findGitRoot(path string) string {
-	dir := path
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
 	}
 }

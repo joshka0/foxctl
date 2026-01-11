@@ -5,21 +5,17 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 type input struct {
-	OldPath          string `json:"old_path"`
-	NewPath          string `json:"new_path"`
+	OldPath          string `json:"old_path" validate:"required"`
+	NewPath          string `json:"new_path" validate:"required"`
 	Format           string `json:"format"`
 	ContextLines     int    `json:"context_lines"`
 	IgnoreWhitespace bool   `json:"ignore_whitespace"`
@@ -51,30 +47,18 @@ type diffHunk struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/diff", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/diff", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/diff", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/diff", "ERUNTIME", err)
-	}
+	skillmain.Main("code/diff", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.Format == "" {
+		in.Format = "unified"
+	}
+	if in.ContextLines < 0 {
+		in.ContextLines = 3
+	}
+
 	// Resolve and validate paths
 	workspace := rc.PathValidator.Workspace()
 
@@ -127,10 +111,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	// Prepare artifact for large diffs
-	var artifact runner.Artifact
+	var artifact skillmain.Artifact
 	if in.Format == "unified" && len(result.Unified) > 2048 {
 		buf := bytes.NewBufferString(result.Unified)
-		artifact, err = runner.PersistBuffer(ctx, rc, buf, "text/plain", "code_diff")
+		artifact, err = skillmain.PersistBuffer(ctx, rc, buf, "text/plain", "code_diff")
 		if err != nil {
 			return err
 		}
@@ -167,27 +151,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("code/diff", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.OldPath == "" {
-		return input{}, fmt.Errorf("old_path is required")
-	}
-	if in.NewPath == "" {
-		return input{}, fmt.Errorf("new_path is required")
-	}
-	if in.Format == "" {
-		in.Format = "unified"
-	}
-	if in.ContextLines < 0 {
-		in.ContextLines = 3
-	}
-	return in, nil
+	return skillout.Emit(rc, "code/diff", data)
 }
 
 func splitLines(text string) []string {
@@ -390,8 +354,3 @@ func relativeTo(base, target string) string {
 	return target
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/diff failure")
-	os.Exit(1)
-}

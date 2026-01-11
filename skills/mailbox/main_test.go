@@ -162,7 +162,7 @@ func (env *mailboxTestEnv) run(t *testing.T, in input) map[string]any {
 func (env *mailboxTestEnv) expectError(t *testing.T, in input) error {
 	t.Helper()
 	env.rc.Stdout = &bytes.Buffer{}
-	return run(env.ctx, env.rc, env.rc.Config, in)
+	return run(env.ctx, env.rc, in)
 }
 
 func (env *mailboxTestEnv) upsertTeam(t *testing.T, team teams.Team) {
@@ -237,7 +237,7 @@ func runSkill(ctx context.Context, t *testing.T, rc *runner.RunnerContext, in in
 	t.Helper()
 	buf := &bytes.Buffer{}
 	rc.Stdout = buf
-	if err := run(ctx, rc, rc.Config, in); err != nil {
+	if err := run(ctx, rc, in); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	return buf

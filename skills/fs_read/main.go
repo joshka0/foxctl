@@ -4,7 +4,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,45 +14,26 @@ import (
 	"time"
 	"unicode/utf8"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-type input struct {
-	Path     string `json:"path"`
-	MaxBytes int    `json:"max_bytes"`
+// Input defines the input parameters for fs/read.
+type Input struct {
+	Path     string `json:"path" validate:"required"`
+	MaxBytes int    `json:"max_bytes" validate:"gte=0"`
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("fs/read", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("fs/read", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("fs/read", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("fs/read", "ERUNTIME", err)
-	}
+	skillmain.Main("fs/read", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
-	validPath, err := resolveWorkspace(rc, in.Path)
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	validPath, err := rc.PathValidator.ValidatePath(in.Path)
 	if err != nil {
-		return err
+		return fmt.Errorf("path validation failed: %w", err)
 	}
 
 	info, err := os.Stat(validPath)
@@ -114,37 +94,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 	data["summary"] = fmt.Sprintf("Read %d bytes from %s", obj.Size, filepath.Base(validPath))
 
-	meta := envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	}
-
-	return rc.Emit("fs/read", data, "application/json", meta)
+	return skillout.Emit(rc, "fs/read", data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if strings.TrimSpace(in.Path) == "" {
-		return input{}, fmt.Errorf("path is required")
-	}
-	if in.MaxBytes < 0 {
-		return input{}, fmt.Errorf("max_bytes cannot be negative")
-	}
-	return in, nil
-}
-
-func resolveWorkspace(rc *runner.RunnerContext, path string) (string, error) {
-	valid, err := rc.PathValidator.ValidatePath(path)
-	if err != nil {
-		return "", fmt.Errorf("path validation failed: %w", err)
-	}
-	return valid, nil
-}
-
-func previewLimit(rc *runner.RunnerContext, in input) int {
+func previewLimit(rc *skillmain.RunContext, in Input) int {
 	maxInline := rc.InlineKB * 1024
 	if maxInline <= 0 {
 		maxInline = config.DefaultInlineOutputKB * 1024
@@ -201,10 +154,4 @@ func detectKind(path string) string {
 		}
 	}
 	return "text/plain; charset=utf-8"
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
-	os.Exit(1)
 }

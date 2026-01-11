@@ -30,6 +30,19 @@ signature:
       minimum: 1
       maximum: 5
       description: "Exploration depth: 1=quick, 2=standard, 3=detailed, 4=deep, 5=exhaustive"
+  help:
+    short: "Generate semantic codemaps for a query."
+    long: |
+      Use codemap/generate to explore relationships in a codebase.
+      Example commands:
+        agentctl run codemap/generate --input '{"query":"map authentication flow","depth":2}'
+        agentctl skills run codemap/generate --query "map authentication flow" --depth 2
+    workflows:
+      - id: auth-map
+        description: "Generate an authentication codemap."
+        example_input:
+          query: "map authentication flow"
+          depth: 2
 returns:
   - name: codemap
     type: object

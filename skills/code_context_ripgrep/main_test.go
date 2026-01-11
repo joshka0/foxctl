@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
 )
 
 func TestParseInput(t *testing.T) {
@@ -250,9 +252,9 @@ func TestRelativeTo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.target, func(t *testing.T) {
-			got := relativeTo(tt.base, tt.target)
+			got := pathutil.RelTo(tt.base, tt.target)
 			if got != tt.want {
-				t.Errorf("relativeTo(%q, %q) = %q, want %q", tt.base, tt.target, got, tt.want)
+				t.Errorf("pathutil.RelTo(%q, %q) = %q, want %q", tt.base, tt.target, got, tt.want)
 			}
 		})
 	}

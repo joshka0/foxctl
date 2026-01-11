@@ -12,19 +12,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/rs/zerolog"
 )
-
-var log zerolog.Logger
-
-func init() {
-	log = zerolog.New(os.Stderr).With().Timestamp().Str("skill", command).Logger()
-}
 
 const (
 	command       = "embedding/worker"
@@ -95,42 +90,18 @@ type geminiError struct {
 }
 
 func main() {
-	if err := run(context.Background(), os.Stdin, os.Stdout); err != nil {
-		log.Error().Err(err).Msg("worker failed")
-		env := envelope.Error(command, "ERUNTIME", err.Error(), map[string]any{
-			"hint": "check input payload and environment variables, run with --debug for details",
-		})
-		_ = json.NewEncoder(os.Stdout).Encode(env)
-		os.Exit(1)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, r io.Reader, w io.Writer) error {
-	// Load config for embedding settings
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to load config")
-		env := envelope.Error(command, "ERUNTIME", fmt.Sprintf("load config: %v", err), nil)
-		_ = json.NewEncoder(w).Encode(env)
-		return nil
-	}
-
-	var input Input
-	if err := json.NewDecoder(r).Decode(&input); err != nil {
-		log.Error().Err(err).Msg("failed to parse input")
-		env := envelope.Error(command, "EPARSE", "invalid input", map[string]any{
-			"hint": "expected JSON object with optional fields: batch_size (int), max_duration (int), dry_run (bool)",
-		})
-		_ = json.NewEncoder(w).Encode(env)
-		return nil
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	log := rc.Logger
 
 	// Apply defaults
-	if input.BatchSize <= 0 {
-		input.BatchSize = defaultBatch
+	if in.BatchSize <= 0 {
+		in.BatchSize = defaultBatch
 	}
-	if input.MaxDuration <= 0 {
-		input.MaxDuration = defaultMaxDur
+	if in.MaxDuration <= 0 {
+		in.MaxDuration = defaultMaxDur
 	}
 
 	// Determine embedding provider: prefer Voyage (rate-limited), fall back to Gemini
@@ -142,15 +113,15 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	if voyageKey != "" {
 		// Use Voyage with built-in rate limiting (3 RPM for free tier)
+		// Use ScopeSymbols for file embeddings (code content)
+		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
 		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey:        voyageKey,
+			Model:         model,
 			RateLimitWait: boolPtr(true), // Wait when rate limited
 		})
 		if err != nil {
-			log.Error().Err(err).Msg("failed to create Voyage provider")
-			env := envelope.Error(command, "EAUTH", fmt.Sprintf("voyage provider: %v", err), nil)
-			_ = json.NewEncoder(w).Encode(env)
-			return nil
+			return skillerr.Auth("voyage provider failed", skillerr.WithCause(err))
 		}
 		voyageProvider = vp
 		embeddingModel = vp.Model()
@@ -159,19 +130,15 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 	} else {
 		// Fall back to Gemini
 		geminiKey = os.Getenv("GEMINI_API_KEY")
-		if geminiKey == "" && !input.DryRun {
-			log.Error().Msg("no embedding API key set")
-			env := envelope.Error(command, "EAUTH", "VOYAGE_API_KEY or GEMINI_API_KEY required", map[string]any{
-				"hint": "set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable",
-			})
-			_ = json.NewEncoder(w).Encode(env)
-			return nil
+		if geminiKey == "" && !in.DryRun {
+			return skillerr.Auth("VOYAGE_API_KEY or GEMINI_API_KEY required",
+				skillerr.WithHint("set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable"))
 		}
-		embeddingModel = cfg.Embedding.Model
+		embeddingModel = rc.Config.Embedding.Model
 		if embeddingModel == "" {
 			embeddingModel = "gemini-embedding-001"
 		}
-		expectedDims = cfg.Embedding.Dimensions
+		expectedDims = rc.Config.Embedding.Dimensions
 		if expectedDims == 0 {
 			// Model-specific dimension defaults for Gemini
 			switch embeddingModel {
@@ -186,32 +153,16 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 		log.Info().Str("provider", "gemini").Str("model", embeddingModel).Int("dims", expectedDims).Msg("using Gemini embeddings")
 	}
 
-	// Get storage root (prefer config, fallback to env/default)
-	root := cfg.Paths.Cache
-	if root == "" {
-		root = os.Getenv("AGENTCTL_HOME")
-		if root == "" {
-			home, _ := os.UserHomeDir()
-			root = home + "/.agentctl/cache"
-		} else {
-			root = root + "/cache"
-		}
-	}
-
-	// Open store
-	store, err := embedding.OpenStore(ctx, root)
+	// Open store using cache path from config
+	store, err := embedding.OpenStore(ctx, rc.Config.Paths.Cache)
 	if err != nil {
-		log.Error().Err(err).Str("path", root).Msg("failed to open store")
-		env := envelope.Error(command, "EIO", fmt.Sprintf("open store: %v", err), map[string]any{
-			"hint": "check that the store path exists and has correct permissions: " + root,
-		})
-		_ = json.NewEncoder(w).Encode(env)
-		return nil
+		return skillerr.IO("open store", skillerr.WithCause(err),
+			skillerr.WithHint("check that the store path exists and has correct permissions: "+rc.Config.Paths.Cache))
 	}
 	defer store.Close()
 
 	// Set up timeout
-	deadline := time.Now().Add(time.Duration(input.MaxDuration) * time.Second)
+	deadline := time.Now().Add(time.Duration(in.MaxDuration) * time.Second)
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
@@ -219,7 +170,7 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 	output := Output{Status: "completed"}
 
 	// Process jobs in batches
-	for i := 0; i < input.BatchSize; i++ {
+	for i := 0; i < in.BatchSize; i++ {
 		// Check deadline
 		if time.Now().After(deadline.Add(-5 * time.Second)) {
 			output.Status = "timeout"
@@ -256,7 +207,7 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 			Msg("claimed job")
 
 		// Generate embedding
-		if input.DryRun {
+		if in.DryRun {
 			// Dry run: mark as complete with fake embedding using config dimensions
 			fakeEmbed := make([]float32, expectedDims)
 			if err := store.Complete(ctx, job.ID, fakeEmbed, "dry-run"); err != nil {
@@ -275,7 +226,7 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 				embed, err = voyageProvider.Embed(ctx, job.Content)
 			} else {
 				// Fall back to Gemini
-				embed, err = generateGeminiEmbedding(ctx, geminiKey, embeddingModel, job.Content)
+				embed, err = generateGeminiEmbedding(ctx, log, geminiKey, embeddingModel, job.Content)
 			}
 
 			if err != nil {
@@ -356,8 +307,7 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 		output.Message = fmt.Sprintf("Worker finished: %s", output.Status)
 	}
 
-	env := envelope.OK(command, output)
-	return json.NewEncoder(w).Encode(env)
+	return skillout.Emit(rc, command, output)
 }
 
 // boolPtr returns a pointer to a bool value.
@@ -366,7 +316,7 @@ func boolPtr(b bool) *bool {
 }
 
 // generateGeminiEmbedding calls the Gemini embedding API with the specified model.
-func generateGeminiEmbedding(ctx context.Context, apiKey, model, text string) ([]float32, error) {
+func generateGeminiEmbedding(ctx context.Context, log zerolog.Logger, apiKey, model, text string) ([]float32, error) {
 	// Use header-based authentication to prevent API key leakage in logs
 	url := fmt.Sprintf("%s/models/%s:embedContent", geminiBaseURL, model)
 
@@ -407,22 +357,12 @@ func generateGeminiEmbedding(ctx context.Context, apiKey, model, text string) ([
 	if resp.StatusCode != http.StatusOK {
 		var errResp geminiEmbedResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
-			log.Error().
-				Int("http_status", resp.StatusCode).
-				Int("api_code", errResp.Error.Code).
-				Str("api_status", errResp.Error.Status).
-				Str("api_message", errResp.Error.Message).
-				Msg("Gemini API error")
 			return nil, &apiError{
 				code:    errResp.Error.Code,
 				message: errResp.Error.Message,
 				status:  errResp.Error.Status,
 			}
 		}
-		log.Error().
-			Int("http_status", resp.StatusCode).
-			Str("response_body", string(respBody)).
-			Msg("Gemini API error (unparsed)")
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 

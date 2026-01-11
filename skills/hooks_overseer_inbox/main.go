@@ -4,23 +4,21 @@
 //
 // Environment variables:
 //   - AGENTCTL_OVERSEER_RECIPIENT: Recipient to monitor (default: "overseer", use "*" for broadcast)
-//   - AGENTCTL_OVERSEER_AUTOACK: Set to "0" to disable auto-ack (default: "1")
+//   - AGENTCTL_OVERSEER_AUTOACK: Set to "0" to disable auto-marking displayed messages as "surfaced" (default: "1")
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	wsutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 )
 
@@ -33,34 +31,19 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("hooks/overseer_inbox", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("hooks/overseer_inbox", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("hooks/overseer_inbox", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("hooks/overseer_inbox", "ERUNTIME", err)
-	}
+	skillmain.Main("hooks/overseer_inbox", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in hook.Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
+	paths := sessionkit.ResolvePaths(rc.Config)
+
 	// Get workspace ID using detection chain (hook input takes priority)
-	workspaceID := in.WorkspaceRoot
+	workspaceID := in.WorkspaceID
 	if workspaceID == "" {
-		workspaceID = detectWorkspace()
+		workspaceID = in.WorkspaceRoot
+	}
+	if workspaceID == "" {
+		workspaceID = wsutil.Detect("")
 	}
 
 	// Get recipient to monitor from env, default to "overseer"
@@ -73,10 +56,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	autoAck := os.Getenv("AGENTCTL_OVERSEER_AUTOACK") != "0"
 
 	// Open board store
-	boardStore, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)
 	if err != nil {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionNone,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionNone,
 			Reason:   "overseer_inbox: could not open board store",
 		})
 	}
@@ -86,23 +69,24 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// The SQL query uses (recipient = ? OR recipient = '*') so broadcast messages
 	// are always included regardless of the ActorID value passed.
 	filter := agent.InboxFilter{
-		WorkspaceID: workspaceID,
-		ActorID:     recipient, // e.g. "overseer" or "*" for broadcast
-		OnlyUnread:  true,
-		Limit:       MaxMessagesInContext * 2,
+		WorkspaceID:    workspaceID,
+		ActorID:        recipient, // e.g. "overseer" or "*" for broadcast
+		OnlyUnread:     true,      // includes surfaced, but...
+		OnlyUnsurfaced: true,      // ...hooks only want never-shown messages
+		Limit:          MaxMessagesInContext * 2,
 	}
 
 	messages, err := boardStore.Inbox(ctx, filter)
 	if err != nil {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionNone,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionNone,
 			Reason:   "overseer_inbox: inbox query failed",
 		})
 	}
 
 	if len(messages) == 0 {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionNone,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionNone,
 			Reason:   "no overseer messages",
 			Meta: map[string]any{
 				"workspace_id": workspaceID,
@@ -114,7 +98,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// Build context string with messages
 	contextStr := buildOverseerContext(messages, recipient)
 
-	// Auto-ack displayed messages if enabled
+	// Auto-mark displayed messages as "surfaced" if enabled
 	if autoAck && len(messages) > 0 {
 		ids := make([]string, 0, minInt(len(messages), MaxMessagesInContext))
 		for i, m := range messages {
@@ -123,12 +107,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 			}
 			ids = append(ids, m.ID)
 		}
-		// Mark as read using the recipient as the actor ID
-		_, _ = boardStore.MarkRead(ctx, workspaceID, recipient, ids) //nolint:errcheck
+		// Mark as surfaced using the recipient as the actor ID
+		_, _ = boardStore.MarkSurfaced(ctx, workspaceID, recipient, ids) //nolint:errcheck
 	}
 
-	return emitOutput(rc, hook.Output{
-		Decision: hook.DecisionNone, // Advisory only - never block
+	return emitOutput(rc, hooks.Output{
+		Decision: hooks.DecisionNone, // Advisory only - never block
 		Reason:   fmt.Sprintf("surfaced %d overseer messages", minInt(len(messages), MaxMessagesInContext)),
 		Context:  contextStr,
 		Meta: map[string]any{
@@ -225,20 +209,11 @@ func kindToLabel(kind agent.BoardMessageKind) string {
 	}
 }
 
-func emitOutput(rc *runner.RunnerContext, output hook.Output) error {
+func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
 	data := map[string]any{
 		"hook_output": output,
 	}
-	return rc.Emit("hooks/overseer_inbox", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	return skillout.Emit(rc, "hooks/overseer_inbox", data)
 }
 
 func minInt(a, b int) int {
@@ -246,50 +221,4 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// detectWorkspace returns the workspace root using a detection chain:
-// 1. AGENTCTL_WORKSPACE - set by agentctl runner
-// 2. CLAUDE_PROJECT_DIR - set by Claude Code
-// 3. Git root detection from current directory
-// 4. Current working directory (last resort)
-func detectWorkspace() string {
-	// 1. AGENTCTL_WORKSPACE (highest priority - set by agentctl)
-	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-		return ws
-	}
-
-	// 2. CLAUDE_PROJECT_DIR (set by Claude Code)
-	if projDir := os.Getenv("CLAUDE_PROJECT_DIR"); projDir != "" {
-		return projDir
-	}
-
-	// Get current working directory for remaining checks
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-
-	// 3. Git root detection
-	if gitRoot := findGitRoot(cwd); gitRoot != "" {
-		return gitRoot
-	}
-
-	// 4. Current working directory (last resort)
-	return cwd
-}
-
-// findGitRoot walks up from the given path to find the .git directory.
-func findGitRoot(path string) string {
-	dir := path
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
 }

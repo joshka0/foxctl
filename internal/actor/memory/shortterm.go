@@ -199,6 +199,7 @@ func (m *ShortTermMemory) ensureSchema(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS actor_memory_state (
 			actor_id TEXT PRIMARY KEY,
 			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL DEFAULT '',
 			task_context TEXT,
 			next_turn_to_summarize INTEGER DEFAULT 0,
 			next_summary_to_distill INTEGER DEFAULT 0,
@@ -210,6 +211,12 @@ func (m *ShortTermMemory) ensureSchema(ctx context.Context) error {
 			last_distill_at TIMESTAMP,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
+
+		CREATE INDEX IF NOT EXISTS idx_actor_memory_state_session
+		ON actor_memory_state(session_id);
+
+		CREATE INDEX IF NOT EXISTS idx_actor_memory_state_workspace
+		ON actor_memory_state(workspace_id);
 	`
 	if _, err := m.db.ExecContext(ctx, stateSchema); err != nil {
 		return fmt.Errorf("create actor_memory_state: %w", err)
@@ -221,20 +228,26 @@ func (m *ShortTermMemory) ensureSchema(ctx context.Context) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			actor_id TEXT NOT NULL,
 			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL DEFAULT '',
 			turn_index INTEGER NOT NULL,
 			role TEXT NOT NULL,
-			content TEXT NOT NULL,
+			content TEXT,
+			tool_name TEXT,
+			tool_input TEXT,
+			tool_output TEXT,
 			tool_calls TEXT,
+			artifact_digest TEXT,
+			correlation_id TEXT,
 			token_count INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(actor_id, turn_index)
+			UNIQUE(actor_id, session_id, turn_index)
 		);
 
 		CREATE INDEX IF NOT EXISTS idx_actor_turns_actor_session
-		ON actor_turns(actor_id, session_id);
+		ON actor_turns(actor_id, session_id, turn_index);
 
-		CREATE INDEX IF NOT EXISTS idx_actor_turns_index
-		ON actor_turns(actor_id, turn_index);
+		CREATE INDEX IF NOT EXISTS idx_actor_turns_workspace
+		ON actor_turns(workspace_id);
 	`
 	if _, err := m.db.ExecContext(ctx, turnsSchema); err != nil {
 		return fmt.Errorf("create actor_turns: %w", err)
@@ -262,6 +275,31 @@ func (m *ShortTermMemory) ensureSchema(ctx context.Context) error {
 	`
 	if _, err := m.db.ExecContext(ctx, summariesSchema); err != nil {
 		return fmt.Errorf("create actor_summaries: %w", err)
+	}
+
+	// Context inbox table for hook-injected context
+	// Hooks can inject context that will be surfaced in the next actor turn
+	inboxSchema := `
+		CREATE TABLE IF NOT EXISTS actor_context_inbox (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			actor_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			priority INTEGER NOT NULL DEFAULT 0,
+			kind TEXT NOT NULL DEFAULT 'context',
+			text TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			surfaced_at TIMESTAMP
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_actor_inbox_actor_session
+		ON actor_context_inbox(actor_id, session_id, surfaced_at, created_at);
+
+		CREATE INDEX IF NOT EXISTS idx_actor_inbox_workspace
+		ON actor_context_inbox(workspace_id);
+	`
+	if _, err := m.db.ExecContext(ctx, inboxSchema); err != nil {
+		return fmt.Errorf("create actor_context_inbox: %w", err)
 	}
 
 	return nil

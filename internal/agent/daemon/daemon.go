@@ -340,8 +340,18 @@ func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.R
 		model = os.Getenv("AGENTCTL_LLM_MODEL")
 	}
 	if model == "" {
-		// Default to latest stable Gemini model
-		model = "gemini-2.0-flash"
+		switch provider {
+		case "groq":
+			model = "qwen/qwen3-32b"
+		case "openrouter":
+			model = "minimax/minimax-m2.1"
+		case "anthropic":
+			model = "claude-haiku-4-5"
+		case "openai":
+			model = "gpt-5.2"
+		default:
+			model = "gemini-3.0-flash"
+		}
 	}
 
 	apiKey := agentRecord.LLMAPIKey

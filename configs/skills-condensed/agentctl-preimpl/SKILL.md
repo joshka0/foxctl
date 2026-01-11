@@ -40,4 +40,4 @@ agentctl run code/swe_grep --input '{"query": "error handling", "files": ["handl
 Ready to implement: YES/NO
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-preimpl/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-preimpl/Skill.md`

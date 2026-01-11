@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -22,7 +22,7 @@ type fileGuardTestEnv struct {
 	ctx           context.Context
 	workspaceRoot string
 	cfg           config.Config
-	rc            *runner.RunnerContext
+	rc            *skillmain.RunContext
 }
 
 func newFileGuardTestEnv(t *testing.T) *fileGuardTestEnv {
@@ -44,7 +44,7 @@ func newFileGuardTestEnv(t *testing.T) *fileGuardTestEnv {
 		},
 	}
 
-	rc, err := runner.NewRunnerContext(cfg, &bytes.Buffer{})
+	rc, err := skillmain.BuildRunContext(cfg, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -58,12 +58,12 @@ func newFileGuardTestEnv(t *testing.T) *fileGuardTestEnv {
 	}
 }
 
-func (env *fileGuardTestEnv) run(t *testing.T, in hook.Input) hook.Output {
+func (env *fileGuardTestEnv) run(t *testing.T, in hooks.Input) hooks.Output {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	env.rc.Stdout = buf
 
-	if err := run(env.ctx, env.rc, env.cfg, in); err != nil {
+	if err := run(env.ctx, env.rc, in); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -82,8 +82,8 @@ func (env *fileGuardTestEnv) run(t *testing.T, in hook.Input) hook.Output {
 		t.Fatalf("expected hook_output map, got %T", data["hook_output"])
 	}
 
-	var output hook.Output
-	output.Decision = hook.Decision(hookOutput["decision"].(string))
+	var output hooks.Output
+	output.Decision = hooks.Decision(hookOutput["decision"].(string))
 	if reason, ok := hookOutput["reason"].(string); ok {
 		output.Reason = reason
 	}
@@ -125,8 +125,8 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 	filePath := filepath.Join(env.workspaceRoot, "main.go")
 	input := json.RawMessage([]byte("{\"file_path\": \"" + filePath + "\"}"))
 
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Edit",
 		ToolInput:     input,
@@ -136,7 +136,7 @@ func TestFileGuard_ReservesPathForActiveTask(t *testing.T) {
 	t.Setenv("AGENTCTL_AGENT_NAME", "actor:test")
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Fatalf("expected approve, got %s (reason=%q)", output.Decision, output.Reason)
 	}
 
@@ -216,15 +216,15 @@ func TestFileGuard_StrictMode_BlocksOnConflict(t *testing.T) {
 	filePath := filepath.Join(env.workspaceRoot, "main.go")
 	input := json.RawMessage([]byte("{\"file_path\": \"" + filePath + "\"}"))
 
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Edit",
 		ToolInput:     input,
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionBlock {
+	if output.Decision != hooks.DecisionBlock {
 		t.Fatalf("expected block, got %s (reason=%q)", output.Decision, output.Reason)
 	}
 	if !strings.Contains(output.Reason, "file conflict") {

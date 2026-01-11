@@ -6,10 +6,25 @@ import (
 	"path/filepath"
 )
 
-// Detect walks up from start (or current working directory if empty) looking
-// for directories that contain `.agentctl` or `.git`. It returns the first
-// match, or the starting directory if none are found.
+// Detect returns the workspace path using the standard fallback chain:
+// 1. AGENTCTL_WORKSPACE env var (highest priority - set by agentctl for sandboxes)
+// 2. CLAUDE_PROJECT_DIR env var (set by Claude Code)
+// 3. Walk up from start looking for .git or .agentctl markers
+// 4. Return start directory if no markers found
+//
+// Pass empty string for start to use current working directory.
 func Detect(start string) string {
+	// 1. AGENTCTL_WORKSPACE has highest priority (handles sandbox scenarios)
+	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
+		return ws
+	}
+
+	// 2. CLAUDE_PROJECT_DIR (set by Claude Code)
+	if projDir := os.Getenv("CLAUDE_PROJECT_DIR"); projDir != "" {
+		return projDir
+	}
+
+	// 3. Walk up looking for markers
 	dir := start
 	if dir == "" {
 		if cwd, err := os.Getwd(); err == nil {

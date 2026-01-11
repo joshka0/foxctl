@@ -44,6 +44,27 @@ signature:
       required: false
       default: false
       description: "Show stat summary (for diff operation)"
+  help:
+    short: "Inspect git status, diffs, or recent commits."
+    long: |
+      Use git/status to summarize repository state, show diffs, or list recent
+      commits.
+      Example commands:
+        agentctl run git/status --input '{"operation":"status"}'
+        agentctl skills run git/status --operation status
+        agentctl run git/status --input '{"operation":"diff","staged":true,"stat":true}'
+        agentctl skills run git/status --operation diff --staged --stat
+    workflows:
+      - id: status
+        description: "Show repository status for the current directory."
+        example_input:
+          operation: "status"
+      - id: diff-staged
+        description: "Show staged diff with stats."
+        example_input:
+          operation: "diff"
+          staged: true
+          stat: true
 returns:
   - name: status
     type: object

@@ -27,6 +27,49 @@ signature:
       type: integer
       required: false
       description: "Max tokens to send to LLM (default: 16000)"
+    - name: mode
+      type: string
+      required: false
+      description: "Mode: summary (default) or seed (generate a pasteable seed prompt)"
+    - name: query
+      type: string
+      required: false
+      description: "Optional relevance query for seed mode"
+    - name: seed_max_chars
+      type: integer
+      required: false
+      description: "Max characters for seed_prompt (default: 12000)"
+    - name: seed_top_k_windows
+      type: integer
+      required: false
+      description: "Additional relevant context windows to include besides the latest (default: 2)"
+    - name: seed_chunks_per_window
+      type: integer
+      required: false
+      description: "Max chunk previews per included window (default: 10)"
+  help:
+    short: "Summarize a captured session."
+    long: |
+      Use session/summarize to generate structured summaries for a session.
+      Example commands:
+        agentctl run session/summarize --input '{"session_id":"abc123"}'
+        agentctl skills run session/summarize --session_id abc123
+        agentctl run session/summarize --input '{"session_id":"abc123","force":true,"max_tokens":12000}'
+        agentctl skills run session/summarize --session_id abc123 --force --max_tokens 12000
+
+        # Generate a pasteable seed prompt for the next context window
+        agentctl run session/summarize --no-cas --input '{"session_id":"abc123","mode":"seed","query":"what are we doing next"}'
+    workflows:
+      - id: summarize-session
+        description: "Summarize a session."
+        example_input:
+          session_id: "abc123"
+      - id: summarize-force
+        description: "Re-summarize with custom token budget."
+        example_input:
+          session_id: "abc123"
+          force: true
+          max_tokens: 12000
 returns:
   - name: session_id
     type: string
@@ -43,6 +86,12 @@ returns:
   - name: gotchas
     type: array
     description: "Problems encountered and solutions"
+  - name: user_preferences
+    type: array
+    description: "Explicit user preferences or constraints"
+  - name: time_sinks
+    type: array
+    description: "Issues that took unusually long or repeated attempts"
   - name: tags
     type: array
     description: "Topic tags"
@@ -52,9 +101,12 @@ returns:
   - name: tools_pattern
     type: string
     description: "Common tool sequence pattern"
+  - name: seed_prompt
+    type: string
+    description: "Pasteable seed prompt for next context window (mode=seed)"
   - name: status
     type: string
-    description: "Status: summarized, exists, error"
+    description: "Status: summarized, seeded, exists, error"
 capabilities:
   network: "egress"
   filesystem:

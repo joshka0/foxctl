@@ -1,6 +1,7 @@
 # agentctl Claude Code Integration
 
 > Protocol, profiles, invariants: `AGENTS.md` | Full docs: `docs/`
+> Start-of-session checklist: read `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`.
 
 ## Architecture
 
@@ -36,12 +37,16 @@ Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 | PreToolUse       | `file-memory-recall`       | Surfaces memories/gotchas before editing                                       |
 | PreToolUse       | `task-guard`               | Ensures task exists for writes                                                 |
 | PostToolUse      | `read-context-suggestions` | Suggests context_ripgrep for symbols after reading code (full function bodies) |
+| PostToolUse      | `counsel-suggest`          | Suggests /counsel after reading 3+ code files                                  |
 | PostToolUse      | `lsp-diagnostics`          | Shows LSP errors after editing                                                 |
 | PostToolUse      | `memory-prompt`            | Prompts to save memories when tasks are completed                              |
 | PreCompact       | `session-save`             | Captures session state                                                         |
 | SessionStart     | `session-restore`          | Restores context on compact/resume                                             |
 | UserPromptSubmit | `memory-detector`          | Detects save/recall/todo patterns                                              |
 | UserPromptSubmit | `skill-advisor`            | Suggests agentctl skills based on prompt patterns                              |
+| UserPromptSubmit | `anchor-detect`            | Sets the session anchor goal via `/anchor <goal>`                              |
+| UserPromptSubmit | `counsel-detect`           | Runs `/counsel` multi-perspective code analysis                                |
+| UserPromptSubmit | `context-detect`           | Runs `/context` quick code context gathering                                   |
 | Stop             | `todo-continuation`        | Blocks stop if tasks remain; injects PageRank-prioritized continuation prompt  |
 | Stop             | `plan-sync`                | Syncs plans to tasks                                                           |
 
@@ -73,10 +78,57 @@ agentctl-mail --to claude "Question" "How should we handle auth?"
 | `AGENTCTL_OVERSEER_RECIPIENT` | `overseer` | Recipient to monitor (use `*` for broadcast)    |
 | `AGENTCTL_OVERSEER_AUTOACK`  | `1`        | Auto-mark displayed messages as read            |
 
+## Slash Commands
+
+Available slash commands in Claude Code chat:
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `/anchor <goal>` | Set session goal | `/anchor Fix authentication bug` |
+| `/todo` | Enable todo check-in mode | `/todo` |
+| `/counsel <question>` | Multi-perspective code analysis | `/counsel review auth flow for security issues` |
+| `/context <query>` | Quick code context gathering | `/context database connection handling` |
+
+### /anchor
+
+Set a durable session goal:
+```
+/anchor Fix failing stop hook behavior
+```
+
+This persists via `session/anchor` and will be re-injected on resume/compaction.
+
+### /todo
+
+Enable a lightweight todo check-in prompt (no graph analysis) for this session.
+
+### /counsel
+
+Run multi-perspective code analysis using LLM-powered insights:
+```
+/counsel check for race conditions in the worker pool
+/counsel security review of auth flow
+```
+
+**Perspectives analyzed:** security, correctness (configurable via `AGENTCTL_COUNSEL_PERSPECTIVES`)
+
+**Requirements:** Needs an LLM API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, or CEREBRAS_API_KEY)
+
+### /context
+
+Quickly gather relevant code snippets without LLM analysis:
+```
+/context user authentication
+/context error handling patterns
+```
+
+Uses `code/smart_read` to auto-select and extract relevant code based on your query.
+
 ## Quick Commands
 
 ```bash
 # Tasks
+# If the request is specific, use it as the task title; only ask when ambiguous.
 agentctl todo add --title "Task" --description "Details"
 agentctl todo list                              # JSON output (default)
 agentctl todo list -f table                     # Pretty table with status icons
@@ -185,7 +237,8 @@ agentctl run code/symbols --input '...' -f table
 | `AGENTCTL_TASK_GUARD_MODE`            | `auto`        | `auto` or `strict`                                   |
 | `AGENTCTL_TODO_CONTINUATION_DISABLED` | `0`           | Set to `1` to disable todo continuation enforcement  |
 | `AGENTCTL_TODO_CONTINUATION_MIN_PENDING` | `1`        | Minimum pending tasks to trigger continuation        |
-| `AGENTCTL_TODO_CONTINUATION_TOP_N`    | `3`           | Number of top tasks to show in continuation prompt   |
+| `AGENTCTL_TODO_CONTINUATION_TOP_N`    | `5`           | Number of top tasks to show in continuation prompt   |
+| `AGENTCTL_TODO_CONTINUATION_VERIFY`   | `0`           | Set to `1` to enable CoVe verification when tasks=0  |
 | `AGENTCTL_HOME`               | `~/.agentctl` | Storage root                                         |
 | `VOYAGE_API_KEY`              | -             | For Voyage embeddings/reranking (1024 dimensions)    |
 | `GEMINI_API_KEY`              | -             | For Gemini embeddings (3072 dimensions)              |
@@ -193,6 +246,8 @@ agentctl run code/symbols --input '...' -f table
 | `AGENTCTL_VECTOR_DIMS`        | `1024`        | Global default vector dimensions (Voyage=1024)       |
 | `AGENTCTL_SEMANTIC_RERANK`    | `0`           | Set to `1` to enable Voyage rerank-2.5 in hooks      |
 | `AGENTCTL_EMBEDDING_RATE_LIMIT` | `3`         | Embedding RPM: 0=disabled (paid tier), >0=limit      |
+| `AGENTCTL_EMBEDDING_MODEL_CODE` | `voyage-code-3` | Override model for code scopes (symbols)         |
+| `AGENTCTL_EMBEDDING_MODEL_TEXT` | `voyage-3.5`    | Override model for text scopes (memory, tasks, sessions, codemaps) |
 
 ### Scope-Based Embedding Models
 
@@ -309,6 +364,85 @@ make skills-install # Build AND install all skills (preferred over skills-build)
 > rebuilds everything and installs to `~/.agentctl/skills/`. **TODO:** Add
 > `make skills-install SKILL=<name>` for single-skill rebuild+install.
 
+## Package Design Patterns
+
+### Dependency Direction
+
+```
+skills/ ──────────► internal/adapters/skillslib/  (skills import skillslib)
+                            │
+                            ▼
+                    internal/platform/            (skillslib imports platform)
+                    internal/storage/
+                    internal/domain/
+```
+
+**Rules:**
+- `internal/` packages **MUST NOT** import `skillslib` - keeps core logic reusable
+- `skillslib` is the **skill-facing API** - only `skills/` should import it
+- Shared utilities go in `internal/platform/` (config, workspace, fsutil)
+- `sessionkit` uses `config.Config` directly, not `skillmain.RunContext`
+
+### Workspace Detection
+
+**Always use `internal/platform/workspace.Detect()`** - never roll your own
+`os.Getwd()` chains. The platform function handles sandbox scenarios:
+
+### Code Context Retrieval Architecture
+
+**Funnel design - each layer has ONE job:**
+
+```
+semantic_search → swe_grep (evidence) → counsel (analysis)
+     ↓                  ↓                      ↓
+  "where to look"   "what's relevant"    "what does it mean"
+```
+
+**Rules:**
+- `code/semantic_search`: Upstream discovery only - returns candidates (path, symbol_id, line, priority)
+- `code/swe_grep`: The **canonical evidence collector** - reads files, extracts snippets, validates paths
+- `code/counsel`: Analysis only - consumes evidence artifacts, never reads files directly
+- `smart_read_file`: Alias for `swe_grep` with `mode=masked`
+
+**`internal/codecontext/` - Shared extraction engine:**
+
+```go
+// Skills call these, never re-implement extraction logic
+codecontext.Collect(ctx, query, candidates, opts) → Evidence
+codecontext.Render(evidence, mode) → string/ndjson
+
+// Modes: snippets | masked | structure | flow
+```
+
+**Anti-patterns:**
+- ❌ Skills implementing their own `readFileContent()` or `extractSnippet()` functions
+- ❌ Multiple `detectLanguage()` implementations (use `platform/fsutil.DetectLanguage()`)
+- ❌ Duplicate block boundary detection (`findBraceEnd`, `findIndentEnd`)
+- ❌ `code_counsel` or analysis skills reading files directly
+
+**Shared utilities location:**
+- Language detection: `internal/platform/fsutil/fsutil.go` → `DetectLanguage()`
+- File reading with limits: `internal/codecontext/files/reader.go`
+- Block expansion: `internal/codecontext/expander/` (language-specific)
+- Comment markers: `internal/codecontext/lang/comments.go`
+
+```go
+// Priority chain (handles sandboxes correctly):
+// 1. AGENTCTL_WORKSPACE  ← set by agentctl for sandboxed execution
+// 2. CLAUDE_PROJECT_DIR  ← set by Claude Code
+// 3. Git root detection  ← walk up looking for .git/.agentctl
+// 4. Current directory   ← fallback
+
+import "github.com/jkatigb/agentctl/internal/platform/workspace"
+
+ws := workspace.Detect("")  // empty string = start from cwd
+ws := workspace.Detect(somePath)  // start from specific path
+```
+
+**Why this matters:** Agents may spawn skills from sandbox directories. Raw
+`os.Getwd()` returns the sandbox path, not the repo. `AGENTCTL_WORKSPACE` is
+set by the runner to preserve the correct workspace context.
+
 ## ⚠️ CGO Build Requirement
 
 **NEVER use raw `CGO_ENABLED=1 go build`** - it causes duplicate SQLite symbol
@@ -343,6 +477,30 @@ echo "$context" | gemini -p "Refactoring priorities?"
 **TOCTOU:** Always use resolved paths for all file operations after validation.
 
 ## Gotchas
+
+### Batch Search and Replace
+
+For cross-file search and replace operations, use specialized tools instead of
+manual Edit tool calls:
+
+```bash
+# RepoPrompt MCP (preferred for complex edits)
+mcp__RepoPrompt__apply_edits  # Single file with multiple edits
+mcp__RepoPrompt__file_search  # Find files to edit
+
+# agentctl text/replace skill
+agentctl run text/replace --input '{
+  "path": ".",
+  "pattern": "oldText",
+  "replacement": "newText",
+  "glob": ["*.go"],
+  "dry_run": true
+}'
+```
+
+**Why:** Manual Edit calls are error-prone for batch operations (broken imports,
+missed files). These tools handle quoting, preserve formatting, and provide
+dry-run previews.
 
 ### Claude Max OAuth (Future Enhancement)
 
@@ -414,6 +572,35 @@ CGO_ENABLED=0 go build -o ~/.agentctl/skills/code/semantic_search/bin ./skills/c
 2. Verify binary: `strings ~/.agentctl/skills/<path>/bin | grep "<expected-string>"`
 3. Rebuild to correct location as shown above
 
+### Skills Must Load .env
+
+Skills that need API keys (VOYAGE_API_KEY, GEMINI_API_KEY, etc.) must explicitly
+load `.env` files at startup. The runner does NOT automatically load them.
+
+```go
+import "github.com/jkatigb/agentctl/internal/platform/config"
+
+func main() {
+    config.LoadDotEnv() // Must call BEFORE os.Getenv()
+    // ... rest of skill
+}
+```
+
+Without this, `os.Getenv("VOYAGE_API_KEY")` returns empty even if the key is in
+`~/.agentctl/.env`.
+
+### Context Window Summaries
+
+`session/restore` searches for similar past context windows via embedding, but
+the **summaries must be populated** by `session/summarize` for them to display.
+Empty summaries are filtered out.
+
+To populate summaries for existing windows:
+```bash
+# Re-run summarization for a session
+agentctl run session/summarize --input '{"session_id": "<id>"}'
+```
+
 ### Memory Hooks
 
 | Hook                 | Trigger                  | Notes                                                               |
@@ -458,6 +645,44 @@ agentctl memory put --name "gotcha-<topic>" --type "gotcha" \
 
 # 2. Appends to CLAUDE.md under Gotchas section
 ```
+
+### TOCTOU-Safe File Reading
+
+Skills that read user files **MUST** use TOCTOU-safe patterns. Never use
+`os.ReadFile()` directly - it creates a race window between validation and read.
+
+```go
+// CORRECT - open immediately after validation, then read from descriptor
+path, err := pathValidator.ValidatePath(requested)
+if err != nil { return err }
+
+f, err := os.Open(path)  // Open file immediately
+if err != nil { return err }
+defer f.Close()
+
+info, err := f.Stat()
+if err != nil { return err }
+if info.IsDir() { return errors.New("is directory") }
+
+// Re-validate resolved path for symlink escapes
+resolved, err := filepath.EvalSymlinks(path)
+if err != nil { return err }
+if _, err := pathValidator.ValidatePath(resolved); err != nil {
+    return fmt.Errorf("symlink escape: %w", err)
+}
+
+// Read from already-open descriptor (no race window)
+data := make([]byte, min(info.Size(), maxBytes))
+n, err := io.ReadFull(f, data)
+
+// WRONG - race window between validation and read
+path, _ := pathValidator.ValidatePath(requested)
+data, _ := os.ReadFile(path)  // ❌ File could change between validate and read
+```
+
+**Why:** Attackers can swap files via symlinks between validation and read. The
+`code_swe_grep` skill demonstrates the correct pattern - open first, validate
+symlinks, then read from the open descriptor.
 
 ### Memory Storage Path
 

@@ -7,30 +7,54 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/rs/zerolog"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
 	state := t.TempDir()
+	casPath := filepath.Join(state, "cas")
+	casStore, err := cas.NewStore(casPath)
+	if err != nil {
+		t.Fatalf("open cas: %v", err)
+	}
+
+	pv, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		t.Fatalf("path validator: %v", err)
+	}
+
 	cfg := config.Config{
 		Home:           state,
 		InlineOutputKB: 32,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   state + "/cas",
-			Jobs:  state + "/jobs",
-			Cache: state + "/cache",
+			CAS:   casPath,
+			Jobs:  filepath.Join(state, "jobs"),
+			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
-	if err != nil {
-		t.Fatalf("runner context: %v", err)
+
+	return &skillmain.RunContext{
+		Config:        cfg,
+		CASStore:      casStore,
+		Workspace:     workspace,
+		Logger:        zerolog.Nop(),
+		PathValidator: pv,
+		Validator:     validator.New(),
+		Stdout:        stdout,
+		Now:           time.Now,
+		InlineKB:      cfg.InlineOutputKB,
+		MaxPreview:    100,
 	}
-	return rc
 }
 
 func TestRunFsTree(t *testing.T) {
@@ -57,10 +81,10 @@ func TestRunFsTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestRunContext(t, stdout, work)
 	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Path:     work,
 		MaxDepth: 2,
 		Format:   "tree",
@@ -113,10 +137,10 @@ func TestRunFsTreeList(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
+	rc := newTestRunContext(t, stdout, work)
 	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Path:     work,
 		Format:   "list",
 		MaxDepth: 3,

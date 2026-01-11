@@ -189,6 +189,7 @@ type Session struct {
 	Decisions       []string  `json:"decisions"`
 	Gotchas         []string  `json:"gotchas"`
 	UserInsights    []string  `json:"user_insights,omitempty"`
+	KeyQuestions    []string  `json:"key_questions,omitempty"` // Semantic search queries for context restoration
 	Tags            []string  `json:"tags"`
 	KeyFiles        []string  `json:"key_files"`
 	ToolsPattern    string    `json:"tools_pattern"`
@@ -336,7 +337,12 @@ type SessionStore interface {
 	SaveContextWindows(ctx context.Context, windows []ContextWindow) error
 	GetContextWindows(ctx context.Context, sessionID string) ([]ContextWindow, error)
 	GetContextWindow(ctx context.Context, sessionID string, windowIndex int) (ContextWindow, error)
+	// Deprecated: Use UpdateContextWindowSummary or SetContextWindowEmbedding instead
 	UpdateWindowSummary(ctx context.Context, windowID string, summary string, embedding []byte, model string) error
+	// UpdateContextWindowSummary updates only the summary text for a context window.
+	UpdateContextWindowSummary(ctx context.Context, windowID string, summary string) error
+	// SetContextWindowEmbedding sets the embedding and model for a context window.
+	SetContextWindowEmbedding(ctx context.Context, windowID string, embedding []byte, model string) error
 	SearchContextWindows(ctx context.Context, embedding []float32, limit int) ([]ScoredContextWindow, error)
 	DeleteContextWindows(ctx context.Context, sessionID string) error
 }

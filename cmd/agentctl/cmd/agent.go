@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -180,7 +181,7 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	if spawnPromptFile != "" {
 		data, err := os.ReadFile(spawnPromptFile)
 		if err != nil {
-			return writeErrorEnvelope(cmd, "agent/spawn", string(string(protocol.ErrorCodeEARG)), fmt.Sprintf("failed to read prompt file: %v", err))
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read prompt file: %v", err))
 		}
 		prompt = string(data)
 	}
@@ -261,13 +262,7 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 			"has_prompt":   len(req.Prompt) > 0,
 			"has_policy":   req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
 		}
-		env := envelope.OK("agent/spawn", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-			m.Source = "run"
-		}))
-		if err := envelope.Write(os.Stdout, env); err != nil {
-			return fmt.Errorf("write envelope: %w", err)
-		}
-		return nil
+		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
 
 	resp, err := mgr.Spawn(ctx, req)
@@ -282,15 +277,7 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		"role":     resp.Role,
 	}
 
-	env := envelope.OK("agent/spawn", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	return writeOK(cmd, "agent/spawn", data, "run", nil)
 }
 
 func runAgentList(cmd *cobra.Command, _ []string) error {
@@ -311,18 +298,10 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("agent/list", map[string]any{
+	return writeOK(cmd, "agent/list", map[string]any{
 		"agents": list,
 		"count":  len(list),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	}, "run", nil)
 }
 
 func runAgentKill(cmd *cobra.Command, args []string) error {
@@ -370,13 +349,7 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 			"graceful":   killGraceful,
 			"timeout_s":  killTimeoutS,
 		}
-		env := envelope.OK("agent/kill", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-			m.Source = "run"
-		}))
-		if err := envelope.Write(os.Stdout, env); err != nil {
-			return fmt.Errorf("write envelope: %w", err)
-		}
-		return nil
+		return writeOK(cmd, "agent/kill", data, "run", nil)
 	}
 
 	resp, err := mgr.Kill(ctx, req)
@@ -391,15 +364,7 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 		"exit_code":    resp.ExitCode,
 	}
 
-	env := envelope.OK("agent/kill", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	return writeOK(cmd, "agent/kill", data, "run", nil)
 }
 
 func runAgentInfo(cmd *cobra.Command, args []string) error {
@@ -427,15 +392,7 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("agent/info", a, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	return writeOK(cmd, "agent/info", a, "run", nil)
 }
 
 func runAgentWatch(cmd *cobra.Command, args []string) error {
@@ -463,7 +420,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create NDJSON writer
-	writer := envelope.NewWriter(os.Stdout)
+	writer := envelope.NewWriter(cmd.OutOrStdout())
 
 	// Track sequence number
 	seq := 0
@@ -484,7 +441,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 				"status": "stopped",
 			}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 				m.Source = "run"
-				m.Profiles = []string{"core/v1", "agent/v1"}
+				m.Profiles = profilesCoreAgent
 				m.AgentID = agentID
 				m.Seq = &seq
 				m.Final = &finalBool
@@ -505,7 +462,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 						"status": "terminated",
 					}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 						m.Source = "run"
-						m.Profiles = []string{"core/v1", "agent/v1"}
+						m.Profiles = profilesCoreAgent
 						m.Seq = &seq
 						m.Final = &finalBool
 					}))
@@ -536,7 +493,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 					Meta: envelope.Meta{
 						TS:       time.Now().UTC().Format(time.RFC3339),
 						Source:   "run",
-						Profiles: []string{"core/v1", "agent/v1"},
+						Profiles: profilesCoreAgent,
 						AgentID:  agentID,
 						Seq:      &seq,
 						Final:    &finalBool,
@@ -568,7 +525,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 					Meta: envelope.Meta{
 						TS:       time.Now().UTC().Format(time.RFC3339),
 						Source:   "run",
-						Profiles: []string{"core/v1", "agent/v1"},
+						Profiles: profilesCoreAgent,
 						AgentID:  agentID,
 						Seq:      &seq,
 						Final:    &finalBool,
@@ -621,7 +578,7 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 					Meta: envelope.Meta{
 						TS:        time.Now().UTC().Format(time.RFC3339),
 						Source:    "run",
-						Profiles:  []string{"core/v1", "agent/v1"},
+						Profiles:  profilesCoreAgent,
 						AgentID:   agentID,
 						MailboxID: "mailbox:" + a.Namespace,
 						Seq:       &seq,
@@ -637,67 +594,27 @@ func runAgentWatch(cmd *cobra.Command, args []string) error {
 	}
 }
 
-func writeErrorEnvelope(_ *cobra.Command, command, code, message string, hints ...string) error {
+func writeErrorEnvelope(cmd *cobra.Command, command, code, message string, hints ...string) error {
 	var data map[string]any
 	if len(hints) > 0 && hints[0] != "" {
 		data = map[string]any{"hint": hints[0]}
 	}
 	env := envelope.Error(command, code, message, data)
-	if err := envelope.Write(os.Stdout, env); err != nil {
+	if err := envelope.Write(cmd.OutOrStdout(), env); err != nil {
 		return fmt.Errorf("write error envelope: %w", err)
 	}
 	return fmt.Errorf("%s", message)
 }
 
 func parseCommaSeparated(s string) []string {
-	var result []string
-	for _, part := range splitAndTrim(s, ",") {
-		if part != "" {
-			result = append(result, part)
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
 		}
 	}
-	return result
-}
-
-func splitAndTrim(s, sep string) []string {
-	var result []string
-	for _, part := range splitString(s, sep) {
-		trimmed := trimString(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
-}
-
-func splitString(s, sep string) []string {
-	if s == "" {
-		return nil
-	}
-	// Simple split implementation
-	var result []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if i < len(s)-len(sep)+1 && s[i:i+len(sep)] == sep {
-			result = append(result, s[start:i])
-			start = i + len(sep)
-			i += len(sep) - 1
-		}
-	}
-	result = append(result, s[start:])
-	return result
-}
-
-func trimString(s string) string {
-	start := 0
-	end := len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
+	return out
 }
 
 func runAgentRun(cmd *cobra.Command, args []string) error {
@@ -791,13 +708,7 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 			"question":   question,
 			"timeout_ms": timeout.Milliseconds(),
 		}
-		env := envelope.OK("agent/ask", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-			m.Source = "ask"
-		}))
-		if err := envelope.Write(os.Stdout, env); err != nil {
-			return fmt.Errorf("write envelope: %w", err)
-		}
-		return nil
+		return writeOK(cmd, "agent/ask", data, "ask", nil)
 	}
 
 	if err := mailboxStore.Send(ctx, msg); err != nil {
@@ -805,19 +716,16 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output ask confirmation
-	env := envelope.OK("agent/ask", map[string]any{
+	if err := writeOK(cmd, "agent/ask", map[string]any{
 		"ask_id":     askID,
 		"message_id": msg.ID,
 		"sent_to":    agentRecord.Namespace,
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "ask"
-	}))
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
+	}, "ask", nil); err != nil {
+		return err
 	}
 
 	if wait {
-		return waitForReply(ctx, mailboxStore, msg.FromNS, askID, timeout)
+		return waitForReply(ctx, mailboxStore, cmd.OutOrStdout(), msg.FromNS, askID, timeout)
 	}
 	return nil
 }
@@ -900,34 +808,21 @@ func runAgentCmd(cmd *cobra.Command, args []string) error {
 			"skill":      skill,
 			"args":       cmdArgs,
 		}
-		env := envelope.OK("agent/cmd", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-			m.Source = "cmd"
-		}))
-		if err := envelope.Write(os.Stdout, env); err != nil {
-			return fmt.Errorf("write envelope: %w", err)
-		}
-		return nil
+		return writeOK(cmd, "agent/cmd", data, "cmd", nil)
 	}
 
 	if err := mailboxStore.Send(ctx, msg); err != nil {
 		return writeErrorEnvelope(cmd, "agent/cmd", string(protocol.ErrorCodeEIO), err.Error())
 	}
 
-	env := envelope.OK("agent/cmd", map[string]any{
+	return writeOK(cmd, "agent/cmd", map[string]any{
 		"cmd_id":     cmdID,
 		"message_id": msg.ID,
 		"sent_to":    agentRecord.Namespace,
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "cmd"
-	}))
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	}, "cmd", nil)
 }
 
-func waitForReply(ctx context.Context, store mailbox.Store, callerNS, askID string, timeout time.Duration) error {
+func waitForReply(ctx context.Context, store mailbox.Store, out io.Writer, callerNS, askID string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	pollInterval := 500 * time.Millisecond
 	const maxConsecutiveErrors = 5
@@ -971,7 +866,7 @@ func waitForReply(ctx context.Context, store mailbox.Store, callerNS, askID stri
 					_ = store.Ack(ctx, msg.ID) //nolint:errcheck
 
 					// Output the reply envelope
-					if err := envelope.Write(os.Stdout, replyEnv); err != nil {
+					if err := envelope.Write(out, replyEnv); err != nil {
 						return fmt.Errorf("write reply envelope: %w", err)
 					}
 					return nil

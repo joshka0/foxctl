@@ -1,0 +1,87 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: todo/continuation
+  version: 0.1.0
+  description: "Compute a continuation prompt from workspace tasks and optional anchor context"
+  tags: ["todo", "continuation", "tasks", "orchestrate"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: todo/continuation
+  parameters:
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Workspace ID (defaults to current directory)"
+    - name: session_id
+      type: string
+      required: false
+      description: "Optional session_id to scope tasks (defaults to current session when available)"
+    - name: top_n
+      type: integer
+      required: false
+      description: "Number of ready tasks to show (default: 5)"
+    - name: min_pending
+      type: integer
+      required: false
+      description: "Minimum incomplete tasks to trigger continuation (default: 1)"
+    - name: anchor_goal
+      type: string
+      required: false
+      description: "Optional anchor goal to include"
+    - name: anchor_pending
+      type: string
+      required: false
+      description: "Optional pending question to include"
+    - name: include_execution_order
+      type: boolean
+      required: false
+      description: "Include topological execution order (default: true)"
+  returns:
+    - name: should_continue
+      type: boolean
+      description: "Whether continuation should be injected"
+    - name: prompt
+      type: string
+      description: "Continuation prompt"
+    - name: session_id
+      type: string
+      description: "Session ID used for scoping (empty means unscoped)"
+    - name: incomplete_count
+      type: integer
+      description: "Count of pending + in_progress tasks"
+    - name: unscoped_incomplete_count
+      type: integer
+      description: "Count of incomplete tasks in workspace with no session_id (only populated when session_id is set)"
+    - name: ready_count
+      type: integer
+      description: "Count of ready pending tasks"
+    - name: blocked_count
+      type: integer
+      description: "Count of blocked pending tasks"
+    - name: in_progress_count
+      type: integer
+      description: "Count of in_progress tasks"
+    - name: cycle_count
+      type: integer
+      description: "Number of detected cycles"
+    - name: cycles
+      type: array
+      description: "Cycles (task ID lists)"
+    - name: topological_order
+      type: array
+      description: "Topological order (task IDs), empty when cycles exist"
+    - name: summary
+      type: string
+      description: "Human-readable summary"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

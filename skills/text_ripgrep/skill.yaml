@@ -63,6 +63,11 @@ signature:
     long: |
       Use this skill for high-performance recursive text search using ripgrep.
       Provide a required pattern, optional path, globs, and context limits.
+      Example commands:
+        agentctl run text/ripgrep --input '{"pattern":"TODO","path":"."}'
+        agentctl skills run text/ripgrep --pattern TODO --path .
+        agentctl run text/ripgrep --input '{"pattern":"TODO","path":"./src","glob":["*.go"],"context_lines":2}'
+        agentctl skills run text/ripgrep --pattern TODO --path ./src --glob '*.go' --context_lines 2
     workflows:
       - id: search-todo-comments
         description: "Find all TODO comments in the current workspace."

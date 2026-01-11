@@ -7,10 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/rs/zerolog"
 )
 
 func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
@@ -23,14 +28,14 @@ func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf, tmp)
+	rc := newTestRunContext(t, buf, tmp)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
+			t.Fatalf("close run context: %v", err)
 		}
 	})
 
-	if err := run(ctx, rc, input{Path: file}); err != nil {
+	if err := run(ctx, rc, Input{Path: file}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -78,14 +83,14 @@ func TestFsReadHonorsMaxBytesAndTruncates(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf, tmp)
+	rc := newTestRunContext(t, buf, tmp)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
+			t.Fatalf("close run context: %v", err)
 		}
 	})
 
-	if err := run(ctx, rc, input{Path: file, MaxBytes: 8}); err != nil {
+	if err := run(ctx, rc, Input{Path: file, MaxBytes: 8}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -115,14 +120,14 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf, tmp)
+	rc := newTestRunContext(t, buf, tmp)
 	t.Cleanup(func() {
 		if err := rc.Close(); err != nil {
-			t.Fatalf("close runner context: %v", err)
+			t.Fatalf("close run context: %v", err)
 		}
 	})
 
-	if err := run(ctx, rc, input{Path: file}); err != nil {
+	if err := run(ctx, rc, Input{Path: file}); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -146,7 +151,7 @@ func TestFsReadMarksBinaryContent(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	oldwd, err := os.Getwd()
 	if err != nil {
@@ -160,20 +165,40 @@ func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) 
 			t.Fatalf("restore cwd: %v", err)
 		}
 	})
+
 	state := t.TempDir()
+	casPath := filepath.Join(state, "cas")
+	casStore, err := cas.NewStore(casPath)
+	if err != nil {
+		t.Fatalf("open cas: %v", err)
+	}
+
+	pv, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		t.Fatalf("path validator: %v", err)
+	}
+
 	cfg := config.Config{
 		Home:           state,
 		InlineOutputKB: 4,
 		MaxCaptureKB:   config.DefaultMaxCaptureKB,
 		Paths: config.Paths{
-			CAS:   filepath.Join(state, "cas"),
+			CAS:   casPath,
 			Jobs:  filepath.Join(state, "jobs"),
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
-	if err != nil {
-		t.Fatalf("runner context: %v", err)
+
+	return &skillmain.RunContext{
+		Config:        cfg,
+		CASStore:      casStore,
+		Workspace:     workspace,
+		Logger:        zerolog.Nop(),
+		PathValidator: pv,
+		Validator:     validator.New(),
+		Stdout:        stdout,
+		Now:           time.Now,
+		InlineKB:      cfg.InlineOutputKB,
+		MaxPreview:    100,
 	}
-	return rc
 }

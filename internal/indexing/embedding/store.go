@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/oklog/ulid/v2"
 )
@@ -32,6 +33,12 @@ func OpenStore(ctx context.Context, root string) (*Store, error) {
 	}
 
 	return &Store{db: db}, nil
+}
+
+// OpenStoreFromConfig opens the embedding queue store using paths from config.
+// This is the preferred way to open the store as it ensures correct path handling.
+func OpenStoreFromConfig(ctx context.Context, cfg config.Config) (*Store, error) {
+	return OpenStore(ctx, cfg.Paths.Cache)
 }
 
 // Close closes the database connection.

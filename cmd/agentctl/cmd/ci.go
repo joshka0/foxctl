@@ -93,6 +93,7 @@ func resolveOwnerRepo(ctx context.Context, owner, repo string) (string, string) 
 }
 
 func newCICommand() *cobra.Command {
+	var examples bool
 	cmd := &cobra.Command{
 		Use:   "ci",
 		Short: "Inspect CI status and PR review tasks via skills",
@@ -103,7 +104,14 @@ func newCICommand() *cobra.Command {
 			"  agentctl ci checks --pr <number-or-branch> [flags]\n" +
 			"  agentctl ci todos --pr <number-or-branch> [flags]\n\n" +
 			"See docs/ci/ for detailed examples and skill contracts.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if examples {
+				return writeCIExamples(cmd)
+			}
+			return cmd.Help()
+		},
 	}
+	cmd.Flags().BoolVar(&examples, "examples", false, "Show example usage for CI commands")
 	cmd.AddCommand(
 		newCIStatusCommand(),
 		newCIPRCommentsCommand(),
@@ -202,7 +210,7 @@ func newCIStatusCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute skills")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
-	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", true, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the command")
 	return cmd
 }
@@ -534,7 +542,7 @@ func newCIPRCommentsCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "Omit raw comments array from data when used with --data-only")
-	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", true, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
 }
@@ -596,7 +604,7 @@ func newCIChecksCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the skill")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} from the envelope for AI consumption")
-	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", true, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
 }
@@ -677,7 +685,7 @@ func newCITodosCommand() *cobra.Command {
 	cmd.Flags().StringVar(&storePath, "store", "", "Path to todo store (default: ~/.agentctl/todo/tasks.json)")
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache and always execute the ci/prcomments skill")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias for --skip-cache)")
-	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", true, "Disable CAS truncation - return full output inline")
 	cmd.Flags().BoolVar(&helpJSON, "help-json", false, "Emit JSON help metadata instead of running the skill")
 	return cmd
 }
@@ -791,7 +799,7 @@ func newCICommentsCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} for AI consumption")
-	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", true, "Disable CAS truncation - return full output inline")
 	return cmd
 }
 
@@ -841,7 +849,7 @@ func newCIResultsCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&skipCache, "skip-cache", false, "Bypass result cache")
 	cmd.Flags().BoolVar(&skipCache, "no-cache", false, "Bypass result cache (alias)")
 	cmd.Flags().BoolVar(&dataOnly, "data-only", false, "Print only {status,data} for AI consumption")
-	cmd.Flags().BoolVar(&noCAS, "no-cas", false, "Disable CAS truncation - return full output inline")
+	cmd.Flags().BoolVar(&noCAS, "no-cas", true, "Disable CAS truncation - return full output inline")
 	return cmd
 }
 
@@ -861,6 +869,11 @@ type ciHelpMetadata struct {
 	Long     string       `json:"long,omitempty"`
 	Flags    []ciFlagHelp `json:"flags,omitempty"`
 	Examples []string     `json:"examples,omitempty"`
+}
+
+type ciExample struct {
+	Description string `json:"description,omitempty"`
+	Command     string `json:"command"`
 }
 
 func runCISkillForEnvelopeWithOpts(cmd *cobra.Command, skillName string, payload map[string]any, skipCache, noCAS bool) (envelope.Envelope, error) {
@@ -1068,6 +1081,34 @@ func writeCIHelpJSON(cmd *cobra.Command) error {
 		return fmt.Errorf("write help envelope: %w", err)
 	}
 	return nil
+}
+
+func writeCIExamples(cmd *cobra.Command) error {
+	examples := []ciExample{
+		{
+			Description: "Get unified CI status for a PR.",
+			Command:     "agentctl ci status --pr 123",
+		},
+		{
+			Description: "Fetch CI checks (data-only JSON for AI consumption).",
+			Command:     "agentctl ci checks --pr 123 --data-only",
+		},
+		{
+			Description: "Summarize review comments only (no inline comments).",
+			Command:     "agentctl ci prcomments --pr 123 --no-comments",
+		},
+		{
+			Description: "Import CI tasks into todo/manage.",
+			Command:     "agentctl ci todos --pr 123 --store ./todo",
+		},
+	}
+
+	payload := map[string]any{
+		"examples": examples,
+		"hint":     "Add a subcommand like status, checks, prcomments, todos, or comments for targeted output.",
+	}
+
+	return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.ci.examples", payload, protocol.WithSource("cli"))
 }
 
 func writeCIValidationError(cmd *cobra.Command, message, field, hint string) error {

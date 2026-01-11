@@ -4,17 +4,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 )
+
+const command = "graph/cleanup"
 
 type input struct {
 	Workspace string `json:"workspace"`
@@ -32,30 +30,10 @@ type cleanupResult struct {
 }
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "graph_cleanup skill error: %v\n", err)
-		os.Exit(1)
-	}
+	skillmain.Main(command, run)
 }
 
-func run() error {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		return fmt.Errorf("runner context: %w", err)
-	}
-	defer func() { errs.Ignore(rc.Close(), "close runner context") }()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		return fmt.Errorf("decode input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Use workspace from input or from runner context
 	workspace := in.Workspace
 	if workspace == "" {
@@ -69,7 +47,7 @@ func run() error {
 	}
 
 	// Open graph store
-	store, err := graph.Open(ctx, cfg.Storage.Root)
+	store, err := graph.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open graph store: %w", err)
 	}
@@ -115,7 +93,7 @@ func run() error {
 		return fmt.Errorf("unknown operation: %s (expected cleanup, stats, repair)", operation)
 	}
 
-	return rc.Emit("graph.cleanup", data, "", envelope.Meta{})
+	return skillout.Emit(rc, command, data)
 }
 
 func handleCleanup(ctx context.Context, store graph.Store, workspace string, in input) (*cleanupResult, error) {
@@ -160,7 +138,6 @@ func handleCleanup(ctx context.Context, store graph.Store, workspace string, in 
 }
 
 func handleRepair(ctx context.Context, store graph.Store, workspace string) (*cleanupResult, error) {
-	startTime := time.Now()
 	result := &cleanupResult{}
 
 	// Step 1: Clean expired edges (global operation)
@@ -182,8 +159,6 @@ func handleRepair(ctx context.Context, store graph.Store, workspace string) (*cl
 		return nil, fmt.Errorf("recalculate degrees: %w", err)
 	}
 	result.DegreesRecalculated = true
-
-	fmt.Fprintf(os.Stderr, "info: repair completed in %v\n", time.Since(startTime))
 
 	return result, nil
 }

@@ -378,9 +378,14 @@ func scanMessage(rows *sql.Rows) (agent.Message, error) {
 	var msg agent.Message
 	var headersJSON string
 	var payloadJSON string
-	if err := rows.Scan(&msg.ID, &msg.FromNS, &msg.ToNS, &msg.Type, &msg.TTLMS, &headersJSON, &payloadJSON, &msg.VisibleAt, &msg.Attempt, &msg.Timestamp, &msg.SessionID, &msg.Workspace, &msg.AgentID); err != nil {
+	var sessionID, workspace, agentID sql.NullString
+	if err := rows.Scan(&msg.ID, &msg.FromNS, &msg.ToNS, &msg.Type, &msg.TTLMS, &headersJSON, &payloadJSON, &msg.VisibleAt, &msg.Attempt, &msg.Timestamp, &sessionID, &workspace, &agentID); err != nil {
 		return agent.Message{}, fmt.Errorf("mailbox: scan: %w", err)
 	}
+
+	msg.SessionID = sessionID.String
+	msg.Workspace = workspace.String
+	msg.AgentID = agentID.String
 
 	// Parse headers
 	if headersJSON != "" {

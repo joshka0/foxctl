@@ -134,6 +134,124 @@ func TestBuildTasksList_ClassifiesCodeRabbitComments(t *testing.T) {
 	}
 }
 
+func TestExtractAIAgentPromptFromBody(t *testing.T) {
+	// Test with actual CodeRabbit format
+	body := `**Actionable comments posted: 10**
+
+<details>
+<summary>🤖 Fix all issues with AI Agents</summary>
+
+` + "```" + `
+In @.github/workflows/backend.yml:
+- Around line 78-82: The workflow writes "$HOME/.deno/bin" to $GITHUB_PATH but
+doesn't update the current shell.
+
+In @praze-app/app/login.tsx:
+- Around line 89-100: The function processPendingInviteCode clears the pending
+code before calling invitesAPI.recordConnection.
+` + "```" + `
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit -->`
+
+	got := extractAIAgentPromptFromBody(body)
+	if got == "" {
+		t.Fatalf("expected AI agent prompt to be extracted, got empty string")
+	}
+	if !strings.Contains(got, "@.github/workflows/backend.yml") {
+		t.Fatalf("expected prompt to contain file reference, got:\n%s", got)
+	}
+	if !strings.Contains(got, "praze-app/app/login.tsx") {
+		t.Fatalf("expected prompt to contain second file reference, got:\n%s", got)
+	}
+	if strings.Contains(got, "Actionable comments") {
+		t.Fatalf("expected prompt to NOT contain prefix text, got:\n%s", got)
+	}
+}
+
+func TestExtractAIAgentPromptFromBody_NoPrompt(t *testing.T) {
+	body := `**Actionable comments posted: 5**
+
+Some regular review content without the AI agent section.
+
+<!-- This is an auto-generated comment by CodeRabbit -->`
+
+	got := extractAIAgentPromptFromBody(body)
+	if got != "" {
+		t.Fatalf("expected empty string when no AI prompt present, got:\n%s", got)
+	}
+}
+
+func TestExtractAIAgentPromptFromBody_RealFormat(t *testing.T) {
+	// This matches the exact format from GitHub API
+	body := `**Actionable comments posted: 10**
+
+> [!NOTE]
+> Due to the large number of review comments, Critical severity comments were prioritized.
+
+<details>
+<summary>🤖 Fix all issues with AI Agents</summary>
+
+` + "```" + `
+In @.github/workflows/backend.yml:
+- Around line 78-82: The workflow writes "$HOME/.deno/bin" to $GITHUB_PATH but
+doesn't update the current shell.
+
+In @praze-app/app/login.tsx:
+- Around line 89-100: The function processPendingInviteCode clears the pending
+code before calling invitesAPI.recordConnection.
+` + "```" + `
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit -->`
+
+	got := extractAIAgentPromptFromBody(body)
+	if got == "" {
+		t.Fatalf("expected AI agent prompt to be extracted from real format, got empty")
+	}
+	if !strings.Contains(got, "workflows/backend.yml") {
+		t.Errorf("expected prompt to contain workflow file, got:\n%s", got)
+	}
+	if !strings.Contains(got, "login.tsx") {
+		t.Errorf("expected prompt to contain login file, got:\n%s", got)
+	}
+}
+
+func TestExtractCodeRabbitAIAgentPrompts_Integration(t *testing.T) {
+	reviews := []PRReview{
+		{
+			ID:   1,
+			User: User{Login: "some-user"},
+			Body: "Regular review without AI prompt",
+		},
+		{
+			ID:   2,
+			User: User{Login: "coderabbitai[bot]"},
+			Body: `**Actionable comments posted: 3**
+
+<details>
+<summary>🤖 Fix all issues with AI Agents</summary>
+
+` + "```" + `
+In @src/main.go:
+- Line 42: Fix the error handling here.
+` + "```" + `
+
+</details>`,
+		},
+	}
+
+	got := extractCodeRabbitAIAgentPrompts(reviews)
+	if got == "" {
+		t.Fatalf("expected to extract AI prompt from CodeRabbit review")
+	}
+	if !strings.Contains(got, "src/main.go") {
+		t.Errorf("expected prompt to contain file reference, got:\n%s", got)
+	}
+}
+
 func TestExtractCodeRabbitComment_StripsMetaKeepsTasksEvenIfAddressed(t *testing.T) {
 	body := "coderabbitai[bot] commented:\n" +
 		"\n" +

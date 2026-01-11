@@ -5,19 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
-	"github.com/rs/zerolog"
 )
 
 const (
@@ -30,7 +28,7 @@ const (
 // Input is the skill input schema.
 type Input struct {
 	// Scope determines which tasks to embed: "all", "pending", "completed", or "workspace".
-	Scope string `json:"scope"`
+	Scope string `json:"scope" validate:"omitempty,oneof=all pending completed workspace"`
 
 	// WorkspaceID is required when Scope is "workspace".
 	WorkspaceID string `json:"workspace_id,omitempty"`
@@ -67,77 +65,66 @@ type TaskResult struct {
 }
 
 func main() {
-	if err := run(context.Background(), os.Stdin, os.Stdout); err != nil {
-		env := envelope.Error(command, "ERUNTIME", err.Error(), nil)
-		_ = json.NewEncoder(os.Stdout).Encode(env)
-		os.Exit(1)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, r io.Reader, w io.Writer) error {
-	var input Input
-	if err := json.NewDecoder(r).Decode(&input); err != nil {
-		return fmt.Errorf("parse input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
-	if input.Scope == "" && input.TaskID == "" {
-		return fmt.Errorf("scope or task_id is required (scope: all, pending, completed, workspace)")
+	if in.Scope == "" && in.TaskID == "" {
+		return skillerr.Arg("scope or task_id is required (scope: all, pending, completed, workspace)")
 	}
-	if input.Scope == "workspace" && input.WorkspaceID == "" {
-		return fmt.Errorf("workspace_id is required when scope is 'workspace'")
+	if in.Scope == "workspace" && in.WorkspaceID == "" {
+		return skillerr.Arg("workspace_id is required when scope is 'workspace'")
 	}
-	if input.BatchSize <= 0 {
-		input.BatchSize = defaultBatchMax
+	if in.BatchSize <= 0 {
+		in.BatchSize = defaultBatchMax
 	}
 
 	start := time.Now()
 	output := Output{
-		Scope: input.Scope,
+		Scope: in.Scope,
 	}
 
 	// Check for API key
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	if geminiKey == "" && voyageKey == "" && !input.DryRun {
-		return fmt.Errorf("no embedding API key set (GEMINI_API_KEY or VOYAGE_API_KEY)")
+	if geminiKey == "" && voyageKey == "" && !in.DryRun {
+		return skillerr.Auth("no embedding API key set", skillerr.WithHint("Set GEMINI_API_KEY or VOYAGE_API_KEY"))
 	}
 
 	// Open task store
-	root := getStorageRoot()
-	taskStore, err := tasks.Open(ctx, root)
+	taskStore, err := tasks.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open task store: %w", err)
+		return skillerr.Runtime("open task store", skillerr.WithCause(err))
 	}
 	defer taskStore.Close() //nolint:errcheck
 
 	// Get tasks based on scope
 	var taskList []tasks.Task
-	if input.TaskID != "" {
+	if in.TaskID != "" {
 		// Single task mode
-		task, err := taskStore.Get(ctx, input.TaskID)
+		task, err := taskStore.Get(ctx, in.TaskID)
 		if err != nil {
-			return fmt.Errorf("get task %s: %w", input.TaskID, err)
+			return skillerr.Runtime(fmt.Sprintf("get task %s", in.TaskID), skillerr.WithCause(err))
 		}
 		taskList = []tasks.Task{task}
 	} else {
 		// List tasks - we get all and filter by scope
-		// Note: tasks.ListByWorkspace requires a workspace ID, so we iterate all workspaces
-		taskList, err = listAllTasks(ctx, taskStore, input.Scope, input.WorkspaceID)
+		taskList, err = listAllTasks(ctx, taskStore, in.Scope, in.WorkspaceID)
 		if err != nil {
-			return fmt.Errorf("list tasks: %w", err)
+			return skillerr.Runtime("list tasks", skillerr.WithCause(err))
 		}
 	}
 
 	output.TasksFound = len(taskList)
 
 	// Apply batch limit
-	if len(taskList) > input.BatchSize {
-		taskList = taskList[:input.BatchSize]
+	if len(taskList) > in.BatchSize {
+		taskList = taskList[:in.BatchSize]
 	}
 
 	// Dry run - just list tasks
-	if input.DryRun {
+	if in.DryRun {
 		for _, t := range taskList {
 			content := taskEmbeddingContent(t)
 			output.Tasks = append(output.Tasks, TaskResult{
@@ -148,7 +135,7 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 			})
 		}
 		output.DurationMs = time.Since(start).Milliseconds()
-		return json.NewEncoder(w).Encode(envelope.OK(command, output))
+		return skillout.Emit(rc, command, output)
 	}
 
 	// Initialize embedding provider (prefer Voyage, fall back to Gemini)
@@ -158,12 +145,15 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 	}
 
 	if voyageKey != "" {
+		// Get model from scope-based recommendation (supports env var override)
+		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeTasks)
 		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey:        voyageKey,
+			Model:         model, // Text content (tasks) - not code
 			RateLimitWait: boolPtr(true),
 		})
 		if err != nil {
-			return fmt.Errorf("voyage provider: %w", err)
+			return skillerr.Runtime("voyage provider", skillerr.WithCause(err))
 		}
 		provider = vp
 	} else {
@@ -172,15 +162,15 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 			RateLimitWait: boolPtr(true),
 		})
 		if err != nil {
-			return fmt.Errorf("gemini provider: %w", err)
+			return skillerr.Runtime("gemini provider", skillerr.WithCause(err))
 		}
 		provider = gp
 	}
 
 	// Open memory store
-	memStore, err := memory.Open(ctx, root, filepath.Join(root, "cas"))
+	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
+		return skillerr.Runtime("open memory store", skillerr.WithCause(err))
 	}
 	defer memStore.Close() //nolint:errcheck
 
@@ -273,7 +263,7 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 	}
 
 	output.DurationMs = time.Since(start).Milliseconds()
-	return json.NewEncoder(w).Encode(envelope.OK(command, output))
+	return skillout.Emit(rc, command, output)
 }
 
 // taskEmbeddingContent builds rich semantic text from task fields.
@@ -355,25 +345,6 @@ func listAllTasks(ctx context.Context, store tasks.Store, scope, workspaceID str
 	default:
 		return allTasks, nil
 	}
-}
-
-func getStorageRoot() string {
-	log := zerolog.New(os.Stderr).With().Str("skill", command).Logger()
-
-	cfg, err := config.Load(context.Background())
-	if err != nil {
-		log.Warn().Err(err).Msg("failed to load config, using fallbacks")
-	}
-	if err == nil && cfg.Storage.Root != "" {
-		return cfg.Storage.Root
-	}
-
-	if root := os.Getenv("AGENTCTL_HOME"); root != "" {
-		return filepath.Join(root, "storage")
-	}
-
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agentctl", "storage")
 }
 
 // boolPtr returns a pointer to a bool value.

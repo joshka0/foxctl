@@ -7,9 +7,7 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,11 +15,9 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 // defaultTimeout is the maximum time to wait for gopls operations.
@@ -32,14 +28,15 @@ const defaultTimeout = 60 * time.Second
 // Daemon mode is faster but may have issues with some operations.
 var useDaemon = os.Getenv("AGENTCTL_GOPLS_CLI") != "1"
 
-type input struct {
-	Operation  string `json:"operation"`
+// Input defines the input parameters for lsp/gopls.
+type Input struct {
+	Operation  string `json:"operation" validate:"required,oneof=definition references symbols workspace_symbol call_hierarchy implementation check"`
 	File       string `json:"file"`
 	Line       int    `json:"line"`
 	Column     int    `json:"column"`
 	Query      string `json:"query"`
 	MaxResults int    `json:"max_results"`
-	Timeout    int    `json:"timeout"` // timeout in seconds, defaults to 30
+	Timeout    int    `json:"timeout"` // timeout in seconds, defaults to 60
 
 	// LSP-style nested parameters (alternative to flat file/line/column)
 	TextDocument *textDocumentParam `json:"textDocument,omitempty"`
@@ -119,61 +116,13 @@ type output struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("lsp/gopls", "ERUNTIME", err, "Check AGENTCTL_HOME and config file permissions")
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("lsp/gopls", "ERUNTIME", err, "Failed to initialize runner context")
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("lsp/gopls", "EARG", err, "Provide valid JSON input with operation, file, line, and column fields")
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("lsp/gopls", "ERUNTIME", err, "Check gopls installation: go install golang.org/x/tools/gopls@latest")
-	}
+	skillmain.Main("lsp/gopls", run)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return in, fmt.Errorf("failed to parse input: %w", err)
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults and normalize LSP-style parameters
+	normalizeInput(&in)
 
-	// Support LSP-style nested parameters (textDocument/position) as alternative to flat file/line/column
-	if in.TextDocument != nil && in.TextDocument.URI != "" && in.File == "" {
-		in.File = in.TextDocument.URI
-	}
-	if in.Position != nil {
-		if in.Line <= 0 {
-			in.Line = in.Position.Line
-		}
-		if in.Column <= 0 {
-			in.Column = in.Position.Character
-		}
-	}
-
-	// Defaults
-	if in.MaxResults <= 0 {
-		in.MaxResults = 50
-	}
-	if in.Column <= 0 {
-		in.Column = 1
-	}
-
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Apply timeout to context
 	timeout := defaultTimeout
 	if in.Timeout > 0 {
@@ -203,8 +152,32 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	return runWithCLI(ctx, rc, workspace, in)
 }
 
+// normalizeInput applies defaults and LSP-style parameter normalization.
+func normalizeInput(in *Input) {
+	// Support LSP-style nested parameters (textDocument/position) as alternative to flat file/line/column
+	if in.TextDocument != nil && in.TextDocument.URI != "" && in.File == "" {
+		in.File = in.TextDocument.URI
+	}
+	if in.Position != nil {
+		if in.Line <= 0 {
+			in.Line = in.Position.Line
+		}
+		if in.Column <= 0 {
+			in.Column = in.Position.Character
+		}
+	}
+
+	// Defaults
+	if in.MaxResults <= 0 {
+		in.MaxResults = 50
+	}
+	if in.Column <= 0 {
+		in.Column = 1
+	}
+}
+
 // runWithDaemon uses the persistent gopls daemon.
-func runWithDaemon(ctx context.Context, rc *runner.RunnerContext, workspace string, in input) error {
+func runWithDaemon(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	daemon, err := gopls.GetDaemon(ctx, workspace)
 	if err != nil {
 		// Fall back to CLI mode if daemon fails to start
@@ -273,11 +246,11 @@ func runWithDaemon(ctx context.Context, rc *runner.RunnerContext, workspace stri
 		out.Count = len(refs)
 	}
 
-	return writeOutput(rc, out)
+	return skillout.Emit(rc, "lsp/gopls", out)
 }
 
 // runWithCLI uses the traditional gopls CLI (slower but supports all operations).
-func runWithCLI(ctx context.Context, rc *runner.RunnerContext, workspace string, in input) error {
+func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	// Check gopls availability
 	goplsPath, err := exec.LookPath("gopls")
 	if err != nil {
@@ -354,15 +327,12 @@ func runWithCLI(ctx context.Context, rc *runner.RunnerContext, workspace string,
 		}
 		out.Diagnostics = diags
 		out.Count = len(diags)
-
-	default:
-		return fmt.Errorf("unknown operation: %s", in.Operation)
 	}
 
-	return writeOutput(rc, out)
+	return skillout.Emit(rc, "lsp/gopls", out)
 }
 
-func runDefinition(ctx context.Context, goplsPath, workspace string, in input) (*Definition, error) {
+func runDefinition(ctx context.Context, goplsPath, workspace string, in Input) (*Definition, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, fmt.Errorf("definition requires file and line")
 	}
@@ -380,7 +350,7 @@ func runDefinition(ctx context.Context, goplsPath, workspace string, in input) (
 	return parseDefinition(string(out))
 }
 
-func runReferences(ctx context.Context, goplsPath, workspace string, in input) ([]Reference, error) {
+func runReferences(ctx context.Context, goplsPath, workspace string, in Input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, fmt.Errorf("references requires file and line")
 	}
@@ -398,7 +368,7 @@ func runReferences(ctx context.Context, goplsPath, workspace string, in input) (
 	return parseReferences(string(out), workspace)
 }
 
-func runSymbols(ctx context.Context, goplsPath, workspace string, in input) ([]Symbol, error) {
+func runSymbols(ctx context.Context, goplsPath, workspace string, in Input) ([]Symbol, error) {
 	if in.File == "" {
 		return nil, fmt.Errorf("symbols requires file")
 	}
@@ -415,7 +385,7 @@ func runSymbols(ctx context.Context, goplsPath, workspace string, in input) ([]S
 	return parseSymbols(string(out), workspace)
 }
 
-func runWorkspaceSymbol(ctx context.Context, goplsPath, workspace string, in input) ([]Symbol, error) {
+func runWorkspaceSymbol(ctx context.Context, goplsPath, workspace string, in Input) ([]Symbol, error) {
 	if in.Query == "" {
 		return nil, fmt.Errorf("workspace_symbol requires query")
 	}
@@ -430,7 +400,7 @@ func runWorkspaceSymbol(ctx context.Context, goplsPath, workspace string, in inp
 	return parseWorkspaceSymbols(string(out), workspace)
 }
 
-func runCallHierarchy(ctx context.Context, goplsPath, workspace string, in input) (*CallHierarchy, error) {
+func runCallHierarchy(ctx context.Context, goplsPath, workspace string, in Input) (*CallHierarchy, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, fmt.Errorf("call_hierarchy requires file and line")
 	}
@@ -448,7 +418,7 @@ func runCallHierarchy(ctx context.Context, goplsPath, workspace string, in input
 	return parseCallHierarchy(string(out), workspace)
 }
 
-func runImplementation(ctx context.Context, goplsPath, workspace string, in input) ([]Reference, error) {
+func runImplementation(ctx context.Context, goplsPath, workspace string, in Input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, fmt.Errorf("implementation requires file and line")
 	}
@@ -466,7 +436,7 @@ func runImplementation(ctx context.Context, goplsPath, workspace string, in inpu
 	return parseReferences(string(out), workspace)
 }
 
-func runCheck(ctx context.Context, goplsPath, workspace string, in input) ([]Diagnostic, error) {
+func runCheck(ctx context.Context, goplsPath, workspace string, in Input) ([]Diagnostic, error) {
 	if in.File == "" {
 		return nil, fmt.Errorf("check requires file")
 	}
@@ -787,15 +757,4 @@ func makeRelative(path, workspace string) string {
 		return path
 	}
 	return rel
-}
-
-func writeOutput(rc *runner.RunnerContext, out output) error {
-	return rc.Emit("lsp/gopls", out, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(cmd, code string, err error, hint string) {
-	data := map[string]any{"hint": hint}
-	env := envelope.Error(cmd, code, err.Error(), data)
-	_ = envelope.Write(os.Stdout, env)
-	os.Exit(1)
 }

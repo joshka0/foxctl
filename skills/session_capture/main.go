@@ -2,7 +2,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,10 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
+	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
 // Input defines the skill input parameters.
@@ -43,97 +44,45 @@ type Output struct {
 	Message         string   `json:"message"`
 }
 
-// ClaudeMessage represents a message from Claude Code's JSONL format.
-type ClaudeMessage struct {
-	Type       string          `json:"type"`
-	UUID       string          `json:"uuid,omitempty"`
-	ParentUUID string          `json:"parentUuid,omitempty"`
-	SessionID  string          `json:"sessionId,omitempty"`
-	Timestamp  string          `json:"timestamp,omitempty"`
-	CWD        string          `json:"cwd,omitempty"`
-	GitBranch  string          `json:"gitBranch,omitempty"`
-	Version    string          `json:"version,omitempty"`
-	Message    *MessageContent `json:"message,omitempty"`
-	Summary    string          `json:"summary,omitempty"`
-	LeafUUID   string          `json:"leafUuid,omitempty"`
-}
-
-// MessageContent represents the content of a message.
-type MessageContent struct {
-	Role    string          `json:"role,omitempty"`
-	Content json.RawMessage `json:"content,omitempty"`
-	Model   string          `json:"model,omitempty"`
-	Usage   *TokenUsage     `json:"usage,omitempty"`
-}
-
-// TokenUsage represents token usage stats.
-type TokenUsage struct {
-	InputTokens  int `json:"input_tokens,omitempty"`
-	OutputTokens int `json:"output_tokens,omitempty"`
-}
-
-// ContentBlock represents a block in assistant message content.
-type ContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"id,omitempty"`
-}
-
 const command = "session/capture"
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("EPARSE", fmt.Errorf("decode input: %w", err), "Ensure valid JSON on stdin")
-	}
-
-	// Default workspace to current directory
-	if input.Workspace == "" {
-		if wd, err := os.Getwd(); err == nil {
-			input.Workspace = wd
-		}
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Default workspace
+	in.Workspace = sessionkit.WorkspaceOrDefault(in.Workspace, rc.Workspace)
 
 	// Default Claude home
-	if input.ClaudeHome == "" {
+	if in.ClaudeHome == "" {
 		homeDir, _ := os.UserHomeDir()
-		input.ClaudeHome = filepath.Join(homeDir, ".claude")
-	}
-
-	// Get agentctl home
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		homeDir, _ := os.UserHomeDir()
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
+		in.ClaudeHome = filepath.Join(homeDir, ".claude")
 	}
 
 	// Open sessions store
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	sessionStore, err := sessions.Open(ctx, storageRoot)
+	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open sessions store: %w", err), "Check that storage directory exists and is accessible")
+		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(sessionStore.Close(), "close sessions store") }()
+	defer cleanup()
 
 	// Find the project directory in Claude's storage
-	projectDir := findProjectDir(input.ClaudeHome, input.Workspace)
+	projectDir := claudejsonl.ClaudeProjectDir(in.Workspace)
 	if projectDir == "" {
-		fail("ENOTFOUND", fmt.Errorf("no Claude Code project found for workspace: %s", input.Workspace), "Ensure Claude Code has been used in this workspace")
+		return skillerr.Arg(fmt.Sprintf("no Claude Code project found for workspace: %s", in.Workspace),
+			skillerr.WithHint("Ensure Claude Code has been used in this workspace"))
 	}
 
 	// Find session file(s)
-	sessionFile, sessionID := findSessionFile(projectDir, input.SessionID)
+	sessionFile, sessionID := findSessionFile(projectDir, in.SessionID)
 	if sessionFile == "" {
-		fail("ENOTFOUND", fmt.Errorf("no session file found in project directory"), "Check that session_id is correct or omit to use most recent session")
+		return skillerr.Arg("no session file found in project directory",
+			skillerr.WithHint("Check that session_id is correct or omit to use most recent session"))
 	}
 
 	// Check if session already exists
-	if !input.Force {
+	if !in.Force {
 		existing, err := sessionStore.Get(ctx, sessionID)
 		if err == nil && existing.ID != "" {
 			output := Output{
@@ -149,20 +98,25 @@ func main() {
 				RawJSONLPath:    existing.RawJSONLPath,
 				Message:         fmt.Sprintf("Session %s already captured (use force=true to re-capture)", sessionID),
 			}
-			env := envelope.OK(command, output)
-			errs.Ignore(envelope.Write(os.Stdout, env), "emit session/capture result")
-			return
+			return skillout.Emit(rc, command, output)
 		}
 	}
 
-	// Parse the JSONL file
-	messages, err := parseJSONL(sessionFile)
+	// Parse the JSONL file using claudejsonl Reader
+	reader, err := claudejsonl.OpenReader(sessionFile)
 	if err != nil {
-		fail("EPARSE", fmt.Errorf("parse session file: %w", err), "Ensure JSONL file is valid and not corrupted")
+		return skillerr.IO("open session file", skillerr.WithCause(err))
+	}
+	defer reader.Close()
+
+	messages, err := reader.ReadAll()
+	if err != nil {
+		return skillerr.IO("parse session file", skillerr.WithCause(err),
+			skillerr.WithHint("Ensure JSONL file is valid and not corrupted"))
 	}
 
 	// Extract session metadata and stats
-	session := extractSession(sessionID, sessionFile, input.Workspace, messages)
+	session := extractSession(sessionID, sessionFile, in.Workspace, messages)
 
 	// Extract high-signal content for preview
 	highSignal := extractHighSignal(messages, 5)
@@ -170,7 +124,7 @@ func main() {
 	// Save to store
 	saved, err := sessionStore.Save(ctx, session)
 	if err != nil {
-		fail("EIO", fmt.Errorf("save session: %w", err), "Check database connectivity and permissions")
+		return skillerr.IO("save session", skillerr.WithCause(err))
 	}
 
 	output := Output{
@@ -189,34 +143,7 @@ func main() {
 			sessionID, saved.MessageCount, saved.UserTurns, saved.ToolInvocations),
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/capture result")
-}
-
-// findProjectDir finds the Claude Code project directory for a workspace.
-func findProjectDir(claudeHome, workspace string) string {
-	projectsDir := filepath.Join(claudeHome, "projects")
-
-	// Claude Code encodes workspace paths by replacing / with -
-	// e.g., /Users/jkatigbak/repos/personal/agentctl -> -Users-jkatigbak-repos-personal-agentctl
-	encodedPath := strings.ReplaceAll(workspace, "/", "-")
-	if !strings.HasPrefix(encodedPath, "-") {
-		encodedPath = "-" + encodedPath
-	}
-
-	projectDir := filepath.Join(projectsDir, encodedPath)
-	if info, err := os.Stat(projectDir); err == nil && info.IsDir() {
-		return projectDir
-	}
-
-	// Try without leading dash (Windows-style paths)
-	encodedPath = strings.ReplaceAll(workspace, string(filepath.Separator), "-")
-	projectDir = filepath.Join(projectsDir, encodedPath)
-	if info, err := os.Stat(projectDir); err == nil && info.IsDir() {
-		return projectDir
-	}
-
-	return ""
+	return skillout.Emit(rc, command, output)
 }
 
 // findSessionFile finds the session JSONL file to capture.
@@ -282,47 +209,8 @@ func findSessionFile(projectDir, sessionID string) (string, string) {
 	return sessions[0].path, sessions[0].id
 }
 
-// parseJSONL reads and parses a Claude Code JSONL file.
-func parseJSONL(path string) ([]ClaudeMessage, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { errs.Ignore(file.Close(), "close session file") }()
-
-	var messages []ClaudeMessage
-	scanner := bufio.NewScanner(file)
-
-	// Increase buffer size for large lines
-	const maxCapacity = 10 * 1024 * 1024 // 10MB
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, maxCapacity)
-
-	lineNum := 0
-	for scanner.Scan() {
-		lineNum++
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var msg ClaudeMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			// Skip malformed lines but continue parsing
-			continue
-		}
-		messages = append(messages, msg)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan error: %w", err)
-	}
-
-	return messages, nil
-}
-
 // extractSession creates a Session from parsed messages.
-func extractSession(sessionID, rawPath, workspace string, messages []ClaudeMessage) storage.Session {
+func extractSession(sessionID, rawPath, workspace string, messages []*claudejsonl.ReadMessage) storage.Session {
 	session := storage.Session{
 		ID:            sessionID,
 		WorkspacePath: workspace,
@@ -332,56 +220,47 @@ func extractSession(sessionID, rawPath, workspace string, messages []ClaudeMessa
 	var minTime, maxTime time.Time
 	toolSet := make(map[string]bool)
 
-	for _, msg := range messages {
+	for _, rm := range messages {
+		msg := rm.Message
 		session.MessageCount++
 
-		// Parse timestamp
-		if msg.Timestamp != "" {
-			if t, err := time.Parse(time.RFC3339, msg.Timestamp); err == nil {
-				if minTime.IsZero() || t.Before(minTime) {
-					minTime = t
-				}
-				if maxTime.IsZero() || t.After(maxTime) {
-					maxTime = t
-				}
+		// Use parsed timestamp
+		if !rm.Timestamp.IsZero() {
+			if minTime.IsZero() || rm.Timestamp.Before(minTime) {
+				minTime = rm.Timestamp
+			}
+			if maxTime.IsZero() || rm.Timestamp.After(maxTime) {
+				maxTime = rm.Timestamp
 			}
 		}
 
-		// Extract metadata
-		if msg.CWD != "" && session.WorkspacePath == "" {
-			session.WorkspacePath = msg.CWD
-		}
-		if msg.GitBranch != "" {
-			session.GitBranch = msg.GitBranch
-		}
-		if msg.Version != "" {
-			session.ClaudeVersion = msg.Version
-		}
-
 		// Count by type
-		switch msg.Type {
-		case "user":
+		msgType := claudejsonl.Classify(msg)
+		switch msgType {
+		case claudejsonl.ChunkTypeUserRequest:
 			session.UserTurns++
-		case "assistant":
-			if msg.Message != nil {
-				// Count tokens
-				if msg.Message.Usage != nil {
-					session.TotalTokens += msg.Message.Usage.InputTokens
-					session.TotalTokens += msg.Message.Usage.OutputTokens
-				}
+		case claudejsonl.ChunkTypeToolUse:
+			session.ToolInvocations++
+		case claudejsonl.ChunkTypeAssistantResponse:
+			// Count tools from assistant messages
+			tools := claudejsonl.ExtractTools(msg)
+			for _, tool := range tools {
+				toolSet[tool] = true
+			}
+			session.ToolInvocations += len(tools)
+		}
 
-				// Count tool uses
-				if msg.Message.Content != nil {
-					var blocks []ContentBlock
-					if err := json.Unmarshal(msg.Message.Content, &blocks); err == nil {
-						for _, block := range blocks {
-							if block.Type == "tool_use" {
-								session.ToolInvocations++
-								toolSet[block.Name] = true
-							}
-						}
-					}
-				}
+		// Count tokens from message usage
+		if msg.Message != nil {
+			var nested struct {
+				Usage *struct {
+					InputTokens  int `json:"input_tokens"`
+					OutputTokens int `json:"output_tokens"`
+				} `json:"usage"`
+			}
+			if json.Unmarshal(msg.Message, &nested) == nil && nested.Usage != nil {
+				session.TotalTokens += nested.Usage.InputTokens
+				session.TotalTokens += nested.Usage.OutputTokens
 			}
 		}
 	}
@@ -413,29 +292,28 @@ func extractSession(sessionID, rawPath, workspace string, messages []ClaudeMessa
 }
 
 // extractHighSignal extracts high-signal content preview.
-func extractHighSignal(messages []ClaudeMessage, limit int) []string {
+func extractHighSignal(messages []*claudejsonl.ReadMessage, limit int) []string {
 	var signals []string
 
-	for _, msg := range messages {
+	for _, rm := range messages {
 		if len(signals) >= limit {
 			break
 		}
 
-		switch msg.Type {
-		case "user":
-			if msg.Message != nil {
-				var content string
-				if err := json.Unmarshal(msg.Message.Content, &content); err == nil {
-					content = truncate(content, 100)
-					if content != "" {
-						signals = append(signals, fmt.Sprintf("[User] %s", content))
-					}
-				}
+		msg := rm.Message
+		msgType := claudejsonl.Classify(msg)
+
+		switch msgType {
+		case claudejsonl.ChunkTypeUserRequest:
+			preview := claudejsonl.ExtractPreview(msg, 100)
+			if preview != "" {
+				signals = append(signals, fmt.Sprintf("[User] %s", preview))
 			}
-		case "summary":
-			if msg.Summary != "" {
-				signals = append(signals, fmt.Sprintf("[Summary] %s", truncate(msg.Summary, 100)))
-			}
+		}
+
+		// Check for compact summary messages
+		if summary, ok := claudejsonl.MaybeCompactSummary(msg); ok && summary != "" {
+			signals = append(signals, fmt.Sprintf("[Summary] %s", truncate(summary, 100)))
 		}
 	}
 
@@ -450,14 +328,4 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
-}
-
-func fail(code string, err error, hint string) {
-	var data map[string]any
-	if hint != "" {
-		data = map[string]any{"hint": hint}
-	}
-	env := envelope.Error(command, code, err.Error(), data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/capture failure")
-	os.Exit(1)
 }

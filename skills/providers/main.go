@@ -6,17 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/BurntSushi/toml"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 // Provider represents a supported AI coding assistant.
@@ -136,69 +133,54 @@ type change struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("EARG", err)
-	}
-
-	out, err := run(ctx, rc, in)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-
-	writeOutput(out)
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) (*output, error) {
+func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	// Default provider
 	if in.Provider == "" {
 		in.Provider = "claude"
 	}
 
+	var out *output
+	var err error
+
 	switch in.Operation {
 	case "list":
-		return listProviders()
+		out, err = listProviders()
 	case "get":
-		return getConfig(in.Provider)
+		out, err = getConfig(in.Provider)
 	case "set":
-		return setConfig(in.Provider, in.Setting, in.DryRun)
+		out, err = setConfig(in.Provider, in.Setting, in.DryRun)
 	case "add-mcp":
-		return addMCP(in.Provider, in.MCP, in.DryRun)
+		out, err = addMCP(in.Provider, in.MCP, in.DryRun)
 	case "remove-mcp":
 		if in.MCP == nil {
-			return nil, fmt.Errorf("mcp config is required for remove-mcp operation")
+			return fmt.Errorf("mcp config is required for remove-mcp operation")
 		}
-		return removeMCP(in.Provider, in.MCP.Name, in.DryRun)
+		out, err = removeMCP(in.Provider, in.MCP.Name, in.DryRun)
 	case "add-skill":
-		return addSkill(in.Provider, in.Skill, in.DryRun)
+		out, err = addSkill(in.Provider, in.Skill, in.DryRun)
 	case "remove-skill":
 		if in.Skill == nil {
-			return nil, fmt.Errorf("skill config is required for remove-skill operation")
+			return fmt.Errorf("skill config is required for remove-skill operation")
 		}
-		return removeSkill(in.Provider, in.Skill.Name, in.DryRun)
+		out, err = removeSkill(in.Provider, in.Skill.Name, in.DryRun)
 	case "sync":
-		return syncProviders(in.SyncConfig, in.DryRun)
+		out, err = syncProviders(in.SyncConfig, in.DryRun)
 	case "export":
-		return exportConfig(in.Provider, in.File)
+		out, err = exportConfig(in.Provider, in.File)
 	case "import":
-		return importConfig(in.Provider, in.File, in.DryRun)
+		out, err = importConfig(in.Provider, in.File, in.DryRun)
 	default:
-		return nil, fmt.Errorf("unknown operation: %s", in.Operation)
+		return fmt.Errorf("unknown operation: %s", in.Operation)
 	}
+
+	if err != nil {
+		return err
+	}
+
+	return skillout.Emit(rc, command, out)
 }
 
 func listProviders() (*output, error) {
@@ -963,23 +945,4 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return in, fmt.Errorf("parse input: %w", err)
-	}
-	return in, nil
-}
-
 const command = "providers/config"
-
-func writeOutput(out *output) {
-	env := envelope.OK(command, out)
-	_ = json.NewEncoder(os.Stdout).Encode(env)
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	_ = json.NewEncoder(os.Stdout).Encode(env)
-	os.Exit(1)
-}

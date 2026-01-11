@@ -2,24 +2,21 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "fs/find"
 
 type input struct {
 	Query         string `json:"query"`
@@ -47,30 +44,21 @@ type fileResult struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("fs/find", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("fs/find", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("fs/find", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("fs/find", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.Type == "" {
+		in.Type = "file"
+	}
+	if in.SortBy == "" {
+		in.SortBy = "relevance"
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 100
+	}
+
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -101,7 +89,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 
 		// Check depth limit
 		if in.MaxDepth > 0 {
-			depth := strings.Count(relativeTo(searchPath, path), "/")
+			depth := strings.Count(pathutil.RelTo(searchPath, path), "/")
 			if depth > in.MaxDepth {
 				if d.IsDir() {
 					return filepath.SkipDir
@@ -119,7 +107,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		}
 
 		// Skip common directories
-		if d.IsDir() && isCommonExclude(d.Name()) {
+		if d.IsDir() && fsutil.IsCommonExclude(d.Name()) {
 			return filepath.SkipDir
 		}
 
@@ -159,7 +147,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		}
 
 		// Create result
-		relPath := relativeTo(workspace, path)
+		relPath := pathutil.RelTo(workspace, path)
 		result := fileResult{
 			Path:         relPath,
 			Name:         d.Name(),
@@ -195,45 +183,27 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		results = results[:in.MaxResults]
 	}
 
-	// Prepare preview and artifact
-	preview, truncated := preparePreview(results, rc.MaxPreview)
-	artifact, err := persistResultsArtifact(ctx, rc, results, truncated)
+	// Prepare preview and persist full results if truncated
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, results, rc.MaxPreview, "fs_find", true)
 	if err != nil {
 		return err
 	}
 
 	// Build response
 	data := map[string]any{
-		"result_count": len(results),
-		"preview":      preview,
+		"result_count": previewResult.Total,
+		"preview":      previewResult.Preview,
 		"sort_by":      in.SortBy,
 		"max_results":  in.MaxResults,
 	}
 	if in.Query != "" {
 		data["query"] = in.Query
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
+	if previewResult.Artifact != nil && previewResult.Artifact.Digest != "" {
+		data["artifact"] = previewResult.Artifact.Digest
 	}
 
-	return rc.Emit("fs/find", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.Type == "" {
-		in.Type = "file"
-	}
-	if in.SortBy == "" {
-		in.SortBy = "relevance"
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 100
-	}
-	return in, nil
+	return skillout.Emit(rc, command, data)
 }
 
 func parseTimeFilter(since string) (time.Time, error) {
@@ -375,58 +345,3 @@ func getFileType(d fs.DirEntry) string {
 	return "file"
 }
 
-func isCommonExclude(name string) bool {
-	excludes := []string{
-		".git", ".svn", ".hg",
-		"node_modules", "vendor", "__pycache__",
-		".venv", "venv", ".tox",
-		"dist", "build", "target",
-	}
-	for _, exclude := range excludes {
-		if name == exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
-func preparePreview(results []fileResult, limit int) ([]fileResult, bool) {
-	preview, truncated := skillslib.PreparePreview(results, limit)
-	if truncated {
-		dup := make([]fileResult, len(preview))
-		copy(dup, preview)
-		preview = dup
-	}
-	return preview, truncated
-}
-
-func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, results []fileResult, truncated bool) (runner.Artifact, error) {
-	if !truncated {
-		return runner.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode result: %w", err)
-		}
-	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "fs_find")
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit fs/find failure")
-	os.Exit(1)
-}

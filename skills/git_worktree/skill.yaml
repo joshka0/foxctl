@@ -42,6 +42,26 @@ signature:
       required: false
       default: false
       description: "Create new branch for add operation"
+  help:
+    short: "Manage git worktrees."
+    long: |
+      Use git/worktree to list, add, remove, or prune worktrees.
+      Example commands:
+        agentctl run git/worktree --input '{"operation":"list"}'
+        agentctl skills run git/worktree --operation list
+        agentctl run git/worktree --input '{"operation":"add","path":"../feature","branch":"feat/one"}'
+        agentctl skills run git/worktree --operation add --path ../feature --branch feat/one
+    workflows:
+      - id: list-worktrees
+        description: "List worktrees."
+        example_input:
+          operation: "list"
+      - id: add-worktree
+        description: "Add a new worktree."
+        example_input:
+          operation: "add"
+          path: "../feature"
+          branch: "feat/one"
 returns:
   - name: worktrees
     type: array

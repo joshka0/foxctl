@@ -22,7 +22,6 @@ MAX_SYMBOLS="${AGENTCTL_READ_SUGGESTIONS_MAX_SYMBOLS:-5}"
 
 INPUT=$(cat)
 file_path=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
-tool_result=$(echo "$INPUT" | jq -r '.tool_result // ""')
 
 # Skip if no file path or file doesn't exist
 if [[ -z "$file_path" || "$file_path" == "null" || ! -f "$file_path" ]]; then
@@ -51,7 +50,6 @@ if [[ "$file_size" -gt 51200 ]]; then
 fi
 
 filename=$(basename "$file_path")
-dir=$(dirname "$file_path")
 
 # Extract language-specific info
 lang=""

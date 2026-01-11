@@ -15,7 +15,8 @@ async function main() {
   try {
     // Create the OpenTUI renderer
     const renderer = await createCliRenderer({
-      exitOnCtrlC: true,
+      exitOnCtrlC: false,
+      exitSignals: [],
       targetFps: 30,
       useMouse: true,
       useAlternateScreen: true,
@@ -27,8 +28,28 @@ async function main() {
 
     console.log("agentctl-tui started. Press Ctrl+C to exit.");
 
-    // Start the render loop (switches to alternate screen)
-    renderer.start();
+    let shuttingDown = false;
+    const shutdown = (code = 0) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      try {
+        root.unmount();
+      } catch (err) {
+        console.error("Failed to unmount TUI:", err);
+      }
+      try {
+        renderer.destroy();
+      } catch (err) {
+        console.error("Failed to destroy renderer:", err);
+      }
+      process.exit(code);
+    };
+
+    (globalThis as { __agentctl_tui_shutdown?: (code?: number) => void }).__agentctl_tui_shutdown = shutdown;
+
+    process.once("SIGINT", () => shutdown(0));
+    process.once("SIGTERM", () => shutdown(0));
+    process.once("SIGQUIT", () => shutdown(0));
   } catch (error) {
     console.error("Failed to start agentctl-tui:", error);
     process.exit(1);

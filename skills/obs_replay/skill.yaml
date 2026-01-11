@@ -1,0 +1,72 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: obs/replay
+  version: 0.1.0
+  description: "Reconstruct execution events from trace ID with full artifact data"
+  tags: ["observability", "debugging", "replay", "tracing"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/obs_replay/obs_replay
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: obs/replay
+  parameters:
+    - name: trace_id
+      type: string
+      required: true
+      description: "The trace ID to look up (from wide event)"
+    - name: span_id
+      type: string
+      required: false
+      description: "Optional specific span ID to filter"
+    - name: include_data
+      type: boolean
+      required: false
+      description: "Fetch and include full artifact content from CAS"
+  help:
+    short: "Reconstruct events from a trace ID with full artifact replay"
+    long: |
+      Use obs/replay to debug and reconstruct past skill executions.
+
+      It searches wide_events.ndjson for events matching the trace_id,
+      and optionally fetches any CAS artifacts (input, result, stderr)
+      for full request/response replay.
+
+      Example commands:
+        agentctl run obs/replay --input '{"trace_id":"01KEN1..."}'
+        agentctl run obs/replay --input '{"trace_id":"01KEN1...","include_data":true}'
+    workflows:
+      - id: lookup
+        description: "Look up an event by trace ID"
+        example_input:
+          trace_id: "01KEN1ANTWEW86XP8F9HQHQS6A"
+      - id: full-replay
+        description: "Full replay with artifact data"
+        example_input:
+          trace_id: "01KEN1ANTWEW86XP8F9HQHQS6A"
+          include_data: true
+returns:
+  - name: trace_id
+    type: string
+    description: "The trace ID queried"
+  - name: count
+    type: integer
+    description: "Number of events found"
+  - name: events
+    type: array
+    description: "Reconstructed events with optional artifact data"
+  - name: summary
+    type: string
+    description: "Human-readable summary"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+      path: ".agentctl/observability"
+    - type: home
+      path: ".agentctl/cas"
+  pure: true

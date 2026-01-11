@@ -44,4 +44,4 @@ agentctl run mailbox --input '{
 
 Broadcast: Use `recipient: "*"` for all agents.
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-mailbox/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-mailbox/Skill.md`

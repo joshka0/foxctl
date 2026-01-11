@@ -21,27 +21,63 @@ signature:
       description: "Hook event type (e.g., PreToolUse, UserPromptSubmit)"
     - name: workspace_root
       type: string
-      required: true
+      required: false
       description: "Absolute path to workspace root"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
     - name: session_id
       type: string
       required: false
       description: "Claude session identifier"
+    - name: actor_id
+      type: string
+      required: false
+      description: "Actor identifier"
+    - name: prompt
+      type: string
+      required: false
+      description: "Prompt text for UserPromptSubmit/LLMRequest events"
     - name: tool_name
       type: string
       required: false
       description: "Name of the tool being used (for PreToolUse)"
+    - name: tool_canonical
+      type: string
+      required: false
+      description: "Canonical tool name (edit.apply_patch, fs.read_file, etc.)"
+    - name: tool_kind
+      type: string
+      required: false
+      description: "Tool category: read, write, exec, search, any"
     - name: tool_input
       type: object
       required: false
       description: "Raw JSON input to the tool"
-returns:
-  - name: hook_output
-    type: object
-    description: "Hook output with decision (always 'none'), context hint, and recommendations"
-  - name: recommendations
-    type: array
-    description: "List of recommended knowledge packs with scores"
+  help:
+    short: "Recommend knowledge packs based on context."
+    long: |
+      Use hooks/knowledge_router to surface relevant knowledge packs.
+      Example commands:
+        agentctl run hooks/knowledge_router --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
+        agentctl skills run hooks/knowledge_router --event PreToolUse --workspace_root /workspace/project --tool_name Edit --tool_input '{"file_path":"main.go"}'
+    workflows:
+      - id: route-knowledge
+        description: "Recommend knowledge for a tool action."
+        example_input:
+          event: "PreToolUse"
+          workspace_root: "/workspace/project"
+          tool_name: "Edit"
+          tool_input:
+            file_path: "main.go"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Hook output with decision (always 'none'), context hint, and recommendations"
+    - name: recommendations
+      type: array
+      description: "List of recommended knowledge packs with scores"
 capabilities:
   network: "none"
   filesystem:

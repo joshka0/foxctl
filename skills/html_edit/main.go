@@ -5,23 +5,21 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/pmezard/go-difflib/difflib"
 	"golang.org/x/net/html"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "html/edit"
 
 type input struct {
 	Path         string      `json:"path"`
@@ -67,30 +65,22 @@ type operationResult struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("html/edit", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("html/edit", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("html/edit", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("html/edit", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate
+	if strings.TrimSpace(in.Path) == "" {
+		return errors.New("path is required")
+	}
+	if len(in.Operations) == 0 {
+		return errors.New("at least one operation is required")
+	}
+	// Apply defaults
+	if in.ContextLines <= 0 {
+		in.ContextLines = 3
+	}
+
 	// Validate and resolve path
 	absPath, err := rc.PathValidator.ValidatePath(in.Path)
 	if err != nil {
@@ -156,7 +146,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		}
 
 		// Generate unified diff
-		diff, err = generateUnifiedDiff(absPath, original, modified, in.ContextLines)
+		diff, err = diffutil.UnifiedDiff(absPath, original, modified, in.ContextLines)
 		if err != nil {
 			return fmt.Errorf("generate diff: %w", err)
 		}
@@ -171,7 +161,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	// Prepare response
-	relPath := relativeTo(rc.PathValidator.Workspace(), absPath)
+	relPath := pathutil.RelTo(rc.PathValidator.Workspace(), absPath)
 
 	data := map[string]any{
 		"path":               relPath,
@@ -190,25 +180,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["message"] = "no changes made"
 	}
 
-	return rc.Emit("html/edit", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if strings.TrimSpace(in.Path) == "" {
-		return input{}, errors.New("path is required")
-	}
-	if len(in.Operations) == 0 {
-		return input{}, errors.New("at least one operation is required")
-	}
-	if in.ContextLines <= 0 {
-		in.ContextLines = 3
-	}
-	// FormatOutput is a pointer - nil means preserve original formatting
-	return in, nil
+	return skillout.Emit(rc, command, data)
 }
 
 func applyOperation(doc *goquery.Document, op operation) (operationResult, error) {
@@ -631,33 +603,6 @@ func preservesWhitespace(tag string) bool {
 	return false
 }
 
-func generateUnifiedDiff(path, original, modified string, contextLines int) (string, error) {
-	if original == modified {
-		return "", nil
-	}
-
-	diff := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(original),
-		B:        difflib.SplitLines(modified),
-		FromFile: "a/" + filepath.Base(path),
-		ToFile:   "b/" + filepath.Base(path),
-		Context:  contextLines,
-	}
-
-	return difflib.GetUnifiedDiffString(diff)
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
 // applyStructure generates a tree outline of the DOM structure.
 func applyStructure(doc *goquery.Document, op operation) string {
 	var buf bytes.Buffer
@@ -908,8 +853,3 @@ func applyExtract(selection *goquery.Selection, op operation) ([]string, bool) {
 	return extracted, truncated
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit html/edit failure")
-	os.Exit(1)
-}

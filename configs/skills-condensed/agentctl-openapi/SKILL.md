@@ -48,4 +48,4 @@ agentctl run http/openapi --input '{
 }'
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-openapi/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-openapi/Skill.md`

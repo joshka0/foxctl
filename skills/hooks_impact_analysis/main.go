@@ -16,19 +16,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	wsutil "github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 const (
@@ -185,35 +184,11 @@ var languages = map[string]Language{
 	},
 }
 
-// testFilePatterns matches test file paths to skip.
-var testFilePatterns = regexp.MustCompile(`_test\.go$|_test\.py$|\.test\.[jt]sx?$|\.spec\.[jt]sx?$|__test__|/testdata/|/fixtures/`)
-
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("hooks/impact_analysis", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("hooks/impact_analysis", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("hooks/impact_analysis", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("hooks/impact_analysis", "ERUNTIME", err)
-	}
+	skillmain.Main("hooks/impact_analysis", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, appCfg config.Config, in hook.Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	cfg := LoadConfig()
 
 	// Debug: print resolved binary path
@@ -225,8 +200,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, appCfg config.Config, in
 		return emitNone(rc, "disabled via AGENTCTL_IMPACT_DISABLED")
 	}
 
-	// Extract file path from tool input
-	filePath := extractFilePath(in.ToolInput)
+	// Extract file path from tool input using cross-platform path extraction
+	// Checks file_path, path, file, current_path fields
+	filePath := pathutil.ExtractPath(in.ToolInput)
 	if filePath == "" {
 		return emitNone(rc, "no file path")
 	}
@@ -238,8 +214,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, appCfg config.Config, in
 		return emitNone(rc, "unsupported language")
 	}
 
-	// Skip test files
-	if testFilePatterns.MatchString(filePath) {
+	// Skip test files using cross-platform detection
+	if pathutil.IsTestFile(filePath) {
 		return emitNone(rc, "test file")
 	}
 
@@ -260,7 +236,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, appCfg config.Config, in
 	// Get workspace root using detection chain (hook input takes priority)
 	workspace := in.WorkspaceRoot
 	if workspace == "" {
-		workspace = detectWorkspace(absPath)
+		workspace = wsutil.Detect(absPath)
 	}
 	fmt.Fprintf(os.Stderr, "impact_analysis: workspace=%s\n", workspace)
 
@@ -323,19 +299,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, appCfg config.Config, in
 	contextMsg := formatImpactContext(filename, significantImpacts)
 
 	return emitApprove(rc, contextMsg, significantImpacts)
-}
-
-func extractFilePath(toolInput json.RawMessage) string {
-	if len(toolInput) == 0 {
-		return ""
-	}
-	var input struct {
-		FilePath string `json:"file_path"`
-	}
-	if err := json.Unmarshal(toolInput, &input); err != nil {
-		return ""
-	}
-	return input.FilePath
 }
 
 func getSymbols(ctx context.Context, filePath string, maxResults int, workspace string) ([]Symbol, error) {
@@ -719,46 +682,6 @@ func hashPath(path string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-// detectWorkspace returns the workspace root using a detection chain:
-// 1. AGENTCTL_WORKSPACE - set by agentctl runner
-// 2. CLAUDE_PROJECT_DIR - set by Claude Code
-// 3. Git root detection from file path
-// 4. File's parent directory
-func detectWorkspace(filePath string) string {
-	// 1. AGENTCTL_WORKSPACE (highest priority - set by agentctl)
-	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-		return ws
-	}
-
-	// 2. CLAUDE_PROJECT_DIR (set by Claude Code)
-	if projDir := os.Getenv("CLAUDE_PROJECT_DIR"); projDir != "" {
-		return projDir
-	}
-
-	// 3. Git root detection
-	if gitRoot := findGitRoot(filePath); gitRoot != "" {
-		return gitRoot
-	}
-
-	// 4. File's parent directory (last resort)
-	return filepath.Dir(filePath)
-}
-
-// findGitRoot walks up from the given path to find the .git directory.
-func findGitRoot(path string) string {
-	dir := filepath.Dir(path)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
 // isSameFile checks if refFile refers to the same file as filePath.
 // Handles both absolute and relative paths from LSP.
 func isSameFile(filePath, refFile, workspaceRoot string) bool {
@@ -804,15 +727,15 @@ func formatImpactContext(filename string, impacts []Impact) string {
 	return sb.String()
 }
 
-func emitNone(rc *runner.RunnerContext, reason string) error {
-	output := hook.NewNone()
+func emitNone(rc *skillmain.RunContext, reason string) error {
+	output := hooks.NewNone()
 	output.Reason = reason
 	return emitOutput(rc, output)
 }
 
-func emitApprove(rc *runner.RunnerContext, contextMsg string, impacts []Impact) error {
-	output := hook.Output{
-		Decision: hook.DecisionApprove,
+func emitApprove(rc *skillmain.RunContext, contextMsg string, impacts []Impact) error {
+	output := hooks.Output{
+		Decision: hooks.DecisionApprove,
 		Context:  contextMsg,
 		Meta: map[string]any{
 			"impacts": impacts,
@@ -821,18 +744,9 @@ func emitApprove(rc *runner.RunnerContext, contextMsg string, impacts []Impact) 
 	return emitOutput(rc, output)
 }
 
-func emitOutput(rc *runner.RunnerContext, output hook.Output) error {
+func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
 	data := map[string]any{
 		"hook_output": output,
 	}
-	return rc.Emit("hooks/impact_analysis", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	return skillout.Emit(rc, "hooks/impact_analysis", data)
 }

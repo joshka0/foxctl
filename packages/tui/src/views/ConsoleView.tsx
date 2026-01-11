@@ -2,13 +2,14 @@
 // Supports SSE streaming, 1-5 rating feedback, and keyboard shortcuts
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useKeyboard } from "@opentui/react";
 import {
   useConsoles,
   useConsoleEvents,
   useConsoleMutations,
+  useAgents,
   type ConsoleHistoryEvent,
 } from "../hooks/useData";
+import { useKeyboardStable } from "../hooks/useKeyboardStable";
 
 interface ConsoleViewProps {
   height?: number;
@@ -80,9 +81,16 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [showRatingPrompt, setShowRatingPrompt] = useState(false);
+  const [daemonStatus, setDaemonStatus] = useState<string | null>(null);
+  const [daemonError, setDaemonError] = useState<string | null>(null);
+  const [pendingProvider, setPendingProvider] = useState("");
+  const [pendingModel, setPendingModel] = useState("");
+  const [configField, setConfigField] = useState<"provider" | "model" | null>(null);
+  const [configValue, setConfigValue] = useState("");
 
   // Data hooks
   const { data: consolesData, isLoading: consolesLoading, refetch: refetchConsoles } = useConsoles({ limit: 50 });
+  const { data: agentsData } = useAgents({ limit: 50 });
   const { connected, error: sseError, history, addUserMessage, clearHistory } = useConsoleEvents(
     selectedConsoleId,
     (event) => {
@@ -97,22 +105,75 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
   const mutations = useConsoleMutations();
 
   const consoles = consolesData?.consoles || [];
+  const defaultActorId = useMemo(() => {
+    const agents = agentsData?.agents || [];
+    const candidate = agents.find((agent) => agent.state === "running") || agents[0];
+    return candidate?.ns || "";
+  }, [agentsData?.agents]);
 
   // Calculate visible area
   const historyHeight = Math.max(1, height - 8);
+  const pendingProviderLabel = pendingProvider.trim() || "auto";
+  const pendingModelLabel = pendingModel.trim() || "auto";
+
+  const startConfig = useCallback(
+    (field: "provider" | "model") => {
+      setConfigField(field);
+      setConfigValue(field === "provider" ? pendingProvider : pendingModel);
+    },
+    [pendingProvider, pendingModel]
+  );
+
+  const commitConfig = useCallback(() => {
+    if (!configField) return;
+    const next = configValue.trim();
+    if (configField === "provider") {
+      setPendingProvider(next);
+    } else {
+      setPendingModel(next);
+    }
+    setConfigField(null);
+    setConfigValue("");
+  }, [configField, configValue]);
+
+  const cancelConfig = useCallback(() => {
+    setConfigField(null);
+    setConfigValue("");
+  }, []);
 
   // Handle creating a new console session
   const handleCreateConsole = useCallback(async () => {
+    setDaemonError(null);
+    setDaemonStatus("starting");
     try {
-      const session = await mutations.createSession("tui-user");
+      const meta: Record<string, unknown> = {};
+      const provider = pendingProvider.trim();
+      const model = pendingModel.trim();
+      if (provider) meta.llm_provider = provider;
+      if (model) meta.llm_model = model;
+      if (!defaultActorId) {
+        throw new Error("No agents available. Create an agent first.");
+      }
+
+      const session = await mutations.createSession(
+        defaultActorId,
+        undefined,
+        Object.keys(meta).length > 0 ? meta : undefined
+      );
       setSelectedConsoleId(session.id);
       setShowConsoleList(false);
       clearHistory();
       refetchConsoles();
+      const sessionWithDaemon = session as { daemon_status?: string; daemon_error?: string };
+      setDaemonStatus(sessionWithDaemon.daemon_status || "unknown");
+      if (sessionWithDaemon.daemon_error) {
+        setDaemonError(sessionWithDaemon.daemon_error);
+      }
     } catch (err) {
-      // Silently fail - user can try again
+      setDaemonStatus("error");
+      setDaemonError(err instanceof Error ? err.message : "Failed to create console");
     }
-  }, [mutations, clearHistory, refetchConsoles]);
+  }, [mutations, clearHistory, refetchConsoles, pendingProvider, pendingModel, defaultActorId]);
 
   // Handle sending a message
   const handleSend = useCallback(async () => {
@@ -182,8 +243,32 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
   }, [history.length, historyHeight]);
 
   // Keyboard navigation
-  useKeyboard((e) => {
+  useKeyboardStable((e) => {
     if (showConsoleList) {
+      if (configField) {
+        if (e.name === "return") {
+          commitConfig();
+          return;
+        }
+        if (e.name === "backspace") {
+          setConfigValue((v) => v.slice(0, -1));
+          return;
+        }
+        if (e.name === "escape") {
+          cancelConfig();
+          return;
+        }
+        if (e.raw && e.raw.length === 1 && !e.ctrl && !e.meta) {
+          setConfigValue((v) => v + e.raw);
+          return;
+        }
+        if (e.name === "space") {
+          setConfigValue((v) => v + " ");
+          return;
+        }
+        return;
+      }
+
       // Console list navigation
       switch (e.name) {
         case "escape":
@@ -209,6 +294,12 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
           break;
         case "n":
           handleCreateConsole();
+          break;
+        case "p":
+          startConfig("provider");
+          break;
+        case "m":
+          startConfig("model");
           break;
         case "r":
           refetchConsoles();
@@ -330,7 +421,7 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
     return (
       <box flexDirection="column" width="100%" height="100%">
         {/* Header */}
-        <box height={2} paddingLeft={1} paddingTop={1}>
+        <box height={3} paddingLeft={1} paddingTop={1} flexDirection="column">
           <text>
             <b fg="#0088ff">CONSOLE SESSIONS</b>
             {"  "}
@@ -338,6 +429,9 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
               {consoles.length} session{consoles.length !== 1 ? "s" : ""}
             </span>
             {consolesLoading && <span fg="#ffff00"> Loading...</span>}
+          </text>
+          <text fg="#666666">
+            new session llm: {pendingProviderLabel}/{pendingModelLabel}
           </text>
         </box>
 
@@ -351,6 +445,12 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
             consoles.map((console, idx) => {
               const isSelected = idx === cursor;
               const bg = isSelected ? "#444444" : undefined;
+              const meta = (console.meta || {}) as Record<string, unknown>;
+              const metaProvider = typeof meta.llm_provider === "string" ? meta.llm_provider : "";
+              const metaModel = typeof meta.llm_model === "string" ? meta.llm_model : "";
+              const llmLabel = metaProvider || metaModel
+                ? ` llm:${metaProvider || "auto"}${metaModel ? `/${metaModel}` : ""}`
+                : "";
               return (
                 <box key={console.id} height={1} backgroundColor={bg}>
                   <text fg={isSelected ? "#ffffff" : "#00ffff"}>
@@ -359,6 +459,11 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
                   </text>
                   <text fg="#888888">
                     {"  "}actor: {console.actor_id}
+                    {llmLabel && (
+                      <>
+                        {"  "}{llmLabel}
+                      </>
+                    )}
                     {"  "}
                     {new Date(console.created_at).toLocaleString()}
                   </text>
@@ -368,10 +473,20 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
           )}
         </box>
 
+        {configField && (
+          <box height={2} paddingLeft={1}>
+            <text>
+              <span fg="#888888">Set {configField}: </span>
+              <span fg="#ffffff">{configValue}</span>
+              <span fg="#00ff00">_</span>
+            </text>
+          </box>
+        )}
+
         {/* Footer */}
         <box height={1} paddingLeft={1} paddingBottom={1}>
           <text fg="#666666">
-            [j/k]navigate [Enter]select [n]new [r]refresh [Esc]back
+            [j/k]navigate [Enter]select [n]new [p]provider [m]model [r]refresh [Esc]back
           </text>
         </box>
       </box>
@@ -380,6 +495,11 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
 
   // Render console session view
   const selectedConsole = consoles.find((c) => c.id === selectedConsoleId);
+  const selectedMeta = (selectedConsole?.meta || {}) as Record<string, unknown>;
+  const selectedProvider = typeof selectedMeta.llm_provider === "string" ? selectedMeta.llm_provider : "";
+  const selectedModel = typeof selectedMeta.llm_model === "string" ? selectedMeta.llm_model : "";
+  const selectedProviderLabel = selectedProvider || "auto";
+  const selectedModelLabel = selectedModel || "auto";
   const ratingStars = lastRating ? "★".repeat(lastRating) + "☆".repeat(5 - lastRating) : "";
 
   // Render feedback modal overlay
@@ -428,19 +548,46 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
   return (
     <box flexDirection="column" width="100%" height="100%">
       {/* Header */}
-      <box height={2} paddingLeft={1} paddingTop={1}>
+      <box height={3} paddingLeft={1} paddingTop={1} flexDirection="column">
         <text>
           <b fg="#0088ff">CONSOLE:</b>
           {"  "}
           <span fg="#00ffff">{selectedConsole?.actor_id || "unknown"}</span>
           {"  "}
-          <span fg={connected ? "#00ff00" : "#ffff00"}>
-            [{connected ? "connected" : "connecting..."}]
+          <span
+            fg={
+              sseError || daemonError
+                ? "#ff0000"
+                : connected
+                  ? "#00ff00"
+                  : "#ffff00"
+            }
+          >
+            [{sseError ? "sse error" : daemonError ? "daemon error" : connected ? "connected" : "connecting..."}]
+          </span>
+          <span
+            fg={
+              daemonStatus === "running"
+                ? "#00ff00"
+                : daemonStatus === "error"
+                  ? "#ff0000"
+                  : "#ffff00"
+            }
+          >
+            {"  "}[daemon: {daemonStatus || "unknown"}]
+          </span>
+          <span fg="#888888">
+            {"  "}llm: {selectedProviderLabel}/{selectedModelLabel}
           </span>
           {isProcessing && <span fg="#ff00ff"> [processing...]</span>}
           {lastRating && <span fg="#00ffff"> [rated: {ratingStars}]</span>}
-          {sseError && <span fg="#ff0000"> [error: {sseError.message}]</span>}
+          {sseError && <span fg="#ff0000"> [SSE error: {sseError.message}]</span>}
         </text>
+        {daemonError && (
+          <text fg="#ff0000">
+            Daemon error: {daemonError}
+          </text>
+        )}
       </box>
 
       {/* History */}
@@ -461,8 +608,20 @@ export function ConsoleView({ height = 24, onExit }: ConsoleViewProps) {
           </text>
         </box>
         {history.length === 0 ? (
-          <box paddingLeft={1}>
-            <text fg="#888888">No messages yet. Press [i] to type a prompt.</text>
+          <box paddingLeft={1} flexDirection="column">
+            {daemonError ? (
+              <box flexDirection="column">
+                <text fg="#ff0000">Agent daemon failed to start.</text>
+                <text fg="#888888">Make sure you have an LLM API key configured:</text>
+                <text fg="#666666">  export GROQ_API_KEY=your-key      (fastest)</text>
+                <text fg="#666666">  export GEMINI_API_KEY=your-key    (Google)</text>
+                <text fg="#666666">  export OPENROUTER_API_KEY=key     (multi-model)</text>
+                <text fg="#666666">  export OPENAI_API_KEY=your-key    (OpenAI)</text>
+                <text fg="#666666">  export ANTHROPIC_API_KEY=your-key (Anthropic/Claude)</text>
+              </box>
+            ) : (
+              <text fg="#888888">No messages yet. Press [i] to type a prompt.</text>
+            )}
           </box>
         ) : (
           <box flexDirection="column" overflow="hidden" paddingLeft={1}>

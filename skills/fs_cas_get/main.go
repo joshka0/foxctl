@@ -3,18 +3,18 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
+
+const command = "fs/cas_get"
 
 type input struct {
 	Digest string `json:"digest"`
@@ -22,30 +22,21 @@ type input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("fs/cas_get", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("fs/cas_get", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("fs/cas_get", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("fs/cas_get", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate digest format
+	if strings.TrimSpace(in.Digest) == "" {
+		return fmt.Errorf("digest is required")
+	}
+	if !strings.HasPrefix(in.Digest, "sha256:") {
+		return fmt.Errorf("digest must start with 'sha256:'")
+	}
+	if len(in.Digest) != 71 { // "sha256:" (7) + hex (64)
+		return fmt.Errorf("invalid digest length")
+	}
+
 	// Get object metadata first
 	obj, err := rc.CASStore.Head(ctx, in.Digest)
 	if err != nil {
@@ -116,30 +107,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"summary": fmt.Sprintf("Retrieved %d bytes from CAS to %s", obj.Size, filepath.Base(outputPath)),
 	}
 
-	envMeta := envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	}
-
-	return rc.Emit("fs/cas_get", data, "application/json", envMeta)
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if strings.TrimSpace(in.Digest) == "" {
-		return input{}, fmt.Errorf("digest is required")
-	}
-	// Validate digest format
-	if !strings.HasPrefix(in.Digest, "sha256:") {
-		return input{}, fmt.Errorf("digest must start with 'sha256:'")
-	}
-	if len(in.Digest) != 71 { // "sha256:" (7) + hex (64)
-		return input{}, fmt.Errorf("invalid digest length")
-	}
-	return in, nil
+	return skillout.Emit(rc, command, data)
 }
 
 func extensionFromKind(kind string) string {
@@ -172,10 +140,4 @@ func extensionFromKind(kind string) string {
 	default:
 		return ""
 	}
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
-	os.Exit(1)
 }

@@ -45,4 +45,4 @@ agentctl run data/jq --input '{
 "group_by(.category) | map({category: .[0].category, count: length})"
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-jq/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-jq/Skill.md`

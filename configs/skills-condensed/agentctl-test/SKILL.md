@@ -30,4 +30,4 @@ agentctl run test/run --input '{"path": "./...", "mode": "test"}'
 {"data": {"passed": 42, "failed": 1, "skipped": 3, "duration_ms": 5230, "coverage_pct": 78.5, "failures": [...]}}
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-test/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-test/Skill.md`

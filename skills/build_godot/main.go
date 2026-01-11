@@ -5,18 +5,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
@@ -58,50 +55,19 @@ type ExportPreset struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err, "Check AGENTCTL_HOME and config file permissions")
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err, "Failed to initialize runner context")
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("EARG", err, "Provide valid JSON input with required action field")
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("ERUNTIME", err, "Check godot/dotnet installation and project structure")
-	}
+	skillmain.Main(skillName, run)
 }
 
-func parseInput(r io.Reader) (Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return Input{}, fmt.Errorf("decode input: %w", err)
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Validate
+	if strings.TrimSpace(in.Action) == "" {
+		return fmt.Errorf("action is required")
 	}
-
 	// Apply defaults
 	if in.GodotPath == "" {
 		in.GodotPath = "godot"
 	}
 
-	// Validate action
-	if strings.TrimSpace(in.Action) == "" {
-		return Input{}, fmt.Errorf("action is required")
-	}
-
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	workspace := rc.PathValidator.Workspace()
 
 	switch in.Action {
@@ -122,7 +88,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	}
 }
 
-func listPresets(ctx context.Context, rc *runner.RunnerContext, workspace string) error {
+func listPresets(ctx context.Context, rc *skillmain.RunContext, workspace string) error {
 	presets, err := parseExportPresets(workspace)
 	if err != nil {
 		return err
@@ -143,7 +109,7 @@ func listPresets(ctx context.Context, rc *runner.RunnerContext, workspace string
 	return emitSuccess(rc, result)
 }
 
-func exportProject(ctx context.Context, rc *runner.RunnerContext, workspace string, in Input, dryRun bool) error {
+func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input, dryRun bool) error {
 	// Validate preset is provided
 	if strings.TrimSpace(in.Preset) == "" {
 		return fmt.Errorf("preset is required for action %q", in.Action)
@@ -345,19 +311,19 @@ func parseExportPresets(workspace string) ([]ExportPreset, error) {
 	return presets, nil
 }
 
-func buildCSharp(ctx context.Context, rc *runner.RunnerContext, workspace string, in Input) error {
+func buildCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "build")
 }
 
-func restoreCSharp(ctx context.Context, rc *runner.RunnerContext, workspace string, in Input) error {
+func restoreCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "restore")
 }
 
-func cleanCSharp(ctx context.Context, rc *runner.RunnerContext, workspace string, in Input) error {
+func cleanCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "clean")
 }
 
-func runDotnet(ctx context.Context, rc *runner.RunnerContext, workspace string, in Input, command string) error {
+func runDotnet(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input, command string) error {
 	// Find the .csproj file
 	csprojPath, err := findCsproj(workspace)
 	if err != nil {
@@ -453,20 +419,6 @@ func findCsproj(workspace string) (string, error) {
 	return "", fmt.Errorf("no .csproj file found in %s (is this a C# Godot project?)", workspace)
 }
 
-func emitSuccess(rc *runner.RunnerContext, result map[string]any) error {
-	meta := envelope.Meta{
-		TS:        time.Now().UTC().Format(time.RFC3339),
-		Source:    "run",
-		Runner:    "exec",
-		Workspace: rc.PathValidator.Workspace(),
-	}
-
-	return rc.Emit(skillName, result, "application/json", meta)
-}
-
-func fail(code string, err error, hint string) {
-	data := map[string]any{"hint": hint}
-	env := envelope.Error(skillName, code, err.Error(), data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
-	os.Exit(1)
+func emitSuccess(rc *skillmain.RunContext, result map[string]any) error {
+	return skillout.Emit(rc, skillName, result)
 }

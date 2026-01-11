@@ -4,16 +4,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
@@ -28,30 +24,10 @@ type input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace
 	if workspace == "" {
@@ -63,7 +39,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	}
 
 	// Open pattern store
-	patternStore, err := optimization.OpenPatternStore(ctx, cfg.Storage.Root)
+	patternStore, err := optimization.OpenPatternStore(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open pattern store: %w", err)
 	}
@@ -75,13 +51,13 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	case "clear":
 		return clearPatterns(ctx, rc, patternStore, in)
 	case "hints":
-		return getHints(ctx, rc, cfg, patternStore, absWorkspace, in)
+		return getHints(ctx, rc, patternStore, absWorkspace, in)
 	default:
 		return fmt.Errorf("unknown action: %s (use: list, clear, hints)", in.Action)
 	}
 }
 
-func listPatterns(ctx context.Context, rc *runner.RunnerContext, store optimization.PatternStore, in input) error {
+func listPatterns(ctx context.Context, rc *skillmain.RunContext, store optimization.PatternStore, in input) error {
 	limit := in.Limit
 	if limit <= 0 {
 		limit = 50
@@ -109,13 +85,13 @@ func listPatterns(ctx context.Context, rc *runner.RunnerContext, store optimizat
 		}
 	}
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"patterns": result,
 		"count":    len(result),
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	})
 }
 
-func clearPatterns(ctx context.Context, rc *runner.RunnerContext, store optimization.PatternStore, in input) error {
+func clearPatterns(ctx context.Context, rc *skillmain.RunContext, store optimization.PatternStore, in input) error {
 	if err := store.Clear(ctx, in.Role); err != nil {
 		return fmt.Errorf("clear patterns: %w", err)
 	}
@@ -125,13 +101,13 @@ func clearPatterns(ctx context.Context, rc *runner.RunnerContext, store optimiza
 		msg = fmt.Sprintf("patterns cleared for role: %s", in.Role)
 	}
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"message": msg,
 		"role":    in.Role,
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	})
 }
 
-func getHints(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, patternStore optimization.PatternStore, workspace string, in input) error {
+func getHints(ctx context.Context, rc *skillmain.RunContext, patternStore optimization.PatternStore, workspace string, in input) error {
 	if in.Role == "" {
 		return fmt.Errorf("role is required for hints")
 	}
@@ -140,7 +116,7 @@ func getHints(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, 
 	}
 
 	// Open trajectory store for collector
-	trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
+	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open trajectory store: %w", err)
 	}
@@ -166,15 +142,9 @@ func getHints(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, 
 	// Also include formatted prompt
 	formatted := collector.FormatHintsForPrompt(hints)
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"hints":     result,
 		"count":     len(result),
 		"formatted": formatted,
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
+	})
 }

@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -163,22 +162,14 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 	topic := args[0]
 
 	// Load data payload
-	var dataBytes []byte
-	var err error
-	if bbPostDataFile != "" {
-		dataBytes, err = os.ReadFile(bbPostDataFile)
-		if err != nil {
-			return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read data file: %v", err))
-		}
-	} else if bbPostData != "" {
-		dataBytes = []byte(bbPostData)
-	} else {
+	if bbPostDataFile == "" && bbPostData == "" {
 		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), "either --data or --data-file is required")
 	}
-
-	// Validate JSON
-	var payload map[string]any
-	if err := json.Unmarshal(dataBytes, &payload); err != nil {
+	dataBytes, err := readPayload(cmd, bbPostDataFile, bbPostData)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read data payload: %v", err))
+	}
+	if err := requireValidJSON(dataBytes); err != nil {
 		return writeErrorEnvelope(cmd, "bb/post", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON data: %v", err))
 	}
 
@@ -213,16 +204,7 @@ func runBBPost(cmd *cobra.Command, args []string) error {
 		"created_at": time.Unix(record.TS, 0).UTC().Format(time.RFC3339),
 	}
 
-	env := envelope.OK("bb/post", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	return writeOK(cmd, "bb/post", data, "run", profilesCoreAgent)
 }
 
 func runBBSearch(cmd *cobra.Command, args []string) error {
@@ -244,19 +226,10 @@ func runBBSearch(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("bb/search", map[string]any{
+	return writeOK(cmd, "bb/search", map[string]any{
 		"results": records,
 		"count":   len(records),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	}, "run", profilesCoreAgent)
 }
 
 func runBBClaim(cmd *cobra.Command, args []string) error {
@@ -296,16 +269,7 @@ func runBBClaim(cmd *cobra.Command, args []string) error {
 		"lease_expires_at": time.Unix(record.Lease.Until, 0).UTC().Format(time.RFC3339),
 	}
 
-	env := envelope.OK("bb/claim", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	return writeOK(cmd, "bb/claim", data, "run", profilesCoreAgent)
 }
 
 func runBBRelease(cmd *cobra.Command, args []string) error {
@@ -334,16 +298,7 @@ func runBBRelease(cmd *cobra.Command, args []string) error {
 		"released": true,
 	}
 
-	env := envelope.OK("bb/release", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	return writeOK(cmd, "bb/release", data, "run", profilesCoreAgent)
 }
 
 func runBBList(cmd *cobra.Command, args []string) error {
@@ -365,19 +320,10 @@ func runBBList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("bb/list", map[string]any{
+	return writeOK(cmd, "bb/list", map[string]any{
 		"items": records,
 		"count": len(records),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	}, "run", profilesCoreAgent)
 }
 
 func runBBWatch(cmd *cobra.Command, args []string) error {
@@ -402,7 +348,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 	recordCh, errCh := bbStore.Watch(ctx, bbWatchNS, topic, fromTS)
 
 	// Create NDJSON writer
-	writer := envelope.NewWriter(os.Stdout)
+	writer := envelope.NewWriter(cmd.OutOrStdout())
 
 	// Track sequence number
 	seq := 0
@@ -417,7 +363,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 				"status": "stopped",
 			}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 				m.Source = "run"
-				m.Profiles = []string{"core/v1", "agent/v1"}
+				m.Profiles = profilesCoreAgent
 				m.Seq = &seq
 				m.Final = &finalBool
 			}))
@@ -440,7 +386,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 					"status": "completed",
 				}, envelope.WithMetaMutator(func(m *envelope.Meta) {
 					m.Source = "run"
-					m.Profiles = []string{"core/v1", "agent/v1"}
+					m.Profiles = profilesCoreAgent
 					m.Seq = &seq
 					m.Final = &finalBool
 				}))
@@ -469,7 +415,7 @@ func runBBWatch(cmd *cobra.Command, args []string) error {
 				Meta: envelope.Meta{
 					TS:       time.Now().UTC().Format(time.RFC3339),
 					Source:   "run",
-					Profiles: []string{"core/v1", "agent/v1"},
+					Profiles: profilesCoreAgent,
 					Seq:      &seq,
 					Final:    &finalBool,
 				},

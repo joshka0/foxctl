@@ -440,6 +440,10 @@ export interface ConsoleSession {
   created_at: string;
   last_attached_at: string;
   meta?: Record<string, unknown>;
+  // Daemon status info (returned on create)
+  daemon_status?: "already_running" | "daemon_spawned" | "created_and_spawned" | "unknown" | "error";
+  agent_id?: string;
+  daemon_error?: string;
 }
 
 export interface ConsoleSessionCreate {

@@ -15,9 +15,11 @@ import (
 var skillBinaryCache sync.Map
 
 var stableGoModCache string
+var stableGoBuildCache string
 
 func init() {
 	stableGoModCache = strings.TrimSpace(goEnv("GOMODCACHE"))
+	stableGoBuildCache = strings.TrimSpace(goEnv("GOCACHE"))
 }
 
 func goEnv(key string) string {
@@ -108,6 +110,46 @@ func installFSReadSkill(t *testing.T, cfg config.Config) {
 	installSkillBinary(t, binaryPath, "./skills/fs_read")
 }
 
+func installTodoSkill(t *testing.T) config.Config {
+	t.Helper()
+	orig := newDaemonClient
+	t.Cleanup(func() { newDaemonClient = orig })
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	agentHome := filepath.Join(tmp, ".agentctl")
+	cfg := config.Config{
+		Home:           agentHome,
+		InlineOutputKB: config.DefaultInlineOutputKB,
+		MaxCaptureKB:   config.DefaultMaxCaptureKB,
+		Paths: config.Paths{
+			CAS:    filepath.Join(agentHome, "cas"),
+			Jobs:   filepath.Join(agentHome, "jobs"),
+			Cache:  filepath.Join(agentHome, "cache"),
+			Skills: filepath.Join(agentHome, "skills"),
+		},
+	}
+
+	for _, dir := range []string{cfg.Home, cfg.Paths.CAS, cfg.Paths.Jobs, cfg.Paths.Cache, cfg.Paths.Skills} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("todo/manage"))
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatalf("skill dir: %v", err)
+	}
+	copySkillFile(t, filepath.Join(repoRoot(t), "skills", "todo", "skill.yaml"), filepath.Join(dest, "skill.yaml"))
+
+	binaryPath := filepath.Join(dest, "bin")
+	if runtime.GOOS == "windows" {
+		binaryPath += ".exe"
+	}
+	installSkillBinary(t, binaryPath, "./skills/todo")
+	return cfg
+}
+
 func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
 	t.Helper()
 	args := []string{"build", "-o", dest, pkg}
@@ -121,6 +163,9 @@ func buildSkillBinaryFromSource(t *testing.T, dest, pkg string) {
 	env = withEnv(env, "GOFLAGS", "-modcacherw -buildvcs=false")
 	if stableGoModCache != "" {
 		env = withEnv(env, "GOMODCACHE", stableGoModCache)
+	}
+	if stableGoBuildCache != "" {
+		env = withEnv(env, "GOCACHE", stableGoBuildCache)
 	}
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

@@ -24,6 +24,8 @@ type BoardStore interface {
 	// Message operations
 	SendMessage(ctx context.Context, msg *agent.BoardMessage) error
 	Inbox(ctx context.Context, filter agent.InboxFilter) ([]agent.BoardMessage, error)
+	// MarkSurfaced marks messages as surfaced (shown in context, but not explicitly read).
+	MarkSurfaced(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
 	MarkRead(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
 	AckMessages(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error)
 	// CountMessagesByTask counts unread messages per task grouped by sender type
@@ -109,9 +111,15 @@ func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]
 		query += ` AND stream = ?`
 		args = append(args, filter.Stream)
 	}
-	if filter.OnlyUnread {
+	// Status filtering
+	// - OnlyUnsurfaced: strictly "unread" (never surfaced)
+	// - OnlyUnread: "unread" + "surfaced" (not explicitly read yet)
+	if filter.OnlyUnsurfaced {
 		query += ` AND status = ?`
 		args = append(args, agent.BoardMessageStatusUnread)
+	} else if filter.OnlyUnread {
+		query += ` AND status IN (?, ?)`
+		args = append(args, agent.BoardMessageStatusUnread, agent.BoardMessageStatusSurfaced)
 	}
 
 	// Order by priority (1 first), then created_at (newest first)
@@ -149,21 +157,62 @@ func (s *boardSQLStore) MarkRead(ctx context.Context, workspaceID, _ string, mes
 		placeholders += ", ?"
 	}
 
-	args := []any{agent.BoardMessageStatusRead, workspaceID}
+	// Mark both "unread" and "surfaced" as "read" (explicit read action)
+	args := []any{
+		agent.BoardMessageStatusRead,
+		workspaceID,
+		agent.BoardMessageStatusUnread,
+		agent.BoardMessageStatusSurfaced,
+	}
 	for _, id := range messageIDs {
 		args = append(args, id)
 	}
 
 	query := fmt.Sprintf(`
-		UPDATE board_messages 
+		UPDATE board_messages
 		SET status = ?
-		WHERE workspace_id = ? AND id IN (%s) AND status = 'unread'`, placeholders)
+		WHERE workspace_id = ? AND status IN (?, ?) AND id IN (%s)`, placeholders)
 
 	res, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("board: mark read: %w", err)
 	}
 	// RowsAffected error is nil for SQLite.
+	affected, _ := res.RowsAffected() //nolint:errcheck
+	return int(affected), nil
+}
+
+// MarkSurfaced marks messages as surfaced (injected into AI context).
+// This is used by hooks to suppress re-injecting the same messages forever,
+// without claiming the user has explicitly read them.
+func (s *boardSQLStore) MarkSurfaced(ctx context.Context, workspaceID, _ string, messageIDs []string) (int, error) {
+	if len(messageIDs) == 0 {
+		return 0, nil
+	}
+
+	placeholders := "?"
+	for i := 1; i < len(messageIDs); i++ {
+		placeholders += ", ?"
+	}
+
+	args := []any{
+		agent.BoardMessageStatusSurfaced,
+		workspaceID,
+		agent.BoardMessageStatusUnread,
+	}
+	for _, id := range messageIDs {
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE board_messages
+		SET status = ?
+		WHERE workspace_id = ? AND status = ? AND id IN (%s)`, placeholders)
+
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("board: mark surfaced: %w", err)
+	}
 	affected, _ := res.RowsAffected() //nolint:errcheck
 	return int(affected), nil
 }
@@ -436,8 +485,8 @@ var ErrReservationConflict = errors.New("board: reservation conflict")
 func (s *boardSQLStore) CountMessagesByTask(ctx context.Context, workspaceID, taskID string) (admin, overseer, total int, err error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT sender FROM board_messages
-		WHERE workspace_id = ? AND task_id = ? AND status = ?`,
-		workspaceID, taskID, agent.BoardMessageStatusUnread)
+		WHERE workspace_id = ? AND task_id = ? AND status IN (?, ?)`,
+		workspaceID, taskID, agent.BoardMessageStatusUnread, agent.BoardMessageStatusSurfaced)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("board: count messages: %w", err)
 	}

@@ -73,6 +73,11 @@ signature:
       type: array
       required: false
       description: Specific workspaces to search (requires remote=true)
+    - name: format
+      type: string
+      required: false
+      default: json
+      description: Output format - "json" (default) or "tree" (displays file paths as directory tree)
   returns:
     - name: query
       type: string
@@ -86,6 +91,9 @@ signature:
     - name: stats
       type: object
       description: Search statistics (counts, latencies, missing sources)
+    - name: tree_text
+      type: string
+      description: ASCII tree visualization of related files (present when format=tree)
   help:
     short: "Search code, sessions, and memories with semantic understanding"
     long: |
@@ -131,6 +139,12 @@ signature:
       - remote=true, workspaces=["ws1","ws2"]: Search specific workspaces
       - Requires TURSO_DATABASE_URL and TURSO_AUTH_TOKEN environment variables
       - Embedding dimensions must match (all 1024 for Voyage)
+
+      Example commands:
+        agentctl run code/semantic_search --input '{"query":"authentication middleware","scope":["symbols"],"limit":10}'
+        agentctl skills run code/semantic_search --query "authentication middleware" --scope symbols --limit 10
+        agentctl run code/semantic_search --input '{"query":"database migration issues","scope":["sessions"],"include_context":true}'
+        agentctl skills run code/semantic_search --query "database migration issues" --scope sessions --include_context
     workflows:
       - id: search-all
         description: "Search all sources for a question"
@@ -161,6 +175,12 @@ signature:
         example_input:
           query: "how does authentication connect to database"
           scope: ["codemaps"]
+      - id: search-tree
+        description: "Show related files as a directory tree"
+        example_input:
+          query: "embedding vector search"
+          scope: ["symbols"]
+          format: "tree"
 capabilities:
   network: "egress"
   filesystem:

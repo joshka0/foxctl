@@ -9,14 +9,13 @@ import (
 	"os"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	openapiauth "github.com/jkatigb/agentctl/internal/openapi/auth"
 	"github.com/jkatigb/agentctl/internal/openapi/builder"
 	"github.com/jkatigb/agentctl/internal/openapi/client"
 	"github.com/jkatigb/agentctl/internal/openapi/loader"
 	"github.com/jkatigb/agentctl/internal/openapi/pagination"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/secrets"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -55,33 +54,13 @@ type RetryConfig struct {
 	MaxMS       int     `json:"max_ms"`
 }
 
-func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("http/openapi", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("http/openapi", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
+const command = "http/openapi"
 
-	var in Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("http/openapi", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-	if err := run(ctx, rc, in); err != nil {
-		if openapiErr, ok := err.(*client.Error); ok {
-			failWithHint("http/openapi", openapiErr.Code, openapiErr.Message, openapiErr.Response)
-		}
-		fail("http/openapi", "ERUNTIME", err)
-	}
+func main() {
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if in.Spec == "" {
 		return &client.Error{
@@ -203,7 +182,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	return emitResponse(rc, response, nil)
 }
 
-func executeWithPagination(ctx context.Context, rc *runner.RunnerContext, req *http.Request, httpClient *client.Client, pagingCfg *PagingConfig) error {
+func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *http.Request, httpClient *client.Client, pagingCfg *PagingConfig) error {
 	// Create paginator
 	paginator, err := pagination.New(pagination.Config{
 		Strategy:     pagination.Strategy(pagingCfg.Strategy),
@@ -367,7 +346,7 @@ func aggregateResponses(bodies []any) any {
 	return bodies
 }
 
-func emitDryRun(rc *runner.RunnerContext, req *builder.Request, in Input) error {
+func emitDryRun(rc *skillmain.RunContext, req *builder.Request, in Input) error {
 	// Redact sensitive headers
 	headers := secrets.RedactHeaders(req.Headers)
 
@@ -414,10 +393,10 @@ func emitDryRun(rc *runner.RunnerContext, req *builder.Request, in Input) error 
 		},
 	}
 
-	return rc.Emit("http/openapi", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, command, data)
 }
 
-func emitResponse(rc *runner.RunnerContext, resp *client.Response, pagingSummary *pagination.Summary) error {
+func emitResponse(rc *skillmain.RunContext, resp *client.Response, pagingSummary *pagination.Summary) error {
 	summary := map[string]any{
 		"status_code": resp.StatusCode,
 		"headers":     secrets.RedactHeaders(resp.Headers),
@@ -458,27 +437,7 @@ func emitResponse(rc *runner.RunnerContext, resp *client.Response, pagingSummary
 		data["body"] = resp.Body
 	}
 
-	return rc.Emit("http/openapi", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit http/openapi failure")
-	os.Exit(1)
-}
-
-func failWithHint(command, code, message string, resp *client.Response) {
-	data := map[string]any{}
-	if resp != nil {
-		data["summary"] = map[string]any{
-			"status_code": resp.StatusCode,
-			"headers":     secrets.RedactHeaders(resp.Headers),
-		}
-		data["hint"] = generateHint(code, resp.StatusCode)
-	}
-	env := envelope.Error(command, code, message, data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit http/openapi failure")
-	os.Exit(1)
+	return skillout.Emit(rc, command, data)
 }
 
 func generateHint(code string, statusCode int) string {

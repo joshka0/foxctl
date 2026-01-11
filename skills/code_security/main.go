@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,11 +13,11 @@ import (
 	"sort"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "code/security"
 
 type input struct {
 	Path              string   `json:"path"`
@@ -344,30 +343,21 @@ var securityPatterns = []securityPattern{
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/security", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/security", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/security", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/security", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.ScanMode == "" {
+		in.ScanMode = "scan"
+	}
+	if in.SeverityThreshold == "" {
+		in.SeverityThreshold = "low"
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 100
+	}
+
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
 	if in.Path != "" {
@@ -427,25 +417,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("code/security", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, command, data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.ScanMode == "" {
-		in.ScanMode = "scan"
-	}
-	if in.SeverityThreshold == "" {
-		in.SeverityThreshold = "low"
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 100
-	}
-	return in, nil
-}
 
 func scanDirectory(dir, workspace string, in input) ([]vulnerability, error) {
 	var vulns []vulnerability
@@ -677,22 +651,17 @@ func preparePreview(vulns []vulnerability, limit int) ([]vulnerability, bool) {
 	return vulns[:limit], true
 }
 
-func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, vulns []vulnerability, truncated bool) (runner.Artifact, error) {
+func persistResultsArtifact(ctx context.Context, rc *skillmain.RunContext, vulns []vulnerability, truncated bool) (skillmain.Artifact, error) {
 	if !truncated {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
 	for _, v := range vulns {
 		if err := enc.Encode(v); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode vulnerability: %w", err)
+			return skillmain.Artifact{}, fmt.Errorf("encode vulnerability: %w", err)
 		}
 	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_security")
+	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_security")
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/security failure")
-	os.Exit(1)
-}

@@ -81,4 +81,4 @@ agentctl workflow list
 
 Built-in: `pre-impl-analysis`, `code-review`, `lsp-analysis`
 
-Full docs: See individual skill docs in `configs/skills/`
+Full docs: See individual skill docs in `~/.agentctl/share/configs/skills/`

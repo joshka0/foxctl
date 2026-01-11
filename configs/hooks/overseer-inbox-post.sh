@@ -72,7 +72,40 @@ hook_output="$(printf '%s' "$result" | jq -c '.data.hook_output // {}')"
 context="$(printf '%s' "$hook_output" | jq -r '.context // ""')"
 
 if [[ -n "$context" && "$context" != "null" ]]; then
-  # For PostToolUse: use hookSpecificOutput with PostToolUse event name
+  opencode_session_id="${OPENCODE_SESSION_ID:-}"
+  if [[ -z "$opencode_session_id" || "$opencode_session_id" == "null" ]]; then
+    opencode_session_id="$(printf '%s' "$payload" | jq -r '.sessionID // .session_id // ""' 2>/dev/null || true)"
+  fi
+
+  if [[ -n "$opencode_session_id" && "$opencode_session_id" != "null" ]]; then
+    # Sanitize session ID to prevent path traversal attacks
+    opencode_session_id="${opencode_session_id//[^a-zA-Z0-9_-]/}"
+    if [[ -z "$opencode_session_id" ]]; then
+      echo '{}'
+      exit 0
+    fi
+
+    # Use Context Buffer API to enqueue context for injection
+    enqueue_input=$(jq -nc \
+      --arg sid "$opencode_session_id" \
+      --arg ws "$workspace_root" \
+      --arg src "Overseer Messages" \
+      --arg ctx "$context" \
+      '{
+        session_id: $sid,
+        workspace: $ws,
+        source: $src,
+        context: $ctx,
+        priority: 1
+      }')
+
+    # Call context enqueue skill (best-effort, don't block on failure)
+    printf '%s' "$enqueue_input" | "$AGENTCTL_BIN" run hooks/context_enqueue --ephemeral --input-file - >/dev/null 2>&1 || true
+
+    echo '{}'
+    exit 0
+  fi
+
   jq -n --arg ctx "$context" '{
     hookSpecificOutput: {
       hookEventName: "PostToolUse",

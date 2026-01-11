@@ -22,8 +22,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/indexing/rerank"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
@@ -83,7 +83,7 @@ const (
 
 // Input is the expected JSON input.
 type Input struct {
-	Query          string   `json:"query"`
+	Query          string   `json:"query" validate:"required"`
 	Scope          []string `json:"scope,omitempty"`           // ["symbols", "sessions", "memories", "tasks"]
 	Workspace      string   `json:"workspace,omitempty"`       // Workspace path (defaults to cwd)
 	Limit          int      `json:"limit,omitempty"`           // Default: 20
@@ -91,6 +91,7 @@ type Input struct {
 	IncludeContext *bool    `json:"include_context,omitempty"` // Include session context hints (default: true)
 	Summarize      bool     `json:"summarize,omitempty"`       // Send results to LLM for synthesis
 	SummarizeModel string   `json:"summarize_model,omitempty"` // Override default LLM model
+	Format         string   `json:"format,omitempty"`          // Output format: "json" (default), "tree"
 
 	// Remote/cross-workspace options (requires Turso)
 	Remote     bool     `json:"remote,omitempty"`     // Use remote Turso database
@@ -110,6 +111,7 @@ type Output struct {
 	ContextHints []ContextHint     `json:"context_hints,omitempty"`
 	Stats        SearchStats       `json:"stats"`
 	Summary      *SynthesisSummary `json:"summary,omitempty"` // Present when summarize=true
+	TreeText     string            `json:"tree_text,omitempty"` // Present when format=tree
 }
 
 // SynthesisSummary contains the LLM-generated synthesis of search results.
@@ -166,52 +168,10 @@ type SearchStats struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail(ErrCodeInput, err)
-	}
-
-	out, err := search(ctx, cfg, in)
-	if err != nil {
-		// Determine error code based on error type
-		code := ErrCodeRuntime
-		if strings.Contains(err.Error(), "API") || strings.Contains(err.Error(), "embedding") {
-			code = ErrCodeEmbedProvider
-		}
-		fail(code, err)
-	}
-
-	env := envelope.OK(Command, out)
-	if err := json.NewEncoder(os.Stdout).Encode(env); err != nil {
-		fail(ErrCodeRuntime, err)
-	}
+	skillmain.Main(Command, run)
 }
 
-func parseInput(r *os.File) (*Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return nil, fmt.Errorf("invalid JSON input: %w", err)
-	}
-
-	// Validate required fields
-	if strings.TrimSpace(in.Query) == "" {
-		return nil, fmt.Errorf("query is required")
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if len(in.Scope) == 0 {
 		in.Scope = []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
@@ -223,19 +183,8 @@ func parseInput(r *os.File) (*Input, error) {
 		in.MinSimilarity = DefaultMinSimilarity
 	}
 	if in.Workspace == "" {
-		// Prefer AGENTCTL_WORKSPACE (set by runner) over cwd (sandbox temp dir)
-		if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-			in.Workspace = ws
-		} else {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get working directory: %w", err)
-			}
-			in.Workspace = cwd
-		}
+		in.Workspace = rc.PathValidator.Workspace()
 	}
-
-	// Apply default for include_context (true per skill.yaml)
 	if in.IncludeContext == nil {
 		defaultTrue := true
 		in.IncludeContext = &defaultTrue
@@ -245,11 +194,16 @@ func parseInput(r *os.File) (*Input, error) {
 	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true}
 	for _, s := range in.Scope {
 		if !validScopes[s] {
-			return nil, fmt.Errorf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps)", s)
+			return fmt.Errorf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps)", s)
 		}
 	}
 
-	return &in, nil
+	out, err := search(ctx, rc.Config, &in)
+	if err != nil {
+		return err
+	}
+
+	return skillout.Emit(rc, Command, out)
 }
 
 func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
@@ -595,6 +549,11 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 		}
 	}
 
+	// Render tree view if requested
+	if in.Format == "tree" {
+		out.TreeText = renderResultsAsTree(fusedResults)
+	}
+
 	return out, nil
 }
 
@@ -689,13 +648,21 @@ func createProviderWithModel(model string) (semantic.EmbeddingProvider, error) {
 		})
 	}
 
-	// Auto-detect provider from API keys
+	// Auto-detect provider from API keys with scope-based model selection
 	if voyageKey != "" {
+		// Use scope-based default when model is empty
+		if model == "" {
+			model, _ = semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
+		}
 		return semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey: voyageKey,
 			Model:  model,
 		})
 	} else if geminiKey != "" {
+		// Gemini fallback (not recommended - dimension mismatch with Voyage)
+		if model == "" {
+			model = "gemini-embedding-001"
+		}
 		return semantic.NewGeminiProvider(semantic.GeminiConfig{
 			APIKey: geminiKey,
 			Model:  model,
@@ -798,6 +765,17 @@ func searchSymbolsWithRetrieval(
 	// Create generator with embedding provider
 	// The Generator handles hybrid search internally (BM25 + semantic when embedProvider is set)
 	gen := retrieval.NewGenerator(memStore, embedProvider, workspacePath, logger)
+
+	// Wire up SearchableStore for vector search when embeddings are available
+	if embedProvider != nil && queryEmbedding != nil {
+		wrappedDB := dbdriver.WrapSQLDB(memStore.DB(), dbdriver.DriverSQLite)
+		searchStore, searchErr := memStore.EnableSearch(wrappedDB, workspaceID)
+		if searchErr == nil {
+			gen = gen.WithSearchableStore(searchStore)
+			logger.Debug().Msg("enabled SearchableStore for hybrid search")
+		}
+		// If EnableSearch fails, we fall back to BM25 (no error returned)
+	}
 
 	// Configure options for symbol search
 	opts := retrieval.DefaultOptions()
@@ -1742,11 +1720,6 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
-	_ = json.NewEncoder(os.Stdout).Encode(env)
-	os.Exit(1)
-}
 
 // LLMProvider represents an LLM provider for synthesis.
 type LLMProvider struct {
@@ -1969,4 +1942,95 @@ func parseSynthesisResponse(content string) (*SynthesisSummary, error) {
 	}
 
 	return &summary, nil
+}
+
+// renderResultsAsTree builds a tree visualization from result file paths.
+// Groups files by directory structure and renders with ASCII tree characters.
+func renderResultsAsTree(results []Result) string {
+	// Extract unique paths from results (only symbol results have paths)
+	pathSet := make(map[string]bool)
+	for _, r := range results {
+		if r.Path != "" {
+			pathSet[r.Path] = true
+		}
+	}
+
+	if len(pathSet) == 0 {
+		return "(no file paths in results)"
+	}
+
+	// Sort paths for consistent output
+	paths := make([]string, 0, len(pathSet))
+	for p := range pathSet {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	// Build tree structure: map of path components to children
+	type treeNode struct {
+		children map[string]*treeNode
+		isFile   bool
+	}
+
+	root := &treeNode{children: make(map[string]*treeNode)}
+
+	for _, path := range paths {
+		parts := strings.Split(path, "/")
+		current := root
+		for i, part := range parts {
+			if current.children[part] == nil {
+				current.children[part] = &treeNode{
+					children: make(map[string]*treeNode),
+					isFile:   i == len(parts)-1,
+				}
+			}
+			current = current.children[part]
+		}
+	}
+
+	// Render tree recursively
+	var sb strings.Builder
+	sb.WriteString(".\n")
+
+	var renderNode func(node *treeNode, prefix string)
+	renderNode = func(node *treeNode, prefix string) {
+		// Get sorted children
+		names := make([]string, 0, len(node.children))
+		for name := range node.children {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+
+		for i, name := range names {
+			child := node.children[name]
+			isLast := i == len(names)-1
+
+			connector := "├── "
+			if isLast {
+				connector = "└── "
+			}
+
+			suffix := ""
+			if !child.isFile {
+				suffix = "/"
+			}
+
+			sb.WriteString(prefix + connector + name + suffix + "\n")
+
+			if !child.isFile {
+				newPrefix := prefix
+				if isLast {
+					newPrefix += "    "
+				} else {
+					newPrefix += "│   "
+				}
+				renderNode(child, newPrefix)
+			}
+		}
+	}
+
+	renderNode(root, "")
+	sb.WriteString(fmt.Sprintf("\n📂 %d related files", len(paths)))
+
+	return sb.String()
 }

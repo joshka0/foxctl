@@ -9,8 +9,8 @@ if [[ "${AGENTCTL_EMBED_QUEUE:-1}" == "0" ]]; then
   exit 0
 fi
 
-# Check if GEMINI_API_KEY is set (required for embedding generation)
-if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+# Check if any embedding API key is set (VOYAGE preferred, GEMINI fallback)
+if [[ -z "${VOYAGE_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" ]]; then
   # No API key, skip silently
   exit 0
 fi

@@ -33,6 +33,26 @@ signature:
       required: false
       default: false
       description: "Automatically regenerate the codemap if stale (uses original query)"
+  help:
+    short: "Check whether a codemap is stale."
+    long: |
+      Use codemap/check to see if codemap references have changed.
+      Example commands:
+        agentctl run codemap/check --input '{"codemap_id":"01KXXXXXX","include_diff":true}'
+        agentctl skills run codemap/check --codemap_id 01KXXXXXX --include_diff
+        agentctl run codemap/check --input '{"codemap_id":"01KXXXXXX","regenerate":true}'
+        agentctl skills run codemap/check --codemap_id 01KXXXXXX --regenerate
+    workflows:
+      - id: check-stale
+        description: "Check staleness with diffs."
+        example_input:
+          codemap_id: "01KXXXXXX"
+          include_diff: true
+      - id: check-regenerate
+        description: "Regenerate if stale."
+        example_input:
+          codemap_id: "01KXXXXXX"
+          regenerate: true
 returns:
   - name: is_stale
     type: boolean

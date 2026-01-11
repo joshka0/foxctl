@@ -7,18 +7,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
+
+const command = "code/stats"
 
 type input struct {
 	Path         string `json:"path"`
@@ -58,30 +58,15 @@ type fileStats struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/stats", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/stats", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/stats", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/stats", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.BreakdownBy == "" {
+		in.BreakdownBy = "language"
+	}
+
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -248,21 +233,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("code/stats", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, command, data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	in := input{
-		IncludeTests: true,
-	}
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.BreakdownBy == "" {
-		in.BreakdownBy = "language"
-	}
-	return in, nil
-}
 
 func detectLanguage(ext, name string) string {
 	langMap := map[string]string{
@@ -442,19 +415,13 @@ func preparePreview(s *stats, limit int) (*stats, bool) {
 	return &cp, true
 }
 
-func persistStatsArtifact(ctx context.Context, rc *runner.RunnerContext, s *stats, truncated bool) (runner.Artifact, error) {
+func persistStatsArtifact(ctx context.Context, rc *skillmain.RunContext, s *stats, truncated bool) (skillmain.Artifact, error) {
 	if !truncated {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(s); err != nil {
-		return runner.Artifact{}, fmt.Errorf("encode stats: %w", err)
+		return skillmain.Artifact{}, fmt.Errorf("encode stats: %w", err)
 	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/json", "code_stats")
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/stats failure")
-	os.Exit(1)
+	return skillmain.PersistBuffer(ctx, rc, buf, "application/json", "code_stats")
 }

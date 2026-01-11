@@ -5,19 +5,15 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 // MatchMode defines how to match the search string.
@@ -31,19 +27,19 @@ const (
 
 // Edit represents a single edit operation.
 type Edit struct {
-	Search        string    `json:"search"`
+	Search        string    `json:"search" validate:"required"`
 	Replace       string    `json:"replace"`
 	LineHint      int       `json:"line_hint,omitempty"`
 	ContextBefore string    `json:"context_before,omitempty"`
 	ContextAfter  string    `json:"context_after,omitempty"`
 	Global        bool      `json:"global,omitempty"`
-	MatchMode     MatchMode `json:"match_mode,omitempty"`
+	MatchMode     MatchMode `json:"match_mode,omitempty" validate:"omitempty,oneof=exact fuzzy regex"`
 }
 
 // Input is the skill input.
 type Input struct {
-	Path         string `json:"path"`
-	Edits        []Edit `json:"edits"`
+	Path         string `json:"path" validate:"required"`
+	Edits        []Edit `json:"edits" validate:"required,min=1,dive"`
 	DryRun       bool   `json:"dry_run,omitempty"`
 	CreateBackup bool   `json:"create_backup,omitempty"`
 }
@@ -68,80 +64,30 @@ type Output struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("fs/apply_edit", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("fs/apply_edit", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("fs/apply_edit", "EARG", err)
-	}
-
-	out, err := run(ctx, rc, in)
-	if err != nil {
-		fail("fs/apply_edit", "ERUNTIME", err)
-	}
-
-	if err := rc.Emit("fs/apply_edit", out, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	}); err != nil {
-		fail("fs/apply_edit", "ERUNTIME", err)
-	}
+	skillmain.Main("fs/apply_edit", run)
 }
 
-func parseInput(r io.Reader) (Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return Input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	if strings.TrimSpace(in.Path) == "" {
-		return Input{}, fmt.Errorf("path is required")
-	}
-
-	if len(in.Edits) == 0 {
-		return Input{}, fmt.Errorf("at least one edit is required")
-	}
-
-	// Set defaults
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
 	if !in.DryRun {
 		in.CreateBackup = true // Default to creating backup unless dry run
 	}
-
 	for i := range in.Edits {
-		if in.Edits[i].Search == "" {
-			return Input{}, fmt.Errorf("edit[%d]: search is required", i)
-		}
 		if in.Edits[i].MatchMode == "" {
 			in.Edits[i].MatchMode = MatchFuzzy
 		}
 	}
 
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in Input) (Output, error) {
 	// Resolve and validate path
 	targetPath, err := rc.PathValidator.ValidatePath(in.Path)
 	if err != nil {
-		return Output{}, fmt.Errorf("invalid path: %w", err)
+		return fmt.Errorf("invalid path: %w", err)
 	}
 
 	// Read original content
 	originalBytes, err := os.ReadFile(targetPath)
 	if err != nil {
-		return Output{}, fmt.Errorf("read file: %w", err)
+		return fmt.Errorf("read file: %w", err)
 	}
 	original := string(originalBytes)
 
@@ -154,7 +100,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) (Output, error
 			fmt.Sprintf("path:%s", targetPath),
 		})
 		if err != nil {
-			return Output{}, fmt.Errorf("backup to CAS: %w", err)
+			return fmt.Errorf("backup to CAS: %w", err)
 		}
 		backupDigest = obj.Digest
 	}
@@ -178,16 +124,16 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) (Output, error
 	}
 
 	// Generate diff
-	diff := generateUnifiedDiff(targetPath, original, modified)
+	diff, _ := diffutil.UnifiedDiff(targetPath, original, modified, 0)
 
 	// Write if not dry run
 	if !in.DryRun && modified != original {
 		if err := os.WriteFile(targetPath, []byte(modified), 0o644); err != nil {
-			return Output{}, fmt.Errorf("write file: %w", err)
+			return fmt.Errorf("write file: %w", err)
 		}
 	}
 
-	return Output{
+	out := Output{
 		Path:             targetPath,
 		BackupDigest:     backupDigest,
 		EditsApplied:     editsApplied,
@@ -195,7 +141,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) (Output, error
 		Diff:             diff,
 		DryRun:           in.DryRun,
 		EditResults:      editResults,
-	}, nil
+	}
+
+	return skillout.Emit(rc, "fs/apply_edit", out)
 }
 
 // applyEdit applies a single edit operation to content.
@@ -476,111 +424,4 @@ func countLines(s string) int {
 // normalizeWhitespace collapses whitespace for fuzzy matching.
 func normalizeWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
-}
-
-// generateUnifiedDiff creates a unified diff between original and modified.
-func generateUnifiedDiff(path, original, modified string) string {
-	if original == modified {
-		return ""
-	}
-
-	origLines := strings.Split(original, "\n")
-	modLines := strings.Split(modified, "\n")
-
-	var diff strings.Builder
-	diff.WriteString(fmt.Sprintf("--- a/%s\n", filepath.Base(path)))
-	diff.WriteString(fmt.Sprintf("+++ b/%s\n", filepath.Base(path)))
-
-	// Simple line-by-line diff (not a proper unified diff algorithm, but sufficient for preview)
-	// Find changed regions
-	type hunk struct {
-		origStart, origCount int
-		modStart, modCount   int
-		lines                []string
-	}
-
-	var hunks []hunk
-	i, j := 0, 0
-	for i < len(origLines) || j < len(modLines) {
-		// Skip matching lines
-		for i < len(origLines) && j < len(modLines) && origLines[i] == modLines[j] {
-			i++
-			j++
-		}
-
-		if i >= len(origLines) && j >= len(modLines) {
-			break
-		}
-
-		// Found a difference - collect the hunk
-		h := hunk{origStart: i + 1, modStart: j + 1}
-		var hunkLines []string
-
-		// Add context before (up to 3 lines)
-		ctxStart := max(0, i-3)
-		for k := ctxStart; k < i; k++ {
-			hunkLines = append(hunkLines, " "+origLines[k])
-		}
-		if ctxStart < i {
-			h.origStart = ctxStart + 1
-			h.modStart = ctxStart + 1
-		}
-
-		// Find extent of difference
-		diffStart := i
-		for i < len(origLines) && j < len(modLines) {
-			if origLines[i] == modLines[j] {
-				// Check if we're past the diff
-				if i > diffStart+5 {
-					break
-				}
-				hunkLines = append(hunkLines, " "+origLines[i])
-				i++
-				j++
-				continue
-			}
-			hunkLines = append(hunkLines, "-"+origLines[i])
-			hunkLines = append(hunkLines, "+"+modLines[j])
-			i++
-			j++
-		}
-
-		// Handle remaining lines if lengths differ
-		for i < len(origLines) && j >= len(modLines) {
-			hunkLines = append(hunkLines, "-"+origLines[i])
-			i++
-		}
-		for j < len(modLines) && i >= len(origLines) {
-			hunkLines = append(hunkLines, "+"+modLines[j])
-			j++
-		}
-
-		// Context after
-		for k := 0; k < 3 && i+k < len(origLines) && j+k < len(modLines); k++ {
-			if origLines[i+k] == modLines[j+k] {
-				hunkLines = append(hunkLines, " "+origLines[i+k])
-			}
-		}
-
-		h.origCount = i - h.origStart + 1 + 3
-		h.modCount = j - h.modStart + 1 + 3
-		h.lines = hunkLines
-		hunks = append(hunks, h)
-	}
-
-	// Format hunks
-	for _, h := range hunks {
-		diff.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", h.origStart, h.origCount, h.modStart, h.modCount))
-		for _, line := range h.lines {
-			diff.WriteString(line + "\n")
-		}
-	}
-
-	return diff.String()
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit fs/apply_edit failure")
-	os.Exit(1)
 }

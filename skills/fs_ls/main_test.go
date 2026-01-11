@@ -7,10 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/rs/zerolog"
 )
 
 func TestFsLsListsEntries(t *testing.T) {
@@ -28,10 +32,14 @@ func TestFsLsListsEntries(t *testing.T) {
 	}
 
 	buf := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, buf, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, buf, work)
+	t.Cleanup(func() {
+		if err := rc.Close(); err != nil {
+			t.Fatalf("close run context: %v", err)
+		}
+	})
 
-	in := input{Path: work}
+	in := Input{Path: work}
 	if err := run(ctx, rc, in); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -49,22 +57,41 @@ func TestFsLsListsEntries(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, _ string) *runner.RunnerContext {
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	state := t.TempDir()
+	casPath := filepath.Join(state, "cas")
+	casStore, err := cas.NewStore(casPath)
+	if err != nil {
+		t.Fatalf("open cas: %v", err)
+	}
+
+	pv, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		t.Fatalf("path validator: %v", err)
+	}
+
 	cfg := config.Config{
 		Home:           state,
 		InlineOutputKB: 32,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   filepath.Join(state, "cas"),
+			CAS:   casPath,
 			Jobs:  filepath.Join(state, "jobs"),
 			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
-	if err != nil {
-		t.Fatalf("runner context: %v", err)
+
+	return &skillmain.RunContext{
+		Config:        cfg,
+		CASStore:      casStore,
+		Workspace:     workspace,
+		Logger:        zerolog.Nop(),
+		PathValidator: pv,
+		Validator:     validator.New(),
+		Stdout:        stdout,
+		Now:           time.Now,
+		InlineKB:      cfg.InlineOutputKB,
+		MaxPreview:    100,
 	}
-	return rc
 }

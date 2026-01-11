@@ -27,16 +27,29 @@ signature:
       type: integer
       required: false
       description: "Number of days to analyze (default: 30)"
-returns:
-  - name: stats
-    type: object
-    description: "Aggregate statistics"
-  - name: tool_usage
-    type: array
-    description: "Tool usage statistics"
-  - name: recommendations
-    type: array
-    description: "Optimization recommendations"
+  help:
+    short: "Analyze trajectory statistics."
+    long: |
+      Use optimize/analyze to summarize trajectory data for a role.
+      Example commands:
+        agentctl run optimize/analyze --input '{"role":"coder","days":30}'
+        agentctl skills run optimize/analyze --role coder --days 30
+    workflows:
+      - id: analyze-role
+        description: "Analyze the last 30 days."
+        example_input:
+          role: "coder"
+          days: 30
+  returns:
+    - name: stats
+      type: object
+      description: "Aggregate statistics"
+    - name: tool_usage
+      type: array
+      description: "Tool usage statistics"
+    - name: recommendations
+      type: array
+      description: "Optimization recommendations"
 capabilities:
   network: "none"
   filesystem:

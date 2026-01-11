@@ -25,4 +25,4 @@ agentctl run session/restore --input '{"trigger": "compact"}'
 
 Sets `AGENTCTL_SESSION_RESTORED=true` and injects markdown context.
 
-Full docs: `~/repos/personal/agentctl/configs/skills/session-restore/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/session-restore/Skill.md`

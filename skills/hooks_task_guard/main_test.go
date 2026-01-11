@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -18,14 +18,14 @@ func TestTaskGuard_NonWriteOperation(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Non-write operation should always approve
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Read",
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Errorf("expected approve, got %s", output.Decision)
 	}
 }
@@ -34,15 +34,15 @@ func TestTaskGuard_AutoMode_CreatesTask(t *testing.T) {
 	env := newTestEnv(t)
 
 	// Write operation with no active task should auto-create
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Edit",
 		ToolInput:     json.RawMessage(`{"file_path": "/path/to/file.go"}`),
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Errorf("expected approve, got %s", output.Decision)
 	}
 	if output.Meta["created"] != true {
@@ -77,14 +77,14 @@ func TestTaskGuard_AutoMode_UsesExistingTask(t *testing.T) {
 	_ = store.Close() //nolint:errcheck
 
 	// Write operation should use existing task
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Write",
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Errorf("expected approve, got %s", output.Decision)
 	}
 	if output.Meta["created"] != false {
@@ -102,14 +102,14 @@ func TestTaskGuard_StrictMode_BlocksWithoutTask(t *testing.T) {
 	t.Setenv("AGENTCTL_TASK_GUARD_MODE", "strict")
 
 	// Write operation with no active task should block
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Edit",
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionBlock {
+	if output.Decision != hooks.DecisionBlock {
 		t.Errorf("expected block, got %s", output.Decision)
 	}
 	if output.Reason == "" {
@@ -144,14 +144,14 @@ func TestTaskGuard_StrictMode_ApprovesWithTask(t *testing.T) {
 	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "MultiEdit",
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Errorf("expected approve, got %s", output.Decision)
 	}
 }
@@ -182,15 +182,15 @@ func TestTaskGuard_AutoMode_DirtiesReadyForReviewTask(t *testing.T) {
 	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve and dirty the task
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Edit",
 		ToolInput:     json.RawMessage(`{"file_path": "/path/to/file.go"}`),
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Errorf("expected approve, got %s", output.Decision)
 	}
 	if output.Meta["dirtied"] != true {
@@ -248,14 +248,14 @@ func TestTaskGuard_StrictMode_DirtiesCompletedTask(t *testing.T) {
 	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve and dirty the task
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Write",
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Errorf("expected approve, got %s", output.Decision)
 	}
 	if output.Meta["dirtied"] != true {
@@ -291,14 +291,14 @@ func TestTaskGuard_AutoMode_DoesNotDirtyInProgressTask(t *testing.T) {
 	_ = store.Close() //nolint:errcheck
 
 	// Write operation should approve but NOT dirty the task
-	in := hook.Input{
-		Event:         "PreToolUse",
+	in := hooks.Input{
+		Event:         hooks.EventPreToolUse,
 		WorkspaceRoot: env.workspaceRoot,
 		ToolName:      "Edit",
 	}
 
 	output := env.run(t, in)
-	if output.Decision != hook.DecisionApprove {
+	if output.Decision != hooks.DecisionApprove {
 		t.Errorf("expected approve, got %s", output.Decision)
 	}
 	if output.Meta["dirtied"] != false {
@@ -310,7 +310,7 @@ type testEnv struct {
 	ctx           context.Context
 	workspaceRoot string
 	cfg           config.Config
-	rc            *runner.RunnerContext
+	rc            *skillmain.RunContext
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -332,7 +332,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		},
 	}
 
-	rc, err := runner.NewRunnerContext(cfg, &bytes.Buffer{})
+	rc, err := skillmain.BuildRunContext(cfg, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("runner context: %v", err)
 	}
@@ -346,12 +346,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 }
 
-func (env *testEnv) run(t *testing.T, in hook.Input) hook.Output {
+func (env *testEnv) run(t *testing.T, in hooks.Input) hooks.Output {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	env.rc.Stdout = buf
 
-	if err := run(env.ctx, env.rc, env.cfg, in); err != nil {
+	if err := run(env.ctx, env.rc, in); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -370,8 +370,8 @@ func (env *testEnv) run(t *testing.T, in hook.Input) hook.Output {
 		t.Fatalf("expected hook_output map, got %T", data["hook_output"])
 	}
 
-	var output hook.Output
-	output.Decision = hook.Decision(hookOutput["decision"].(string))
+	var output hooks.Output
+	output.Decision = hooks.Decision(hookOutput["decision"].(string))
 	if reason, ok := hookOutput["reason"].(string); ok {
 		output.Reason = reason
 	}

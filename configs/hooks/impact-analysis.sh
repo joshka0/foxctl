@@ -189,8 +189,8 @@ while IFS= read -r symbol; do
       if [[ "$sym_type" == "interface" ]]; then
         impl_result=$("$AGENTCTL_BIN" run lsp/gopls --ephemeral --input "$(echo "$lsp_input" | jq '. + {operation: "implementation"}')" 2>/dev/null) || true
         if [[ -n "$impl_result" ]]; then
-          impl_list=$(echo "$impl_result" | jq -r --arg self "$abs_file_path" '
-            .data.locations // [] | map(select(.file != $self)) | .[:'$MAX_REFS'] |
+          impl_list=$(echo "$impl_result" | jq -r --arg self "$abs_file_path" --argjson max "$MAX_REFS" '
+            .data.locations // [] | map(select(.file != $self)) | .[:$max] |
             map(.file + ":" + (.line | tostring)) | join(", ")
           ')
           if [[ -n "$impl_list" && "$impl_list" != "null" ]]; then
@@ -217,7 +217,7 @@ while IFS= read -r symbol; do
     [[ -z "$ref_line" ]] && continue
     ref_file=$(echo "$ref_line" | cut -d: -f1)
     [[ "$ref_file" == "$abs_file_path" ]] && continue
-    ref_file_rel="${ref_file#$workspace_root/}"
+    ref_file_rel="${ref_file#"$workspace_root"/}"
     ref_files+="$ref_file_rel, "
     ((ref_count++)) || true
     [[ "$ref_count" -ge "$MAX_REFS" ]] && break

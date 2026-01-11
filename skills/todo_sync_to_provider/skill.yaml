@@ -1,0 +1,108 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: todo/sync_to_provider
+  version: 0.1.0
+  description: "Sync todos TO a provider (Claude Code) FROM agentctl task store"
+  tags: ["todo", "sync", "claude"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: todo/sync_to_provider
+  parameters:
+    - name: provider
+      type: string
+      required: true
+      description: "Target provider: claude"
+    - name: workspace_id
+      type: string
+      required: true
+      description: "Workspace path for task scoping"
+    - name: session_id
+      type: string
+      required: false
+      description: "Session ID (auto-detected if empty)"
+    - name: order
+      type: string
+      required: false
+      description: "Task ordering: agentctl_rank, stable, off (default: agentctl_rank)"
+    - name: max_items
+      type: integer
+      required: false
+      description: "Maximum tasks to project (0 = no limit)"
+    - name: include_glyphs
+      type: boolean
+      required: false
+      description: "Add status glyphs (▶, □, ✓) to content (default: true)"
+    - name: include_dep_hints
+      type: boolean
+      required: false
+      description: "Add dependency hints (⛓n) to content (default: true)"
+    - name: dry_run
+      type: boolean
+      required: false
+      description: "Preview changes without writing to file"
+  help:
+    short: "Sync todos from agentctl to Claude Code"
+    long: |
+      Exports agentctl tasks to Claude Code's native todo system. This is the
+      outbound sync direction (agentctl → Claude).
+
+      The skill:
+      - Projects tasks with status glyphs and dependency hints
+      - Includes task ID tags (〔T:<id>〕) for stable mapping
+      - Sorts by agentctl rank (in_progress → pending → blocked → completed)
+      - Uses atomic file writes for safety
+
+      SECURITY: Requires AGENTCTL_ALLOW_PROVIDER_STATE=1 to write files.
+      This should only be enabled for privileged hooks/daemons.
+
+      Example:
+        AGENTCTL_ALLOW_PROVIDER_STATE=1 agentctl run todo/sync_to_provider --input '{
+          "provider": "claude",
+          "workspace_id": "/path/to/project"
+        }'
+    workflows:
+      - id: sync-to-claude
+        description: "Sync tasks to Claude Code todo file"
+        example_input:
+          provider: "claude"
+          workspace_id: "/path/to/project"
+      - id: preview-projection
+        description: "Preview what would be written"
+        example_input:
+          provider: "claude"
+          workspace_id: "/path/to/project"
+          dry_run: true
+  returns:
+    - name: written
+      type: integer
+      description: "Number of todos written"
+    - name: updated
+      type: integer
+      description: "Number of todos updated"
+    - name: unchanged
+      type: integer
+      description: "Number of todos unchanged"
+    - name: file_path
+      type: string
+      description: "Path to the written file"
+    - name: file_hash
+      type: string
+      description: "SHA256 hash of written file (for conflict detection)"
+    - name: todos
+      type: array
+      description: "Projected todos (dry run only)"
+    - name: warnings
+      type: array
+      description: "Any warnings encountered"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

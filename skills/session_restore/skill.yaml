@@ -23,19 +23,32 @@ signature:
       type: string
       required: false
       description: "Project workspace path"
-returns:
-  - name: hook_output
-    type: object
-    description: "Claude Code hook output with decision, reason, context, and env"
-  - name: snapshot_id
-    type: string
-    description: "ID of the restored snapshot"
-  - name: snapshot_age
-    type: string
-    description: "Human-readable age of the snapshot"
-  - name: items_restored
-    type: integer
-    description: "Number of items restored"
+  help:
+    short: "Restore session state after compaction."
+    long: |
+      Use session/restore to load snapshot context on resume.
+      Example commands:
+        agentctl run session/restore --input '{"trigger":"resume","workspace":"./"}'
+        agentctl skills run session/restore --trigger resume --workspace ./
+    workflows:
+      - id: restore-session
+        description: "Restore after resume."
+        example_input:
+          trigger: "resume"
+          workspace: "./"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Claude Code hook output with decision, reason, context, and env"
+    - name: snapshot_id
+      type: string
+      description: "ID of the restored snapshot"
+    - name: snapshot_age
+      type: string
+      description: "Human-readable age of the snapshot"
+    - name: items_restored
+      type: integer
+      description: "Number of items restored"
 capabilities:
   network: "none"
   filesystem:

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
@@ -32,14 +33,25 @@ func (e *Executor) ExecuteEphemeral(input []byte) error {
 	skillExecutor := execution.NewRunnerExecutor()
 	start := time.Now()
 
-	// Add workspace to context so skill runners can read it via workspace.FromContext
+	// Ensure trace exists for propagation (skill binary reads AGENTCTL_TRACE_ID from env).
+	// If correlation_id is set, use it as trace_id for cross-layer correlation.
 	ctx := e.ctx
+	if e.options.CorrelationID != "" {
+		ctx = observability.WithTraceID(ctx, e.options.CorrelationID)
+	}
+	ctx, _ = observability.EnsureTraceID(ctx)
+
+	// Add workspace to context so skill runners can read it via workspace.FromContext
 	if e.options.Workspace != "" {
 		ctx = workspace.WithContext(ctx, e.options.Workspace)
 	}
 
 	// Build extra env vars for this execution (avoids race condition with os.Setenv)
 	var extraEnv []string
+
+	// Propagate trace context to the child process so skill-side spans correlate.
+	extraEnv = append(extraEnv, observability.PropagationEnv(ctx)...)
+
 	if e.options.NoCAS {
 		extraEnv = append(extraEnv, "AGENTCTL_NO_CAS=1")
 	}

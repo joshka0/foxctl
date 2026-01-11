@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -16,11 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 // Security: Regex patterns for input validation to prevent command injection
@@ -68,7 +63,7 @@ func validateGitSince(since string) error {
 }
 
 type input struct {
-	QueryType    string `json:"query_type"`
+	QueryType    string `json:"query_type" validate:"required"`
 	Path         string `json:"path"`
 	Since        string `json:"since"`
 	Author       string `json:"author"`
@@ -92,30 +87,18 @@ type gitResult struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/git", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/git", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/git", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/git", "ERUNTIME", err)
-	}
+	skillmain.Main("code/git", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.Since == "" {
+		in.Since = "1m"
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 100
+	}
+
 	// Check if git is available
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("git not found in PATH: %w", err)
@@ -181,24 +164,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("code/git", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.QueryType == "" {
-		return input{}, fmt.Errorf("query_type is required")
-	}
-	if in.Since == "" {
-		in.Since = "1m"
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 100
-	}
-	return in, nil
+	return skillout.Emit(rc, "code/git", data)
 }
 
 func checkGitRepo(ctx context.Context, workspace string) error {
@@ -605,7 +571,7 @@ func parseSinceArg(since string) string {
 }
 
 func preparePreview(results []gitResult, limit int) ([]gitResult, bool) {
-	preview, truncated := skillslib.PreparePreview(results, limit)
+	preview, truncated := skillout.PreparePreview(results, limit)
 	if truncated {
 		dup := make([]gitResult, len(preview))
 		copy(dup, preview)
@@ -614,18 +580,18 @@ func preparePreview(results []gitResult, limit int) ([]gitResult, bool) {
 	return preview, truncated
 }
 
-func persistResultsArtifact(ctx context.Context, rc *runner.RunnerContext, results []gitResult, truncated bool) (runner.Artifact, error) {
+func persistResultsArtifact(ctx context.Context, rc *skillmain.RunContext, results []gitResult, truncated bool) (skillmain.Artifact, error) {
 	if !truncated {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
 	for _, r := range results {
 		if err := enc.Encode(r); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode result: %w", err)
+			return skillmain.Artifact{}, fmt.Errorf("encode result: %w", err)
 		}
 	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_git")
+	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_git")
 }
 
 func relativeTo(base, target string) string {
@@ -645,8 +611,3 @@ func relativeTo(base, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/git failure")
-	os.Exit(1)
-}

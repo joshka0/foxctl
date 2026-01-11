@@ -61,6 +61,11 @@ export async function runSkill<T = unknown>(
 ): Promise<AgentctlResult<T>> {
   const args = ["run", skill, "--input", JSON.stringify(input)];
 
+  // For OpenCode integration flows, prefer inline output over CAS digests.
+  if (skill === "session/summarize") {
+    args.push("--no-cas");
+  }
+
   if (options?.workspace) {
     args.push("--workspace", options.workspace);
   }
@@ -76,8 +81,9 @@ export async function runSkill<T = unknown>(
 
     // Apply timeout if specified
     const timeout = options?.timeout ?? 5000;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         proc.kill();
         reject(new Error(`Skill ${skill} timed out after ${timeout}ms`));
       }, timeout);
@@ -101,7 +107,13 @@ export async function runSkill<T = unknown>(
       return { success: true, data: parsed.data as T } as AgentctlResult<T>;
     })();
 
-    return await Promise.race([resultPromise, timeoutPromise]);
+    try {
+      return await Promise.race([resultPromise, timeoutPromise]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
   } catch (error) {
     return {
       success: false,
@@ -123,6 +135,11 @@ export async function runSkillFromFile<T = unknown>(
   options?: RunSkillOptions
 ): Promise<AgentctlResult<T>> {
   const args = ["run", skill, "--input-file", inputPath];
+
+  // For OpenCode integration flows, prefer inline output over CAS digests.
+  if (skill === "session/summarize") {
+    args.push("--no-cas");
+  }
 
   if (options?.workspace) {
     args.push("--workspace", options.workspace);
@@ -178,11 +195,12 @@ export async function runSkillFromFile<T = unknown>(
  * - CURSOR_PROJECT_DIR (Cursor)
  * - Falls back to cwd
  */
-export function getWorkspace(): string {
+export function getWorkspace(fallback?: string): string {
   return (
     process.env.OPENCODE_PROJECT_DIR ||
     process.env.CLAUDE_PROJECT_DIR ||
     process.env.CURSOR_PROJECT_DIR ||
+    fallback ||
     process.cwd()
   );
 }

@@ -86,4 +86,4 @@ agentctl run mailbox --input '{"operation": "release", "release": {"paths": ["au
 
 Modes: `exclusive` (only holder edits), `shared` (multiple readers)
 
-Full docs: See individual skill docs in `configs/skills/`
+Full docs: See individual skill docs in `~/.agentctl/share/configs/skills/`

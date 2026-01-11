@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -70,58 +70,42 @@ type Output struct {
 	Recommendations     []Recommendation `json:"recommendations"`
 }
 
-const command = "optimize/feedback"
+const command = "optimize/from_feedback"
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("EPARSE", fmt.Errorf("decode input: %w", err))
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set defaults
-	if input.MinRating == 0 {
-		input.MinRating = 1
+	if in.MinRating == 0 {
+		in.MinRating = 1
 	}
-	if input.MaxRating == 0 {
-		input.MaxRating = 5
+	if in.MaxRating == 0 {
+		in.MaxRating = 5
 	}
 
 	var sinceTime time.Time
-	if input.Since != "" {
+	if in.Since != "" {
 		var err error
-		sinceTime, err = time.Parse(time.RFC3339, input.Since)
+		sinceTime, err = time.Parse(time.RFC3339, in.Since)
 		if err != nil {
-			sinceTime, err = time.Parse("2006-01-02", input.Since)
+			sinceTime, err = time.Parse("2006-01-02", in.Since)
 			if err != nil {
-				fail("EINVALID", fmt.Errorf("invalid since date format: %w", err))
+				return fmt.Errorf("invalid since date format: %w", err)
 			}
 		}
 	}
 
-	// Get agentctl home
-	home := os.Getenv("AGENTCTL_HOME")
-	if home == "" {
-		homeDir, _ := os.UserHomeDir()
-		home = filepath.Join(homeDir, ".agentctl")
-	}
-
-	// Open memory store
-	cachePath := filepath.Join(home, "cache")
-	casPath := filepath.Join(home, "cas")
-
-	memStore, err := memory.Open(ctx, cachePath, casPath)
+	// Open memory store using config paths (storage, not cache)
+	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open memory store: %w", err))
+		return fmt.Errorf("open memory store: %w", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	// Get all feedback entries
-	// Use a workspace of "*" to signify all, but memory.List requires a workspace
-	// So we need to list entries and filter
-	workspace := input.Workspace
+	workspace := in.Workspace
 	if workspace == "" {
 		if wd, err := os.Getwd(); err == nil {
 			workspace = wd
@@ -130,7 +114,7 @@ func main() {
 
 	entries, err := memStore.List(ctx, workspace, 1000)
 	if err != nil {
-		fail("EIO", fmt.Errorf("list memory entries: %w", err))
+		return fmt.Errorf("list memory entries: %w", err)
 	}
 
 	// Filter for session_feedback type
@@ -146,10 +130,10 @@ func main() {
 		}
 
 		// Apply filters
-		if fb.Rating < input.MinRating || fb.Rating > input.MaxRating {
+		if fb.Rating < in.MinRating || fb.Rating > in.MaxRating {
 			continue
 		}
-		if input.Outcome != "" && fb.Outcome != input.Outcome {
+		if in.Outcome != "" && fb.Outcome != in.Outcome {
 			continue
 		}
 		if !sinceTime.IsZero() && fb.Timestamp.Before(sinceTime) {
@@ -162,8 +146,7 @@ func main() {
 	// Analyze patterns
 	output := analyzeFeedback(feedbacks)
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit optimize/feedback result")
+	return skillout.Emit(rc, command, output)
 }
 
 func analyzeFeedback(feedbacks []SessionFeedback) Output {
@@ -316,8 +299,3 @@ func generateRecommendations(output Output) []Recommendation {
 	return recommendations
 }
 
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit optimize/feedback failure")
-	os.Exit(1)
-}

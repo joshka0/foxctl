@@ -36,6 +36,22 @@ signature:
       type: object
       required: false
       description: "LLM provider/model configuration for selection"
+  help:
+    short: "Filter context chunks with an LLM."
+    long: |
+      Use context/filter to select the most relevant context chunks for a prompt.
+      Example commands:
+        agentctl run context/filter --input '{"prompt":"Summarize auth flow","source":{"text":"..."},"budget":{"max_tokens":400}}'
+        agentctl skills run context/filter --prompt "Summarize auth flow" --source '{"text":"..."}' --budget '{"max_tokens":400}'
+    workflows:
+      - id: filter-text
+        description: "Filter a single text blob."
+        example_input:
+          prompt: "Summarize auth flow"
+          source:
+            text: "..."
+          budget:
+            max_tokens: 400
   returns:
     - name: chunks
       type: array

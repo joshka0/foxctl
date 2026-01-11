@@ -4,11 +4,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -16,13 +14,12 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-const skillName = "mobile/android"
+const command = "mobile/android"
 
 type input struct {
 	Operation  string `json:"operation"`
@@ -85,44 +82,14 @@ type UINode struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("EARG", err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate input
 	if in.Operation == "" {
-		return input{}, errors.New("operation is required")
+		return errors.New("operation is required")
 	}
-
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Check ADB availability
 	if _, err := exec.LookPath("adb"); err != nil {
 		return errors.New("adb not found: install Android SDK or 'brew install android-platform-tools'")
@@ -189,7 +156,7 @@ func adbCommand(ctx context.Context, serial string, args ...string) *exec.Cmd {
 }
 
 // listDevices lists all connected Android devices/emulators.
-func listDevices(ctx context.Context, rc *runner.RunnerContext) error {
+func listDevices(ctx context.Context, rc *skillmain.RunContext) error {
 	cmd := exec.CommandContext(ctx, "adb", "devices", "-l")
 	output, err := cmd.Output()
 	if err != nil {
@@ -243,7 +210,7 @@ func listDevices(ctx context.Context, rc *runner.RunnerContext) error {
 }
 
 // deviceInfo gets detailed info about a device.
-func deviceInfo(ctx context.Context, rc *runner.RunnerContext, serial string) error {
+func deviceInfo(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	properties := make(map[string]string)
 
 	// Key properties to fetch
@@ -290,7 +257,7 @@ func deviceInfo(ctx context.Context, rc *runner.RunnerContext, serial string) er
 }
 
 // install installs an APK.
-func install(ctx context.Context, rc *runner.RunnerContext, serial, apkPath string) error {
+func install(ctx context.Context, rc *skillmain.RunContext, serial, apkPath string) error {
 	if apkPath == "" {
 		return errors.New("app (APK path) is required for install operation")
 	}
@@ -310,7 +277,7 @@ func install(ctx context.Context, rc *runner.RunnerContext, serial, apkPath stri
 }
 
 // launch starts an app.
-func launch(ctx context.Context, rc *runner.RunnerContext, serial, pkg, activity string) error {
+func launch(ctx context.Context, rc *skillmain.RunContext, serial, pkg, activity string) error {
 	if pkg == "" {
 		return errors.New("app (package name) is required for launch operation")
 	}
@@ -349,7 +316,7 @@ func launch(ctx context.Context, rc *runner.RunnerContext, serial, pkg, activity
 }
 
 // terminate stops an app.
-func terminate(ctx context.Context, rc *runner.RunnerContext, serial, pkg string) error {
+func terminate(ctx context.Context, rc *skillmain.RunContext, serial, pkg string) error {
 	if pkg == "" {
 		return errors.New("app (package name) is required for terminate operation")
 	}
@@ -367,7 +334,7 @@ func terminate(ctx context.Context, rc *runner.RunnerContext, serial, pkg string
 }
 
 // screenshot captures the screen.
-func screenshot(ctx context.Context, rc *runner.RunnerContext, serial, outputPath string) error {
+func screenshot(ctx context.Context, rc *skillmain.RunContext, serial, outputPath string) error {
 	if outputPath == "" {
 		outputPath = fmt.Sprintf("/tmp/android_screenshot_%d.png", time.Now().UnixNano())
 	}
@@ -385,7 +352,7 @@ func screenshot(ctx context.Context, rc *runner.RunnerContext, serial, outputPat
 	}
 
 	// Store in CAS
-	artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "image/png", "android_screenshot")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "image/png", "android_screenshot")
 	if err != nil {
 		return fmt.Errorf("persist screenshot: %w", err)
 	}
@@ -400,7 +367,7 @@ func screenshot(ctx context.Context, rc *runner.RunnerContext, serial, outputPat
 }
 
 // tap performs a tap.
-func tap(ctx context.Context, rc *runner.RunnerContext, serial string, x, y int) error {
+func tap(ctx context.Context, rc *skillmain.RunContext, serial string, x, y int) error {
 	cmd := adbCommand(ctx, serial, "shell", "input", "tap",
 		strconv.Itoa(x), strconv.Itoa(y))
 	if err := cmd.Run(); err != nil {
@@ -416,7 +383,7 @@ func tap(ctx context.Context, rc *runner.RunnerContext, serial string, x, y int)
 }
 
 // swipe performs a swipe gesture.
-func swipe(ctx context.Context, rc *runner.RunnerContext, serial string, x1, y1, x2, y2, duration int) error {
+func swipe(ctx context.Context, rc *skillmain.RunContext, serial string, x1, y1, x2, y2, duration int) error {
 	if duration <= 0 {
 		duration = 300 // Default 300ms
 	}
@@ -439,7 +406,7 @@ func swipe(ctx context.Context, rc *runner.RunnerContext, serial string, x1, y1,
 }
 
 // typeText types text.
-func typeText(ctx context.Context, rc *runner.RunnerContext, serial, text string) error {
+func typeText(ctx context.Context, rc *skillmain.RunContext, serial, text string) error {
 	if text == "" {
 		return errors.New("text is required for type_text operation")
 	}
@@ -472,7 +439,7 @@ func typeText(ctx context.Context, rc *runner.RunnerContext, serial, text string
 }
 
 // pressKey presses a key.
-func pressKey(ctx context.Context, rc *runner.RunnerContext, serial, keycode string) error {
+func pressKey(ctx context.Context, rc *skillmain.RunContext, serial, keycode string) error {
 	if keycode == "" {
 		return errors.New("keycode is required for press_key operation")
 	}
@@ -495,7 +462,7 @@ func pressKey(ctx context.Context, rc *runner.RunnerContext, serial, keycode str
 }
 
 // uiTree gets the UI hierarchy.
-func uiTree(ctx context.Context, rc *runner.RunnerContext, serial string) error {
+func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	// Dump UI hierarchy to device
 	remotePath := "/sdcard/window_dump.xml"
 	cmd := adbCommand(ctx, serial, "shell", "uiautomator", "dump", remotePath)
@@ -535,7 +502,7 @@ func uiTree(ctx context.Context, rc *runner.RunnerContext, serial string) error 
 
 	// Store full tree in CAS if truncated
 	if truncated {
-		artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/xml", "android_ui_tree")
+		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/xml", "android_ui_tree")
 		if err != nil {
 			return fmt.Errorf("persist ui tree: %w", err)
 		}
@@ -591,7 +558,7 @@ func parseUIHierarchy(data []byte) []map[string]any {
 }
 
 // logs gets logcat output with optional filtering.
-func logs(ctx context.Context, rc *runner.RunnerContext, serial string, count int, pattern string) error {
+func logs(ctx context.Context, rc *skillmain.RunContext, serial string, count int, pattern string) error {
 	if count <= 0 {
 		count = 500
 	}
@@ -610,7 +577,7 @@ func logs(ctx context.Context, rc *runner.RunnerContext, serial string, count in
 	}
 
 	// Store in CAS
-	artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_logs")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_logs")
 	if err != nil {
 		return fmt.Errorf("persist logs: %w", err)
 	}
@@ -637,7 +604,7 @@ func logs(ctx context.Context, rc *runner.RunnerContext, serial string, count in
 }
 
 // logcatFilter gets filtered logcat output by tag and level.
-func logcatFilter(ctx context.Context, rc *runner.RunnerContext, serial, tag, level string, count int, pattern string) error {
+func logcatFilter(ctx context.Context, rc *skillmain.RunContext, serial, tag, level string, count int, pattern string) error {
 	if count <= 0 {
 		count = 500
 	}
@@ -686,7 +653,7 @@ func logcatFilter(ctx context.Context, rc *runner.RunnerContext, serial, tag, le
 
 	// Store in CAS if large, otherwise return inline
 	if len(filteredOutput) > 10000 {
-		artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_logs_filtered")
+		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_logs_filtered")
 		if err != nil {
 			return fmt.Errorf("persist filtered logs: %w", err)
 		}
@@ -706,7 +673,7 @@ func logcatFilter(ctx context.Context, rc *runner.RunnerContext, serial, tag, le
 }
 
 // logcatApp gets logs filtered by app package name.
-func logcatApp(ctx context.Context, rc *runner.RunnerContext, serial, pkg, level string, count int, pattern string) error {
+func logcatApp(ctx context.Context, rc *skillmain.RunContext, serial, pkg, level string, count int, pattern string) error {
 	if pkg == "" {
 		return errors.New("app (package name) is required for logcat_app operation")
 	}
@@ -753,7 +720,7 @@ func logcatApp(ctx context.Context, rc *runner.RunnerContext, serial, pkg, level
 }
 
 // logcatAppByGrep filters logs by grepping for the package name (fallback when PID not available).
-func logcatAppByGrep(ctx context.Context, rc *runner.RunnerContext, serial, pkg, level string, count int, pattern string) error {
+func logcatAppByGrep(ctx context.Context, rc *skillmain.RunContext, serial, pkg, level string, count int, pattern string) error {
 	args := []string{"logcat", "-d", "-t", strconv.Itoa(count)}
 	if level != "" {
 		args = append(args, "*:"+level)
@@ -791,7 +758,7 @@ func logcatAppByGrep(ctx context.Context, rc *runner.RunnerContext, serial, pkg,
 }
 
 // logcatCrash gets crash logs from the crash buffer.
-func logcatCrash(ctx context.Context, rc *runner.RunnerContext, serial, pkg string, count int) error {
+func logcatCrash(ctx context.Context, rc *skillmain.RunContext, serial, pkg string, count int) error {
 	if count <= 0 {
 		count = 100
 	}
@@ -831,7 +798,7 @@ func logcatCrash(ctx context.Context, rc *runner.RunnerContext, serial, pkg stri
 	}
 
 	if len(filteredOutput) > 10000 {
-		artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_crash_logs")
+		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_crash_logs")
 		if err != nil {
 			return fmt.Errorf("persist crash logs: %w", err)
 		}
@@ -850,7 +817,7 @@ func logcatCrash(ctx context.Context, rc *runner.RunnerContext, serial, pkg stri
 }
 
 // logcatClear clears the logcat buffer.
-func logcatClear(ctx context.Context, rc *runner.RunnerContext, serial string) error {
+func logcatClear(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	// Clear all buffers
 	cmd := adbCommand(ctx, serial, "logcat", "-c")
 	if err := cmd.Run(); err != nil {
@@ -890,7 +857,7 @@ func filterLogsByPattern(data []byte, pattern string) []byte {
 }
 
 // emitLogcatResult handles common logcat result emission with CAS storage for large outputs.
-func emitLogcatResult(ctx context.Context, rc *runner.RunnerContext, operation string, output []byte, extra map[string]any, pattern string) error {
+func emitLogcatResult(ctx context.Context, rc *skillmain.RunContext, operation string, output []byte, extra map[string]any, pattern string) error {
 	lines := strings.Split(string(output), "\n")
 
 	result := map[string]any{
@@ -909,7 +876,7 @@ func emitLogcatResult(ctx context.Context, rc *runner.RunnerContext, operation s
 
 	// Store in CAS if large, otherwise return inline
 	if len(output) > 10000 {
-		artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "android_logs")
+		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "android_logs")
 		if err != nil {
 			return fmt.Errorf("persist logs: %w", err)
 		}
@@ -929,7 +896,7 @@ func emitLogcatResult(ctx context.Context, rc *runner.RunnerContext, operation s
 }
 
 // openURL opens a URL.
-func openURL(ctx context.Context, rc *runner.RunnerContext, serial, url string) error {
+func openURL(ctx context.Context, rc *skillmain.RunContext, serial, url string) error {
 	if url == "" {
 		return errors.New("url is required for open_url operation")
 	}
@@ -948,7 +915,7 @@ func openURL(ctx context.Context, rc *runner.RunnerContext, serial, url string) 
 }
 
 // grantPermission grants a runtime permission.
-func grantPermission(ctx context.Context, rc *runner.RunnerContext, serial, pkg, permission string) error {
+func grantPermission(ctx context.Context, rc *skillmain.RunContext, serial, pkg, permission string) error {
 	if pkg == "" {
 		return errors.New("app (package name) is required for grant_permission")
 	}
@@ -981,7 +948,7 @@ const (
 )
 
 // recordScreen starts screen recording.
-func recordScreen(ctx context.Context, rc *runner.RunnerContext, serial, outputPath string) error {
+func recordScreen(ctx context.Context, rc *skillmain.RunContext, serial, outputPath string) error {
 	if outputPath == "" {
 		outputPath = fmt.Sprintf("/tmp/android_recording_%d.mp4", time.Now().UnixNano())
 	}
@@ -1032,7 +999,7 @@ func recordScreen(ctx context.Context, rc *runner.RunnerContext, serial, outputP
 }
 
 // recordStop stops screen recording and pulls the file.
-func recordStop(ctx context.Context, rc *runner.RunnerContext) error {
+func recordStop(ctx context.Context, rc *skillmain.RunContext) error {
 	remotePath := "/sdcard/screen_recording.mp4" // default fallback
 	serial := ""                                 // default to empty (uses default device)
 
@@ -1092,7 +1059,7 @@ func recordStop(ctx context.Context, rc *runner.RunnerContext) error {
 }
 
 // dumpsys gets system service dump.
-func dumpsys(ctx context.Context, rc *runner.RunnerContext, serial, service string) error {
+func dumpsys(ctx context.Context, rc *skillmain.RunContext, serial, service string) error {
 	if service == "" {
 		service = "activity"
 	}
@@ -1104,7 +1071,7 @@ func dumpsys(ctx context.Context, rc *runner.RunnerContext, serial, service stri
 	}
 
 	// Store in CAS for large outputs
-	artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "android_dumpsys")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "android_dumpsys")
 	if err != nil {
 		return fmt.Errorf("persist dumpsys: %w", err)
 	}
@@ -1126,7 +1093,7 @@ func dumpsys(ctx context.Context, rc *runner.RunnerContext, serial, service stri
 }
 
 // pullFile pulls a file from the device.
-func pullFile(ctx context.Context, rc *runner.RunnerContext, serial, remotePath, localPath string) error {
+func pullFile(ctx context.Context, rc *skillmain.RunContext, serial, remotePath, localPath string) error {
 	if remotePath == "" {
 		return errors.New("remote_path is required for pull_file")
 	}
@@ -1157,7 +1124,7 @@ func pullFile(ctx context.Context, rc *runner.RunnerContext, serial, remotePath,
 }
 
 // pushFile pushes a file to the device.
-func pushFile(ctx context.Context, rc *runner.RunnerContext, serial, localPath, remotePath string) error {
+func pushFile(ctx context.Context, rc *skillmain.RunContext, serial, localPath, remotePath string) error {
 	if localPath == "" {
 		return errors.New("local_path is required for push_file")
 	}
@@ -1181,15 +1148,6 @@ func pushFile(ctx context.Context, rc *runner.RunnerContext, serial, localPath, 
 }
 
 // emit outputs the result envelope.
-func emit(rc *runner.RunnerContext, data map[string]any) error {
-	return rc.Emit(skillName, data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(skillName, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
-	os.Exit(1)
+func emit(rc *skillmain.RunContext, data map[string]any) error {
+	return skillout.Emit(rc, command, data)
 }

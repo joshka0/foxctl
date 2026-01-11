@@ -35,16 +35,36 @@ signature:
       type: integer
       required: false
       description: "Maximum number of results"
-returns:
-  - name: patterns
-    type: array
-    description: "List of patterns (for list action)"
-  - name: hints
-    type: array
-    description: "Tool hints (for hints action)"
-  - name: cleared
-    type: integer
-    description: "Number of patterns cleared (for clear action)"
+  help:
+    short: "Manage learned tool patterns."
+    long: |
+      Use optimize/patterns to list, clear, or get hints.
+      Example commands:
+        agentctl run optimize/patterns --input '{"action":"list","role":"coder"}'
+        agentctl skills run optimize/patterns --action list --role coder
+        agentctl run optimize/patterns --input '{"action":"hints","context":"refactor"}'
+        agentctl skills run optimize/patterns --action hints --context refactor
+    workflows:
+      - id: list-patterns
+        description: "List patterns for a role."
+        example_input:
+          action: "list"
+          role: "coder"
+      - id: hint-patterns
+        description: "Get hints for a context."
+        example_input:
+          action: "hints"
+          context: "refactor"
+  returns:
+    - name: patterns
+      type: array
+      description: "List of patterns (for list action)"
+    - name: hints
+      type: array
+      description: "Tool hints (for hints action)"
+    - name: cleared
+      type: integer
+      description: "Number of patterns cleared (for clear action)"
 capabilities:
   network: "none"
   filesystem:

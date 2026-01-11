@@ -3,30 +3,30 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/teams"
 )
 
+const command = "mailbox/manage"
+
 type input struct {
-	Operation   string      `json:"operation"`
-	WorkspaceID string      `json:"workspace_id"`
-	Send        *sendReq    `json:"send"`
-	Inbox       *inboxReq   `json:"inbox"`
-	Ack         *ackReq     `json:"ack"`
-	Reserve     *reserveReq `json:"reserve"`
-	Release     *releaseReq `json:"release"`
+	Operation    string           `json:"operation"`
+	WorkspaceID  string           `json:"workspace_id"`
+	Send         *sendReq         `json:"send"`
+	Inbox        *inboxReq        `json:"inbox"`
+	Ack          *ackReq          `json:"ack"`
+	MarkSurfaced *markSurfacedReq `json:"mark_surfaced"`
+	Reserve      *reserveReq      `json:"reserve"`
+	Release      *releaseReq      `json:"release"`
 }
 
 type sendReq struct {
@@ -42,14 +42,20 @@ type sendReq struct {
 }
 
 type inboxReq struct {
-	ActorID    string `json:"actor_id"`
-	TaskID     string `json:"task_id"`
-	Stream     string `json:"stream"`
-	OnlyUnread bool   `json:"only_unread"`
-	Limit      int    `json:"limit"`
+	ActorID        string `json:"actor_id"`
+	TaskID         string `json:"task_id"`
+	Stream         string `json:"stream"`
+	OnlyUnread     bool   `json:"only_unread"`
+	OnlyUnsurfaced bool   `json:"only_unsurfaced"`
+	Limit          int    `json:"limit"`
 }
 
 type ackReq struct {
+	ActorID    string   `json:"actor_id"`
+	MessageIDs []string `json:"message_ids"`
+}
+
+type markSurfacedReq struct {
 	ActorID    string   `json:"actor_id"`
 	MessageIDs []string `json:"message_ids"`
 }
@@ -68,30 +74,11 @@ type releaseReq struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("mailbox/manage", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("mailbox/manage", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("mailbox/manage", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("mailbox/manage", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
-	store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	store, err := blackboard.OpenBoardStore(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open board store: %w", err)
 	}
@@ -144,7 +131,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		}
 
 		if strings.HasPrefix(base.Recipient, "team:") {
-			teamStore, err := teams.Open(ctx, cfg.Storage.Root)
+			teamStore, err := teams.Open(ctx, rc.Config.Storage.Root)
 			if err != nil {
 				return fmt.Errorf("open teams store: %w", err)
 			}
@@ -213,12 +200,13 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		}
 
 		filter := agent.InboxFilter{
-			WorkspaceID: workspaceID,
-			ActorID:     in.Inbox.ActorID,
-			TaskID:      in.Inbox.TaskID,
-			Stream:      in.Inbox.Stream,
-			OnlyUnread:  in.Inbox.OnlyUnread,
-			Limit:       in.Inbox.Limit,
+			WorkspaceID:    workspaceID,
+			ActorID:        in.Inbox.ActorID,
+			TaskID:         in.Inbox.TaskID,
+			Stream:         in.Inbox.Stream,
+			OnlyUnread:     in.Inbox.OnlyUnread,
+			OnlyUnsurfaced: in.Inbox.OnlyUnsurfaced,
+			Limit:          in.Inbox.Limit,
 		}
 
 		messages, err := store.Inbox(ctx, filter)
@@ -226,8 +214,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			return err
 		}
 
-		// Mark as read by default when retrieved
-		if len(messages) > 0 {
+		// Only mark as read if this is NOT a filtering query for unread messages.
+		// This allows hooks to see the same unread messages multiple times until explicitly acked.
+		if len(messages) > 0 && !in.Inbox.OnlyUnread {
 			ids := make([]string, len(messages))
 			for i, m := range messages {
 				ids[i] = m.ID
@@ -260,6 +249,26 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		data = map[string]any{
 			"acked_count": count,
 			"summary":     fmt.Sprintf("acknowledged %d messages", count),
+		}
+
+	case "mark_surfaced":
+		if in.MarkSurfaced == nil {
+			return fmt.Errorf("mark_surfaced payload is required")
+		}
+		if in.MarkSurfaced.ActorID == "" {
+			return fmt.Errorf("actor_id is required")
+		}
+		if len(in.MarkSurfaced.MessageIDs) == 0 {
+			return fmt.Errorf("message_ids is required")
+		}
+
+		count, err := store.MarkSurfaced(ctx, workspaceID, in.MarkSurfaced.ActorID, in.MarkSurfaced.MessageIDs)
+		if err != nil {
+			return err
+		}
+		data = map[string]any{
+			"surfaced_count": count,
+			"summary":        fmt.Sprintf("marked %d messages as surfaced", count),
 		}
 
 	case "reserve":
@@ -359,17 +368,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		}
 
 	default:
-		return fmt.Errorf("unknown operation %q (expected send|inbox|ack|reserve|release|list_reservations)", op)
+		return fmt.Errorf("unknown operation %q (expected send|inbox|ack|mark_surfaced|reserve|release|list_reservations)", op)
 	}
 
-	return rc.Emit("mailbox/manage", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, command, data)
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit mailbox failure")
-	os.Exit(1)
-}

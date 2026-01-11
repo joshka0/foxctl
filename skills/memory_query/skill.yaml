@@ -27,11 +27,15 @@ signature:
     - name: types
       type: string
       required: false
-      description: Comma-separated memory types to filter (gotcha, decision, pattern, edit, codemap, etc.)
+      description: Comma-separated memory types to filter (gotcha, decision, pattern, user_pref, time_sink, edit, codemap, code_symbol)
     - name: workspace
       type: string
       required: false
       description: Workspace path (defaults to current directory)
+    - name: session_id
+      type: string
+      required: false
+      description: Filter memories by session_id
     - name: limit
       type: integer
       required: false
@@ -85,6 +89,8 @@ signature:
       - gotcha: Lessons learned, pitfalls to avoid
       - decision: Architecture/design decisions with rationale
       - pattern: Code patterns to follow or avoid
+      - user_pref: Explicit user preferences (from session summaries)
+      - time_sink: Time-consuming issues to avoid (from session summaries)
       - edit: Recent file edits (auto-captured)
       - code_symbol: Indexed code symbols
       - codemap: Semantic codemaps
@@ -101,6 +107,12 @@ signature:
       - Query gotchas for a file: { "file": "internal/storage/memory/store.go", "types": "gotcha,decision" }
       - Search patterns semantically: { "query": "error handling patterns", "types": "pattern" }
       - Get all decisions: { "types": "decision", "limit": 20 }
+
+      Example commands:
+        agentctl run memory/query --input '{"file":"internal/storage/memory/store.go","types":"gotcha,decision","limit":5}'
+        agentctl skills run memory/query --file internal/storage/memory/store.go --types gotcha,decision --limit 5
+        agentctl run memory/query --input '{"query":"authentication middleware","types":"pattern","limit":10}'
+        agentctl skills run memory/query --query "authentication middleware" --types pattern --limit 10
     workflows:
       - id: file-gotchas
         description: "Get gotchas before editing a file"

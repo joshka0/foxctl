@@ -64,4 +64,4 @@ agentctl run code/security --input '{"path": ".", "recursive": true}'
 agentctl run code/imports --input '{"path": "internal/", "recursive": true}'
 ```
 
-Full docs: See individual skill docs in `configs/skills/`
+Full docs: See individual skill docs in `~/.agentctl/share/configs/skills/`

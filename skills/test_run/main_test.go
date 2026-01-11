@@ -2,9 +2,30 @@ package main
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 )
+
+// applyDefaults sets default values for input fields (mirrors run function).
+func applyDefaults(in *input) {
+	if in.Path == "" {
+		in.Path = "./..."
+	}
+	if in.Mode == "" {
+		in.Mode = "test"
+	}
+	if in.Timeout == "" {
+		in.Timeout = "10m"
+	}
+}
+
+// parseInput is a test helper that parses JSON and applies defaults.
+func parseInput(r io.Reader) (input, error) {
+	return skilltest.ParseInputWithDefaults[input](r, applyDefaults)
+}
 
 func TestParseInput_Default(t *testing.T) {
 	r := strings.NewReader(`{}`)

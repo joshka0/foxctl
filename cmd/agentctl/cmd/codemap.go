@@ -102,35 +102,9 @@ Examples:
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 
-			// Resolve workspace
-			workspacePath := workspace
-			var err error
-			if workspacePath == "" {
-				workspacePath, err = os.Getwd()
-				if err != nil {
-					return fmt.Errorf("get working directory: %w", err)
-				}
-			}
-			workspacePath, err = filepath.Abs(workspacePath)
+			memStore, workspacePath, err := openCodemapMemoryStore(cmd, workspace)
 			if err != nil {
-				return fmt.Errorf("resolve workspace: %w", err)
-			}
-
-			// Open memory store
-			agentctlHome := os.Getenv("AGENTCTL_HOME")
-			if agentctlHome == "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return fmt.Errorf("get home directory: %w", err)
-				}
-				agentctlHome = filepath.Join(home, ".agentctl")
-			}
-			storageRoot := filepath.Join(agentctlHome, "storage")
-			casRoot := filepath.Join(agentctlHome, "cas")
-
-			memStore, err := memory.Open(ctx, storageRoot, casRoot)
-			if err != nil {
-				return fmt.Errorf("open memory store: %w", err)
+				return err
 			}
 			defer memStore.Close()
 
@@ -218,35 +192,9 @@ Examples:
 			codemapID := args[0]
 			ctx := cmd.Context()
 
-			// Resolve workspace
-			workspacePath := workspace
-			var err error
-			if workspacePath == "" {
-				workspacePath, err = os.Getwd()
-				if err != nil {
-					return fmt.Errorf("get working directory: %w", err)
-				}
-			}
-			workspacePath, err = filepath.Abs(workspacePath)
+			memStore, workspacePath, err := openCodemapMemoryStore(cmd, workspace)
 			if err != nil {
-				return fmt.Errorf("resolve workspace: %w", err)
-			}
-
-			// Open memory store
-			agentctlHome := os.Getenv("AGENTCTL_HOME")
-			if agentctlHome == "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return fmt.Errorf("get home directory: %w", err)
-				}
-				agentctlHome = filepath.Join(home, ".agentctl")
-			}
-			storageRoot := filepath.Join(agentctlHome, "storage")
-			casRoot := filepath.Join(agentctlHome, "cas")
-
-			memStore, err := memory.Open(ctx, storageRoot, casRoot)
-			if err != nil {
-				return fmt.Errorf("open memory store: %w", err)
+				return err
 			}
 			defer memStore.Close()
 
@@ -291,35 +239,9 @@ Examples:
 			codemapID := args[0]
 			ctx := cmd.Context()
 
-			// Resolve workspace
-			workspacePath := workspace
-			var err error
-			if workspacePath == "" {
-				workspacePath, err = os.Getwd()
-				if err != nil {
-					return fmt.Errorf("get working directory: %w", err)
-				}
-			}
-			workspacePath, err = filepath.Abs(workspacePath)
+			memStore, workspacePath, err := openCodemapMemoryStore(cmd, workspace)
 			if err != nil {
-				return fmt.Errorf("resolve workspace: %w", err)
-			}
-
-			// Open memory store
-			agentctlHome := os.Getenv("AGENTCTL_HOME")
-			if agentctlHome == "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return fmt.Errorf("get home directory: %w", err)
-				}
-				agentctlHome = filepath.Join(home, ".agentctl")
-			}
-			storageRoot := filepath.Join(agentctlHome, "storage")
-			casRoot := filepath.Join(agentctlHome, "cas")
-
-			memStore, err := memory.Open(ctx, storageRoot, casRoot)
-			if err != nil {
-				return fmt.Errorf("open memory store: %w", err)
+				return err
 			}
 			defer memStore.Close()
 
@@ -373,17 +295,37 @@ Examples:
 	return cmd
 }
 
+func openCodemapMemoryStore(cmd *cobra.Command, workspaceFlag string) (*memory.Store, string, error) {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+
+	workspacePath := workspaceFlag
+	var err error
+	if workspacePath == "" {
+		workspacePath, err = os.Getwd()
+		if err != nil {
+			return nil, "", fmt.Errorf("get working directory: %w", err)
+		}
+	}
+	workspacePath, err = filepath.Abs(workspacePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	store, err := memory.OpenFromConfig(ctx, cfg)
+	if err != nil {
+		return nil, "", fmt.Errorf("open memory store: %w", err)
+	}
+	return store, workspacePath, nil
+}
+
 func runCodemapSkill(cmd *cobra.Command, skillName string, payload map[string]any) error {
 	return runCodemapSkillWithTimeout(cmd, skillName, payload, "")
 }
 
 func runCodemapSkillWithTimeout(cmd *cobra.Command, skillName string, payload map[string]any, timeout string) error {
-	cfg, err := config.Load(cmd.Context())
-	if err != nil {
-		return err
-	}
-	_, err = findSkill(cfg, skillName)
-	if err != nil {
+	cfg := config.MustFromContext(cmd.Context())
+	if _, err := findSkill(cfg, skillName); err != nil {
 		return fmt.Errorf("%s skill not found (run make skills-install): %w", skillName, err)
 	}
 	input, err := json.Marshal(payload)

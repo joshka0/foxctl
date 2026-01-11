@@ -1,0 +1,72 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/anchor
+  version: 0.1.0
+  description: "Persist an immutable session goal (anchor) and terse learnings across compactions"
+  tags: ["session", "continuity", "anchor", "hooks", "claude-code", "opencode"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: session/anchor
+  parameters:
+    - name: operation
+      type: string
+      required: true
+      description: "Operation: get|set|append_learnings|bump_compaction|set_question|clear_question|clear"
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path"
+    - name: session_id
+      type: string
+      required: false
+      description: "Optional session ID for attribution"
+    - name: main_prompt
+      type: string
+      required: false
+      description: "Main prompt to anchor (required for operation=set)"
+    - name: trigger
+      type: string
+      required: false
+      description: "Trigger source (stop, pre_compact, etc.)"
+    - name: summary
+      type: string
+      required: false
+      description: "Optional terse window summary to append"
+    - name: decisions
+      type: array
+      required: false
+      description: "Decisions to append"
+    - name: gotchas
+      type: array
+      required: false
+      description: "Gotchas to append"
+    - name: progress
+      type: array
+      required: false
+      description: "Progress items to append"
+    - name: question
+      type: string
+      required: false
+      description: "Pending elicitation question"
+  returns:
+    - name: found
+      type: boolean
+      description: "Whether an anchor exists"
+    - name: anchor
+      type: object
+      description: "Anchor object (if found)"
+    - name: message
+      type: string
+      description: "Human-readable result message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

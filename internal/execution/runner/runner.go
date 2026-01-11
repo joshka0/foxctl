@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	execrunner "github.com/jkatigb/agentctl/internal/execution/exec"
@@ -61,6 +62,15 @@ type RunOptions struct {
 // RunWithOptions executes the appropriate runtime for a manifest using structured options.
 func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error) {
 	ws, _ := workspace.FromContext(ctx)
+	if strings.TrimSpace(ws) == "" {
+		if envWS := strings.TrimSpace(os.Getenv("AGENTCTL_WORKSPACE")); envWS != "" {
+			ws = workspace.Normalize(envWS)
+		}
+		if ws == "" {
+			ws = workspace.Detect("")
+		}
+	}
+
 	switch opts.Manifest.Distribution.Type {
 	case "exec":
 		r := execrunner.Runner{Manifest: opts.Manifest, Binary: opts.ArtifactPath}

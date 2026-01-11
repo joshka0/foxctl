@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,13 +14,12 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-const skillName = "mobile/ios"
+const command = "mobile/ios"
 
 type input struct {
 	Operation   string   `json:"operation"`
@@ -53,44 +51,14 @@ type IDBDevice struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("EARG", err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate input
 	if in.Operation == "" {
-		return input{}, fmt.Errorf("operation is required")
+		return errors.New("operation is required")
 	}
-
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Check IDB availability
 	if _, err := exec.LookPath("idb"); err != nil {
 		return fmt.Errorf("idb not found: install with 'brew install idb-companion'")
@@ -155,7 +123,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 }
 
 // listDevices lists all available iOS simulators.
-func listDevices(ctx context.Context, rc *runner.RunnerContext) error {
+func listDevices(ctx context.Context, rc *skillmain.RunContext) error {
 	cmd := exec.CommandContext(ctx, "idb", "list-targets", "--json")
 	output, err := cmd.Output()
 	if err != nil {
@@ -188,7 +156,7 @@ func listDevices(ctx context.Context, rc *runner.RunnerContext) error {
 }
 
 // deviceInfo gets detailed info about a specific device.
-func deviceInfo(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func deviceInfo(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	args := []string{"describe", "--json"}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -212,7 +180,7 @@ func deviceInfo(ctx context.Context, rc *runner.RunnerContext, udid string) erro
 }
 
 // boot boots a simulator.
-func boot(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func boot(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	if udid == "" {
 		return fmt.Errorf("udid is required for boot operation")
 	}
@@ -231,7 +199,7 @@ func boot(ctx context.Context, rc *runner.RunnerContext, udid string) error {
 }
 
 // install installs an app on the simulator.
-func install(ctx context.Context, rc *runner.RunnerContext, udid, app string) error {
+func install(ctx context.Context, rc *skillmain.RunContext, udid, app string) error {
 	if app == "" {
 		return fmt.Errorf("app path is required for install operation")
 	}
@@ -279,7 +247,7 @@ func install(ctx context.Context, rc *runner.RunnerContext, udid, app string) er
 }
 
 // launch launches an app by bundle ID.
-func launch(ctx context.Context, rc *runner.RunnerContext, udid, bundleID string) error {
+func launch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
 		return fmt.Errorf("app bundle ID is required for launch operation")
 	}
@@ -303,7 +271,7 @@ func launch(ctx context.Context, rc *runner.RunnerContext, udid, bundleID string
 }
 
 // terminate stops a running app.
-func terminate(ctx context.Context, rc *runner.RunnerContext, udid, bundleID string) error {
+func terminate(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
 		return fmt.Errorf("app bundle ID is required for terminate operation")
 	}
@@ -327,7 +295,7 @@ func terminate(ctx context.Context, rc *runner.RunnerContext, udid, bundleID str
 }
 
 // screenshot captures the simulator screen.
-func screenshot(ctx context.Context, rc *runner.RunnerContext, udid, outputPath string) error {
+func screenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath string) error {
 	// Track if we created a temp file that needs cleanup
 	tempCreated := false
 	if outputPath == "" {
@@ -358,7 +326,7 @@ func screenshot(ctx context.Context, rc *runner.RunnerContext, udid, outputPath 
 		return fmt.Errorf("read screenshot: %w", err)
 	}
 
-	artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(data), "image/png", "ios_screenshot")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(data), "image/png", "ios_screenshot")
 	if err != nil {
 		return fmt.Errorf("persist screenshot: %w", err)
 	}
@@ -373,7 +341,7 @@ func screenshot(ctx context.Context, rc *runner.RunnerContext, udid, outputPath 
 }
 
 // tap performs a tap at coordinates.
-func tap(ctx context.Context, rc *runner.RunnerContext, udid string, x, y int) error {
+func tap(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) error {
 	args := []string{"ui", "tap", strconv.Itoa(x), strconv.Itoa(y)}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -393,7 +361,7 @@ func tap(ctx context.Context, rc *runner.RunnerContext, udid string, x, y int) e
 }
 
 // swipe performs a swipe gesture.
-func swipe(ctx context.Context, rc *runner.RunnerContext, udid string, x1, y1, x2, y2 int) error {
+func swipe(ctx context.Context, rc *skillmain.RunContext, udid string, x1, y1, x2, y2 int) error {
 	args := []string{
 		"ui", "swipe",
 		strconv.Itoa(x1), strconv.Itoa(y1),
@@ -417,7 +385,7 @@ func swipe(ctx context.Context, rc *runner.RunnerContext, udid string, x1, y1, x
 }
 
 // typeText types text into the simulator.
-func typeText(ctx context.Context, rc *runner.RunnerContext, udid, text string) error {
+func typeText(ctx context.Context, rc *skillmain.RunContext, udid, text string) error {
 	if text == "" {
 		return fmt.Errorf("text is required for type_text operation")
 	}
@@ -440,7 +408,7 @@ func typeText(ctx context.Context, rc *runner.RunnerContext, udid, text string) 
 }
 
 // button presses a hardware button.
-func button(ctx context.Context, rc *runner.RunnerContext, udid, buttonName string) error {
+func button(ctx context.Context, rc *skillmain.RunContext, udid, buttonName string) error {
 	if buttonName == "" {
 		return fmt.Errorf("button name is required")
 	}
@@ -463,7 +431,7 @@ func button(ctx context.Context, rc *runner.RunnerContext, udid, buttonName stri
 }
 
 // uiTree gets the UI accessibility tree.
-func uiTree(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	args := []string{"ui", "describe-all", "--json"}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -509,7 +477,7 @@ func uiTree(ctx context.Context, rc *runner.RunnerContext, udid string) error {
 
 	// Store full tree in CAS if truncated
 	if truncated {
-		artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/json", "ios_ui_tree")
+		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/json", "ios_ui_tree")
 		if err != nil {
 			return fmt.Errorf("persist ui tree: %w", err)
 		}
@@ -521,7 +489,7 @@ func uiTree(ctx context.Context, rc *runner.RunnerContext, udid string) error {
 }
 
 // describePoint describes the UI element at a specific point.
-func describePoint(ctx context.Context, rc *runner.RunnerContext, udid string, x, y int) error {
+func describePoint(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) error {
 	args := []string{"ui", "describe-point", strconv.Itoa(x), strconv.Itoa(y), "--json"}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -547,7 +515,7 @@ func describePoint(ctx context.Context, rc *runner.RunnerContext, udid string, x
 }
 
 // logs gets simulator logs.
-func logs(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func logs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	args := []string{"log", "--style", "json"}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -576,7 +544,7 @@ func logs(ctx context.Context, rc *runner.RunnerContext, udid string) error {
 	}
 
 	// Store logs in CAS
-	artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/x-ndjson", "ios_logs")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/x-ndjson", "ios_logs")
 	if err != nil {
 		return fmt.Errorf("persist logs: %w", err)
 	}
@@ -598,7 +566,7 @@ func logs(ctx context.Context, rc *runner.RunnerContext, udid string) error {
 }
 
 // openURL opens a URL in the simulator.
-func openURL(ctx context.Context, rc *runner.RunnerContext, udid, url string) error {
+func openURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) error {
 	if url == "" {
 		return fmt.Errorf("url is required for open_url operation")
 	}
@@ -621,7 +589,7 @@ func openURL(ctx context.Context, rc *runner.RunnerContext, udid, url string) er
 }
 
 // setLocation sets the simulated GPS location.
-func setLocation(ctx context.Context, rc *runner.RunnerContext, udid string, lat, long float64) error {
+func setLocation(ctx context.Context, rc *skillmain.RunContext, udid string, lat, long float64) error {
 	args := []string{
 		"set_location",
 		strconv.FormatFloat(lat, 'f', 6, 64),
@@ -645,7 +613,7 @@ func setLocation(ctx context.Context, rc *runner.RunnerContext, udid string, lat
 }
 
 // approvePermissions approves permissions for an app.
-func approvePermissions(ctx context.Context, rc *runner.RunnerContext, udid, bundleID string, permissions []string) error {
+func approvePermissions(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string, permissions []string) error {
 	if bundleID == "" {
 		return fmt.Errorf("app bundle ID is required for approve_permissions")
 	}
@@ -675,7 +643,7 @@ func approvePermissions(ctx context.Context, rc *runner.RunnerContext, udid, bun
 const iosRecordPIDFile = "/tmp/agentctl_ios_record.pid"
 
 // recordStart starts video recording.
-func recordStart(ctx context.Context, rc *runner.RunnerContext, udid, outputPath string) error {
+func recordStart(ctx context.Context, rc *skillmain.RunContext, udid, outputPath string) error {
 	if outputPath == "" {
 		outputPath = fmt.Sprintf("/tmp/ios_recording_%d.mp4", time.Now().UnixNano())
 	}
@@ -714,7 +682,7 @@ func recordStart(ctx context.Context, rc *runner.RunnerContext, udid, outputPath
 }
 
 // recordStop stops video recording.
-func recordStop(ctx context.Context, rc *runner.RunnerContext) error {
+func recordStop(ctx context.Context, rc *skillmain.RunContext) error {
 	pidData, err := os.ReadFile(iosRecordPIDFile)
 	if err != nil {
 		// No PID file means no known recording in progress
@@ -745,7 +713,7 @@ func recordStop(ctx context.Context, rc *runner.RunnerContext) error {
 }
 
 // crashLogs lists crash logs.
-func crashLogs(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func crashLogs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	args := []string{"crash", "list", "--json"}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -781,7 +749,7 @@ func crashLogs(ctx context.Context, rc *runner.RunnerContext, udid string) error
 }
 
 // addMedia adds media files to the simulator.
-func addMedia(ctx context.Context, rc *runner.RunnerContext, udid, mediaPath string) error {
+func addMedia(ctx context.Context, rc *skillmain.RunContext, udid, mediaPath string) error {
 	if mediaPath == "" {
 		return fmt.Errorf("media_path is required for add_media operation")
 	}
@@ -830,7 +798,7 @@ func addMedia(ctx context.Context, rc *runner.RunnerContext, udid, mediaPath str
 }
 
 // clearKeychain clears the keychain.
-func clearKeychain(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func clearKeychain(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	args := []string{"clear_keychain"}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -848,7 +816,7 @@ func clearKeychain(ctx context.Context, rc *runner.RunnerContext, udid string) e
 }
 
 // focus brings the simulator window to front.
-func focus(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func focus(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	args := []string{"focus"}
 	if udid != "" {
 		args = append(args, "--udid", udid)
@@ -897,7 +865,7 @@ func doShake(ctx context.Context, udid string) error {
 }
 
 // shake simulates a shake gesture (for Expo dev menu).
-func shake(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func shake(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	if err := doShake(ctx, udid); err != nil {
 		return err
 	}
@@ -910,7 +878,7 @@ func shake(ctx context.Context, rc *runner.RunnerContext, udid string) error {
 }
 
 // expoDeepLink opens an Expo deep link URL.
-func expoDeepLink(ctx context.Context, rc *runner.RunnerContext, udid, expoURL string) error {
+func expoDeepLink(ctx context.Context, rc *skillmain.RunContext, udid, expoURL string) error {
 	if expoURL == "" {
 		return fmt.Errorf("expo_url is required for expo_deep_link operation")
 	}
@@ -939,7 +907,7 @@ func expoDeepLink(ctx context.Context, rc *runner.RunnerContext, udid, expoURL s
 }
 
 // expoReload triggers a reload in the Expo app.
-func expoReload(ctx context.Context, rc *runner.RunnerContext, udid string) error {
+func expoReload(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	// Method 1: Shake to open dev menu, then tap reload
 	// Use doShake to avoid double envelope emission
 	if err := doShake(ctx, udid); err != nil {
@@ -968,15 +936,6 @@ func expoReload(ctx context.Context, rc *runner.RunnerContext, udid string) erro
 }
 
 // emit outputs the result envelope.
-func emit(rc *runner.RunnerContext, data map[string]any) error {
-	return rc.Emit(skillName, data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(skillName, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
-	os.Exit(1)
+func emit(rc *skillmain.RunContext, data map[string]any) error {
+	return skillout.Emit(rc, command, data)
 }

@@ -340,6 +340,143 @@ func TestBoardStore_PriorityOrdering(t *testing.T) {
 	}
 }
 
+func TestSurfacedLifecycleAndFilters(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	workspaceID := "ws"
+	recipient := "overseer"
+
+	// Create an unread message (default)
+	msg := &agent.BoardMessage{
+		WorkspaceID: workspaceID,
+		Sender:      "human",
+		Recipient:   recipient,
+		Subject:     "Test",
+		Body:        "Hello",
+	}
+	if err := store.SendMessage(ctx, msg); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if msg.Status != agent.BoardMessageStatusUnread {
+		t.Fatalf("expected status unread, got %q", msg.Status)
+	}
+
+	// Mark as surfaced
+	if _, err := store.MarkSurfaced(ctx, workspaceID, recipient, []string{msg.ID}); err != nil {
+		t.Fatalf("MarkSurfaced: %v", err)
+	}
+
+	// OnlyUnread should include surfaced
+	got, err := store.Inbox(ctx, agent.InboxFilter{
+		WorkspaceID: workspaceID,
+		ActorID:     recipient,
+		OnlyUnread:  true,
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("Inbox OnlyUnread: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(got))
+	}
+	if got[0].Status != agent.BoardMessageStatusSurfaced {
+		t.Fatalf("expected status surfaced, got %q", got[0].Status)
+	}
+
+	// OnlyUnsurfaced should exclude surfaced
+	got, err = store.Inbox(ctx, agent.InboxFilter{
+		WorkspaceID:    workspaceID,
+		ActorID:        recipient,
+		OnlyUnread:     true,
+		OnlyUnsurfaced: true,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("Inbox OnlyUnsurfaced: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 messages, got %d", len(got))
+	}
+
+	// MarkRead should convert surfaced -> read
+	if _, err := store.MarkRead(ctx, workspaceID, recipient, []string{msg.ID}); err != nil {
+		t.Fatalf("MarkRead: %v", err)
+	}
+
+	// Now OnlyUnread should return none
+	got, err = store.Inbox(ctx, agent.InboxFilter{
+		WorkspaceID: workspaceID,
+		ActorID:     recipient,
+		OnlyUnread:  true,
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("Inbox OnlyUnread after MarkRead: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected 0 messages, got %d", len(got))
+	}
+}
+
+func TestCountMessagesByTaskCountsSurfaced(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+
+	store, err := OpenBoardStore(ctx, root)
+	if err != nil {
+		t.Fatalf("OpenBoardStore: %v", err)
+	}
+	defer store.Close()
+
+	workspaceID := "ws"
+	taskID := "task-1"
+	recipient := "overseer"
+
+	// Unread
+	m1 := &agent.BoardMessage{
+		WorkspaceID: workspaceID,
+		TaskID:      taskID,
+		Sender:      "human",
+		Recipient:   recipient,
+		Subject:     "A",
+		Body:        "A",
+	}
+	if err := store.SendMessage(ctx, m1); err != nil {
+		t.Fatalf("SendMessage m1: %v", err)
+	}
+
+	// Another unread that we'll surface
+	m2 := &agent.BoardMessage{
+		WorkspaceID: workspaceID,
+		TaskID:      taskID,
+		Sender:      "human",
+		Recipient:   recipient,
+		Subject:     "B",
+		Body:        "B",
+	}
+	if err := store.SendMessage(ctx, m2); err != nil {
+		t.Fatalf("SendMessage m2: %v", err)
+	}
+	if _, err := store.MarkSurfaced(ctx, workspaceID, recipient, []string{m2.ID}); err != nil {
+		t.Fatalf("MarkSurfaced m2: %v", err)
+	}
+
+	admin, overseer, total, err := store.CountMessagesByTask(ctx, workspaceID, taskID)
+	if err != nil {
+		t.Fatalf("CountMessagesByTask: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected total=2 (unread+surfaced), got %d (admin=%d overseer=%d)", total, admin, overseer)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Ensure temp directories are cleaned up
 	code := m.Run()

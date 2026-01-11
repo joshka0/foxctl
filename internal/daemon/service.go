@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/execution/runner"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
@@ -35,6 +37,9 @@ type Service struct {
 	opts     ServiceOptions
 	listener net.Listener
 	started  time.Time
+
+	// Skill resolution
+	skillResolver *SkillResolver
 
 	// Shared resources
 	cacheStore *cache.Store
@@ -66,6 +71,7 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 		cfg:            cfg,
 		opts:           opts,
 		started:        time.Now(),
+		skillResolver:  NewSkillResolver(cfg),
 		warmWorkspaces: make(map[string]bool),
 		shutdownCh:     make(chan struct{}),
 		dbPool:         pool,
@@ -318,6 +324,8 @@ type RunResult struct {
 }
 
 func (s *Service) handleRun(ctx context.Context, params json.RawMessage) (*RunResult, error) {
+	start := time.Now()
+
 	var p RunParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("parse params: %w", err)
@@ -327,7 +335,78 @@ func (s *Service) handleRun(ctx context.Context, params json.RawMessage) (*RunRe
 		return nil, errors.New("skill is required")
 	}
 
-	return nil, fmt.Errorf("daemon run is not available; run without --daemon")
+	// Resolve skill
+	handle, err := s.skillResolver.Resolve(p.Skill)
+	if err != nil {
+		return nil, fmt.Errorf("resolve skill %s: %w", p.Skill, err)
+	}
+
+	// Build extra env (session propagation)
+	extraEnv := s.buildSkillEnv(p.Workspace)
+
+	// Prepare input (default to empty object if nil)
+	input := p.Input
+	if len(input) == 0 {
+		input = []byte("{}")
+	}
+
+	// Execute skill
+	stdout, stderr, err := runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     handle.Manifest,
+		ArtifactPath: handle.ArtifactPath,
+		Input:        input,
+		ExtraEnv:     extraEnv,
+	})
+
+	// Handle execution error
+	if err != nil {
+		// If there's stderr output, include it in the error envelope
+		if len(stderr) > 0 {
+			errMsg := fmt.Sprintf("%v: %s", err, string(stderr))
+			errEnv := envelope.Error(p.Skill, "EEXEC", errMsg, nil)
+			output, _ := json.Marshal(errEnv)
+			return &RunResult{Output: output, Duration: ms(start)}, nil
+		}
+		errEnv := envelope.Error(p.Skill, "EEXEC", err.Error(), nil)
+		output, _ := json.Marshal(errEnv)
+		return &RunResult{Output: output, Duration: ms(start)}, nil
+	}
+
+	// Return skill output
+	// If stdout is empty, return a generic success envelope
+	if len(stdout) == 0 {
+		succEnv := envelope.OK(p.Skill, nil)
+		output, _ := json.Marshal(succEnv)
+		return &RunResult{Output: output, Duration: ms(start)}, nil
+	}
+
+	return &RunResult{
+		Output:   stdout,
+		Duration: ms(start),
+	}, nil
+}
+
+// buildSkillEnv constructs environment variables for skill execution.
+func (s *Service) buildSkillEnv(workspace string) []string {
+	var env []string
+	if workspace != "" {
+		env = append(env, "AGENTCTL_WORKSPACE="+workspace)
+	}
+	// Propagate session vars from parent environment
+	for _, key := range []string{
+		"AGENTCTL_SESSION_ID", "CLAUDE_SESSION_ID",
+		"AGENTCTL_AGENT_ID", "AGENTCTL_TRACE_ID",
+	} {
+		if v := os.Getenv(key); v != "" {
+			env = append(env, key+"="+v)
+		}
+	}
+	return env
+}
+
+// ms converts duration since start to milliseconds.
+func ms(start time.Time) float64 {
+	return float64(time.Since(start).Microseconds()) / 1000.0
 }
 
 // WarmParams are the parameters for the warm method.

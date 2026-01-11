@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,47 +13,44 @@ import (
 	"strconv"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-type input struct {
-	Path        string `json:"path"`
+// Input defines the input parameters for fs/write.
+type Input struct {
+	Path        string `json:"path" validate:"required"`
 	Content     string `json:"content"`
 	Digest      string `json:"digest"`
-	Mode        string `json:"mode"`
+	Mode        string `json:"mode" validate:"omitempty,oneof=create overwrite append"`
 	Permissions string `json:"permissions"`
 	CreateDirs  bool   `json:"create_dirs"`
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("fs/write", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("fs/write", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("fs/write", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("fs/write", "ERUNTIME", err)
-	}
+	skillmain.Main("fs/write", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
+	if in.Mode == "" {
+		in.Mode = "create"
+	}
+	if in.Permissions == "" {
+		in.Permissions = "0644"
+	}
+
+	// Custom validation: either content or digest required
+	if in.Content == "" && in.Digest == "" {
+		return fmt.Errorf("either content or digest is required")
+	}
+	if in.Content != "" && in.Digest != "" {
+		return fmt.Errorf("cannot specify both content and digest")
+	}
+
 	// Validate path
-	targetPath, err := resolveTargetPath(rc, in.Path)
+	targetPath, err := rc.PathValidator.ValidatePath(in.Path)
 	if err != nil {
 		return fmt.Errorf("resolve target path: %w", err)
 	}
@@ -104,50 +100,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"permissions":   fmt.Sprintf("%04o", perm),
 	}
 
-	return rc.Emit("fs/write", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, "fs/write", data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	if strings.TrimSpace(in.Path) == "" {
-		return input{}, fmt.Errorf("path is required")
-	}
-
-	if in.Content == "" && in.Digest == "" {
-		return input{}, fmt.Errorf("either content or digest is required")
-	}
-
-	if in.Content != "" && in.Digest != "" {
-		return input{}, fmt.Errorf("cannot specify both content and digest")
-	}
-
-	if in.Mode == "" {
-		in.Mode = "create"
-	}
-
-	if in.Permissions == "" {
-		in.Permissions = "0644"
-	}
-
-	return in, nil
-}
-
-func resolveTargetPath(rc *runner.RunnerContext, path string) (string, error) {
-	valid, err := rc.PathValidator.ValidatePath(path)
-	if err != nil {
-		return "", fmt.Errorf("path validation failed: %w", err)
-	}
-	return valid, nil
-}
-
-func getContent(ctx context.Context, rc *runner.RunnerContext, in input) ([]byte, error) {
+func getContent(ctx context.Context, rc *skillmain.RunContext, in Input) ([]byte, error) {
 	if in.Content != "" {
 		return []byte(in.Content), nil
 	}
@@ -248,10 +204,4 @@ func performWrite(path string, content []byte, mode string, perm fs.FileMode) (i
 	}
 
 	return n, checksum, nil
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit fs/write failure")
-	os.Exit(1)
 }

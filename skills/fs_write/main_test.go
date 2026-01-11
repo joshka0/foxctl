@@ -5,70 +5,56 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/rs/zerolog"
 )
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
-	// We use a separate temp dir for agentctl home (config/cache/cas)
 	state := t.TempDir()
+	casPath := filepath.Join(state, "cas")
+	casStore, err := cas.NewStore(casPath)
+	if err != nil {
+		t.Fatalf("open cas: %v", err)
+	}
+
+	pv, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		t.Fatalf("path validator: %v", err)
+	}
+
 	cfg := config.Config{
 		Home:           state,
 		InlineOutputKB: 32,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   state + "/cas",
-			Jobs:  state + "/jobs",
-			Cache: state + "/cache",
-		},
-	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
-	if err != nil {
-		t.Fatalf("runner context: %v", err)
-	}
-	return rc
-}
-
-func TestParseInput(t *testing.T) {
-	tests := []struct {
-		name    string
-		json    string
-		want    input
-		wantErr bool
-	}{
-		{
-			name: "valid input",
-			json: `{"path": "foo.txt", "content": "bar", "permissions": "0644", "mode": "create"}`,
-			want: input{
-				Path:        "foo.txt",
-				Content:     "bar",
-				Permissions: "0644",
-				Mode:        "create",
-			},
-		},
-		{
-			name:    "invalid json",
-			json:    `{invalid}`,
-			wantErr: true,
+			CAS:   casPath,
+			Jobs:  filepath.Join(state, "jobs"),
+			Cache: filepath.Join(state, "cache"),
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			in, err := parseInput(bytes.NewBufferString(tt.json))
-			if (err != nil) != tt.wantErr {
-				t.Errorf("parseInput() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && in != tt.want {
-				t.Errorf("parseInput() = %v, want %v", in, tt.want)
-			}
-		})
+	return &skillmain.RunContext{
+		Config:        cfg,
+		CASStore:      casStore,
+		Workspace:     workspace,
+		Logger:        zerolog.Nop(),
+		PathValidator: pv,
+		Validator:     validator.New(),
+		Stdout:        stdout,
+		Now:           time.Now,
+		InlineKB:      cfg.InlineOutputKB,
+		MaxPreview:    100,
 	}
 }
 
@@ -86,38 +72,38 @@ func TestCheckWriteMode(t *testing.T) {
 	tests := []struct {
 		name    string
 		path    string
-		in      input
+		mode    string
 		wantErr bool
 	}{
 		{
 			name:    "overwrite allowed",
 			path:    f.Name(),
-			in:      input{Mode: "overwrite"},
+			mode:    "overwrite",
 			wantErr: false,
 		},
 		{
 			name:    "overwrite denied",
 			path:    f.Name(),
-			in:      input{Mode: "create"}, // create mode fails if file exists
+			mode:    "create", // create mode fails if file exists
 			wantErr: true,
 		},
 		{
 			name:    "append allowed",
 			path:    f.Name(),
-			in:      input{Mode: "append"},
+			mode:    "append",
 			wantErr: false,
 		},
 		{
 			name:    "new file",
 			path:    f.Name() + ".new",
-			in:      input{Mode: "create"},
+			mode:    "create",
 			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checkWriteMode(tt.path, tt.in.Mode)
+			err := checkWriteMode(tt.path, tt.mode)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("checkWriteMode() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -132,10 +118,10 @@ func TestRunFsWrite(t *testing.T) {
 	target := "output.txt"
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Path:        target,
 		Content:     "hello world",
 		Mode:        "create",
@@ -177,10 +163,10 @@ func TestRunFsWriteAppend(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Path:        target,
 		Content:     " world",
 		Mode:        "append",

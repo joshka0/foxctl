@@ -1,0 +1,63 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/subagent_stop
+  version: 0.1.0
+  description: "Handle SubagentStop events for cleanup and observability"
+  tags: ["hook", "subagent", "lifecycle"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_subagent_stop/hooks_subagent_stop
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: hooks/subagent_stop
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event name (SubagentStop)"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Subagent stop payload"
+    - name: hook_config
+      type: object
+      required: false
+      description: "Hook-specific configuration"
+  help:
+    short: "Handle subagent stop events"
+    long: |
+      The subagent_stop hook handles SubagentStop events to:
+
+      1. Release file reservations owned by the subagent
+      2. Emit observability wide events for lifecycle tracking
+      3. Log completion status
+
+      This hook always approves (never blocks) since the subagent
+      has already completed.
+
+      Example hook config in .claude/settings.json:
+        "SubagentStop": [{
+          "matcher": "explorer|reviewer|implementer",
+          "hooks": [{
+            "type": "command",
+            "command": "agentctl run hooks/subagent_stop --ephemeral"
+          }]
+        }]
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook output (always approve)"
+  - name: subagent_name
+    type: string
+    description: "Name of the stopped subagent"
+  - name: reservations_released
+    type: integer
+    description: "Number of file reservations released"
+capabilities:
+  network: "none"
+  filesystem: []
+  pure: false

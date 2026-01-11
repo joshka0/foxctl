@@ -95,16 +95,22 @@ func autoMigrate(ctx context.Context, cfg Config, dst storage.CASStore) error {
 		return fmt.Errorf("cas: check source: %w", err)
 	}
 
-	// Count actual content files (not .json metadata)
-	contentCount := 0
+	// Only count legacy objects that have metadata.
+	// Some very old layouts can leave content files without a matching `.json` metadata file.
+	// Those cannot be migrated via the Store List API and should not trigger repeated auto-migration noise.
+	sourceDigests := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() && len(entry.Name()) == 64 {
-			contentCount++
+		if entry.IsDir() || len(entry.Name()) != 64 {
+			continue
 		}
+		if _, err := os.Stat(filepath.Join(sha256Dir, entry.Name()+".json")); err != nil {
+			continue
+		}
+		sourceDigests = append(sourceDigests, "sha256:"+entry.Name())
 	}
 
-	if contentCount == 0 {
-		// No content to migrate
+	if len(sourceDigests) == 0 {
+		// No migratable objects.
 		return nil
 	}
 
@@ -122,14 +128,13 @@ func autoMigrate(ctx context.Context, cfg Config, dst storage.CASStore) error {
 
 	// Count objects that need migration (exist in source but not destination)
 	newCount := 0
-	for _, entry := range entries {
-		if !entry.IsDir() && len(entry.Name()) == 64 {
-			digest := "sha256:" + entry.Name()
-			if _, exists := dstDigests[digest]; !exists {
-				newCount++
-			}
+	for _, digest := range sourceDigests {
+		if _, exists := dstDigests[digest]; !exists {
+			newCount++
 		}
 	}
+
+	contentCount := len(sourceDigests)
 
 	if newCount == 0 {
 		// All source objects already exist in destination

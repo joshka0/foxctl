@@ -90,6 +90,26 @@ signature:
       type: string
       required: false
       description: Path to media file for add_media operation
+  help:
+    short: "Automate iOS simulators via IDB."
+    long: |
+      Use mobile/ios for device control, app lifecycle, and UI actions.
+      Example commands:
+        agentctl run mobile/ios --input '{"operation":"list_devices"}'
+        agentctl skills run mobile/ios --operation list_devices
+        agentctl run mobile/ios --input '{"operation":"tap","x":150,"y":300}'
+        agentctl skills run mobile/ios --operation tap --x 150 --y 300
+    workflows:
+      - id: list-devices
+        description: "List iOS devices."
+        example_input:
+          operation: "list_devices"
+      - id: tap-screen
+        description: "Tap on screen coordinates."
+        example_input:
+          operation: "tap"
+          x: 150
+          y: 300
   returns:
     - name: devices
       type: array

@@ -41,6 +41,28 @@ signature:
       required: false
       default: 50
       description: "Maximum number of results to return"
+  help:
+    short: "Query Go symbols, references, and diagnostics."
+    long: |
+      Use lsp/gopls to query Go language server operations.
+      Example commands:
+        agentctl run lsp/gopls --input '{"operation":"definition","file":"main.go","line":10,"column":5}'
+        agentctl skills run lsp/gopls --operation definition --file main.go --line 10 --column 5
+        agentctl run lsp/gopls --input '{"operation":"workspace_symbol","query":"Handler"}'
+        agentctl skills run lsp/gopls --operation workspace_symbol --query Handler
+    workflows:
+      - id: find-definition
+        description: "Find a definition at a position."
+        example_input:
+          operation: "definition"
+          file: "main.go"
+          line: 10
+          column: 5
+      - id: search-symbols
+        description: "Search workspace symbols."
+        example_input:
+          operation: "workspace_symbol"
+          query: "Handler"
 returns:
   - name: results
     type: array

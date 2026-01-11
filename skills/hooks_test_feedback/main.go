@@ -7,16 +7,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/testwatch"
 )
 
@@ -41,30 +39,11 @@ type WatcherFeedback struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("hooks/test_feedback", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("hooks/test_feedback", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("hooks/test_feedback", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("hooks/test_feedback", "ERUNTIME", err)
-	}
+	skillmain.Main("hooks/test_feedback", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in hook.Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
+	paths := sessionkit.ResolvePaths(rc.Config)
 	feedbackCfg := DefaultConfig()
 
 	// Load custom config from environment if available
@@ -76,28 +55,31 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Open test status store
-	store, err := testwatch.Open(ctx, cfg.Storage.Root)
+	store, err := testwatch.Open(ctx, paths.StorageRoot)
 	if err != nil {
 		// If store doesn't exist yet, emit none with no context
-		output := hook.NewNone()
+		output := hooks.NewNone()
 		output.Reason = "test watch store not initialized"
 		return emitOutput(rc, output, nil)
 	}
 	defer store.Close()
 
 	// Derive workspace ID from workspace root
-	workspaceID := deriveWorkspaceID(in.WorkspaceRoot)
+	workspaceID := in.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = deriveWorkspaceID(in.WorkspaceRoot)
+	}
 
 	// Get all test statuses for this workspace
 	statuses, err := store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
-		output := hook.NewNone()
+		output := hooks.NewNone()
 		output.Reason = fmt.Sprintf("failed to load test status: %v", err)
 		return emitOutput(rc, output, nil)
 	}
 
 	if len(statuses) == 0 {
-		output := hook.NewNone()
+		output := hooks.NewNone()
 		output.Reason = "no test watchers configured for this workspace"
 		return emitOutput(rc, output, nil)
 	}
@@ -125,7 +107,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 	// If no failures, emit none
 	if len(failingWatchers) == 0 {
-		output := hook.NewNone()
+		output := hooks.NewNone()
 		output.Reason = "all tests passing"
 		return emitOutput(rc, output, nil)
 	}
@@ -134,7 +116,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	contextStr := buildContextString(failingWatchers, feedbackCfg)
 
 	// Build output
-	output := hook.NewNone() // Advisory only, never blocks
+	output := hooks.NewNone() // Advisory only, never blocks
 	output.Reason = fmt.Sprintf("tests failing in %d watcher(s)", len(failingWatchers))
 	output.Context = contextStr
 
@@ -189,24 +171,14 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-func emitOutput(rc *runner.RunnerContext, output hook.Output, meta map[string]any) error {
+func emitOutput(rc *skillmain.RunContext, output hooks.Output, meta map[string]any) error {
 	data := map[string]any{
 		"hook_output": output,
 	}
 	if meta != nil {
 		data["meta"] = meta
 	}
-
-	return rc.Emit("hooks/test_feedback", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	return skillout.Emit(rc, "hooks/test_feedback", data)
 }
 
 func deriveWorkspaceID(path string) string {

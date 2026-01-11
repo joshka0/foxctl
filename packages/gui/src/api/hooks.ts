@@ -7,6 +7,7 @@ export const queryKeys = {
   jobs: (params?: { state?: string; limit?: number }) => ["jobs", params] as const,
   jobDetail: (id: string) => ["jobs", id] as const,
   tasks: (params?: { limit?: number }) => ["tasks", params] as const,
+  agents: (params?: { state?: string; limit?: number }) => ["agents", params] as const,
   stats: () => ["stats"] as const,
   insights: () => ["insights"] as const,
   mailbox: (params?: { actor?: string; limit?: number }) => ["mailbox", params] as const,
@@ -51,6 +52,13 @@ export function useTasks(params?: { limit?: number }) {
   return useQuery({
     queryKey: queryKeys.tasks(params),
     queryFn: () => api.getTasks(params),
+  });
+}
+
+export function useAgents(params?: { state?: string; limit?: number }) {
+  return useQuery({
+    queryKey: queryKeys.agents(params),
+    queryFn: () => api.getAgents(params),
   });
 }
 

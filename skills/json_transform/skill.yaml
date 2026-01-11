@@ -42,6 +42,27 @@ signature:
       required: false
       default: false
       description: "Compact output (for format operation)"
+  help:
+    short: "Transform or validate JSON strings."
+    long: |
+      Use json/transform to extract, merge, validate, format, or list keys for
+      JSON payloads. The input parameter is a JSON string.
+      Example commands:
+        agentctl run json/transform --input '{"operation":"keys","input":"{\"foo\":1,\"bar\":2}"}'
+        agentctl run json/transform --input '{"operation":"extract","input":"{\"data\":{\"items\":[1,2]}}","path":".data.items"}'
+        agentctl run json/transform --input '{"operation":"format","input":"{\"foo\":1}","indent":4}'
+    workflows:
+      - id: extract-items
+        description: "Extract a JSON path."
+        example_input:
+          operation: "extract"
+          input: "{\"data\":{\"items\":[1,2]}}"
+          path: ".data.items"
+      - id: list-keys
+        description: "List the keys of a JSON object."
+        example_input:
+          operation: "keys"
+          input: "{\"foo\":1,\"bar\":2}"
 returns:
   - name: result
     type: object

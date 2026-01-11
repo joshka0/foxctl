@@ -12,7 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
@@ -20,7 +21,7 @@ import (
 
 // Input defines the skill input parameters.
 type Input struct {
-	Query             string  `json:"query"`
+	Query             string  `json:"query" validate:"required"`
 	Limit             int     `json:"limit,omitempty"`
 	MinSimilarity     float64 `json:"min_similarity,omitempty"`
 	Workspace         string  `json:"workspace,omitempty"`
@@ -68,7 +69,6 @@ type WindowMatch struct {
 }
 
 const (
-	command       = "session/recall"
 	geminiModel   = "gemini-embedding-001"
 	geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultLimit  = 5
@@ -104,32 +104,17 @@ type geminiError struct {
 }
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main("session/recall", run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("EPARSE", fmt.Errorf("decode input: %w", err), "Ensure valid JSON on stdin")
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
+	normalizeInput(&in, rc)
 
-	if input.Query == "" {
-		fail("EARG", fmt.Errorf("query is required"), "Provide a query string for semantic search")
-	}
-
-	if input.Limit <= 0 {
-		input.Limit = defaultLimit
-	}
-
-	if input.MinSimilarity <= 0 {
-		input.MinSimilarity = defaultMinSim
-	}
-
-	// Check for embedding API key - prefer Voyage, fall back to Gemini
+	// Check for embedding API key - prefer Voyage, fall back to Gemini, then FTS
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey == "" && geminiKey == "" {
-		fail("ERUNTIME", fmt.Errorf("no embedding API key set"), "Set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable")
-	}
+	useFTSFallback := voyageKey == "" && geminiKey == ""
 
 	// Get agentctl home
 	agentctlHome := os.Getenv("AGENTCTL_HOME")
@@ -142,45 +127,49 @@ func main() {
 	storageRoot := filepath.Join(agentctlHome, "storage")
 	sessionStore, err := sessions.Open(ctx, storageRoot)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open sessions store: %w", err), "Check AGENTCTL_HOME permissions and disk space")
+		return fmt.Errorf("open sessions store: %w", err)
 	}
 	defer func() { errs.Ignore(sessionStore.Close(), "close sessions store") }()
 
-	// Generate embedding for the query - prefer Voyage, fall back to Gemini
+	// Generate embedding for the query - prefer Voyage, fall back to Gemini, then FTS
 	var queryEmbedding []float32
-	if voyageKey != "" {
-		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			Model:         "voyage-3.5", // Must match model used in session_archive for window embeddings
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			fail("ERUNTIME", fmt.Errorf("voyage provider: %w", err), "Check VOYAGE_API_KEY")
-		}
-		queryEmbedding, err = vp.EmbedQuery(ctx, input.Query)
-		if err != nil {
-			fail("ERUNTIME", fmt.Errorf("generate query embedding: %w", err), "Check Voyage API key and network connectivity")
-		}
-	} else {
-		queryEmbedding, err = generateGeminiEmbedding(ctx, geminiKey, input.Query)
-		if err != nil {
-			fail("ERUNTIME", fmt.Errorf("generate query embedding: %w", err), "Check Gemini API key and network connectivity")
+	if !useFTSFallback {
+		if voyageKey != "" {
+			// Get model from scope-based recommendation (supports env var override)
+			model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSessions)
+			vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
+				APIKey:        voyageKey,
+				Model:         model, // Must match session_summarize for compatible embeddings
+				RateLimitWait: boolPtr(true),
+			})
+			if err != nil {
+				return fmt.Errorf("voyage provider: %w", err)
+			}
+			queryEmbedding, err = vp.EmbedQuery(ctx, in.Query)
+			if err != nil {
+				return fmt.Errorf("generate query embedding: %w", err)
+			}
+		} else {
+			queryEmbedding, err = generateGeminiEmbedding(ctx, geminiKey, in.Query)
+			if err != nil {
+				return fmt.Errorf("generate query embedding: %w", err)
+			}
 		}
 	}
 
 	var output Output
-	output.Query = input.Query
+	output.Query = in.Query
 
-	if input.WindowGranularity {
+	if in.WindowGranularity {
 		// Search at context window level for more granular retrieval
-		windowResults, err := sessionStore.SearchContextWindows(ctx, queryEmbedding, input.Limit*2)
+		windowResults, err := sessionStore.SearchContextWindows(ctx, queryEmbedding, in.Limit*2)
 		if err != nil {
-			fail("ERUNTIME", fmt.Errorf("search context windows: %w", err), "Check session store integrity")
+			return fmt.Errorf("search context windows: %w", err)
 		}
 
 		windowMatches := make([]WindowMatch, 0)
 		for _, r := range windowResults {
-			if r.Similarity < input.MinSimilarity {
+			if r.Similarity < in.MinSimilarity {
 				continue
 			}
 
@@ -203,7 +192,7 @@ func main() {
 
 			windowMatches = append(windowMatches, match)
 
-			if len(windowMatches) >= input.Limit {
+			if len(windowMatches) >= in.Limit {
 				break
 			}
 		}
@@ -219,63 +208,127 @@ func main() {
 		}
 	} else {
 		// Search at session level (default)
-		results, err := sessionStore.SearchSimilar(ctx, queryEmbedding, input.Limit*2)
-		if err != nil {
-			fail("ERUNTIME", fmt.Errorf("search similar sessions: %w", err), "Check session store integrity")
-		}
-
 		matches := make([]SessionMatch, 0)
-		for _, r := range results {
-			if r.Similarity < input.MinSimilarity {
-				continue
+		var totalSearched int
+
+		if useFTSFallback {
+			// Full-text search fallback when no embedding API available
+			ftsResults, err := sessionStore.Search(ctx, in.Query, in.Limit*2)
+			if err != nil {
+				return fmt.Errorf("text search: %w", err)
+			}
+			totalSearched = len(ftsResults)
+
+			for _, s := range ftsResults {
+				if in.Workspace != "" && s.WorkspacePath != in.Workspace {
+					continue
+				}
+				if in.Project != "" && s.ProjectName != in.Project {
+					continue
+				}
+
+				match := SessionMatch{
+					SessionID:    s.ID,
+					ProjectName:  s.ProjectName,
+					GitBranch:    s.GitBranch,
+					Summary:      s.Summary,
+					Accomplished: s.Accomplished,
+					Decisions:    s.Decisions,
+					Gotchas:      s.Gotchas,
+					UserInsights: s.UserInsights,
+					Tags:         s.Tags,
+					KeyFiles:     s.KeyFiles,
+					Similarity:   1.0, // FTS doesn't have similarity scores
+				}
+
+				if !s.StartedAt.IsZero() {
+					match.StartedAt = s.StartedAt.Format(time.RFC3339)
+				}
+
+				matches = append(matches, match)
+				if len(matches) >= in.Limit {
+					break
+				}
 			}
 
-			if input.Workspace != "" && r.Session.WorkspacePath != input.Workspace {
-				continue
+			output.Status = "ok"
+			output.Message = fmt.Sprintf("Found %d sessions via full-text search (no API key for semantic)", len(matches))
+		} else {
+			// Semantic search with embeddings
+			results, err := sessionStore.SearchSimilar(ctx, queryEmbedding, in.Limit*2)
+			if err != nil {
+				return fmt.Errorf("search similar sessions: %w", err)
+			}
+			totalSearched = len(results)
+
+			for _, r := range results {
+				if r.Similarity < in.MinSimilarity {
+					continue
+				}
+
+				if in.Workspace != "" && r.Session.WorkspacePath != in.Workspace {
+					continue
+				}
+
+				if in.Project != "" && r.Session.ProjectName != in.Project {
+					continue
+				}
+
+				match := SessionMatch{
+					SessionID:    r.Session.ID,
+					ProjectName:  r.Session.ProjectName,
+					GitBranch:    r.Session.GitBranch,
+					Summary:      r.Session.Summary,
+					Accomplished: r.Session.Accomplished,
+					Decisions:    r.Session.Decisions,
+					Gotchas:      r.Session.Gotchas,
+					UserInsights: r.Session.UserInsights,
+					Tags:         r.Session.Tags,
+					KeyFiles:     r.Session.KeyFiles,
+					Similarity:   r.Similarity,
+				}
+
+				if !r.Session.StartedAt.IsZero() {
+					match.StartedAt = r.Session.StartedAt.Format(time.RFC3339)
+				}
+
+				matches = append(matches, match)
+
+				if len(matches) >= in.Limit {
+					break
+				}
 			}
 
-			if input.Project != "" && r.Session.ProjectName != input.Project {
-				continue
-			}
-
-			match := SessionMatch{
-				SessionID:    r.Session.ID,
-				ProjectName:  r.Session.ProjectName,
-				GitBranch:    r.Session.GitBranch,
-				Summary:      r.Session.Summary,
-				Accomplished: r.Session.Accomplished,
-				Decisions:    r.Session.Decisions,
-				Gotchas:      r.Session.Gotchas,
-				UserInsights: r.Session.UserInsights,
-				Tags:         r.Session.Tags,
-				KeyFiles:     r.Session.KeyFiles,
-				Similarity:   r.Similarity,
-			}
-
-			if !r.Session.StartedAt.IsZero() {
-				match.StartedAt = r.Session.StartedAt.Format(time.RFC3339)
-			}
-
-			matches = append(matches, match)
-
-			if len(matches) >= input.Limit {
-				break
-			}
+			output.Status = "ok"
+			output.Message = fmt.Sprintf("Found %d relevant sessions for query", len(matches))
 		}
 
 		output.Matches = matches
-		output.TotalWithEmbeddings = len(results)
-		output.Status = "ok"
-		output.Message = fmt.Sprintf("Found %d relevant sessions for query", len(matches))
+		output.TotalWithEmbeddings = totalSearched
 
 		if len(matches) == 0 {
 			output.Status = "no_matches"
-			output.Message = "No sessions matched the query above the similarity threshold"
+			if useFTSFallback {
+				output.Message = "No sessions matched the query via full-text search"
+			} else {
+				output.Message = "No sessions matched the query above the similarity threshold"
+			}
 		}
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/recall result")
+	return skillout.Emit(rc, "session/recall", output)
+}
+
+func normalizeInput(in *Input, rc *skillmain.RunContext) {
+	if in.Limit <= 0 {
+		in.Limit = defaultLimit
+	}
+	if in.MinSimilarity <= 0 {
+		in.MinSimilarity = defaultMinSim
+	}
+	if in.Workspace == "" {
+		in.Workspace = rc.Workspace
+	}
 }
 
 // boolPtr returns a pointer to a bool value.
@@ -338,13 +391,4 @@ func generateGeminiEmbedding(ctx context.Context, apiKey, text string) ([]float3
 	}
 
 	return embedResp.Embedding.Values, nil
-}
-
-func fail(code string, err error, hint string) {
-	data := map[string]any{
-		"hint": hint,
-	}
-	env := envelope.Error(command, code, err.Error(), data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/recall failure")
-	os.Exit(1)
 }

@@ -26,4 +26,4 @@ agentctl run plan/sync --input '{"force": true}'
 
 Runs on Stop hook automatically.
 
-Full docs: `~/repos/personal/agentctl/configs/skills/plan-sync/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/plan-sync/Skill.md`

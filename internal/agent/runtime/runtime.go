@@ -375,7 +375,22 @@ Workflow:
 2. Use fs.read_file to inspect surrounding context.
 3. Use tests.run to verify behavior and check for regressions.
 4. Suggest concrete patches or improvements in your output, but leave edits to Coder.
-5. Use mail.send to communicate review feedback or todo.add to track follow-ups.`
+	5. Use mail.send to communicate review feedback or todo.add to track follow-ups.`
+	case types.RoleFixer:
+		instruction = `You are a fixing agent. Apply targeted code changes to address bugs, review feedback, and failing tests.
+
+Workflow:
+1. Identify the root cause.
+2. Make minimal, safe edits.
+3. Run tests to verify.
+4. Summarize what changed and why.`
+	case types.RoleVerifier:
+		instruction = `You are a verification agent. Validate claims, results, and proposed changes.
+
+Guidelines:
+- Prefer evidence: tests, logs, diffs, and direct code inspection.
+- Use verification/cove_verify when appropriate.
+- Do not apply edits; propose concrete fixes or next steps.`
 	default:
 		instruction = `You are a helpful agent. Complete the given task using available tools.`
 	}

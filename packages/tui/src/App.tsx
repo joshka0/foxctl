@@ -226,6 +226,16 @@ export function App() {
 
   // Global keyboard handling for view switching and quit
   useKeyboard((e) => {
+    if (e.ctrl && e.name === "c") {
+      const shutdown = (globalThis as { __agentctl_tui_shutdown?: (code?: number) => void })
+        .__agentctl_tui_shutdown;
+      if (shutdown) {
+        shutdown(0);
+      } else {
+        process.exit(0);
+      }
+      return;
+    }
     // Don't intercept keys when in search or console input mode
     // These views handle their own input
     // Use raw character (single char that isn't a control key)
@@ -266,16 +276,21 @@ export function App() {
     }
 
     switch (e.name) {
-      case "q":
-        if (e.ctrl) {
-          // Delay exit slightly to allow cleanup
-          setTimeout(() => process.exit(0), 50);
-        }
-        // Regular q only quits from non-input views
-        if (view !== "search" && view !== "console") {
-          setTimeout(() => process.exit(0), 50);
+      case "q": {
+        const shutdown = (globalThis as { __agentctl_tui_shutdown?: (code?: number) => void })
+          .__agentctl_tui_shutdown;
+        const canExit = view !== "search" && view !== "console";
+        if (e.ctrl || canExit) {
+          setTimeout(() => {
+            if (shutdown) {
+              shutdown(0);
+            } else {
+              process.exit(0);
+            }
+          }, 50);
         }
         break;
+      }
       case "[":
         // Previous view (across all categories)
         setView((v) => {

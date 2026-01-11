@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -70,59 +71,47 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("DECODE_ERROR", fmt.Errorf("decode input: %w", err))
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	if len(in.SessionIDs) == 0 && in.Project == "" {
+		return skillerr.Arg("either session_ids or project is required")
 	}
 
-	if len(input.SessionIDs) == 0 && input.Project == "" {
-		fail("INVALID_INPUT", fmt.Errorf("either session_ids or project is required"))
+	if in.Limit <= 0 {
+		in.Limit = defaultLimit
 	}
 
-	if input.Limit <= 0 {
-		input.Limit = defaultLimit
-	}
-
-	if input.Format == "" {
-		input.Format = "dspy"
-	}
-
-	// Get agentctl home
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		homeDir, _ := os.UserHomeDir()
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
+	if in.Format == "" {
+		in.Format = "dspy"
 	}
 
 	// Open sessions store
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	sessionStore, err := sessions.Open(ctx, storageRoot)
+	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		fail("STORE_ERROR", fmt.Errorf("open sessions store: %w", err))
+		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(sessionStore.Close(), "close sessions store") }()
+	defer cleanup()
 
 	// Gather sessions
 	var sessionList []sessions.Session
 
-	if len(input.SessionIDs) > 0 {
-		for _, id := range input.SessionIDs {
+	if len(in.SessionIDs) > 0 {
+		for _, id := range in.SessionIDs {
 			sess, err := sessionStore.Get(ctx, id)
 			if err == nil {
 				sessionList = append(sessionList, sess)
 			}
 		}
-	} else if input.Project != "" {
+	} else if in.Project != "" {
 		// Search by project
 		all, err := sessionStore.List(ctx, sessions.ListOptions{Limit: 100})
 		if err != nil {
-			fail("LIST_ERROR", fmt.Errorf("list sessions: %w", err))
+			return skillerr.IO("list sessions", skillerr.WithCause(err))
 		}
 		for _, s := range all {
-			if strings.EqualFold(s.ProjectName, input.Project) {
+			if strings.EqualFold(s.ProjectName, in.Project) {
 				sessionList = append(sessionList, s)
 			}
 		}
@@ -136,9 +125,7 @@ func main() {
 			Status:        "no_sessions",
 			Message:       "No sessions found matching criteria",
 		}
-		env := envelope.OK(command, output)
-		errs.Ignore(envelope.Write(os.Stdout, env), "emit session/export-dspy result")
-		return
+		return skillout.Emit(rc, command, output)
 	}
 
 	// Extract examples from sessions
@@ -147,17 +134,17 @@ func main() {
 		// Get turns for this session
 		turns, err := sessionStore.GetTurns(ctx, sess.ID, sessions.TurnListOptions{
 			SessionID: sess.ID,
-			Limit:     input.Limit,
+			Limit:     in.Limit,
 		})
 		if err != nil || len(turns) == 0 {
 			continue
 		}
 
 		// Pair user requests with assistant responses
-		examples = append(examples, extractExamples(sess, turns, input)...)
+		examples = append(examples, extractExamples(sess, turns, in)...)
 
-		if len(examples) >= input.Limit {
-			examples = examples[:input.Limit]
+		if len(examples) >= in.Limit {
+			examples = examples[:in.Limit]
 			break
 		}
 	}
@@ -170,17 +157,16 @@ func main() {
 	}
 
 	// Write to file or return inline
-	if input.OutputFile != "" {
-		if err := writeExamples(input.OutputFile, examples, input.Format); err != nil {
-			fail("WRITE_ERROR", fmt.Errorf("write output: %w", err))
+	if in.OutputFile != "" {
+		if err := writeExamples(in.OutputFile, examples, in.Format); err != nil {
+			return skillerr.IO("write output", skillerr.WithCause(err))
 		}
-		output.OutputFile = input.OutputFile
+		output.OutputFile = in.OutputFile
 	} else {
 		output.Examples = examples
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/export-dspy result")
+	return skillout.Emit(rc, command, output)
 }
 
 // extractExamples extracts DSPy examples from session turns.
@@ -309,10 +295,4 @@ func unique(items []string) []string {
 		}
 	}
 	return result
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/export-dspy failure")
-	os.Exit(1)
 }

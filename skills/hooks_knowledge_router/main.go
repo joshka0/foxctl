@@ -9,13 +9,14 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/knowledge"
 )
 
@@ -42,30 +43,11 @@ type Match struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("hooks/knowledge_router", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("hooks/knowledge_router", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("hooks/knowledge_router", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("hooks/knowledge_router", "ERUNTIME", err)
-	}
+	skillmain.Main("hooks/knowledge_router", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in hook.Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
+	paths := sessionkit.ResolvePaths(rc.Config)
 	routerCfg := DefaultConfig()
 
 	// Load custom config from environment if available
@@ -77,10 +59,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Open knowledge store
-	store, err := knowledge.Open(ctx, cfg.Storage.Root)
+	store, err := knowledge.Open(ctx, paths.StorageRoot)
 	if err != nil {
 		// If store doesn't exist yet, emit none with no context
-		output := hook.NewNone()
+		output := hooks.NewNone()
 		output.Reason = "knowledge store not initialized"
 		return emitOutput(rc, output, nil, routerCfg)
 	}
@@ -88,7 +70,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 	// Extract search context from input
 	prompt := extractPrompt(in)
-	filePath := extractFilePath(in.ToolInput)
+	filePath := pathutil.ExtractPath(in.ToolInput)
 
 	// Find matching knowledge items
 	matches := findMatches(ctx, store, prompt, filePath)
@@ -106,7 +88,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 	// Build output
 	if len(recommendations) == 0 {
-		output := hook.NewNone()
+		output := hooks.NewNone()
 		output.Reason = "no relevant knowledge packs found"
 		return emitOutput(rc, output, nil, routerCfg)
 	}
@@ -118,8 +100,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 	contextHint := fmt.Sprintf("Recommended knowledge packs: %s", strings.Join(names, ", "))
 
-	output := hook.Output{
-		Decision: hook.DecisionNone, // Advisory only, never block
+	output := hooks.Output{
+		Decision: hooks.DecisionNone, // Advisory only, never block
 		Context:  contextHint,
 		Meta: map[string]any{
 			"recommended": recommendations,
@@ -133,15 +115,9 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 // extractPrompt extracts the prompt text from hook input.
 // For UserPromptSubmit events, this would be in a "prompt" field.
 // For PreToolUse events, we extract from tool_input.
-func extractPrompt(in hook.Input) string {
-	// Try to get prompt from a dedicated field (for future UserPromptSubmit support)
-	if len(in.ToolInput) > 0 {
-		var input struct {
-			Prompt string `json:"prompt"`
-		}
-		if err := json.Unmarshal(in.ToolInput, &input); err == nil && input.Prompt != "" {
-			return input.Prompt
-		}
+func extractPrompt(in hooks.Input) string {
+	if in.Prompt != "" {
+		return in.Prompt
 	}
 
 	// For PreToolUse, extract meaningful text from tool input
@@ -160,21 +136,6 @@ func extractPrompt(in hook.Input) string {
 	}
 
 	return ""
-}
-
-// extractFilePath extracts the file_path from tool input JSON.
-func extractFilePath(toolInput json.RawMessage) string {
-	if len(toolInput) == 0 {
-		return ""
-	}
-
-	var input struct {
-		FilePath string `json:"file_path"`
-	}
-	if err := json.Unmarshal(toolInput, &input); err != nil {
-		return ""
-	}
-	return input.FilePath
 }
 
 // findMatches searches the knowledge store and scores matches.
@@ -221,7 +182,7 @@ func findMatches(ctx context.Context, store knowledge.Store, prompt, filePath st
 					// Boost score for items that match both keywords and path
 					for i := range matches {
 						if matches[i].Name == item.Name {
-							matches[i].Score = min(1.0, matches[i].Score+0.3)
+							matches[i].Score = minFloat(1.0, matches[i].Score+0.3)
 						}
 					}
 				}
@@ -280,21 +241,25 @@ func scoreKeywordMatch(keywords []string, item knowledge.Item) float64 {
 	baseScore := 0.5
 	bonus := float64(matchCount) / float64(len(keywords)) * 0.4
 
-	return min(1.0, baseScore+bonus)
+	return minFloat(1.0, baseScore+bonus)
 }
 
 // sortMatchesByScore sorts matches by score in descending order.
 func sortMatchesByScore(matches []Match) {
-	for i := 0; i < len(matches)-1; i++ {
-		for j := i + 1; j < len(matches); j++ {
-			if matches[j].Score > matches[i].Score {
-				matches[i], matches[j] = matches[j], matches[i]
-			}
-		}
-	}
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Score > matches[j].Score
+	})
 }
 
-func emitOutput(rc *runner.RunnerContext, output hook.Output, recommendations []Match, cfg RouterConfig) error {
+// minFloat returns the smaller of two float64 values.
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func emitOutput(rc *skillmain.RunContext, output hooks.Output, recommendations []Match, cfg RouterConfig) error {
 	data := map[string]any{
 		"hook_output": output,
 	}
@@ -302,14 +267,5 @@ func emitOutput(rc *runner.RunnerContext, output hook.Output, recommendations []
 		data["recommendations"] = recommendations
 		data["config"] = cfg
 	}
-	return rc.Emit("hooks/knowledge_router", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	return skillout.Emit(rc, "hooks/knowledge_router", data)
 }

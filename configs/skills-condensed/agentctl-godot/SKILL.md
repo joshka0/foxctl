@@ -35,4 +35,4 @@ agentctl run editor/godot --input '{"action": "node_create", "parent_path": "/ro
 agentctl run editor/godot --input '{"action": "node_attach_script", "node_path": "/root/Main/Player", "script_path": "res://scripts/player.gd"}'
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-godot/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-godot/Skill.md`

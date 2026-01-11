@@ -44,6 +44,27 @@ signature:
       required: false
       default: "10m"
       description: "Test timeout (e.g., 10m, 1h)"
+  help:
+    short: "Run tests, benchmarks, or coverage."
+    long: |
+      Use test/run to execute Go tests with optional coverage or race mode.
+      Example commands:
+        agentctl run test/run --input '{"path":"./...","mode":"test"}'
+        agentctl skills run test/run --path ./... --mode test
+        agentctl run test/run --input '{"path":"./...","mode":"race","timeout":"20m"}'
+        agentctl skills run test/run --path ./... --mode race --timeout 20m
+    workflows:
+      - id: run-tests
+        description: "Run tests."
+        example_input:
+          path: "./..."
+          mode: "test"
+      - id: run-race
+        description: "Run tests with race detection."
+        example_input:
+          path: "./..."
+          mode: "race"
+          timeout: "20m"
 returns:
   - name: results
     type: object

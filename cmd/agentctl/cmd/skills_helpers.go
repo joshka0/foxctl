@@ -17,6 +17,11 @@ import (
 func resolveWorkspaceContext(ctx context.Context, workspaceOverride string) context.Context {
 	ws := workspace.Normalize(workspaceOverride)
 	if ws == "" {
+		if envWS := strings.TrimSpace(os.Getenv("AGENTCTL_WORKSPACE")); envWS != "" {
+			ws = workspace.Normalize(envWS)
+		}
+	}
+	if ws == "" {
 		ws = workspace.Detect("")
 	}
 	if ws == "" {

@@ -3,41 +3,19 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
-)
-
-// skillError is a typed error that carries an error code and hint.
-type skillError struct {
-	code    string
-	message string
-	hint    string
-}
-
-func (e *skillError) Error() string {
-	return e.message
-}
-
-func newSkillError(code, message, hint string) error {
-	return &skillError{code: code, message: message, hint: hint}
-}
-
-const (
-	// DefaultRoot is the default storage root.
-	DefaultRoot = "~/.agentctl/storage"
 )
 
 // Input is the skill input schema.
 type Input struct {
 	// Operation is the action to perform.
-	Operation string `json:"operation"`
+	Operation string `json:"operation" validate:"required,oneof=enqueue stats get get_by_file job_status cleanup"`
 
 	// WorkspaceID identifies the workspace.
 	WorkspaceID string `json:"workspace_id,omitempty"`
@@ -101,53 +79,22 @@ type Output struct {
 }
 
 func main() {
-	if err := run(context.Background(), os.Stdin, os.Stdout); err != nil {
-		code := "ERUNTIME"
-		var data map[string]any
-		var se *skillError
-		if errors.As(err, &se) {
-			code = se.code
-			if se.hint != "" {
-				data = map[string]any{"hint": se.hint}
-			}
-		}
-		env := envelope.Error("embedding/queue", code, err.Error(), data)
-		_ = json.NewEncoder(os.Stdout).Encode(env) //nolint:errcheck // best-effort error output
-		os.Exit(1)
-	}
+	skillmain.Main("embedding/queue", run)
 }
 
-func run(ctx context.Context, r io.Reader, w io.Writer) error {
-	var input Input
-	if err := json.NewDecoder(r).Decode(&input); err != nil {
-		return newSkillError("EPARSE", fmt.Sprintf("parse input: %v", err), "Ensure valid JSON on stdin")
-	}
-
-	if input.Operation == "" {
-		return newSkillError("EARG", "operation is required", "Specify operation: enqueue, stats, get, get_by_file, job_status, cleanup")
-	}
-
-	// Get storage root from environment or use default (use cache dir, same as incremental_index)
-	root := os.Getenv("AGENTCTL_HOME")
-	if root == "" {
-		home, _ := os.UserHomeDir() //nolint:errcheck // fallback to empty string is fine
-		root = home + "/.agentctl/cache"
-	} else {
-		root = root + "/cache"
-	}
-
-	// Open store
-	store, err := embedding.OpenStore(ctx, root)
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Open store using cache path from config
+	store, err := embedding.OpenStore(ctx, rc.Config.Paths.Cache)
 	if err != nil {
-		return newSkillError("EIO", fmt.Sprintf("open store: %v", err), "Check that storage directory exists and is accessible")
+		return fmt.Errorf("open store: %w", err)
 	}
 	defer store.Close()
 
-	output := Output{Operation: input.Operation}
+	output := Output{Operation: in.Operation}
 
-	switch input.Operation {
+	switch in.Operation {
 	case "enqueue":
-		if err := handleEnqueue(ctx, store, &input, &output); err != nil {
+		if err := handleEnqueue(ctx, store, &in, &output); err != nil {
 			return err
 		}
 
@@ -157,31 +104,27 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 		}
 
 	case "get":
-		if err := handleGet(ctx, store, &input, &output); err != nil {
+		if err := handleGet(ctx, store, &in, &output); err != nil {
 			return err
 		}
 
 	case "get_by_file":
-		if err := handleGetByFile(ctx, store, &input, &output); err != nil {
+		if err := handleGetByFile(ctx, store, &in, &output); err != nil {
 			return err
 		}
 
 	case "job_status":
-		if err := handleJobStatus(ctx, store, &input, &output); err != nil {
+		if err := handleJobStatus(ctx, store, &in, &output); err != nil {
 			return err
 		}
 
 	case "cleanup":
-		if err := handleCleanup(ctx, store, &input, &output); err != nil {
+		if err := handleCleanup(ctx, store, &in, &output); err != nil {
 			return err
 		}
-
-	default:
-		return newSkillError("EARG", fmt.Sprintf("unknown operation: %s", input.Operation), "Valid operations: enqueue, stats, get, get_by_file, job_status, cleanup")
 	}
 
-	env := envelope.OK("embedding/queue", output)
-	return json.NewEncoder(w).Encode(env)
+	return skillout.Emit(rc, "embedding/queue", output)
 }
 
 func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
@@ -189,7 +132,7 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 		input.WorkspaceID = "default"
 	}
 	if len(input.Symbols) == 0 {
-		return newSkillError("EARG", "symbols is required for enqueue", "Provide symbols array with symbol_id, file_path, symbol_name, and content")
+		return fmt.Errorf("symbols is required for enqueue")
 	}
 
 	// Convert input symbols
@@ -242,7 +185,7 @@ func handleGet(ctx context.Context, store *embedding.Store, input *Input, output
 		input.WorkspaceID = "default"
 	}
 	if input.SymbolID == "" {
-		return newSkillError("EARG", "symbol_id is required for get", "Provide symbol_id field")
+		return fmt.Errorf("symbol_id is required for get")
 	}
 
 	emb, err := store.GetEmbedding(ctx, input.WorkspaceID, input.SymbolID)
@@ -264,7 +207,7 @@ func handleGetByFile(ctx context.Context, store *embedding.Store, input *Input, 
 		input.WorkspaceID = "default"
 	}
 	if input.FilePath == "" {
-		return newSkillError("EARG", "file_path is required for get_by_file", "Provide file_path field")
+		return fmt.Errorf("file_path is required for get_by_file")
 	}
 
 	embeddings, err := store.GetEmbeddingsByFile(ctx, input.WorkspaceID, input.FilePath)
@@ -279,7 +222,7 @@ func handleGetByFile(ctx context.Context, store *embedding.Store, input *Input, 
 
 func handleJobStatus(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
 	if input.JobID == "" {
-		return newSkillError("EARG", "job_id is required for job_status", "Provide job_id field from enqueue response")
+		return fmt.Errorf("job_id is required for job_status")
 	}
 
 	job, err := store.GetJob(ctx, input.JobID)

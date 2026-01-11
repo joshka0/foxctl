@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,11 +13,11 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/analysis/overseer"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/planning/llm"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -28,6 +27,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
+
+const command = "todo/manage"
 
 const (
 	statusPending    = "pending"
@@ -64,6 +65,7 @@ type input struct {
 	ReviewStatus  *reviewStatusReq  `json:"review_status"`
 	Search        *searchReq        `json:"search"`
 	List          *listReq          `json:"list"`
+	Dedupe        *dedupeReq        `json:"dedupe"`
 }
 
 // listReq defines the input for the list operation.
@@ -72,6 +74,15 @@ type listReq struct {
 	Status         string `json:"status"`          // Filter by status: pending, in_progress, completed, blocked
 	SortBy         string `json:"sort_by"`         // Sort by: created_at, pagerank, critical_path (default: created_at)
 	IncludeMetrics bool   `json:"include_metrics"` // Include full graph metrics (degrees, critical path)
+	TitleContains  string `json:"title_contains"`  // Case-insensitive substring match
+	SessionID      string `json:"session_id"`
+	Limit          int    `json:"limit"` // Limit number of results after sorting
+}
+
+type dedupeReq struct {
+	Apply bool   `json:"apply"`
+	Keep  string `json:"keep"`
+	Limit int    `json:"limit"`
 }
 
 // searchReq defines the input for semantic task search.
@@ -87,12 +98,14 @@ type addRequest struct {
 	ParentID    string   `json:"parent_id"`
 	DependsOn   []string `json:"depends_on"`
 	ScopePath   string   `json:"scope_path"`
+	SessionID   string   `json:"session_id,omitempty"` // Override runner context session_id
 }
 
 type completeRequest struct {
-	ID      string `json:"id"`
-	Notes   string `json:"notes"`
-	Gotchas string `json:"gotchas"`
+	ID        string `json:"id"`
+	Notes     string `json:"notes"`
+	Gotchas   string `json:"gotchas"`
+	SessionID string `json:"session_id,omitempty"` // Optional: scope to specific session
 }
 
 type updateRequest struct {
@@ -117,7 +130,8 @@ type reviewStatusReq struct {
 }
 
 type setActiveReq struct {
-	TaskID string `json:"task_id"`
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id,omitempty"` // Optional: scope to specific session
 }
 
 type ensureActiveReq struct {
@@ -187,6 +201,7 @@ type taskOutput struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
 	ScopePath   string   `json:"scope_path,omitempty"`
+	SessionID   string   `json:"session_id,omitempty"`
 	ParentID    string   `json:"parent_id,omitempty"`
 	Children    []string `json:"children,omitempty"`
 	DependsOn   []string `json:"depends_on,omitempty"`
@@ -209,29 +224,11 @@ type taskOutput struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("todo/manage", "ERUNTIME", err, "Check AGENTCTL_HOME is set and accessible")
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("todo/manage", "ERUNTIME", err, "Check storage directory permissions")
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("todo/manage", "EPARSE", fmt.Errorf("decode input: %w", err), "Ensure valid JSON on stdin")
-	}
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("todo/manage", "ERUNTIME", err, "")
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	cfg := rc.Config
 	// Open SQLite-backed task store
 	store, err := tasks.Open(ctx, cfg.Storage.Root)
 	if err != nil {
@@ -259,7 +256,12 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 
 	switch op {
 	case "add":
-		task, allTasks, err := handleAdd(ctx, store, cfg, workspaceID, rc.SessionID, in.Add)
+		// Prefer session_id from input, fallback to runner context
+		addSessionID := rc.SessionID
+		if in.Add != nil && strings.TrimSpace(in.Add.SessionID) != "" {
+			addSessionID = strings.TrimSpace(in.Add.SessionID)
+		}
+		task, allTasks, err := handleAdd(ctx, store, cfg, workspaceID, addSessionID, in.Add)
 		if err != nil {
 			return err
 		}
@@ -299,9 +301,16 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			return err
 		}
 
-		// Apply status filter if specified
-		if in.List != nil && in.List.Status != "" {
-			allTasks = filterByStatus(allTasks, in.List.Status)
+		if in.List != nil {
+			if in.List.Status != "" {
+				allTasks = filterByStatus(allTasks, in.List.Status)
+			}
+			if strings.TrimSpace(in.List.TitleContains) != "" {
+				allTasks = filterByTitleContains(allTasks, in.List.TitleContains)
+			}
+			if strings.TrimSpace(in.List.SessionID) != "" {
+				allTasks = filterBySessionID(allTasks, in.List.SessionID)
+			}
 		}
 
 		// Check if we need graph metrics
@@ -336,6 +345,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			})
 		}
 		// Default sort is by creation time (already the case from store)
+
+		if in.List != nil && in.List.Limit > 0 && len(allTasks) > in.List.Limit {
+			allTasks = allTasks[:in.List.Limit]
+		}
 
 		// Convert to output with optional metrics
 		taskOutputs := toOutputListWithMetrics(allTasks, metricsMap)
@@ -520,14 +533,18 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 			"summary":     fmt.Sprintf("found %d tasks matching %q", results.TotalFound, results.Query),
 		}
 
+	case "dedupe":
+		out, err := handleDedupe(ctx, store, workspaceID, in.Dedupe)
+		if err != nil {
+			return err
+		}
+		data = out
+
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|update|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status|search)", op)
+		return fmt.Errorf("unknown operation %q (expected add|update|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status|search|dedupe)", op)
 	}
 
-	return rc.Emit("todo/manage", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, command, data)
 }
 
 func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID, sessionID string, req *addRequest) (*taskOutput, []tasks.Task, error) {
@@ -564,6 +581,58 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 		return nil, nil, err
 	}
 
+	normalizedTitle := normalizeTaskTitle(req.Title)
+	existing := findOpenDuplicateTask(allTasks, workspaceID, sessionID, req.ParentID, normalizedTitle)
+	if existing != nil && strings.TrimSpace(existing.ScopePath) != "" && strings.TrimSpace(req.ScopePath) != "" && existing.ScopePath != req.ScopePath {
+		existing = nil
+	}
+	if existing != nil {
+		changed := false
+
+		if existing.Description == "" && strings.TrimSpace(req.Description) != "" {
+			existing.Description = req.Description
+			changed = true
+		}
+		if existing.ScopePath == "" && strings.TrimSpace(req.ScopePath) != "" {
+			existing.ScopePath = req.ScopePath
+			changed = true
+		}
+
+		mergedDeps := mergeStringIDs(existing.DependsOn, dedupe(req.DependsOn))
+		if !equalStringSets(existing.DependsOn, mergedDeps) {
+			existing.DependsOn = mergedDeps
+			changed = true
+		}
+
+		updated := *existing
+		if changed {
+			var err error
+			updated, err = store.Update(ctx, updated)
+			if err != nil {
+				return nil, nil, fmt.Errorf("update existing task: %w", err)
+			}
+		}
+
+		createTaskDependencyEdges(ctx, cfg, workspaceID, updated)
+
+		if req.ParentID != "" {
+			parent := index[req.ParentID]
+			if !containsString(parent.Children, updated.ID) {
+				parent.Children = append(parent.Children, updated.ID)
+				if _, err := store.Update(ctx, *parent); err != nil {
+					return nil, nil, fmt.Errorf("update parent children: %w", err)
+				}
+			}
+		}
+
+		allTasks, err = store.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return toOutput(updated), allTasks, nil
+	}
+
 	newTask := tasks.Task{
 		WorkspaceID: workspaceID,
 		Title:       req.Title,
@@ -580,19 +649,18 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 		return nil, nil, err
 	}
 
-	// Create graph edges for task relationships (parent_of, depends_on)
 	createTaskDependencyEdges(ctx, cfg, workspaceID, added)
 
-	// Update parent's children if needed
 	if req.ParentID != "" {
 		parent := index[req.ParentID]
-		parent.Children = append(parent.Children, added.ID)
-		if _, err := store.Update(ctx, *parent); err != nil {
-			return nil, nil, fmt.Errorf("update parent children: %w", err)
+		if !containsString(parent.Children, added.ID) {
+			parent.Children = append(parent.Children, added.ID)
+			if _, err := store.Update(ctx, *parent); err != nil {
+				return nil, nil, fmt.Errorf("update parent children: %w", err)
+			}
 		}
 	}
 
-	// Refresh task list
 	allTasks, err = store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, nil, err
@@ -895,13 +963,26 @@ func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, wor
 		return nil, fmt.Errorf("no embedding API key set (GEMINI_API_KEY or VOYAGE_API_KEY)")
 	}
 
-	// Initialize embedding provider (prefer Gemini for consistency with task embeddings)
-	// Task embeddings are created with Gemini (3072-dim), so query must use same provider
+	// Initialize embedding provider (prefer Voyage for consistency with standardized embeddings)
+	// Use ScopeModelRecommendation for consistent model selection across all skills
 	var provider interface {
 		Embed(ctx context.Context, text string) ([]float32, error)
 	}
 
-	if geminiKey != "" {
+	if voyageKey != "" {
+		// Get model from scope-based recommendation (supports env var override)
+		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeTasks)
+		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey:        voyageKey,
+			Model:         model,
+			RateLimitWait: boolPtr(true),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("voyage provider: %w", err)
+		}
+		provider = vp
+	} else {
+		// Gemini fallback (not recommended - dimension mismatch with Voyage)
 		gp, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
 			APIKey:        geminiKey,
 			RateLimitWait: boolPtr(true),
@@ -910,15 +991,6 @@ func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, wor
 			return nil, fmt.Errorf("gemini provider: %w", err)
 		}
 		provider = gp
-	} else {
-		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("voyage provider: %w", err)
-		}
-		provider = vp
 	}
 
 	// Generate query embedding
@@ -1017,6 +1089,241 @@ func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, wor
 
 	output.TotalFound = len(output.Tasks)
 	return output, nil
+}
+
+type dedupeGroup struct {
+	Key          string   `json:"key"`
+	Title        string   `json:"title"`
+	ParentID     string   `json:"parent_id"`
+	ScopePath    string   `json:"scope_path"`
+	SessionID    string   `json:"session_id,omitempty"`
+	Count        int      `json:"count"`
+	KeptID       string   `json:"kept_id"`
+	DuplicateIDs []string `json:"duplicate_ids"`
+}
+
+func handleDedupe(ctx context.Context, store tasks.Store, workspaceID string, req *dedupeReq) (map[string]any, error) {
+	apply := false
+	keep := "newest"
+	limit := 50
+	if req != nil {
+		apply = req.Apply
+		if strings.TrimSpace(req.Keep) != "" {
+			keep = strings.ToLower(strings.TrimSpace(req.Keep))
+		}
+		if req.Limit > 0 {
+			limit = req.Limit
+		}
+	}
+	if keep != "newest" && keep != "oldest" {
+		return nil, fmt.Errorf("dedupe.keep must be newest or oldest, got %q", keep)
+	}
+
+	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+
+	type groupInfo struct {
+		Key       string
+		Title     string
+		ParentID  string
+		ScopePath string
+		SessionID string
+		Tasks     []*tasks.Task
+	}
+
+	groups := make(map[string]*groupInfo)
+	for i := range allTasks {
+		t := &allTasks[i]
+		if t.WorkspaceID != workspaceID {
+			continue
+		}
+		if !isOpenForDedupe(t.Status) {
+			continue
+		}
+		normTitle := normalizeTaskTitle(t.Title)
+		if normTitle == "" {
+			continue
+		}
+		sessionKey := strings.TrimSpace(t.SessionID)
+		scopeKey := strings.ToLower(strings.TrimSpace(t.ScopePath))
+		key := fmt.Sprintf("%s|%s|%s|%s", sessionKey, t.ParentID, normTitle, scopeKey)
+		g := groups[key]
+		if g == nil {
+			g = &groupInfo{Key: key, Title: t.Title, ParentID: t.ParentID, ScopePath: t.ScopePath, SessionID: t.SessionID}
+			groups[key] = g
+		}
+		g.Tasks = append(g.Tasks, t)
+	}
+
+	duplicateGroups := make([]*groupInfo, 0)
+	for _, g := range groups {
+		if len(g.Tasks) < 2 {
+			continue
+		}
+		duplicateGroups = append(duplicateGroups, g)
+	}
+
+	sort.Slice(duplicateGroups, func(i, j int) bool {
+		return len(duplicateGroups[i].Tasks) > len(duplicateGroups[j].Tasks)
+	})
+	if limit > 0 && len(duplicateGroups) > limit {
+		duplicateGroups = duplicateGroups[:limit]
+	}
+
+	dupToKept := make(map[string]string)
+	outGroups := make([]dedupeGroup, 0, len(duplicateGroups))
+	duplicateTaskCount := 0
+
+	for _, g := range duplicateGroups {
+		sort.Slice(g.Tasks, func(i, j int) bool {
+			if keep == "oldest" {
+				return g.Tasks[i].CreatedAt.Before(g.Tasks[j].CreatedAt)
+			}
+			return g.Tasks[i].CreatedAt.After(g.Tasks[j].CreatedAt)
+		})
+
+		kept := g.Tasks[0]
+		dupIDs := make([]string, 0, len(g.Tasks)-1)
+		for _, t := range g.Tasks[1:] {
+			dupToKept[t.ID] = kept.ID
+			dupIDs = append(dupIDs, t.ID)
+		}
+		duplicateTaskCount += len(dupIDs)
+
+		outGroups = append(outGroups, dedupeGroup{
+			Key:          g.Key,
+			Title:        kept.Title,
+			ParentID:     kept.ParentID,
+			ScopePath:    kept.ScopePath,
+			SessionID:    kept.SessionID,
+			Count:        len(g.Tasks),
+			KeptID:       kept.ID,
+			DuplicateIDs: dupIDs,
+		})
+	}
+
+	canceledCount := 0
+	updatedCount := 0
+
+	if apply {
+		for i := range allTasks {
+			t := allTasks[i]
+			if !isOpenForDedupe(t.Status) {
+				continue
+			}
+			if len(t.DependsOn) == 0 {
+				continue
+			}
+
+			changed := false
+			newDeps := make([]string, 0, len(t.DependsOn))
+			for _, dep := range t.DependsOn {
+				if kept, ok := dupToKept[dep]; ok {
+					dep = kept
+					changed = true
+				}
+				newDeps = append(newDeps, dep)
+			}
+			newDeps = mergeStringIDs([]string{}, newDeps)
+			if !changed && equalStringSets(t.DependsOn, newDeps) {
+				continue
+			}
+			t.DependsOn = newDeps
+			if t.Children == nil {
+				t.Children = []string{}
+			}
+			if t.DependsOn == nil {
+				t.DependsOn = []string{}
+			}
+			if _, err := store.Update(ctx, t); err != nil {
+				return nil, fmt.Errorf("update dependencies for %s: %w", t.ID, err)
+			}
+			updatedCount++
+		}
+
+		for _, g := range outGroups {
+			if g.ParentID == "" {
+				continue
+			}
+			parent, err := store.Get(ctx, g.ParentID)
+			if err != nil {
+				continue
+			}
+			if parent.Children == nil {
+				parent.Children = []string{}
+			}
+
+			childSet := make([]string, 0, len(parent.Children))
+			for _, child := range parent.Children {
+				if _, ok := dupToKept[child]; ok {
+					continue
+				}
+				childSet = append(childSet, child)
+			}
+			if !containsString(childSet, g.KeptID) {
+				childSet = append(childSet, g.KeptID)
+			}
+			parent.Children = mergeStringIDs([]string{}, childSet)
+			if _, err := store.Update(ctx, parent); err != nil {
+				return nil, fmt.Errorf("update parent children %s: %w", parent.ID, err)
+			}
+		}
+
+		for dupID, keptID := range dupToKept {
+			t, err := store.Get(ctx, dupID)
+			if err != nil {
+				continue
+			}
+			if t.Status == tasks.StatusCanceled {
+				continue
+			}
+			note := fmt.Sprintf("superseded by %s", keptID)
+			if strings.TrimSpace(t.Notes) == "" {
+				t.Notes = note
+			} else if !strings.Contains(t.Notes, note) {
+				t.Notes = t.Notes + "\n" + note
+			}
+			t.Status = tasks.StatusCanceled
+			if t.Children == nil {
+				t.Children = []string{}
+			}
+			if t.DependsOn == nil {
+				t.DependsOn = []string{}
+			}
+			if _, err := store.Update(ctx, t); err != nil {
+				return nil, fmt.Errorf("cancel duplicate %s: %w", dupID, err)
+			}
+			canceledCount++
+		}
+	}
+
+	summary := fmt.Sprintf("duplicate_groups=%d duplicate_tasks=%d", len(outGroups), duplicateTaskCount)
+	if apply {
+		summary = fmt.Sprintf("%s canceled=%d updated=%d", summary, canceledCount, updatedCount)
+	}
+
+	return map[string]any{
+		"applied":          apply,
+		"groups":           outGroups,
+		"groups_count":     len(outGroups),
+		"duplicate_tasks":  duplicateTaskCount,
+		"canceled_tasks":   canceledCount,
+		"updated_tasks":    updatedCount,
+		"total_open_tasks": countOpenTasks(allTasks),
+		"summary":          summary,
+	}, nil
+}
+
+func countOpenTasks(taskList []tasks.Task) int {
+	count := 0
+	for _, t := range taskList {
+		if isOpenForDedupe(t.Status) {
+			count++
+		}
+	}
+	return count
 }
 
 // boolPtr returns a pointer to a bool value.
@@ -1205,6 +1512,11 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 	titleToActualID := make(map[string]string)
 
 	if mode == "apply" {
+		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks: %w", err)
+		}
+
 		for i := range plannedTasks {
 			// Resolve title-based dependencies to actual IDs
 			var resolvedDeps []string
@@ -1215,19 +1527,65 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 			}
 			plannedTasks[i].DependsOn = resolvedDeps
 
+			normalizedTitle := normalizeTaskTitle(plannedTasks[i].Title)
+			existing := findOpenDuplicateTask(allTasks, workspaceID, sessionID, plannedTasks[i].ParentID, normalizedTitle)
+			if existing != nil && strings.TrimSpace(existing.ScopePath) != "" && strings.TrimSpace(plannedTasks[i].ScopePath) != "" && existing.ScopePath != plannedTasks[i].ScopePath {
+				existing = nil
+			}
+			if existing != nil {
+				changed := false
+
+				if existing.Description == "" && strings.TrimSpace(plannedTasks[i].Description) != "" {
+					existing.Description = plannedTasks[i].Description
+					changed = true
+				}
+				if existing.ScopePath == "" && strings.TrimSpace(plannedTasks[i].ScopePath) != "" {
+					existing.ScopePath = plannedTasks[i].ScopePath
+					changed = true
+				}
+
+				mergedDeps := mergeStringIDs(existing.DependsOn, plannedTasks[i].DependsOn)
+				if !equalStringSets(existing.DependsOn, mergedDeps) {
+					existing.DependsOn = mergedDeps
+					changed = true
+				}
+
+				updated := *existing
+				if changed {
+					var err error
+					updated, err = store.Update(ctx, updated)
+					if err != nil {
+						return nil, fmt.Errorf("update existing task %q: %w", plannedTasks[i].Title, err)
+					}
+				}
+
+				createTaskDependencyEdges(ctx, cfg, workspaceID, updated)
+				if err := ensureParentHasChild(ctx, store, updated.ParentID, updated.ID); err != nil {
+					return nil, err
+				}
+
+				titleToActualID[plannedTasks[i].Title] = updated.ID
+				createdTasks = append(createdTasks, toOutput(updated))
+				if rootTaskID == "" && i == 0 {
+					rootTaskID = updated.ID
+				}
+				continue
+			}
+
 			created, err := store.Add(ctx, plannedTasks[i])
 			if err != nil {
 				return nil, fmt.Errorf("create task %q: %w", plannedTasks[i].Title, err)
 			}
+			allTasks = append(allTasks, created)
 
-			// Create graph edges for task relationships (parent_of, depends_on)
 			createTaskDependencyEdges(ctx, cfg, workspaceID, created)
+			if err := ensureParentHasChild(ctx, store, created.ParentID, created.ID); err != nil {
+				return nil, err
+			}
 
 			titleToActualID[plannedTasks[i].Title] = created.ID
 			addedIDs = append(addedIDs, created.ID)
 			createdTasks = append(createdTasks, toOutput(created))
-
-			// Set root task ID from first created task if not attached
 			if rootTaskID == "" && i == 0 {
 				rootTaskID = created.ID
 			}
@@ -1362,6 +1720,139 @@ func dedupe(in []string) []string {
 	return out
 }
 
+func normalizeTaskTitle(title string) string {
+	t := strings.ToLower(strings.TrimSpace(title))
+	if t == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(t), " ")
+}
+
+func isOpenForDedupe(status string) bool {
+	s := strings.TrimSpace(status)
+	if s == "" {
+		return false
+	}
+	if s == statusDone || s == tasks.StatusCanceled {
+		return false
+	}
+	return true
+}
+
+func findOpenDuplicateTask(taskList []tasks.Task, workspaceID, sessionID, parentID, normalizedTitle string) *tasks.Task {
+	if normalizedTitle == "" {
+		return nil
+	}
+
+	sid := strings.TrimSpace(sessionID)
+
+	var best *tasks.Task
+	for i := range taskList {
+		t := &taskList[i]
+		if t.WorkspaceID != workspaceID {
+			continue
+		}
+		if strings.TrimSpace(t.SessionID) != sid {
+			continue
+		}
+		if t.ParentID != parentID {
+			continue
+		}
+		if !isOpenForDedupe(t.Status) {
+			continue
+		}
+		if normalizeTaskTitle(t.Title) != normalizedTitle {
+			continue
+		}
+		if best == nil || t.CreatedAt.After(best.CreatedAt) {
+			best = t
+		}
+	}
+	return best
+}
+
+func mergeStringIDs(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, v := range a {
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	for _, v := range b {
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return []string{}
+	}
+	return out
+}
+
+func equalStringSets(a, b []string) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, v := range a {
+		seen[v]++
+	}
+	for _, v := range b {
+		if seen[v] == 0 {
+			return false
+		}
+		seen[v]--
+		if seen[v] == 0 {
+			delete(seen, v)
+		}
+	}
+	return len(seen) == 0
+}
+
+func containsString(items []string, value string) bool {
+	for _, v := range items {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+func ensureParentHasChild(ctx context.Context, store tasks.Store, parentID, childID string) error {
+	if parentID == "" {
+		return nil
+	}
+	parent, err := store.Get(ctx, parentID)
+	if err != nil {
+		return fmt.Errorf("get parent %s: %w", parentID, err)
+	}
+	if parent.Children == nil {
+		parent.Children = []string{}
+	}
+	if containsString(parent.Children, childID) {
+		return nil
+	}
+	parent.Children = append(parent.Children, childID)
+	if _, err := store.Update(ctx, parent); err != nil {
+		return fmt.Errorf("update parent children: %w", err)
+	}
+	return nil
+}
+
 func countPending(taskList []tasks.Task) int {
 	count := 0
 	for _, t := range taskList {
@@ -1395,12 +1886,41 @@ func filterByStatus(taskList []tasks.Task, status string) []tasks.Task {
 	return out
 }
 
+func filterByTitleContains(taskList []tasks.Task, query string) []tasks.Task {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return taskList
+	}
+	out := make([]tasks.Task, 0)
+	for _, t := range taskList {
+		if strings.Contains(strings.ToLower(t.Title), q) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func filterBySessionID(taskList []tasks.Task, sessionID string) []tasks.Task {
+	sid := strings.TrimSpace(sessionID)
+	if sid == "" {
+		return taskList
+	}
+	out := make([]tasks.Task, 0)
+	for _, t := range taskList {
+		if strings.TrimSpace(t.SessionID) == sid {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func toOutput(t tasks.Task) *taskOutput {
 	out := &taskOutput{
 		ID:               t.ID,
 		Title:            t.Title,
 		Description:      t.Description,
 		ScopePath:        t.ScopePath,
+		SessionID:        t.SessionID,
 		ParentID:         t.ParentID,
 		Children:         t.Children,
 		DependsOn:        t.DependsOn,
@@ -1434,16 +1954,6 @@ func toOutputListWithMetrics(taskList []tasks.Task, metrics map[string]tasksgrap
 		}
 	}
 	return out
-}
-
-func fail(command, code string, err error, hint string) {
-	var data map[string]any
-	if hint != "" {
-		data = map[string]any{"hint": hint}
-	}
-	env := envelope.Error(command, code, err.Error(), data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit todo failure")
-	os.Exit(1)
 }
 
 // createTaskDependencyEdges creates graph edges for task relationships.

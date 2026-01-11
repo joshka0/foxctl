@@ -310,6 +310,11 @@ func findSessionToContinue(workspace string) (*Session, string) {
 ```
 
 **Mailbox handoff message:**
+
+Prefer to reuse existing structured outputs rather than hand-writing:
+- Attach `session/summarize` output as a CAS digest (or memory name)
+- Attach `todo/manage` ranked/recommend output to preserve PageRank ordering
+
 ```json
 {
   "type": "session_handoff",
@@ -318,6 +323,10 @@ func findSessionToContinue(workspace string) (*Session, string) {
   "active_task": "01HDEF",
   "topic_tags": ["auth", "middleware"],
   "summary": "Working on auth middleware, 3 tests remaining",
+  "summary_artifact": "sha256:abc123...",
+  "next_tasks": [
+    {"id": "01HAAA", "title": "Add missing tests", "pagerank": 0.0123}
+  ],
   "created_at": "2024-01-01T12:00:00Z"
 }
 ```

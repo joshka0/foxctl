@@ -93,6 +93,10 @@ signature:
       - EMBEDDING_MODEL: Model name (default: "gemini-embedding-001")
 
       See docs/spec/code_symbol_index_and_swe_grep.md §5 for the full contract.
+
+      Example commands:
+        agentctl run code/swe_grep --input '{"workspace_id":"my-workspace","question":"How does user authentication work?","candidates":[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}],"limits":{"max_files":10,"max_snippets":20}}'
+        agentctl skills run code/swe_grep --workspace_id my-workspace --question "How does user authentication work?" --candidates '[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}]' --limits '{"max_files":10,"max_snippets":20}'
     workflows:
       - id: extract-snippets-for-question
         description: "Extract code snippets relevant to a question from candidates."

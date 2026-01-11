@@ -23,13 +23,32 @@ signature:
       type: string
       required: false
       description: "Workspace root path"
-returns:
-  - name: weights
-    type: object
-    description: "Current scorer weights"
-  - name: update
-    type: object
-    description: "Learning update result"
+  help:
+    short: "Show or learn scorer weights."
+    long: |
+      Use optimize/weights to inspect or learn scoring weights.
+      Example commands:
+        agentctl run optimize/weights --input '{"action":"show"}'
+        agentctl skills run optimize/weights --action show
+        agentctl run optimize/weights --input '{"action":"learn","workspace":"./"}'
+        agentctl skills run optimize/weights --action learn --workspace ./
+    workflows:
+      - id: show-weights
+        description: "Show current weights."
+        example_input:
+          action: "show"
+      - id: learn-weights
+        description: "Learn new weights."
+        example_input:
+          action: "learn"
+          workspace: "./"
+  returns:
+    - name: weights
+      type: object
+      description: "Current scorer weights"
+    - name: update
+      type: object
+      description: "Learning update result"
 capabilities:
   network: "none"
   filesystem:

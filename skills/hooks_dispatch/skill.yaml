@@ -1,0 +1,149 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/dispatch
+  version: 0.1.0
+  description: "Central hook dispatcher - loads hooks.yaml, matches hooks, runs them, merges outputs"
+  tags: ["hook", "dispatch", "core"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_dispatch/dispatch
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: hooks/dispatch
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event type: SessionStart, MessageReceived, UserPromptSubmit, LLMRequest, LLMResponse, PreToolUse, PostToolUse, StopRequested, PostAgentTurn, ContextBudgetExceeded, SessionEnd"
+    - name: workspace_root
+      type: string
+      required: false
+      description: "Absolute path to workspace root (defaults to CLAUDE_PROJECT_DIR or cwd)"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
+    - name: session_id
+      type: string
+      required: false
+      description: "Session identifier"
+    - name: actor_id
+      type: string
+      required: false
+      description: "Actor identifier"
+    - name: tool_name
+      type: string
+      required: false
+      description: "Platform tool name (Edit, Write, Read, Bash, etc.)"
+    - name: tool_canonical
+      type: string
+      required: false
+      description: "Canonical tool name (edit.apply_patch, fs.read_file, etc.)"
+    - name: tool_kind
+      type: string
+      required: false
+      description: "Tool category: read, write, exec, search, any (auto-computed if not provided)"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Raw JSON input to the tool"
+    - name: tool_observation
+      type: object
+      required: false
+      description: "Tool result for PostToolUse events"
+    - name: prompt
+      type: string
+      required: false
+      description: "User prompt text for UserPromptSubmit/LLMRequest"
+    - name: assistant_text
+      type: string
+      required: false
+      description: "Assistant response for PostAgentTurn/LLMResponse"
+    - name: provider
+      type: object
+      required: false
+      description: "Provider capabilities for context buffer integration"
+      properties:
+        name:
+          type: string
+          description: "Provider name: claude-code, opencode, agentctl"
+        event:
+          type: string
+          description: "Current event name"
+        can_inject_context:
+          type: boolean
+          description: "Whether this event supports context injection"
+        can_block:
+          type: boolean
+          description: "Whether this event supports blocking"
+  help:
+    short: "Dispatch hooks from hooks.yaml configuration."
+    long: |
+      The central hook dispatcher that:
+      1. Loads hooks.yaml from workspace (.agentctl/hooks.yaml) and global (~/.agentctl/hooks.yaml)
+      2. Matches hooks by event + tool_name/tool_canonical/tool_kind
+      3. Runs matched hook skills in order
+      4. Merges outputs using deterministic rules (block wins, context concatenated, etc.)
+      5. Processes enqueue_context actions via Context Buffer
+      6. When provider.can_inject_context is true, drains buffer and merges into output
+      7. Returns merged hook_output for adapters to use
+
+      Context Buffer Integration:
+      - Hooks can return enqueue_context actions to defer injection to later events
+      - Pass provider capabilities to enable buffer drain on inject-capable events
+      - Buffer provides TTL, deduplication, and priority ordering
+
+      This skill is called by platform adapters (CC, OC) to centralize hook behavior.
+
+      Example:
+        agentctl run hooks/dispatch --input '{"event":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
+
+      With provider capabilities:
+        agentctl run hooks/dispatch --input '{
+          "event": "UserPromptSubmit",
+          "session_id": "abc123",
+          "provider": {"name": "claude-code", "can_inject_context": true}
+        }'
+    workflows:
+      - id: pre-tool-check
+        description: "Dispatch PreToolUse hooks before an edit."
+        example_input:
+          event: "PreToolUse"
+          workspace_root: "/workspace/project"
+          tool_name: "Edit"
+          tool_kind: "write"
+          tool_input:
+            file_path: "main.go"
+      - id: post-tool-analysis
+        description: "Dispatch PostToolUse hooks after a tool runs."
+        example_input:
+          event: "PostToolUse"
+          tool_name: "Edit"
+          tool_observation:
+            success: true
+  returns:
+    - name: hook_output
+      type: object
+      description: "Merged hook output with decision, reason, context, actions"
+    - name: matched_hooks
+      type: array
+      description: "List of hooks that matched the event/matchers"
+    - name: steps
+      type: array
+      description: "Execution details for each hook skill"
+    - name: config_files
+      type: array
+      description: "Config file paths that were loaded"
+    - name: context_buffer
+      type: object
+      description: "Context buffer stats: can_inject, enqueued, drained, pending"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+    - type: home
+  pure: false

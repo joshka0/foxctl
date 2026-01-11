@@ -47,6 +47,27 @@ signature:
       required: false
       default: false
       description: "Only include failing CI checks and actionable review items"
+  help:
+    short: "Summarize PR comments and CI failures."
+    long: |
+      Use ci/prcomments to collect review feedback, merge conflicts, and CI failures.
+      Example commands:
+        agentctl run ci/prcomments --input '{"pr":"123","format":"markdown"}'
+        agentctl skills run ci/prcomments --pr 123 --format markdown
+        agentctl run ci/prcomments --input '{"pr":"123","format":"json","errors_only":true}'
+        agentctl skills run ci/prcomments --pr 123 --format json --errors_only
+    workflows:
+      - id: comments-markdown
+        description: "Render comments as markdown."
+        example_input:
+          pr: "123"
+          format: "markdown"
+      - id: comments-errors
+        description: "Return only actionable items."
+        example_input:
+          pr: "123"
+          format: "json"
+          errors_only: true
 returns:
   - name: report
     type: object

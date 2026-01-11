@@ -24,4 +24,4 @@ Get Gemini's perspective using agentctl-gathered context.
 
 5. Present: agentctl findings + Gemini analysis + Claude synthesis
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-friend/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-friend/Skill.md`

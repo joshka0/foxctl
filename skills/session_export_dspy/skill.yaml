@@ -43,25 +43,39 @@ signature:
       type: integer
       required: false
       description: "Maximum number of examples to export (default: 1000)"
-returns:
-  - name: examples_count
-    type: integer
-    description: "Number of examples exported"
-  - name: sessions_used
-    type: integer
-    description: "Number of sessions used"
-  - name: output_file
-    type: string
-    description: "Path to output file (if specified)"
-  - name: examples
-    type: array
-    description: "Exported examples (if no output_file specified)"
-  - name: status
-    type: string
-    description: "Status of the export"
-  - name: message
-    type: string
-    description: "Human-readable status message"
+  help:
+    short: "Export sessions as DSPy training examples."
+    long: |
+      Use session/export-dspy to export sessions for training data.
+      Example commands:
+        agentctl run session/export-dspy --input '{"project":"agentctl","format":"jsonl","output_file":"/tmp/training.jsonl"}'
+        agentctl skills run session/export-dspy --project agentctl --format jsonl --output_file /tmp/training.jsonl
+    workflows:
+      - id: export-project
+        description: "Export sessions for a project."
+        example_input:
+          project: "agentctl"
+          format: "jsonl"
+          output_file: "/tmp/training.jsonl"
+  returns:
+    - name: examples_count
+      type: integer
+      description: "Number of examples exported"
+    - name: sessions_used
+      type: integer
+      description: "Number of sessions used"
+    - name: output_file
+      type: string
+      description: "Path to output file (if specified)"
+    - name: examples
+      type: array
+      description: "Exported examples (if no output_file specified)"
+    - name: status
+      type: string
+      description: "Status of the export"
+    - name: message
+      type: string
+      description: "Human-readable status message"
 capabilities:
   network: "none"
   filesystem:

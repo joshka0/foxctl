@@ -16,15 +16,18 @@ import (
 	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/rs/zerolog"
+	"gopkg.in/yaml.v3"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"gopkg.in/yaml.v3"
 )
 
-var logger = zerolog.New(os.Stderr).With().Timestamp().Str("skill", "mcp/install").Logger()
+const command = "mcp/install"
+
+var logger = zerolog.New(os.Stderr).With().Timestamp().Str("skill", command).Logger()
 
 type input struct {
 	ServerCmd string `json:"server_cmd"`
@@ -44,32 +47,33 @@ type input struct {
 
 func main() {
 	ctx := context.Background()
+	config.LoadDotEnv()
 
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		fail("mcp/install", "ERUNTIME", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("load config", err))
 	}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
+	rc, err := skillmain.BuildRunContext(cfg, os.Stdout)
 	if err != nil {
-		fail("mcp/install", "ERUNTIME", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("build context", err))
 	}
 
 	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
+		errs.Ignore(rc.Close(), "run context close")
 	}()
 
 	in, err := parseInput(os.Stdin)
 	if err != nil {
-		fail("mcp/install", "EARG", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
 	}
 
 	if err := run(ctx, rc, in); err != nil {
-		fail("mcp/install", "ERUNTIME", err)
+		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
 	}
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	var mcpClient *client.Client
 	var err error
 
@@ -156,17 +160,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	// Emit success
-
-	return rc.Emit("mcp/install", map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"installed": installed,
-
-		"count": len(installed),
-
-		"path": validDir,
-	}, "application/json", envelope.Meta{
-		Source: "run",
-
-		Runner: "exec",
+		"count":     len(installed),
+		"path":      validDir,
 	})
 }
 
@@ -358,10 +355,4 @@ func parseInput(r io.Reader) (input, error) {
 	}
 
 	return in, nil
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit mcp/install failure")
-	os.Exit(1)
 }

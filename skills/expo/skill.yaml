@@ -66,6 +66,27 @@ signature:
       type: integer
       required: false
       description: Number of log lines to retrieve (default 100)
+  help:
+    short: "Control Expo dev tools and EAS operations."
+    long: |
+      Use mobile/expo for Expo dev menu actions and EAS build/update flows.
+      Example commands:
+        agentctl run mobile/expo --input '{"operation":"reload","platform":"ios"}'
+        agentctl skills run mobile/expo --operation reload --platform ios
+        agentctl run mobile/expo --input '{"operation":"build","build_platform":"android","profile":"preview"}'
+        agentctl skills run mobile/expo --operation build --build_platform android --profile preview
+    workflows:
+      - id: expo-reload
+        description: "Reload the Expo app."
+        example_input:
+          operation: "reload"
+          platform: "ios"
+      - id: expo-build
+        description: "Kick off an EAS build."
+        example_input:
+          operation: "build"
+          build_platform: "android"
+          profile: "preview"
   returns:
     - name: operation
       type: string

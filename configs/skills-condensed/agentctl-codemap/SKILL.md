@@ -36,4 +36,4 @@ agentctl run code/semantic_search --input '{"query": "authentication", "scope": 
 - ASCII trees of code relationships
 - Annotated references with file:line
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-codemap/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-codemap/Skill.md`

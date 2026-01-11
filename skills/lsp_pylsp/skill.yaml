@@ -41,6 +41,28 @@ signature:
       required: false
       default: 50
       description: "Maximum number of results to return"
+  help:
+    short: "Query Python symbols and references."
+    long: |
+      Use lsp/pylsp to query Python language server operations.
+      Example commands:
+        agentctl run lsp/pylsp --input '{"operation":"definition","file":"app.py","line":12,"column":4}'
+        agentctl skills run lsp/pylsp --operation definition --file app.py --line 12 --column 4
+        agentctl run lsp/pylsp --input '{"operation":"workspace_symbol","query":"Client"}'
+        agentctl skills run lsp/pylsp --operation workspace_symbol --query Client
+    workflows:
+      - id: find-definition
+        description: "Find a definition in a file."
+        example_input:
+          operation: "definition"
+          file: "app.py"
+          line: 12
+          column: 4
+      - id: search-symbols
+        description: "Search workspace symbols."
+        example_input:
+          operation: "workspace_symbol"
+          query: "Client"
 returns:
   - name: results
     type: array

@@ -5,17 +5,17 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
+	"github.com/jkatigb/agentctl/internal/hooks/toolutil"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -31,33 +31,16 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("hooks/task_guard", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("hooks/task_guard", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("hooks/task_guard", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("hooks/task_guard", "ERUNTIME", err)
-	}
+	skillmain.Main("hooks/task_guard", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in hook.Input) error {
-	// Skip non-write operations
-	if !hook.IsWriteOperation(in.ToolName) {
-		return emitOutput(rc, hook.NewApprove("non-write operation", nil))
+func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
+	paths := sessionkit.ResolvePaths(rc.Config)
+
+	// Skip non-write operations using cross-platform detection
+	// Supports CC tools (Edit, Write, etc.), canonical tools (edit.*, fs.write_*), and explicit tool_kind
+	if !toolutil.IsWriteOperation(in.ToolName, in.ToolCanonical, string(in.ToolKind)) {
+		return emitOutput(rc, hooks.NewApprove("non-write operation", nil))
 	}
 
 	// Determine mode from environment
@@ -67,7 +50,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Resolve workspace ID from WorkspaceRoot
-	workspaceID := in.WorkspaceRoot
+	workspaceID := in.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = in.WorkspaceRoot
+	}
 	if workspaceID == "" {
 		var wdErr error
 		workspaceID, wdErr = os.Getwd()
@@ -77,7 +63,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Open task store
-	store, err := tasks.Open(ctx, cfg.Storage.Root)
+	store, err := tasks.Open(ctx, paths.StorageRoot)
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
@@ -86,10 +72,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// Generate default title from tool + file path
 	defaultTitle := deriveTaskTitle(in)
 
-	// Get scope path from tool input
-	scopePath := extractFilePath(in.ToolInput)
+	// Get scope path from tool input using cross-platform path extraction
+	scopePath := pathutil.ExtractPath(in.ToolInput)
 
-	var output hook.Output
+	var output hooks.Output
 
 	switch mode {
 	case ModeAuto:
@@ -117,10 +103,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 		// Create graph edge: task → file (modified)
 		if scopePath != "" {
-			createModifiedEdge(ctx, cfg, workspaceID, task.ID, scopePath)
+			createModifiedEdge(ctx, paths.StorageRoot, workspaceID, task.ID, scopePath)
 		}
 
-		output = hook.NewApprove(reason, map[string]any{
+		output = hooks.NewApprove(reason, map[string]any{
 			"task_id":      task.ID,
 			"task_title":   task.Title,
 			"task_status":  task.Status,
@@ -137,7 +123,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		}
 
 		if !found {
-			output = hook.NewBlock(
+			output = hooks.NewBlock(
 				"No active task. Create one with: agentctl todo add --title \"<task>\" or use /start-task",
 			)
 		} else {
@@ -154,10 +140,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 			// Create graph edge: task → file (modified)
 			if scopePath != "" {
-				createModifiedEdge(ctx, cfg, workspaceID, task.ID, scopePath)
+				createModifiedEdge(ctx, paths.StorageRoot, workspaceID, task.ID, scopePath)
 			}
 
-			output = hook.NewApprove(reason, map[string]any{
+			output = hooks.NewApprove(reason, map[string]any{
 				"task_id":      task.ID,
 				"task_title":   task.Title,
 				"task_status":  task.Status,
@@ -172,67 +158,53 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 // deriveTaskTitle generates a task title from the hook input.
 // Format: "<tool> <relative/path>" or "<tool> operation" if no path.
-func deriveTaskTitle(in hook.Input) string {
-	filePath := extractFilePath(in.ToolInput)
+func deriveTaskTitle(in hooks.Input) string {
+	filePath := pathutil.ExtractPath(in.ToolInput)
 	if filePath == "" {
-		return fmt.Sprintf("%s operation", in.ToolName)
-	}
-
-	// Make path relative to workspace if possible
-	if in.WorkspaceRoot != "" {
-		if rel, err := filepath.Rel(in.WorkspaceRoot, filePath); err == nil {
-			filePath = rel
+		toolName := in.ToolName
+		if toolName == "" {
+			toolName = in.ToolCanonical
 		}
+		if toolName == "" {
+			toolName = "tool"
+		}
+		return fmt.Sprintf("%s operation", toolName)
 	}
 
-	return fmt.Sprintf("%s %s", in.ToolName, filePath)
+	// Make path relative to workspace using pathutil
+	filePath = pathutil.RelativePath(filePath, in.WorkspaceRoot)
+
+	toolName := in.ToolName
+	if toolName == "" {
+		toolName = in.ToolCanonical
+	}
+	if toolName == "" {
+		toolName = "tool"
+	}
+	return fmt.Sprintf("%s %s", toolName, filePath)
 }
 
-// extractFilePath extracts the file_path from tool input JSON.
-func extractFilePath(toolInput json.RawMessage) string {
-	if len(toolInput) == 0 {
-		return ""
-	}
-
-	var input struct {
-		FilePath string `json:"file_path"`
-	}
-	if err := json.Unmarshal(toolInput, &input); err != nil {
-		return ""
-	}
-	return input.FilePath
-}
-
-func emitOutput(rc *runner.RunnerContext, output hook.Output) error {
+func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
 	data := map[string]any{
 		"hook_output": output,
 	}
-	return rc.Emit("hooks/task_guard", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	return skillout.Emit(rc, "hooks/task_guard", data)
 }
 
 // createModifiedEdge creates a graph edge from task to file when modified.
 // This enables PageRank to flow from tasks to the files they touch.
-func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, taskID, filePath string) {
+func createModifiedEdge(ctx context.Context, storagePath, workspaceID, taskID, filePath string) {
 	// Early exit if no file path - avoids unnecessary graph.Open() overhead
 	if filePath == "" {
 		return
 	}
 
 	// Open graph store (fail silently - graph is optional)
-	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
+	graphStore, err := graph.Open(ctx, storagePath)
 	if err != nil {
 		return
 	}
-	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
+	defer func() { _ = graphStore.Close() }()
 
 	// Ensure task node exists
 	taskNodeID := graph.TaskNodeID(taskID)
@@ -244,7 +216,7 @@ func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, tas
 		CurrentPath: "",
 		LastSeen:    time.Now().UTC(),
 	}
-	errs.Ignore(graphStore.UpsertNode(ctx, taskNode), "upsert task node")
+	_ = graphStore.UpsertNode(ctx, taskNode)
 
 	// Ensure file node exists
 	fileNodeID := graph.FileNodeID(filePath)
@@ -256,7 +228,7 @@ func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, tas
 		CurrentPath: filePath,
 		LastSeen:    time.Now().UTC(),
 	}
-	errs.Ignore(graphStore.UpsertNode(ctx, fileNode), "upsert file node")
+	_ = graphStore.UpsertNode(ctx, fileNode)
 
 	// Create edge: task → file (modified)
 	edge := graph.Edge{
@@ -270,7 +242,7 @@ func createModifiedEdge(ctx context.Context, cfg config.Config, workspaceID, tas
 		TTLDays:   intPtr(90), // 90 day TTL for task edges
 		CreatedAt: time.Now().UTC(),
 	}
-	errs.Ignore(graphStore.UpsertEdge(ctx, edge), "upsert modified edge")
+	_ = graphStore.UpsertEdge(ctx, edge)
 }
 
 func intPtr(i int) *int {

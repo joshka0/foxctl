@@ -24,6 +24,30 @@ const (
 	DefaultMaxCaptureKB = 10240
 )
 
+// ExposePolicy controls how CAS artifacts are exposed in output envelopes.
+type ExposePolicy string
+
+const (
+	// ExposePolicyOff hides CAS digests from output (store for debugging only).
+	ExposePolicyOff ExposePolicy = "off"
+	// ExposePolicyDigest includes the raw CAS digest in output.
+	ExposePolicyDigest ExposePolicy = "digest"
+	// ExposePolicyHint includes a CAS hint with retrieval commands.
+	ExposePolicyHint ExposePolicy = "hint"
+)
+
+// CASPolicy controls content-addressed storage behavior.
+type CASPolicy struct {
+	// Store controls whether outputs are stored in CAS (default: true).
+	// When true, large outputs are always stored for debugging/retrieval.
+	Store bool `mapstructure:"store" json:"store"`
+
+	// Expose controls how CAS digests appear in output envelopes.
+	// Values: "off" (hidden), "digest" (raw digest), "hint" (with retrieval commands).
+	// Default: "off" for hooks, "hint" for skills.
+	Expose ExposePolicy `mapstructure:"expose" json:"expose"`
+}
+
 // Config represents the fully materialized runtime configuration.
 type Config struct {
 	Home           string            `mapstructure:"home" json:"home"`
@@ -33,6 +57,7 @@ type Config struct {
 	Storage        StorageSettings   `mapstructure:"storage" json:"storage"`
 	Memory         MemorySettings    `mapstructure:"memory" json:"memory"`
 	Cache          CacheSettings     `mapstructure:"cache" json:"cache"`
+	CAS            CASPolicy         `mapstructure:"cas" json:"cas"`
 	Logging        LoggingSettings   `mapstructure:"logging" json:"logging"`
 	OpenAPI        OpenAPISettings   `mapstructure:"openapi" json:"openapi"`
 	Embedding      EmbeddingSettings `mapstructure:"embedding" json:"embedding"`
@@ -290,6 +315,9 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("database.turso.auth_token", "")
 	v.SetDefault("database.vector.enabled", false)
 	v.SetDefault("database.vector.dimensions", dbdriver.DefaultVectorDimensions)
+	// CAS policy defaults - store always on, expose off by default (hooks/tools)
+	v.SetDefault("cas.store", true)
+	v.SetDefault("cas.expose", "off")
 }
 
 func configureConfigFile(v *viper.Viper, l *loader, defaultHome string) {
@@ -372,6 +400,29 @@ func finalizeConfig(cfg Config, home string) Config {
 	// Default vector dimensions from embedding config if not set
 	if cfg.Database.Vector.Dimensions == 0 {
 		cfg.Database.Vector.Dimensions = cfg.Embedding.Dimensions
+	}
+
+	// Default-enable observability: if AGENTCTL_OBS_DIR is not set but
+	// cfg.Paths.Observability is configured, set the env var so all
+	// downstream code (skills, CLI, daemon) inherits the path.
+	if os.Getenv("AGENTCTL_OBS_DIR") == "" && cfg.Paths.Observability != "" {
+		// Best-effort: ignore errors since observability is non-critical
+		_ = os.Setenv("AGENTCTL_OBS_DIR", cfg.Paths.Observability)
+	}
+
+	// CAS policy env var overrides
+	if storeEnv := os.Getenv("AGENTCTL_CAS_STORE"); storeEnv != "" {
+		cfg.CAS.Store = storeEnv == "1" || strings.EqualFold(storeEnv, "true")
+	}
+	if exposeEnv := os.Getenv("AGENTCTL_CAS_EXPOSE"); exposeEnv != "" {
+		switch strings.ToLower(exposeEnv) {
+		case "off", "0", "false":
+			cfg.CAS.Expose = ExposePolicyOff
+		case "digest":
+			cfg.CAS.Expose = ExposePolicyDigest
+		case "hint":
+			cfg.CAS.Expose = ExposePolicyHint
+		}
 	}
 
 	return cfg

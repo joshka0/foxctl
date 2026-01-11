@@ -1,9 +1,9 @@
 // Sessions View - Browse Claude Code sessions with summaries
 import { useState } from "react";
-import { useKeyboard } from "@opentui/react";
 import { useSessions, useSessionMessages, useSessionContextWindows } from "../hooks/useData";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
 import type { Session, SessionMessage, ContextWindow } from "@agentctl/data";
+import { useKeyboardStable } from "../hooks/useKeyboardStable";
 
 function statusColor(status: string): string {
   switch (status) {
@@ -366,7 +366,7 @@ function SessionTurnViewer({ sessionId, onClose }: SessionTurnViewerProps) {
     }
   };
 
-  useKeyboard((e) => {
+  useKeyboardStable((e) => {
     switch (e.name) {
       case "escape":
       case "q":
@@ -514,8 +514,7 @@ export function SessionsView() {
     }
   };
 
-  useKeyboard((e) => {
-    if (showTurnViewer) return; // Turn viewer handles its own keys
+  useKeyboardStable((e) => {
     switch (e.name) {
       case "up":
       case "k":
@@ -540,7 +539,7 @@ export function SessionsView() {
         updateCursor(Math.max(0, sessions.length - 1));
         break;
     }
-  });
+  }, !showTurnViewer);
 
   if (isLoading && !data) {
     return (

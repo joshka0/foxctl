@@ -43,6 +43,7 @@ func TestGolden(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env := newTodoTestEnv(t)
+			env.rc.SessionID = "test-session"
 			if tt.setup != nil {
 				tt.setup(env)
 			}
@@ -50,7 +51,7 @@ func TestGolden(t *testing.T) {
 
 			buf := &bytes.Buffer{}
 			env.rc.Stdout = buf
-			err := run(env.ctx, env.rc, env.rc.Config, tt.input)
+			err := run(env.ctx, env.rc, tt.input)
 
 			if err != nil {
 				if !tt.isError {
@@ -109,6 +110,9 @@ func scrub(t *testing.T, data []byte) []byte {
 		if task, ok := m["task"].(map[string]any); ok {
 			task["id"] = "00000000-0000-0000-0000-000000000000"
 			task["created_at"] = "2025-01-01T12:00:00Z"
+			if _, ok := task["session_id"]; ok {
+				task["session_id"] = "test-session"
+			}
 		}
 		if summary, ok := m["summary"].(string); ok {
 			if strings.HasPrefix(summary, "added task ") {

@@ -66,6 +66,10 @@ func (r *Registry) registerMailTools() error {
 					Type:        "boolean",
 					Description: "Only return unread messages (default true)",
 				},
+				"unsurfaced_only": {
+					Type:        "boolean",
+					Description: "Only return messages that have never been surfaced into context (default false)",
+				},
 				"kind": {
 					Type:        "string",
 					Description: "Filter by message kind",
@@ -241,6 +245,11 @@ func (r *Registry) mailInbox(ctx context.Context, args map[string]any) (*models.
 		unreadOnly = u
 	}
 
+	unsurfacedOnly := false
+	if us, ok := args["unsurfaced_only"].(bool); ok {
+		unsurfacedOnly = us
+	}
+
 	limit := 20
 	if l, ok := args["limit"].(float64); ok && l > 0 {
 		limit = int(l)
@@ -253,10 +262,11 @@ func (r *Registry) mailInbox(ctx context.Context, args map[string]any) (*models.
 	defer func() { errspkg.Ignore(store.Close(), "close board store") }()
 
 	filter := agent.InboxFilter{
-		WorkspaceID: r.config.WorkspaceID,
-		ActorID:     r.config.ActorID,
-		OnlyUnread:  unreadOnly,
-		Limit:       limit,
+		WorkspaceID:    r.config.WorkspaceID,
+		ActorID:        r.config.ActorID,
+		OnlyUnread:     unreadOnly,
+		OnlyUnsurfaced: unsurfacedOnly,
+		Limit:          limit,
 	}
 	// Note: We could filter by kind if InboxFilter supported it, but it doesn't currently.
 	// We'll rely on client-side filtering if needed, or update filter spec.

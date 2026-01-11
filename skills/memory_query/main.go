@@ -10,19 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-)
-
-const Command = "memory/query"
-
-const (
-	ErrCodeInput   = "EARG"
-	ErrCodeRuntime = "ERUNTIME"
 )
 
 const (
@@ -31,23 +24,27 @@ const (
 	DefaultTimeout       = 5 * time.Second
 )
 
+// Input defines the skill input parameters.
 type Input struct {
 	Query          string  `json:"query,omitempty"`
 	File           string  `json:"file,omitempty"`
 	Types          string  `json:"types,omitempty"`
 	Workspace      string  `json:"workspace,omitempty"`
+	SessionID      string  `json:"session_id,omitempty"`
 	Limit          int     `json:"limit,omitempty"`
 	Offset         int     `json:"offset,omitempty"`
 	MinSimilarity  float64 `json:"min_similarity,omitempty"`
 	IncludeContent bool    `json:"include_content,omitempty"`
 }
 
+// Output defines the skill output.
 type Output struct {
 	Memories   []MemoryResult `json:"memories"`
 	Pagination Pagination     `json:"pagination"`
 	Stats      QueryStats     `json:"stats"`
 }
 
+// Pagination provides pagination metadata.
 type Pagination struct {
 	Total   int  `json:"total"`
 	Offset  int  `json:"offset"`
@@ -55,6 +52,7 @@ type Pagination struct {
 	HasMore bool `json:"has_more"`
 }
 
+// MemoryResult represents a single memory entry in results.
 type MemoryResult struct {
 	Name      string  `json:"name"`
 	Type      string  `json:"type"`
@@ -63,52 +61,44 @@ type MemoryResult struct {
 	Score     float64 `json:"score"`
 	CreatedAt string  `json:"created_at,omitempty"`
 	UpdatedAt string  `json:"updated_at,omitempty"`
+	SessionID string  `json:"session_id,omitempty"`
 	Content   any     `json:"content,omitempty"`
 }
 
+// QueryStats provides query statistics.
 type QueryStats struct {
-	TotalFound   int    `json:"total_found"`
-	Filtered     int    `json:"filtered"`
-	SearchMethod string `json:"search_method"`
-	LatencyMS    int    `json:"latency_ms"`
-	TypesFilter  string `json:"types_filter,omitempty"`
-	FileFilter   string `json:"file_filter,omitempty"`
-	Hint         string `json:"hint,omitempty"`
+	TotalFound      int    `json:"total_found"`
+	Filtered        int    `json:"filtered"`
+	SearchMethod    string `json:"search_method"`
+	LatencyMS       int    `json:"latency_ms"`
+	TypesFilter     string `json:"types_filter,omitempty"`
+	FileFilter      string `json:"file_filter,omitempty"`
+	SessionIDFilter string `json:"session_id_filter,omitempty"`
+	Hint            string `json:"hint,omitempty"`
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail(ErrCodeInput, err)
-	}
-
-	out, err := query(ctx, cfg, in)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-
-	env := envelope.OK(Command, out)
-	if err := json.NewEncoder(os.Stdout).Encode(env); err != nil {
-		fail(ErrCodeRuntime, err)
-	}
+	skillmain.Main("memory/query", run)
 }
 
-func parseInput(r *os.File) (*Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return nil, fmt.Errorf("invalid JSON input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Validate: at least one search criteria must be provided
 	if in.Query == "" && in.File == "" && in.Types == "" {
-		return nil, fmt.Errorf("at least one of query, file, or types must be provided")
+		return fmt.Errorf("at least one of query, file, or types must be provided")
 	}
 
+	// Apply defaults
+	normalizeInput(&in, rc)
+
+	out, err := query(ctx, rc, &in)
+	if err != nil {
+		return err
+	}
+
+	return skillout.Emit(rc, "memory/query", out)
+}
+
+func normalizeInput(in *Input, rc *skillmain.RunContext) {
 	if in.Limit <= 0 {
 		in.Limit = DefaultLimit
 	}
@@ -122,21 +112,11 @@ func parseInput(r *os.File) (*Input, error) {
 		in.MinSimilarity = DefaultMinSimilarity
 	}
 	if in.Workspace == "" {
-		if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-			in.Workspace = ws
-		} else {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get working directory: %w", err)
-			}
-			in.Workspace = cwd
-		}
+		in.Workspace = rc.Workspace
 	}
-
-	return &in, nil
 }
 
-func query(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
+func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
@@ -148,8 +128,9 @@ func query(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
 			Limit:  in.Limit,
 		},
 		Stats: QueryStats{
-			TypesFilter: in.Types,
-			FileFilter:  in.File,
+			TypesFilter:     in.Types,
+			FileFilter:      in.File,
+			SessionIDFilter: in.SessionID,
 		},
 	}
 
@@ -186,6 +167,43 @@ func query(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	var scoredEntries []storage.ScoredEntry
+
+	if in.Query == "" && in.File == "" && (strings.TrimSpace(in.SessionID) != "" || len(typeFilters) > 0) {
+		entries, total, err := memStore.ListFiltered(ctx, workspacePath, memory.ListFilter{Types: typeFilters, SessionID: in.SessionID}, in.Limit, in.Offset)
+		if err != nil {
+			return nil, fmt.Errorf("list memories with filters: %w", err)
+		}
+
+		out.Stats.SearchMethod = "filter"
+		out.Stats.TotalFound = total
+		out.Stats.Filtered = total
+		out.Pagination.Total = total
+		out.Pagination.HasMore = in.Offset+in.Limit < total
+
+		for _, entry := range entries {
+			result := MemoryResult{
+				Name:      entry.Name,
+				Type:      entry.Type,
+				Summary:   truncate(entry.Summary, 500),
+				Score:     1.0,
+				SessionID: entry.SessionID,
+			}
+			if !entry.CreatedAt.IsZero() {
+				result.CreatedAt = entry.CreatedAt.Format(time.RFC3339)
+			}
+			if !entry.UpdatedAt.IsZero() {
+				result.UpdatedAt = entry.UpdatedAt.Format(time.RFC3339)
+			}
+			result.File = extractFileFromEntry(entry)
+			out.Memories = append(out.Memories, result)
+		}
+
+		out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
+		if len(out.Memories) == 0 {
+			out.Stats.Hint = "no memories match the filters"
+		}
+		return out, nil
+	}
 
 	if in.Query != "" {
 		scoredEntries, err = searchWithEmbeddings(ctx, memStore, workspacePath, in)
@@ -236,6 +254,10 @@ func query(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
 			}
 		}
 
+		if strings.TrimSpace(in.SessionID) != "" && entry.SessionID != strings.TrimSpace(in.SessionID) {
+			continue
+		}
+
 		if in.File != "" {
 			if !isFileAssociated(entry, in.File) {
 				continue
@@ -266,10 +288,11 @@ func query(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
 	for _, scored := range filtered {
 		entry := scored.Entry
 		result := MemoryResult{
-			Name:    entry.Name,
-			Type:    entry.Type,
-			Summary: truncate(entry.Summary, 500),
-			Score:   scored.Score,
+			Name:      entry.Name,
+			Type:      entry.Type,
+			Summary:   truncate(entry.Summary, 500),
+			Score:     scored.Score,
+			SessionID: entry.SessionID,
 		}
 
 		if !entry.CreatedAt.IsZero() {
@@ -305,45 +328,17 @@ func query(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
 }
 
 func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, workspacePath string, in *Input) ([]storage.ScoredEntry, error) {
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-
-	if voyageKey == "" && geminiKey == "" {
-		return nil, fmt.Errorf("no embedding API key (VOYAGE_API_KEY or GEMINI_API_KEY)")
-	}
-
-	var provider semantic.EmbeddingProvider
-	var err error
-
-	if voyageKey != "" {
-		model := os.Getenv("EMBEDDING_MODEL_TEXT")
-		if model == "" {
-			model = "voyage-3.5"
-		}
-		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: voyageKey,
-			Model:  model,
-		})
-	} else {
-		model := os.Getenv("EMBEDDING_MODEL")
-		if model == "" {
-			model = "gemini-embedding-001"
-		}
-		provider, err = semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey: geminiKey,
-			Model:  model,
-		})
-	}
+	embedder, err := semantic.NewEmbedder(semantic.ScopeMemory)
 	if err != nil {
-		return nil, fmt.Errorf("create embedding provider: %w", err)
+		return nil, fmt.Errorf("create embedder: %w", err)
 	}
 
-	embedding, err := provider.Embed(ctx, in.Query)
+	result, err := embedder.Embed(ctx, in.Query)
 	if err != nil {
 		return nil, fmt.Errorf("generate query embedding: %w", err)
 	}
 
-	results, err := memStore.SearchSimilar(ctx, workspacePath, embedding, in.Limit*3)
+	results, err := memStore.SearchSimilar(ctx, workspacePath, result.Vec, in.Limit*3)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
@@ -415,10 +410,4 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
-	_ = json.NewEncoder(os.Stdout).Encode(env)
-	os.Exit(1)
 }

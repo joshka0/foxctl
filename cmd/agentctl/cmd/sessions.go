@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -44,6 +45,7 @@ manually with:
 		newSessionsSummarizeCommand(),
 		newSessionsImportCommand(),
 		newSessionsWindowsCommand(),
+		newSessionsExportCommand(),
 		// Lineage commands
 		newSessionsNewCommand(),
 		newSessionsResumeCommand(),
@@ -81,22 +83,8 @@ func newSessionsListCommand() *cobra.Command {
 						Sessions []sessionSummary `json:"sessions"`
 						Count    int              `json:"count"`
 					}{
-						Count: len(sessionList),
-					}
-
-					for _, s := range sessionList {
-						payload.Sessions = append(payload.Sessions, sessionSummary{
-							ID:              s.ID,
-							ProjectName:     s.ProjectName,
-							GitBranch:       s.GitBranch,
-							Summary:         truncateSummary(s.Summary, 100),
-							MessageCount:    s.MessageCount,
-							UserTurns:       s.UserTurns,
-							ToolInvocations: s.ToolInvocations,
-							TotalTokens:     s.TotalTokens,
-							StartedAt:       s.StartedAt,
-							Tags:            s.Tags,
-						})
+						Sessions: summarizeSessions(sessionList, 100),
+						Count:    len(sessionList),
 					}
 					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.list", payload)
 				})
@@ -186,23 +174,9 @@ func newSessionsSearchCommand() *cobra.Command {
 						Query    string           `json:"query"`
 						Count    int              `json:"count"`
 					}{
-						Query: query,
-						Count: len(sessionList),
-					}
-
-					for _, s := range sessionList {
-						payload.Sessions = append(payload.Sessions, sessionSummary{
-							ID:              s.ID,
-							ProjectName:     s.ProjectName,
-							GitBranch:       s.GitBranch,
-							Summary:         truncateSummary(s.Summary, 100),
-							MessageCount:    s.MessageCount,
-							UserTurns:       s.UserTurns,
-							ToolInvocations: s.ToolInvocations,
-							TotalTokens:     s.TotalTokens,
-							StartedAt:       s.StartedAt,
-							Tags:            s.Tags,
-						})
+						Sessions: summarizeSessions(sessionList, 100),
+						Query:    query,
+						Count:    len(sessionList),
 					}
 					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.search", payload)
 				})
@@ -469,12 +443,15 @@ func runSessionSkillQuiet(cmd *cobra.Command, cfg config.Config, skillName strin
 
 // runSessionSkill runs a session skill via the run command.
 func runSessionSkill(cmd *cobra.Command, skillName string, payload map[string]any) error {
-	cfg, err := config.Load(cmd.Context())
-	if err != nil {
-		return err
+	cfg, ok := config.FromContext(cmd.Context())
+	if !ok {
+		var err error
+		cfg, err = config.Load(cmd.Context())
+		if err != nil {
+			return err
+		}
 	}
-	_, err = findSkill(cfg, skillName)
-	if err != nil {
+	if _, err := findSkill(cfg, skillName); err != nil {
 		return fmt.Errorf("%s skill not found (run make skills-build): %w", skillName, err)
 	}
 
@@ -508,6 +485,25 @@ type sessionSummary struct {
 	TotalTokens     int       `json:"total_tokens"`
 	StartedAt       time.Time `json:"started_at,omitempty"`
 	Tags            []string  `json:"tags,omitempty"`
+}
+
+func summarizeSessions(list []storage.Session, maxSummaryLen int) []sessionSummary {
+	out := make([]sessionSummary, 0, len(list))
+	for _, s := range list {
+		out = append(out, sessionSummary{
+			ID:              s.ID,
+			ProjectName:     s.ProjectName,
+			GitBranch:       s.GitBranch,
+			Summary:         truncateSummary(s.Summary, maxSummaryLen),
+			MessageCount:    s.MessageCount,
+			UserTurns:       s.UserTurns,
+			ToolInvocations: s.ToolInvocations,
+			TotalTokens:     s.TotalTokens,
+			StartedAt:       s.StartedAt,
+			Tags:            s.Tags,
+		})
+	}
+	return out
 }
 
 // sessionDetail is the full session representation for show output.
@@ -1138,6 +1134,298 @@ Examples:
 	return cmd
 }
 
+func newSessionsExportCommand() *cobra.Command {
+	var sessionID string
+	var outputPath string
+	var format string
+	var includeTurns bool
+	var includeChunks bool
+	var includeSummaries bool
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export a session to MV2 format (memvid)",
+		Long: `Export a captured session to memvid's MV2 file format.
+
+MV2 is a single-file format with embedded search capabilities (Tantivy + HNSW).
+Exported sessions can be shared, searched offline, and imported into other tools.
+
+Requires memvid CLI to be installed:
+  npm install -g memvid-cli
+
+Examples:
+  agentctl sessions export --session 01HXYZ
+  agentctl sessions export --session 01HXYZ --output ./session.mv2
+  agentctl sessions export --session 01HXYZ --include-turns --include-chunks
+  agentctl sessions export --session 01HXYZ --dry-run`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if sessionID == "" {
+				return sessionscmd.WriteArgError(cmd.OutOrStdout(), "agentctl.sessions.export",
+					"--session is required",
+					"Specify the session to export with --session <session-id>")
+			}
+
+			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
+				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
+					// Get session
+					session, err := store.Get(ctx, sessionID)
+					if err != nil {
+						if errors.Is(err, sessions.ErrNotFound) {
+							return sessionscmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.sessions.export", sessionID)
+						}
+						return err
+					}
+
+					// Determine output path
+					outPath := outputPath
+					if outPath == "" {
+						outPath = fmt.Sprintf("%s.mv2", sessionID)
+					}
+
+					// Get turns if requested
+					var turns []storage.SessionTurn
+					if includeTurns {
+						turns, err = store.GetTurns(ctx, sessionID, storage.SessionTurnListOptions{})
+						if err != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to get turns: %v\n", err)
+						}
+					}
+
+					// Get chunks if requested
+					var chunks []storage.SessionChunk
+					if includeChunks {
+						chunks, err = store.GetChunks(ctx, sessionID, 0)
+						if err != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to get chunks: %v\n", err)
+						}
+					}
+
+					// Dry run - just show what would be exported
+					if dryRun {
+						payload := struct {
+							SessionID        string `json:"session_id"`
+							OutputPath       string `json:"output_path"`
+							Format           string `json:"format"`
+							IncludeTurns     bool   `json:"include_turns"`
+							IncludeChunks    bool   `json:"include_chunks"`
+							IncludeSummaries bool   `json:"include_summaries"`
+							ProjectName      string `json:"project_name"`
+							MessageCount     int    `json:"message_count"`
+							TurnCount        int    `json:"turn_count"`
+							ChunkCount       int    `json:"chunk_count"`
+							TotalTokens      int    `json:"total_tokens"`
+							DryRun           bool   `json:"dry_run"`
+						}{
+							SessionID:        sessionID,
+							OutputPath:       outPath,
+							Format:           format,
+							IncludeTurns:     includeTurns,
+							IncludeChunks:    includeChunks,
+							IncludeSummaries: includeSummaries,
+							ProjectName:      session.ProjectName,
+							MessageCount:     session.MessageCount,
+							TurnCount:        len(turns),
+							ChunkCount:       len(chunks),
+							TotalTokens:      session.TotalTokens,
+							DryRun:           true,
+						}
+						return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.export", payload)
+					}
+
+					// Export using memvid CLI
+					result, err := exportSessionToMV2(ctx, cmd.ErrOrStderr(), session, turns, chunks, outPath, includeSummaries)
+					if err != nil {
+						return fmt.Errorf("export failed: %w", err)
+					}
+
+					return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.export", result)
+				})
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&sessionID, "session", "", "Session ID to export (required)")
+	cmd.Flags().StringVar(&outputPath, "output", "", "Output file path (default: <session-id>.mv2)")
+	cmd.Flags().StringVar(&format, "format", "mv2", "Export format (mv2)")
+	cmd.Flags().BoolVar(&includeTurns, "include-turns", true, "Include individual turns as frames")
+	cmd.Flags().BoolVar(&includeChunks, "include-chunks", false, "Include session chunks as frames")
+	cmd.Flags().BoolVar(&includeSummaries, "include-summaries", true, "Include L1/L2 summaries as frames")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be exported without creating file")
+	return cmd
+}
+
+// exportSessionToMV2 exports a session to MV2 format using the memvid CLI.
+func exportSessionToMV2(ctx context.Context, stderr io.Writer, session storage.Session, turns []storage.SessionTurn, chunks []storage.SessionChunk, outPath string, includeSummaries bool) (map[string]any, error) {
+	// Check if memvid CLI is available
+	cli := newMemvidCLI()
+	if err := cli.Available(ctx); err != nil {
+		return nil, err
+	}
+
+	// Create the MV2 file
+	fmt.Fprintf(stderr, "Creating %s...\n", outPath)
+	if err := cli.Create(ctx, outPath); err != nil {
+		return nil, fmt.Errorf("create MV2 file: %w", err)
+	}
+
+	frameCount := 0
+
+	// Add session metadata frame
+	metaContent := fmt.Sprintf(`# Session: %s
+
+**Project:** %s
+**Branch:** %s
+**Started:** %s
+**Messages:** %d
+**Tokens:** %d
+
+## Summary
+%s`, session.ID, session.ProjectName, session.GitBranch, session.StartedAt.Format(time.RFC3339),
+		session.MessageCount, session.TotalTokens, session.Summary)
+
+	if err := cli.Put(ctx, outPath, metaContent, "Session Metadata", map[string]string{
+		"type":       "session_meta",
+		"session_id": session.ID,
+		"project":    session.ProjectName,
+	}); err != nil {
+		fmt.Fprintf(stderr, "warning: failed to add metadata frame: %v\n", err)
+	} else {
+		frameCount++
+	}
+
+	// Add turns as frames
+	for i, turn := range turns {
+		if turn.ContentPreview == "" {
+			continue
+		}
+
+		title := fmt.Sprintf("Turn %d (%s)", turn.TurnIndex, turn.Role)
+		tags := map[string]string{
+			"type":       "turn",
+			"session_id": session.ID,
+			"role":       turn.Role,
+			"turn_index": fmt.Sprintf("%d", turn.TurnIndex),
+		}
+		if turn.HasError {
+			tags["has_error"] = "true"
+			tags["error_type"] = turn.ErrorType
+		}
+
+		if err := cli.Put(ctx, outPath, turn.ContentPreview, title, tags); err != nil {
+			fmt.Fprintf(stderr, "warning: failed to add turn %d: %v\n", i, err)
+		} else {
+			frameCount++
+		}
+	}
+
+	// Add chunks as frames
+	for i, chunk := range chunks {
+		if chunk.ContentPreview == "" {
+			continue
+		}
+
+		title := fmt.Sprintf("Chunk %d (%s)", chunk.ChunkIndex, chunk.ChunkType)
+		tags := map[string]string{
+			"type":        "chunk",
+			"session_id":  session.ID,
+			"chunk_index": fmt.Sprintf("%d", chunk.ChunkIndex),
+			"chunk_type":  chunk.ChunkType,
+		}
+		if chunk.HasError {
+			tags["has_error"] = "true"
+			tags["error_type"] = chunk.ErrorType
+		}
+
+		if err := cli.Put(ctx, outPath, chunk.ContentPreview, title, tags); err != nil {
+			fmt.Fprintf(stderr, "warning: failed to add chunk %d: %v\n", i, err)
+		} else {
+			frameCount++
+		}
+	}
+
+	// Add summary frame if available
+	if includeSummaries && session.Summary != "" {
+		if err := cli.Put(ctx, outPath, session.Summary, "Session Summary", map[string]string{
+			"type":       "summary",
+			"session_id": session.ID,
+		}); err != nil {
+			fmt.Fprintf(stderr, "warning: failed to add summary frame: %v\n", err)
+		} else {
+			frameCount++
+		}
+	}
+
+	// Get file stats
+	fileInfo, _ := os.Stat(outPath)
+	var fileSize int64
+	if fileInfo != nil {
+		fileSize = fileInfo.Size()
+	}
+
+	return map[string]any{
+		"session_id":   session.ID,
+		"output_path":  outPath,
+		"frame_count":  frameCount,
+		"turn_count":   len(turns),
+		"chunk_count":  len(chunks),
+		"file_size":    fileSize,
+		"status":       "exported",
+		"project_name": session.ProjectName,
+	}, nil
+}
+
+// memvidCLI is a minimal CLI wrapper for session export.
+type memvidCLI struct{}
+
+func newMemvidCLI() *memvidCLI {
+	return &memvidCLI{}
+}
+
+func (c *memvidCLI) Available(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "memvid", "version")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("memvid CLI not available: %w (install with: npm install -g memvid-cli)", err)
+	}
+	return nil
+}
+
+func (c *memvidCLI) Create(ctx context.Context, path string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "memvid", "create", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("create failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
+func (c *memvidCLI) Put(ctx context.Context, path, content, title string, tags map[string]string) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	args := []string{"put", path, "--title", title}
+	for k, v := range tags {
+		args = append(args, "--tag", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	cmd := exec.CommandContext(ctx, "memvid", args...)
+	cmd.Stdin = strings.NewReader(content)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("put failed: %w\n%s", err, output)
+	}
+	return nil
+}
+
 func newSessionsWindowsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "windows <session-id>",
@@ -1150,11 +1438,17 @@ enabling granular retrieval within long sessions.
 
 Examples:
   agentctl sessions windows 01HXYZ...
-  agentctl sessions windows 01HXYZ... --show-chunks`,
+  agentctl sessions windows 01HXYZ... --limit 5
+  agentctl sessions windows 01HXYZ... --index 2 --full
+  agentctl sessions windows 01HXYZ... --offset 5 --limit 5`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
 			showChunks, _ := cmd.Flags().GetBool("show-chunks")
+			limit, _ := cmd.Flags().GetInt("limit")
+			offset, _ := cmd.Flags().GetInt("offset")
+			windowIndex, _ := cmd.Flags().GetInt("index")
+			fullSummary, _ := cmd.Flags().GetBool("full")
 
 			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
 				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
@@ -1173,6 +1467,29 @@ Examples:
 						return fmt.Errorf("get context windows: %w", err)
 					}
 
+					totalWindows := len(windows)
+
+					// Filter by specific index if requested
+					if windowIndex >= 0 {
+						if windowIndex >= len(windows) {
+							return fmt.Errorf("window index %d out of range (session has %d windows)", windowIndex, len(windows))
+						}
+						windows = []storage.ContextWindow{windows[windowIndex]}
+					} else {
+						// Apply offset
+						if offset > 0 {
+							if offset >= len(windows) {
+								windows = nil
+							} else {
+								windows = windows[offset:]
+							}
+						}
+						// Apply limit
+						if limit > 0 && len(windows) > limit {
+							windows = windows[:limit]
+						}
+					}
+
 					type windowEntry struct {
 						ID               string    `json:"id"`
 						WindowIndex      int       `json:"window_index"`
@@ -1189,6 +1506,10 @@ Examples:
 
 					entries := make([]windowEntry, len(windows))
 					for i, w := range windows {
+						summary := w.Summary
+						if !fullSummary {
+							summary = truncateSummary(summary, 80)
+						}
 						entries[i] = windowEntry{
 							ID:               w.ID,
 							WindowIndex:      w.WindowIndex,
@@ -1199,21 +1520,27 @@ Examples:
 							ChunkStart:       w.ChunkStart,
 							ChunkEnd:         w.ChunkEnd,
 							MessageCount:     w.MessageCount,
-							Summary:          truncateSummary(w.Summary, 80),
+							Summary:          summary,
 							HasEmbedding:     len(w.Embedding) > 0,
 						}
 					}
 
 					payload := struct {
-						SessionID   string        `json:"session_id"`
-						ProjectName string        `json:"project_name,omitempty"`
-						Windows     []windowEntry `json:"windows"`
-						Count       int           `json:"count"`
+						SessionID    string        `json:"session_id"`
+						ProjectName  string        `json:"project_name,omitempty"`
+						Windows      []windowEntry `json:"windows"`
+						Count        int           `json:"count"`
+						TotalWindows int           `json:"total_windows"`
+						Offset       int           `json:"offset,omitempty"`
+						Limit        int           `json:"limit,omitempty"`
 					}{
-						SessionID:   sessionID,
-						ProjectName: session.ProjectName,
-						Windows:     entries,
-						Count:       len(entries),
+						SessionID:    sessionID,
+						ProjectName:  session.ProjectName,
+						Windows:      entries,
+						Count:        len(entries),
+						TotalWindows: totalWindows,
+						Offset:       offset,
+						Limit:        limit,
 					}
 
 					// Optionally show chunk counts
@@ -1221,20 +1548,26 @@ Examples:
 						// Get total chunk count for context
 						chunks, err := store.GetChunks(ctx, sessionID, 0)
 						if err == nil {
-							payload := struct {
-								SessionID   string        `json:"session_id"`
-								ProjectName string        `json:"project_name,omitempty"`
-								Windows     []windowEntry `json:"windows"`
-								Count       int           `json:"count"`
-								TotalChunks int           `json:"total_chunks"`
+							payloadWithChunks := struct {
+								SessionID    string        `json:"session_id"`
+								ProjectName  string        `json:"project_name,omitempty"`
+								Windows      []windowEntry `json:"windows"`
+								Count        int           `json:"count"`
+								TotalWindows int           `json:"total_windows"`
+								Offset       int           `json:"offset,omitempty"`
+								Limit        int           `json:"limit,omitempty"`
+								TotalChunks  int           `json:"total_chunks"`
 							}{
-								SessionID:   sessionID,
-								ProjectName: session.ProjectName,
-								Windows:     entries,
-								Count:       len(entries),
-								TotalChunks: len(chunks),
+								SessionID:    sessionID,
+								ProjectName:  session.ProjectName,
+								Windows:      entries,
+								Count:        len(entries),
+								TotalWindows: totalWindows,
+								Offset:       offset,
+								Limit:        limit,
+								TotalChunks:  len(chunks),
 							}
-							return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.windows", payload)
+							return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.windows", payloadWithChunks)
 						}
 					}
 
@@ -1245,6 +1578,10 @@ Examples:
 	}
 
 	cmd.Flags().Bool("show-chunks", false, "Include total chunk count in output")
+	cmd.Flags().Int("limit", 0, "Limit number of windows returned (default: all)")
+	cmd.Flags().Int("offset", 0, "Skip first N windows (for pagination)")
+	cmd.Flags().Int("index", -1, "Get a specific window by index (0-based)")
+	cmd.Flags().Bool("full", false, "Show full summaries instead of truncated")
 	return cmd
 }
 

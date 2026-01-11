@@ -1,0 +1,106 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/context_drain
+  version: 0.1.0
+  description: "Drain context buffer for injection into AI turns"
+  tags: ["hook", "context", "injection"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_context_drain/context_drain
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: hooks/context_drain
+  parameters:
+    - name: workspace_id
+      type: string
+      required: true
+      description: "Workspace identifier"
+    - name: session_id
+      type: string
+      required: true
+      description: "Session identifier"
+    - name: agent_id
+      type: string
+      required: false
+      description: "Filter by agent ID"
+    - name: sources
+      type: array
+      required: false
+      description: "Filter by source names (e.g., ['smart-grep', 'overseer-inbox'])"
+    - name: min_priority
+      type: integer
+      required: false
+      description: "Only return entries with priority <= this (1=high, 2=normal, 3=low)"
+    - name: limit
+      type: integer
+      required: false
+      description: "Max entries to return (default: 50)"
+    - name: peek
+      type: boolean
+      required: false
+      description: "If true, don't mark entries as consumed"
+    - name: format
+      type: string
+      required: false
+      description: "Output format: 'markdown' (default) or 'json'"
+    - name: prune
+      type: boolean
+      required: false
+      description: "Also prune expired entries"
+  help:
+    short: "Drain context buffer for injection."
+    long: |
+      Drains the context buffer, returning pending context entries for injection
+      into AI turns. Used by inject-capable events in platform adapters.
+
+      The context buffer is a SQLite-backed queue that hooks can enqueue to at
+      any time. This skill drains the buffer and returns formatted markdown or
+      raw entries.
+
+      Example:
+        agentctl run hooks/context_drain --input '{"workspace_id":"/workspace","session_id":"abc123"}'
+
+      With filters:
+        agentctl run hooks/context_drain --input '{"workspace_id":"/workspace","session_id":"abc123","sources":["smart-grep"],"min_priority":1}'
+    workflows:
+      - id: inject-on-turn
+        description: "Drain context before AI turn for injection."
+        example_input:
+          workspace_id: "/workspace/project"
+          session_id: "session-abc123"
+          format: "markdown"
+      - id: peek-buffer
+        description: "Check buffer without consuming."
+        example_input:
+          workspace_id: "/workspace/project"
+          session_id: "session-abc123"
+          peek: true
+          format: "json"
+  returns:
+    - name: markdown
+      type: string
+      description: "Formatted markdown for injection (when format=markdown)"
+    - name: entries
+      type: array
+      description: "Raw context entries (when format=json)"
+    - name: count
+      type: integer
+      description: "Number of entries returned"
+    - name: total_pending
+      type: integer
+      description: "Remaining pending entries after drain"
+    - name: sources
+      type: object
+      description: "Count of entries by source"
+    - name: pruned
+      type: integer
+      description: "Number of expired entries pruned (when prune=true)"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+  pure: false

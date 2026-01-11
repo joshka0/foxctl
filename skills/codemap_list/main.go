@@ -5,25 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
-const Command = "codemap/list"
-
-const (
-	ErrCodeInput   = "EARG"
-	ErrCodeRuntime = "ERUNTIME"
-)
+const command = "codemap/list"
 
 const (
 	DefaultLimit          = 10
@@ -33,7 +26,6 @@ const (
 )
 
 type Input struct {
-	Workspace       string `json:"workspace,omitempty"`
 	Limit           int    `json:"limit,omitempty"`
 	Offset          int    `json:"offset,omitempty"`
 	Query           string `json:"query,omitempty"`
@@ -69,34 +61,11 @@ type Stats struct {
 }
 
 func main() {
-	ctx := context.Background()
-	_, err := config.Load(ctx)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail(ErrCodeInput, err)
-	}
-
-	out, err := listCodemaps(ctx, in)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-
-	env := envelope.OK(Command, out)
-	if err := json.NewEncoder(os.Stdout).Encode(env); err != nil {
-		fail(ErrCodeRuntime, err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r *os.File) (*Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return nil, fmt.Errorf("invalid JSON input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
 	if in.Limit <= 0 {
 		in.Limit = DefaultLimit
 	}
@@ -113,22 +82,7 @@ func parseInput(r *os.File) (*Input, error) {
 		defaultTrue := true
 		in.SummaryOnly = &defaultTrue
 	}
-	if in.Workspace == "" {
-		if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-			in.Workspace = ws
-		} else {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return nil, fmt.Errorf("failed to get working directory: %w", err)
-			}
-			in.Workspace = cwd
-		}
-	}
 
-	return &in, nil
-}
-
-func listCodemaps(ctx context.Context, in *Input) (*Output, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
@@ -141,36 +95,20 @@ func listCodemaps(ctx context.Context, in *Input) (*Output, error) {
 		},
 	}
 
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("determine home directory: %w", err)
-		}
-		agentctlHome = filepath.Join(home, ".agentctl")
-	}
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	casRoot := filepath.Join(agentctlHome, "cas")
-
-	workspacePath := in.Workspace
-	if absPath, err := filepath.Abs(workspacePath); err == nil {
-		workspacePath = absPath
-	}
-
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return fmt.Errorf("open memory store: %w", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	var allEntries []storage.ScoredEntry
 
 	if in.Query != "" {
-		allEntries, err = searchCodemaps(ctx, memStore, workspacePath, in.Query, in.Limit+in.Offset+10)
+		allEntries, err = searchCodemaps(ctx, memStore, rc.Workspace, in.Query, in.Limit+in.Offset+10)
 		if err != nil {
-			entries, listErr := memStore.List(ctx, workspacePath, 500)
+			entries, listErr := memStore.List(ctx, rc.Workspace, 500)
 			if listErr != nil {
-				return nil, fmt.Errorf("list memories: %w", listErr)
+				return fmt.Errorf("list memories: %w", listErr)
 			}
 			for _, e := range entries {
 				if e.Type == "codemap" {
@@ -182,9 +120,9 @@ func listCodemaps(ctx context.Context, in *Input) (*Output, error) {
 			out.Stats.SearchMethod = "vector"
 		}
 	} else {
-		entries, err := memStore.List(ctx, workspacePath, 500)
+		entries, err := memStore.List(ctx, rc.Workspace, 500)
 		if err != nil {
-			return nil, fmt.Errorf("list memories: %w", err)
+			return fmt.Errorf("list memories: %w", err)
 		}
 		for _, e := range entries {
 			if e.Type == "codemap" {
@@ -249,49 +187,21 @@ func listCodemaps(ctx context.Context, in *Input) (*Output, error) {
 
 	out.Stats.LatencyMS = int(time.Since(start).Milliseconds())
 
-	return out, nil
+	return skillout.Emit(rc, command, out)
 }
 
 func searchCodemaps(ctx context.Context, memStore *memory.Store, workspacePath, query string, limit int) ([]storage.ScoredEntry, error) {
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-
-	if voyageKey == "" && geminiKey == "" {
-		return nil, fmt.Errorf("no embedding API key")
-	}
-
-	var provider semantic.EmbeddingProvider
-	var err error
-
-	if voyageKey != "" {
-		model := os.Getenv("EMBEDDING_MODEL_TEXT")
-		if model == "" {
-			model = "voyage-3.5"
-		}
-		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: voyageKey,
-			Model:  model,
-		})
-	} else {
-		model := os.Getenv("EMBEDDING_MODEL")
-		if model == "" {
-			model = "gemini-embedding-001"
-		}
-		provider, err = semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey: geminiKey,
-			Model:  model,
-		})
-	}
+	embedder, err := semantic.NewEmbedder(semantic.ScopeCodemaps)
 	if err != nil {
-		return nil, fmt.Errorf("create embedding provider: %w", err)
+		return nil, fmt.Errorf("create embedder: %w", err)
 	}
 
-	embedding, err := provider.Embed(ctx, query)
+	result, err := embedder.Embed(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("generate query embedding: %w", err)
 	}
 
-	results, err := memStore.SearchSimilar(ctx, workspacePath, embedding, limit)
+	results, err := memStore.SearchSimilar(ctx, workspacePath, result.Vec, limit)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
@@ -324,10 +234,4 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen-3]) + "..."
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
-	_ = json.NewEncoder(os.Stdout).Encode(env)
-	os.Exit(1)
 }

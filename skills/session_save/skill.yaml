@@ -31,16 +31,29 @@ signature:
       type: string
       required: false
       description: "Optional user-provided session summary"
-returns:
-  - name: snapshot_id
-    type: string
-    description: "ID of the created snapshot"
-  - name: items_captured
-    type: object
-    description: "Count of captured items by type"
-  - name: message
-    type: string
-    description: "Human-readable result message"
+  help:
+    short: "Save session state before compaction."
+    long: |
+      Use session/save to capture session context for continuity.
+      Example commands:
+        agentctl run session/save --input '{"trigger":"pre_compact","workspace":"./"}'
+        agentctl skills run session/save --trigger pre_compact --workspace ./
+    workflows:
+      - id: save-session
+        description: "Capture session state."
+        example_input:
+          trigger: "pre_compact"
+          workspace: "./"
+  returns:
+    - name: snapshot_id
+      type: string
+      description: "ID of the created snapshot"
+    - name: items_captured
+      type: object
+      description: "Count of captured items by type"
+    - name: message
+      type: string
+      description: "Human-readable result message"
 capabilities:
   network: "none"
   filesystem:

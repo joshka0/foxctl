@@ -20,6 +20,8 @@ const (
 	RoleReviewer AgentRole = "reviewer"
 	// RoleFixer is a fixing agent that addresses review feedback.
 	RoleFixer AgentRole = "fixer"
+	// RoleVerifier is a verification agent for CoVe (Chain of Verification) claims.
+	RoleVerifier AgentRole = "verifier"
 )
 
 // AgentStatus represents the current state of an agent session.

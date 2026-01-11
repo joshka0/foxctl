@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"context"
+	"os"
 	"sync"
 )
 
@@ -37,6 +38,10 @@ const (
 // ScopeModelRecommendation returns the recommended Voyage model for a scope.
 // Returns (model, isCodeModel) where isCodeModel indicates if voyage-code-3 should be used.
 //
+// Environment variable overrides (checked first):
+//   - AGENTCTL_EMBEDDING_MODEL_CODE: Model for code scopes (symbols) - default: voyage-code-3
+//   - AGENTCTL_EMBEDDING_MODEL_TEXT: Model for text scopes (memory, tasks, sessions, codemaps) - default: voyage-3.5
+//
 // Model strategy (Jan 2025):
 // - voyage-code-3: Best for code retrieval (13.80% better than OpenAI), $0.18/1M
 // - voyage-3.5: Best price/performance for general text, $0.06/1M (3x cheaper than voyage-3-large)
@@ -45,10 +50,19 @@ const (
 func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel bool) {
 	switch scope {
 	case ScopeSymbols:
+		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_CODE"); env != "" {
+			return env, true
+		}
 		return "voyage-code-3", true
 	case ScopeMemory, ScopeCodemaps, ScopeTasks, ScopeSessions:
+		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_TEXT"); env != "" {
+			return env, false
+		}
 		return "voyage-3.5", false
 	default:
+		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_TEXT"); env != "" {
+			return env, false
+		}
 		return "voyage-3.5", false
 	}
 }

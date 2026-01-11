@@ -59,4 +59,4 @@ agentctl run html/edit --input '{
 }'
 ```
 
-Full docs: `configs/skills/agentctl-html-edit/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-html-edit/Skill.md`

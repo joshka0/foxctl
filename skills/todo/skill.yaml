@@ -18,7 +18,7 @@ signature:
     - name: operation
       type: string
       required: false
-      description: "add|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|search (default list)"
+      description: "add|update|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status|search|dedupe (default list)"
     - name: workspace_id
       type: string
       required: false
@@ -40,17 +40,89 @@ signature:
         include_metrics:
           type: boolean
           description: "Include full graph metrics (degrees, critical path)"
-returns:
-  - name: tasks
-    type: array
-    description: "List of tasks with optional pagerank, critical_path_score, in_degree, out_degree fields"
-  - name: task
-    type: object
-  - name: active
-    type: boolean
-  - name: ranked
-    type: boolean
-    description: "True when PageRank metrics are included"
+        title_contains:
+          type: string
+          description: "Case-insensitive substring match on task title"
+        session_id:
+          type: string
+          description: "Filter tasks by session_id (exact match)"
+        limit:
+          type: integer
+          description: "Limit number of tasks returned after sorting"
+    - name: dedupe
+      type: object
+      required: false
+      description: "Options for dedupe operation"
+      properties:
+        apply:
+          type: boolean
+          description: "If true, cancel duplicates and rewire dependencies"
+        keep:
+          type: string
+          description: "Which task to keep: newest|oldest (default: newest)"
+        limit:
+          type: integer
+          description: "Max duplicate groups to process (default: 50)"
+  help:
+    short: "Manage tasks with dependencies and PageRank"
+    long: |
+      Use todo/manage to add, list, and complete tasks while keeping dependencies,
+      active task state, and planning operations in a single skill.
+
+      When you think a task is done, prefer gating with verification/cove_verify before marking it complete.
+
+      Example commands:
+        agentctl run todo/manage --input '{"operation":"add","add":{"title":"Implement feature X"}}'
+        agentctl run todo/manage --input '{"operation":"list","list":{"ranked":true,"sort_by":"pagerank"}}'
+        agentctl run todo/manage --input '{"operation":"recommend","recommend":{"limit":5}}'
+    workflows:
+      - id: add-task
+        description: "Add a new task with a title and optional description."
+        example_input:
+          operation: "add"
+          add:
+            title: "Implement feature X"
+            description: "Capture the main deliverable and any key constraints."
+      - id: complete-task
+        description: "Complete a task with notes and gotchas."
+        example_input:
+          operation: "complete"
+          complete:
+            id: "01J9Z5G8E6Q8Z2W8V9YFZ6B3ZP"
+            notes: "Feature is shipped behind a flag."
+            gotchas: "Remember to clean up the flag when rollout finishes."
+      - id: list-ranked
+        description: "List tasks with PageRank ordering and metrics."
+        example_input:
+          operation: "list"
+          list:
+            ranked: true
+            sort_by: "pagerank"
+            include_metrics: true
+      - id: recommend
+        description: "Get recommended tasks to work on next."
+        example_input:
+          operation: "recommend"
+          recommend:
+            limit: 5
+      - id: gate-before-complete
+        description: "Gate a TODO with CoVe before completing it"
+        example_input:
+          operation: "complete"
+          complete:
+            id: "01HDEF"
+            notes: "Completed after CoVe gate returned STATUS: DONE."
+  returns:
+    - name: tasks
+      type: array
+      description: "List of tasks with optional pagerank, critical_path_score, in_degree, out_degree fields"
+    - name: task
+      type: object
+    - name: active
+      type: boolean
+    - name: ranked
+      type: boolean
+      description: "True when PageRank metrics are included"
 capabilities:
   network: "none"
   filesystem:

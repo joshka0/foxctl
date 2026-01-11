@@ -40,4 +40,4 @@ agentctl run mobile/ios --input '{"operation": "<op>", ...}'
 | `expo_reload` | - | Reload Expo app |
 | `open_url` | `url` | Open URL/deep link |
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-mobile-ios/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-mobile-ios/Skill.md`

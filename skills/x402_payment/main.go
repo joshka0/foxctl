@@ -21,10 +21,8 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -171,23 +169,10 @@ type RPCError struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", fmt.Errorf("load config: %w", err))
-	}
+	skillmain.Main(commandName, run)
+}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", fmt.Errorf("create runner context: %w", err))
-	}
-	defer func() { errs.Ignore(rc.Close(), "close runner context") }()
-
-	var in Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("EARG", fmt.Errorf("decode input: %w", err))
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set defaults
 	if in.Method == "" {
 		in.Method = "GET"
@@ -205,12 +190,6 @@ func main() {
 		in.Asset = "USDC"
 	}
 
-	if err := run(ctx, rc, in); err != nil {
-		fail("ERUNTIME", err)
-	}
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	switch in.Operation {
 	case OpWalletInit:
 		return handleWalletInit(ctx, rc, in)
@@ -225,7 +204,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	}
 }
 
-func handleWalletInit(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	var wallet *WalletInfo
 	var err error
 
@@ -250,7 +229,7 @@ func handleWalletInit(ctx context.Context, rc *runner.RunnerContext, in Input) e
 				},
 				Error: err.Error(),
 			}
-			return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+			return skillout.Emit(rc, commandName, output)
 		}
 		return fmt.Errorf("init wallet: %w", err)
 	}
@@ -265,10 +244,10 @@ func handleWalletInit(ctx context.Context, rc *runner.RunnerContext, in Input) e
 		Wallet:    wallet,
 	}
 
-	return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+	return skillout.Emit(rc, commandName, output)
 }
 
-func handleWalletStatus(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Load wallet config or use provided address
 	walletCfg, err := loadWalletConfig(rc)
 	if err != nil && in.Address == "" {
@@ -309,10 +288,10 @@ func handleWalletStatus(ctx context.Context, rc *runner.RunnerContext, in Input)
 		Wallet:    wallet,
 	}
 
-	return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+	return skillout.Emit(rc, commandName, output)
 }
 
-func handleFetch(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.URL == "" {
 		return fmt.Errorf("url is required for fetch operation")
 	}
@@ -376,10 +355,10 @@ func handleFetch(ctx context.Context, rc *runner.RunnerContext, in Input) error 
 		},
 	}
 
-	return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+	return skillout.Emit(rc, commandName, output)
 }
 
-func handle402Response(ctx context.Context, rc *runner.RunnerContext, in Input, resp *http.Response, body []byte) error {
+func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, resp *http.Response, body []byte) error {
 	// Parse x402 payment requirements from header
 	paymentHeader := resp.Header.Get("X-Payment-Required")
 	if paymentHeader == "" {
@@ -396,7 +375,7 @@ func handle402Response(ctx context.Context, rc *runner.RunnerContext, in Input, 
 			},
 			Error: "received 402 but no payment requirements in response headers",
 		}
-		return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+		return skillout.Emit(rc, commandName, output)
 	}
 
 	// Decode payment requirements (base64 JSON)
@@ -439,7 +418,7 @@ func handle402Response(ctx context.Context, rc *runner.RunnerContext, in Input, 
 			},
 			Error: fmt.Sprintf("payment amount %s exceeds max_payment %s", selectedReq.MaxAmountRequired, in.MaxPayment),
 		}
-		return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+		return skillout.Emit(rc, commandName, output)
 	}
 
 	// Load wallet and execute payment
@@ -504,10 +483,10 @@ func handle402Response(ctx context.Context, rc *runner.RunnerContext, in Input, 
 		},
 	}
 
-	return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+	return skillout.Emit(rc, commandName, output)
 }
 
-func handlePay(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.To == "" {
 		return fmt.Errorf("to address is required for pay operation")
 	}
@@ -540,7 +519,7 @@ func handlePay(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 				Payment:   payment,
 				Error:     err.Error(),
 			}
-			return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+			return skillout.Emit(rc, commandName, output)
 		}
 		payment.TxHash = txHash
 		payment.Status = "submitted"
@@ -554,7 +533,7 @@ func handlePay(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 				Payment:   payment,
 				Error:     err.Error(),
 			}
-			return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+			return skillout.Emit(rc, commandName, output)
 		}
 		payment.TxHash = txHash
 		payment.Status = "submitted"
@@ -568,7 +547,7 @@ func handlePay(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		Payment:   payment,
 	}
 
-	return rc.Emit(commandName, output, "application/json", envelope.Meta{Source: "run"})
+	return skillout.Emit(rc, commandName, output)
 }
 
 // Wallet initialization functions
@@ -586,7 +565,7 @@ func initCDPWallet(ctx context.Context, network string) (*WalletInfo, error) {
 	return nil, fmt.Errorf("CDP wallet integration pending. Set up credentials and use 'go get github.com/coinbase/coinbase-sdk-go' for full support")
 }
 
-func initLocalWallet(ctx context.Context, rc *runner.RunnerContext, network, keyPath string) (*WalletInfo, error) {
+func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, keyPath string) (*WalletInfo, error) {
 	var privateKey *ecdsa.PrivateKey
 	var err error
 
@@ -634,7 +613,7 @@ func initLocalWallet(ctx context.Context, rc *runner.RunnerContext, network, key
 
 // Config persistence
 
-func walletConfigPath(rc *runner.RunnerContext) string {
+func walletConfigPath(rc *skillmain.RunContext) string {
 	home := os.Getenv("AGENTCTL_HOME")
 	if home == "" {
 		home = filepath.Join(os.Getenv("HOME"), ".agentctl")
@@ -642,7 +621,7 @@ func walletConfigPath(rc *runner.RunnerContext) string {
 	return filepath.Join(home, "x402_wallet.json")
 }
 
-func saveWalletConfig(rc *runner.RunnerContext, wallet *WalletInfo, keyPath string) error {
+func saveWalletConfig(rc *skillmain.RunContext, wallet *WalletInfo, keyPath string) error {
 	cfg := WalletConfig{
 		Type:      wallet.Type,
 		Network:   wallet.Network,
@@ -664,7 +643,7 @@ func saveWalletConfig(rc *runner.RunnerContext, wallet *WalletInfo, keyPath stri
 	return os.WriteFile(configPath, data, 0o600)
 }
 
-func loadWalletConfig(rc *runner.RunnerContext) (*WalletConfig, error) {
+func loadWalletConfig(rc *skillmain.RunContext) (*WalletConfig, error) {
 	// Check environment first
 	if addr := os.Getenv("X402_WALLET_ADDRESS"); addr != "" {
 		network := os.Getenv("X402_NETWORK")
@@ -1002,8 +981,3 @@ func decodeBase64(s string) ([]byte, error) {
 	return base64.URLEncoding.DecodeString(s)
 }
 
-func fail(code string, err error) {
-	env := envelope.Error(commandName, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
-}

@@ -39,4 +39,4 @@ agentctl run fs/tree --input '{"path": "src/", "max_depth": 3}'
 agentctl run code/context_ripgrep --input '{"query": "auth", "expand_functions": true}'
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-search/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-search/Skill.md`

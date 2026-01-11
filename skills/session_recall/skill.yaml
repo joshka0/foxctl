@@ -35,22 +35,35 @@ signature:
       type: string
       required: false
       description: "Filter by project name (optional)"
-returns:
-  - name: query
-    type: string
-    description: "The search query"
-  - name: matches
-    type: array
-    description: "Matching sessions with similarity scores"
-  - name: total_with_embeddings
-    type: integer
-    description: "Total sessions with embeddings available"
-  - name: status
-    type: string
-    description: "Status of the recall operation"
-  - name: message
-    type: string
-    description: "Human-readable status message"
+  help:
+    short: "Recall relevant sessions via semantic search."
+    long: |
+      Use session/recall to find past sessions matching a query.
+      Example commands:
+        agentctl run session/recall --input '{"query":"authentication flow","limit":3}'
+        agentctl skills run session/recall --query "authentication flow" --limit 3
+    workflows:
+      - id: recall-query
+        description: "Recall sessions for a query."
+        example_input:
+          query: "authentication flow"
+          limit: 3
+  returns:
+    - name: query
+      type: string
+      description: "The search query"
+    - name: matches
+      type: array
+      description: "Matching sessions with similarity scores"
+    - name: total_with_embeddings
+      type: integer
+      description: "Total sessions with embeddings available"
+    - name: status
+      type: string
+      description: "Status of the recall operation"
+    - name: message
+      type: string
+      description: "Human-readable status message"
 capabilities:
   network: "egress"
   filesystem:

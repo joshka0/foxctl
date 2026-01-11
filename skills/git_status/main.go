@@ -5,19 +5,17 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "git/status"
 
 type input struct {
 	Operation string `json:"operation"`
@@ -44,29 +42,19 @@ type commitInfo struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("git/status", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("git/status", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("git/status", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("git/status", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	in.Operation = oputil.DefaultOp(in.Operation, "status")
+	if in.RepoPath == "" {
+		in.RepoPath = "."
+	}
+	if in.Limit <= 0 {
+		in.Limit = 10
+	}
+
 	repoPath, err := resolveRepoPath(rc, in.RepoPath)
 	if err != nil {
 		return fmt.Errorf("resolve repo path: %w", err)
@@ -76,47 +64,20 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		return fmt.Errorf("git command not found: %w", err)
 	}
 
-	var data map[string]any
-
-	switch in.Operation {
-	case "status":
-		data, err = getStatus(ctx, rc, repoPath)
-	case "diff":
-		data, err = getDiff(ctx, rc, repoPath, in)
-	case "log":
-		data, err = getLog(ctx, rc, repoPath, in)
-	default:
-		return fmt.Errorf("invalid operation: %s", in.Operation)
-	}
-
+	// Dispatch operation
+	data, err := oputil.NewSwitch(in.Operation).
+		Case("status", func() (map[string]any, error) { return getStatus(ctx, repoPath) }).
+		Case("diff", func() (map[string]any, error) { return getDiff(ctx, rc, repoPath, in) }).
+		Case("log", func() (map[string]any, error) { return getLog(ctx, repoPath, in) }).
+		Run()
 	if err != nil {
 		return err
 	}
 
-	return rc.Emit("git/status", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, command, data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.Operation == "" {
-		in.Operation = "status"
-	}
-	if in.RepoPath == "" {
-		in.RepoPath = "."
-	}
-	if in.Limit <= 0 {
-		in.Limit = 10
-	}
-	return in, nil
-}
-
-func resolveRepoPath(rc *runner.RunnerContext, path string) (string, error) {
+func resolveRepoPath(rc *skillmain.RunContext, path string) (string, error) {
 	if path == "" {
 		path = "."
 	}
@@ -127,7 +88,7 @@ func resolveRepoPath(rc *runner.RunnerContext, path string) (string, error) {
 	return valid, nil
 }
 
-func getStatus(ctx context.Context, _ *runner.RunnerContext, repoPath string) (map[string]any, error) {
+func getStatus(ctx context.Context, repoPath string) (map[string]any, error) {
 	// Get porcelain status
 	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain=v1", "-b")
 	output, err := cmd.Output()
@@ -171,7 +132,7 @@ func getStatus(ctx context.Context, _ *runner.RunnerContext, repoPath string) (m
 	return data, nil
 }
 
-func getDiff(ctx context.Context, rc *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
+func getDiff(ctx context.Context, rc *skillmain.RunContext, repoPath string, in input) (map[string]any, error) {
 	args := []string{"-C", repoPath, "diff"}
 
 	if in.Staged {
@@ -211,7 +172,7 @@ func getDiff(ctx context.Context, rc *runner.RunnerContext, repoPath string, in 
 	// Store full diff as artifact if large
 	if truncated {
 		buf := bytes.NewBufferString(diff)
-		artifact, err := runner.PersistBuffer(ctx, rc, buf, "text/plain", "git_diff")
+		artifact, err := skillmain.PersistBuffer(ctx, rc, buf, "text/plain", "git_diff")
 		if err == nil && artifact.Digest != "" {
 			data["artifact"] = artifact.Digest
 		}
@@ -227,7 +188,7 @@ func getDiff(ctx context.Context, rc *runner.RunnerContext, repoPath string, in 
 	return data, nil
 }
 
-func getLog(ctx context.Context, _ *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
+func getLog(ctx context.Context, repoPath string, in input) (map[string]any, error) {
 	format := "--pretty=format:%H%x00%h%x00%an%x00%ai%x00%s"
 	args := []string{"-C", repoPath, "log", format, fmt.Sprintf("-%d", in.Limit)}
 
@@ -357,8 +318,3 @@ func countByStatus(files []fileStatus, status string) int {
 	return count
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit git/status failure")
-	os.Exit(1)
-}

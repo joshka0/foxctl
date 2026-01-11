@@ -14,11 +14,12 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
+
+const command = "context/filter"
 
 // httpClient is a shared HTTP client with timeout for LLM provider calls.
 var httpClient = &http.Client{
@@ -102,38 +103,14 @@ func debugf(format string, args ...any) {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("context/filter", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("context/filter", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("context/filter", "EARG", err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("context/filter", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate input
 	in.Prompt = strings.TrimSpace(in.Prompt)
 	if in.Prompt == "" {
-		return input{}, fmt.Errorf("prompt is required")
+		return fmt.Errorf("prompt is required")
 	}
 	if in.Scope == "" {
 		in.Scope = "auto"
@@ -165,7 +142,7 @@ func parseInput(r io.Reader) (input, error) {
 		case "openrouter":
 			in.LLM.Model = "openrouter/auto"
 		default:
-			return input{}, fmt.Errorf("unsupported llm.provider %q", in.LLM.Provider)
+			return fmt.Errorf("unsupported llm.provider %q", in.LLM.Provider)
 		}
 	}
 	if in.LLM.MaxOutputTokens <= 0 {
@@ -176,12 +153,8 @@ func parseInput(r io.Reader) (input, error) {
 	}
 	// Ensure we have some source
 	if strings.TrimSpace(in.Source.Text) == "" && in.Source.CASDigest == "" && len(in.Source.Chunks) == 0 {
-		return input{}, fmt.Errorf("source is required (cas_digest, text, or chunks)")
+		return fmt.Errorf("source is required (cas_digest, text, or chunks)")
 	}
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	candidates, err := buildCandidates(ctx, rc, in.Source, in.Budget.MaxSourceTokens)
 	if err != nil {
 		return err
@@ -196,7 +169,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 			ApproxTokens: 0,
 			LLMUsage:     map[string]any{},
 		}
-		return rc.Emit("context/filter", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+		return skillout.Emit(rc, command, data)
 	}
 
 	selection, usage, err := callLLMForSelection(ctx, in, candidates)
@@ -216,10 +189,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		LLMUsage:     usage,
 	}
 
-	return rc.Emit("context/filter", out, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, command, out)
 }
 
-func buildCandidates(ctx context.Context, rc *runner.RunnerContext, src sourceInput, maxSourceTokens int) ([]candidateChunk, error) {
+func buildCandidates(ctx context.Context, rc *skillmain.RunContext, src sourceInput, maxSourceTokens int) ([]candidateChunk, error) {
 	var candidates []candidateChunk
 
 	// Prefer explicit chunks if provided
@@ -717,8 +690,3 @@ func callGemini(ctx context.Context, llm llmInput, prompt string) (string, map[s
 	return text, usage, nil
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit context/filter failure")
-	os.Exit(1)
-}

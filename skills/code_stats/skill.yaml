@@ -35,6 +35,27 @@ signature:
       required: false
       default: 0
       description: "Maximum directory depth (0 = unlimited)"
+  help:
+    short: "Summarize codebase statistics."
+    long: |
+      Use code/stats to get file counts and language breakdowns.
+      Example commands:
+        agentctl run code/stats --input '{"path":"./src","breakdown_by":"language"}'
+        agentctl skills run code/stats --path ./src --breakdown_by language
+        agentctl run code/stats --input '{"path":".","breakdown_by":"directory","max_depth":2}'
+        agentctl skills run code/stats --path . --breakdown_by directory --max_depth 2
+    workflows:
+      - id: by-language
+        description: "Break down stats by language."
+        example_input:
+          path: "./src"
+          breakdown_by: "language"
+      - id: by-directory
+        description: "Break down stats by directory."
+        example_input:
+          path: "."
+          breakdown_by: "directory"
+          max_depth: 2
 returns:
   - name: statistics
     type: object

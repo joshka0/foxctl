@@ -25,6 +25,7 @@ BIN_DIR="$REPO_ROOT/bin"
 LOCAL_BIN="${HOME}/.local/bin"
 AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.agentctl}"
 CLAUDE_DIR="$HOME/.claude"
+CODEX_DIR="$HOME/.codex"
 
 echo -e "${BLUE}=== agentctl System Initialization ===${NC}"
 echo ""
@@ -38,6 +39,64 @@ info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; ((WARNINGS++)); }
 error() { echo -e "${RED}[ERROR]${NC} $1"; ((ERRORS++)); }
+
+SKILLS_CONFIG="$REPO_ROOT/configs/providers/skills.json"
+
+expand_home_path() {
+    local p="$1"
+    if [[ "$p" == "~/"* ]]; then
+        echo "$HOME/${p#~/}"
+        return
+    fi
+    echo "$p"
+}
+
+provider_cfg() {
+    local provider="$1"
+    local key="$2"
+    local default_value="$3"
+
+    if command -v jq &>/dev/null && [[ -f "$SKILLS_CONFIG" ]]; then
+        local v
+        v="$(jq -r --arg p "$provider" --arg k "$key" '.providers[$p][$k] // empty' "$SKILLS_CONFIG" 2>/dev/null || true)"
+        if [[ -n "$v" && "$v" != "null" ]]; then
+            echo "$(expand_home_path "$v")"
+            return
+        fi
+    fi
+
+    echo "$(expand_home_path "$default_value")"
+}
+
+resolve_repo_path() {
+    local p="$1"
+    p="$(expand_home_path "$p")"
+    if [[ "$p" == /* ]]; then
+        echo "$p"
+        return
+    fi
+    echo "$REPO_ROOT/$p"
+}
+
+provider_cfg_list() {
+    local provider="$1"
+    local key="$2"
+    local default_value="$3"
+
+    if command -v jq &>/dev/null && [[ -f "$SKILLS_CONFIG" ]]; then
+        local v
+        v="$(jq -r --arg p "$provider" --arg k "$key" '
+            .providers[$p][$k] // empty
+            | if type == "array" then .[] else . end
+        ' "$SKILLS_CONFIG" 2>/dev/null || true)"
+        if [[ -n "$v" && "$v" != "null" ]]; then
+            printf '%s\n' "$v"
+            return
+        fi
+    fi
+
+    printf '%s\n' "$default_value"
+}
 
 # 1. Check binaries exist
 echo -e "${BLUE}1. Checking binaries...${NC}"
@@ -61,6 +120,20 @@ success "Created $LOCAL_BIN"
 
 mkdir -p "$AGENTCTL_HOME"/{storage,cache,cas,skills,jobs,observability/events,backups}
 success "Created $AGENTCTL_HOME structure"
+
+info "Ensuring agentctl share configs link"
+AGENTCTL_SHARE="$AGENTCTL_HOME/share"
+mkdir -p "$AGENTCTL_SHARE"
+
+if [[ -L "$AGENTCTL_SHARE/configs" ]]; then
+    rm "$AGENTCTL_SHARE/configs"
+elif [[ -e "$AGENTCTL_SHARE/configs" ]]; then
+    warn "agentctl share path exists (skipping): $AGENTCTL_SHARE/configs"
+else
+    REPO_CONFIGS_ABS="$(cd "$REPO_ROOT/configs" && pwd)"
+    ln -s "$REPO_CONFIGS_ABS" "$AGENTCTL_SHARE/configs"
+    success "Symlinked agentctl configs -> $AGENTCTL_SHARE/configs"
+fi
 
 mkdir -p "$CLAUDE_DIR"
 success "Created $CLAUDE_DIR"
@@ -144,6 +217,67 @@ if [[ -d "$REPO_ROOT/.claude/skills" ]]; then
     mkdir -p "$CLAUDE_DIR/skills"
     success "Claude skills directory ready at $CLAUDE_DIR/skills"
 fi
+
+echo -e "${BLUE}5a2. Setting up Claude skills...${NC}"
+
+CLAUDE_SKILLS_DIR="$(provider_cfg claude target_dir "$CLAUDE_DIR/skills")"
+CLAUDE_SKILLS_LEGACY="$(provider_cfg claude legacy_dir "$CLAUDE_DIR/skills-legacy")"
+
+mkdir -p "$CLAUDE_SKILLS_DIR" "$CLAUDE_SKILLS_LEGACY"
+
+while IFS= read -r prune_root; do
+    prune_root="$(resolve_repo_path "$prune_root")"
+    [[ -d "$prune_root" ]] || continue
+
+    for skill_dir in "$prune_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$CLAUDE_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            legacy="$CLAUDE_SKILLS_LEGACY/$skill_name"
+            if [[ ! -e "$legacy" ]]; then
+                mv "$target" "$legacy"
+            else
+                rm "$target"
+            fi
+        fi
+    done
+done < <(provider_cfg_list claude prune_sources "$REPO_ROOT/configs/skills-condensed")
+
+claude_installed_any=0
+while IFS= read -r source_root; do
+    source_root="$(resolve_repo_path "$source_root")"
+    [[ -d "$source_root" ]] || continue
+    claude_installed_any=1
+
+    info "Linking Claude skills from $source_root"
+
+    for skill_dir in "$source_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$CLAUDE_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            rm "$target"
+        elif [[ -e "$target" ]]; then
+            warn "Claude skill already exists (skipping): $target"
+            continue
+        fi
+
+        skill_dir_abs="$(cd "$skill_dir" && pwd)"
+        ln -s "$skill_dir_abs" "$target"
+    done
+done < <(provider_cfg_list claude sources "$REPO_ROOT/configs/skills-pack")
+
+if [[ "$claude_installed_any" == "1" ]]; then
+    success "Installed agentctl Claude skills"
+else
+    warn "No Claude skills to install (sources not found)"
+fi
+
 echo ""
 
 # 5b. Setup OpenCode plugin integration
@@ -211,6 +345,246 @@ EOF
 else
     warn "No OpenCode hooks to install (configs/opencode-hooks not found)"
 fi
+
+echo -e "${BLUE}5b2. Setting up OpenCode skills...${NC}"
+
+OPENCODE_SKILLS_DIR="$(provider_cfg opencode target_dir "$OPENCODE_CONFIG_DIR/skill")"
+OPENCODE_SKILLS_LEGACY="$(provider_cfg opencode legacy_dir "$OPENCODE_CONFIG_DIR/skill-legacy")"
+mkdir -p "$OPENCODE_SKILLS_DIR" "$OPENCODE_SKILLS_LEGACY"
+
+while IFS= read -r prune_root; do
+    prune_root="$(resolve_repo_path "$prune_root")"
+    [[ -d "$prune_root" ]] || continue
+
+    for skill_dir in "$prune_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$OPENCODE_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            legacy="$OPENCODE_SKILLS_LEGACY/$skill_name"
+            if [[ ! -e "$legacy" ]]; then
+                mv "$target" "$legacy"
+            else
+                rm "$target"
+            fi
+        fi
+    done
+done < <(provider_cfg_list opencode prune_sources "$REPO_ROOT/configs/skills-condensed")
+
+opencode_installed_any=0
+while IFS= read -r source_root; do
+    source_root="$(resolve_repo_path "$source_root")"
+    [[ -d "$source_root" ]] || continue
+    opencode_installed_any=1
+
+    info "Linking OpenCode skills from $source_root"
+
+    for skill_dir in "$source_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$OPENCODE_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            rm "$target"
+        elif [[ -e "$target" ]]; then
+            warn "OpenCode skill already exists (skipping): $target"
+            continue
+        fi
+
+        skill_dir_abs="$(cd "$skill_dir" && pwd)"
+        ln -s "$skill_dir_abs" "$target"
+    done
+done < <(provider_cfg_list opencode sources "$REPO_ROOT/configs/skills-pack")
+
+if [[ "$opencode_installed_any" == "1" ]]; then
+    success "Installed agentctl OpenCode skills"
+else
+    warn "No OpenCode skills to install (sources not found)"
+fi
+
+echo -e "${BLUE}5b3. Setting up OpenCode agents...${NC}"
+
+OPENCODE_AGENTS_DIR="$OPENCODE_CONFIG_DIR/agent"
+OPENCODE_AGENTS_LEGACY="$OPENCODE_CONFIG_DIR/agent-legacy"
+OPENCODE_AGENTS_SOURCE="$REPO_ROOT/configs/opencode/agents-pack"
+
+mkdir -p "$OPENCODE_AGENTS_DIR" "$OPENCODE_AGENTS_LEGACY"
+
+if [[ -d "$OPENCODE_AGENTS_SOURCE" ]]; then
+    for p in "$OPENCODE_AGENTS_DIR"/*; do
+        [[ -e "$p" ]] || continue
+
+        base="$(basename "$p")"
+        if [[ -L "$p" && "$base" != *.md ]]; then
+            legacy="$OPENCODE_AGENTS_LEGACY/$base"
+            if [[ ! -e "$legacy" ]]; then
+                mv "$p" "$legacy"
+            else
+                rm "$p"
+            fi
+        fi
+    done
+
+    info "Linking OpenCode agents from $OPENCODE_AGENTS_SOURCE"
+
+    for agent_file in "$OPENCODE_AGENTS_SOURCE"/*.md; do
+        [[ -f "$agent_file" ]] || continue
+
+        agent_name="$(basename "$agent_file")"
+        target="$OPENCODE_AGENTS_DIR/$agent_name"
+
+        if [[ -L "$target" ]]; then
+            rm "$target"
+        elif [[ -e "$target" ]]; then
+            warn "OpenCode agent already exists (skipping): $target"
+            continue
+        fi
+
+        agent_abs="$(cd "$(dirname "$agent_file")" && pwd)/$(basename "$agent_file")"
+        ln -s "$agent_abs" "$target"
+    done
+
+    success "Installed agentctl OpenCode agents"
+else
+    warn "No OpenCode agents to install (configs/opencode/agents-pack not found)"
+fi
+
+echo ""
+
+# 5c. Start MCP daemon
+echo -e "${BLUE}5c. Starting MCP daemon...${NC}"
+
+# Check if daemon is already running
+if "$BIN_DIR/agentctl" mcp status 2>/dev/null | grep -q "running"; then
+    success "MCP daemon already running"
+else
+    # Start the daemon with skills enabled
+    if "$BIN_DIR/agentctl" mcp serve --daemon --skills 2>/dev/null; then
+        success "MCP daemon started on http://localhost:8091"
+        info "Claude Code and OpenCode will use SSE connection"
+    else
+        warn "Failed to start MCP daemon"
+        echo "    Start manually: agentctl mcp serve --daemon --skills"
+    fi
+fi
+
+# Note about SSE configuration
+info "MCP configs updated to use SSE (http://localhost:8091/sse)"
+info "Restart Claude Code/OpenCode to use the shared MCP server"
+echo ""
+
+echo -e "${BLUE}5d. Setting up Codex CLI integration...${NC}"
+
+mkdir -p "$CODEX_DIR"
+success "Created $CODEX_DIR"
+
+CODEX_CONFIG="$CODEX_DIR/config.toml"
+if [[ ! -f "$CODEX_CONFIG" ]]; then
+    cat > "$CODEX_CONFIG" <<EOF
+# Autogenerated by agentctl scripts/init.sh
+#
+# If you want MCP tools that use network (web search, etc) to work from Codex,
+# set sandbox_workspace_write.network_access=true.
+
+approval_policy = "on-failure"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = false
+
+# Enable Codex built-in web search tool (optional)
+# tools.web_search = true
+
+[mcp_servers.agentctl]
+command = "agentctl"
+args = ["mcp", "serve", "--skills"]
+EOF
+    success "Created $CODEX_CONFIG"
+else
+    info "Codex config already exists at $CODEX_CONFIG"
+    info "Ensure it contains [mcp_servers.agentctl] if you want agentctl MCP tools"
+fi
+
+CODEX_SKILLS_DIR="$(provider_cfg codex target_dir "$CODEX_DIR/skills")"
+CODEX_SKILLS_LEGACY="$(provider_cfg codex legacy_dir "$CODEX_DIR/skills-legacy")"
+mkdir -p "$CODEX_SKILLS_DIR" "$CODEX_SKILLS_LEGACY"
+
+while IFS= read -r prune_root; do
+    prune_root="$(resolve_repo_path "$prune_root")"
+    [[ -d "$prune_root" ]] || continue
+
+    for skill_dir in "$prune_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$CODEX_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            legacy="$CODEX_SKILLS_LEGACY/$skill_name"
+            if [[ ! -e "$legacy" ]]; then
+                mv "$target" "$legacy"
+            else
+                rm "$target"
+            fi
+        fi
+    done
+done < <(provider_cfg_list codex prune_sources "$REPO_ROOT/configs/skills-condensed")
+
+codex_installed_any=0
+while IFS= read -r source_root; do
+    source_root="$(resolve_repo_path "$source_root")"
+    [[ -d "$source_root" ]] || continue
+    codex_installed_any=1
+
+    info "Linking Codex skills from $source_root"
+
+    for skill_dir in "$source_root"/*; do
+        [[ -d "$skill_dir" ]] || continue
+
+        skill_name="$(basename "$skill_dir")"
+        target="$CODEX_SKILLS_DIR/$skill_name"
+
+        if [[ -L "$target" ]]; then
+            rm "$target"
+        elif [[ -e "$target" ]]; then
+            warn "Codex skill already exists (skipping): $target"
+            continue
+        fi
+
+        skill_dir_abs="$(cd "$skill_dir" && pwd)"
+        ln -s "$skill_dir_abs" "$target"
+    done
+done < <(provider_cfg_list codex sources "$REPO_ROOT/configs/skills-pack")
+
+if [[ "$codex_installed_any" == "1" ]]; then
+    success "Installed agentctl Codex skills (restart Codex to load)"
+else
+    warn "No Codex skills to install (sources not found)"
+fi
+
+CODEX_AGENTS_SOURCE="$REPO_ROOT/configs/codex/AGENTS.md"
+CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
+
+if [[ -f "$CODEX_AGENTS_SOURCE" ]]; then
+    if [[ -L "$CODEX_AGENTS" ]]; then
+        rm "$CODEX_AGENTS"
+    elif [[ -e "$CODEX_AGENTS" ]]; then
+        warn "Codex AGENTS.md already exists (skipping): $CODEX_AGENTS"
+        warn "To use agentctl version: rm $CODEX_AGENTS"
+    fi
+
+    if [[ ! -e "$CODEX_AGENTS" ]]; then
+        source_abs="$(cd "$(dirname "$CODEX_AGENTS_SOURCE")" && pwd)/$(basename "$CODEX_AGENTS_SOURCE")"
+        ln -s "$source_abs" "$CODEX_AGENTS"
+        success "Symlinked Codex AGENTS.md -> $CODEX_AGENTS"
+    fi
+else
+    warn "Codex AGENTS.md source not found (skipping): $CODEX_AGENTS_SOURCE"
+fi
+
 echo ""
 
 # 6. Validate .env
@@ -287,6 +661,12 @@ if [[ $ERRORS -eq 0 ]]; then
     echo "  1. Verify installation: agentctl version"
     echo "  2. List skills: agentctl skills list"
     echo "  3. Configure .env at $ENV_FILE"
+    echo "  4. Restart Claude Code/OpenCode to use shared MCP server"
+    echo ""
+    echo "MCP daemon commands:"
+    echo "  agentctl mcp status  - Check if daemon is running"
+    echo "  agentctl mcp stop    - Stop the daemon"
+    echo "  agentctl mcp serve --daemon --skills  - Start daemon"
     echo ""
     echo "For Turso remote search (cross-workspace):"
     echo "  - Use agentctl-cgo binary (built with CGO)"

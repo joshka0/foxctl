@@ -6,27 +6,26 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/lsp/jsonrpc"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 // defaultTimeout is the maximum time to wait for LSP operations.
 const defaultTimeout = 30 * time.Second
+
+const command = "lsp/tsserver"
 
 type input struct {
 	Operation  string `json:"operation"`
@@ -36,26 +35,6 @@ type input struct {
 	Query      string `json:"query"`
 	MaxResults int    `json:"max_results"`
 	Timeout    int    `json:"timeout"` // timeout in seconds, defaults to 30
-}
-
-// LSP JSON-RPC types
-type jsonRPCRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
-
-type jsonRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *jsonRPCError   `json:"error,omitempty"`
-}
-
-type jsonRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
 }
 
 // LSP types
@@ -121,44 +100,16 @@ type output struct {
 
 // LSPClient manages the TypeScript language server lifecycle
 type LSPClient struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
-	mu     sync.Mutex
-	nextID int
+	cmd *exec.Cmd
+	rpc *jsonrpc.Client
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("lsp/tsserver", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("lsp/tsserver", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("lsp/tsserver", "EARG", err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("lsp/tsserver", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return in, fmt.Errorf("failed to parse input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
 	if in.MaxResults <= 0 {
 		in.MaxResults = 50
 	}
@@ -166,10 +117,6 @@ func parseInput(r io.Reader) (input, error) {
 		in.Column = 1
 	}
 
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	// Check typescript-language-server availability
 	serverPath, err := exec.LookPath("typescript-language-server")
 	if err != nil {
@@ -184,7 +131,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	workspace := rc.PathValidator.Workspace()
+	workspace := rc.Workspace
 	out := output{Operation: in.Operation}
 
 	// Create and initialize LSP client
@@ -270,10 +217,8 @@ func newLSPClient(ctx context.Context, serverPath, workspace string) (*LSPClient
 	}
 
 	client := &LSPClient{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
-		nextID: 1,
+		cmd: cmd,
+		rpc: jsonrpc.NewClient(stdin, stdout),
 	}
 
 	// Initialize the server
@@ -293,9 +238,9 @@ func (c *LSPClient) Close() error {
 	done := make(chan error, 1)
 	go func() {
 		// Use background context for shutdown since we're in Close()
-		_, _ = c.sendRequest(context.Background(), "shutdown", nil)
-		c.sendNotification("exit", nil)
-		errs.Ignore(c.stdin.Close(), "close stdin")
+		_, _ = c.rpc.Call(context.Background(), "shutdown", nil)
+		_ = c.rpc.Notify("exit", nil)
+		errs.Ignore(c.rpc.Close(), "close LSP RPC client")
 		done <- c.cmd.Wait()
 	}()
 
@@ -331,17 +276,16 @@ func (c *LSPClient) initialize(ctx context.Context, workspace string) error {
 		},
 	}
 
-	_, err := c.sendRequest(ctx, "initialize", params)
+	_, err := c.rpc.Call(ctx, "initialize", params)
 	if err != nil {
 		return err
 	}
 
 	// Send initialized notification
-	c.sendNotification("initialized", map[string]any{})
-	return nil
+	return c.rpc.Notify("initialized", map[string]any{})
 }
 
-func (c *LSPClient) openFile(ctx context.Context, filePath string) error {
+func (c *LSPClient) openFile(_ context.Context, filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
@@ -356,7 +300,9 @@ func (c *LSPClient) openFile(ctx context.Context, filePath string) error {
 		},
 	}
 
-	c.sendNotification("textDocument/didOpen", params)
+	if err := c.rpc.Notify("textDocument/didOpen", params); err != nil {
+		return err
+	}
 
 	// Give the server a moment to process
 	time.Sleep(100 * time.Millisecond)
@@ -379,7 +325,7 @@ func (c *LSPClient) definition(ctx context.Context, workspace string, in input) 
 		},
 	}
 
-	result, err := c.sendRequest(ctx, "textDocument/definition", params)
+	result, err := c.rpc.Call(ctx, "textDocument/definition", params)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +371,7 @@ func (c *LSPClient) references(ctx context.Context, workspace string, in input) 
 		},
 	}
 
-	result, err := c.sendRequest(ctx, "textDocument/references", params)
+	result, err := c.rpc.Call(ctx, "textDocument/references", params)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +405,7 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 		},
 	}
 
-	result, err := c.sendRequest(ctx, "textDocument/documentSymbol", params)
+	result, err := c.rpc.Call(ctx, "textDocument/documentSymbol", params)
 	if err != nil {
 		return nil, err
 	}
@@ -498,7 +444,7 @@ func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in i
 		"query": in.Query,
 	}
 
-	result, err := c.sendRequest(ctx, "workspace/symbol", params)
+	result, err := c.rpc.Call(ctx, "workspace/symbol", params)
 	if err != nil {
 		return nil, err
 	}
@@ -520,108 +466,6 @@ func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in i
 	}
 
 	return syms, nil
-}
-
-func (c *LSPClient) sendRequest(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	c.mu.Lock()
-	id := c.nextID
-	c.nextID++
-	c.mu.Unlock()
-
-	req := jsonRPCRequest{
-		JSONRPC: "2.0",
-		ID:      id,
-		Method:  method,
-		Params:  params,
-	}
-
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-
-	// Write with Content-Length header
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(reqBytes))
-	if _, err := c.stdin.Write([]byte(header)); err != nil {
-		return nil, err
-	}
-	if _, err := c.stdin.Write(reqBytes); err != nil {
-		return nil, err
-	}
-
-	// Read response
-	return c.readResponse(ctx, id)
-}
-
-func (c *LSPClient) sendNotification(method string, params any) {
-	req := jsonRPCRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		Params:  params,
-	}
-
-	reqBytes, _ := json.Marshal(req)
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(reqBytes))
-	_, _ = c.stdin.Write([]byte(header))
-	_, _ = c.stdin.Write(reqBytes)
-}
-
-func (c *LSPClient) readResponse(ctx context.Context, expectedID int) (json.RawMessage, error) {
-	for {
-		// Check context cancellation at the start of each iteration
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		// Read headers
-		var contentLength int
-		for {
-			line, err := c.stdout.ReadString('\n')
-			if err != nil {
-				return nil, fmt.Errorf("failed to read response header: %w", err)
-			}
-			line = strings.TrimSpace(line)
-			if line == "" {
-				break
-			}
-			if strings.HasPrefix(line, "Content-Length:") {
-				_, _ = fmt.Sscanf(line, "Content-Length: %d", &contentLength)
-			}
-		}
-
-		if contentLength == 0 {
-			continue
-		}
-
-		// Read body
-		body := make([]byte, contentLength)
-		if _, err := io.ReadFull(c.stdout, body); err != nil {
-			return nil, fmt.Errorf("failed to read response body: %w", err)
-		}
-
-		var resp jsonRPCResponse
-		if err := json.Unmarshal(body, &resp); err != nil {
-			// Might be a notification, skip it
-			continue
-		}
-
-		// Skip notifications (no ID)
-		if resp.ID == 0 {
-			continue
-		}
-
-		if resp.ID != expectedID {
-			continue
-		}
-
-		if resp.Error != nil {
-			return nil, fmt.Errorf("LSP error %d: %s", resp.Error.Code, resp.Error.Message)
-		}
-
-		return resp.Result, nil
-	}
 }
 
 // Helper functions
@@ -714,12 +558,6 @@ func symbolKindToString(kind int) string {
 	return strconv.Itoa(kind)
 }
 
-func writeOutput(rc *runner.RunnerContext, out output) error {
-	return rc.Emit("lsp/tsserver", out, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(cmd, code string, err error) {
-	env := envelope.Error(cmd, code, err.Error(), nil)
-	_ = envelope.Write(os.Stdout, env)
-	os.Exit(1)
+func writeOutput(rc *skillmain.RunContext, out output) error {
+	return skillout.Emit(rc, command, out)
 }

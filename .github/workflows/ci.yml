@@ -74,9 +74,10 @@ jobs:
         with:
           path: |
             ~/.cache/go-build
+            ~/.cache/golangci-lint
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.25-
 
       - name: Format (gofumpt)
         run: |
@@ -108,8 +109,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.25-
 
       - name: Unit tests with coverage
         run: |
@@ -133,8 +134,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.25-
 
       - name: Race tests
         run: make test-race
@@ -154,8 +155,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.25-
 
       - name: Build CLI
         run: make build
@@ -170,7 +171,7 @@ jobs:
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: agentctl-${{ runner.os }}-go1.24
+          name: agentctl-${{ runner.os }}-go1.25
           path: |
             bin/agentctl
             dist/skills/**
@@ -196,8 +197,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-cgo-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-cgo-${{ runner.os }}-
+          key: go-cgo-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-cgo-${{ runner.os }}-go1.25-
 
       - name: Build CLI (CGO + libsqlite3)
         run: make build-cgo
@@ -220,8 +221,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          key: go-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ runner.os }}-go1.25-
 
       - name: Run integration tests
         run: make test-integration
@@ -252,8 +253,8 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-cgo-${{ runner.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-cgo-${{ runner.os }}-
+          key: go-cgo-${{ runner.os }}-go1.25-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-cgo-${{ runner.os }}-go1.25-
 
       - name: Skip if OpenRouter secret not set
         if: env.OPENROUTER_API_KEY == ''

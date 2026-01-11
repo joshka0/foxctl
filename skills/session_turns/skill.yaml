@@ -39,22 +39,35 @@ signature:
       type: integer
       required: false
       description: "Maximum number of turns to return (default: 50)"
-returns:
-  - name: query
-    type: string
-    description: "The search query used"
-  - name: turns
-    type: array
-    description: "Matching turns from across sessions"
-  - name: total_found
-    type: integer
-    description: "Total number of matching turns found"
-  - name: status
-    type: string
-    description: "Status of the query operation"
-  - name: message
-    type: string
-    description: "Human-readable status message"
+  help:
+    short: "Query turn patterns across sessions."
+    long: |
+      Use session/turns to search for error patterns or tool usage.
+      Example commands:
+        agentctl run session/turns --input '{"errors_only":true,"limit":20}'
+        agentctl skills run session/turns --errors_only --limit 20
+    workflows:
+      - id: find-errors
+        description: "Find error turns."
+        example_input:
+          errors_only: true
+          limit: 20
+  returns:
+    - name: query
+      type: string
+      description: "The search query used"
+    - name: turns
+      type: array
+      description: "Matching turns from across sessions"
+    - name: total_found
+      type: integer
+      description: "Total number of matching turns found"
+    - name: status
+      type: string
+      description: "Status of the query operation"
+    - name: message
+      type: string
+      description: "Human-readable status message"
 capabilities:
   network: "none"
   filesystem:

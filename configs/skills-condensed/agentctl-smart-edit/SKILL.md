@@ -47,4 +47,4 @@ Go, Python, JavaScript, TypeScript, GDScript
 - **text/replace**: Bulk regex replace across many files
 - **html/edit**: DOM-aware HTML editing with CSS selectors
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-smart-edit/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-smart-edit/Skill.md`

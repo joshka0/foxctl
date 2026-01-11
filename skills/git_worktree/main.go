@@ -4,18 +4,16 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "git/worktree"
 
 type input struct {
 	Operation string `json:"operation"`
@@ -34,29 +32,16 @@ type worktree struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("git/worktree", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("git/worktree", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("git/worktree", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("git/worktree", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	in.Operation = oputil.DefaultOp(in.Operation, "list")
+	if in.RepoPath == "" {
+		in.RepoPath = "."
+	}
+
 	// Validate and resolve repository path
 	repoPath, err := resolveRepoPath(rc, in.RepoPath)
 	if err != nil {
@@ -68,46 +53,21 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		return fmt.Errorf("git command not found: %w", err)
 	}
 
-	var data map[string]any
-
-	switch in.Operation {
-	case "list":
-		data, err = listWorktrees(ctx, repoPath)
-	case "add":
-		data, err = addWorktree(ctx, rc, repoPath, in)
-	case "remove":
-		data, err = removeWorktree(ctx, rc, repoPath, in)
-	case "prune":
-		data, err = pruneWorktrees(ctx, repoPath)
-	default:
-		return fmt.Errorf("invalid operation: %s (must be list, add, remove, or prune)", in.Operation)
-	}
-
+	// Dispatch operation
+	data, err := oputil.NewSwitch(in.Operation).
+		Case("list", func() (map[string]any, error) { return listWorktrees(ctx, repoPath) }).
+		Case("add", func() (map[string]any, error) { return addWorktree(ctx, rc, repoPath, in) }).
+		Case("remove", func() (map[string]any, error) { return removeWorktree(ctx, rc, repoPath, in) }).
+		Case("prune", func() (map[string]any, error) { return pruneWorktrees(ctx, repoPath) }).
+		Run()
 	if err != nil {
 		return err
 	}
 
-	return rc.Emit("git/worktree", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, command, data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if strings.TrimSpace(in.Operation) == "" {
-		return input{}, fmt.Errorf("operation is required")
-	}
-	if in.RepoPath == "" {
-		in.RepoPath = "."
-	}
-	return in, nil
-}
-
-func resolveRepoPath(rc *runner.RunnerContext, path string) (string, error) {
+func resolveRepoPath(rc *skillmain.RunContext, path string) (string, error) {
 	if path == "" {
 		path = "."
 	}
@@ -171,7 +131,7 @@ func parseWorktreeList(output string) []worktree {
 	return worktrees
 }
 
-func addWorktree(ctx context.Context, rc *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
+func addWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, fmt.Errorf("path is required for add operation")
 	}
@@ -210,7 +170,7 @@ func addWorktree(ctx context.Context, rc *runner.RunnerContext, repoPath string,
 	}, nil
 }
 
-func removeWorktree(ctx context.Context, rc *runner.RunnerContext, repoPath string, in input) (map[string]any, error) {
+func removeWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, fmt.Errorf("path is required for remove operation")
 	}
@@ -262,8 +222,3 @@ func pruneWorktrees(ctx context.Context, repoPath string) (map[string]any, error
 	}, nil
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit git/worktree failure")
-	os.Exit(1)
-}

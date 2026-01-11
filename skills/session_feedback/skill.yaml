@@ -63,13 +63,27 @@ signature:
       type: string
       required: false
       description: "Additional notes or context"
-returns:
-  - name: feedback_id
-    type: string
-    description: "ID of the stored feedback"
-  - name: message
-    type: string
-    description: "Human-readable result message"
+  help:
+    short: "Record session feedback."
+    long: |
+      Use session/feedback to capture ratings and outcomes.
+      Example commands:
+        agentctl run session/feedback --input '{"session_id":"abc123","rating":5,"outcome":"success"}'
+        agentctl skills run session/feedback --session_id abc123 --rating 5 --outcome success
+    workflows:
+      - id: record-feedback
+        description: "Record a session rating."
+        example_input:
+          session_id: "abc123"
+          rating: 5
+          outcome: "success"
+  returns:
+    - name: feedback_id
+      type: string
+      description: "ID of the stored feedback"
+    - name: message
+      type: string
+      description: "Human-readable result message"
 capabilities:
   network: "none"
   filesystem:

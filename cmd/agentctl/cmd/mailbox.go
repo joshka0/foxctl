@@ -105,38 +105,35 @@ func init() {
 	mailboxListCmd.Flags().IntVar(&mailboxListLimit, "limit", 20, "Maximum messages to list")
 }
 
+func parseMailboxMessageType(s string) (agent.MessageType, error) {
+	mt := agent.MessageType(s)
+	switch mt {
+	case agent.MessageTypeAsk, agent.MessageTypeReply, agent.MessageTypeCmd, agent.MessageTypeEvent:
+		return mt, nil
+	default:
+		return "", fmt.Errorf("invalid message type: %s", s)
+	}
+}
+
 func runMailboxSend(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	toNS := args[0]
 
-	// Load payload
-	var payloadBytes []byte
-	var err error
-	if mailboxSendPayloadFile != "" {
-		payloadBytes, err = os.ReadFile(mailboxSendPayloadFile)
-		if err != nil {
-			return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read payload file: %v", err))
-		}
-	} else if mailboxSendPayload != "" {
-		payloadBytes = []byte(mailboxSendPayload)
-	} else {
+	if mailboxSendPayloadFile == "" && mailboxSendPayload == "" {
 		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), "either --payload or --payload-file is required")
 	}
-
-	// Validate JSON
-	var payload map[string]any
-	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+	payloadBytes, err := readPayload(cmd, mailboxSendPayloadFile, mailboxSendPayload)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read payload: %v", err))
+	}
+	if err := requireValidJSON(payloadBytes); err != nil {
 		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON payload: %v", err))
 	}
 
-	// Validate message type
-	msgType := agent.MessageType(mailboxSendType)
-	switch msgType {
-	case agent.MessageTypeAsk, agent.MessageTypeReply, agent.MessageTypeCmd, agent.MessageTypeEvent:
-		// Valid
-	default:
-		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid message type: %s", mailboxSendType))
+	msgType, err := parseMailboxMessageType(mailboxSendType)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "mailbox/send", string(protocol.ErrorCodeEARG), err.Error())
 	}
 
 	// Open mailbox store
@@ -180,19 +177,11 @@ func runMailboxSend(cmd *cobra.Command, args []string) error {
 		"sent_at":    time.Unix(msg.Timestamp, 0).UTC().Format(time.RFC3339),
 	}
 
-	env := envelope.OK("mailbox/send", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
+	return writeOK(cmd, "mailbox/send", data, "run", profilesCoreAgent, func(m *envelope.Meta) {
 		if mailboxSendCorrelation != "" {
 			m.CorrelID = mailboxSendCorrelation
 		}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	})
 }
 
 func runMailboxPoll(cmd *cobra.Command, args []string) error {
@@ -215,19 +204,10 @@ func runMailboxPoll(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("mailbox/poll", map[string]any{
+	return writeOK(cmd, "mailbox/poll", map[string]any{
 		"messages": messages,
 		"count":    len(messages),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	}, "run", profilesCoreAgent)
 }
 
 func runMailboxAck(cmd *cobra.Command, args []string) error {
@@ -256,16 +236,7 @@ func runMailboxAck(cmd *cobra.Command, args []string) error {
 		"acknowledged": true,
 	}
 
-	env := envelope.OK("mailbox/ack", data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	return writeOK(cmd, "mailbox/ack", data, "run", profilesCoreAgent)
 }
 
 func runMailboxList(cmd *cobra.Command, args []string) error {
@@ -287,17 +258,8 @@ func runMailboxList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Write success envelope
-	env := envelope.OK("mailbox/list", map[string]any{
+	return writeOK(cmd, "mailbox/list", map[string]any{
 		"messages": messages,
 		"count":    len(messages),
-	}, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Profiles = []string{"core/v1", "agent/v1"}
-	}))
-
-	if err := envelope.Write(os.Stdout, env); err != nil {
-		return fmt.Errorf("write envelope: %w", err)
-	}
-
-	return nil
+	}, "run", profilesCoreAgent)
 }

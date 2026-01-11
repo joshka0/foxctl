@@ -41,4 +41,4 @@ agentctl run mobile --input '{"platform": "android", "operation": "tap", "x": 20
 
 Platform-specific skills: `/agentctl-mobile-ios`, `/agentctl-mobile-android`
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-mobile/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-mobile/Skill.md`

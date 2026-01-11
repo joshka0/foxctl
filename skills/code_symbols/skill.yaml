@@ -46,6 +46,26 @@ signature:
       required: false
       default: 500
       description: "Maximum number of symbols to return"
+  help:
+    short: "Extract symbols from source code."
+    long: |
+      Use code/symbols to list functions, types, and other symbols.
+      Example commands:
+        agentctl run code/symbols --input '{"path":"./src","symbol_type":"function"}'
+        agentctl skills run code/symbols --path ./src --symbol_type function
+        agentctl run code/symbols --input '{"path":"./src","include_private":true}'
+        agentctl skills run code/symbols --path ./src --include_private
+    workflows:
+      - id: functions
+        description: "List functions in a directory."
+        example_input:
+          path: "./src"
+          symbol_type: "function"
+      - id: include-private
+        description: "Include private symbols."
+        example_input:
+          path: "./src"
+          include_private: true
 returns:
   - name: symbols
     type: array

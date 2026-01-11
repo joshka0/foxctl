@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
 )
 
 func TestApplyExactMatch(t *testing.T) {
@@ -147,7 +149,10 @@ line3`
 line2-changed
 line3`
 
-	diff := generateUnifiedDiff("test.txt", original, modified)
+	diff, err := diffutil.UnifiedDiff("test.txt", original, modified, 0)
+	if err != nil {
+		t.Fatalf("UnifiedDiff: %v", err)
+	}
 	if !strings.Contains(diff, "--- a/test.txt") {
 		t.Error("diff should contain original file header")
 	}

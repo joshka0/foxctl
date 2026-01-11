@@ -35,28 +35,41 @@ signature:
       type: string
       required: false
       description: "Filter by outcome: success, partial, failure, abandoned"
-returns:
-  - name: feedback_count
-    type: number
-    description: "Number of feedback entries analyzed"
-  - name: avg_rating
-    type: number
-    description: "Average session rating"
-  - name: outcome_distribution
-    type: object
-    description: "Distribution of outcomes"
-  - name: top_successes
-    type: array
-    description: "Most common things that worked well"
-  - name: top_failures
-    type: array
-    description: "Most common things that didn't work"
-  - name: top_blockers
-    type: array
-    description: "Most common blockers"
-  - name: recommendations
-    type: array
-    description: "Optimization recommendations based on patterns"
+  help:
+    short: "Analyze feedback to extract optimization patterns."
+    long: |
+      Use optimize/feedback to analyze recorded feedback and recommend improvements.
+      Example commands:
+        agentctl run optimize/feedback --input '{"workspace":"./","min_rating":3}'
+        agentctl skills run optimize/feedback --workspace ./ --min_rating 3
+    workflows:
+      - id: analyze-feedback
+        description: "Analyze feedback in a workspace."
+        example_input:
+          workspace: "./"
+          min_rating: 3
+  returns:
+    - name: feedback_count
+      type: number
+      description: "Number of feedback entries analyzed"
+    - name: avg_rating
+      type: number
+      description: "Average session rating"
+    - name: outcome_distribution
+      type: object
+      description: "Distribution of outcomes"
+    - name: top_successes
+      type: array
+      description: "Most common things that worked well"
+    - name: top_failures
+      type: array
+      description: "Most common things that didn't work"
+    - name: top_blockers
+      type: array
+      description: "Most common blockers"
+    - name: recommendations
+      type: array
+      description: "Optimization recommendations based on patterns"
 capabilities:
   network: "none"
   filesystem:

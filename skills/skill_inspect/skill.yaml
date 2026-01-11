@@ -29,6 +29,26 @@ signature:
       type: string
       required: false
       description: "Specific function name to show (for implementation view)"
+  help:
+    short: "Inspect skill manifests, APIs, and examples."
+    long: |
+      Use skill/inspect to retrieve manifest details or generated examples for a skill.
+      Example commands:
+        agentctl run skill/inspect --input '{"skill_name":"fs/ls","view":"api"}'
+        agentctl skills run skill/inspect --skill_name fs/ls --view api
+        agentctl run skill/inspect --input '{"skill_name":"todo/manage","view":"examples"}'
+        agentctl skills run skill/inspect --skill_name todo/manage --view examples
+    workflows:
+      - id: inspect-api
+        description: "Inspect a skill API."
+        example_input:
+          skill_name: "fs/ls"
+          view: "api"
+      - id: inspect-examples
+        description: "Inspect examples for a skill."
+        example_input:
+          skill_name: "todo/manage"
+          view: "examples"
 returns:
   - name: inspection
     type: object

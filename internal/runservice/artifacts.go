@@ -15,19 +15,20 @@ import (
 )
 
 func (e *Executor) handleArtifacts(jobID string, result []byte) error {
-	casStore, err := cas.OpenDefault(e.ctx, e.cfg.Home)
+	digests := artifacts.Digests(result)
+	if len(digests) == 0 {
+		return nil
+	}
+
+	casStore, err := cas.NewStore(e.cfg.Paths.CAS)
 	if err != nil {
 		return err
 	}
 	defer func() { errs.Ignore(casStore.Close(), "close cas store") }()
 
 	mgr := artifacts.NewManager(casStore)
-	digests, err := mgr.PinFromEnvelope(e.ctx, result)
-	if err != nil {
+	if err := mgr.Pin(e.ctx, digests...); err != nil {
 		return fmt.Errorf("pin artifacts: %w", err)
-	}
-	if len(digests) == 0 {
-		return nil
 	}
 
 	// Ensure job directory exists before writing artifacts.json

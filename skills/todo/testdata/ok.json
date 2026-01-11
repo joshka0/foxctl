@@ -9,6 +9,7 @@
       "created_at": "2025-01-01T12:00:00Z",
       "description": "2% fat",
       "id": "00000000-0000-0000-0000-000000000000",
+      "session_id": "test-session",
       "status": "pending",
       "title": "Buy milk"
     },

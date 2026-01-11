@@ -3,17 +3,16 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 )
+
+const command = "graph"
 
 type input struct {
 	Operation  string          `json:"operation"`
@@ -81,30 +80,10 @@ type cleanupReq struct {
 }
 
 func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "graph skill error: %v\n", err)
-		os.Exit(1)
-	}
+	skillmain.Main(command, run)
 }
 
-func run() error {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		return fmt.Errorf("runner context: %w", err)
-	}
-	defer func() { errs.Ignore(rc.Close(), "close runner context") }()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		return fmt.Errorf("decode input: %w", err)
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Use workspace from input or from runner context
 	workspace := in.Workspace
 	if workspace == "" {
@@ -112,7 +91,7 @@ func run() error {
 	}
 
 	// Open graph store
-	store, err := graph.Open(ctx, cfg.Storage.Root)
+	store, err := graph.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open graph store: %w", err)
 	}
@@ -142,7 +121,7 @@ func run() error {
 	}
 }
 
-func handleAddNode(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string, req *addNodeRequest) error {
+func handleAddNode(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *addNodeRequest) error {
 	if req == nil {
 		return fmt.Errorf("add_node request required")
 	}
@@ -167,10 +146,10 @@ func handleAddNode(ctx context.Context, rc *runner.RunnerContext, store *graph.S
 		"workspace": workspace,
 		"created":   true,
 	}
-	return rc.Emit("graph.add_node", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.add_node", data)
 }
 
-func handleAddEdge(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string, req *addEdgeRequest) error {
+func handleAddEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *addEdgeRequest) error {
 	if req == nil {
 		return fmt.Errorf("add_edge request required")
 	}
@@ -204,10 +183,10 @@ func handleAddEdge(ctx context.Context, rc *runner.RunnerContext, store *graph.S
 		"workspace": workspace,
 		"created":   true,
 	}
-	return rc.Emit("graph.add_edge", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.add_edge", data)
 }
 
-func handleQuery(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string, req *queryRequest) error {
+func handleQuery(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *queryRequest) error {
 	if req == nil {
 		return fmt.Errorf("query request required")
 	}
@@ -277,10 +256,10 @@ func handleQuery(ctx context.Context, rc *runner.RunnerContext, store *graph.SQL
 		"count":     len(output),
 		"workspace": workspace,
 	}
-	return rc.Emit("graph.query", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.query", data)
 }
 
-func handleNeighbors(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string, req *neighborsReq) error {
+func handleNeighbors(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *neighborsReq) error {
 	if req == nil {
 		return fmt.Errorf("neighbors request required")
 	}
@@ -339,10 +318,10 @@ func handleNeighbors(ctx context.Context, rc *runner.RunnerContext, store *graph
 		"count":     len(output),
 		"workspace": workspace,
 	}
-	return rc.Emit("graph.neighbors", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.neighbors", data)
 }
 
-func handleTopNodes(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string, req *topNodesReq) error {
+func handleTopNodes(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *topNodesReq) error {
 	if req == nil {
 		req = &topNodesReq{}
 	}
@@ -396,10 +375,10 @@ func handleTopNodes(ctx context.Context, rc *runner.RunnerContext, store *graph.
 		"count":     len(output),
 		"workspace": workspace,
 	}
-	return rc.Emit("graph.top_nodes", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.top_nodes", data)
 }
 
-func handleDeleteNode(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string, req *deleteNodeReq) error {
+func handleDeleteNode(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *deleteNodeReq) error {
 	if req == nil {
 		return fmt.Errorf("delete_node request required")
 	}
@@ -413,10 +392,10 @@ func handleDeleteNode(ctx context.Context, rc *runner.RunnerContext, store *grap
 		"workspace": workspace,
 		"deleted":   true,
 	}
-	return rc.Emit("graph.delete_node", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.delete_node", data)
 }
 
-func handleDeleteEdge(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, req *deleteEdgeReq) error {
+func handleDeleteEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, req *deleteEdgeReq) error {
 	if req == nil {
 		return fmt.Errorf("delete_edge request required")
 	}
@@ -429,10 +408,10 @@ func handleDeleteEdge(ctx context.Context, rc *runner.RunnerContext, store *grap
 		"edge_id": req.EdgeID,
 		"deleted": true,
 	}
-	return rc.Emit("graph.delete_edge", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.delete_edge", data)
 }
 
-func handleStats(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string) error {
+func handleStats(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string) error {
 	stats, err := store.Stats(ctx, workspace)
 	if err != nil {
 		return fmt.Errorf("get stats: %w", err)
@@ -451,10 +430,10 @@ func handleStats(ctx context.Context, rc *runner.RunnerContext, store *graph.SQL
 		"avg_edge_weight": stats.Edges.AvgWeight,
 		"database_path":   stats.Path,
 	}
-	return rc.Emit("graph.stats", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.stats", data)
 }
 
-func handleCleanup(ctx context.Context, rc *runner.RunnerContext, store *graph.SQLiteStore, workspace string, req *cleanupReq) error {
+func handleCleanup(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *cleanupReq) error {
 	if req == nil {
 		req = &cleanupReq{}
 	}
@@ -488,5 +467,5 @@ func handleCleanup(ctx context.Context, rc *runner.RunnerContext, store *graph.S
 		"dangling_edges_removed": danglingCount,
 		"degrees_recalculated":   req.RecalcDegrees,
 	}
-	return rc.Emit("graph.cleanup", data, "", envelope.Meta{})
+	return skillout.Emit(rc, "graph.cleanup", data)
 }

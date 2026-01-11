@@ -8,18 +8,14 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 type input struct {
@@ -51,30 +47,24 @@ type graphNode struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/imports", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/imports", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/imports", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/imports", "ERUNTIME", err)
-	}
+	skillmain.Main("code/imports", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.QueryType == "" {
+		in.QueryType = "list"
+	}
+	if in.Language == "" {
+		in.Language = "auto"
+	}
+	if in.MaxDepth <= 0 {
+		in.MaxDepth = 3
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 500
+	}
+
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -165,27 +155,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("code/imports", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.QueryType == "" {
-		in.QueryType = "list"
-	}
-	if in.Language == "" {
-		in.Language = "auto"
-	}
-	if in.MaxDepth <= 0 {
-		in.MaxDepth = 3
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 500
-	}
-	return in, nil
+	return skillout.Emit(rc, "code/imports", data)
 }
 
 func extractFromDirectory(dir, workspace string, in input) ([]importInfo, map[string][]string, error) {
@@ -647,7 +617,7 @@ func limitResults(results any, limit int) any {
 func preparePreview(results any, limit int) (any, bool) {
 	switch r := results.(type) {
 	case []importInfo:
-		preview, truncated := skillslib.PreparePreview(r, limit)
+		preview, truncated := skillout.PreparePreview(r, limit)
 		if truncated {
 			dup := make([]importInfo, len(preview))
 			copy(dup, preview)
@@ -655,7 +625,7 @@ func preparePreview(results any, limit int) (any, bool) {
 		}
 		return preview, false
 	case []graphNode:
-		preview, truncated := skillslib.PreparePreview(r, limit)
+		preview, truncated := skillout.PreparePreview(r, limit)
 		if truncated {
 			dup := make([]graphNode, len(preview))
 			copy(dup, preview)
@@ -663,26 +633,20 @@ func preparePreview(results any, limit int) (any, bool) {
 		}
 		return preview, false
 	case []string:
-		preview, truncated := skillslib.PreparePreview(r, limit)
+		preview, truncated := skillout.PreparePreview(r, limit)
 		return preview, truncated
 	default:
 		return results, false
 	}
 }
 
-func persistImportsArtifact(ctx context.Context, rc *runner.RunnerContext, results any, truncated bool) (runner.Artifact, error) {
+func persistImportsArtifact(ctx context.Context, rc *skillmain.RunContext, results any, truncated bool) (skillmain.Artifact, error) {
 	if !truncated {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 	buf := &bytes.Buffer{}
 	if err := json.NewEncoder(buf).Encode(results); err != nil {
-		return runner.Artifact{}, fmt.Errorf("encode results: %w", err)
+		return skillmain.Artifact{}, fmt.Errorf("encode results: %w", err)
 	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/json", "code_imports")
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/imports failure")
-	os.Exit(1)
+	return skillmain.PersistBuffer(ctx, rc, buf, "application/json", "code_imports")
 }

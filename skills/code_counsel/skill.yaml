@@ -1,0 +1,137 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/counsel
+  version: 0.1.0
+  description: "Multi-perspective code analysis using LLMs for security, performance, and readability insights"
+  tags: ["code", "analysis", "llm", "security", "performance", "review"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_counsel/code_counsel
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/counsel
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "Natural-language question or analysis focus"
+    - name: files
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Explicit file paths to analyze (optional, overrides auto-selection)"
+    - name: auto_files
+      type: boolean
+      required: false
+      description: "Enable automatic file selection based on query (default: true)"
+    - name: evidence
+      type: object
+      required: false
+      description: "Pre-computed code evidence from smart_read (optional)"
+    - name: perspectives
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Analysis perspectives: security, performance, readability, correctness, general"
+    - name: max_files
+      type: integer
+      required: false
+      description: "Maximum number of files to process (default: 8)"
+    - name: provider
+      type: string
+      required: false
+      enum: ["anthropic", "openai", "cerebras"]
+      description: "LLM provider to use (default: auto-detect from environment)"
+  returns:
+    - name: analyses
+      type: array
+      description: "Analysis results from each perspective"
+    - name: summary
+      type: string
+      description: "Overall summary combining all perspectives"
+    - name: stats
+      type: object
+      description: "Processing stats: latency, files analyzed, provider used"
+  help:
+    short: "Multi-perspective code analysis with LLM-powered insights."
+    long: |
+      Code Counsel provides intelligent code analysis from multiple perspectives
+      using LLM providers. It's the analysis layer in the Code Context Funnel:
+
+        smart_read (context) → counsel (analysis)
+
+      **Perspectives:**
+      - `security`: Vulnerabilities, auth issues, input validation
+      - `performance`: Complexity, bottlenecks, optimization opportunities
+      - `readability`: Naming, organization, documentation, best practices
+      - `correctness`: Bugs, edge cases, error handling, race conditions
+      - `general`: Balanced overview of all aspects
+
+      **Usage Patterns:**
+
+      1. **Auto-select and analyze:**
+         ```bash
+         agentctl run code/counsel --input '{"query": "review auth flow"}'
+         ```
+
+      2. **Specific perspectives:**
+         ```bash
+         agentctl run code/counsel --input '{
+           "query": "check for security issues",
+           "perspectives": ["security", "correctness"]
+         }'
+         ```
+
+      3. **Specific files:**
+         ```bash
+         agentctl run code/counsel --input '{
+           "query": "review this implementation",
+           "files": ["internal/auth/handler.go"],
+           "perspectives": ["security"]
+         }'
+         ```
+
+      4. **Pipeline with smart_read:**
+         ```bash
+         # First gather context
+         evidence=$(agentctl run code/smart_read --input '{"query": "auth"}' --jq '.data.evidence')
+
+         # Then analyze
+         agentctl run code/counsel --input "{\"query\": \"security review\", \"evidence\": $evidence}"
+         ```
+
+      **Environment Variables:**
+      - ANTHROPIC_API_KEY: Use Claude for analysis
+      - OPENAI_API_KEY: Use GPT for analysis
+      - CEREBRAS_API_KEY: Use Cerebras for analysis
+
+    workflows:
+      - id: security-review
+        description: "Security-focused code review."
+        example_input:
+          query: "Check for security vulnerabilities"
+          perspectives: ["security", "correctness"]
+          auto_files: true
+      - id: performance-audit
+        description: "Performance analysis and optimization suggestions."
+        example_input:
+          query: "Find performance bottlenecks"
+          perspectives: ["performance"]
+          max_files: 10
+      - id: code-review
+        description: "General code review with all perspectives."
+        example_input:
+          query: "Review this code"
+          perspectives: ["security", "performance", "readability", "correctness"]
+          auto_files: true
+capabilities:
+  network: "egress"  # For LLM API calls
+  filesystem:
+    - type: workdir
+  pure: false  # Calls external LLM APIs

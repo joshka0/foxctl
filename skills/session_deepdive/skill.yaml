@@ -35,25 +35,38 @@ signature:
       type: integer
       required: false
       description: "Maximum number of chunks to return (default: 10)"
-returns:
-  - name: session_id
-    type: string
-    description: "The session ID"
-  - name: archive_path
-    type: string
-    description: "Path to the archive file"
-  - name: chunks
-    type: array
-    description: "Retrieved chunks with raw content"
-  - name: total_found
-    type: integer
-    description: "Number of chunks retrieved"
-  - name: status
-    type: string
-    description: "Status of the retrieval"
-  - name: message
-    type: string
-    description: "Human-readable status message"
+  help:
+    short: "Retrieve archived session chunks."
+    long: |
+      Use session/deep-dive to fetch raw content from archived sessions.
+      Example commands:
+        agentctl run session/deep-dive --input '{"session_id":"01HXYZ...","chunk_index":5}'
+        agentctl skills run session/deep-dive --session_id 01HXYZ... --chunk_index 5
+    workflows:
+      - id: get-chunk
+        description: "Retrieve a specific chunk."
+        example_input:
+          session_id: "01HXYZ..."
+          chunk_index: 5
+  returns:
+    - name: session_id
+      type: string
+      description: "The session ID"
+    - name: archive_path
+      type: string
+      description: "Path to the archive file"
+    - name: chunks
+      type: array
+      description: "Retrieved chunks with raw content"
+    - name: total_found
+      type: integer
+      description: "Number of chunks retrieved"
+    - name: status
+      type: string
+      description: "Status of the retrieval"
+    - name: message
+      type: string
+      description: "Human-readable status message"
 capabilities:
   network: "none"
   filesystem:

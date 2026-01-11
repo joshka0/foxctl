@@ -19,10 +19,8 @@ import (
 
 	"github.com/rs/zerolog"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 // Command is the envelope command for this skill.
@@ -52,8 +50,8 @@ const (
 // Input is the expected JSON input.
 type Input struct {
 	WorkspaceID string      `json:"workspace_id"`
-	Question    string      `json:"question"`
-	Candidates  []Candidate `json:"candidates"`
+	Question    string      `json:"question" validate:"required"`
+	Candidates  []Candidate `json:"candidates" validate:"required,min=1"`
 	Providers   []string    `json:"providers,omitempty"`
 	Limits      Limits      `json:"limits,omitempty"`
 }
@@ -124,66 +122,7 @@ type RankingProvider interface {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail(ErrCodeConfig, err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail(ErrCodeArg, err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-}
-
-// parseInput decodes and validates input from stdin.
-func parseInput(r io.Reader) (Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return Input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	// Validate required fields
-	if in.Question == "" {
-		return Input{}, fmt.Errorf("question is required")
-	}
-	if len(in.Candidates) == 0 {
-		return Input{}, fmt.Errorf("candidates is required")
-	}
-
-	// Apply defaults
-	if in.WorkspaceID == "" {
-		in.WorkspaceID = "default"
-	}
-	if len(in.Providers) == 0 {
-		// Default to available providers based on API keys
-		in.Providers = detectAvailableProviders()
-	}
-	if in.Limits.MaxCandidates <= 0 {
-		in.Limits.MaxCandidates = DefaultMaxCandidates
-	}
-	if in.Limits.Timeout <= 0 {
-		in.Limits.Timeout = DefaultTimeout
-	}
-
-	// Limit candidates
-	if len(in.Candidates) > in.Limits.MaxCandidates {
-		in.Candidates = in.Candidates[:in.Limits.MaxCandidates]
-	}
-
-	return in, nil
+	skillmain.Main(Command, run)
 }
 
 // detectAvailableProviders returns providers that have API keys configured.
@@ -217,7 +156,25 @@ func detectAvailableProviders() []string {
 }
 
 // run is the main skill logic.
-func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
+	if in.WorkspaceID == "" {
+		in.WorkspaceID = "default"
+	}
+	if len(in.Providers) == 0 {
+		in.Providers = detectAvailableProviders()
+	}
+	if in.Limits.MaxCandidates <= 0 {
+		in.Limits.MaxCandidates = DefaultMaxCandidates
+	}
+	if in.Limits.Timeout <= 0 {
+		in.Limits.Timeout = DefaultTimeout
+	}
+	// Limit candidates
+	if len(in.Candidates) > in.Limits.MaxCandidates {
+		in.Candidates = in.Candidates[:in.Limits.MaxCandidates]
+	}
+
 	start := time.Now()
 	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
 
@@ -310,10 +267,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		Int64("duration_ms", output.Summary.DurationMS).
 		Msg("llm_search_complete")
 
-	return rc.Emit(Command, output, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, Command, output)
 }
 
 // mergeProviderResults combines scores from all providers.
@@ -804,8 +758,3 @@ func parseRankingResponse(response string, candidates []Candidate) ([]ProviderSc
 	return scores, nil
 }
 
-func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
-}

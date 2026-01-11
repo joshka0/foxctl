@@ -6,16 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "data/jq"
 
 type input struct {
 	Query     string `json:"query"`
@@ -28,29 +26,17 @@ type input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("data/jq", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("data/jq", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("data/jq", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("data/jq", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate
+	if strings.TrimSpace(in.Query) == "" {
+		return fmt.Errorf("query is required")
+	}
+	if in.Input == "" {
+		return fmt.Errorf("input is required")
+	}
 	// Check if jq is available
 	jqPath, err := exec.LookPath("jq")
 	if err != nil {
@@ -119,34 +105,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 			}
 
 			buf := bytes.NewBufferString(outputStr)
-			artifact, err := runner.PersistBuffer(ctx, rc, buf, contentType, "jq_output")
+			artifact, err := skillmain.PersistBuffer(ctx, rc, buf, contentType, "jq_output")
 			if err == nil && artifact.Digest != "" {
 				result["artifact"] = artifact.Digest
 			}
 		}
 	}
 
-	return rc.Emit("data/jq", result, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	if strings.TrimSpace(in.Query) == "" {
-		return input{}, fmt.Errorf("query is required")
-	}
-
-	if in.Input == "" {
-		return input{}, fmt.Errorf("input is required")
-	}
-
-	return in, nil
+	return skillout.Emit(rc, command, result)
 }
 
 func buildJQArgs(in input) []string {
@@ -179,8 +145,3 @@ func buildJQArgs(in input) []string {
 	return args
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit data/jq failure")
-	os.Exit(1)
-}

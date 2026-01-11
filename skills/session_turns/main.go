@@ -3,15 +3,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -63,45 +62,33 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("DECODE_ERROR", fmt.Errorf("decode input: %w", err))
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// At least one filter must be provided
-	if input.Query == "" && input.ErrorType == "" && input.ToolPattern == "" && !input.ErrorsOnly {
-		fail("INVALID_INPUT", fmt.Errorf("at least one filter required: query, error_type, tool_pattern, or errors_only"))
+	if in.Query == "" && in.ErrorType == "" && in.ToolPattern == "" && !in.ErrorsOnly {
+		return skillerr.Arg("at least one filter required: query, error_type, tool_pattern, or errors_only")
 	}
 
-	if input.Limit <= 0 {
-		input.Limit = defaultLimit
+	if in.Limit <= 0 {
+		in.Limit = defaultLimit
 	}
 
-	// Get agentctl home
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		homeDir, _ := os.UserHomeDir()
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
-	}
-
-	// Open sessions store
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	sessionStore, err := sessions.Open(ctx, storageRoot)
+	// Open sessions store using sessionkit
+	store, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		fail("STORE_ERROR", fmt.Errorf("open sessions store: %w", err))
+		return skillerr.IO("open sessions store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(sessionStore.Close(), "close sessions store") }()
+	defer cleanup()
 
 	results := []TurnResult{}
 
 	// Search by query text
-	if input.Query != "" {
-		turns, err := sessionStore.SearchTurns(ctx, input.Query, input.Limit*2)
+	if in.Query != "" {
+		turns, err := store.SearchTurns(ctx, in.Query, in.Limit*2)
 		if err != nil {
-			fail("SEARCH_ERROR", fmt.Errorf("search turns: %w", err))
+			return skillerr.Runtime("search turns", skillerr.WithCause(err))
 		}
 
 		// Get session info for context and apply filters
@@ -109,23 +96,23 @@ func main() {
 
 		for _, t := range turns {
 			// Apply additional filters
-			if input.ErrorsOnly && !t.HasError {
+			if in.ErrorsOnly && !t.HasError {
 				continue
 			}
-			if input.ErrorType != "" && !strings.EqualFold(t.ErrorType, input.ErrorType) {
+			if in.ErrorType != "" && !strings.EqualFold(t.ErrorType, in.ErrorType) {
 				continue
 			}
-			if input.Role != "" && !strings.EqualFold(t.Role, input.Role) {
+			if in.Role != "" && !strings.EqualFold(t.Role, in.Role) {
 				continue
 			}
-			if input.ToolPattern != "" && !matchesToolPattern(t.ToolCalls, input.ToolPattern) {
+			if in.ToolPattern != "" && !matchesToolPattern(t.ToolCalls, in.ToolPattern) {
 				continue
 			}
 
 			// Get session for project name
 			sess, ok := sessionCache[t.SessionID]
 			if !ok {
-				s, err := sessionStore.Get(ctx, t.SessionID)
+				s, err := store.Get(ctx, t.SessionID)
 				if err == nil {
 					sess = &s
 					sessionCache[t.SessionID] = sess
@@ -165,29 +152,29 @@ func main() {
 			}
 
 			results = append(results, result)
-			if len(results) >= input.Limit {
+			if len(results) >= in.Limit {
 				break
 			}
 		}
 	} else {
 		// No text query - scan sessions and filter
-		sessionList, err := sessionStore.List(ctx, sessions.ListOptions{Limit: 100})
+		sessionList, err := store.List(ctx, sessions.ListOptions{Limit: 100})
 		if err != nil {
-			fail("LIST_ERROR", fmt.Errorf("list sessions: %w", err))
+			return skillerr.Runtime("list sessions", skillerr.WithCause(err))
 		}
 
 		for _, sess := range sessionList {
 			var turns []sessions.SessionTurn
 
-			if input.ErrorsOnly {
-				turns, err = sessionStore.GetTurnsWithErrors(ctx, sess.ID)
+			if in.ErrorsOnly {
+				turns, err = store.GetTurnsWithErrors(ctx, sess.ID)
 			} else {
 				opts := sessions.TurnListOptions{
 					SessionID: sess.ID,
-					Role:      input.Role,
-					Limit:     input.Limit,
+					Role:      in.Role,
+					Limit:     in.Limit,
 				}
-				turns, err = sessionStore.GetTurns(ctx, sess.ID, opts)
+				turns, err = store.GetTurns(ctx, sess.ID, opts)
 			}
 
 			if err != nil {
@@ -196,10 +183,10 @@ func main() {
 
 			for _, t := range turns {
 				// Apply filters
-				if input.ErrorType != "" && !strings.EqualFold(t.ErrorType, input.ErrorType) {
+				if in.ErrorType != "" && !strings.EqualFold(t.ErrorType, in.ErrorType) {
 					continue
 				}
-				if input.ToolPattern != "" && !matchesToolPattern(t.ToolCalls, input.ToolPattern) {
+				if in.ToolPattern != "" && !matchesToolPattern(t.ToolCalls, in.ToolPattern) {
 					continue
 				}
 
@@ -233,19 +220,19 @@ func main() {
 				}
 
 				results = append(results, result)
-				if len(results) >= input.Limit {
+				if len(results) >= in.Limit {
 					break
 				}
 			}
 
-			if len(results) >= input.Limit {
+			if len(results) >= in.Limit {
 				break
 			}
 		}
 	}
 
 	output := Output{
-		Query:      input.Query,
+		Query:      in.Query,
 		Turns:      results,
 		TotalFound: len(results),
 		Status:     "ok",
@@ -257,8 +244,7 @@ func main() {
 		output.Message = "No turns matched the specified filters"
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/turns result")
+	return skillout.Emit(rc, command, output)
 }
 
 // matchesToolPattern checks if any tool call matches the pattern.
@@ -270,10 +256,4 @@ func matchesToolPattern(toolCalls []sessions.ToolCall, pattern string) bool {
 		}
 	}
 	return false
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/turns failure")
-	os.Exit(1)
 }

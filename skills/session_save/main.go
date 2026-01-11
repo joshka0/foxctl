@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"os/exec"
+	"sort"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
+	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/plans"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -69,68 +73,50 @@ type Output struct {
 	Message       string         `json:"message"`
 }
 
+
 const command = "session/save"
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("EPARSE", fmt.Errorf("decode input: %w", err))
-	}
-
-	// Default workspace to current directory
-	if input.Workspace == "" {
-		if wd, err := os.Getwd(); err == nil {
-			input.Workspace = wd
-		}
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Default workspace
+	in.Workspace = sessionkit.WorkspaceOrDefault(in.Workspace, rc.Workspace)
 
 	// Default trigger
-	if input.Trigger == "" {
-		input.Trigger = "manual"
-	}
-
-	// Get agentctl home
-	home := os.Getenv("AGENTCTL_HOME")
-	if home == "" {
-		homeDir, _ := os.UserHomeDir()
-		home = filepath.Join(homeDir, ".agentctl")
+	if in.Trigger == "" {
+		in.Trigger = "manual"
 	}
 
 	// Open stores - memory uses cache path (matches CLI), tasks uses storage
-	cachePath := filepath.Join(home, "cache")
-	storageRoot := filepath.Join(home, "storage")
-	casPath := filepath.Join(home, "cas")
-
-	memStore, err := memory.Open(ctx, cachePath, casPath)
+	memStore, memCleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open memory store: %w", err))
+		return skillerr.IO("open memory store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+	defer memCleanup()
 
-	taskStore, err := tasks.Open(ctx, storageRoot)
+	taskStore, taskCleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open task store: %w", err))
+		return skillerr.IO("open task store", skillerr.WithCause(err))
 	}
-	defer func() { errs.Ignore(taskStore.Close(), "close task store") }()
+	defer taskCleanup()
 
 	// Build snapshot
 	snapshot := SessionSnapshot{
 		SnapshotID: fmt.Sprintf("snap-%d", timeutil.NowUTC().UnixMilli()),
-		SessionID:  input.SessionID,
-		Trigger:    input.Trigger,
-		Workspace:  input.Workspace,
+		SessionID:  in.SessionID,
+		Trigger:    in.Trigger,
+		Workspace:  in.Workspace,
 		Timestamp:  timeutil.NowUTC(),
-		Summary:    input.Summary,
+		Summary:    in.Summary,
 		Metadata:   make(map[string]string),
 	}
 
 	itemsCaptured := make(map[string]int)
 
 	// Capture active task
-	activeTask, found, err := taskStore.GetActive(ctx, input.Workspace)
+	activeTask, found, err := taskStore.GetActive(ctx, in.Workspace)
 	if err == nil && found && activeTask.ID != "" {
 		snapshot.ActiveTask = &TaskInfo{
 			ID:          activeTask.ID,
@@ -151,9 +137,8 @@ func main() {
 	}
 
 	// If no plan linked to active task, try to detect the most recently modified plan
-	homeDir, _ := os.UserHomeDir()
-	plansDir := filepath.Join(homeDir, ".claude", "plans")
-	detector := plans.NewDetector(plansDir)
+	paths := sessionkit.ResolvePaths(rc.Config)
+	detector := plans.NewDetector(paths.PlansDir)
 
 	var activePlan *plans.PlanInfo
 	if activePlanFile != "" {
@@ -195,20 +180,53 @@ func main() {
 		snapshot.Metadata["plan_file"] = activePlan.FilePath
 	}
 
-	// Capture pending/in-progress todos
-	allTasks, err := taskStore.ListByWorkspace(ctx, input.Workspace)
-	if err == nil {
-		for _, t := range allTasks {
-			if t.Status == tasks.StatusPending || t.Status == tasks.StatusInProgress {
-				snapshot.PendingTodos = append(snapshot.PendingTodos, TaskInfo{
-					ID:          t.ID,
-					Title:       t.Title,
-					Description: t.Description,
-					Status:      t.Status,
-					Notes:       t.Notes,
-					Gotchas:     t.Gotchas,
+	// Capture pending/in-progress todos with PageRank prioritization
+	// First try session-scoped, fall back to workspace-scoped
+	sessionID := sessionkit.ResolveSessionID(in.Workspace, in.SessionID)
+
+	// Get pending/in_progress tasks (session-scoped if available)
+	pendingTasks, err := taskStore.ListWithOptions(ctx, in.Workspace, tasks.ListOptions{
+		SessionID: sessionID,
+		Statuses:  []string{tasks.StatusPending, tasks.StatusInProgress},
+	})
+	if err != nil || len(pendingTasks) == 0 {
+		// Fallback: get all pending tasks for workspace (no session filter)
+		pendingTasks, err = taskStore.ListWithOptions(ctx, in.Workspace, tasks.ListOptions{
+			Statuses: []string{tasks.StatusPending, tasks.StatusInProgress},
+		})
+	}
+
+	const maxPendingTodos = 10
+
+	if err == nil && len(pendingTasks) > 0 {
+		// Use PageRank to prioritize if we have more than maxPendingTodos
+		if len(pendingTasks) > maxPendingTodos {
+			analyzer := tasksgraph.NewAnalyzer()
+			insights, analyzeErr := analyzer.Analyze(pendingTasks, in.Workspace)
+			if analyzeErr == nil && len(insights.Nodes) > 0 {
+				// Build ID -> PageRank map
+				rankMap := make(map[string]float64)
+				for _, node := range insights.Nodes {
+					rankMap[node.TaskID] = node.PageRank
+				}
+				// Sort by PageRank descending
+				sort.Slice(pendingTasks, func(i, j int) bool {
+					return rankMap[pendingTasks[i].ID] > rankMap[pendingTasks[j].ID]
 				})
 			}
+			// Truncate to top N
+			pendingTasks = pendingTasks[:maxPendingTodos]
+		}
+
+		for _, t := range pendingTasks {
+			snapshot.PendingTodos = append(snapshot.PendingTodos, TaskInfo{
+				ID:          t.ID,
+				Title:       t.Title,
+				Description: t.Description,
+				Status:      t.Status,
+				Notes:       t.Notes,
+				Gotchas:     t.Gotchas,
+			})
 		}
 		itemsCaptured["pending_todos"] = len(snapshot.PendingTodos)
 	}
@@ -229,41 +247,35 @@ func main() {
 
 	// Add metadata
 	snapshot.Metadata["captured_at"] = snapshot.Timestamp.Format(time.RFC3339)
-	snapshot.Metadata["trigger"] = input.Trigger
+	snapshot.Metadata["trigger"] = in.Trigger
 
 	// Serialize snapshot
 	snapshotJSON, err := json.Marshal(snapshot)
 	if err != nil {
-		fail("ERUNTIME", fmt.Errorf("marshal snapshot: %w", err))
+		return skillerr.Runtime("marshal snapshot", skillerr.WithCause(err))
 	}
 
 	// Store in memory with type "session_snapshot"
 	snapshotName := fmt.Sprintf("session-snapshot-%s", snapshot.SnapshotID)
-	summaryText := fmt.Sprintf("Session snapshot: %s", input.Trigger)
+	summaryText := fmt.Sprintf("Session snapshot: %s", in.Trigger)
 	if snapshot.ActiveTask != nil && snapshot.ActivePlan != nil {
-		summaryText = fmt.Sprintf("Session snapshot (%s): %s [Plan: %s]", input.Trigger, snapshot.ActiveTask.Title, snapshot.ActivePlan.Title)
+		summaryText = fmt.Sprintf("Session snapshot (%s): %s [Plan: %s]", in.Trigger, snapshot.ActiveTask.Title, snapshot.ActivePlan.Title)
 	} else if snapshot.ActiveTask != nil {
-		summaryText = fmt.Sprintf("Session snapshot (%s): %s", input.Trigger, snapshot.ActiveTask.Title)
+		summaryText = fmt.Sprintf("Session snapshot (%s): %s", in.Trigger, snapshot.ActiveTask.Title)
 	} else if snapshot.ActivePlan != nil {
-		summaryText = fmt.Sprintf("Session snapshot (%s): Plan: %s", input.Trigger, snapshot.ActivePlan.Title)
-	}
-
-	// Resolve session ID from input or environment
-	sessionID := input.SessionID
-	if sessionID == "" {
-		sessionID = resolveSessionID()
+		summaryText = fmt.Sprintf("Session snapshot (%s): Plan: %s", in.Trigger, snapshot.ActivePlan.Title)
 	}
 
 	_, err = memStore.SaveResult(ctx, memory.SaveOptions{
 		Name:      snapshotName,
 		Type:      "session_snapshot",
-		Workspace: input.Workspace,
+		Workspace: in.Workspace,
 		Summary:   summaryText,
 		Result:    snapshotJSON,
 		SessionID: sessionID,
 	})
 	if err != nil {
-		fail("EIO", fmt.Errorf("save snapshot: %w", err))
+		return skillerr.IO("save snapshot", skillerr.WithCause(err))
 	}
 
 	// Output result
@@ -273,34 +285,49 @@ func main() {
 		Message:       fmt.Sprintf("Session snapshot saved: %s", snapshotName),
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/save result")
+	// Trigger session/archive to create context windows (fire-and-forget)
+	// This enables semantic search over past context windows in session/restore
+	// Both archive and window summarization run in background to avoid blocking the hook.
+	// Note: triggerArchiveAndSummarize uses cmd.Start() which is already non-blocking,
+	// so we call it synchronously to avoid a race where main exits before the goroutine runs.
+	if in.Trigger == "pre_compact" && sessionID != "" {
+		triggerArchiveAndSummarize(sessionID, in.Workspace)
+		output.Message += " (archiving in background)"
+	}
+
+	return skillout.Emit(rc, command, output)
 }
 
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/save failure")
-	os.Exit(1)
-}
+// triggerArchiveAndSummarize runs archive and then window summarization as a background process.
+// Uses nohup to ensure the process continues after the parent exits.
+func triggerArchiveAndSummarize(sessionID, workspace string) {
+	// Find JSONL path using claudejsonl package
+	jsonlPath := claudejsonl.LocateSessionJSONL(workspace, sessionID)
+	if jsonlPath == "" {
+		return // Can't find JSONL, skip
+	}
 
-// resolveSessionID returns the session ID from environment variables.
-// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
-// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
-func resolveSessionID() string {
-	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
-		return sid
+	archiveInput := map[string]any{
+		"session_id":    sessionID,
+		"jsonl_path":    jsonlPath,
+		"workspace":     workspace,
+		"embed_windows": true,
+		// Archive is idempotent by default - skips already-archived chunks
 	}
-	if sid := os.Getenv("CLAUDE_SESSION_ID"); sid != "" {
-		return sid
+	archiveJSON, err := json.Marshal(archiveInput)
+	if err != nil {
+		return
 	}
-	if sid := os.Getenv("OPENCODE_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("CURSOR_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("TERM_SESSION_ID"); sid != "" {
-		return sid
-	}
-	return ""
+
+	// Build a shell script that runs archive, then summarize
+	// Use nohup to ensure it survives parent exit
+	script := fmt.Sprintf(`
+nohup sh -c '
+agentctl run session/archive --input '\''%s'\'' --ephemeral >/dev/null 2>&1
+agentctl run session/summarize --input '\''{"session_id":"%s","mode":"windows"}'\'' --ephemeral >/dev/null 2>&1
+' >/dev/null 2>&1 &
+`, string(archiveJSON), sessionID)
+
+	cmd := exec.Command("sh", "-c", script)
+	_ = cmd.Start() // Start and don't wait
 }

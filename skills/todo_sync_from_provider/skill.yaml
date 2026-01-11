@@ -1,0 +1,97 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: todo/sync_from_provider
+  version: 0.1.0
+  description: "Sync todos FROM a provider (Claude Code) INTO agentctl task store"
+  tags: ["todo", "sync", "claude"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: todo/sync_from_provider
+  parameters:
+    - name: provider
+      type: string
+      required: true
+      description: "Source provider: claude"
+    - name: workspace_id
+      type: string
+      required: true
+      description: "Workspace path for task scoping"
+    - name: session_id
+      type: string
+      required: false
+      description: "Session ID (auto-detected if empty)"
+    - name: todos
+      type: array
+      required: false
+      description: "Todos to sync (reads from file if empty)"
+    - name: dry_run
+      type: boolean
+      required: false
+      description: "Preview changes without applying"
+  help:
+    short: "Sync todos from Claude Code to agentctl"
+    long: |
+      Imports todos from Claude Code's native todo system into agentctl's
+      task management. This is the inbound sync direction (Claude → agentctl).
+
+      The skill:
+      - Maps todos to agentctl tasks by task ID tag (〔T:<id>〕)
+      - Falls back to title matching for untagged todos
+      - Creates new tasks for unmatched todos
+      - Infers dependencies from todo ordering
+      - Updates task status based on todo status
+
+      Example:
+        agentctl run todo/sync_from_provider --input '{
+          "provider": "claude",
+          "workspace_id": "/path/to/project"
+        }'
+    workflows:
+      - id: sync-claude
+        description: "Sync from Claude Code todo file"
+        example_input:
+          provider: "claude"
+          workspace_id: "/path/to/project"
+      - id: sync-explicit
+        description: "Sync explicit todo list"
+        example_input:
+          provider: "claude"
+          workspace_id: "/path/to/project"
+          todos:
+            - content: "▶ Add auth middleware 〔T:01HF1234〕"
+              status: "in_progress"
+              activeForm: "Adding auth middleware"
+  returns:
+    - name: created
+      type: integer
+      description: "Number of new tasks created"
+    - name: updated
+      type: integer
+      description: "Number of tasks updated"
+    - name: completed
+      type: integer
+      description: "Number of tasks completed"
+    - name: mapped
+      type: integer
+      description: "Number of todos matched to existing tasks"
+    - name: unmapped
+      type: integer
+      description: "Number of todos that created new tasks"
+    - name: deps_added
+      type: integer
+      description: "Number of dependencies inferred"
+    - name: warnings
+      type: array
+      description: "Any warnings encountered"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

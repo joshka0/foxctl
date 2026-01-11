@@ -10,16 +10,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"time"
 
 	"github.com/rs/zerolog"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -45,7 +43,7 @@ const (
 // Input is the expected JSON input.
 type Input struct {
 	WorkspaceID string   `json:"workspace_id"`
-	Question    string   `json:"question"`
+	Question    string   `json:"question" validate:"required"`
 	Sources     []string `json:"sources"`
 	Limits      Limits   `json:"limits"`
 }
@@ -85,45 +83,14 @@ type CandidateOutput struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail(ErrCodeConfig, err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail(ErrCodeRuntime, err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail(ErrCodeArg, err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail(ErrCodeRuntime, err)
-	}
+	skillmain.Main(Command, run)
 }
 
-// parseInput decodes and validates input from stdin.
-func parseInput(r io.Reader) (Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return Input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	// Validate required fields
-	if in.Question == "" {
-		return Input{}, fmt.Errorf("question is required")
-	}
-
+// run is the main skill logic.
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.WorkspaceID == "" {
-		in.WorkspaceID = "default"
+		in.WorkspaceID = rc.PathValidator.Workspace()
 	}
 	if len(in.Sources) == 0 {
 		in.Sources = []string{"symbols", "ripgrep"}
@@ -138,11 +105,6 @@ func parseInput(r io.Reader) (Input, error) {
 		in.Limits.MaxBytesPerFile = DefaultMaxBytesPerFile
 	}
 
-	return in, nil
-}
-
-// run is the main skill logic.
-func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 	start := time.Now()
 
 	// Step 1: Generate candidates from indexes
@@ -161,7 +123,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 
 	// If no candidates, return empty result
 	if len(candidates) == 0 {
-		return emit(rc, Output{
+		return skillout.Emit(rc, Command, Output{
 			Summary: Summary{
 				CandidatesGenerated:   0,
 				CandidatesBySource:    bySource,
@@ -209,11 +171,11 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
 		Artifact:       sweGrepResult.Artifact,
 	}
 
-	return emit(rc, output)
+	return skillout.Emit(rc, Command, output)
 }
 
 // generateCandidates uses the retrieval package to generate candidates.
-func generateCandidates(ctx context.Context, rc *runner.RunnerContext, in Input) ([]retrieval.Candidate, error) {
+func generateCandidates(ctx context.Context, rc *skillmain.RunContext, in Input) ([]retrieval.Candidate, error) {
 	// Open memory store (uses Storage.Root for persistent data)
 	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
@@ -262,7 +224,7 @@ type SweGrepResult struct {
 }
 
 // invokeSweGrep calls the code/swe_grep skill with generated candidates.
-func invokeSweGrep(ctx context.Context, rc *runner.RunnerContext, in Input, candidates []retrieval.Candidate) (*SweGrepResult, error) {
+func invokeSweGrep(ctx context.Context, rc *skillmain.RunContext, in Input, candidates []retrieval.Candidate) (*SweGrepResult, error) {
 	// Build swe_grep input
 	sweGrepCandidates := make([]map[string]any, len(candidates))
 	for i, c := range candidates {
@@ -366,17 +328,4 @@ func findAgentctlBin() string {
 	}
 
 	return "agentctl"
-}
-
-func emit(rc *runner.RunnerContext, out Output) error {
-	return rc.Emit(Command, out, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
 }

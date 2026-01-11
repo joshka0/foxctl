@@ -26,9 +26,8 @@ if [[ -z "$file_path" || "$file_path" == "null" || ! -f "$file_path" ]]; then
   exit 0
 fi
 
-# Get absolute path and directory
+# Get absolute path
 abs_path=$(cd "$(dirname "$file_path")" && pwd)/$(basename "$file_path")
-dir=$(dirname "$abs_path")
 
 diagnostics=""
 

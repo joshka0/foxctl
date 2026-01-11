@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +47,34 @@ type daemonState struct {
 	pidFile   string
 	startTime time.Time
 	addr      string
+}
+
+// skillGroups defines logical groupings of agentctl skills exposed as first-class MCP tools.
+// Use --groups flag to enable specific groups (e.g., --groups code-intel,project).
+var skillGroups = map[string][]string{
+	// code-intel: Code analysis and search tools
+	"code-intel": {
+		"code/semantic_search",
+		"code/symbols",
+		"code/complexity",
+		"code/swe_grep",
+		"code/context_ripgrep",
+	},
+	// code-write: Code modification tools
+	"code-write": {
+		"code/smart_write",
+	},
+	// project: Project management tools
+	"project": {
+		"todo/manage",
+		"memory/query",
+		"session/recall",
+	},
+	// agentctl-ci: CI/CD integration tools
+	"agentctl-ci": {
+		"ci/github_checks",
+		"ci/prcomments",
+	},
 }
 
 // storeToCAS stores content in the CAS and returns the digest.
@@ -198,14 +228,26 @@ This reduces token overhead by exposing simplified tool schemas.`,
 	}
 
 	cmd.AddCommand(newMCPServeCommand())
+	cmd.AddCommand(newMCPStopCommand())
+	cmd.AddCommand(newMCPStatusCommand())
 	return cmd
 }
+
+const (
+	// defaultDaemonPort is the default port for daemon mode
+	defaultDaemonPort = ":8091"
+
+	// defaultLogFile is the log file for daemon mode
+	defaultLogFile = "~/.agentctl/logs/mcp-daemon.log"
+)
 
 func newMCPServeCommand() *cobra.Command {
 	var (
 		configFile   string
 		httpAddr     string
 		enableSkills bool
+		daemonMode   bool
+		skillGroupsF []string
 	)
 
 	cmd := &cobra.Command{
@@ -214,8 +256,16 @@ func newMCPServeCommand() *cobra.Command {
 		Long: `Start agentctl as an MCP server using stdio or HTTP/SSE transport.
 
 By default, uses stdio transport for Claude Code integration.
-Use --http to run as an HTTP daemon with SSE transport.
-Use --skills to expose all agentctl skills as MCP tools.
+Use --http to run as an HTTP daemon with SSE transport (foreground).
+Use --daemon to run as an HTTP daemon in background mode.
+Use --skills to expose all agentctl skills via generic agentctl_run/agentctl_skills tools.
+Use --groups to expose specific skill groups as first-class MCP tools.
+
+Available skill groups:
+  code-intel  - Code analysis: semantic_search, symbols, complexity, swe_grep, context_ripgrep
+  code-write  - Code modification: smart_write
+  project     - Project management: todo/manage, memory/query, session/recall
+  agentctl-ci - CI/CD integration: github_checks, prcomments
 
 Configure backend MCP servers via --config or environment variables:
   TAVILY_API_KEY     - Tavily API key (web search, extract, crawl, map)
@@ -230,14 +280,23 @@ Example usage in Claude's mcp.json (stdio):
     "mcpServers": {
       "agentctl": {
         "command": "/path/to/agentctl",
-        "args": ["mcp", "serve", "--skills"]
+        "args": ["mcp", "serve", "--groups", "code-intel,project,agentctl-ci"]
       }
     }
   }
 
-Example usage with HTTP/SSE daemon:
-  # Start daemon
-  agentctl mcp serve --http :8091 --skills
+Example usage with HTTP/SSE daemon (foreground):
+  agentctl mcp serve --http :8091 --groups code-intel,project
+
+Example usage with daemon mode (background):
+  # Start daemon in background
+  agentctl mcp serve --daemon --groups code-intel,project,agentctl-ci
+
+  # Check status
+  agentctl mcp status
+
+  # Stop daemon
+  agentctl mcp stop
 
   # Configure in mcp.json
   {
@@ -248,18 +307,252 @@ Example usage with HTTP/SSE daemon:
     }
   }`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Daemon mode implies HTTP mode with default port
+			if daemonMode {
+				if httpAddr == "" {
+					httpAddr = defaultDaemonPort
+				}
+				return runDaemonMode(cmd.Context(), mcpServerOptions{
+					configFile:   configFile,
+					httpAddr:     httpAddr,
+					enableSkills: enableSkills,
+					groups:       skillGroupsF,
+				})
+			}
 			return runMCPServer(cmd.Context(), mcpServerOptions{
 				configFile:   configFile,
 				httpAddr:     httpAddr,
 				enableSkills: enableSkills,
+				groups:       skillGroupsF,
 			})
 		},
 	}
 
 	cmd.Flags().StringVar(&configFile, "config", "", "Path to backend MCP servers config file")
 	cmd.Flags().StringVar(&httpAddr, "http", "", "HTTP address for SSE daemon mode (e.g., :8091)")
-	cmd.Flags().BoolVar(&enableSkills, "skills", false, "Expose all agentctl skills as MCP tools")
+	cmd.Flags().BoolVar(&enableSkills, "skills", false, "Expose all agentctl skills via agentctl_run/agentctl_skills tools")
+	cmd.Flags().BoolVar(&daemonMode, "daemon", false, "Run as background daemon (implies --http :8091)")
+	cmd.Flags().StringSliceVar(&skillGroupsF, "groups", nil, "Skill groups to expose as first-class tools (code-intel,code-write,project,agentctl-ci)")
 	return cmd
+}
+
+// runDaemonMode spawns a background process running the MCP server
+func runDaemonMode(ctx context.Context, opts mcpServerOptions) error {
+	pidFile := expandPath(defaultPIDFile)
+
+	// Check if daemon already running
+	if existingPID, _, running := isDaemonRunning(pidFile); running {
+		fmt.Printf("MCP daemon already running (PID %d)\n", existingPID)
+		fmt.Printf("Use 'agentctl mcp stop' to stop it first\n")
+		return nil
+	}
+
+	// Prepare log file
+	logFile := expandPath(defaultLogFile)
+	if err := os.MkdirAll(filepath.Dir(logFile), 0o755); err != nil {
+		return fmt.Errorf("create log dir: %w", err)
+	}
+
+	// Get the current executable path
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("get executable path: %w", err)
+	}
+
+	// Build command args for the child process
+	args := []string{"mcp", "serve", "--http", opts.httpAddr}
+	if opts.enableSkills {
+		args = append(args, "--skills")
+	}
+	if opts.configFile != "" {
+		args = append(args, "--config", opts.configFile)
+	}
+	if len(opts.groups) > 0 {
+		args = append(args, "--groups", strings.Join(opts.groups, ","))
+	}
+
+	// Open log file for output
+	logF, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	// Spawn background process
+	cmd := &exec.Cmd{
+		Path:   execPath,
+		Args:   append([]string{execPath}, args...),
+		Env:    os.Environ(),
+		Stdout: logF,
+		Stderr: logF,
+	}
+
+	// Start the process
+	if err := cmd.Start(); err != nil {
+		logF.Close()
+		return fmt.Errorf("start daemon: %w", err)
+	}
+
+	// Capture PID before releasing
+	pid := cmd.Process.Pid
+
+	// Close log file (child has inherited it)
+	logF.Close()
+
+	// Detach from the child process
+	if err := cmd.Process.Release(); err != nil {
+		return fmt.Errorf("release process: %w", err)
+	}
+
+	// Helper to cleanup failed daemon process
+	cleanupDaemon := func() {
+		if process, err := os.FindProcess(pid); err == nil {
+			_ = process.Signal(syscall.SIGTERM)
+			// Wait briefly for graceful shutdown
+			done := make(chan struct{})
+			go func() {
+				_, _ = process.Wait()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				_ = process.Kill()
+				_, _ = process.Wait()
+			}
+		}
+		// Remove PID file if it was created
+		pidFile := expandPath(defaultPIDFile)
+		_ = os.Remove(pidFile)
+	}
+
+	healthURL := fmt.Sprintf("http://localhost%s/health", opts.httpAddr)
+	healthClient := &http.Client{Timeout: 500 * time.Millisecond}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if ctx.Err() != nil {
+			cleanupDaemon()
+			return fmt.Errorf("daemon health check canceled: %w", ctx.Err())
+		}
+		if time.Now().After(deadline) {
+			cleanupDaemon()
+			return fmt.Errorf("daemon did not become healthy within 3s (check logs: %s)", logFile)
+		}
+		resp, err := healthClient.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	fmt.Printf("MCP daemon started (PID %d)\n", pid)
+	fmt.Printf("Listening on http://localhost%s\n", opts.httpAddr)
+	fmt.Printf("Logs: %s\n", logFile)
+	fmt.Printf("\nUse 'agentctl mcp status' to check status\n")
+	fmt.Printf("Use 'agentctl mcp stop' to stop\n")
+	return nil
+}
+
+func newMCPStopCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the MCP daemon",
+		Long:  "Stop a running MCP daemon process.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			pidFile := expandPath(defaultPIDFile)
+
+			pid, _, running := isDaemonRunning(pidFile)
+			if !running {
+				fmt.Println("MCP daemon is not running")
+				return nil
+			}
+
+			// Find and signal the process
+			process, err := os.FindProcess(pid)
+			if err != nil {
+				return fmt.Errorf("find process: %w", err)
+			}
+
+			// Send SIGTERM for graceful shutdown
+			if err := process.Signal(syscall.SIGTERM); err != nil {
+				return fmt.Errorf("send SIGTERM: %w", err)
+			}
+
+			// Wait for process to exit (with timeout)
+			fmt.Printf("Stopping MCP daemon (PID %d)...\n", pid)
+
+			// Poll for process exit
+			for i := 0; i < 50; i++ { // 5 second timeout
+				time.Sleep(100 * time.Millisecond)
+				if err := process.Signal(syscall.Signal(0)); err != nil {
+					// Process has exited
+					os.Remove(pidFile)
+					fmt.Println("MCP daemon stopped")
+					return nil
+				}
+			}
+
+			// Force kill if still running
+			fmt.Println("Daemon not responding, sending SIGKILL...")
+			if err := process.Kill(); err != nil {
+				return fmt.Errorf("kill process: %w", err)
+			}
+			os.Remove(pidFile)
+			fmt.Println("MCP daemon killed")
+			return nil
+		},
+	}
+}
+
+func newMCPStatusCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Check MCP daemon status",
+		Long:  "Check if the MCP daemon is running and display status information.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			pidFile := expandPath(defaultPIDFile)
+
+			pid, storedAddr, running := isDaemonRunning(pidFile)
+			if !running {
+				fmt.Println("MCP daemon: not running")
+				return nil
+			}
+
+			fmt.Printf("MCP daemon: running (PID %d)\n", pid)
+
+			// Use stored address or fallback to default
+			port := defaultDaemonPort
+			if storedAddr != "" {
+				port = extractPort(storedAddr)
+			}
+
+			// Try to get health info
+			healthURL := fmt.Sprintf("http://localhost%s/health", port)
+			client := &http.Client{Timeout: 2 * time.Second}
+			resp, err := client.Get(healthURL)
+			if err != nil {
+				fmt.Printf("Health check failed: %v\n", err)
+				return nil
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				var health map[string]any
+				if err := json.NewDecoder(resp.Body).Decode(&health); err == nil {
+					fmt.Printf("Status: %s\n", health["status"])
+					if uptime, ok := health["uptime_sec"].(float64); ok {
+						fmt.Printf("Uptime: %d seconds\n", int(uptime))
+					}
+					if addr, ok := health["addr"].(string); ok {
+						fmt.Printf("Address: %s\n", addr)
+					}
+				}
+			}
+			return nil
+		},
+	}
 }
 
 // mcpServerOptions holds configuration for the MCP server.
@@ -267,6 +560,7 @@ type mcpServerOptions struct {
 	configFile   string
 	httpAddr     string
 	enableSkills bool
+	groups       []string
 }
 
 func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
@@ -288,15 +582,17 @@ func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
 	// Register curated tools with simplified schemas (external MCP proxies + html)
 	registerTools(s)
 
-	// Register all agentctl skills as MCP tools
+	// Register skill groups as first-class MCP tools
+	if len(opts.groups) > 0 {
+		if err := registerSkillGroups(ctx, s, opts.groups); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to register skill groups: %v\n", err)
+		}
+	}
+
+	// Register generic agentctl tools (run + discovery) instead of individual skill tools
+	// This reduces token overhead from ~83k to ~1k
 	if opts.enableSkills {
-		cfg, err := config.Load(ctx)
-		if err != nil {
-			return fmt.Errorf("load config for skills: %w", err)
-		}
-		if err := registerSkillTools(ctx, s, cfg); err != nil {
-			return fmt.Errorf("register skill tools: %w", err)
-		}
+		registerAgentctlTools(s)
 	}
 
 	// Cleanup on exit
@@ -320,7 +616,7 @@ func runSSEDaemon(ctx context.Context, s *server.MCPServer, addr string) error {
 	pidFile := expandPath(defaultPIDFile)
 
 	// Check if daemon already running
-	if existingPID, running := isDaemonRunning(pidFile); running {
+	if existingPID, _, running := isDaemonRunning(pidFile); running {
 		// Try to connect to existing daemon
 		healthURL := fmt.Sprintf("http://localhost%s/health", extractPort(addr))
 		if resp, err := http.Get(healthURL); err == nil {
@@ -335,8 +631,8 @@ func runSSEDaemon(ctx context.Context, s *server.MCPServer, addr string) error {
 		os.Remove(pidFile)
 	}
 
-	// Write PID file
-	if err := writePIDFile(pidFile); err != nil {
+	// Write PID file with address for status command to use
+	if err := writePIDFile(pidFile, addr); err != nil {
 		return fmt.Errorf("write PID file: %w", err)
 	}
 	defer os.Remove(pidFile)
@@ -436,39 +732,49 @@ func extractPort(addr string) string {
 	return addr
 }
 
-// writePIDFile writes the current process ID to the PID file
-func writePIDFile(path string) error {
+// writePIDFile writes the current process ID and address to the PID file.
+// Format: "PID\nADDR" (e.g., "12345\n:8091")
+func writePIDFile(path string, addr string) error {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o644)
+	content := fmt.Sprintf("%d\n%s", os.Getpid(), addr)
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-// isDaemonRunning checks if a daemon is already running based on PID file
-func isDaemonRunning(pidFile string) (int, bool) {
+// isDaemonRunning checks if a daemon is already running based on PID file.
+// Returns (pid, addr, running). Addr may be empty for legacy PID files.
+func isDaemonRunning(pidFile string) (int, string, bool) {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
 
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	// Parse PID and optional address (format: "PID\nADDR" or just "PID")
+	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)
+	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
 	if err != nil {
-		return 0, false
+		return 0, "", false
+	}
+
+	var addr string
+	if len(lines) > 1 {
+		addr = strings.TrimSpace(lines[1])
 	}
 
 	// Check if process exists
 	process, err := os.FindProcess(pid)
 	if err != nil {
-		return pid, false
+		return pid, addr, false
 	}
 
 	// On Unix, FindProcess always succeeds - need to send signal 0 to check
 	if err := process.Signal(syscall.Signal(0)); err != nil {
-		return pid, false
+		return pid, addr, false
 	}
 
-	return pid, true
+	return pid, addr, true
 }
 
 func initBackendConfigs() {
@@ -579,7 +885,7 @@ func registerTools(s *server.MCPServer) {
 	s.AddTool(
 		mcp.NewTool("web_extract",
 			mcp.WithDescription("Extract content from URLs. Returns markdown-formatted page content."),
-			mcp.WithArray("urls", mcp.Required(), mcp.Description("URLs to extract content from")),
+			mcp.WithArray("urls", mcp.Required(), mcp.WithStringItems(), mcp.Description("URLs to extract content from")),
 		),
 		handleWebExtract,
 	)
@@ -1164,6 +1470,318 @@ func handleBrowserContent(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	return callBackend(ctx, "playwright", "browser_get_content", contentArgs)
 }
 
+// ============================================================================
+// Generic Agentctl Tools (run + discovery)
+// ============================================================================
+
+// registerAgentctlTools adds the generic agentctl_run and agentctl_skills tools.
+// This replaces individual skill registration, reducing token overhead from ~83k to ~1k.
+func registerAgentctlTools(s *server.MCPServer) {
+	// agentctl_run - Generic skill execution
+	s.AddTool(
+		mcp.NewTool("agentctl_run",
+			mcp.WithDescription("Run an agentctl skill. Use agentctl_skills to discover available skills."),
+			mcp.WithString("skill", mcp.Required(), mcp.Description("Skill name (e.g., 'code/complexity', 'todo/manage', 'test/run')")),
+			mcp.WithObject("input", mcp.Description("Input arguments for the skill as a JSON object. Check skill signature with agentctl_skills for required parameters.")),
+		),
+		handleAgentctlRun,
+	)
+
+	// agentctl_skills - Skill discovery
+	s.AddTool(
+		mcp.NewTool("agentctl_skills",
+			mcp.WithDescription("List available agentctl skills with their descriptions and parameters."),
+			mcp.WithString("filter", mcp.Description("Filter skills by category prefix (e.g., 'code/', 'test/', 'session/')")),
+			mcp.WithBoolean("verbose", mcp.Description("Include full parameter signatures (default: false)")),
+		),
+		handleAgentctlSkills,
+	)
+}
+
+// registerSkillGroups registers skills from specified groups as first-class MCP tools.
+// This provides better UX than agentctl_run by exposing proper parameter schemas.
+func registerSkillGroups(ctx context.Context, s *server.MCPServer, groups []string) error {
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Collect skills to register from specified groups
+	skillsToRegister := make(map[string]bool)
+	for _, group := range groups {
+		skills, ok := skillGroups[group]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Warning: unknown skill group %q (available: code-intel, code-write, project, agentctl-ci)\n", group)
+			continue
+		}
+		for _, skillName := range skills {
+			skillsToRegister[skillName] = true
+		}
+	}
+
+	// Load and register each skill
+	for skillName := range skillsToRegister {
+		handle, err := findSkill(cfg, skillName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skill %q not found: %v\n", skillName, err)
+			continue
+		}
+		registerSkillAsTool(s, handle.Manifest, handle.ArtifactPath)
+	}
+
+	return nil
+}
+
+// registerSkillAsTool registers a single skill as a first-class MCP tool with proper schema.
+func registerSkillAsTool(s *server.MCPServer, manifest skill.Manifest, artifactPath string) {
+	// Convert skill name to MCP tool name: code/semantic_search -> code_semantic_search
+	toolName := strings.ReplaceAll(manifest.Metadata.Name, "/", "_")
+
+	// Build MCP tool options from manifest
+	toolOpts := []mcp.ToolOption{
+		mcp.WithDescription(manifest.Metadata.Description),
+	}
+
+	// Add parameters from skill signature
+	for _, param := range manifest.Signature.Parameters {
+		switch param.Type {
+		case "string":
+			if param.Required {
+				toolOpts = append(toolOpts, mcp.WithString(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				toolOpts = append(toolOpts, mcp.WithString(param.Name, mcp.Description(param.Description)))
+			}
+		case "number", "integer", "float":
+			if param.Required {
+				toolOpts = append(toolOpts, mcp.WithNumber(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				toolOpts = append(toolOpts, mcp.WithNumber(param.Name, mcp.Description(param.Description)))
+			}
+		case "boolean", "bool":
+			if param.Required {
+				toolOpts = append(toolOpts, mcp.WithBoolean(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				toolOpts = append(toolOpts, mcp.WithBoolean(param.Name, mcp.Description(param.Description)))
+			}
+		case "array":
+			if param.Required {
+				toolOpts = append(toolOpts, mcp.WithArray(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				toolOpts = append(toolOpts, mcp.WithArray(param.Name, mcp.Description(param.Description)))
+			}
+		case "object":
+			if param.Required {
+				toolOpts = append(toolOpts, mcp.WithObject(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				toolOpts = append(toolOpts, mcp.WithObject(param.Name, mcp.Description(param.Description)))
+			}
+		default:
+			// Default to string for unknown types
+			if param.Required {
+				toolOpts = append(toolOpts, mcp.WithString(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			} else {
+				toolOpts = append(toolOpts, mcp.WithString(param.Name, mcp.Description(param.Description)))
+			}
+		}
+	}
+
+	// Create the MCP tool
+	tool := mcp.NewTool(toolName, toolOpts...)
+
+	// Create handler that captures manifest and artifactPath
+	handler := makeSkillHandler(manifest, artifactPath)
+
+	s.AddTool(tool, handler)
+}
+
+// makeSkillHandler creates a tool handler for a specific skill.
+func makeSkillHandler(manifest skill.Manifest, artifactPath string) func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := getArgs(req)
+
+		// Marshal arguments to JSON for skill input
+		inputBytes, err := json.Marshal(args)
+		if err != nil {
+			return mcp.NewToolResultError("marshal input: " + err.Error()), nil
+		}
+
+		// Resolve workspace context
+		runCtx := resolveWorkspaceContext(ctx, "")
+
+		// Execute the skill
+		stdout, stderr, err := executeSkill(runCtx, manifest, artifactPath, inputBytes)
+		if err != nil {
+			errMsg := err.Error()
+			if len(stderr) > 0 {
+				errMsg += "\nstderr: " + string(stderr)
+			}
+			return mcp.NewToolResultError("execute skill: " + errMsg), nil
+		}
+
+		// Parse the envelope response
+		var envelope struct {
+			Status  string         `json:"status"`
+			Command string         `json:"command"`
+			Data    map[string]any `json:"data"`
+			Error   struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+
+		if err := json.Unmarshal(stdout, &envelope); err != nil {
+			// Return raw output if not a valid envelope
+			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
+		}
+
+		if envelope.Status == "error" {
+			return mcp.NewToolResultError(envelope.Error.Message), nil
+		}
+
+		// Format the data as readable output
+		result, err := json.MarshalIndent(envelope.Data, "", "  ")
+		if err != nil {
+			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
+		}
+
+		return truncateSkillOutput(ctx, string(result), manifest.Metadata.Name)
+	}
+}
+
+func handleAgentctlRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	skillName, _ := args["skill"].(string)
+	if skillName == "" {
+		return mcp.NewToolResultError("skill name is required"), nil
+	}
+
+	// Extract input - can be map or nil
+	var input map[string]any
+	if inputArg, ok := args["input"].(map[string]any); ok {
+		input = inputArg
+	} else {
+		input = make(map[string]any)
+	}
+
+	// Load config
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+
+	// Find the skill
+	handle, err := findSkill(cfg, skillName)
+	if err != nil {
+		return mcp.NewToolResultError("skill not found: " + skillName + " - " + err.Error()), nil
+	}
+
+	// Marshal input to JSON
+	inputBytes, err := json.Marshal(input)
+	if err != nil {
+		return mcp.NewToolResultError("marshal input: " + err.Error()), nil
+	}
+
+	// Resolve workspace context
+	runCtx := resolveWorkspaceContext(ctx, "")
+
+	// Execute the skill
+	stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
+	if err != nil {
+		errMsg := err.Error()
+		if len(stderr) > 0 {
+			errMsg += "\nstderr: " + string(stderr)
+		}
+		return mcp.NewToolResultError("execute skill: " + errMsg), nil
+	}
+
+	// Parse the envelope response
+	var envelope struct {
+		Status  string         `json:"status"`
+		Command string         `json:"command"`
+		Data    map[string]any `json:"data"`
+		Meta    map[string]any `json:"meta"`
+		Error   struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal(stdout, &envelope); err != nil {
+		// Return raw output if not a valid envelope
+		return truncateSkillOutput(ctx, string(stdout), skillName)
+	}
+
+	if envelope.Status == "error" {
+		return mcp.NewToolResultError(envelope.Error.Message), nil
+	}
+
+	// Format the data as readable output
+	result, err := json.MarshalIndent(envelope.Data, "", "  ")
+	if err != nil {
+		return truncateSkillOutput(ctx, string(stdout), skillName)
+	}
+
+	return truncateSkillOutput(ctx, string(result), skillName)
+}
+
+func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	filter, _ := args["filter"].(string)
+	verbose, _ := args["verbose"].(bool)
+
+	// Load config
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return mcp.NewToolResultError("load config: " + err.Error()), nil
+	}
+
+	// Discover all skills
+	manifests, err := discoverSkills(cfg)
+	if err != nil {
+		return mcp.NewToolResultError("discover skills: " + err.Error()), nil
+	}
+
+	// Build response
+	type skillInfo struct {
+		Name        string            `json:"name"`
+		Description string            `json:"description"`
+		Parameters  []skill.Parameter `json:"parameters,omitempty"`
+	}
+
+	var skills []skillInfo
+	for _, m := range manifests {
+		// Apply filter
+		if filter != "" && !strings.HasPrefix(m.Metadata.Name, filter) {
+			continue
+		}
+
+		info := skillInfo{
+			Name:        m.Metadata.Name,
+			Description: m.Metadata.Description,
+		}
+		if verbose {
+			info.Parameters = m.Signature.Parameters
+		}
+		skills = append(skills, info)
+	}
+
+	// Sort by name
+	sort.Slice(skills, func(i, j int) bool {
+		return skills[i].Name < skills[j].Name
+	})
+
+	result := map[string]any{
+		"count":  len(skills),
+		"skills": skills,
+	}
+	if filter != "" {
+		result["filter"] = filter
+	}
+
+	output, _ := json.MarshalIndent(result, "", "  ")
+	return mcp.NewToolResultText(string(output)), nil
+}
+
 // Local skill handlers (HTML)
 
 func handleHTMLSelect(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1458,37 +2076,8 @@ func extractLibraryID(result *mcp.CallToolResult) string {
 }
 
 // ============================================================================
-// Dynamic Skill Registration
+// Skill Discovery (used by agentctl_skills tool)
 // ============================================================================
-
-// registerSkillTools discovers all agentctl skills and registers them as MCP tools.
-func registerSkillTools(ctx context.Context, s *server.MCPServer, cfg config.Config) error {
-	// Discover all skill manifests
-	manifests, err := discoverSkills(cfg)
-	if err != nil {
-		return fmt.Errorf("discover skills: %w", err)
-	}
-
-	// Track registered tools to avoid duplicates with curated tools
-	registered := make(map[string]bool)
-
-	for _, manifest := range manifests {
-		toolName := skillNameToToolName(manifest.Metadata.Name)
-
-		// Skip if already registered (curated tools take precedence)
-		if registered[toolName] {
-			continue
-		}
-
-		// Convert skill manifest to MCP tool
-		tool, handler := skillToMCPTool(cfg, manifest)
-		s.AddTool(tool, handler)
-		registered[toolName] = true
-	}
-
-	fmt.Fprintf(os.Stderr, "Registered %d skill tools\n", len(registered))
-	return nil
-}
 
 // discoverSkills finds all skill manifests in the configured paths.
 func discoverSkills(cfg config.Config) ([]skill.Manifest, error) {
@@ -1540,136 +2129,6 @@ func discoverSkills(cfg config.Config) ([]skill.Manifest, error) {
 	}
 
 	return manifests, nil
-}
-
-// skillNameToToolName converts skill name (e.g., "code/complexity") to MCP tool name.
-// MCP tool names should use underscores, not slashes.
-func skillNameToToolName(name string) string {
-	return strings.ReplaceAll(name, "/", "_")
-}
-
-// skillToMCPTool converts a skill manifest to an MCP tool definition and handler.
-func skillToMCPTool(cfg config.Config, manifest skill.Manifest) (mcp.Tool, server.ToolHandlerFunc) {
-	toolName := skillNameToToolName(manifest.Metadata.Name)
-
-	// Build MCP tool options from skill signature
-	opts := []mcp.ToolOption{
-		mcp.WithDescription(manifest.Metadata.Description),
-	}
-
-	// Add parameters from skill signature
-	for _, param := range manifest.Signature.Parameters {
-		paramOpts := skillParamToMCPOpts(param)
-		opts = append(opts, paramOpts...)
-	}
-
-	tool := mcp.NewTool(toolName, opts...)
-
-	// Create handler that executes the skill
-	handler := createSkillHandler(cfg, manifest)
-
-	return tool, handler
-}
-
-// skillParamToMCPOpts converts a skill parameter to MCP tool options.
-func skillParamToMCPOpts(param skill.Parameter) []mcp.ToolOption {
-	var opts []mcp.ToolOption
-
-	// Build property options
-	var propOpts []mcp.PropertyOption
-	if param.Required {
-		propOpts = append(propOpts, mcp.Required())
-	}
-	if param.Description != "" {
-		propOpts = append(propOpts, mcp.Description(param.Description))
-	}
-	if len(param.Enum) > 0 {
-		propOpts = append(propOpts, mcp.Enum(param.Enum...))
-	}
-
-	// Map skill types to MCP types
-	switch param.Type {
-	case "string":
-		opts = append(opts, mcp.WithString(param.Name, propOpts...))
-	case "integer", "int":
-		opts = append(opts, mcp.WithNumber(param.Name, propOpts...))
-	case "number", "float":
-		opts = append(opts, mcp.WithNumber(param.Name, propOpts...))
-	case "boolean", "bool":
-		opts = append(opts, mcp.WithBoolean(param.Name, propOpts...))
-	case "array":
-		opts = append(opts, mcp.WithArray(param.Name, propOpts...))
-	case "object":
-		opts = append(opts, mcp.WithObject(param.Name, propOpts...))
-	default:
-		// Default to string for unknown types
-		opts = append(opts, mcp.WithString(param.Name, propOpts...))
-	}
-
-	return opts
-}
-
-// createSkillHandler creates an MCP tool handler that executes the given skill.
-func createSkillHandler(cfg config.Config, manifest skill.Manifest) server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Find the skill (may need to locate artifact)
-		handle, err := findSkill(cfg, manifest.Metadata.Name)
-		if err != nil {
-			return mcp.NewToolResultError("find skill: " + err.Error()), nil
-		}
-
-		// Extract arguments from request
-		args := getArgs(req)
-
-		// Marshal to JSON for skill input
-		inputBytes, err := json.Marshal(args)
-		if err != nil {
-			return mcp.NewToolResultError("marshal input: " + err.Error()), nil
-		}
-
-		// Resolve workspace context
-		runCtx := resolveWorkspaceContext(ctx, "")
-
-		// Execute the skill
-		stdout, stderr, err := executeSkill(runCtx, handle.Manifest, handle.ArtifactPath, inputBytes)
-		if err != nil {
-			errMsg := err.Error()
-			if len(stderr) > 0 {
-				errMsg += "\nstderr: " + string(stderr)
-			}
-			return mcp.NewToolResultError("execute skill: " + errMsg), nil
-		}
-
-		// Parse the envelope response
-		var envelope struct {
-			Status  string         `json:"status"`
-			Command string         `json:"command"`
-			Data    map[string]any `json:"data"`
-			Meta    map[string]any `json:"meta"`
-			Error   struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-
-		if err := json.Unmarshal(stdout, &envelope); err != nil {
-			// Return raw output if not a valid envelope
-			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
-		}
-
-		if envelope.Status == "error" {
-			return mcp.NewToolResultError(envelope.Error.Message), nil
-		}
-
-		// Format the data as readable output
-		result, err := json.MarshalIndent(envelope.Data, "", "  ")
-		if err != nil {
-			return truncateSkillOutput(ctx, string(stdout), manifest.Metadata.Name)
-		}
-
-		// Apply output limiting with structured pagination
-		return truncateSkillOutput(ctx, string(result), manifest.Metadata.Name)
-	}
 }
 
 // truncateSkillOutput checks if skill output exceeds size limit.

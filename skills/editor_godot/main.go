@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/skills/editor_godot/handlers"
 )
@@ -45,31 +43,34 @@ type PluginError struct {
 const skillName = "editor/godot"
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("EARG", err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(skillName, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in handlers.Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in handlers.Input) error {
+	// Validate
+	if strings.TrimSpace(in.Action) == "" {
+		return fmt.Errorf("action is required")
+	}
+	// Apply defaults
+	if in.Host == "" {
+		in.Host = "127.0.0.1"
+	}
+	if in.Port == 0 {
+		in.Port = 7777
+	}
+	if in.TimeoutMS == 0 {
+		in.TimeoutMS = 10000
+	}
+	if in.MaxDepth == 0 {
+		in.MaxDepth = 10
+	}
+	if in.MaxNodes == 0 {
+		in.MaxNodes = 500
+	}
+	if in.ErrorLimit == 0 {
+		in.ErrorLimit = 50
+	}
+
 	// Get handler for action
 	handler, ok := handlers.GetHandler(in.Action)
 	if !ok {
@@ -107,40 +108,6 @@ func run(ctx context.Context, rc *runner.RunnerContext, in handlers.Input) error
 
 	// Build and emit success envelope using handler for summary
 	return emitSuccess(ctx, rc, in.Action, resp.Data, handler)
-}
-
-func parseInput(r io.Reader) (handlers.Input, error) {
-	var in handlers.Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return handlers.Input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	// Apply defaults
-	if in.Host == "" {
-		in.Host = "127.0.0.1"
-	}
-	if in.Port == 0 {
-		in.Port = 7777
-	}
-	if in.TimeoutMS == 0 {
-		in.TimeoutMS = 10000
-	}
-	if in.MaxDepth == 0 {
-		in.MaxDepth = 10
-	}
-	if in.MaxNodes == 0 {
-		in.MaxNodes = 500
-	}
-	if in.ErrorLimit == 0 {
-		in.ErrorLimit = 50
-	}
-
-	// Validate action
-	if strings.TrimSpace(in.Action) == "" {
-		return handlers.Input{}, fmt.Errorf("action is required")
-	}
-
-	return in, nil
 }
 
 func callPlugin(ctx context.Context, host string, port int, timeout time.Duration, req PluginRequest) (*PluginResponse, error) {
@@ -208,35 +175,20 @@ func (e *bridgeError) Error() string {
 	return e.message
 }
 
-func emitPluginError(rc *runner.RunnerContext, pe *PluginError) error {
+func emitPluginError(rc *skillmain.RunContext, pe *PluginError) error {
 	data := map[string]any{
-		"hint": pe.Hint,
+		"hint":    pe.Hint,
+		"code":    pe.Code,
+		"message": pe.Message,
 	}
 	if pe.Details != nil {
 		data["details"] = pe.Details
 	}
-
-	env := envelope.Envelope{
-		Version: 1,
-		Status:  "error",
-		Command: skillName,
-		Data:    data,
-		Meta: envelope.Meta{
-			TS:        time.Now().UTC().Format(time.RFC3339),
-			Source:    "run",
-			Runner:    "exec",
-			Workspace: rc.PathValidator.Workspace(),
-		},
-		Error: envelope.ErrorFields{
-			Code:    pe.Code,
-			Message: pe.Message,
-		},
-	}
-
-	return envelope.Write(rc.Stdout, env)
+	// Return error to let skillmain emit error envelope
+	return fmt.Errorf("%s: %s", pe.Code, pe.Message)
 }
 
-func emitSuccess(ctx context.Context, rc *runner.RunnerContext, action string, data any, handler handlers.Handler) error {
+func emitSuccess(ctx context.Context, rc *skillmain.RunContext, action string, data any, handler handlers.Handler) error {
 	// Serialize data to check size
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
@@ -258,12 +210,6 @@ func emitSuccess(ctx context.Context, rc *runner.RunnerContext, action string, d
 		inlineLimit = 32 * 1024
 	}
 
-	var meta envelope.Meta
-	meta.TS = time.Now().UTC().Format(time.RFC3339)
-	meta.Source = "run"
-	meta.Runner = "exec"
-	meta.Workspace = rc.PathValidator.Workspace()
-
 	if len(dataBytes) > inlineLimit {
 		// Store in CAS
 		obj, err := rc.CASStore.Put(ctx, bytes.NewReader(dataBytes), "application/json", []string{"godot", action})
@@ -273,18 +219,12 @@ func emitSuccess(ctx context.Context, rc *runner.RunnerContext, action string, d
 
 		result["artifact"] = obj.Digest
 		result["artifact_size_bytes"] = obj.Size
-		meta.CASDigest = obj.Digest
 
 		// Remove full result, keep only summary
 		delete(result, "result")
 		result["hint"] = "Full result stored in CAS; fetch via: agentctl cas get " + obj.Digest
 	}
 
-	return rc.Emit(skillName, result, "application/json", meta)
+	return skillout.Emit(rc, skillName, result)
 }
 
-func fail(code string, err error) {
-	env := envelope.Error(skillName, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure envelope")
-	os.Exit(1)
-}

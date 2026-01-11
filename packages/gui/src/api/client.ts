@@ -95,6 +95,27 @@ export async function getTasks(params?: {
   return request(`/api/tasks${query ? `?${query}` : ""}`);
 }
 
+export async function getAgents(params?: {
+  state?: string;
+  limit?: number;
+}): Promise<{ agents: import("../types").AgentSummary[]; total: number }> {
+  const searchParams = new URLSearchParams();
+  if (params?.state) searchParams.set("state", params.state);
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/agents${query ? `?${query}` : ""}`);
+}
+
+export async function startAgentDaemon(
+  id: string,
+  body?: { workspace?: string; meta?: Record<string, unknown> | null }
+): Promise<import("../types").AgentDaemonStartResult> {
+  return request(`/api/agents/${encodeURIComponent(id)}/daemon/start`, {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}
+
 // Stats
 export async function getStats(): Promise<import("../types").JobStats> {
   return request("/api/stats");

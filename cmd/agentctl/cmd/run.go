@@ -29,7 +29,19 @@ func newRunCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run <skill-name>",
 		Short: "Run a skill and record the result as a job",
-		Args:  cobra.MinimumNArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			showExamples, err := cmd.Flags().GetBool("examples")
+			if err != nil {
+				return err
+			}
+			if showExamples {
+				if len(args) > 1 {
+					return fmt.Errorf("expected zero or one skill name when using --examples")
+				}
+				return nil
+			}
+			return cobra.MinimumNArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executeRunCommand(cmd, args, flags)
 		},
@@ -43,6 +55,9 @@ func init() {
 }
 
 func executeRunCommand(cmd *cobra.Command, args []string, flags runCommandFlags) error {
+	if flags.Examples {
+		return writeRunExamples(cmd, args)
+	}
 	cfg := config.MustFromContext(cmd.Context())
 	data, err := loadSkillInput(cmd, cfg, flags.Input, flags.InputFile)
 	if err != nil {

@@ -2,8 +2,8 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import { execSync, spawn } from "child_process";
-import { readdirSync, statSync, readFileSync, existsSync, writeFileSync } from "fs";
-import { join, basename, dirname } from "path";
+import { readdirSync, statSync, readFileSync, existsSync, writeFileSync, renameSync, unlinkSync } from "fs";
+import { join, basename, dirname, resolve } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 
@@ -33,6 +33,12 @@ if (existsSync(envPath)) {
     }
   }
   console.log(`Loaded environment from ${envPath}`);
+}
+
+// Default to disabling CAS auto-migrate for the server process to avoid log spam.
+// Users can override by explicitly setting AGENTCTL_CAS_AUTO_MIGRATE.
+if (!process.env.AGENTCTL_CAS_AUTO_MIGRATE) {
+  process.env.AGENTCTL_CAS_AUTO_MIGRATE = "0";
 }
 
 // Detect Bun and use native sqlite driver if available
@@ -81,14 +87,140 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 app.use(express.json());
 
+function findGitRoot(startDir) {
+  let dir = startDir;
+  while (true) {
+    if (existsSync(join(dir, ".git"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return "";
+    }
+    dir = parent;
+  }
+}
+
+// detectWorkspace returns the workspace root using a detection chain:
+// 1. AGENTCTL_WORKSPACE - set by agentctl runner
+// 2. CLAUDE_PROJECT_DIR - set by Claude Code
+// 3. Git root detection from start dir
+// 4. start dir
+function detectWorkspace(startDir) {
+  if (process.env.AGENTCTL_WORKSPACE) {
+    return process.env.AGENTCTL_WORKSPACE;
+  }
+  if (process.env.CLAUDE_PROJECT_DIR) {
+    return process.env.CLAUDE_PROJECT_DIR;
+  }
+  const gitRoot = findGitRoot(startDir);
+  if (gitRoot) {
+    return gitRoot;
+  }
+  return startDir;
+}
+
+const DEFAULT_WORKSPACE = detectWorkspace(resolve(process.cwd()));
+
 // Helper: get workspace from cookie
 function getWorkspace(req) {
-  return req.cookies[WORKSPACE_COOKIE] || "";
+  return req.cookies[WORKSPACE_COOKIE] || DEFAULT_WORKSPACE || "";
 }
 
 // Helper: run agentctl skill
-// Uses AGENTCTL_BIN_DIR env var or looks for agentctl in PATH
-const AGENTCTL_BIN = process.env.AGENTCTL_BIN || "agentctl";
+// Uses AGENTCTL_BIN env var or falls back to repo-local bin/agentctl when available.
+const DEFAULT_AGENTCTL_BIN = (() => {
+  const candidate = join(__dirname, "..", "..", "..", "bin", "agentctl");
+  if (existsSync(candidate)) {
+    return candidate;
+  }
+  return "agentctl";
+})();
+const AGENTCTL_BIN = process.env.AGENTCTL_BIN || DEFAULT_AGENTCTL_BIN;
+const CAS_DRIVER = (process.env.AGENTCTL_CAS_DRIVER || "sqlite").toLowerCase();
+
+function readCASJSONFromSQLite(digest) {
+  const dbPath = process.env.AGENTCTL_CAS_DB_PATH || join(AGENTCTL_HOME, "storage", "cas.db");
+  const resolved = resolve(dbPath);
+  if (!existsSync(resolved)) {
+    return null;
+  }
+  let db;
+  try {
+    db = openDB(resolved, { readonly: true });
+    const row = db.prepare("SELECT content FROM cas_objects WHERE digest = ?").get(digest);
+    if (!row || row.content == null) {
+      return null;
+    }
+    const raw = Buffer.from(row.content).toString("utf-8");
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error("Failed to read CAS SQLite JSON:", err.message);
+    return null;
+  } finally {
+    if (db && typeof db.close === "function") {
+      try {
+        db.close();
+      } catch {
+        // Ignore close errors for read-only use.
+      }
+    }
+  }
+}
+
+function readCASJSONFromFile(digest) {
+  const casRoot = process.env.AGENTCTL_CAS_PATH || join(AGENTCTL_HOME, "cas");
+
+  if (typeof digest !== "string" || !digest.startsWith("sha256:")) {
+    return null;
+  }
+
+  const hex = digest.slice("sha256:".length);
+  if (!/^[0-9a-f]{64}$/i.test(hex)) {
+    return null;
+  }
+
+  const casPath = join(resolve(casRoot), "sha256", hex);
+  if (!existsSync(casPath)) {
+    return null;
+  }
+  try {
+    const raw = readFileSync(casPath, "utf-8");
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error("Failed to parse CAS file JSON:", err.message);
+    return null;
+  }
+}
+
+function readCASJSON(digest) {
+  if (!digest || typeof digest !== "string" || !digest.startsWith("sha256:")) {
+    return null;
+  }
+
+  if (CAS_DRIVER !== "file") {
+    const fromSQLite = readCASJSONFromSQLite(digest);
+    if (fromSQLite) {
+      return fromSQLite;
+    }
+  }
+
+  return readCASJSONFromFile(digest);
+}
+
+function inflateTruncatedEnvelope(env) {
+  if (!env || typeof env !== "object") {
+    return env;
+  }
+  const meta = env.meta || {};
+  const isTruncated = meta.truncated === true || meta.truncate_reason === "inline_output_kb";
+  if (!isTruncated) {
+    return env;
+  }
+  const digest = env.data?.artifact || meta.cas_digest;
+  const inflated = readCASJSON(digest);
+  return inflated || env;
+}
 
 function runSkill(skill, input) {
   try {
@@ -97,7 +229,8 @@ function runSkill(skill, input) {
       encoding: "utf-8",
       timeout: 30000,
     });
-    return JSON.parse(result);
+    const parsed = JSON.parse(result);
+    return inflateTruncatedEnvelope(parsed);
   } catch (err) {
     console.error(`Skill ${skill} failed:`, err.message);
     return { error: err.message, data: {} };
@@ -111,42 +244,78 @@ const runningDaemons = new Map(); // actor_id -> { pid, startedAt }
 // Priority: Anthropic OAuth (future) > OpenRouter > Groq > Gemini > OpenAI
 // TODO: Implement Anthropic OAuth via Claude CLI wrapper for Max subscription users
 // See: CLAUDE.md "Claude Max OAuth" section for details
-function detectLLMProvider() {
-  // Provider configurations with their env keys and default models
-  // Models updated Jan 2026
-  const providers = [
-    {
-      name: "openrouter",
-      envKey: "OPENROUTER_API_KEY",
-      modelEnv: "OPENROUTER_MODEL",
-      // Free agentic/coding models: devstral, minimax-m2.1, mimo-v2-flash, deepseek-r1
-      defaultModel: "minimax/minimax-m2.1", // Fast, efficient for coding/agents
-    },
-    {
-      name: "groq",
-      envKey: "GROQ_API_KEY",
-      modelEnv: "GROQ_MODEL",
-      defaultModel: "qwen/qwen3-32b", // Fast inference on Groq
-    },
-    {
-      name: "gemini",
-      envKey: "GEMINI_API_KEY",
-      modelEnv: "GEMINI_MODEL",
-      defaultModel: "gemini-3-flash-preview", // Latest as of Dec 2025
-    },
-    {
-      name: "anthropic",
-      envKey: "ANTHROPIC_API_KEY",
-      modelEnv: "ANTHROPIC_MODEL",
-      defaultModel: "claude-haiku-4-5", // Direct API (not Max subscription)
-    },
-    {
-      name: "openai",
-      envKey: "OPENAI_API_KEY",
-      modelEnv: "OPENAI_MODEL",
-      defaultModel: "gpt-5.2", // Latest for coding/agentic
-    },
-  ];
+// Provider configurations with their env keys and default models
+// Models updated Jan 2026
+const LLM_PROVIDERS = [
+  {
+    name: "openrouter",
+    envKey: "OPENROUTER_API_KEY",
+    modelEnv: "OPENROUTER_MODEL",
+    // Free agentic/coding models: devstral, minimax-m2.1, mimo-v2-flash, deepseek-r1
+    defaultModel: "minimax/minimax-m2.1", // Fast, efficient for coding/agents
+  },
+  {
+    name: "groq",
+    envKey: "GROQ_API_KEY",
+    modelEnv: "GROQ_MODEL",
+    defaultModel: "qwen/qwen3-32b", // Fast inference on Groq
+  },
+  {
+    name: "gemini",
+    envKey: "GEMINI_API_KEY",
+    modelEnv: "GEMINI_MODEL",
+    defaultModel: "gemini-3-flash-preview", // Latest as of Dec 2025
+  },
+  {
+    name: "anthropic",
+    envKey: "ANTHROPIC_API_KEY",
+    modelEnv: "ANTHROPIC_MODEL",
+    defaultModel: "claude-haiku-4-5", // Direct API (not Max subscription)
+  },
+  {
+    name: "openai",
+    envKey: "OPENAI_API_KEY",
+    modelEnv: "OPENAI_MODEL",
+    defaultModel: "gpt-5.2", // Latest for coding/agentic
+  },
+];
+
+function normalizeLLMOverrides(meta) {
+  if (!meta || typeof meta !== "object") {
+    return { provider: undefined, model: undefined };
+  }
+  const provider =
+    typeof meta.llm_provider === "string"
+      ? meta.llm_provider.trim()
+      : typeof meta.llmProvider === "string"
+        ? meta.llmProvider.trim()
+        : "";
+  const model =
+    typeof meta.llm_model === "string"
+      ? meta.llm_model.trim()
+      : typeof meta.llmModel === "string"
+        ? meta.llmModel.trim()
+        : "";
+  return {
+    provider: provider || undefined,
+    model: model || undefined,
+  };
+}
+
+function detectLLMProvider(preferredProvider, preferredModel) {
+  // Explicit provider selection (from console meta)
+  if (preferredProvider) {
+    const match = LLM_PROVIDERS.find(p => p.name === preferredProvider);
+    if (!match) {
+      return { error: `Unknown LLM provider: ${preferredProvider}` };
+    }
+    const apiKey = process.env[match.envKey];
+    if (!apiKey) {
+      return { error: `Missing ${match.envKey} for provider ${preferredProvider}` };
+    }
+    const model = preferredModel || process.env[match.modelEnv] || match.defaultModel;
+    return { provider: match.name, apiKey, model };
+  }
 
   // Check for explicit provider override
   const explicitProvider = process.env.AGENTCTL_LLM_PROVIDER;
@@ -157,15 +326,15 @@ function detectLLMProvider() {
     return {
       provider: explicitProvider,
       apiKey: explicitKey,
-      model: explicitModel || providers.find(p => p.name === explicitProvider)?.defaultModel || "default",
+      model: preferredModel || explicitModel || LLM_PROVIDERS.find(p => p.name === explicitProvider)?.defaultModel || "default",
     };
   }
 
   // Auto-detect from available keys
-  for (const p of providers) {
+  for (const p of LLM_PROVIDERS) {
     const apiKey = process.env[p.envKey];
     if (apiKey) {
-      const model = process.env[p.modelEnv] || p.defaultModel;
+      const model = preferredModel || process.env[p.modelEnv] || p.defaultModel;
       console.log(`Auto-detected LLM provider: ${p.name} (model: ${model})`);
       return {
         provider: p.name,
@@ -178,10 +347,27 @@ function detectLLMProvider() {
   return null; // No provider found
 }
 
+function stopAgentDaemon(actorId) {
+  const running = runningDaemons.get(actorId);
+  if (!running?.pid) {
+    return false;
+  }
+  try {
+    process.kill(running.pid);
+  } catch (err) {
+    console.warn(`Failed to stop daemon for ${actorId}:`, err?.message || err);
+    return false;
+  }
+  runningDaemons.delete(actorId);
+  return true;
+}
+
 // Ensure agent exists in agents.db and spawn daemon if needed
-function ensureAgentDaemon(actorId, workspace = "") {
+function ensureAgentDaemon(actorId, workspace = "", meta = null) {
   const dbPath = join(AGENTCTL_HOME, "storage", "agents.db");
   let db = null;
+  const overrides = normalizeLLMOverrides(meta);
+  const hasOverride = Boolean(overrides.provider || overrides.model);
 
   try {
     // Open with write access
@@ -190,38 +376,79 @@ function ensureAgentDaemon(actorId, workspace = "") {
     // Ensure agents table exists
     db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
-        id TEXT PRIMARY KEY,
-        namespace TEXT NOT NULL UNIQUE,
-        parent_ns TEXT,
-        role TEXT NOT NULL,
-        prompt TEXT,
-        llm_provider TEXT,
-        llm_model TEXT,
-        llm_api_key TEXT,
-        state TEXT NOT NULL DEFAULT 'pending',
-        skills_allow TEXT,
-        policy TEXT,
+        id           TEXT PRIMARY KEY,
+        parent_id    TEXT,
+        ns           TEXT UNIQUE NOT NULL,
+        role         TEXT,
+        prompt       TEXT,
+        skills_allow TEXT NOT NULL,
+        policy       TEXT NOT NULL,
+        share_bb     TEXT NOT NULL CHECK (share_bb IN ('all','scoped','none')),
+        state        TEXT NOT NULL CHECK (state IN ('starting','running','stopped','error')),
+        created_at   TEXT NOT NULL,
         heartbeat_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        llm_provider TEXT,
+        llm_model    TEXT
       );
-      CREATE INDEX IF NOT EXISTS idx_agents_namespace ON agents(namespace);
+      CREATE INDEX IF NOT EXISTS idx_agents_ns ON agents(ns);
+      CREATE INDEX IF NOT EXISTS idx_agents_parent ON agents(parent_id);
       CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
     `);
 
+    // Never persist API keys in the agents DB.
+    try {
+      db.prepare("UPDATE agents SET llm_api_key = NULL WHERE llm_api_key IS NOT NULL").run();
+    } catch {
+      // Ignore if column doesn't exist (new schema) or DB is read-only.
+    }
+
     // Check if agent exists for this namespace
-    const existing = db.prepare(`SELECT id, state FROM agents WHERE namespace = ?`).get(actorId);
+    const existing = db.prepare(`
+      SELECT id, state, heartbeat_at, llm_provider, llm_model
+      FROM agents WHERE ns = ?
+    `).get(actorId);
 
     if (existing) {
-      // Agent exists - check if daemon is running
-      if (existing.state === "running" || runningDaemons.has(actorId)) {
+      let llmConfig = null;
+      if (hasOverride) {
+        const providerHint = overrides.provider || (overrides.model && existing.llm_provider ? existing.llm_provider : undefined);
+        llmConfig = detectLLMProvider(providerHint, overrides.model);
+        if (!llmConfig || llmConfig.error) {
+          return { error: llmConfig?.error || "No LLM provider configured. Set an API key in .env or environment." };
+        }
+      }
+
+      const running = runningDaemons.has(actorId);
+      const heartbeatAt = existing.heartbeat_at ? Date.parse(existing.heartbeat_at) : 0;
+      const heartbeatFresh = heartbeatAt > 0 && Date.now() - heartbeatAt < 60000;
+      const isHealthy = running || (existing.state === "running" && heartbeatFresh);
+      const needsUpdate = llmConfig && (existing.llm_provider !== llmConfig.provider || existing.llm_model !== llmConfig.model);
+
+      // Agent exists - check if daemon is running or heartbeat is fresh
+      if (!needsUpdate && isHealthy) {
         db.close();
         db = null;
         return { agentId: existing.id, status: "already_running" };
       }
-      // Agent exists but not running - update state to pending and spawn daemon
-      db.prepare(`UPDATE agents SET state = 'pending', updated_at = ? WHERE id = ?`)
-        .run(new Date().toISOString(), existing.id);
+
+      if (needsUpdate && running) {
+        stopAgentDaemon(actorId);
+      }
+
+      // Agent exists but daemon not running (or stale heartbeat) - restart
+      if (llmConfig) {
+        db.prepare(`
+          UPDATE agents
+          SET state = 'starting',
+              heartbeat_at = ?,
+               llm_provider = ?,
+               llm_model = ?
+          WHERE id = ?
+        `).run(new Date().toISOString(), llmConfig.provider, llmConfig.model, existing.id);
+      } else {
+        db.prepare(`UPDATE agents SET state = 'starting', heartbeat_at = ? WHERE id = ?`)
+          .run(new Date().toISOString(), existing.id);
+      }
       db.close();
       db = null;
       spawnAgentDaemon(existing.id, actorId);
@@ -229,10 +456,13 @@ function ensureAgentDaemon(actorId, workspace = "") {
     }
 
     // Detect LLM provider
-    const llmConfig = detectLLMProvider();
-    if (!llmConfig) {
-      console.warn("No LLM provider configured. Set GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or AGENTCTL_LLM_API_KEY");
-      return { error: "No LLM provider configured. Set an API key in .env or environment." };
+    const llmConfig = detectLLMProvider(overrides.provider, overrides.model);
+    if (!llmConfig || llmConfig.error) {
+      const message =
+        llmConfig?.error ||
+        "No LLM provider configured. Set GROQ_API_KEY, OPENROUTER_API_KEY, GEMINI_API_KEY, or AGENTCTL_LLM_API_KEY";
+      console.warn(message);
+      return { error: llmConfig?.error || "No LLM provider configured. Set an API key in .env or environment." };
     }
 
     // Create new agent record
@@ -246,21 +476,22 @@ function ensureAgentDaemon(actorId, workspace = "") {
     });
 
     db.prepare(`
-      INSERT INTO agents (id, namespace, role, prompt, llm_provider, llm_model, llm_api_key, state, skills_allow, policy, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO agents (id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       agentId,
-      actorId, // namespace = actor_id
+      null, // parent_id
+      actorId, // ns = actor_id
       "console", // role
       "You are an interactive console agent. Help the user with their queries.", // prompt
-      llmConfig.provider,
-      llmConfig.model,
-      llmConfig.apiKey,
-      "pending", // state
       JSON.stringify(["*"]), // skills_allow - all skills
       defaultPolicy,
+      "scoped", // share_bb
+      "starting", // state
       now,
-      now
+      null, // heartbeat_at
+      llmConfig.provider,
+      llmConfig.model
     );
 
     db.close();
@@ -358,6 +589,7 @@ const knownDatabases = {
   "agents.db": "Agents",
   "jobs.db": "Jobs",
   "blackboard.db": "Blackboard",
+  "board.db": "Board",
   "mailbox.db": "Mailbox",
   "memory.db": "Memory",
   "knowledge.db": "Knowledge",
@@ -433,12 +665,10 @@ function atomicWriteFileSync(filePath, content) {
   const tempPath = filePath + ".tmp." + process.pid;
   try {
     writeFileSync(tempPath, content);
-    const { renameSync } = require("fs");
     renameSync(tempPath, filePath);
   } catch (err) {
     // Clean up temp file on error
     try {
-      const { unlinkSync } = require("fs");
       unlinkSync(tempPath);
     } catch { }
     throw err;
@@ -536,36 +766,121 @@ app.get("/api/jobs/:id", (req, res) => {
   }
 });
 
-// Tasks
+// Tasks - Direct SQLite read (fast)
 app.get("/api/tasks", (req, res) => {
   const workspace = getWorkspace(req);
   const limit = parseInt(req.query.limit) || 50;
+  const includeMetrics = req.query.metrics !== "false";
 
-  const input = { operation: "list" };
-  if (workspace) input.workspace_id = workspace;
+  const tasksDB = join(AGENTCTL_HOME, "storage", "tasks.db");
+  const graphDB = join(AGENTCTL_HOME, "storage", "graph.db");
 
-  const result = runSkill("todo/manage", input);
-  const tasks = (result.data?.tasks || []).slice(0, limit);
+  if (!existsSync(tasksDB)) {
+    return res.json({ tasks: [] });
+  }
 
-  res.json({ tasks });
+  try {
+    const db = openDB(tasksDB);
+
+    let query = `
+      SELECT id, title, description, status, scope_path, parent_id,
+             depends_on, created_at, completed_at, notes, session_id
+      FROM tasks`;
+    const params = [];
+
+    if (workspace) {
+      query += ` WHERE workspace_id = ?`;
+      params.push(workspace);
+    }
+    query += ` ORDER BY created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    let tasks = db.prepare(query).all(...params);
+    db.close();
+
+    tasks = tasks.map((t) => ({
+      ...t,
+      depends_on: t.depends_on ? JSON.parse(t.depends_on) : [],
+    }));
+
+    if (includeMetrics && existsSync(graphDB)) {
+      try {
+        const gdb = openDB(graphDB);
+        const nodeMap = new Map();
+
+        let gquery = `
+          SELECT node_id, pagerank, in_degree, out_degree
+          FROM graph_nodes
+          WHERE node_type = 'task'`;
+        const gparams = [];
+
+        if (workspace) {
+          gquery += ` AND workspace = ?`;
+          gparams.push(workspace);
+        }
+
+        const nodes = gdb.prepare(gquery).all(...gparams);
+        for (const n of nodes) {
+          const taskId = n.node_id.replace(/^task:/, "");
+          nodeMap.set(taskId, n);
+        }
+        gdb.close();
+
+        tasks = tasks.map((t) => {
+          const metrics = nodeMap.get(t.id);
+          return {
+            ...t,
+            pagerank: metrics?.pagerank || 0,
+            in_degree: metrics?.in_degree || 0,
+            out_degree: metrics?.out_degree || 0,
+          };
+        });
+      } catch (e) {
+        console.warn("Failed to load graph metrics:", e.message);
+      }
+    }
+
+    res.json({ tasks });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Stats
+// Stats - Direct SQLite read (fast)
 app.get("/api/stats", (req, res) => {
   const workspace = getWorkspace(req);
+  const tasksDB = join(AGENTCTL_HOME, "storage", "tasks.db");
 
-  // Get task stats
-  const taskInput = { operation: "list" };
-  if (workspace) taskInput.workspace_id = workspace;
-  const taskResult = runSkill("todo/manage", taskInput);
-  const tasks = taskResult.data?.tasks || [];
+  let taskStats = { total: 0, pending: 0, in_progress: 0, completed: 0 };
 
-  const taskStats = {
-    total: tasks.length,
-    pending: tasks.filter((t) => t.status === "pending").length,
-    in_progress: tasks.filter((t) => t.status === "in_progress").length,
-    completed: tasks.filter((t) => t.status === "completed").length,
-  };
+  if (existsSync(tasksDB)) {
+    try {
+      const db = openDB(tasksDB);
+
+      let countQuery = `
+        SELECT status, COUNT(*) as cnt
+        FROM tasks`;
+      const params = [];
+
+      if (workspace) {
+        countQuery += ` WHERE workspace_id = ?`;
+        params.push(workspace);
+      }
+      countQuery += ` GROUP BY status`;
+
+      const rows = db.prepare(countQuery).all(...params);
+      db.close();
+
+      for (const r of rows) {
+        taskStats.total += r.cnt;
+        if (r.status === "pending") taskStats.pending = r.cnt;
+        else if (r.status === "in_progress") taskStats.in_progress = r.cnt;
+        else if (r.status === "completed") taskStats.completed = r.cnt;
+      }
+    } catch (e) {
+      console.warn("Failed to load task stats:", e.message);
+    }
+  }
 
   // Count jobs with state breakdown
   const jobsDir = join(AGENTCTL_HOME, "jobs");
@@ -602,7 +917,6 @@ app.get("/api/stats", (req, res) => {
     }
   } catch { }
 
-  // Frontend expects job stats at top level
   res.json({
     total: jobTotal,
     by_state: byState,
@@ -612,53 +926,291 @@ app.get("/api/stats", (req, res) => {
   });
 });
 
-// Insights
+// Insights - Direct SQLite with JS-computed critical_path_score
 app.get("/api/insights", (req, res) => {
   const workspace = getWorkspace(req);
 
-  const input = { operation: "graph_insights" };
-  if (workspace) input.workspace_id = workspace;
+  const graphDB = join(AGENTCTL_HOME, "storage", "graph.db");
+  const tasksDB = join(AGENTCTL_HOME, "storage", "tasks.db");
 
-  const result = runSkill("todo/manage", input);
-  // Flatten: result.data.insights contains the actual graph data
-  const insights = result.data?.insights || {};
-  res.json({
-    nodes: insights.nodes || [],
-    cycles: insights.cycles || [],
-    topological_order: insights.topological_order || [],
-  });
+  if (!existsSync(tasksDB)) {
+    return res.json({ nodes: [], cycles: [], topological_order: [] });
+  }
+
+  try {
+    // Get tasks with dependencies
+    const tdb = openDB(tasksDB);
+    let taskQuery = `SELECT id, title, status, depends_on FROM tasks`;
+    const taskParams = [];
+    if (workspace) {
+      taskQuery += ` WHERE workspace_id = ?`;
+      taskParams.push(workspace);
+    }
+    const tasks = tdb.prepare(taskQuery).all(...taskParams);
+    tdb.close();
+
+    // Build adjacency list (task -> its dependencies)
+    const adjList = new Map(); // task_id -> [dependency_ids]
+    for (const t of tasks) {
+      const deps = t.depends_on ? JSON.parse(t.depends_on) : [];
+      adjList.set(t.id, deps);
+    }
+
+    // Get PageRank from graph.db if available
+    const pagerankMap = new Map();
+    if (existsSync(graphDB)) {
+      try {
+        const gdb = openDB(graphDB);
+        let prQuery = `SELECT node_id, pagerank, in_degree, out_degree FROM graph_nodes WHERE node_type = 'task'`;
+        const prParams = [];
+        if (workspace) {
+          prQuery += ` AND workspace = ?`;
+          prParams.push(workspace);
+        }
+        const prNodes = gdb.prepare(prQuery).all(...prParams);
+        gdb.close();
+        for (const n of prNodes) {
+          const taskId = n.node_id.replace(/^task:/, "");
+          pagerankMap.set(taskId, n);
+        }
+      } catch { }
+    }
+
+    // Compute critical_path_score: longest path to any sink via memoized DFS
+    const memo = new Map();
+    const visiting = new Set();
+
+    function computeCriticalPath(taskId) {
+      if (memo.has(taskId)) return memo.get(taskId);
+      if (visiting.has(taskId)) return 0; // Cycle detected
+
+      visiting.add(taskId);
+      const deps = adjList.get(taskId) || [];
+
+      if (deps.length === 0) {
+        memo.set(taskId, 0);
+        visiting.delete(taskId);
+        return 0;
+      }
+
+      let maxPath = 0;
+      for (const depId of deps) {
+        if (adjList.has(depId)) {
+          const pathLen = computeCriticalPath(depId) + 1;
+          if (pathLen > maxPath) maxPath = pathLen;
+        }
+      }
+
+      memo.set(taskId, maxPath);
+      visiting.delete(taskId);
+      return maxPath;
+    }
+
+    // Build nodes with all metrics
+    const nodes = tasks.map((t) => {
+      const pr = pagerankMap.get(t.id) || {};
+      return {
+        task_id: t.id,
+        title: t.title,
+        status: t.status,
+        pagerank: pr.pagerank || 0,
+        critical_path_score: computeCriticalPath(t.id),
+        in_degree: pr.in_degree || 0,
+        out_degree: pr.out_degree || 0,
+      };
+    });
+
+    // Sort by critical_path_score desc, then pagerank desc
+    nodes.sort((a, b) => {
+      if (a.critical_path_score !== b.critical_path_score) {
+        return b.critical_path_score - a.critical_path_score;
+      }
+      return b.pagerank - a.pagerank;
+    });
+
+    // Topological order via Kahn's algorithm
+    const inDegree = new Map();
+    const graph = new Map();
+    for (const t of tasks) {
+      inDegree.set(t.id, 0);
+      graph.set(t.id, []);
+    }
+    for (const t of tasks) {
+      const deps = adjList.get(t.id) || [];
+      for (const depId of deps) {
+        if (graph.has(depId)) {
+          graph.get(depId).push(t.id);
+          inDegree.set(t.id, (inDegree.get(t.id) || 0) + 1);
+        }
+      }
+    }
+
+    const queue = [];
+    for (const [id, deg] of inDegree) {
+      if (deg === 0) queue.push(id);
+    }
+
+    const topological_order = [];
+    const cycles = [];
+    while (queue.length > 0) {
+      const curr = queue.shift();
+      topological_order.push(curr);
+      for (const next of graph.get(curr) || []) {
+        inDegree.set(next, inDegree.get(next) - 1);
+        if (inDegree.get(next) === 0) queue.push(next);
+      }
+    }
+
+    // If not all nodes processed, there are cycles
+    if (topological_order.length < tasks.length) {
+      const processed = new Set(topological_order);
+      const cycleNodes = tasks.filter((t) => !processed.has(t.id)).map((t) => t.id);
+      if (cycleNodes.length > 0) cycles.push(cycleNodes);
+    }
+
+    res.json({ nodes, cycles, topological_order });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Mailbox
+// Mailbox - Direct SQLite read (fast)
 app.get("/api/mailbox", (req, res) => {
-  const actor = req.query.actor || "";
+  const actor = req.query.actor || "admin";
+  const workspace = getWorkspace(req);
   const limit = parseInt(req.query.limit) || 50;
+  const now = Date.now();
 
-  const input = { operation: "list", limit };
-  if (actor) input.actor_id = actor;
+  const mailboxDB = join(AGENTCTL_HOME, "storage", "mailbox.db");
+  if (!existsSync(mailboxDB)) {
+    return res.json({ messages: [] });
+  }
 
-  const result = runSkill("mailbox/manage", input);
-  res.json({ messages: result.data?.messages || [] });
+  try {
+    const db = openDB(mailboxDB);
+
+    let query = `
+      SELECT id, from_ns, to_ns, type, headers, payload, ts, session_id, workspace, agent_id
+      FROM mailbox
+      WHERE to_ns = ? AND visible_at <= ?`;
+    const params = [actor, now];
+
+    if (workspace) {
+      query += ` AND (workspace = ? OR workspace IS NULL)`;
+      params.push(workspace);
+    }
+    query += ` ORDER BY ts DESC LIMIT ?`;
+    params.push(limit);
+
+    const messages = db.prepare(query).all(...params).map((m) => ({
+      id: m.id,
+      from: m.from_ns,
+      to: m.to_ns,
+      type: m.type,
+      headers: m.headers ? JSON.parse(m.headers) : {},
+      payload: m.payload ? JSON.parse(m.payload) : {},
+      ts: m.ts,
+      session_id: m.session_id,
+      workspace: m.workspace,
+      agent_id: m.agent_id,
+    }));
+
+    db.close();
+    res.json({ messages });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Reservations
+// Reservations - Direct SQLite read (fast)
 app.get("/api/reservations", (req, res) => {
-  const result = runSkill("reservations/manage", { operation: "list" });
-  res.json({ reservations: result.data?.reservations || [] });
+  const workspace = getWorkspace(req);
+  const now = Date.now();
+
+  const boardDB = join(AGENTCTL_HOME, "storage", "board.db");
+  if (!existsSync(boardDB)) {
+    return res.json({ reservations: [] });
+  }
+
+  try {
+    const db = openDB(boardDB);
+
+    let query = `
+      SELECT id, workspace_id, task_id, path, holder, mode, reason, expires_at, created_at
+      FROM file_reservations
+      WHERE expires_at > ?`;
+    const params = [now];
+
+    if (workspace) {
+      query += ` AND workspace_id = ?`;
+      params.push(workspace);
+    }
+    query += ` ORDER BY created_at DESC`;
+
+    const reservations = db.prepare(query).all(...params).map((r) => ({
+      id: r.id,
+      workspace_id: r.workspace_id,
+      task_id: r.task_id,
+      path: r.path,
+      holder: r.holder,
+      mode: r.mode,
+      reason: r.reason,
+      expires_at: r.expires_at,
+      created_at: r.created_at,
+    }));
+
+    db.close();
+    res.json({ reservations });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Blackboard
 app.get("/api/blackboard", (req, res) => {
   const ns = req.query.ns || "";
   const topic = req.query.topic || "";
-  const limit = parseInt(req.query.limit) || 50;
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
 
-  const input = { operation: "list", limit };
-  if (ns) input.namespace = ns;
-  if (topic) input.topic = topic;
+  const blackboardDB = join(AGENTCTL_HOME, "storage", "blackboard.db");
+  if (!existsSync(blackboardDB)) {
+    return res.json({ records: [] });
+  }
 
-  const result = runSkill("blackboard/manage", input);
-  res.json({ records: result.data?.records || [] });
+  try {
+    const db = openDB(blackboardDB);
+    let query = `
+      SELECT id, ns, topic, ts, ttl_sec, payload
+      FROM blackboard
+      WHERE 1=1`;
+    const params = [];
+
+    if (ns) {
+      query += ` AND ns = ?`;
+      params.push(ns);
+    }
+    if (topic) {
+      query += ` AND topic = ?`;
+      params.push(topic);
+    }
+
+    query += ` ORDER BY ts DESC LIMIT ?`;
+    params.push(limit);
+
+    const records = db.prepare(query).all(...params).map((row) => ({
+      id: row.id,
+      ns: row.ns,
+      topic: row.topic,
+      ts: row.ts,
+      ttl_sec: row.ttl_sec,
+      payload: row.payload || "",
+    }));
+
+    db.close();
+    res.json({ records });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // SQLite - list databases
@@ -1408,7 +1960,7 @@ let lastJobCount = 0;
 // Track last seen IDs for each resource type to detect new entries
 let lastTaskUpdateCheck = Date.now();
 let lastMailboxId = "";
-let lastBlackboardVersion = 0;
+let lastBlackboardTS = 0;
 
 // ULID pattern: 26 alphanumeric characters (Crockford base32)
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
@@ -1491,15 +2043,15 @@ setInterval(() => {
 setInterval(() => {
   if (sseClients.size === 0) return; // Skip if no clients
 
-  const mailboxDB = join(AGENTCTL_HOME, "storage", "mailbox.db");
-  if (!existsSync(mailboxDB)) return;
+  const boardDB = join(AGENTCTL_HOME, "storage", "board.db");
+  if (!existsSync(boardDB)) return;
 
   try {
-    const db = openDB(mailboxDB);
+    const db = openDB(boardDB);
     // Get newest message ID
     const latest = db.prepare(`
-      SELECT id, to_ns, from_ns, subject, created_at
-      FROM messages
+      SELECT id, recipient, sender, subject, created_at
+      FROM board_messages
       ORDER BY created_at DESC
       LIMIT 1
     `).get();
@@ -1511,8 +2063,8 @@ setInterval(() => {
       if (lastMailboxId !== "") {
         broadcastEvent("mailbox", {
           id: latest.id,
-          actor: latest.to_ns,
-          from: latest.from_ns,
+          actor: latest.recipient,
+          from: latest.sender,
           subject: latest.subject,
         });
       }
@@ -1532,19 +2084,19 @@ setInterval(() => {
 
   try {
     const db = openDB(blackboardDB);
-    // Get latest version number
+    // Get latest timestamp
     const latest = db.prepare(`
-      SELECT MAX(version) as max_version FROM entries
+      SELECT MAX(ts) as max_ts FROM blackboard
     `).get();
 
     db.close();
 
-    if (latest && latest.max_version > lastBlackboardVersion) {
+    if (latest && latest.max_ts > lastBlackboardTS) {
       // Blackboard has been updated
-      if (lastBlackboardVersion > 0) {
+      if (lastBlackboardTS > 0) {
         broadcastEvent("blackboard", { updated: true });
       }
-      lastBlackboardVersion = latest.max_version;
+      lastBlackboardTS = latest.max_ts;
     }
   } catch {
     // Database doesn't exist or query failed
@@ -2010,7 +2562,7 @@ app.get("/api/agents/:id", (req, res) => {
     const db = openDB(dbPath);
     const agent = db.prepare(`
       SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state,
-             llm_provider, llm_model, llm_api_key, created_at, heartbeat_at
+             llm_provider, llm_model, created_at, heartbeat_at
       FROM agents WHERE id = ?
     `).get(req.params.id);
 
@@ -2020,12 +2572,41 @@ app.get("/api/agents/:id", (req, res) => {
       return res.status(404).json({ error: "Agent not found" });
     }
 
-    // Don't expose the API key
-    if (agent.llm_api_key) {
-      agent.llm_api_key = "***";
-    }
 
     res.json({ agent });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/agents/:id/daemon/start", (req, res) => {
+  const dbPath = join(AGENTCTL_HOME, "storage", "agents.db");
+
+  if (!existsSync(dbPath)) {
+    return res.status(404).json({ error: "Agents database not found" });
+  }
+
+  try {
+    const db = openDB(dbPath);
+    const agent = db.prepare(`SELECT id, ns FROM agents WHERE id = ?`).get(req.params.id);
+    db.close();
+
+    if (!agent) {
+      return res.status(404).json({ error: "Agent not found" });
+    }
+
+    const body = req.body || {};
+    const workspace = typeof body.workspace === "string" && body.workspace ? body.workspace : getWorkspace(req);
+    const meta = body.meta && typeof body.meta === "object" ? body.meta : null;
+
+    const result = ensureAgentDaemon(agent.ns, workspace, meta);
+    if (result.error) {
+      const message = String(result.error || "failed to start daemon");
+      const status = message.toLowerCase().includes("missing") || message.toLowerCase().includes("no llm") ? 400 : 500;
+      return res.status(status).json({ error: message, actor_id: agent.ns, ...result });
+    }
+
+    res.json({ actor_id: agent.ns, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2446,7 +3027,7 @@ app.post("/api/consoles", (req, res) => {
 
   try {
     // Ensure agent daemon is running for this actor_id
-    const daemonResult = ensureAgentDaemon(actor_id, workspace);
+    const daemonResult = ensureAgentDaemon(actor_id, workspace, meta);
     if (daemonResult.error) {
       console.warn(`Failed to ensure agent daemon: ${daemonResult.error}`);
       // Continue anyway - the daemon might start later
@@ -2492,6 +3073,7 @@ app.post("/api/consoles", (req, res) => {
       last_attached_at: now,
       meta: meta || null,
       daemon_status: daemonResult.status || "unknown",
+      daemon_error: daemonResult.error || null,
       agent_id: daemonResult.agentId || null,
     });
   } catch (err) {
@@ -2590,12 +3172,26 @@ app.post("/api/consoles/:id/send", (req, res) => {
     // Get console session to find actor_id
     const agentsDb = openDB(agentsDbPath);
     const consoleSession = agentsDb.prepare(`
-      SELECT actor_id, session_id, workspace FROM console_sessions WHERE console_id = ?
+      SELECT actor_id, session_id, workspace, meta FROM console_sessions WHERE console_id = ?
     `).get(consoleId);
     agentsDb.close();
 
     if (!consoleSession) {
       return res.status(404).json({ error: "Console not found" });
+    }
+
+    let metaObj = null;
+    if (consoleSession.meta) {
+      try {
+        metaObj = JSON.parse(consoleSession.meta);
+      } catch (err) {
+        console.debug("Failed to parse console meta for send", err?.message || err);
+      }
+    }
+
+    const daemonResult = ensureAgentDaemon(consoleSession.actor_id, consoleSession.workspace || "", metaObj);
+    if (daemonResult.error) {
+      console.warn(`Failed to ensure agent daemon: ${daemonResult.error}`);
     }
 
     // Generate IDs
@@ -3105,7 +3701,6 @@ app.post("/api/agents", (req, res) => {
         state TEXT DEFAULT 'starting',
         llm_provider TEXT,
         llm_model TEXT,
-        llm_api_key TEXT,
         created_at TEXT NOT NULL,
         heartbeat_at TEXT
       )

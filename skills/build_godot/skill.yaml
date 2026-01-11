@@ -73,6 +73,15 @@ signature:
       required: false
       default: "dotnet"
       description: "Path to dotnet executable"
+  help:
+    short: "Build or export Godot projects."
+    long: |
+      Use build/godot to list presets, validate exports, or run exports/builds.
+      Example commands:
+        agentctl run build/godot --input '{"action":"list_presets"}'
+        agentctl skills run build/godot --action list_presets
+        agentctl run build/godot --input '{"action":"export","preset":"Windows Desktop","output_path":"exports/game.exe"}'
+        agentctl skills run build/godot --action export --preset "Windows Desktop" --output_path exports/game.exe
   returns:
     - name: presets
       type: array

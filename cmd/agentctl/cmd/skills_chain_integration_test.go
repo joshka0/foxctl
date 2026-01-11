@@ -43,7 +43,14 @@ func buildAgentctlBinary(t *testing.T) string {
 	// Build CLI without CGO to use pure-Go SQLite (modernc.org/sqlite) and avoid
 	// linker conflicts between go-libsql and mattn/go-sqlite3 when both are present.
 	env := append([]string{}, os.Environ()...)
-	env = append(env, "CGO_ENABLED=0", "GOFLAGS=-modcacherw -buildvcs=false")
+	env = withEnv(env, "CGO_ENABLED", "0")
+	env = withEnv(env, "GOFLAGS", "-modcacherw -buildvcs=false")
+	if stableGoModCache != "" {
+		env = withEnv(env, "GOMODCACHE", stableGoModCache)
+	}
+	if stableGoBuildCache != "" {
+		env = withEnv(env, "GOCACHE", stableGoBuildCache)
+	}
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	if err != nil {

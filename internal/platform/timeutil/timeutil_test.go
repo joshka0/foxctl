@@ -74,9 +74,9 @@ func TestMustParseRFC3339Nano(t *testing.T) {
 			wantZero: false,
 		},
 		{
-			name:     "invalid format returns zero time",
+			name:     "sqlite datetime format",
 			input:    "2024-01-15 10:30:45",
-			wantZero: true,
+			wantZero: false,
 		},
 		{
 			name:     "empty string returns zero time",

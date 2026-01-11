@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,15 +16,14 @@ import (
 	"sort"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 type input struct {
 	Path            string   `json:"path"`
-	Pattern         string   `json:"pattern"`
+	Pattern         string   `json:"pattern" validate:"required"`
 	CaseInsensitive bool     `json:"case_insensitive"`
 	Glob            []string `json:"glob"`
 	GlobNot         []string `json:"glob_not"`
@@ -85,30 +83,21 @@ type rawMatch struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/context_ripgrep", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/context_ripgrep", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/context_ripgrep", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/context_ripgrep", "ERUNTIME", err)
-	}
+	skillmain.Main("code/context_ripgrep", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.MaxMatches <= 0 {
+		in.MaxMatches = 10000
+	}
+	if in.MaxBlocks <= 0 {
+		in.MaxBlocks = 50
+	}
+	if in.MaxBlockLines <= 0 {
+		in.MaxBlockLines = 400
+	}
+
 	// Check if ripgrep is available
 	if _, err := exec.LookPath("rg"); err != nil {
 		return fmt.Errorf("ripgrep (rg) not found in PATH: %w", err)
@@ -206,30 +195,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("code/context_ripgrep", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, "code/context_ripgrep", data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if strings.TrimSpace(in.Pattern) == "" {
-		return input{}, errors.New("pattern is required")
-	}
-	if in.MaxMatches <= 0 {
-		in.MaxMatches = 10000
-	}
-	if in.MaxBlocks <= 0 {
-		in.MaxBlocks = 50
-	}
-	if in.MaxBlockLines <= 0 {
-		in.MaxBlockLines = 400
-	}
-	return in, nil
-}
-
-func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, string, error) {
+func resolveWorkspace(rc *skillmain.RunContext, candidate string) (string, string, error) {
 	workspace := rc.PathValidator.Workspace()
 	if strings.TrimSpace(candidate) == "" {
 		return workspace, workspace, nil
@@ -302,7 +271,7 @@ func parseRipgrepOutput(output []byte, workspace string, maxMatches int) ([]rawM
 			}
 
 			lineText := strings.TrimSuffix(matchData.Lines.Text, "\n")
-			relPath := relativeTo(workspace, matchData.Path.Text)
+			relPath := pathutil.RelTo(workspace, matchData.Path.Text)
 
 			matches = append(matches, rawMatch{
 				File: relPath,
@@ -327,7 +296,7 @@ func groupByFile(matches []rawMatch) map[string][]rawMatch {
 	return result
 }
 
-func emitEmptyResult(rc *runner.RunnerContext, in input) error {
+func emitEmptyResult(rc *skillmain.RunContext, in input) error {
 	data := map[string]any{
 		"pattern":          in.Pattern,
 		"case_insensitive": in.CaseInsensitive,
@@ -338,7 +307,7 @@ func emitEmptyResult(rc *runner.RunnerContext, in input) error {
 		"top_files":        [][2]any{},
 		"max_blocks":       in.MaxBlocks,
 	}
-	return rc.Emit("code/context_ripgrep", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, "code/context_ripgrep", data)
 }
 
 func prepareBlockPreview(blocks []Block, limit int) []BlockPreview {
@@ -367,37 +336,47 @@ func prepareBlockPreview(blocks []Block, limit int) []BlockPreview {
 	return previews
 }
 
-func persistBlocksArtifact(ctx context.Context, rc *runner.RunnerContext, blocks []Block) (runner.Artifact, error) {
+func persistBlocksArtifact(ctx context.Context, rc *skillmain.RunContext, blocks []Block) (skillmain.Artifact, error) {
 	// Always persist full blocks to CAS if we have any
 	if len(blocks) == 0 {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
 	for _, b := range blocks {
 		if err := enc.Encode(b); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode block: %w", err)
+			return skillmain.Artifact{}, fmt.Errorf("encode block: %w", err)
 		}
 	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_context_ripgrep")
+	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_context_ripgrep")
 }
 
-func relativeTo(base, target string) string {
-	if base == "" {
-		if rel, err := filepath.Rel(".", target); err == nil {
-			return filepath.ToSlash(rel)
-		}
-		return filepath.ToSlash(target)
+// parseInput parses and validates input from a reader.
+// Exported for testing.
+func parseInput(r io.Reader) (input, error) {
+	var in input
+	if err := json.NewDecoder(r).Decode(&in); err != nil {
+		return input{}, fmt.Errorf("decode input: %w", err)
 	}
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
+
+	// Apply defaults
+	if in.MaxMatches <= 0 {
+		in.MaxMatches = 10000
 	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
+	if in.MaxBlocks <= 0 {
+		in.MaxBlocks = 50
 	}
-	return filepath.ToSlash(rel)
+	if in.MaxBlockLines <= 0 {
+		in.MaxBlockLines = 400
+	}
+
+	// Validate required fields
+	if strings.TrimSpace(in.Pattern) == "" {
+		return input{}, fmt.Errorf("pattern is required")
+	}
+
+	return in, nil
 }
 
 func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
@@ -428,8 +407,3 @@ func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
 	return out
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/context_ripgrep failure")
-	os.Exit(1)
-}

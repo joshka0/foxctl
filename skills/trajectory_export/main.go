@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/platform/secrets"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -220,36 +217,14 @@ func sortStrings(v []string) {
 	}
 }
 
+const command = "trajectory.export"
+
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("trajectory.export", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("trajectory.export", "ERUNTIME", err)
-	}
-	defer func() {
-		errspkg.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("trajectory.export", "EARG", err)
-	}
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("trajectory.export", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	dec := json.NewDecoder(r)
-	if err := dec.Decode(&in); err != nil {
-		return input{}, err
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Normalize input
 	in.WorkspaceID = strings.TrimSpace(in.WorkspaceID)
 	in.TaskID = strings.TrimSpace(in.TaskID)
 	in.EpicID = strings.TrimSpace(in.EpicID)
@@ -261,10 +236,7 @@ func parseInput(r io.Reader) (input, error) {
 	if in.Limit <= 0 {
 		in.Limit = 100
 	}
-	return in, nil
-}
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
 	if in.WorkspaceID == "" {
 		return fmt.Errorf("workspace_id required")
 	}
@@ -282,7 +254,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		return err
 	}
 
-	store, err := trajectory.Open(ctx, cfg.Storage.Root)
+	store, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return err
 	}
@@ -314,7 +286,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 				"estimated_bytes": estimatedBytes,
 			},
 		}
-		return rc.Emit("trajectory.export", secrets.RedactMap(data), "application/json", envelope.Meta{Runner: "exec"})
+		return skillout.Emit(rc, command, secrets.RedactMap(data))
 	}
 
 	count, digest, err := writeEpisodesToCAS(ctx, exp, filter, rc.CASStore)
@@ -335,7 +307,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 		"artifact": digest,
 	}
 
-	return rc.Emit("trajectory.export", secrets.RedactMap(data), "application/json", envelope.Meta{Runner: "exec"})
+	return skillout.Emit(rc, command, secrets.RedactMap(data))
 }
 
 func parseExportTime(v string) (time.Time, error) {
@@ -425,13 +397,3 @@ func writeEpisodesToCAS(ctx context.Context, exp exporter, filter trajectory.Lis
 	return res.count, obj.Digest, nil
 }
 
-func fail(command string, code string, err error) {
-	data := map[string]any{"cause": err.Error()}
-	env := envelope.Error(command, code, err.Error(), data, envelope.WithMetaMutator(func(m *envelope.Meta) {
-		m.Source = "run"
-		m.Runner = "exec"
-	}))
-	// Error envelope write in fail path; error is not actionable.
-	_ = envelope.Write(os.Stdout, env) //nolint:errcheck
-	os.Exit(1)
-}

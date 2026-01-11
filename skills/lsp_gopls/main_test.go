@@ -8,10 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/rs/zerolog"
 )
 
 func skipIfNoGopls(t *testing.T) {
@@ -21,24 +25,44 @@ func skipIfNoGopls(t *testing.T) {
 	}
 }
 
-func newTestRunnerContext(t *testing.T, stdout *bytes.Buffer, workspace string) *runner.RunnerContext {
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
 	t.Helper()
 	t.Setenv("AGENTCTL_WORKSPACE", workspace)
+	state := t.TempDir()
+	casPath := filepath.Join(state, "cas")
+	casStore, err := cas.NewStore(casPath)
+	if err != nil {
+		t.Fatalf("open cas: %v", err)
+	}
+
+	pv, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		t.Fatalf("path validator: %v", err)
+	}
+
 	cfg := config.Config{
-		Home:           workspace,
+		Home:           state,
 		InlineOutputKB: 64,
 		MaxCaptureKB:   10240,
 		Paths: config.Paths{
-			CAS:   filepath.Join(workspace, "cas"),
-			Jobs:  filepath.Join(workspace, "jobs"),
-			Cache: filepath.Join(workspace, "cache"),
+			CAS:   casPath,
+			Jobs:  filepath.Join(state, "jobs"),
+			Cache: filepath.Join(state, "cache"),
 		},
 	}
-	rc, err := runner.NewRunnerContext(cfg, stdout)
-	if err != nil {
-		t.Fatalf("runner context: %v", err)
+
+	return &skillmain.RunContext{
+		Config:        cfg,
+		CASStore:      casStore,
+		Workspace:     workspace,
+		Logger:        zerolog.Nop(),
+		PathValidator: pv,
+		Validator:     validator.New(),
+		Stdout:        stdout,
+		Now:           time.Now,
+		InlineKB:      cfg.InlineOutputKB,
+		MaxPreview:    100,
 	}
-	return rc
 }
 
 func setupTestWorkspace(t *testing.T) string {
@@ -108,10 +132,10 @@ func TestSymbols(t *testing.T) {
 	defer os.Chdir(cwd)
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Operation:  "symbols",
 		File:       "main.go",
 		MaxResults: 50,
@@ -174,12 +198,12 @@ func TestReferences(t *testing.T) {
 	defer os.Chdir(cwd)
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
 	// Find references to NewHandler (line 23, col 6 based on test file)
 	// The test file has: func NewHandler(name string) *MyHandler {
-	in := input{
+	in := Input{
 		Operation:  "references",
 		File:       "main.go",
 		Line:       23,
@@ -224,10 +248,10 @@ func TestWorkspaceSymbol(t *testing.T) {
 	defer os.Chdir(cwd)
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
-	in := input{
+	in := Input{
 		Operation:  "workspace_symbol",
 		Query:      "Handler",
 		MaxResults: 50,
@@ -284,11 +308,11 @@ func TestDefinition(t *testing.T) {
 	defer os.Chdir(cwd)
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
 	// Find definition of NewHandler call in main() (line 29)
-	in := input{
+	in := Input{
 		Operation:  "definition",
 		File:       "main.go",
 		Line:       29,
@@ -342,12 +366,12 @@ func TestCallHierarchy(t *testing.T) {
 	defer os.Chdir(cwd)
 
 	stdout := &bytes.Buffer{}
-	rc := newTestRunnerContext(t, stdout, work)
-	defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
 	// Get call hierarchy for processInternal (line 18, col 21 based on test file)
 	// The test file has: func (h *MyHandler) processInternal(req string) string {
-	in := input{
+	in := Input{
 		Operation:  "call_hierarchy",
 		File:       "main.go",
 		Line:       18,
@@ -387,53 +411,32 @@ func TestCallHierarchy(t *testing.T) {
 	}
 }
 
-func TestParseInput(t *testing.T) {
+func TestNormalizeInput(t *testing.T) {
 	tests := []struct {
-		name    string
-		json    string
-		wantErr bool
-		check   func(t *testing.T, in input)
+		name  string
+		input Input
+		check func(t *testing.T, in Input)
 	}{
 		{
-			name: "symbols operation",
-			json: `{"operation": "symbols", "file": "main.go"}`,
-			check: func(t *testing.T, in input) {
-				if in.Operation != "symbols" {
-					t.Errorf("expected operation 'symbols', got %q", in.Operation)
-				}
-				if in.File != "main.go" {
-					t.Errorf("expected file 'main.go', got %q", in.File)
-				}
+			name: "symbols operation defaults",
+			input: Input{
+				Operation: "symbols",
+				File:      "main.go",
+			},
+			check: func(t *testing.T, in Input) {
 				if in.MaxResults != 50 {
 					t.Errorf("expected default max_results 50, got %d", in.MaxResults)
 				}
 			},
 		},
 		{
-			name: "references with position",
-			json: `{"operation": "references", "file": "test.go", "line": 10, "column": 5}`,
-			check: func(t *testing.T, in input) {
-				if in.Line != 10 {
-					t.Errorf("expected line 10, got %d", in.Line)
-				}
-				if in.Column != 5 {
-					t.Errorf("expected column 5, got %d", in.Column)
-				}
+			name: "defaults applied for column",
+			input: Input{
+				Operation: "symbols",
+				File:      "x.go",
+				Line:      1,
 			},
-		},
-		{
-			name: "workspace_symbol with query",
-			json: `{"operation": "workspace_symbol", "query": "Handler"}`,
-			check: func(t *testing.T, in input) {
-				if in.Query != "Handler" {
-					t.Errorf("expected query 'Handler', got %q", in.Query)
-				}
-			},
-		},
-		{
-			name: "defaults applied",
-			json: `{"operation": "symbols", "file": "x.go", "line": 1}`,
-			check: func(t *testing.T, in input) {
+			check: func(t *testing.T, in Input) {
 				if in.Column != 1 {
 					t.Errorf("expected default column 1, got %d", in.Column)
 				}
@@ -442,25 +445,12 @@ func TestParseInput(t *testing.T) {
 				}
 			},
 		},
-		{
-			name:    "invalid json",
-			json:    `{invalid`,
-			wantErr: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			in, err := parseInput(bytes.NewBufferString(tt.json))
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			in := tt.input
+			normalizeInput(&in)
 			if tt.check != nil {
 				tt.check(t, in)
 			}
@@ -604,27 +594,22 @@ func TestOperationValidation(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		input   input
+		input   Input
 		wantErr bool
 	}{
 		{
 			name:    "symbols without file",
-			input:   input{Operation: "symbols"},
+			input:   Input{Operation: "symbols"},
 			wantErr: true,
 		},
 		{
 			name:    "references without line",
-			input:   input{Operation: "references", File: "main.go"},
+			input:   Input{Operation: "references", File: "main.go"},
 			wantErr: true,
 		},
 		{
 			name:    "workspace_symbol without query",
-			input:   input{Operation: "workspace_symbol"},
-			wantErr: true,
-		},
-		{
-			name:    "unknown operation",
-			input:   input{Operation: "unknown"},
+			input:   Input{Operation: "workspace_symbol"},
 			wantErr: true,
 		},
 	}
@@ -632,8 +617,8 @@ func TestOperationValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			stdout := &bytes.Buffer{}
-			rc := newTestRunnerContext(t, stdout, work)
-			defer func() { errs.Ignore(rc.Close(), "cleanup") }()
+			rc := newTestRunContext(t, stdout, work)
+			defer rc.Close()
 
 			err := run(ctx, rc, tt.input)
 			if tt.wantErr && err == nil {

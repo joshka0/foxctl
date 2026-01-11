@@ -41,6 +41,28 @@ signature:
       required: false
       default: 50
       description: "Maximum number of results to return"
+  help:
+    short: "Query TypeScript/JavaScript symbols and diagnostics."
+    long: |
+      Use lsp/tsserver to query TypeScript/JavaScript language server operations.
+      Example commands:
+        agentctl run lsp/tsserver --input '{"operation":"definition","file":"src/index.ts","line":15,"column":3}'
+        agentctl skills run lsp/tsserver --operation definition --file src/index.ts --line 15 --column 3
+        agentctl run lsp/tsserver --input '{"operation":"workspace_symbol","query":"useEffect"}'
+        agentctl skills run lsp/tsserver --operation workspace_symbol --query useEffect
+    workflows:
+      - id: find-definition
+        description: "Find a definition in a TS file."
+        example_input:
+          operation: "definition"
+          file: "src/index.ts"
+          line: 15
+          column: 3
+      - id: search-symbols
+        description: "Search workspace symbols."
+        example_input:
+          operation: "workspace_symbol"
+          query: "useEffect"
 returns:
   - name: results
     type: array

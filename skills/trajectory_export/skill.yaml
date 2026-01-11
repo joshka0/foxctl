@@ -52,6 +52,19 @@ signature:
     - name: dry_run
       type: boolean
       required: false
+  help:
+    short: "Export trajectories as DSPy-ready episodes."
+    long: |
+      Use trajectory/export to export stored trajectories.
+      Example commands:
+        agentctl run trajectory/export --input '{"workspace_id":"default","limit":10}'
+        agentctl skills run trajectory/export --workspace_id default --limit 10
+    workflows:
+      - id: export-trajectories
+        description: "Export the latest trajectories."
+        example_input:
+          workspace_id: "default"
+          limit: 10
   returns:
     - name: summary
       type: object

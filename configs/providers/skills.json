@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "providers": {
+    "claude": {
+      "target_dir": "~/.claude/skills",
+      "legacy_dir": "~/.claude/skills-legacy",
+      "sources": ["configs/skills-pack"],
+      "prune_sources": ["configs/skills-condensed"]
+    },
+    "codex": {
+      "target_dir": "~/.codex/skills",
+      "legacy_dir": "~/.codex/skills-legacy",
+      "sources": ["configs/skills-pack"],
+      "prune_sources": ["configs/skills-condensed"]
+    },
+    "opencode": {
+      "target_dir": "~/.config/opencode/skill",
+      "legacy_dir": "~/.config/opencode/skill-legacy",
+      "sources": ["configs/skills-pack"],
+      "prune_sources": ["configs/skills-condensed"]
+    }
+  }
+}

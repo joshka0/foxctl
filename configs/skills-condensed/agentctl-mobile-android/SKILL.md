@@ -36,4 +36,4 @@ agentctl run mobile/android --input '{"operation": "<op>", ...}'
 | `push_file` | `local_path`, `remote_path` | Upload file |
 | `open_url` | `url` | Open URL/deep link |
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-mobile-android/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-mobile-android/Skill.md`

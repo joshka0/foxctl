@@ -33,4 +33,4 @@ agentctl run mailbox --input '{"operation": "<op>", ...}'
 
 Set mode: `AGENTCTL_FILE_GUARD_MODE=strict`
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-reservations/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-reservations/Skill.md`

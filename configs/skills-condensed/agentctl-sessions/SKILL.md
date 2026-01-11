@@ -28,4 +28,4 @@ Returns sessions with: summary, decisions, gotchas, files modified.
 
 Requires `GEMINI_API_KEY` for embeddings.
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-sessions/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-sessions/Skill.md`

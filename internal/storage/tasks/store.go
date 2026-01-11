@@ -30,6 +30,8 @@ type Store interface {
 	Get(ctx context.Context, id string) (Task, error)
 	// ListByWorkspace returns tasks scoped to a workspace.
 	ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error)
+	// ListWithOptions returns tasks scoped to a workspace with filtering options.
+	ListWithOptions(ctx context.Context, workspaceID string, opts ListOptions) ([]Task, error)
 	// ListByPlanFile returns tasks linked to a specific plan file.
 	ListByPlanFile(ctx context.Context, planFile string) ([]Task, error)
 	// ListAll returns all tasks (for embedding operations).
@@ -80,6 +82,13 @@ type Task struct {
 
 	// Session tracking - links task to AI coding tool session
 	SessionID string // AI coding tool session ID (Claude Code, OpenCode, Cursor, etc.)
+}
+
+// ListOptions configures task list queries.
+type ListOptions struct {
+	SessionID string   // Filter by session ID (empty = all sessions)
+	Statuses  []string // Filter by status (empty = all statuses)
+	Limit     int      // Max results (0 = no limit)
 }
 
 // Task status constants per review_gate.md
@@ -306,6 +315,52 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 		// Rows cleanup in defer; error is not actionable after iteration.
 		_ = rows.Close() //nolint:errcheck
 	}()
+
+	var tasks []Task
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// ListWithOptions returns tasks scoped to a workspace with filtering options.
+func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts ListOptions) ([]Task, error) {
+	// Build query with optional filters
+	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id FROM tasks WHERE workspace_id = ?`
+	args := []any{workspaceID}
+
+	if opts.SessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, opts.SessionID)
+	}
+
+	if len(opts.Statuses) > 0 {
+		placeholders := ""
+		for i, status := range opts.Statuses {
+			if i > 0 {
+				placeholders += ", "
+			}
+			placeholders += "?"
+			args = append(args, status)
+		}
+		query += ` AND status IN (` + placeholders + `)`
+	}
+
+	query += ` ORDER BY created_at DESC`
+
+	if opts.Limit > 0 {
+		query += fmt.Sprintf(` LIMIT %d`, opts.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list with options: %w", err)
+	}
+	defer rows.Close()
 
 	var tasks []Task
 	for rows.Next() {

@@ -21,24 +21,54 @@ signature:
       description: "Hook event type (e.g., PreToolUse)"
     - name: workspace_root
       type: string
-      required: true
+      required: false
       description: "Absolute path to workspace root"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
     - name: session_id
       type: string
       required: false
       description: "Claude session identifier"
+    - name: actor_id
+      type: string
+      required: false
+      description: "Actor identifier"
     - name: tool_name
       type: string
       required: false
       description: "Name of the tool being used"
+    - name: tool_canonical
+      type: string
+      required: false
+      description: "Canonical tool name (edit.apply_patch, fs.read_file, etc.)"
+    - name: tool_kind
+      type: string
+      required: false
+      description: "Tool category: read, write, exec, search, any"
     - name: tool_input
       type: object
       required: false
       description: "Raw JSON input to the tool"
-returns:
-  - name: hook_output
-    type: object
-    description: "Hook output with decision, context containing messages, and metadata"
+  help:
+    short: "Surface overseer inbox messages in hooks."
+    long: |
+      Use hooks/overseer_inbox to fetch mailbox messages before tool use.
+      Example commands:
+        agentctl run hooks/overseer_inbox --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
+        agentctl skills run hooks/overseer_inbox --event PreToolUse --workspace_root /workspace/project --tool_name Edit
+    workflows:
+      - id: check-inbox
+        description: "Check for overseer messages."
+        example_input:
+          event: "PreToolUse"
+          workspace_root: "/workspace/project"
+          tool_name: "Edit"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Hook output with decision, context containing messages, and metadata"
 capabilities:
   network: "none"
   filesystem:

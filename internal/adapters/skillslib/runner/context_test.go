@@ -21,7 +21,7 @@ func TestEmitDoesNotSetMetaCasDigestWhenArtifactPresent(t *testing.T) {
 		"artifact": "sha256:abc123",
 		"foo":      "bar",
 	}
-	if err := c.Emit("demo", data, "application/json", envelope.Meta{Source: "run"}); err != nil {
+	if err := Emit(c, "demo", data, "application/json", envelope.Meta{Source: "run"}); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 
@@ -41,7 +41,7 @@ func TestEmitPreservesExistingCasDigest(t *testing.T) {
 	digest := "sha256:existing"
 	meta := envelope.Meta{Source: "run", CASDigest: digest}
 	data := map[string]any{"artifact": digest}
-	if err := c.Emit("demo", data, "application/json", meta); err != nil {
+	if err := Emit(c, "demo", data, "application/json", meta); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestEmitWithNilData(t *testing.T) {
 	buf := &bytes.Buffer{}
 	c := &RunnerContext{Stdout: buf}
 
-	if err := c.Emit("cmd", nil, "application/json", envelope.Meta{}); err != nil {
+	if err := Emit(c, "cmd", nil, "application/json", envelope.Meta{}); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
 

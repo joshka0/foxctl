@@ -46,6 +46,27 @@ signature:
       required: false
       default: 500
       description: "Maximum number of results"
+  help:
+    short: "Analyze imports and dependencies."
+    long: |
+      Use code/imports to list imports or analyze dependency graphs.
+      Example commands:
+        agentctl run code/imports --input '{"path":"./src","query_type":"list"}'
+        agentctl skills run code/imports --path ./src --query_type list
+        agentctl run code/imports --input '{"path":"./src","query_type":"graph","max_depth":2}'
+        agentctl skills run code/imports --path ./src --query_type graph --max_depth 2
+    workflows:
+      - id: list-imports
+        description: "List imports for a directory."
+        example_input:
+          path: "./src"
+          query_type: "list"
+      - id: dependency-graph
+        description: "Generate a dependency graph."
+        example_input:
+          path: "./src"
+          query_type: "graph"
+          max_depth: 2
 returns:
   - name: imports
     type: array

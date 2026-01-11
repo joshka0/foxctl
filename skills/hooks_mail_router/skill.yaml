@@ -1,0 +1,76 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/mail_router
+  version: 0.1.0
+  description: "Hook that surfaces relevant mailbox messages into context"
+  tags: ["hook", "mailbox", "inbox", "context", "pre-tool-use"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_mail_router/mail_router
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: hooks/mail_router
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event type (e.g., PreToolUse)"
+    - name: workspace_root
+      type: string
+      required: false
+      description: "Absolute path to workspace root"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
+    - name: session_id
+      type: string
+      required: false
+      description: "Claude session identifier"
+    - name: actor_id
+      type: string
+      required: false
+      description: "Actor identifier"
+    - name: tool_name
+      type: string
+      required: false
+      description: "Name of the tool being used"
+    - name: tool_canonical
+      type: string
+      required: false
+      description: "Canonical tool name (edit.apply_patch, fs.read_file, etc.)"
+    - name: tool_kind
+      type: string
+      required: false
+      description: "Tool category: read, write, exec, search, any"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Raw JSON input to the tool"
+  help:
+    short: "Surface relevant mailbox messages in hooks."
+    long: |
+      Use hooks/mail_router to fetch mailbox messages and inject them into context.
+      Example commands:
+        agentctl run hooks/mail_router --input '{"event":"PreToolUse","workspace_root":"/workspace/project","tool_name":"Read"}'
+        agentctl skills run hooks/mail_router --event PreToolUse --workspace_root /workspace/project --tool_name Read
+    workflows:
+      - id: check-mailbox
+        description: "Check inbox for relevant messages."
+        example_input:
+          event: "PreToolUse"
+          workspace_root: "/workspace/project"
+          tool_name: "Read"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Hook output with decision, context containing messages, and metadata"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

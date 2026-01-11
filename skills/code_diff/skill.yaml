@@ -39,6 +39,30 @@ signature:
       required: false
       default: false
       description: "Ignore whitespace changes"
+  help:
+    short: "Compare two files and emit diffs or stats."
+    long: |
+      Use code/diff to compare two files and produce unified diffs or summary
+      statistics.
+      Example commands:
+        agentctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"unified"}'
+        agentctl skills run code/diff --old_path ./before.go --new_path ./after.go --format unified
+        agentctl run code/diff --input '{"old_path":"./before.go","new_path":"./after.go","format":"stats","ignore_whitespace":true}'
+        agentctl skills run code/diff --old_path ./before.go --new_path ./after.go --format stats --ignore_whitespace
+    workflows:
+      - id: unified-diff
+        description: "Show a unified diff."
+        example_input:
+          old_path: "./before.go"
+          new_path: "./after.go"
+          format: "unified"
+      - id: stats-diff
+        description: "Show stats, ignoring whitespace."
+        example_input:
+          old_path: "./before.go"
+          new_path: "./after.go"
+          format: "stats"
+          ignore_whitespace: true
 returns:
   - name: diff
     type: object

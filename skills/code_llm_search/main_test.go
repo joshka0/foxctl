@@ -2,9 +2,51 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 )
+
+// applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).
+func applyDefaultsAndValidate(in *Input) error {
+	// Validate required fields
+	if in.Question == "" {
+		return fmt.Errorf("question is required")
+	}
+	if len(in.Candidates) == 0 {
+		return fmt.Errorf("candidates is required")
+	}
+	// Apply defaults
+	if in.WorkspaceID == "" {
+		in.WorkspaceID = "default"
+	}
+	if in.Limits.MaxCandidates <= 0 {
+		in.Limits.MaxCandidates = DefaultMaxCandidates
+	}
+	if in.Limits.Timeout <= 0 {
+		in.Limits.Timeout = DefaultTimeout
+	}
+	// Limit candidates
+	if len(in.Candidates) > in.Limits.MaxCandidates {
+		in.Candidates = in.Candidates[:in.Limits.MaxCandidates]
+	}
+	return nil
+}
+
+// parseInput is a test helper that parses JSON, applies defaults, and validates.
+func parseInput(r io.Reader) (Input, error) {
+	in, err := skilltest.ParseInput[Input](r)
+	if err != nil {
+		return in, err
+	}
+	if err := applyDefaultsAndValidate(&in); err != nil {
+		return in, err
+	}
+	return in, nil
+}
 
 func TestParseInput_RequiresQuestion(t *testing.T) {
 	input := `{"candidates": [{"path": "test.go"}]}`

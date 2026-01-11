@@ -31,31 +31,48 @@ signature:
       type: boolean
       required: false
       description: "Preview chunks without saving (default: false)"
-returns:
-  - name: session_id
-    type: string
-    description: "The session ID"
-  - name: archive_path
-    type: string
-    description: "Path to the compressed archive"
-  - name: original_size
-    type: integer
-    description: "Original file size in bytes"
-  - name: compressed_size
-    type: integer
-    description: "Compressed file size in bytes"
-  - name: chunk_count
-    type: integer
-    description: "Number of chunks created"
-  - name: chunks
-    type: array
-    description: "Info about each chunk (in dry_run mode)"
-  - name: status
-    type: string
-    description: "Status of the archive operation"
-  - name: message
-    type: string
-    description: "Human-readable status message"
+  help:
+    short: "Archive session JSONL into chunks."
+    long: |
+      Use session/archive to compress and chunk a session JSONL file.
+      Example commands:
+        agentctl run session/archive --input '{"session_id":"01HXYZ...","dry_run":true}'
+        agentctl skills run session/archive --session_id 01HXYZ... --dry_run
+    workflows:
+      - id: archive-session
+        description: "Archive a session."
+        example_input:
+          session_id: "01HXYZ..."
+      - id: archive-dry-run
+        description: "Preview chunks without saving."
+        example_input:
+          session_id: "01HXYZ..."
+          dry_run: true
+  returns:
+    - name: session_id
+      type: string
+      description: "The session ID"
+    - name: archive_path
+      type: string
+      description: "Path to the compressed archive"
+    - name: original_size
+      type: integer
+      description: "Original file size in bytes"
+    - name: compressed_size
+      type: integer
+      description: "Compressed file size in bytes"
+    - name: chunk_count
+      type: integer
+      description: "Number of chunks created"
+    - name: chunks
+      type: array
+      description: "Info about each chunk (in dry_run mode)"
+    - name: status
+      type: string
+      description: "Status of the archive operation"
+    - name: message
+      type: string
+      description: "Human-readable status message"
 capabilities:
   network: "none"
   filesystem:

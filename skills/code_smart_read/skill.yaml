@@ -1,0 +1,113 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/smart_read
+  version: 0.1.0
+  description: "Intelligent file reading with auto-selection and context-aware extraction"
+  tags: ["code", "read", "context", "retrieval", "snippets"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_smart_read/code_smart_read
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: code/smart_read
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "Natural-language question guiding file selection and extraction"
+    - name: files
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Explicit file paths to read (optional, overrides auto-selection)"
+    - name: auto_files
+      type: boolean
+      required: false
+      description: "Enable automatic file selection based on query (default: true)"
+    - name: max_files
+      type: integer
+      required: false
+      description: "Maximum number of files to process (default: 8)"
+    - name: mode
+      type: string
+      required: false
+      enum: ["general", "structure", "flow", "masked"]
+      description: |
+        Extraction mode:
+        - general: Extract relevant snippets (default)
+        - structure: Show API shape (signatures, types, imports)
+        - flow: Follow control flow and function calls
+        - masked: Full file with irrelevant sections redacted
+    - name: max_bytes_per_file
+      type: integer
+      required: false
+      description: "Maximum bytes to read per file (default: 200KB)"
+    - name: context_lines
+      type: integer
+      required: false
+      description: "Lines of context around matches (default: 5)"
+  returns:
+    - name: evidence
+      type: object
+      description: "Extracted code evidence with snippets and metadata"
+    - name: candidates
+      type: array
+      description: "Files considered when auto_files=true"
+    - name: stats
+      type: object
+      description: "Processing stats: latency, files processed, snippets found"
+  help:
+    short: "Intelligently read and extract relevant code based on a query."
+    long: |
+      Smart Read is the entry point for the Code Context Funnel. It provides:
+
+      1. **Auto-selection**: When auto_files=true (default), uses symbol index,
+         semantic search, and ripgrep to find the most relevant files for your query.
+
+      2. **Context-aware extraction**: Extracts only the relevant portions of files
+         based on your question, not entire file contents.
+
+      3. **Multiple modes**:
+         - general: Extract snippets around keyword matches
+         - structure: Show API shape (function signatures, type definitions)
+         - flow: Follow function calls and control flow
+         - masked: Full file with irrelevant sections redacted
+
+      Environment Variables:
+      - VOYAGE_API_KEY: Enables semantic search for better file selection
+      - GEMINI_API_KEY: Alternative for semantic search
+
+      Example commands:
+        # Auto-select files and extract snippets
+        agentctl run code/smart_read --input '{"query": "user authentication flow"}'
+
+        # Read specific files
+        agentctl run code/smart_read --input '{"query": "how does login work", "files": ["auth/login.go"]}'
+
+        # Get API structure only
+        agentctl run code/smart_read --input '{"query": "auth API", "mode": "structure", "max_files": 5}'
+
+    workflows:
+      - id: explore-codebase
+        description: "Explore codebase to understand a feature or concept."
+        example_input:
+          query: "How does user authentication work?"
+          auto_files: true
+          max_files: 8
+          mode: "general"
+      - id: understand-api
+        description: "Get API shape for a module."
+        example_input:
+          query: "storage API"
+          mode: "structure"
+          max_files: 10
+capabilities:
+  network: "egress"  # For embedding API calls (semantic search)
+  filesystem:
+    - type: workdir
+  pure: false  # Uses external embedding API when available

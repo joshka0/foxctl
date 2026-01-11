@@ -27,28 +27,41 @@ signature:
       type: integer
       required: false
       description: "Maximum number of turns to return (default: 100)"
-returns:
-  - name: session_id
-    type: string
-    description: "The session ID"
-  - name: session
-    type: object
-    description: "Session metadata (project, summary, decisions, etc.)"
-  - name: turns
-    type: array
-    description: "List of conversation turns with metadata"
-  - name: total_turns
-    type: integer
-    description: "Total number of turns returned"
-  - name: error_count
-    type: integer
-    description: "Number of turns that had errors"
-  - name: status
-    type: string
-    description: "Status of the expand operation"
-  - name: message
-    type: string
-    description: "Human-readable status message"
+  help:
+    short: "Expand a session into turns."
+    long: |
+      Use session/expand to retrieve conversation turns for a session.
+      Example commands:
+        agentctl run session/expand --input '{"session_id":"01HXYZ...","limit":20}'
+        agentctl skills run session/expand --session_id 01HXYZ... --limit 20
+    workflows:
+      - id: expand-session
+        description: "Expand a session with a limit."
+        example_input:
+          session_id: "01HXYZ..."
+          limit: 20
+  returns:
+    - name: session_id
+      type: string
+      description: "The session ID"
+    - name: session
+      type: object
+      description: "Session metadata (project, summary, decisions, etc.)"
+    - name: turns
+      type: array
+      description: "List of conversation turns with metadata"
+    - name: total_turns
+      type: integer
+      description: "Total number of turns returned"
+    - name: error_count
+      type: integer
+      description: "Number of turns that had errors"
+    - name: status
+      type: string
+      description: "Status of the expand operation"
+    - name: message
+      type: string
+      description: "Human-readable status message"
 capabilities:
   network: "none"
   filesystem:

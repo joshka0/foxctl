@@ -41,6 +41,33 @@ export interface TaskStats {
   completed: number;
 }
 
+export interface AgentSummary {
+  id: string;
+  parent_id?: string | null;
+  ns: string;
+  role?: string | null;
+  skills_allow?: string | null;
+  policy?: string | null;
+  share_bb?: string | null;
+  state: string;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  created_at: string;
+  heartbeat_at?: string | null;
+}
+
+export interface AgentDetail extends AgentSummary {
+  prompt?: string | null;
+  llm_api_key?: string | null;
+}
+
+export interface AgentDaemonStartResult {
+  actor_id: string;
+  agentId?: string;
+  status?: string;
+  error?: string;
+}
+
 export interface JobStats {
   total: number;
   by_state: Record<string, number>;

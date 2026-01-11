@@ -8,12 +8,25 @@ node_modules/
 bun.lockb
 packages/*/dist/
 packages/*/*.tsbuildinfo
+configs/opencode-hooks/dist/
 web-ui/dist/
 web-ui/.vite/
 
 # Go build output
 *.test
 *.out
+
+.gomodcache/
+dspy-go/
+
+# SQLite databases (except test fixtures)
+*.db
+*.db-shm
+*.db-wal
+!test/**/*.db
+
+# Logs
+*.log
 
 # Editor noise
 .DS_Store
@@ -27,106 +40,74 @@ web-ui/.vite/
 *.token
 *.key
 
-# Dev binaries and symlinks (root directory)
-# Created by running `go build ./skills/X` without -o flag from repo root
-# Use `make skills-build` instead which outputs to dist/skills/
-/opentui
-/mcp_bridge
-/mcp_install
-/code_swe_grep
-/code_incremental_index
-/code_llm_search
-/code_universal_swe_grep
-/build_godot
-/agentctl_viewer
-/text_replace
-/editor_godot
-/embedding_tasks
-/embedding_worker
-/graph
-/graph_pagerank
-/plan_sync
-/session_save
-/session_capture
-/session_summarize
-/todo
-/code_semantic_search
+# Dev binaries in root directory
+# Created by running `go build ./cmd/X` or `go build ./skills/X` without -o flag
+# Use `make build` or `make skills-install` instead
+/agentctl
+/agentctl-cgo
+/cove_verify
 
-# Skill binaries (match directory name pattern)
-# Each skill directory contains a binary with the same name as the directory
-skills/build_godot/build_godot
-skills/ci_github_checks/ci_github_checks
-skills/ci_prcomments/ci_prcomments
-skills/code_complexity/code_complexity
-skills/code_context_ripgrep/code_context_ripgrep
-skills/code_diff/code_diff
-skills/code_git/code_git
-skills/code_imports/code_imports
-skills/code_incremental_index/code_incremental_index
-skills/code_llm_search/code_llm_search
-skills/code_security/code_security
-skills/code_stats/code_stats
-skills/code_swe_grep/code_swe_grep
-skills/code_symbols/code_symbols
-skills/code_universal_swe_grep/code_universal_swe_grep
-skills/context_filter/context_filter
-skills/data_jq/data_jq
-skills/editor_godot/editor_godot
-skills/embedding_queue/embedding_queue
-skills/fs_apply_edit/fs_apply_edit
-skills/fs_find/fs_find
-skills/fs_ls/fs_ls
-skills/fs_read/fs_read
-skills/fs_tree/fs_tree
-skills/fs_write/fs_write
-skills/git_status/git_status
-skills/git_worktree/git_worktree
-skills/hooks_file_guard/hooks_file_guard
-skills/hooks_knowledge_router/hooks_knowledge_router
-skills/hooks_mail_router/hooks_mail_router
-skills/hooks_task_guard/hooks_task_guard
-skills/hooks_test_feedback/hooks_test_feedback
-skills/http_openapi/http_openapi
-skills/json_transform/json_transform
-skills/lsp_gopls/lsp_gopls
-skills/lsp_pylsp/lsp_pylsp
-skills/lsp_tsserver/lsp_tsserver
-skills/mailbox/mailbox
-skills/mcp_bridge/mcp_bridge
-skills/mcp_install/mcp_install
-skills/mobile/mobile
-skills/mobile_android/mobile_android
-skills/mobile_ios/mobile_ios
-skills/optimize_analyze/optimize_analyze
-skills/optimize_bootstrap/optimize_bootstrap
-skills/optimize_feedback/optimize_feedback
-skills/optimize_patterns/optimize_patterns
-skills/optimize_reflect/optimize_reflect
-skills/optimize_weights/optimize_weights
-skills/plan_sync/plan_sync
-skills/session_capture/session_capture
-skills/session_restore/session_restore
-skills/session_save/session_save
-skills/session_summarize/session_summarize
-skills/skill_inspect/skill_inspect
-skills/test_run/test_run
-skills/text_grep/text_grep
-skills/text_replace/text_replace
-skills/text_ripgrep/text_ripgrep
-skills/todo/todo
-skills/trajectory_export/trajectory_export
-skills/code_semantic_search/code_semantic_search
-skills/embedding_tasks/embedding_tasks
-skills/embedding_worker/embedding_worker
-skills/graph/graph
-skills/graph_pagerank/graph_pagerank
-skills/hooks_session_end/hooks_session_end
-skills/optimize_from_feedback/optimize_from_feedback
-skills/session_feedback/session_feedback
-skills/memory_query/memory_query
-skills/memory_query/bin
-skills/codemap_list/bin
-skills/codemap_get/bin
+# Skill binaries accidentally built in root (match skill directory names)
+# Pattern: any underscore-separated name that matches skills/*/ directories
+/build_godot
+/ci_*
+/code_*
+/context_*
+/data_*
+/editor_*
+/embedding_*
+/expo
+/fs_*
+/git_*
+/graph
+/graph_*
+/hooks_*
+/html_*
+/http_*
+/json_*
+/lsp_*
+/mailbox
+/mcp_*
+/memory_*
+/mobile
+/mobile_*
+/optimize_*
+/opentui
+/plan_*
+/providers
+/session_*
+/skill_*
+/test_*
+/text_*
+/todo
+/trajectory_*
+/verification_*
+/wasi_*
+/web_*
+/x402_*
+
+# Compiled extensions
+extensions/*.so
+extensions/*.dylib
+
+# Skill binaries - wildcard pattern
+# Ignore everything in skill directories except source files
+skills/*/*
+!skills/*/*.go
+!skills/*/*.yaml
+!skills/*/*.md
+!skills/*/*.json
+!skills/*/*.gd
+!skills/*/*.wasm
+!skills/*/*.cfg
+!skills/*/.keep
+!skills/*/godot_plugin/
+skills/*/godot_plugin/*
+!skills/*/godot_plugin/*.gd
+!skills/*/godot_plugin/*.cfg
+!skills/*/godot_plugin/handlers/
+skills/*/godot_plugin/handlers/*
+!skills/*/godot_plugin/handlers/*.gd
 
 # Temp files
 test_*.go
@@ -137,9 +118,10 @@ pr*.txt
 
 # Claude Code local settings
 .claude/settings.local.json.env
-.opencode
+
+# Temp workspace output
+/tmp/
+
+# OpenCode
 .opencode/
-.opencode/*
-.opencode/**
-skills/providers/providers
-*.db/agentctl
+.fastembed_cache/

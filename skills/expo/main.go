@@ -6,16 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 const skillName = "mobile/expo"
@@ -35,23 +32,13 @@ type Input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(skillName, run)
+}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("EARG", err)
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Validate input
+	if in.Operation == "" {
+		return fmt.Errorf("operation is required")
 	}
 
 	// Detect platform if not specified
@@ -60,64 +47,36 @@ func main() {
 	switch in.Operation {
 	// Device operations
 	case "shake":
-		err = shake(ctx, rc, platform, in.DeviceID)
+		return shake(ctx, rc, platform, in.DeviceID)
 	case "reload":
-		err = reload(ctx, rc, platform, in.DeviceID)
+		return reload(ctx, rc, platform, in.DeviceID)
 	case "deep_link":
-		err = deepLink(ctx, rc, platform, in.DeviceID, in.URL)
+		return deepLink(ctx, rc, platform, in.DeviceID, in.URL)
 	case "dev_menu":
-		err = devMenu(ctx, rc, platform, in.DeviceID)
+		return devMenu(ctx, rc, platform, in.DeviceID)
 	case "toggle_inspector":
-		err = toggleInspector(ctx, rc, platform, in.DeviceID)
+		return toggleInspector(ctx, rc, platform, in.DeviceID)
 	case "toggle_performance":
-		err = togglePerformance(ctx, rc, platform, in.DeviceID)
+		return togglePerformance(ctx, rc, platform, in.DeviceID)
 	case "toggle_remote_debug":
-		err = toggleRemoteDebug(ctx, rc, platform, in.DeviceID)
+		return toggleRemoteDebug(ctx, rc, platform, in.DeviceID)
 	// EAS operations
 	case "build":
-		err = build(ctx, rc, in.BuildPlatform, in.Profile)
+		return build(ctx, rc, in.BuildPlatform, in.Profile)
 	case "update":
-		err = update(ctx, rc, in.Channel, in.Message)
+		return update(ctx, rc, in.Channel, in.Message)
 	case "build_status":
-		err = buildStatus(ctx, rc)
+		return buildStatus(ctx, rc)
 	// Logs
 	case "logs":
-		err = logs(ctx, rc, in.Filter, in.Count)
+		return logs(ctx, rc, in.Filter, in.Count)
 	default:
-		fail("EARG", fmt.Errorf("unknown operation: %s", in.Operation))
-	}
-
-	if err != nil {
-		fail("ERUNTIME", err)
+		return fmt.Errorf("unknown operation: %s", in.Operation)
 	}
 }
 
-func fail(code string, err error) {
-	// Emit canonical error envelope to stdout
-	data := map[string]any{"hint": "Check device connectivity and platform availability"}
-	env := envelope.Error(skillName, code, err.Error(), data)
-	_ = envelope.Write(os.Stdout, env)
-	os.Exit(1)
-}
-
-func emit(rc *runner.RunnerContext, data map[string]any) error {
-	return rc.Emit(skillName, data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func parseInput(r io.Reader) (Input, error) {
-	var in Input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return Input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	if in.Operation == "" {
-		return Input{}, fmt.Errorf("operation is required")
-	}
-
-	return in, nil
+func emit(rc *skillmain.RunContext, data map[string]any) error {
+	return skillout.Emit(rc, skillName, data)
 }
 
 // detectPlatform determines the platform from device ID or explicit setting.
@@ -150,7 +109,7 @@ func detectPlatform(deviceID, explicit string) string {
 // ============================================================================
 
 // shake triggers a shake gesture to open the Expo dev menu.
-func shake(ctx context.Context, rc *runner.RunnerContext, platform, deviceID string) error {
+func shake(ctx context.Context, rc *skillmain.RunContext, platform, deviceID string) error {
 	var err error
 	if platform == "android" {
 		err = androidShake(ctx, deviceID)
@@ -213,7 +172,7 @@ func androidShake(ctx context.Context, serial string) error {
 }
 
 // reload triggers a JS bundle reload.
-func reload(ctx context.Context, rc *runner.RunnerContext, platform, deviceID string) error {
+func reload(ctx context.Context, rc *skillmain.RunContext, platform, deviceID string) error {
 	var err error
 	if platform == "android" {
 		err = androidReload(ctx, deviceID)
@@ -266,7 +225,7 @@ func androidReload(ctx context.Context, serial string) error {
 }
 
 // deepLink opens an Expo deep link URL.
-func deepLink(ctx context.Context, rc *runner.RunnerContext, platform, deviceID, url string) error {
+func deepLink(ctx context.Context, rc *skillmain.RunContext, platform, deviceID, url string) error {
 	if url == "" {
 		return fmt.Errorf("url is required for deep_link operation")
 	}
@@ -313,13 +272,13 @@ func androidDeepLink(ctx context.Context, serial, url string) error {
 }
 
 // devMenu opens the Expo developer menu.
-func devMenu(ctx context.Context, rc *runner.RunnerContext, platform, deviceID string) error {
+func devMenu(ctx context.Context, rc *skillmain.RunContext, platform, deviceID string) error {
 	// Same as shake - opens the dev menu
 	return shake(ctx, rc, platform, deviceID)
 }
 
 // toggleInspector toggles the React element inspector.
-func toggleInspector(ctx context.Context, rc *runner.RunnerContext, platform, deviceID string) error {
+func toggleInspector(ctx context.Context, rc *skillmain.RunContext, platform, deviceID string) error {
 	var err error
 	if platform == "android" {
 		err = androidToggleDevOption(ctx, deviceID, "i")
@@ -340,7 +299,7 @@ func toggleInspector(ctx context.Context, rc *runner.RunnerContext, platform, de
 }
 
 // togglePerformance toggles the performance monitor.
-func togglePerformance(ctx context.Context, rc *runner.RunnerContext, platform, deviceID string) error {
+func togglePerformance(ctx context.Context, rc *skillmain.RunContext, platform, deviceID string) error {
 	var err error
 	if platform == "android" {
 		err = androidToggleDevOption(ctx, deviceID, "p")
@@ -361,7 +320,7 @@ func togglePerformance(ctx context.Context, rc *runner.RunnerContext, platform, 
 }
 
 // toggleRemoteDebug toggles remote JS debugging.
-func toggleRemoteDebug(ctx context.Context, rc *runner.RunnerContext, platform, deviceID string) error {
+func toggleRemoteDebug(ctx context.Context, rc *skillmain.RunContext, platform, deviceID string) error {
 	var err error
 	if platform == "android" {
 		err = androidToggleDevOption(ctx, deviceID, "d")
@@ -420,7 +379,7 @@ func androidToggleDevOption(ctx context.Context, serial, key string) error {
 // ============================================================================
 
 // build triggers an EAS cloud build.
-func build(ctx context.Context, rc *runner.RunnerContext, buildPlatform, profile string) error {
+func build(ctx context.Context, rc *skillmain.RunContext, buildPlatform, profile string) error {
 	if buildPlatform == "" {
 		buildPlatform = "all"
 	}
@@ -474,7 +433,7 @@ func build(ctx context.Context, rc *runner.RunnerContext, buildPlatform, profile
 }
 
 // update publishes an OTA update.
-func update(ctx context.Context, rc *runner.RunnerContext, channel, message string) error {
+func update(ctx context.Context, rc *skillmain.RunContext, channel, message string) error {
 	if channel == "" {
 		return fmt.Errorf("channel is required for update operation")
 	}
@@ -518,7 +477,7 @@ func update(ctx context.Context, rc *runner.RunnerContext, channel, message stri
 }
 
 // buildStatus checks EAS build status.
-func buildStatus(ctx context.Context, rc *runner.RunnerContext) error {
+func buildStatus(ctx context.Context, rc *skillmain.RunContext) error {
 	args := []string{"build:list", "--json", "--non-interactive", "--limit", "5"}
 
 	cmd := exec.CommandContext(ctx, "eas", args...)
@@ -568,7 +527,7 @@ func buildStatus(ctx context.Context, rc *runner.RunnerContext) error {
 // ============================================================================
 
 // logs retrieves Metro bundler logs.
-func logs(ctx context.Context, rc *runner.RunnerContext, filter string, count int) error {
+func logs(ctx context.Context, rc *skillmain.RunContext, filter string, count int) error {
 	if count <= 0 {
 		count = 100
 	}
@@ -631,7 +590,7 @@ func logs(ctx context.Context, rc *runner.RunnerContext, filter string, count in
 
 	// Store in CAS if large
 	if len(output) > 4096 {
-		artifact, err := runner.PersistBuffer(ctx, rc, bytes.NewBufferString(output), "text/plain", "expo_logs")
+		artifact, err := skillmain.PersistBuffer(ctx, rc, bytes.NewBufferString(output), "text/plain", "expo_logs")
 		if err != nil {
 			return fmt.Errorf("persist logs: %w", err)
 		}

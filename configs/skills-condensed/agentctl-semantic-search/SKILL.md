@@ -8,7 +8,11 @@ description: Semantic code search using embeddings and vector similarity. Search
 Vector-based search using Voyage AI embeddings.
 
 ```bash
+# JSON output (default)
 agentctl run code/semantic_search --input '{"query": "auth middleware", "scope": ["symbols", "memories"]}'
+
+# Tree view - shows related files grouped by directory
+agentctl run code/semantic_search --input '{"query": "auth middleware", "format": "tree"}'
 ```
 
 ## Scopes
@@ -28,6 +32,7 @@ agentctl run code/semantic_search --input '{"query": "auth middleware", "scope":
 | `query` | Natural language query |
 | `scope` | Content types to search |
 | `limit` | Max results (default: 10) |
+| `format` | Output: `json` (default) or `tree` |
 | `path` | Directory for symbol search |
 
 ## Environment
@@ -38,4 +43,4 @@ agentctl run code/semantic_search --input '{"query": "auth middleware", "scope":
 | `EMBEDDING_MODEL_CODE` | Override: voyage-code-3 |
 | `EMBEDDING_MODEL_TEXT` | Override: voyage-3.5 |
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-semantic-search/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-semantic-search/Skill.md`

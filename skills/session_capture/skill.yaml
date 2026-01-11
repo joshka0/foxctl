@@ -35,6 +35,26 @@ signature:
       type: boolean
       required: false
       description: "Re-capture even if session already exists"
+  help:
+    short: "Capture a Claude Code session into the store."
+    long: |
+      Use session/capture to ingest the latest or a specific session.
+      Example commands:
+        agentctl run session/capture --input '{"workspace":"./","summarize":true}'
+        agentctl skills run session/capture --workspace ./ --summarize
+        agentctl run session/capture --input '{"session_id":"abc123","force":true}'
+        agentctl skills run session/capture --session_id abc123 --force
+    workflows:
+      - id: capture-latest
+        description: "Capture the most recent session."
+        example_input:
+          workspace: "./"
+          summarize: true
+      - id: capture-specific
+        description: "Capture a specific session ID."
+        example_input:
+          session_id: "abc123"
+          force: true
 returns:
   - name: session_id
     type: string

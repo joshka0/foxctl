@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	"github.com/jkatigb/agentctl/internal/storage/vector"
 )
 
 // Ensure Store implements storage.SessionStore.
@@ -109,6 +109,12 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 	store.validateDimensionsOnOpen(ctx)
 
 	return store, nil
+}
+
+// OpenFromConfig opens the sessions store using paths from config.
+// This is the preferred way to open the store as it ensures correct path handling.
+func OpenFromConfig(ctx context.Context, cfg config.Config) (*Store, error) {
+	return Open(ctx, cfg.Storage.Root)
 }
 
 // Close releases resources.
@@ -224,7 +230,7 @@ func (s *Store) Get(ctx context.Context, id string) (Session, error) {
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status
+			created_at, updated_at, parent_session_id, agent_id, status, key_questions
 		FROM sessions
 		WHERE id = ?`, id)
 	return scanSession(row)
@@ -269,7 +275,7 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status
+			created_at, updated_at, parent_session_id, agent_id, status, key_questions
 		FROM sessions`
 
 	if len(conditions) > 0 {
@@ -316,7 +322,7 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status
+			created_at, updated_at, parent_session_id, agent_id, status, key_questions
 		FROM sessions
 		WHERE LOWER(summary) LIKE ?
 			OR LOWER(tags) LIKE ?
@@ -337,6 +343,11 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 
 // UpdateSummary updates the summary fields for a session.
 func (s *Store) UpdateSummary(ctx context.Context, id string, summary string, accomplished, decisions, gotchas, userInsights, tags, keyFiles []string, toolsPattern string) error {
+	return s.UpdateSummaryWithQuestions(ctx, id, summary, accomplished, decisions, gotchas, userInsights, tags, keyFiles, toolsPattern, nil)
+}
+
+// UpdateSummaryWithQuestions updates the summary fields for a session including key_questions.
+func (s *Store) UpdateSummaryWithQuestions(ctx context.Context, id string, summary string, accomplished, decisions, gotchas, userInsights, tags, keyFiles []string, toolsPattern string, keyQuestions []string) error {
 	accomplishedJSON, err := sqlutil.FormatJSON(accomplished)
 	if err != nil {
 		return fmt.Errorf("sessions: format accomplished: %w", err)
@@ -361,6 +372,10 @@ func (s *Store) UpdateSummary(ctx context.Context, id string, summary string, ac
 	if err != nil {
 		return fmt.Errorf("sessions: format key_files: %w", err)
 	}
+	keyQuestionsJSON, err := sqlutil.FormatJSON(keyQuestions)
+	if err != nil {
+		return fmt.Errorf("sessions: format key_questions: %w", err)
+	}
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE sessions SET
@@ -372,9 +387,10 @@ func (s *Store) UpdateSummary(ctx context.Context, id string, summary string, ac
 			tags = ?,
 			key_files = ?,
 			tools_pattern = ?,
+			key_questions = ?,
 			updated_at = ?
 		WHERE id = ?`,
-		summary, accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON, tagsJSON, keyFilesJSON, toolsPattern,
+		summary, accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON, tagsJSON, keyFilesJSON, toolsPattern, keyQuestionsJSON,
 		sqlutil.FormatTimestamp(timeutil.NowUTC()), id)
 	if err != nil {
 		return fmt.Errorf("sessions: update summary: %w", err)
@@ -423,7 +439,7 @@ func (s *Store) SearchSimilar(ctx context.Context, queryEmbedding []float32, lim
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status
+			created_at, updated_at, parent_session_id, agent_id, status, key_questions
 		FROM sessions
 		WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0
 		ORDER BY started_at DESC`)
@@ -443,13 +459,13 @@ func (s *Store) SearchSimilar(ctx context.Context, queryEmbedding []float32, lim
 		}
 
 		// Deserialize embedding
-		sessionEmb := deserializeEmbedding(session.Embedding)
+		sessionEmb := vector.DeserializeF32(session.Embedding)
 		if len(sessionEmb) == 0 {
 			continue
 		}
 
 		// Compute cosine similarity
-		similarity := cosineSimilarity(queryEmbedding, sessionEmb)
+		similarity := vector.Cosine(queryEmbedding, sessionEmb)
 
 		results = append(results, storage.SimilarSession{
 			Session:    session,
@@ -474,42 +490,6 @@ func (s *Store) SearchSimilar(ctx context.Context, queryEmbedding []float32, lim
 	return results, nil
 }
 
-// deserializeEmbedding converts binary bytes back to float32 slice.
-func deserializeEmbedding(data []byte) []float32 {
-	if len(data) < 4 || len(data)%4 != 0 {
-		return nil
-	}
-	result := make([]float32, len(data)/4)
-	for i := range result {
-		bits := uint32(data[i*4]) |
-			uint32(data[i*4+1])<<8 |
-			uint32(data[i*4+2])<<16 |
-			uint32(data[i*4+3])<<24
-		result[i] = math.Float32frombits(bits)
-	}
-	return result
-}
-
-// cosineSimilarity computes the cosine similarity between two vectors.
-func cosineSimilarity(a, b []float32) float64 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0
-	}
-
-	var dotProduct, normA, normB float64
-	for i := range a {
-		dotProduct += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-
-	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
-}
-
 // --- Lineage Operations ---
 
 // GetActive returns the most recently started session for a workspace/agent that hasn't ended.
@@ -524,7 +504,7 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status
+			created_at, updated_at, parent_session_id, agent_id, status, key_questions
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ? AND status = ?
 		ORDER BY started_at DESC
@@ -587,7 +567,7 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status
+			created_at, updated_at, parent_session_id, agent_id, status, key_questions
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ?`
 
@@ -662,7 +642,7 @@ func (s *Store) GetAncestorChain(ctx context.Context, sessionID string, maxDepth
 			s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
 			s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
 			s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.embedding, s.embedding_model,
-			s.created_at, s.updated_at, s.parent_session_id, s.agent_id, s.status
+			s.created_at, s.updated_at, s.parent_session_id, s.agent_id, s.status, s.key_questions
 		FROM sessions s
 		JOIN ancestors a ON s.id = a.id
 		ORDER BY a.depth ASC`, sessionID, maxDepth)
@@ -1097,11 +1077,11 @@ WHERE embedding IS NOT NULL`)
 		if len(chunk.Embedding) == 0 {
 			continue
 		}
-		chunkEmb := deserializeEmbedding(chunk.Embedding)
+		chunkEmb := vector.DeserializeF32(chunk.Embedding)
 		if len(chunkEmb) == 0 {
 			continue
 		}
-		sim := cosineSimilarity(embedding, chunkEmb)
+		sim := vector.Cosine(embedding, chunkEmb)
 		scored = append(scored, ScoredChunk{Chunk: chunk, Similarity: sim})
 	}
 
@@ -1172,9 +1152,9 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 	chunk_start = excluded.chunk_start,
 	chunk_end = excluded.chunk_end,
 	message_count = excluded.message_count,
-	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	summary = COALESCE(NULLIF(excluded.summary, ''), session_context_windows.summary),
 	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
-	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`,
+	embedding_model = COALESCE(NULLIF(excluded.embedding_model, ''), session_context_windows.embedding_model)`,
 		window.ID, window.SessionID, window.WindowIndex,
 		sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
 		window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,
@@ -1212,9 +1192,9 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 	chunk_start = excluded.chunk_start,
 	chunk_end = excluded.chunk_end,
 	message_count = excluded.message_count,
-	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	summary = COALESCE(NULLIF(excluded.summary, ''), session_context_windows.summary),
 	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
-	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`)
+	embedding_model = COALESCE(NULLIF(excluded.embedding_model, ''), session_context_windows.embedding_model)`)
 	if err != nil {
 		return fmt.Errorf("sessions: prepare window stmt: %w", err)
 	}
@@ -1272,15 +1252,74 @@ WHERE session_id = ? AND window_index = ?`, sessionID, windowIndex)
 }
 
 // UpdateWindowSummary updates the summary and embedding for a context window.
+// Nil/empty values are treated as "no change" to preserve existing data.
+//
+// Deprecated: Use UpdateContextWindowSummary or SetContextWindowEmbedding instead
+// for clearer intent and to prevent accidental overwrites.
 func (s *Store) UpdateWindowSummary(ctx context.Context, windowID string, summary string, embedding []byte, model string) error {
+	// Normalize: treat empty slice as nil so COALESCE works correctly
+	if len(embedding) == 0 {
+		embedding = nil
+	}
+	summary = strings.TrimSpace(summary)
+	model = strings.TrimSpace(model)
+
 	result, err := s.db.ExecContext(ctx, `
 UPDATE session_context_windows SET
-	summary = ?,
-	embedding = ?,
-	embedding_model = ?
+	summary = COALESCE(NULLIF(?, ''), summary),
+	embedding = COALESCE(?, embedding),
+	embedding_model = COALESCE(NULLIF(?, ''), embedding_model)
 WHERE id = ?`, summary, embedding, model, windowID)
 	if err != nil {
 		return fmt.Errorf("sessions: update window summary: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateContextWindowSummary updates only the summary text for a context window.
+// Use this when generating summaries without affecting embeddings.
+func (s *Store) UpdateContextWindowSummary(ctx context.Context, windowID string, summary string) error {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil // No-op for empty summary
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE session_context_windows SET summary = ?
+WHERE id = ?`, summary, windowID)
+	if err != nil {
+		return fmt.Errorf("sessions: update context window summary: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetContextWindowEmbedding sets the embedding and model for a context window.
+// Use this when generating embeddings without affecting the summary.
+func (s *Store) SetContextWindowEmbedding(ctx context.Context, windowID string, embedding []byte, model string) error {
+	if len(embedding) == 0 {
+		return nil // No-op for empty embedding
+	}
+	model = strings.TrimSpace(model)
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE session_context_windows SET embedding = ?, embedding_model = ?
+WHERE id = ?`, embedding, model, windowID)
+	if err != nil {
+		return fmt.Errorf("sessions: set context window embedding: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -1319,11 +1358,11 @@ WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0`)
 		if len(window.Embedding) == 0 {
 			continue
 		}
-		windowEmb := deserializeEmbedding(window.Embedding)
+		windowEmb := vector.DeserializeF32(window.Embedding)
 		if len(windowEmb) == 0 {
 			continue
 		}
-		sim := cosineSimilarity(queryEmbedding, windowEmb)
+		sim := vector.Cosine(queryEmbedding, windowEmb)
 		scored = append(scored, ScoredContextWindow{Window: window, Similarity: sim})
 	}
 
@@ -1783,6 +1822,17 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspac
 		}
 	}
 
+	// Add key_questions column if it doesn't exist (for existing databases)
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'key_questions'")
+	if err := row.Scan(&colCount); err == nil && colCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN key_questions TEXT"); err != nil {
+			// Ignore error if column already exists
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sessions: add key_questions column: %w", err)
+			}
+		}
+	}
+
 	// Add lineage columns for existing databases
 	lineageColumns := []struct {
 		name       string
@@ -1891,13 +1941,14 @@ func scanSession(row scannable) (Session, error) {
 	var embedding []byte
 	var embeddingModel sql.NullString
 	var parentSessionID, agentID, status sql.NullString
+	var keyQuestions sql.NullString
 
 	err := row.Scan(
 		&session.ID, &session.WorkspacePath, &session.ProjectName, &session.GitBranch, &session.ClaudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &session.MessageCount, &session.UserTurns,
 		&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embedding, &embeddingModel,
-		&createdAt, &updatedAt, &parentSessionID, &agentID, &status,
+		&createdAt, &updatedAt, &parentSessionID, &agentID, &status, &keyQuestions,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1954,6 +2005,9 @@ func scanSession(row scannable) (Session, error) {
 	}
 	if keyFiles.Valid {
 		errs.Ignore(sqlutil.ScanJSON(keyFiles.String, &session.KeyFiles), "parse keyFiles JSON")
+	}
+	if keyQuestions.Valid {
+		errs.Ignore(sqlutil.ScanJSON(keyQuestions.String, &session.KeyQuestions), "parse keyQuestions JSON")
 	}
 
 	session.Embedding = embedding

@@ -12,6 +12,7 @@ import {
   MailboxPage,
   SessionsPage,
   CodemapsPage,
+  AgentsPage,
 } from "@/pages";
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
           <Route path="insights" element={<InsightsPage />} />
           <Route path="mailbox" element={<MailboxPage />} />
           <Route path="sessions" element={<SessionsPage />} />
+          <Route path="agents" element={<AgentsPage />} />
           <Route path="reservations" element={<PlaceholderPage title="Reservations" />} />
           <Route path="blackboard" element={<PlaceholderPage title="Blackboard" />} />
           <Route path="sqlite" element={<SQLitePage />} />

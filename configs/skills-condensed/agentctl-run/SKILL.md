@@ -32,4 +32,4 @@ agentctl run <skill-name> --input '<json>'
 
 Large outputs stored in CAS with `data.artifact` digest.
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-run/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-run/Skill.md`

@@ -1,0 +1,107 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/context_enqueue
+  version: 0.1.0
+  description: "Enqueue context to buffer for later injection"
+  tags: ["hook", "context", "injection"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_context_enqueue/context_enqueue
+io:
+  format: JSON
+  inline_output_kb: 4
+signature:
+  command: hooks/context_enqueue
+  parameters:
+    - name: workspace_id
+      type: string
+      required: true
+      description: "Workspace identifier"
+    - name: session_id
+      type: string
+      required: true
+      description: "Session identifier"
+    - name: source
+      type: string
+      required: true
+      description: "Source identifier (e.g., 'smart-grep', 'file-memory-recall')"
+    - name: text
+      type: string
+      required: true
+      description: "Markdown content to inject"
+    - name: agent_id
+      type: string
+      required: false
+      description: "Agent ID for multi-agent scenarios"
+    - name: priority
+      type: integer
+      required: false
+      description: "Priority: 1=high, 2=normal (default), 3=low"
+    - name: ttl_seconds
+      type: integer
+      required: false
+      description: "Time-to-live in seconds (default: 60)"
+    - name: dedupe
+      type: boolean
+      required: false
+      description: "Skip if same source+text exists unconsumed"
+    - name: metadata
+      type: object
+      required: false
+      description: "Optional metadata for extensibility"
+  help:
+    short: "Enqueue context for later injection."
+    long: |
+      Enqueues context to the buffer for injection on the next inject-capable event.
+      Used by hooks that run on events where direct injection isn't possible
+      (e.g., OpenCode PostToolUse).
+
+      The context buffer handles:
+      - TTL enforcement (auto-expires)
+      - Deduplication (same source+text won't accumulate)
+      - Priority ordering (high priority surfaces first)
+      - Multi-agent safety (scoped by workspace/session/agent)
+
+      Example:
+        agentctl run hooks/context_enqueue --input '{
+          "workspace_id": "/workspace",
+          "session_id": "abc123",
+          "source": "smart-grep",
+          "text": "## Search Results\n...",
+          "priority": 2,
+          "ttl_seconds": 120
+        }'
+    workflows:
+      - id: enqueue-from-hook
+        description: "Enqueue context from a PostToolUse hook."
+        example_input:
+          workspace_id: "/workspace/project"
+          session_id: "session-abc123"
+          source: "counsel-suggest"
+          text: "Tip: You've read 3+ code files. Consider using `/counsel` for analysis."
+          priority: 3
+          ttl_seconds: 60
+          dedupe: true
+  returns:
+    - name: id
+      type: string
+      description: "Entry ID (ULID)"
+    - name: source
+      type: string
+      description: "Source identifier"
+    - name: priority
+      type: integer
+      description: "Priority level"
+    - name: expires_at
+      type: string
+      description: "Expiration timestamp (RFC3339)"
+    - name: total_pending
+      type: integer
+      description: "Total pending entries for this session"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+  pure: false

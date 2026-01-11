@@ -13,13 +13,12 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib"
 	fsutil "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "text/replace"
 
 type lineRange struct {
 	Start        int    `json:"start"`
@@ -113,31 +112,20 @@ func (r *regexReplacer) Replace(content string) (string, int) {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("text/replace", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("text/replace", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("text/replace", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("text/replace", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
-	// Apply defaults for pointer booleans if not set
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults
+	if in.MaxFiles <= 0 {
+		in.MaxFiles = 100
+	}
+	if len(in.Paths) == 0 {
+		in.Paths = []string{"."}
+	}
+	if in.BackupSuffix == "" {
+		in.BackupSuffix = ".bak"
+	}
 	if in.SkipBinary == nil {
 		defaultSkipBinary := true
 		in.SkipBinary = &defaultSkipBinary
@@ -145,6 +133,16 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	if in.PreserveLineEndings == nil {
 		defaultPreserveLineEndings := true
 		in.PreserveLineEndings = &defaultPreserveLineEndings
+	}
+
+	// Validate: either pattern/replacement OR operations, not both
+	hasMain := strings.TrimSpace(in.Pattern) != ""
+	hasOps := len(in.Operations) > 0
+	if !hasMain && !hasOps {
+		return fmt.Errorf("either pattern/replacement or operations must be specified")
+	}
+	if hasMain && hasOps {
+		return fmt.Errorf("cannot specify both pattern/replacement and operations")
 	}
 
 	// Build list of operations
@@ -304,47 +302,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("text/replace", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	// Set defaults
-	if in.MaxFiles <= 0 {
-		in.MaxFiles = 100
-	}
-	if len(in.Paths) == 0 {
-		in.Paths = []string{"."}
-	}
-	if in.BackupSuffix == "" {
-		in.BackupSuffix = ".bak"
-	}
-	// Default to true for skip_binary and preserve_line_endings per manifest (only if unset)
-	if in.SkipBinary == nil {
-		defaultSkipBinary := true
-		in.SkipBinary = &defaultSkipBinary
-	}
-	if in.PreserveLineEndings == nil {
-		defaultPreserveLineEndings := true
-		in.PreserveLineEndings = &defaultPreserveLineEndings
-	}
-
-	// Validate: either pattern/replacement OR operations, not both
-	hasMain := strings.TrimSpace(in.Pattern) != ""
-	hasOps := len(in.Operations) > 0
-
-	if !hasMain && !hasOps {
-		return input{}, fmt.Errorf("either pattern/replacement or operations must be specified")
-	}
-	if hasMain && hasOps {
-		return input{}, fmt.Errorf("cannot specify both pattern/replacement and operations")
-	}
-
-	return in, nil
+	return skillout.Emit(rc, command, data)
 }
 
 func buildOperations(in input) []operation {
@@ -402,7 +360,7 @@ func buildReplacer(op operation, caseInsensitive, wordBoundary, multiline bool) 
 	}, nil
 }
 
-func collectEntries(rc *runner.RunnerContext, paths []string, includeHidden bool, extensions []string) ([]fsutil.FileEntry, error) {
+func collectEntries(rc *skillmain.RunContext, paths []string, includeHidden bool, extensions []string) ([]fsutil.FileEntry, error) {
 	var allEntries []fsutil.FileEntry
 	seen := make(map[string]bool)
 
@@ -503,7 +461,7 @@ func detectLineEnding(content string) string {
 
 func processFile(
 	ctx context.Context,
-	rc *runner.RunnerContext,
+	rc *skillmain.RunContext,
 	path, workspace string,
 	replacers []replacer,
 	lineRange *lineRange,
@@ -771,7 +729,7 @@ func truncateLine(line string, maxLen int) string {
 }
 
 func preparePreview(changes []fileChange, maxItems int) ([]fileChange, bool) {
-	preview, truncated := skillslib.PreparePreview(changes, maxItems)
+	preview, truncated := skillout.PreparePreview(changes, maxItems)
 	if truncated {
 		dup := make([]fileChange, len(preview))
 		copy(dup, preview)
@@ -780,22 +738,16 @@ func preparePreview(changes []fileChange, maxItems int) ([]fileChange, bool) {
 	return preview, truncated
 }
 
-func persistChangesArtifact(ctx context.Context, rc *runner.RunnerContext, changes []fileChange, truncated bool) (runner.Artifact, error) {
+func persistChangesArtifact(ctx context.Context, rc *skillmain.RunContext, changes []fileChange, truncated bool) (skillmain.Artifact, error) {
 	if !truncated {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
 	for _, c := range changes {
 		if err := enc.Encode(c); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode change: %w", err)
+			return skillmain.Artifact{}, fmt.Errorf("encode change: %w", err)
 		}
 	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_replace")
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit text/replace failure")
-	os.Exit(1)
+	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_replace")
 }

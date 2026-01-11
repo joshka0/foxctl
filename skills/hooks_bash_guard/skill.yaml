@@ -1,0 +1,69 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/bash_guard
+  version: 0.1.0
+  description: "Enforce agent profile restrictions on bash commands"
+  tags: ["hook", "security", "subagent", "bash"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_bash_guard/hooks_bash_guard
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: hooks/bash_guard
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event name (PreToolUse)"
+    - name: tool_name
+      type: string
+      required: true
+      description: "Name of the tool being called"
+    - name: tool_input
+      type: object
+      required: false
+      description: "Tool input arguments"
+    - name: hook_config
+      type: object
+      required: false
+      description: "Hook-specific configuration"
+  help:
+    short: "Enforce bash command restrictions for agent profiles"
+    long: |
+      The bash_guard hook enforces agent profile restrictions on bash commands.
+
+      For restricted profiles (explorer, reviewer, implementer):
+      - Only "agentctl run <skill>" commands are allowed
+      - The skill must be in the profile's allowlist
+      - All other bash commands are blocked
+
+      Profile is determined from:
+      1. AGENTCTL_AGENT_PROFILE environment variable
+      2. Hook config's "profile" field
+      3. Default: unrestricted (all commands allowed)
+
+      Profiles and their allowed skills:
+      - explorer: Read-only exploration (semantic_search, swe_grep, symbols, etc.)
+      - reviewer: Explorer + analysis (complexity, security, imports, gopls)
+      - implementer: Reviewer + write (test/run, smart_write)
+      - unrestricted: All commands allowed
+
+      Example hook config in .claude/agents/explorer.md:
+        hooks:
+          PreToolUse:
+            - matcher: "Bash"
+              hooks:
+                - type: command
+                  command: "agentctl run hooks/bash_guard --ephemeral"
+returns:
+  - name: hook_output
+    type: object
+    description: "Hook decision and context"
+capabilities:
+  network: "none"
+  filesystem: []
+  pure: true

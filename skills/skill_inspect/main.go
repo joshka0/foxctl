@@ -9,17 +9,16 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
+
+const command = "skill/inspect"
 
 type input struct {
 	SkillName string `json:"skill_name"`
@@ -35,29 +34,18 @@ type skillInfo struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("skill/inspect", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("skill/inspect", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("skill/inspect", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("skill/inspect", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(_ context.Context, rc *runner.RunnerContext, in input) error {
+func run(_ context.Context, rc *skillmain.RunContext, in input) error {
+	// Validation (moved from parseInput)
+	if in.SkillName == "" {
+		return fmt.Errorf("skill_name is required")
+	}
+	if in.View == "" {
+		in.View = "api"
+	}
+
 	// Find skill directory
 	skillInfo, err := findSkill(in.SkillName)
 	if err != nil {
@@ -89,28 +77,9 @@ func run(_ context.Context, rc *runner.RunnerContext, in input) error {
 		return err
 	}
 
-	return rc.Emit("skill/inspect", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
+	return skillout.Emit(rc, command, data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-
-	if in.SkillName == "" {
-		return input{}, fmt.Errorf("skill_name is required")
-	}
-
-	if in.View == "" {
-		in.View = "api"
-	}
-
-	return in, nil
-}
 
 func findSkill(name string) (*skillInfo, error) {
 	// Convert skill name to directory (e.g., "fs/ls" -> "fs_ls")
@@ -557,8 +526,3 @@ func generateExampleValue(param map[string]string) any {
 	}
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit skill/inspect failure")
-	os.Exit(1)
-}

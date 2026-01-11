@@ -1,8 +1,32 @@
 # AGENTS.md — AI Assistant Guide for agentctl
 
-**Last Updated:** November 30, 2025\
+**Last Updated:** January 5, 2026\
 **Target Audience:** AI coding assistants (Claude, Cursor, GitHub Copilot, etc.)
 and human contributors
+
+---
+
+## 📌 Claude Code Users
+
+**For TUI integration (codex, claude code, opencode, etc), hooks, skills, quick commands, and environment
+setup, see [`.claude/CLAUDE.md`](.claude/CLAUDE.md).** That file is the
+authoritative source for Claude-specific usage.
+
+**Skill and agent docs**
+
+If you are in the agentctl repo:
+- Full skill docs: `configs/skills/`
+- Condensed skill docs: `configs/skills-condensed/` (short `SKILL.md` wrappers)
+- Curated skill packs: `configs/skills-pack/` (recommended for Codex/OpenCode)
+- Full agent docs: `configs/agents/`
+- Condensed agent docs: `configs/agents-condensed/`
+
+If you are in a different repo and those paths don’t exist:
+- Run agentctl’s `scripts/init.sh` (or `make init`) once; it creates `~/.agentctl/share/configs` pointing at the agentctl `configs/` tree.
+- Codex installs skills at `~/.codex/skills/` and OpenCode installs skills at `~/.config/opencode/skill/`.
+
+This file (AGENTS.md) covers **contribution conventions** — envelope contracts,
+PR workflow, testing requirements, and gotchas that apply to all AI assistants.
 
 ---
 
@@ -16,6 +40,8 @@ This file supplements `.windsurf/rules/global_rules.md` with
 - **WASI = `network:"none"`** — Core v1 mandates isolation; do not relax.
 - **Large outputs → CAS** — use `data.summary` + `data.artifact` (and optional
   `meta.cas_digest` matching it).
+- **Start-of-task check** — review `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`.
+- **Task titles** — use the user request as the task title when it is specific; only ask for a title when the request is ambiguous or sprawling.
 - **`--dry-run` required** for any state-changing CLI command.
 - **Every production bug or near-miss becomes a Gotchas Graveyard row and a new
   rule entry in `docs/start/gotchas.md` within 24 hours — no exceptions.**

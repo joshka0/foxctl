@@ -48,6 +48,29 @@ signature:
       required: false
       default: false
       description: "Parse input as YAML (requires gojq; standard jq does not support --yaml-input)"
+  help:
+    short: "Run jq queries against inline JSON or YAML."
+    long: |
+      Use data/jq to filter or transform JSON/YAML inputs.
+      Note: the skill parameter is named "input", so with agentctl skills run,
+      pass the full JSON input via --input and set --query as a flag.
+      Example commands:
+        agentctl run data/jq --input '{"query":".items[] | .id","input":"{\"items\":[{\"id\":1},{\"id\":2}]}"}'
+        agentctl skills run data/jq --query '.items[] | .id' --input '{"input":"{\"items\":[{\"id\":1},{\"id\":2}]}" }'
+        agentctl run data/jq --input '{"query":".name","input":"name: example","yaml_input":true}'
+        agentctl skills run data/jq --query '.name' --input '{"input":"name: example","yaml_input":true}'
+    workflows:
+      - id: jq-basic
+        description: "Extract IDs from a JSON list."
+        example_input:
+          query: ".items[] | .id"
+          input: "{\"items\":[{\"id\":1},{\"id\":2}]}"
+      - id: jq-yaml
+        description: "Parse YAML input."
+        example_input:
+          query: ".name"
+          input: "name: example"
+          yaml_input: true
 returns:
   - name: result
     type: object

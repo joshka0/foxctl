@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -23,6 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/dbutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	"github.com/jkatigb/agentctl/internal/storage/vector"
 )
 
 // Ensure Store implements storage.MemoryStore.
@@ -85,9 +87,21 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 	return store, nil
 }
 
+// OpenFromConfig opens the memory store using paths from config.
+// This is the preferred way to open the store as it ensures correct path handling.
+func OpenFromConfig(ctx context.Context, cfg config.Config) (*Store, error) {
+	return Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
+}
+
 // Close releases resources.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// DB returns the underlying *sql.DB for advanced operations like search.
+// This allows callers to use WrapSQLDB for creating a dbdriver.DB.
+func (s *Store) DB() *sql.DB {
+	return s.db
 }
 
 // Stats returns entry counts for named memories.
@@ -121,17 +135,18 @@ func (s *Store) Save(ctx context.Context, entry NamedEntry) (NamedEntry, error) 
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-INSERT INTO named_memory (id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+INSERT INTO named_memory (id, name, type, workspace, summary, result, digests, session_id, created_at, updated_at, last_accessed, access_count)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 ON CONFLICT(name, workspace) DO UPDATE SET
 	id = excluded.id,
 	type = excluded.type,
 	summary = excluded.summary,
 	result = excluded.result,
 	digests = excluded.digests,
+	session_id = COALESCE(NULLIF(excluded.session_id, ''), session_id),
 	updated_at = excluded.updated_at,
 	last_accessed = excluded.last_accessed
-`, entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON,
+`, entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON, entry.SessionID,
 		sqlutil.FormatTimestamp(entry.CreatedAt), sqlutil.FormatTimestamp(entry.UpdatedAt), sqlutil.FormatTimestamp(entry.LastAccess))
 	if err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: save: %w", err)
@@ -143,13 +158,14 @@ ON CONFLICT(name, workspace) DO UPDATE SET
 // Get fetches a named memory by name+workspace.
 func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
 		WHERE name = ? AND workspace = ?`, name, workspace)
 	var entry NamedEntry
 	var digests string
 	var created, updated, last string
-	if err := row.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
+	var sessionID sql.NullString
+	if err := row.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
 		if dbutil.IsNoRows(err) {
 			return NamedEntry{}, ErrNotFound
 		}
@@ -175,6 +191,9 @@ func (s *Store) Get(ctx context.Context, name, workspace string) (NamedEntry, er
 	if err != nil {
 		return NamedEntry{}, fmt.Errorf("memory: scan last_accessed: %w", err)
 	}
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
+	}
 
 	if _, updateErr := s.db.ExecContext(ctx, `
 		UPDATE named_memory
@@ -192,7 +211,7 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 		limit = 20
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
 		WHERE workspace = ?
 		ORDER BY updated_at DESC
@@ -209,7 +228,8 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 		var entry NamedEntry
 		var digests string
 		var created, updated, last string
-		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
+		var sessionID sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
 			return nil, fmt.Errorf("memory: scan list: %w", err)
 		}
 
@@ -231,10 +251,112 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 		if err != nil {
 			return nil, fmt.Errorf("memory: scan list last_accessed: %w", err)
 		}
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
 
 		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+type ListFilter struct {
+	Types     []string
+	SessionID string
+}
+
+// ListFiltered returns named memories for a workspace with optional filters.
+//
+// This is intended for stable pagination and for session-scoped context injection
+// (e.g., “latest 20 gotchas for this session”).
+func (s *Store) ListFiltered(ctx context.Context, workspace string, filter ListFilter, limit, offset int) ([]NamedEntry, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	where := []string{"workspace = ?"}
+	args := []any{workspace}
+
+	if strings.TrimSpace(filter.SessionID) != "" {
+		where = append(where, "session_id = ?")
+		args = append(args, strings.TrimSpace(filter.SessionID))
+	}
+
+	if len(filter.Types) > 0 {
+		placeholders := make([]string, 0, len(filter.Types))
+		for _, t := range filter.Types {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, t)
+		}
+		if len(placeholders) > 0 {
+			where = append(where, fmt.Sprintf("type IN (%s)", strings.Join(placeholders, ",")))
+		}
+	}
+
+	whereSQL := strings.Join(where, " AND ")
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM named_memory WHERE %s", whereSQL), args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("memory: list filtered count: %w", err)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+		FROM named_memory
+		WHERE %s
+		ORDER BY updated_at DESC
+		LIMIT ? OFFSET ?`, whereSQL)
+	qArgs := append(append([]any{}, args...), limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, q, qArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("memory: list filtered: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close memory list filtered rows") }()
+
+	entries := make([]NamedEntry, 0, limit)
+	for rows.Next() {
+		var entry NamedEntry
+		var digests string
+		var created, updated, last string
+		var sessionID sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
+			return nil, 0, fmt.Errorf("memory: scan list filtered: %w", err)
+		}
+		if err := sqlutil.ScanJSON(digests, &entry.Digests); err != nil {
+			return nil, 0, fmt.Errorf("memory: scan list filtered digests: %w", err)
+		}
+
+		var parseErr error
+		entry.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
+		if parseErr != nil {
+			return nil, 0, fmt.Errorf("memory: scan list filtered created_at: %w", parseErr)
+		}
+		entry.UpdatedAt, parseErr = sqlutil.ScanTimestamp(updated)
+		if parseErr != nil {
+			return nil, 0, fmt.Errorf("memory: scan list filtered updated_at: %w", parseErr)
+		}
+		entry.LastAccess, parseErr = sqlutil.ScanTimestamp(last)
+		if parseErr != nil {
+			return nil, 0, fmt.Errorf("memory: scan list filtered last_accessed: %w", parseErr)
+		}
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
+
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("memory: list filtered rows: %w", err)
+	}
+	return entries, total, nil
 }
 
 // Delete removes a named memory and unpins digests.
@@ -412,8 +534,15 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 	}
 
 	// Add session_id column for cross-scope session tracking (any AI tool)
-	_, _ = db.ExecContext(ctx, `ALTER TABLE named_memory ADD COLUMN session_id TEXT`) //nolint:errcheck
-	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_memory_session ON named_memory(session_id)`)
+	if _, err := db.ExecContext(ctx, `ALTER TABLE named_memory ADD COLUMN session_id TEXT`); err != nil {
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+			return fmt.Errorf("memory: add session_id column: %w", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_memory_session ON named_memory(session_id)`); err != nil {
+		return fmt.Errorf("memory: create session_id index: %w", err)
+	}
 
 	// Create embedding_metadata table to track provider/model/dimensions per workspace
 	// This enables detection of dimension mismatches if embedding models change
@@ -441,7 +570,7 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 	}
 	like := "%" + strings.ToLower(query) + "%"
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
 		WHERE workspace = ? AND (LOWER(name) LIKE ? OR LOWER(summary) LIKE ?)
 		ORDER BY updated_at DESC
@@ -471,6 +600,36 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 	})
 	if len(scored) > limit {
 		scored = scored[:limit]
+	}
+	return scored, nil
+}
+
+// ListByType returns entries of a specific type for a workspace, ordered by recency.
+func (s *Store) ListByType(ctx context.Context, workspace, entryType string, limit int) ([]ScoredEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+		FROM named_memory
+		WHERE workspace = ? AND type = ?
+		ORDER BY updated_at DESC
+		LIMIT ?`, workspace, entryType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("memory: list by type: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close memory list rows") }()
+
+	entries, err := scanEntries(rows)
+	if err != nil {
+		return nil, err
+	}
+	var scored []ScoredEntry
+	for _, entry := range entries {
+		scored = append(scored, ScoredEntry{
+			Entry: entry,
+			Score: scoreEntry(entry),
+		})
 	}
 	return scored, nil
 }
@@ -636,7 +795,7 @@ func (s *Store) Relevant(ctx context.Context, workspace string, limit int) ([]Sc
 	// This prevents loading all entries for large datasets while still providing good ranking
 	const maxWindow = 500
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
 		WHERE workspace = ?
 		ORDER BY last_accessed DESC, updated_at DESC
@@ -680,7 +839,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 
 	// Load entries with embeddings from this workspace
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, embedding
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id, embedding
 		FROM named_memory
 		WHERE workspace = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
 		LIMIT 1000
@@ -700,10 +859,11 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 		var entry NamedEntry
 		var digests string
 		var created, updated, last string
+		var sessionID sql.NullString
 		var embeddingJSON []byte
 
 		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result,
-			&digests, &created, &updated, &last, &entry.AccessCount, &embeddingJSON); err != nil {
+			&digests, &created, &updated, &last, &entry.AccessCount, &sessionID, &embeddingJSON); err != nil {
 			continue
 		}
 
@@ -711,6 +871,9 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 		entry.CreatedAt, _ = sqlutil.ScanTimestamp(created)
 		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updated)
 		entry.LastAccess, _ = sqlutil.ScanTimestamp(last)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
 
 		if len(embeddingJSON) == 0 {
 			continue
@@ -736,7 +899,7 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	// Compute cosine similarity for each candidate
 	results := make([]ScoredEntry, 0, len(candidates))
 	for _, c := range candidates {
-		similarity := cosineSimilarity(queryEmbedding, c.embedding)
+		similarity := vector.Cosine(queryEmbedding, c.embedding)
 		if similarity > 0.5 { // Filter low-similarity results
 			results = append(results, ScoredEntry{
 				Entry: c.entry,
@@ -758,33 +921,14 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 	return results, nil
 }
 
-// cosineSimilarity computes the cosine similarity between two vectors.
-func cosineSimilarity(a, b []float32) float64 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0
-	}
-
-	var dotProduct, normA, normB float64
-	for i := range a {
-		dotProduct += float64(a[i]) * float64(b[i])
-		normA += float64(a[i]) * float64(a[i])
-		normB += float64(b[i]) * float64(b[i])
-	}
-
-	if normA == 0 || normB == 0 {
-		return 0
-	}
-
-	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
-}
-
 func scanEntries(rows *sql.Rows) ([]NamedEntry, error) {
 	var out []NamedEntry
 	for rows.Next() {
 		var entry NamedEntry
 		var digests string
 		var created, updated, last string
-		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount); err != nil {
+		var sessionID sql.NullString
+		if err := rows.Scan(&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary, &entry.Result, &digests, &created, &updated, &last, &entry.AccessCount, &sessionID); err != nil {
 			return nil, fmt.Errorf("memory: scan: %w", err)
 		}
 
@@ -806,6 +950,9 @@ func scanEntries(rows *sql.Rows) ([]NamedEntry, error) {
 		entry.LastAccess, err = sqlutil.ScanTimestamp(last)
 		if err != nil {
 			return nil, fmt.Errorf("memory: scan last_accessed: %w", err)
+		}
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
 		}
 
 		out = append(out, entry)

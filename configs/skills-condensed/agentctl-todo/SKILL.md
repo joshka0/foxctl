@@ -38,4 +38,4 @@ agentctl todo update --id <id> --title "New title"
 
 Set mode: `AGENTCTL_TASK_GUARD_MODE=strict`
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-todo/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-todo/Skill.md`

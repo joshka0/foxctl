@@ -1,4 +1,4 @@
-// Package handlers provides role-specific message handlers for DspyActors.
+// Package handlers provides role-specific message handlers for AgentActors.
 //
 // Each handler implements specialized behavior for different agent roles:
 // - Coder: Code operations (write, edit, run tools)

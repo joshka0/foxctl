@@ -21,28 +21,58 @@ signature:
       description: "Hook event type (PostToolUse)"
     - name: workspace_root
       type: string
-      required: true
+      required: false
       description: "Absolute path to workspace root"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
     - name: session_id
       type: string
       required: false
       description: "Claude session ID"
+    - name: actor_id
+      type: string
+      required: false
+      description: "Actor identifier"
     - name: tool_name
       type: string
       required: false
       description: "Name of the tool that was just executed"
+    - name: tool_canonical
+      type: string
+      required: false
+      description: "Canonical tool name (edit.apply_patch, fs.write_file, etc.)"
+    - name: tool_kind
+      type: string
+      required: false
+      description: "Tool category: read, write, exec, search, any"
     - name: tool_input
       type: object
       required: false
       description: "Input that was passed to the tool"
-    - name: tool_response
+    - name: tool_observation
       type: object
       required: false
-      description: "Response from the tool"
-returns:
-  - name: hook_output
-    type: object
-    description: "Hook output with decision (always 'none'), reason, and context"
+      description: "Observation from the tool"
+  help:
+    short: "Report failing tests after tool use."
+    long: |
+      Use hooks/test_feedback to surface failing tests for recent edits.
+      Example commands:
+        agentctl run hooks/test_feedback --input '{"event":"PostToolUse","workspace_root":"/workspace/project","tool_name":"Edit"}'
+        agentctl skills run hooks/test_feedback --event PostToolUse --workspace_root /workspace/project --tool_name Edit
+    workflows:
+      - id: post-edit-feedback
+        description: "Report failures after an edit."
+        example_input:
+          event: "PostToolUse"
+          workspace_root: "/workspace/project"
+          tool_name: "Edit"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Hook output with decision (always 'none'), reason, and context"
 capabilities:
   network: "none"
   filesystem:

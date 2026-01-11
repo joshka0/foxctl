@@ -16,6 +16,17 @@ signature:
   command: wasi/echo
   parameters: []
   returns: []
+  help:
+    short: "Emit a static envelope from WASI."
+    long: |
+      Use wasi/echo as a minimal WASI skill for testing.
+      Example commands:
+        agentctl run wasi/echo --input '{}'
+        agentctl skills run wasi/echo
+    workflows:
+      - id: echo
+        description: "Run the WASI echo skill."
+        example_input: {}
 capabilities:
   network: "none"
   filesystem: []

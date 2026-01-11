@@ -10,9 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/plans"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -20,11 +22,14 @@ import (
 
 // Input defines the skill input parameters.
 type Input struct {
-	Workspace   string `json:"workspace"`              // Project path
-	PlanFile    string `json:"plan_file,omitempty"`    // Specific plan file to sync (optional)
-	ImportTasks bool   `json:"import_tasks,omitempty"` // Whether to create tasks from plan steps
-	DryRun      bool   `json:"dry_run,omitempty"`      // Preview changes without applying
-	Force       bool   `json:"force,omitempty"`        // Re-sync even if hash unchanged
+	Workspace     string `json:"workspace"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	PlanFile      string `json:"plan_file,omitempty"`
+	ImportTasks   bool   `json:"import_tasks,omitempty"`
+	DryRun        bool   `json:"dry_run,omitempty"`
+	Force         bool   `json:"force,omitempty"`
+	Provider      string `json:"provider,omitempty"`
 }
 
 // SyncResult represents the result of syncing a single plan.
@@ -53,6 +58,7 @@ type Output struct {
 	PlansChanged   int          `json:"plans_changed"`
 	TasksCreated   int          `json:"tasks_created"`
 	DryRun         bool         `json:"dry_run"`
+	Provider       string       `json:"provider"`
 	Results        []SyncResult `json:"results"`
 	Message        string       `json:"message"`
 }
@@ -68,59 +74,52 @@ type PlanSyncState struct {
 const command = "plan/sync"
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("EPARSE", fmt.Errorf("decode input: %w", err), "Ensure valid JSON on stdin")
-	}
-
-	// Default workspace to current directory
+func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
+	// Default workspace
 	if input.Workspace == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "plan_sync: warning: failed to get working directory: %v, using '.' as fallback\n", err)
-			input.Workspace = "."
-		} else {
-			input.Workspace = wd
+		if strings.TrimSpace(input.WorkspaceRoot) != "" {
+			input.Workspace = strings.TrimSpace(input.WorkspaceRoot)
 		}
 	}
-
-	// Get agentctl home
-	home := os.Getenv("AGENTCTL_HOME")
-	if home == "" {
-		homeDir, _ := os.UserHomeDir()
-		home = filepath.Join(homeDir, ".agentctl")
-	}
+	input.Workspace = sessionkit.WorkspaceOrDefault(input.Workspace, rc.Workspace)
 
 	// Open stores - memory uses cache path (matches CLI), tasks uses storage
-	cachePath := filepath.Join(home, "cache")
-	storageRoot := filepath.Join(home, "storage")
-	casPath := filepath.Join(home, "cas")
-
-	memStore, err := memory.Open(ctx, cachePath, casPath)
+	memStore, memCleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
 	if err != nil {
-		fail("EIO", fmt.Errorf("open memory store: %w", err), "Check AGENTCTL_HOME permissions and disk space")
+		return skillerr.IO("open memory store", skillerr.WithCause(err),
+			skillerr.WithHint("Check AGENTCTL_HOME permissions and disk space"))
 	}
-	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+	defer memCleanup()
 
 	var taskStore tasks.Store
+	var taskCleanup func()
 	if input.ImportTasks && !input.DryRun {
-		taskStore, err = tasks.Open(ctx, storageRoot)
+		taskStore, taskCleanup, err = sessionkit.OpenTasks(ctx, rc.Config)
 		if err != nil {
-			fail("EIO", fmt.Errorf("open task store: %w", err), "Check AGENTCTL_HOME permissions and disk space")
+			return skillerr.IO("open task store", skillerr.WithCause(err),
+				skillerr.WithHint("Check AGENTCTL_HOME permissions and disk space"))
 		}
-		defer func() { errs.Ignore(taskStore.Close(), "close task store") }()
+		defer taskCleanup()
 	}
 
 	// Load previous sync states from memory
 	syncStates := loadSyncStates(ctx, memStore, input.Workspace)
 
-	// Get plans to process
-	homeDir, _ := os.UserHomeDir()
-	plansDir := filepath.Join(homeDir, ".claude", "plans")
-	detector := plans.NewDetector(plansDir)
+	// Determine provider (auto-detect if not specified)
+	var provider plans.Provider
+	if input.Provider != "" {
+		provider = plans.Provider(input.Provider)
+	} else {
+		provider, _ = plans.DetectProvider(input.Workspace)
+	}
+
+	// Create unified detector
+	unifiedDetector := plans.NewUnifiedDetector(input.Workspace, provider)
+
+	// Claude-specific parser (only used for Claude plans)
 	parser := plans.NewParser(plans.ParseOptions{
 		MaxSectionDepth: 4,
 		IncludeContent:  true,
@@ -129,34 +128,52 @@ func main() {
 	var plansToProcess []plans.PlanInfo
 
 	if input.PlanFile != "" {
-		// Process specific plan
-		plan, err := parser.ParseFile(input.PlanFile)
-		if err != nil {
-			fail("EPARSE", fmt.Errorf("parse plan file: %w", err), "Ensure the plan file exists and is valid markdown")
+		// Process specific plan file
+		if provider == plans.ProviderOpenCode && strings.HasSuffix(input.PlanFile, ".json") {
+			// Parse OpenCode JSON file
+			openCodeParser := plans.NewOpenCodeParser("")
+			todoFile, parseErr := openCodeParser.ParseFile(input.PlanFile)
+			if parseErr != nil {
+				return skillerr.Parse("opencode todo file", skillerr.WithCause(parseErr),
+					skillerr.WithHint("Ensure the JSON file exists and contains valid OpenCode todos"))
+			}
+			plansToProcess = append(plansToProcess, *todoFile.ToPlanInfo())
+		} else {
+			// Parse Claude markdown file
+			plan, parseErr := parser.ParseFile(input.PlanFile)
+			if parseErr != nil {
+				return skillerr.Parse("plan file", skillerr.WithCause(parseErr),
+					skillerr.WithHint("Ensure the plan file exists and is valid markdown"))
+			}
+			plansToProcess = append(plansToProcess, *plan)
 		}
-		plansToProcess = append(plansToProcess, *plan)
 	} else {
-		// Detect all active plans
-		detected, err := detector.Detect(plans.DetectOptions{
+		// Detect all active plans using unified detector
+		detected, detectErr := unifiedDetector.Detect(plans.DetectOptions{
 			IncludeArchived: false,
 		})
-		if err != nil {
-			fail("ERUNTIME", fmt.Errorf("detect plans: %w", err), "Check ~/.claude/plans directory exists and is accessible")
+		if detectErr != nil {
+			providerHint := "Check ~/.claude/plans directory exists and is accessible"
+			if provider == plans.ProviderOpenCode {
+				providerHint = "Check .opencode/storage/todo directory exists and is accessible"
+			}
+			return skillerr.Runtime("detect plans", skillerr.WithCause(detectErr),
+				skillerr.WithHint(providerHint))
 		}
 		plansToProcess = detected
 	}
 
 	// Process each plan
-	// Resolve session ID once for all operations
-	sessionID := resolveSessionID()
+	sessionID := sessionkit.ResolveSessionID(input.Workspace, input.SessionID)
 
 	output := Output{
-		DryRun:  input.DryRun,
-		Results: []SyncResult{},
+		DryRun:   input.DryRun,
+		Provider: string(provider),
+		Results:  []SyncResult{},
 	}
 
 	for _, plan := range plansToProcess {
-		result := processPlan(ctx, &plan, parser, syncStates, taskStore, memStore, input, sessionID)
+		result := processPlan(ctx, &plan, unifiedDetector, syncStates, taskStore, memStore, input, sessionID)
 		output.Results = append(output.Results, result)
 		output.PlansProcessed++
 
@@ -168,21 +185,20 @@ func main() {
 
 	// Build message
 	if input.DryRun {
-		output.Message = fmt.Sprintf("Dry run: %d plans processed, %d would change, %d tasks would be created",
-			output.PlansProcessed, output.PlansChanged, output.TasksCreated)
+		output.Message = fmt.Sprintf("Dry run (%s): %d plans processed, %d would change, %d tasks would be created",
+			provider, output.PlansProcessed, output.PlansChanged, output.TasksCreated)
 	} else {
-		output.Message = fmt.Sprintf("Synced %d plans, %d changed, %d tasks created",
-			output.PlansProcessed, output.PlansChanged, output.TasksCreated)
+		output.Message = fmt.Sprintf("Synced %d %s plans, %d changed, %d tasks created",
+			output.PlansProcessed, provider, output.PlansChanged, output.TasksCreated)
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit plan/sync result")
+	return skillout.Emit(rc, command, output)
 }
 
 func processPlan(
 	ctx context.Context,
 	plan *plans.PlanInfo,
-	parser *plans.Parser,
+	detector *plans.UnifiedDetector,
 	syncStates map[string]PlanSyncState,
 	taskStore tasks.Store,
 	memStore *memory.Store,
@@ -208,8 +224,8 @@ func processPlan(
 		result.Status = "created"
 	}
 
-	// Extract steps from the plan
-	steps := parser.ExtractSteps(plan)
+	// Extract steps from the plan using the appropriate parser
+	steps := detector.ExtractSteps(plan)
 
 	// Import tasks if requested
 	if input.ImportTasks {
@@ -340,35 +356,4 @@ func sanitizeFileName(name string) string {
 	name = strings.ReplaceAll(name, " ", "-")
 	name = strings.ToLower(name)
 	return name
-}
-
-func fail(code string, err error, hint string) {
-	data := map[string]any{
-		"hint": hint,
-	}
-	env := envelope.Error(command, code, err.Error(), data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit plan/sync failure")
-	os.Exit(1)
-}
-
-// resolveSessionID returns the session ID from environment variables.
-// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
-// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
-func resolveSessionID() string {
-	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("CLAUDE_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("OPENCODE_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("CURSOR_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("TERM_SESSION_ID"); sid != "" {
-		return sid
-	}
-	return ""
 }

@@ -15,13 +15,15 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codemap"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
+
+const command = "codemap/check"
 
 type input struct {
 	CodemapID   string `json:"codemap_id"`
@@ -55,27 +57,12 @@ type output struct {
 var pathPattern = regexp.MustCompile(`^@?(.+?)(?::\d+)?$`)
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("codemap/check", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
+}
 
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("codemap/check", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("codemap/check", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.CodemapID == "" {
-		fail("codemap/check", "EARG", fmt.Errorf("codemap_id is required"))
+		return fmt.Errorf("codemap_id is required")
 	}
 
 	workspace := in.Workspace
@@ -83,22 +70,16 @@ func main() {
 		if wd, err := os.Getwd(); err == nil && wd != "" {
 			workspace = wd
 		} else {
-			fail("codemap/check", "ERUNTIME", fmt.Errorf("detect workspace: %w", err))
+			return fmt.Errorf("detect workspace: %w", err)
 		}
 	}
 
-	result, err := checkStaleness(ctx, cfg, in.CodemapID, workspace, in.IncludeDiff, in.Regenerate)
+	result, err := checkStaleness(ctx, rc.Config, in.CodemapID, workspace, in.IncludeDiff, in.Regenerate)
 	if err != nil {
-		fail("codemap/check", "ERUNTIME", err)
+		return err
 	}
 
-	if err := rc.Emit("codemap/check", result, "application/json", envelope.Meta{
-		Source:    "run",
-		Runner:    "exec",
-		Workspace: workspace,
-	}); err != nil {
-		fail("codemap/check", "ERUNTIME", err)
-	}
+	return skillout.Emit(rc, command, result)
 }
 
 func checkStaleness(ctx context.Context, cfg config.Config, codemapID, workspace string, includeDiff bool, regenerate bool) (*output, error) {
@@ -386,12 +367,6 @@ func buildSummary(cm *codemap.Codemap, totalFiles int, changed []changedFile, sc
 
 	return fmt.Sprintf("Codemap '%s' has minor staleness (%.0f%% changed). %d/%d files modified: %s. Consider updating.",
 		cm.Title, score*100, len(changed), totalFiles, strings.Join(changedNames, ", "))
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
 }
 
 // regenerateCodemap calls the codemap/generate skill to create a new codemap

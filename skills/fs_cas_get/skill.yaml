@@ -23,6 +23,25 @@ signature:
       type: string
       required: false
       description: "Optional output path (defaults to temp file)"
+  help:
+    short: "Retrieve a CAS artifact and write it to disk."
+    long: |
+      Use fs/cas_get to fetch content from CAS by digest.
+      Example commands:
+        agentctl run fs/cas_get --input '{"digest":"sha256:..."}'
+        agentctl skills run fs/cas_get --digest sha256:...
+        agentctl run fs/cas_get --input '{"digest":"sha256:...","output":"./artifact.bin"}'
+        agentctl skills run fs/cas_get --digest sha256:... --output ./artifact.bin
+    workflows:
+      - id: cas-to-temp
+        description: "Fetch content to a temp file."
+        example_input:
+          digest: "sha256:..."
+      - id: cas-to-path
+        description: "Fetch content to a specific path."
+        example_input:
+          digest: "sha256:..."
+          output: "./artifact.bin"
 returns:
   - name: path
     type: string

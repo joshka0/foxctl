@@ -45,6 +45,7 @@ payload="$(cat)"
 # Extract trigger type from the hook input
 # PreCompact provides: { trigger: "auto"|"manual", custom_instructions?: string }
 trigger=$(printf '%s' "$payload" | jq -r '.trigger // "auto"')
+custom_instructions=$(printf '%s' "$payload" | jq -r '.custom_instructions // ""' 2>/dev/null || true)
 
 # Workspace from environment
 workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
@@ -65,12 +66,19 @@ skill_input=$(jq -nc \
 )
 
 # Call session/save skill with --ephemeral for faster execution
-result="$(printf '%s' "$skill_input" | "$AGENTCTL_BIN" run session/save --ephemeral --input-file - 2>/dev/null)" || {
+printf '%s' "$skill_input" | "$AGENTCTL_BIN" run session/save --ephemeral --input-file - >/dev/null 2>&1 || {
   # On error, don't block compaction
   echo '{}'
   exit 0
 }
 
-# PreCompact hook doesn't need to return anything special
-# Just acknowledge success
+anchor_bump_input=$(jq -nc --arg ws "$workspace" '{operation: "bump_compaction", workspace: $ws, trigger: "pre_compact"}')
+printf '%s' "$anchor_bump_input" | "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
+
+if [[ -n "${custom_instructions:-}" && "${custom_instructions:-}" != "null" ]]; then
+  clipped="${custom_instructions:0:500}"
+  anchor_append_input=$(jq -nc --arg ws "$workspace" --arg sum "$clipped" '{operation: "append_learnings", workspace: $ws, trigger: "pre_compact", summary: $sum}')
+  printf '%s' "$anchor_append_input" | "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
+fi
+
 echo '{}'

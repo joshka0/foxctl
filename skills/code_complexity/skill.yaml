@@ -52,6 +52,29 @@ signature:
       required: false
       default: 100
       description: "Maximum number of results"
+  help:
+    short: "Analyze code complexity and hotspots."
+    long: |
+      Use code/complexity to compute cyclomatic or cognitive complexity across
+      files or functions and highlight hotspots.
+      Example commands:
+        agentctl run code/complexity --input '{"path":"./src","analysis_mode":"hotspots","threshold":10}'
+        agentctl skills run code/complexity --path ./src --analysis_mode hotspots --threshold 10
+        agentctl run code/complexity --input '{"path":"./src","analysis_mode":"function","metric":"cognitive"}'
+        agentctl skills run code/complexity --path ./src --analysis_mode function --metric cognitive
+    workflows:
+      - id: hotspots
+        description: "Find high-complexity hotspots."
+        example_input:
+          path: "./src"
+          analysis_mode: "hotspots"
+          threshold: 10
+      - id: cognitive-per-function
+        description: "Analyze cognitive complexity per function."
+        example_input:
+          path: "./src"
+          analysis_mode: "function"
+          metric: "cognitive"
 returns:
   - name: complexity
     type: object

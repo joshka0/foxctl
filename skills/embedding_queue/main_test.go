@@ -5,16 +5,66 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/rs/zerolog"
 )
 
-func TestEnqueue(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTCTL_HOME", root)
+func newTestRunContext(t *testing.T, stdout *bytes.Buffer, workspace string) *skillmain.RunContext {
+	t.Helper()
+	t.Setenv("AGENTCTL_WORKSPACE", workspace)
+	state := t.TempDir()
+	casPath := filepath.Join(state, "cas")
+	casStore, err := cas.NewStore(casPath)
+	if err != nil {
+		t.Fatalf("open cas: %v", err)
+	}
 
-	input := Input{
+	pv, err := policy.NewPathValidator(workspace, nil)
+	if err != nil {
+		t.Fatalf("path validator: %v", err)
+	}
+
+	cfg := config.Config{
+		Home:           state,
+		InlineOutputKB: 32,
+		MaxCaptureKB:   10240,
+		Paths: config.Paths{
+			CAS:   casPath,
+			Jobs:  filepath.Join(state, "jobs"),
+			Cache: filepath.Join(state, "cache"),
+		},
+	}
+
+	return &skillmain.RunContext{
+		Config:        cfg,
+		CASStore:      casStore,
+		Workspace:     workspace,
+		Logger:        zerolog.Nop(),
+		PathValidator: pv,
+		Validator:     validator.New(),
+		Stdout:        stdout,
+		Now:           time.Now,
+		InlineKB:      cfg.InlineOutputKB,
+		MaxPreview:    100,
+	}
+}
+
+func TestEnqueue(t *testing.T) {
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
+
+	in := Input{
 		Operation:   "enqueue",
 		WorkspaceID: "test-ws",
 		Symbols: []SymbolInput{
@@ -28,16 +78,13 @@ func TestEnqueue(t *testing.T) {
 		Deduplicate: true,
 	}
 
-	inputBytes, _ := json.Marshal(input)
-	var output bytes.Buffer
-
-	err := run(context.Background(), bytes.NewReader(inputBytes), &output)
+	err := run(context.Background(), rc, in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var env envelope.Envelope
-	if err := json.Unmarshal(output.Bytes(), &env); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
 		t.Fatalf("failed to unmarshal output: %v", err)
 	}
 
@@ -52,23 +99,22 @@ func TestEnqueue(t *testing.T) {
 }
 
 func TestStats(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTCTL_HOME", root)
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
-	input := Input{
+	in := Input{
 		Operation: "stats",
 	}
 
-	inputBytes, _ := json.Marshal(input)
-	var output bytes.Buffer
-
-	err := run(context.Background(), bytes.NewReader(inputBytes), &output)
+	err := run(context.Background(), rc, in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var env envelope.Envelope
-	if err := json.Unmarshal(output.Bytes(), &env); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
 		t.Fatalf("failed to unmarshal output: %v", err)
 	}
 
@@ -83,25 +129,24 @@ func TestStats(t *testing.T) {
 }
 
 func TestGetNotFound(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTCTL_HOME", root)
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
-	input := Input{
+	in := Input{
 		Operation:   "get",
 		WorkspaceID: "test-ws",
 		SymbolID:    "nonexistent.go:Foo",
 	}
 
-	inputBytes, _ := json.Marshal(input)
-	var output bytes.Buffer
-
-	err := run(context.Background(), bytes.NewReader(inputBytes), &output)
+	err := run(context.Background(), rc, in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var env envelope.Envelope
-	if err := json.Unmarshal(output.Bytes(), &env); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
 		t.Fatalf("failed to unmarshal output: %v", err)
 	}
 
@@ -116,46 +161,28 @@ func TestGetNotFound(t *testing.T) {
 }
 
 func TestCleanup(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTCTL_HOME", root)
+	work := t.TempDir()
+	stdout := &bytes.Buffer{}
+	rc := newTestRunContext(t, stdout, work)
+	defer rc.Close()
 
-	input := Input{
+	in := Input{
 		Operation:      "cleanup",
 		OlderThanHours: 0, // Clean all
 	}
 
-	inputBytes, _ := json.Marshal(input)
-	var output bytes.Buffer
-
-	err := run(context.Background(), bytes.NewReader(inputBytes), &output)
+	err := run(context.Background(), rc, in)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var env envelope.Envelope
-	if err := json.Unmarshal(output.Bytes(), &env); err != nil {
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
 		t.Fatalf("failed to unmarshal output: %v", err)
 	}
 
 	if env.Status != "ok" {
 		t.Errorf("expected status ok, got %s", env.Status)
-	}
-}
-
-func TestUnknownOperation(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AGENTCTL_HOME", root)
-
-	input := Input{
-		Operation: "unknown",
-	}
-
-	inputBytes, _ := json.Marshal(input)
-	var output bytes.Buffer
-
-	err := run(context.Background(), bytes.NewReader(inputBytes), &output)
-	if err == nil {
-		t.Error("expected error for unknown operation")
 	}
 }
 

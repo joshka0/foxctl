@@ -4,16 +4,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
 
@@ -25,30 +21,10 @@ type input struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err, "Check AGENTCTL_HOME and config file permissions")
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err, "Failed to initialize runner context")
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("EARG", fmt.Errorf("decode input: %w", err), "Provide valid JSON input with action field (show or learn)")
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("ERUNTIME", err, "Check trajectory store and workspace path")
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve workspace
 	workspace := in.Workspace
 	if workspace == "" {
@@ -60,7 +36,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	}
 
 	// Open trajectory store
-	trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
+	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open trajectory store: %w", err)
 	}
@@ -80,13 +56,13 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in in
 	}
 }
 
-func showWeights(ctx context.Context, rc *runner.RunnerContext, scorer *optimization.LearnableScorer, workspace string) error {
+func showWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimization.LearnableScorer, workspace string) error {
 	weights, err := scorer.GetCurrentWeights(ctx, workspace)
 	if err != nil {
 		return fmt.Errorf("get weights: %w", err)
 	}
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"weights": map[string]any{
 			"critical_path": weights.CriticalPath,
 			"page_rank":     weights.PageRank,
@@ -95,16 +71,16 @@ func showWeights(ctx context.Context, rc *runner.RunnerContext, scorer *optimiza
 			"recency":       weights.Recency,
 		},
 		"workspace": workspace,
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	})
 }
 
-func learnWeights(ctx context.Context, rc *runner.RunnerContext, scorer *optimization.LearnableScorer, workspace string) error {
+func learnWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimization.LearnableScorer, workspace string) error {
 	update, err := scorer.LearnFromOutcomes(ctx, workspace)
 	if err != nil {
 		return fmt.Errorf("learn weights: %w", err)
 	}
 
-	return rc.Emit(command, map[string]any{
+	return skillout.Emit(rc, command, map[string]any{
 		"update": map[string]any{
 			"timestamp":   update.Timestamp,
 			"sample_size": update.SampleSize,
@@ -125,12 +101,5 @@ func learnWeights(ctx context.Context, rc *runner.RunnerContext, scorer *optimiz
 			},
 		},
 		"workspace": workspace,
-	}, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(code string, err error, hint string) {
-	data := map[string]any{"hint": hint}
-	env := envelope.Error(command, code, err.Error(), data)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
+	})
 }

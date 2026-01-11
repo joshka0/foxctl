@@ -70,6 +70,11 @@ agentctl run fs/read --path ./main.go
 
 # Manage tasks with dependencies
 agentctl run todo/manage --input '{"operation":"add","title":"Implement feature X"}'
+
+# Discover example usage
+agentctl run --examples
+agentctl run todo/manage --examples
+agentctl ci --examples
 ```
 
 ### Working with Jobs (Async)

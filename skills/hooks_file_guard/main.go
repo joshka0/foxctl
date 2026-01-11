@@ -5,19 +5,19 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
+	"github.com/jkatigb/agentctl/internal/hooks/toolutil"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
@@ -38,34 +38,17 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("hooks/file_guard", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("hooks/file_guard", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("hooks/file_guard", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail("hooks/file_guard", "ERUNTIME", err)
-	}
+	skillmain.Main("hooks/file_guard", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in hook.Input) error {
-	// Skip non-write operations
-	if !hook.IsWriteOperation(in.ToolName) {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionApprove,
+func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
+	paths := sessionkit.ResolvePaths(rc.Config)
+
+	// Skip non-write operations using cross-platform detection
+	// Supports CC tools (Edit, Write, etc.), canonical tools (edit.*, fs.write_*), and explicit tool_kind
+	if !toolutil.IsWriteOperation(in.ToolName, in.ToolCanonical, string(in.ToolKind)) {
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionApprove,
 			Reason:   "non-write operation",
 		})
 	}
@@ -77,41 +60,46 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Get workspace ID
-	workspaceID := in.WorkspaceRoot
+	workspaceID := in.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = in.WorkspaceRoot
+	}
 	if workspaceID == "" {
 		// Fallback to current directory; error is not actionable.
 		workspaceID, _ = os.Getwd() //nolint:errcheck
 	}
 
 	// Get actor ID from environment
-	actorID := os.Getenv("AGENTCTL_AGENT_NAME")
+	actorID := in.ActorID
+	if actorID == "" {
+		actorID = os.Getenv("AGENTCTL_AGENT_ID")
+	}
+	if actorID == "" {
+		actorID = os.Getenv("AGENTCTL_AGENT_NAME")
+	}
 	if actorID == "" {
 		actorID = fmt.Sprintf("actor:agent:%s", in.SessionID)
 	}
 
-	// Extract file path from tool input
-	filePath := extractFilePath(in.ToolInput)
+	// Extract file path from tool input using cross-platform path extraction
+	// Checks file_path, path, file, current_path fields
+	filePath := pathutil.ExtractPath(in.ToolInput)
 	if filePath == "" {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionApprove,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionApprove,
 			Reason:   "no file path detected",
 		})
 	}
 
-	// Make path relative to workspace
-	relPath := filePath
-	if in.WorkspaceRoot != "" && filepath.IsAbs(filePath) {
-		if rel, err := filepath.Rel(in.WorkspaceRoot, filePath); err == nil && !strings.HasPrefix(rel, "..") {
-			relPath = rel
-		}
-	}
+	// Make path relative to workspace using pathutil
+	relPath := pathutil.RelativePath(filePath, in.WorkspaceRoot)
 
 	// Open board store
-	boardStore, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)
+	boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)
 	if err != nil {
 		// If we can't open the store, allow the operation with a warning
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionApprove,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionApprove,
 			Reason:   "file_guard: could not open board store, allowing operation",
 			Context:  "**Warning:** File reservation system unavailable. Proceeding without conflict checking.",
 		})
@@ -121,8 +109,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	// Check for conflicts
 	conflicts, err := boardStore.CheckConflicts(ctx, workspaceID, []string{relPath}, actorID, agent.ReservationModeExclusive)
 	if err != nil {
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionApprove,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionApprove,
 			Reason:   "file_guard: conflict check failed, allowing operation",
 		})
 	}
@@ -132,8 +120,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		conflictMsg := formatConflicts(conflicts)
 
 		if mode == ModeStrict {
-			return emitOutput(rc, hook.Output{
-				Decision: hook.DecisionBlock,
+			return emitOutput(rc, hooks.Output{
+				Decision: hooks.DecisionBlock,
 				Reason:   fmt.Sprintf("file conflict: %s is reserved by %s", relPath, conflicts[0].Holder),
 				Context:  conflictMsg,
 				Meta: map[string]any{
@@ -146,8 +134,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		}
 
 		// Advisory mode: warn but allow
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionApprove,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionApprove,
 			Reason:   fmt.Sprintf("file conflict warning: %s may be in use by another agent", relPath),
 			Context:  conflictMsg,
 			Meta: map[string]any{
@@ -161,7 +149,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Get active task context for the reservation reason
-	taskID, reason := getTaskContext(ctx, cfg, workspaceID, in.ToolName, relPath)
+	taskID, reason := getTaskContext(ctx, paths.StorageRoot, workspaceID, in.ToolName, relPath)
 
 	// No conflicts - create a reservation for this actor
 	reservation := agent.FileReservation{
@@ -176,8 +164,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 
 	if err := boardStore.Reserve(ctx, &reservation); err != nil {
 		// Failed to reserve, but no conflicts - allow the operation
-		return emitOutput(rc, hook.Output{
-			Decision: hook.DecisionApprove,
+		return emitOutput(rc, hooks.Output{
+			Decision: hooks.DecisionApprove,
 			Reason:   fmt.Sprintf("file_guard: reservation failed but no conflicts for %s", relPath),
 			Meta: map[string]any{
 				"workspace_id": workspaceID,
@@ -187,8 +175,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		})
 	}
 
-	return emitOutput(rc, hook.Output{
-		Decision: hook.DecisionApprove,
+	return emitOutput(rc, hooks.Output{
+		Decision: hooks.DecisionApprove,
 		Reason:   fmt.Sprintf("reserved %s for %s", relPath, actorID),
 		Meta: map[string]any{
 			"reservation_id": reservation.ID,
@@ -203,8 +191,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 }
 
 // getTaskContext retrieves active task info to provide context for the reservation.
-func getTaskContext(ctx context.Context, cfg config.Config, workspaceID, toolName, filePath string) (taskID, reason string) {
-	taskStore, err := tasks.Open(ctx, cfg.Storage.Root)
+func getTaskContext(ctx context.Context, storagePath, workspaceID, toolName, filePath string) (taskID, reason string) {
+	taskStore, err := tasks.Open(ctx, storagePath)
 	if err != nil {
 		// Fallback to tool-based reason
 		return "", fmt.Sprintf("%s on %s", toolName, filepath.Base(filePath))
@@ -228,21 +216,6 @@ func getTaskContext(ctx context.Context, cfg config.Config, workspaceID, toolNam
 	}
 
 	return task.ID, reason
-}
-
-// extractFilePath extracts the file_path from tool input JSON.
-func extractFilePath(toolInput json.RawMessage) string {
-	if len(toolInput) == 0 {
-		return ""
-	}
-
-	var input struct {
-		FilePath string `json:"file_path"`
-	}
-	if err := json.Unmarshal(toolInput, &input); err != nil {
-		return ""
-	}
-	return input.FilePath
 }
 
 // formatConflicts creates a warning message for conflicts with context about the other agent's work.
@@ -269,18 +242,9 @@ func formatConflicts(conflicts []agent.ReservationConflict) string {
 	return sb.String()
 }
 
-func emitOutput(rc *runner.RunnerContext, output hook.Output) error {
+func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
 	data := map[string]any{
 		"hook_output": output,
 	}
-	return rc.Emit("hooks/file_guard", data, "application/json", envelope.Meta{
-		Source: "run",
-		Runner: "exec",
-	})
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	return skillout.Emit(rc, "hooks/file_guard", data)
 }

@@ -1,7 +1,7 @@
 // Data fetching hooks for TUI
 // Uses @agentctl/data client with simple React state management
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useReducer, useRef } from "react";
 import {
   getJobs,
   getJobDetail,
@@ -76,18 +76,35 @@ function useQuery<T>(
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | undefined>(undefined);
 
-  const refetch = useCallback(() => {
-    setIsLoading(true);
-    setError(undefined);
-    fetcher()
-      .then(setData)
-      .catch(setError)
-      .finally(() => setIsLoading(false));
-  }, deps);
+  const fetcherRef = useRef(fetcher);
+  fetcherRef.current = fetcher;
+
+  const [refreshToken, bumpRefresh] = useReducer((value) => value + 1, 0);
+  const refetch = useCallback(() => bumpRefresh(), []);
 
   useEffect(() => {
-    refetch();
-  }, [refetch]);
+    let alive = true;
+    void refreshToken;
+    setIsLoading(true);
+    setError(undefined);
+    fetcherRef.current()
+      .then((result) => {
+        if (!alive) return;
+        setData(result);
+      })
+      .catch((err) => {
+        if (!alive) return;
+        setError(err instanceof Error ? err : new Error(String(err)));
+      })
+      .finally(() => {
+        if (!alive) return;
+        setIsLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [...deps, refreshToken]);
 
   return { data, isLoading, error, refetch };
 }
@@ -660,6 +677,50 @@ export interface ConsoleHistoryEvent {
   askId?: string;
 }
 
+const MAX_CONSOLE_HISTORY = 2000;
+const MAX_EVENT_CHARS = 20000;
+
+function clampText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return value.slice(0, max) + "\n...[truncated]";
+}
+
+function pushConsoleHistory(
+  prev: ConsoleHistoryEvent[],
+  next: ConsoleHistoryEvent
+): ConsoleHistoryEvent[] {
+  const nextClamped = {
+    ...next,
+    content: clampText(next.content || "", MAX_EVENT_CHARS),
+  };
+
+  if (
+    nextClamped.type === "event" &&
+    nextClamped.kind === "progress" &&
+    nextClamped.askId
+  ) {
+    const last = prev[prev.length - 1];
+    if (
+      last?.type === "event" &&
+      last.kind === "progress" &&
+      last.askId === nextClamped.askId
+    ) {
+      const out = prev.slice();
+      out[out.length - 1] = nextClamped;
+      return out;
+    }
+  }
+
+  if (prev.length < MAX_CONSOLE_HISTORY) {
+    return [...prev, nextClamped];
+  }
+
+  return [
+    ...prev.slice(prev.length - MAX_CONSOLE_HISTORY + 1),
+    nextClamped,
+  ];
+}
+
 // Console SSE subscription hook
 export function useConsoleEvents(
   consoleId: string | undefined,
@@ -668,6 +729,11 @@ export function useConsoleEvents(
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<Error | undefined>(undefined);
   const [history, setHistory] = useState<ConsoleHistoryEvent[]>([]);
+
+  const onEventRef = useRef(onEvent);
+  useEffect(() => {
+    onEventRef.current = onEvent;
+  }, [onEvent]);
 
   useEffect(() => {
     if (!consoleId) {
@@ -699,7 +765,7 @@ export function useConsoleEvents(
             toolName: data.tool_name,
             askId: data.ask_id,
           };
-          setHistory((prev) => [...prev, historyEvent]);
+          setHistory((prev) => pushConsoleHistory(prev, historyEvent));
         } else if (event.type === "console.reply") {
           const data = event.data as {
             ask_id?: string;
@@ -714,11 +780,11 @@ export function useConsoleEvents(
             status: data.status,
             askId: data.ask_id,
           };
-          setHistory((prev) => [...prev, historyEvent]);
+          setHistory((prev) => pushConsoleHistory(prev, historyEvent));
         }
 
         // Call custom handler if provided
-        onEvent?.(event);
+        onEventRef.current?.(event);
       },
       (err) => {
         setError(new Error("SSE connection error"));
@@ -744,7 +810,7 @@ export function useConsoleEvents(
       timestamp: new Date(),
       askId,
     };
-    setHistory((prev) => [...prev, event]);
+    setHistory((prev) => pushConsoleHistory(prev, event));
   }, []);
 
   const clearHistory = useCallback(() => {

@@ -123,6 +123,49 @@ func (b *EventBuilder) WithDataMap(data map[string]any) *EventBuilder {
 	return b
 }
 
+// WithInputArtifact sets the CAS digest of the input payload.
+// This enables full request replay from observability events.
+func (b *EventBuilder) WithInputArtifact(digest string) *EventBuilder {
+	if digest != "" {
+		return b.WithData("input_artifact", digest)
+	}
+	return b
+}
+
+// WithResultArtifact sets the CAS digest of the output/result payload.
+// This enables full response replay from observability events.
+func (b *EventBuilder) WithResultArtifact(digest string) *EventBuilder {
+	if digest != "" {
+		return b.WithData("result_artifact", digest)
+	}
+	return b
+}
+
+// WithStderrArtifact sets the CAS digest of captured stderr.
+// This preserves debugging info in CAS for later retrieval.
+func (b *EventBuilder) WithStderrArtifact(digest string) *EventBuilder {
+	if digest != "" {
+		return b.WithData("stderr_artifact", digest)
+	}
+	return b
+}
+
+// WithTrajectory sets the trajectory ID for turn correlation.
+func (b *EventBuilder) WithTrajectory(trajectoryID string) *EventBuilder {
+	if trajectoryID != "" {
+		return b.WithData("trajectory_id", trajectoryID)
+	}
+	return b
+}
+
+// WithMailbox sets the mailbox message ID for actor coordination.
+func (b *EventBuilder) WithMailbox(mailboxMsgID string) *EventBuilder {
+	if mailboxMsgID != "" {
+		return b.WithData("mailbox_message_id", mailboxMsgID)
+	}
+	return b
+}
+
 // EnrichFromEnv populates business context from environment variables.
 // This pulls session, agent, and workspace IDs from standard env vars.
 func (b *EventBuilder) EnrichFromEnv() *EventBuilder {

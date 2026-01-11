@@ -7,20 +7,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib"
 	fsutil "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
+
+const command = "text/grep"
 
 type input struct {
 	Path       string   `json:"path"`
@@ -39,30 +38,19 @@ type match struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("text/grep", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("text/grep", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("text/grep", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("text/grep", "ERUNTIME", err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Validate pattern
+	if strings.TrimSpace(in.Pattern) == "" {
+		return fmt.Errorf("pattern is required")
+	}
+	// Apply defaults
+	if in.MaxMatches <= 0 {
+		in.MaxMatches = 100000
+	}
+
 	re, err := compileRegex(in.Pattern, in.CI)
 	if err != nil {
 		return err
@@ -123,24 +111,10 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		data["artifact"] = artifact.Digest
 	}
 
-	return rc.Emit("text/grep", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, command, data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if strings.TrimSpace(in.Pattern) == "" {
-		return input{}, fmt.Errorf("pattern is required")
-	}
-	if in.MaxMatches <= 0 {
-		in.MaxMatches = 100000
-	}
-	return in, nil
-}
-
-func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, string, error) {
+func resolveWorkspace(rc *skillmain.RunContext, candidate string) (string, string, error) {
 	workspace := rc.PathValidator.Workspace()
 	if strings.TrimSpace(candidate) == "" {
 		return workspace, workspace, nil
@@ -153,7 +127,7 @@ func resolveWorkspace(rc *runner.RunnerContext, candidate string) (string, strin
 }
 
 func preparePreview(matches []match, limit int) ([]match, bool) {
-	preview, truncated := skillslib.PreparePreview(matches, limit)
+	preview, truncated := skillout.PreparePreview(matches, limit)
 	if truncated {
 		dup := make([]match, len(preview))
 		copy(dup, preview)
@@ -162,18 +136,18 @@ func preparePreview(matches []match, limit int) ([]match, bool) {
 	return preview, truncated
 }
 
-func persistMatchesArtifact(ctx context.Context, rc *runner.RunnerContext, matches []match, truncated bool) (runner.Artifact, error) {
+func persistMatchesArtifact(ctx context.Context, rc *skillmain.RunContext, matches []match, truncated bool) (skillmain.Artifact, error) {
 	if !truncated {
-		return runner.Artifact{}, nil
+		return skillmain.Artifact{}, nil
 	}
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
 	for _, m := range matches {
 		if err := enc.Encode(m); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode match: %w", err)
+			return skillmain.Artifact{}, fmt.Errorf("encode match: %w", err)
 		}
 	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_grep")
+	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_grep")
 }
 
 func collectEntries(path string, include, exclude []string) ([]fsutil.FileEntry, error) {
@@ -289,8 +263,3 @@ func trimLine(line string, limit int) string {
 	return line[:limit] + "..."
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit text/grep failure")
-	os.Exit(1)
-}

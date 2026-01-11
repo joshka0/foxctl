@@ -3,22 +3,19 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"math"
 	"os"
-	"path/filepath"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	"github.com/rs/zerolog"
+	"github.com/jkatigb/agentctl/internal/storage/vector"
 )
 
 const (
@@ -30,10 +27,10 @@ const (
 // Input is the skill input schema.
 type Input struct {
 	// Scope is the type of item to refresh: "memory", "symbol", or "session".
-	Scope string `json:"scope"`
+	Scope string `json:"scope" validate:"required,oneof=memory symbol session"`
 
 	// Name is the identifier for the item (memory name, symbol ID, or session ID).
-	Name string `json:"name"`
+	Name string `json:"name" validate:"required"`
 
 	// Workspace is the workspace context (optional, defaults to "default").
 	Workspace string `json:"workspace,omitempty"`
@@ -54,85 +51,68 @@ type Output struct {
 }
 
 func main() {
-	if err := run(context.Background(), os.Stdin, os.Stdout); err != nil {
-		env := envelope.Error(command, "ERUNTIME", err.Error(), nil)
-		_ = json.NewEncoder(os.Stdout).Encode(env)
-		os.Exit(1)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, r io.Reader, w io.Writer) error {
-	var input Input
-	if err := json.NewDecoder(r).Decode(&input); err != nil {
-		return fmt.Errorf("parse input: %w", err)
-	}
-
-	// Validate input
-	if input.Scope == "" {
-		return fmt.Errorf("scope is required (memory, symbol, or session)")
-	}
-	if input.Name == "" {
-		return fmt.Errorf("name is required")
-	}
-	if input.Workspace == "" {
-		input.Workspace = "default"
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Set default workspace
+	if in.Workspace == "" {
+		in.Workspace = "default"
 	}
 
 	start := time.Now()
 	output := Output{
-		Scope: input.Scope,
-		Name:  input.Name,
+		Scope: in.Scope,
+		Name:  in.Name,
 	}
 
 	// Check for API key - prefer Voyage, fall back to Gemini
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if voyageKey == "" && geminiKey == "" && !input.DryRun {
+	if voyageKey == "" && geminiKey == "" && !in.DryRun {
 		output.Status = "error"
 		output.Message = "No embedding API key set"
 		output.Hint = "Set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY"
 		output.DurationMs = time.Since(start).Milliseconds()
-		return json.NewEncoder(w).Encode(envelope.OK(command, output))
+		return skillout.Emit(rc, command, output)
 	}
 
 	// Get content based on scope
 	var content string
 	var err error
 
-	switch input.Scope {
+	switch in.Scope {
 	case "memory":
-		content, err = getMemoryContent(ctx, input.Name, input.Workspace)
+		content, err = getMemoryContent(ctx, rc, in.Name, in.Workspace)
 	case "symbol":
-		content, err = getSymbolContent(ctx, input.Name, input.Workspace)
+		content, err = getSymbolContent(ctx, in.Name, in.Workspace)
 	case "session":
-		content, err = getSessionContent(ctx, input.Name)
-	default:
-		return fmt.Errorf("invalid scope: %s (must be memory, symbol, or session)", input.Scope)
+		content, err = getSessionContent(ctx, rc, in.Name)
 	}
 
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			output.Status = "not_found"
-			output.Message = fmt.Sprintf("%s not found: %s", input.Scope, input.Name)
+			output.Message = fmt.Sprintf("%s not found: %s", in.Scope, in.Name)
 			output.DurationMs = time.Since(start).Milliseconds()
-			return json.NewEncoder(w).Encode(envelope.OK(command, output))
+			return skillout.Emit(rc, command, output)
 		}
-		return fmt.Errorf("get content: %w", err)
+		return skillerr.Runtime("get content", skillerr.WithCause(err))
 	}
 
 	if content == "" {
 		output.Status = "no_content"
-		output.Message = fmt.Sprintf("%s has no content to embed", input.Scope)
+		output.Message = fmt.Sprintf("%s has no content to embed", in.Scope)
 		output.DurationMs = time.Since(start).Milliseconds()
-		return json.NewEncoder(w).Encode(envelope.OK(command, output))
+		return skillout.Emit(rc, command, output)
 	}
 
 	// Dry run - just validate content exists
-	if input.DryRun {
+	if in.DryRun {
 		output.Status = "dry_run"
-		output.Message = fmt.Sprintf("Would generate embedding for %s (content length: %d)", input.Scope, len(content))
+		output.Message = fmt.Sprintf("Would generate embedding for %s (content length: %d)", in.Scope, len(content))
 		output.DurationMs = time.Since(start).Milliseconds()
-		return json.NewEncoder(w).Encode(envelope.OK(command, output))
+		return skillout.Emit(rc, command, output)
 	}
 
 	// Generate embedding - prefer Voyage, fall back to Gemini (both rate-limited)
@@ -140,22 +120,25 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 	var embeddingModel string
 
 	if voyageKey != "" {
+		// Use scope-based model selection for consistency
+		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
 		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey:        voyageKey,
+			Model:         model,
 			RateLimitWait: boolPtr(true),
 		})
 		if err != nil {
 			output.Status = "error"
 			output.Message = fmt.Sprintf("voyage provider failed: %v", err)
 			output.DurationMs = time.Since(start).Milliseconds()
-			return json.NewEncoder(w).Encode(envelope.OK(command, output))
+			return skillout.Emit(rc, command, output)
 		}
 		embedding, err = vp.Embed(ctx, content)
 		if err != nil {
 			output.Status = "error"
 			output.Message = fmt.Sprintf("embedding generation failed: %v", err)
 			output.DurationMs = time.Since(start).Milliseconds()
-			return json.NewEncoder(w).Encode(envelope.OK(command, output))
+			return skillout.Emit(rc, command, output)
 		}
 		embeddingModel = vp.Model()
 	} else {
@@ -168,49 +151,48 @@ func run(ctx context.Context, r io.Reader, w io.Writer) error {
 			output.Status = "error"
 			output.Message = fmt.Sprintf("gemini provider failed: %v", err)
 			output.DurationMs = time.Since(start).Milliseconds()
-			return json.NewEncoder(w).Encode(envelope.OK(command, output))
+			return skillout.Emit(rc, command, output)
 		}
 		embedding, err = gp.Embed(ctx, content)
 		if err != nil {
 			output.Status = "error"
 			output.Message = fmt.Sprintf("embedding generation failed: %v", err)
 			output.DurationMs = time.Since(start).Milliseconds()
-			return json.NewEncoder(w).Encode(envelope.OK(command, output))
+			return skillout.Emit(rc, command, output)
 		}
 		embeddingModel = gp.Model()
 	}
 
 	// Store embedding based on scope
-	switch input.Scope {
+	switch in.Scope {
 	case "memory":
-		err = storeMemoryEmbedding(ctx, input.Name, input.Workspace, embedding)
+		err = storeMemoryEmbedding(ctx, rc, in.Name, in.Workspace, embedding)
 	case "symbol":
-		err = storeSymbolEmbedding(ctx, input.Name, input.Workspace, embedding)
+		err = storeSymbolEmbedding(ctx, in.Name, in.Workspace, embedding)
 	case "session":
-		err = storeSessionEmbedding(ctx, input.Name, embedding, embeddingModel)
+		err = storeSessionEmbedding(ctx, rc, in.Name, embedding, embeddingModel)
 	}
 
 	if err != nil {
 		output.Status = "error"
 		output.Message = fmt.Sprintf("failed to store embedding: %v", err)
 		output.DurationMs = time.Since(start).Milliseconds()
-		return json.NewEncoder(w).Encode(envelope.OK(command, output))
+		return skillout.Emit(rc, command, output)
 	}
 
 	output.Status = "refreshed"
 	output.Dimensions = len(embedding)
-	output.Message = fmt.Sprintf("Refreshed %s embedding (%d dimensions)", input.Scope, len(embedding))
+	output.Message = fmt.Sprintf("Refreshed %s embedding (%d dimensions)", in.Scope, len(embedding))
 	output.DurationMs = time.Since(start).Milliseconds()
 
-	return json.NewEncoder(w).Encode(envelope.OK(command, output))
+	return skillout.Emit(rc, command, output)
 }
 
 var errNotFound = fmt.Errorf("not found")
 
 // getMemoryContent retrieves content from a named memory entry.
-func getMemoryContent(ctx context.Context, name, workspace string) (string, error) {
-	root := getStorageRoot()
-	store, err := memory.Open(ctx, root, filepath.Join(root, "cas"))
+func getMemoryContent(ctx context.Context, rc *skillmain.RunContext, name, workspace string) (string, error) {
+	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
 		return "", fmt.Errorf("open memory store: %w", err)
 	}
@@ -241,9 +223,8 @@ func getSymbolContent(ctx context.Context, symbolID, workspaceID string) (string
 }
 
 // getSessionContent retrieves content from a session.
-func getSessionContent(ctx context.Context, sessionID string) (string, error) {
-	root := getStorageRoot()
-	store, err := sessions.Open(ctx, root)
+func getSessionContent(ctx context.Context, rc *skillmain.RunContext, sessionID string) (string, error) {
+	store, err := sessions.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return "", fmt.Errorf("open sessions store: %w", err)
 	}
@@ -292,12 +273,8 @@ func joinStrings(s []string, sep string) string {
 
 // storeMemoryEmbedding stores an embedding for a memory entry.
 // Routes to Turso with vector support when enabled, otherwise uses SQLite.
-func storeMemoryEmbedding(ctx context.Context, name, workspace string, embedding []float32) error {
-	// Load config to check for Turso vector support
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
+func storeMemoryEmbedding(ctx context.Context, rc *skillmain.RunContext, name, workspace string, embedding []float32) error {
+	cfg := rc.Config
 
 	// Get provider and model from config/env
 	model := os.Getenv("EMBEDDING_MODEL")
@@ -310,15 +287,17 @@ func storeMemoryEmbedding(ctx context.Context, name, workspace string, embedding
 
 	// Route to Turso if vector is enabled
 	if cfg.Database.Driver == "turso" && cfg.Database.Vector.Enabled {
-		return storeMemoryEmbeddingTurso(ctx, cfg, name, workspace, embedding, model)
+		return storeMemoryEmbeddingTurso(ctx, rc, name, workspace, embedding, model)
 	}
 
 	// Fallback to SQLite BM25-only path
-	return storeMemoryEmbeddingSQLite(ctx, name, workspace, embedding, model)
+	return storeMemoryEmbeddingSQLite(ctx, rc, name, workspace, embedding, model)
 }
 
 // storeMemoryEmbeddingTurso stores embedding via Turso's native vector support.
-func storeMemoryEmbeddingTurso(ctx context.Context, cfg config.Config, name, workspace string, embedding []float32, model string) error {
+func storeMemoryEmbeddingTurso(ctx context.Context, rc *skillmain.RunContext, name, workspace string, embedding []float32, model string) error {
+	cfg := rc.Config
+
 	// Get expected dimensions from config, with model-specific fallbacks
 	expectedDims := cfg.Embedding.Dimensions
 	if expectedDims == 0 {
@@ -339,8 +318,7 @@ func storeMemoryEmbeddingTurso(ctx context.Context, cfg config.Config, name, wor
 	}
 
 	// First get the memory entry from SQLite store to get its data
-	root := getStorageRoot()
-	sqliteStore, err := memory.Open(ctx, root, filepath.Join(root, "cas"))
+	sqliteStore, err := memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 	if err != nil {
 		return fmt.Errorf("open sqlite store: %w", err)
 	}
@@ -373,9 +351,8 @@ func storeMemoryEmbeddingTurso(ctx context.Context, cfg config.Config, name, wor
 }
 
 // storeMemoryEmbeddingSQLite stores embedding via SQLite (BM25-only, no vector search).
-func storeMemoryEmbeddingSQLite(ctx context.Context, name, workspace string, embedding []float32, model string) error {
-	root := getStorageRoot()
-	store, err := memory.Open(ctx, root, filepath.Join(root, "cas"))
+func storeMemoryEmbeddingSQLite(ctx context.Context, rc *skillmain.RunContext, name, workspace string, embedding []float32, model string) error {
+	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
 	if err != nil {
 		return fmt.Errorf("open memory store: %w", err)
 	}
@@ -416,52 +393,19 @@ func storeSymbolEmbedding(ctx context.Context, symbolID, workspaceID string, emb
 }
 
 // storeSessionEmbedding stores an embedding for a session.
-func storeSessionEmbedding(ctx context.Context, sessionID string, embedding []float32, model string) error {
-	root := getStorageRoot()
-	store, err := sessions.Open(ctx, root)
+func storeSessionEmbedding(ctx context.Context, rc *skillmain.RunContext, sessionID string, embedding []float32, model string) error {
+	store, err := sessions.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open sessions store: %w", err)
 	}
 	defer store.Close() //nolint:errcheck
 
 	// Serialize embedding as binary float32 (little-endian)
-	embeddingBytes := serializeEmbedding(embedding)
+	embeddingBytes := vector.SerializeF32(embedding)
 	return store.SetEmbedding(ctx, sessionID, embeddingBytes, model)
-}
-
-// serializeEmbedding converts float32 slice to bytes.
-func serializeEmbedding(embedding []float32) []byte {
-	buf := make([]byte, len(embedding)*4)
-	for i, v := range embedding {
-		bits := math.Float32bits(v)
-		buf[i*4] = byte(bits)
-		buf[i*4+1] = byte(bits >> 8)
-		buf[i*4+2] = byte(bits >> 16)
-		buf[i*4+3] = byte(bits >> 24)
-	}
-	return buf
 }
 
 // boolPtr returns a pointer to a bool value.
 func boolPtr(b bool) *bool {
 	return &b
-}
-
-func getStorageRoot() string {
-	log := zerolog.New(os.Stderr).With().Str("skill", command).Logger()
-
-	cfg, err := config.Load(context.Background())
-	if err != nil {
-		log.Warn().Err(err).Msg("failed to load config, using fallbacks")
-	}
-	if err == nil && cfg.Storage.Root != "" {
-		return cfg.Storage.Root
-	}
-
-	if root := os.Getenv("AGENTCTL_HOME"); root != "" {
-		return filepath.Join(root, "storage")
-	}
-
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".agentctl", "storage")
 }

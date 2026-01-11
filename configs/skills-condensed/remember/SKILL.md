@@ -31,4 +31,4 @@ echo '{"version":1,"status":"ok","command":"memory/remember","data":{"content":"
 - `/remember The auth middleware must be registered before route handlers`
 - `/remember gopls daemon needs exec.Command not exec.CommandContext to persist`
 
-Full docs: `~/repos/personal/agentctl/configs/skills/remember/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/remember/Skill.md`

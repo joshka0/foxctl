@@ -10,21 +10,18 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"go/parser"
 	"go/token"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
@@ -60,54 +57,18 @@ type output struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	// Pass workspace path so parseInput can use it as the default workspace scope
-	workspacePath := rc.PathValidator.Workspace()
-	in, err := parseInput(os.Stdin, workspacePath)
-	if err != nil {
-		fail("EARG", err)
-	}
-
-	if err := run(ctx, rc, in); err != nil {
-		fail("ERUNTIME", err)
-	}
+	skillmain.Main(Command, run)
 }
 
-func parseInput(r io.Reader, workspacePath string) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.File == "" {
-		return input{}, fmt.Errorf("file is required")
-	}
-	// Use the actual workspace path for scoping, not a hash or "default"
-	// This ensures symbols are indexed under the same key used by semantic search
+func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Apply defaults not handled by skillmain
 	if in.WorkspaceID == "" {
-		in.WorkspaceID = workspacePath
+		in.WorkspaceID = rc.PathValidator.Workspace()
 	}
-	// Default symbols=true
 	if in.Symbols == nil {
 		t := true
 		in.Symbols = &t
 	}
-	return in, nil
-}
-
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	start := time.Now()
 
 	// Resolve file path
@@ -549,14 +510,8 @@ func inferEndLine(lines []string, startIdx int) int {
 	return len(lines)
 }
 
-func emit(rc *runner.RunnerContext, out output) error {
-	return rc.Emit(Command, out, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
-}
-
-func fail(code string, err error) {
-	env := envelope.Error(Command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit failure")
-	os.Exit(1)
+func emit(rc *skillmain.RunContext, out output) error {
+	return skillout.Emit(rc, Command, out)
 }
 
 // ingestGraphEdges extracts call and import relationships and stores them in the graph store.

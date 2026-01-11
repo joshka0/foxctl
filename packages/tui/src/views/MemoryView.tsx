@@ -2,6 +2,7 @@
 import { useState, useMemo } from "react";
 import { useKeyboard } from "@opentui/react";
 import { useMemoryEntry, useMemoryEntries, useMemoryTypes, useSearch, usePinMemory, useDeleteMemory, useSaveMemory } from "../hooks/useData";
+import { useTimeoutManager } from "../hooks/useTimeoutManager";
 import { WINDOWED_LIST_HEIGHT } from "../constants";
 import type { MemoryEntry, MemoryTypeCount, MemoryEntryDetail, SearchResult } from "@agentctl/data";
 
@@ -523,6 +524,7 @@ export function MemoryView() {
   }, [searchResults]);
 
   const { data: detail, isLoading: detailLoading } = useMemoryEntry(selectedEntry?.id);
+  const setManagedTimeout = useTimeoutManager();
 
   const LIST_HEIGHT = WINDOWED_LIST_HEIGHT;
 
@@ -562,7 +564,7 @@ export function MemoryView() {
       setAddSummary("");
       refetch();
       // Auto-close after success
-      setTimeout(() => {
+      setManagedTimeout(() => {
         setAddMode(false);
         setAddStatus("idle");
       }, 1000);
@@ -582,14 +584,14 @@ export function MemoryView() {
         message: result.pinned ? "Pinned" : "Unpinned",
       });
       refetch();
-      setTimeout(() => setActionStatus(null), 2000);
+      setManagedTimeout(() => setActionStatus(null), 2000);
     } catch (err) {
       setActionStatus({
         type: "pin",
         status: "error",
         message: err instanceof Error ? err.message : "Failed to pin",
       });
-      setTimeout(() => setActionStatus(null), 3000);
+      setManagedTimeout(() => setActionStatus(null), 3000);
     }
   };
 
@@ -608,7 +610,7 @@ export function MemoryView() {
         setCursor(Math.max(0, cursor - 1));
       }
       refetch();
-      setTimeout(() => setActionStatus(null), 2000);
+      setManagedTimeout(() => setActionStatus(null), 2000);
     } catch (err) {
       setActionStatus({
         type: "delete",
@@ -616,7 +618,7 @@ export function MemoryView() {
         message: err instanceof Error ? err.message : "Failed to delete",
       });
       setConfirmDelete(false);
-      setTimeout(() => setActionStatus(null), 3000);
+      setManagedTimeout(() => setActionStatus(null), 3000);
     }
   };
 

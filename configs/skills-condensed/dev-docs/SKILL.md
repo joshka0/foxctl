@@ -32,4 +32,4 @@ Create in `dev/active/[task-name]/`:
 
 Use AFTER plan mode when vision is clear.
 
-Full docs: `~/repos/personal/agentctl/configs/skills/dev-docs/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/dev-docs/Skill.md`

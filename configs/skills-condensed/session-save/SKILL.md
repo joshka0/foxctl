@@ -28,4 +28,4 @@ agentctl run session/save --input '{"trigger": "manual", "summary": "Working on 
 | `trigger` | string | `pre_compact`, `manual`, `session_end` |
 | `summary` | string | Optional user summary |
 
-Full docs: `~/repos/personal/agentctl/configs/skills/session-save/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/session-save/Skill.md`

@@ -11,12 +11,11 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/hook"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -25,6 +24,11 @@ import (
 )
 
 const command = "hooks/session_end"
+
+type HookInput struct {
+	hooks.Input
+	TranscriptPath string `json:"transcript_path,omitempty"`
+}
 
 // SessionMetrics captures metrics about the ended session.
 type SessionMetrics struct {
@@ -41,41 +45,24 @@ type SessionMetrics struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail(err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail(err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in hook.Input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail(fmt.Errorf("decode input: %w", err))
-	}
-
-	if err := run(ctx, rc, cfg, in); err != nil {
-		fail(err)
-	}
+	skillmain.Main(command, run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in hook.Input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	// Only process Stop events
-	if in.Event != "Stop" {
-		return emitOutput(rc, hook.NewNone())
+	if in.Event != hooks.EventSessionEnd && string(in.Event) != "Stop" {
+		return emitOutput(rc, hooks.NewNone())
 	}
 
 	// Check if feedback is enabled
 	if os.Getenv("AGENTCTL_SESSION_FEEDBACK_ENABLED") == "false" {
-		return emitOutput(rc, hook.NewNone())
+		return emitOutput(rc, hooks.NewNone())
 	}
 
-	workspaceID := in.WorkspaceRoot
+	workspaceID := in.WorkspaceID
+	if workspaceID == "" {
+		workspaceID = in.WorkspaceRoot
+	}
 	if workspaceID == "" {
 		var wdErr error
 		workspaceID, wdErr = os.Getwd()
@@ -94,10 +81,13 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 		FeedbackPending: true,
 	}
 
+	// Get paths from sessionkit
+	paths := sessionkit.ResolvePaths(rc.Config)
+
 	// Get task stats for this workspace
 	var taskStore tasks.Store
 	var err error
-	taskStore, err = tasks.Open(ctx, cfg.Storage.Root)
+	taskStore, err = tasks.Open(ctx, paths.StorageRoot)
 	if err == nil {
 		defer taskStore.Close()
 
@@ -117,8 +107,8 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Get trajectory count for this session
-	if cfg.Storage.Root != "" && in.SessionID != "" {
-		trajStore, trajErr := trajectory.Open(ctx, cfg.Storage.Root)
+	if paths.StorageRoot != "" && in.SessionID != "" {
+		trajStore, trajErr := trajectory.Open(ctx, paths.StorageRoot)
 		if trajErr == nil {
 			defer trajStore.Close()
 			trajs, listErr := trajStore.ListTrajectories(ctx, trajectory.ListFilter{
@@ -133,7 +123,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 	}
 
 	// Save metrics to memory store (uses Storage.Root for persistent data)
-	memStore, err := memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
+	memStore, err := memory.Open(ctx, paths.StorageRoot, paths.CASPath)
 	if err == nil {
 		defer memStore.Close()
 
@@ -150,20 +140,20 @@ func run(ctx context.Context, rc *runner.RunnerContext, cfg config.Config, in ho
 				Result:    metricsJSON,
 				SessionID: in.SessionID,
 			})
-			errs.Ignore(saveErr, "save session end metrics")
+			_ = saveErr // ignore save errors
 		}
 	}
 
 	// Create graph edges: session → tasks (worked_on)
 	if in.SessionID != "" && taskStore != nil {
-		createSessionGraphEdges(ctx, cfg, workspaceID, in.SessionID, taskStore)
+		createSessionGraphEdges(ctx, paths.StorageRoot, workspaceID, in.SessionID, taskStore)
 	}
 
 	// Build context message prompting for feedback
 	contextMsg := buildFeedbackPrompt(metrics)
 
-	output := hook.Output{
-		Decision: hook.DecisionNone,
+	output := hooks.Output{
+		Decision: hooks.DecisionNone,
 		Reason:   "session metrics captured",
 		Context:  contextMsg,
 		Meta: map[string]any{
@@ -203,17 +193,11 @@ func buildFeedbackPrompt(metrics SessionMetrics) string {
 	return sb.String()
 }
 
-func emitOutput(rc *runner.RunnerContext, output hook.Output) error {
-	env := envelope.OK(command, map[string]any{
+func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
+	data := map[string]any{
 		"hook_output": output,
-	})
-	return envelope.Write(rc.Stdout, env)
-}
-
-func fail(err error) {
-	env := envelope.Error(command, "ERUNTIME", err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit hook failure")
-	os.Exit(1)
+	}
+	return skillout.Emit(rc, command, data)
 }
 
 func fileExists(path string) bool {
@@ -232,13 +216,13 @@ func fileExists(path string) bool {
 
 // createSessionGraphEdges creates graph edges from the session to tasks it worked on.
 // Edge types: session → task (worked_on)
-func createSessionGraphEdges(ctx context.Context, cfg config.Config, workspaceID, sessionID string, taskStore tasks.Store) {
+func createSessionGraphEdges(ctx context.Context, storagePath, workspaceID, sessionID string, taskStore tasks.Store) {
 	// Open graph store (fail silently - graph is optional)
-	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
+	graphStore, err := graph.Open(ctx, storagePath)
 	if err != nil {
 		return
 	}
-	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
+	defer func() { _ = graphStore.Close() }()
 
 	// Ensure session node exists
 	sessionNodeID := graph.SessionNodeID(sessionID)
@@ -249,7 +233,7 @@ func createSessionGraphEdges(ctx context.Context, cfg config.Config, workspaceID
 		Title:     sessionID,
 		LastSeen:  time.Now().UTC(),
 	}
-	errs.Ignore(graphStore.UpsertNode(ctx, sessionNode), "upsert session node")
+	_ = graphStore.UpsertNode(ctx, sessionNode)
 
 	// Get all tasks for this workspace
 	allTasks, err := taskStore.ListByWorkspace(ctx, workspaceID)
@@ -270,7 +254,7 @@ func createSessionGraphEdges(ctx context.Context, cfg config.Config, workspaceID
 				Title:     t.Title,
 				LastSeen:  time.Now().UTC(),
 			}
-			errs.Ignore(graphStore.UpsertNode(ctx, taskNode), "upsert task node")
+			_ = graphStore.UpsertNode(ctx, taskNode)
 
 			// Create edge: session → task (worked_on)
 			edge := graph.Edge{
@@ -284,7 +268,7 @@ func createSessionGraphEdges(ctx context.Context, cfg config.Config, workspaceID
 				TTLDays:   intPtr(90), // 90 day TTL for session edges
 				CreatedAt: time.Now().UTC(),
 			}
-			errs.Ignore(graphStore.UpsertEdge(ctx, edge), "upsert worked_on edge")
+			_ = graphStore.UpsertEdge(ctx, edge)
 		}
 	}
 }

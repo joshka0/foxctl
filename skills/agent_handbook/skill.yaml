@@ -1,0 +1,74 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: agent/handbook
+  version: 0.1.0
+  description: "Generate capability briefings for agent profiles"
+  tags: ["agent", "subagent", "capability", "handbook"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/agent_handbook/agent_handbook
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: agent/handbook
+  parameters:
+    - name: profile
+      type: string
+      required: true
+      description: "Agent profile name (explorer, reviewer, implementer, unrestricted)"
+  help:
+    short: "Generate capability briefing for an agent profile"
+    long: |
+      The agent/handbook skill generates capability briefings for agent profiles.
+
+      The briefing includes:
+      - Profile description and title
+      - List of allowed agentctl skills with examples
+      - Rules and guidelines for the agent
+
+      Profiles:
+      - explorer: Read-only code exploration (semantic_search, swe_grep, symbols, etc.)
+      - reviewer: Explorer + analysis (complexity, security, imports, gopls)
+      - implementer: Reviewer + write (test/run, smart_write)
+      - unrestricted: All skills allowed
+
+      Example:
+        agentctl run agent/handbook --input '{"profile":"explorer"}'
+
+      The output includes:
+      - briefing: Markdown-formatted capability document
+      - allowed_skills: List of skill names
+      - rules: Guidelines for the agent
+    workflows:
+      - id: explorer-briefing
+        description: "Generate explorer agent briefing"
+        example_input:
+          profile: "explorer"
+      - id: reviewer-briefing
+        description: "Generate reviewer agent briefing"
+        example_input:
+          profile: "reviewer"
+      - id: implementer-briefing
+        description: "Generate implementer agent briefing"
+        example_input:
+          profile: "implementer"
+returns:
+  - name: profile
+    type: string
+    description: "Profile name"
+  - name: briefing
+    type: string
+    description: "Markdown capability briefing"
+  - name: allowed_skills
+    type: array
+    description: "List of allowed skill names"
+  - name: rules
+    type: array
+    description: "Guidelines for the agent"
+capabilities:
+  network: "none"
+  filesystem: []
+  pure: true

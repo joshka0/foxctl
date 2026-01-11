@@ -16,18 +16,17 @@ import (
 	"strings"
 	"time"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-type input struct {
-	PR         string `json:"pr"`
-	Owner      string `json:"owner"`
-	Repo       string `json:"repo"`
-	Mode       string `json:"mode"`
-	ErrorsOnly bool   `json:"errors_only"`
+// Input defines the skill input parameters.
+type Input struct {
+	PR         string `json:"pr" validate:"required"`
+	Owner      string `json:"owner,omitempty"`
+	Repo       string `json:"repo,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	ErrorsOnly bool   `json:"errors_only,omitempty"`
 }
 
 type PRInfo struct {
@@ -82,33 +81,11 @@ type JobStep struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("ci/github_checks", "ERUNTIME", err)
-	}
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("ci/github_checks", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	var in input
-	if err := json.NewDecoder(os.Stdin).Decode(&in); err != nil {
-		fail("ci/github_checks", "EARG", fmt.Errorf("decode input: %w", err))
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("ci/github_checks", "ERUNTIME", err)
-	}
+	skillmain.Main("ci/github_checks", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	prRef := strings.TrimSpace(in.PR)
-	if prRef == "" {
-		return errors.New("pr is required")
-	}
 
 	mode := strings.ToLower(strings.TrimSpace(in.Mode))
 	if mode == "" {
@@ -261,7 +238,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"checks":      summaries,
 	}
 
-	return rc.Emit("ci/github_checks", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, "ci/github_checks", data)
 }
 
 func detectRepo(ctx context.Context) (string, string, error) {
@@ -640,8 +617,3 @@ func githubGET(client *http.Client, token, url string, v any) error {
 	return nil
 }
 
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit ci/github_checks failure")
-	os.Exit(1)
-}

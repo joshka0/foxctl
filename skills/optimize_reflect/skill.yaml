@@ -27,16 +27,35 @@ signature:
       type: string
       required: false
       description: "Specific trajectory ID to reflect on"
-returns:
-  - name: reflection
-    type: object
-    description: "Reflection on specific trajectory"
-  - name: summary
-    type: object
-    description: "Summary of reflections across trajectories"
-  - name: improvements
-    type: array
-    description: "Suggested improvements"
+  help:
+    short: "Generate reflections for a role."
+    long: |
+      Use optimize/reflect to generate insights from trajectories.
+      Example commands:
+        agentctl run optimize/reflect --input '{"role":"coder"}'
+        agentctl skills run optimize/reflect --role coder
+        agentctl run optimize/reflect --input '{"role":"coder","trajectory_id":"01HXYZ"}'
+        agentctl skills run optimize/reflect --role coder --trajectory_id 01HXYZ
+    workflows:
+      - id: reflect-role
+        description: "Reflect on recent trajectories."
+        example_input:
+          role: "coder"
+      - id: reflect-trajectory
+        description: "Reflect on a specific trajectory."
+        example_input:
+          role: "coder"
+          trajectory_id: "01HXYZ"
+  returns:
+    - name: reflection
+      type: object
+      description: "Reflection on specific trajectory"
+    - name: summary
+      type: object
+      description: "Summary of reflections across trajectories"
+    - name: improvements
+      type: array
+      description: "Suggested improvements"
 capabilities:
   network: "none"
   filesystem:

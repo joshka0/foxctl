@@ -33,16 +33,35 @@ signature:
       required: false
       default: 500
       description: "Maximum characters per trace content (truncate longer)"
-  returns:
-    - name: codemap
-      type: object
-      description: "Full codemap content with title, description, files, and traces"
-    - name: found
-      type: boolean
-      description: "Whether the codemap was found"
-    - name: stats
-      type: object
-      description: "Query statistics"
+  help:
+    short: "Retrieve a codemap by ID."
+    long: |
+      Use codemap/get to fetch a codemap and its traces.
+      Example commands:
+        agentctl run codemap/get --input '{"id":"codemap://auth-flow"}'
+        agentctl skills run codemap/get --id codemap://auth-flow
+        agentctl run codemap/get --input '{"id":"auth-flow","include_traces":false}'
+        agentctl skills run codemap/get --id auth-flow --include_traces=false
+    workflows:
+      - id: get-codemap
+        description: "Get a codemap by ID."
+        example_input:
+          id: "codemap://auth-flow"
+      - id: get-summary
+        description: "Fetch codemap without traces."
+        example_input:
+          id: "auth-flow"
+          include_traces: false
+returns:
+  - name: codemap
+    type: object
+    description: "Full codemap content with title, description, files, and traces"
+  - name: found
+    type: boolean
+    description: "Whether the codemap was found"
+  - name: stats
+    type: object
+    description: "Query statistics"
 capabilities:
   network: "none"
   filesystem:

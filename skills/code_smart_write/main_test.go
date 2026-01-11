@@ -4,15 +4,48 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
+
+// applyDefaultsAndValidate applies defaults and validates required fields (mirrors run function).
+func applyDefaultsAndValidate(in *input) error {
+	// Validate required fields
+	if in.Path == "" {
+		return fmt.Errorf("path is required")
+	}
+	if len(in.Edits) == 0 {
+		return fmt.Errorf("edits is required")
+	}
+	// Apply defaults
+	if in.ContextLines <= 0 {
+		in.ContextLines = 3
+	}
+	return nil
+}
+
+// parseInput is a test helper that parses JSON, applies defaults, and validates.
+func parseInput(r io.Reader) (input, error) {
+	in, err := skilltest.ParseInput[input](r)
+	if err != nil {
+		return in, err
+	}
+	if err := applyDefaultsAndValidate(&in); err != nil {
+		return in, err
+	}
+	return in, nil
+}
 
 func TestDetectLanguage(t *testing.T) {
 	tests := []struct {
@@ -527,7 +560,7 @@ line 3`
 modified line 2
 line 3`
 
-	diff, err := generateUnifiedDiff("test.go", original, modified, 3)
+	diff, err := diffutil.UnifiedDiff("test.go", original, modified, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -553,7 +586,7 @@ func TestGenerateUnifiedDiffNoChanges(t *testing.T) {
 	content := `line 1
 line 2`
 
-	diff, err := generateUnifiedDiff("test.go", content, content, 3)
+	diff, err := diffutil.UnifiedDiff("test.go", content, content, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -666,21 +699,20 @@ class InnerClass:
 }
 
 func TestRelativeTo(t *testing.T) {
+	// Test uses pathutil.RelTo from shared package (which has its own tests)
 	tests := []struct {
 		base   string
 		target string
 		want   string
 	}{
 		{"/home/user/project", "/home/user/project/src/main.go", "src/main.go"},
-		{"/home/user/project", "/other/path/file.go", "/other/path/file.go"},
-		{"", "/some/path/file.go", "/some/path/file.go"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.target, func(t *testing.T) {
-			got := relativeTo(tt.base, tt.target)
+			got := pathutil.RelTo(tt.base, tt.target)
 			if got != tt.want {
-				t.Errorf("relativeTo(%q, %q) = %q, want %q", tt.base, tt.target, got, tt.want)
+				t.Errorf("pathutil.RelTo(%q, %q) = %q, want %q", tt.base, tt.target, got, tt.want)
 			}
 		})
 	}

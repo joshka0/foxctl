@@ -42,6 +42,7 @@ func loadSkillInput(cmd *cobra.Command, cfg config.Config, inline, file string) 
 		if err != nil {
 			return nil, fmt.Errorf("open cas store: %w", err)
 		}
+		defer func() { _ = store.Close() }()
 		ctx := cmd.Context()
 		if ctx == nil {
 			ctx = context.Background()

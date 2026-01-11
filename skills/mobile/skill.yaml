@@ -74,6 +74,27 @@ signature:
       type: string
       required: false
       description: Output path for screenshot
+  help:
+    short: "Unified mobile automation across iOS and Android."
+    long: |
+      Use mobile/unified to list devices or run common automation actions.
+      Example commands:
+        agentctl run mobile/unified --input '{"operation":"list_devices"}'
+        agentctl skills run mobile/unified --operation list_devices
+        agentctl run mobile/unified --input '{"platform":"android","operation":"tap","x":100,"y":200}'
+        agentctl skills run mobile/unified --platform android --operation tap --x 100 --y 200
+    workflows:
+      - id: list-devices
+        description: "List available devices."
+        example_input:
+          operation: "list_devices"
+      - id: tap-android
+        description: "Tap on an Android device."
+        example_input:
+          platform: "android"
+          operation: "tap"
+          x: 100
+          y: 200
   returns:
     - name: platform
       type: string

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -864,9 +865,9 @@ func TestDetectLanguage(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			got := detectLanguage(tc.path)
+			got := fsutil.DetectLanguage(tc.path)
 			if got != tc.expected {
-				t.Errorf("detectLanguage(%q) = %q, want %q", tc.path, got, tc.expected)
+				t.Errorf("DetectLanguage(%q) = %q, want %q", tc.path, got, tc.expected)
 			}
 		})
 	}

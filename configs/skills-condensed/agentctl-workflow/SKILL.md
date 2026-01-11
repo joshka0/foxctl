@@ -53,4 +53,4 @@ steps:
 | `code-review` | Complexity + TODO scanning |
 | `lsp-analysis` | Definition, references, call hierarchy |
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-workflow/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-workflow/Skill.md`

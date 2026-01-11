@@ -55,12 +55,13 @@ fi
 
 # Skip patterns that are clearly not conceptual queries
 # (exact file extensions, simple globs, etc.)
+# Note: specific patterns (package.json) must come before generic globs (*.json)
 case "$pattern" in
-  *.go|*.py|*.js|*.ts|*.tsx|*.jsx|*.md|*.json|*.yaml|*.yml)
+  package.json|go.mod|Makefile|README*)
     echo '{}'
     exit 0
     ;;
-  package.json|go.mod|Makefile|README*)
+  *.go|*.py|*.js|*.ts|*.tsx|*.jsx|*.md|*.json|*.yaml|*.yml)
     echo '{}'
     exit 0
     ;;

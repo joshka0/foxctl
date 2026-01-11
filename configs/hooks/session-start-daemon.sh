@@ -46,8 +46,16 @@ else
   exit 0
 fi
 
-# Read hook input from stdin (consume it even if unused)
-payload="$(cat)"
+# Consume stdin (hook input) even if unused
+# Guard against blocking: skip if TTY, use timeout otherwise
+if [[ -t 0 ]]; then
+  : # stdin is a TTY - don't try to drain
+elif command -v timeout &>/dev/null; then
+  timeout 1 cat > /dev/null 2>/dev/null || true
+else
+  # Fallback: use read with timeout (portable)
+  while IFS= read -r -t 1 _line; do :; done 2>/dev/null || true
+fi
 
 # Check if daemon is already running
 if "$AGENTCTL_BIN" daemon status --quiet 2>/dev/null; then

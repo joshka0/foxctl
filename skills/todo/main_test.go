@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -32,6 +33,224 @@ func TestTodoAddAndList(t *testing.T) {
 	}
 	if tasks[0]["title"].(string) != "Ship feature" {
 		t.Fatalf("unexpected title: %v", tasks[0]["title"])
+	}
+}
+
+func TestTodoAdd_DedupesByNormalizedTitleAndParent(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	first := env.addTask(t, addRequest{Title: "Ship feature", Description: "Do the work"})
+	firstID := taskID(t, first)
+
+	second := env.addTask(t, addRequest{Title: "  ship   FEATURE  ", Description: "Do the work"})
+	secondID := taskID(t, second)
+
+	if firstID != secondID {
+		t.Fatalf("expected dedupe to reuse same task id, got %s and %s", firstID, secondID)
+	}
+	if second["total_tasks"].(float64) != 1 {
+		t.Fatalf("expected total tasks = 1 got %v", second["total_tasks"])
+	}
+}
+
+func TestTodoAdd_DoesNotDedupeAcrossDifferentSessions(t *testing.T) {
+	tmp := t.TempDir()
+	ctx := context.Background()
+
+	rc1 := newTestRunnerContext(t, tmp)
+	rc1.SessionID = "session-a"
+	t.Cleanup(func() {
+		if err := rc1.Close(); err != nil {
+			t.Fatalf("close rc1: %v", err)
+		}
+	})
+
+	rc2 := newTestRunnerContext(t, tmp)
+	rc2.SessionID = "session-b"
+	t.Cleanup(func() {
+		if err := rc2.Close(); err != nil {
+			t.Fatalf("close rc2: %v", err)
+		}
+	})
+
+	env1 := &todoTestEnv{ctx: ctx, workspaceID: "test-workspace", rc: rc1}
+	env2 := &todoTestEnv{ctx: ctx, workspaceID: "test-workspace", rc: rc2}
+
+	first := env1.addTask(t, addRequest{Title: "Ship feature", Description: "Do the work"})
+	firstID := taskID(t, first)
+
+	second := env2.addTask(t, addRequest{Title: "Ship feature", Description: "Do the work"})
+	secondID := taskID(t, second)
+
+	if firstID == secondID {
+		t.Fatalf("expected different task ids across sessions")
+	}
+	if second["total_tasks"].(float64) != 2 {
+		t.Fatalf("expected total tasks = 2 got %v", second["total_tasks"])
+	}
+
+	task, ok := second["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task map, got %T", second["task"])
+	}
+	if gotSID, ok := task["session_id"].(string); ok {
+		if gotSID != "session-b" {
+			t.Fatalf("expected session_id=session-b, got %q", gotSID)
+		}
+	}
+}
+
+func TestTodoAdd_DoesNotDedupeAcrossDifferentParents(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	p1 := env.addTask(t, addRequest{Title: "Parent 1"})
+	p2 := env.addTask(t, addRequest{Title: "Parent 2"})
+	p1ID := taskID(t, p1)
+	p2ID := taskID(t, p2)
+
+	c1 := env.addTask(t, addRequest{Title: "Child", ParentID: p1ID})
+	c2 := env.addTask(t, addRequest{Title: "Child", ParentID: p2ID})
+	c1ID := taskID(t, c1)
+	c2ID := taskID(t, c2)
+
+	if c1ID == c2ID {
+		t.Fatalf("expected different child ids for different parents")
+	}
+	if c2["total_tasks"].(float64) != 4 {
+		t.Fatalf("expected total tasks = 4 got %v", c2["total_tasks"])
+	}
+}
+
+func TestTodoAdd_DoesNotDedupeWhenScopePathDiffers(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	first := env.addTask(t, addRequest{Title: "Same", ScopePath: "/a"})
+	firstID := taskID(t, first)
+
+	second := env.addTask(t, addRequest{Title: "Same", ScopePath: "/b"})
+	secondID := taskID(t, second)
+
+	if firstID == secondID {
+		t.Fatalf("expected different ids when scope_path differs")
+	}
+	if second["total_tasks"].(float64) != 2 {
+		t.Fatalf("expected total tasks = 2 got %v", second["total_tasks"])
+	}
+}
+
+func TestTodoAdd_MergesDependsOnWhenReused(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	dep1 := env.addTask(t, addRequest{Title: "Dep 1"})
+	dep2 := env.addTask(t, addRequest{Title: "Dep 2"})
+	dep1ID := taskID(t, dep1)
+	dep2ID := taskID(t, dep2)
+
+	first := env.addTask(t, addRequest{Title: "Main", DependsOn: []string{dep1ID}})
+	mainID := taskID(t, first)
+
+	second := env.addTask(t, addRequest{Title: "Main", DependsOn: []string{dep2ID}})
+	secondID := taskID(t, second)
+	if secondID != mainID {
+		t.Fatalf("expected same main id, got %s and %s", mainID, secondID)
+	}
+
+	task := taskFromData(t, second)
+	deps, ok := task["depends_on"].([]any)
+	if !ok {
+		t.Fatalf("expected depends_on slice, got %T", task["depends_on"])
+	}
+	if len(deps) != 2 {
+		t.Fatalf("expected 2 dependencies, got %d", len(deps))
+	}
+}
+
+func TestTodoDedupe_DryRunAndApply(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	store, err := tasks.Open(env.ctx, env.rc.Config.Storage.Root)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	older, err := store.Add(env.ctx, tasks.Task{WorkspaceID: env.workspaceID, Title: "Dup"})
+	if err != nil {
+		t.Fatalf("add older: %v", err)
+	}
+	newer, err := store.Add(env.ctx, tasks.Task{WorkspaceID: env.workspaceID, Title: "dup"})
+	if err != nil {
+		t.Fatalf("add newer: %v", err)
+	}
+	blocker, err := store.Add(env.ctx, tasks.Task{WorkspaceID: env.workspaceID, Title: "Blocker", DependsOn: []string{older.ID}})
+	if err != nil {
+		t.Fatalf("add blocker: %v", err)
+	}
+
+	dry := env.run(t, input{Operation: "dedupe", WorkspaceID: env.workspaceID, Dedupe: &dedupeReq{Apply: false}})
+	if dry["groups_count"].(float64) != 1 {
+		t.Fatalf("expected 1 group, got %v", dry["groups_count"])
+	}
+
+	applied := env.run(t, input{Operation: "dedupe", WorkspaceID: env.workspaceID, Dedupe: &dedupeReq{Apply: true}})
+	if applied["applied"].(bool) != true {
+		t.Fatalf("expected applied=true")
+	}
+
+	canceled := env.run(t, input{Operation: "list", WorkspaceID: env.workspaceID, List: &listReq{Status: tasks.StatusCanceled}})
+	items, ok := canceled["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks slice, got %T", canceled["tasks"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 canceled task, got %d", len(items))
+	}
+
+	updatedBlocker, err := store.Get(env.ctx, blocker.ID)
+	if err != nil {
+		t.Fatalf("get blocker: %v", err)
+	}
+	if len(updatedBlocker.DependsOn) != 1 {
+		t.Fatalf("expected 1 dependency, got %d", len(updatedBlocker.DependsOn))
+	}
+	if updatedBlocker.DependsOn[0] != newer.ID {
+		t.Fatalf("expected dependency rewritten to %s, got %s", newer.ID, updatedBlocker.DependsOn[0])
+	}
+}
+
+func TestTodoList_TitleContainsAndLimit(t *testing.T) {
+	env := newTodoTestEnv(t)
+
+	env.addTask(t, addRequest{Title: "Ship feature", Description: "Do the work"})
+	env.addTask(t, addRequest{Title: "Ship docs", Description: "Docs"})
+	env.addTask(t, addRequest{Title: "Fix bug", Description: "Bug"})
+
+	data := env.run(t, input{
+		Operation:   "list",
+		WorkspaceID: env.workspaceID,
+		List: &listReq{
+			TitleContains: "SHIP",
+			Limit:         1,
+		},
+	})
+
+	items, ok := data["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks slice, got %T", data["tasks"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(items))
+	}
+	task, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task map, got %T", items[0])
+	}
+	title, ok := task["title"].(string)
+	if !ok {
+		t.Fatalf("task title is not a string: %#v", task)
+	}
+	if !strings.Contains(strings.ToLower(title), "ship") {
+		t.Fatalf("unexpected title: %v", title)
 	}
 }
 
@@ -404,19 +623,19 @@ func newTestRunnerContext(t *testing.T, tmp string) *runner.RunnerContext {
 	return rc
 }
 
-func runSkill(ctx context.Context, t *testing.T, rc *runner.RunnerContext, in input) *bytes.Buffer {
+func runSkill(ctx context.Context, t *testing.T, rc *skillmain.RunContext, in input) *bytes.Buffer {
 	t.Helper()
 	buf := &bytes.Buffer{}
 	rc.Stdout = buf
-	if err := run(ctx, rc, rc.Config, in); err != nil {
+	if err := run(ctx, rc, in); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	return buf
 }
 
-func runExpectError(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func runExpectError(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	rc.Stdout = &bytes.Buffer{}
-	return run(ctx, rc, rc.Config, in)
+	return run(ctx, rc, in)
 }
 
 func decodeData(t *testing.T, buf *bytes.Buffer) map[string]any {

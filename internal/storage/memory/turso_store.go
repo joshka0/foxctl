@@ -144,6 +144,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int,
 			name TEXT NOT NULL,
 			type TEXT NOT NULL,
 			workspace TEXT NOT NULL,
+			session_id TEXT,
 			summary TEXT,
 			result BLOB NOT NULL,
 			digests TEXT NOT NULL,
@@ -178,6 +179,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int,
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace, updated_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_named_memory_name_ws ON named_memory(name, workspace)`,
+		`CREATE INDEX IF NOT EXISTS idx_named_memory_session ON named_memory(session_id)`,
 	}
 	for _, idx := range indexes {
 		if _, err := db.ExecContext(ctx, idx); err != nil {
@@ -260,16 +262,17 @@ func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, em
 
 	query := fmt.Sprintf(`
 		INSERT INTO named_memory (
-			id, name, type, workspace, summary, result, digests,
+			id, name, type, workspace, summary, result, digests, session_id,
 			created_at, updated_at, last_accessed, access_count,
 			embedding, embedding_model
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, vector('%s'), ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, vector('%s'), ?)
 		ON CONFLICT(name, workspace) DO UPDATE SET
 			id = excluded.id,
 			type = excluded.type,
 			summary = excluded.summary,
 			result = excluded.result,
 			digests = excluded.digests,
+			session_id = COALESCE(NULLIF(excluded.session_id, ''), session_id),
 			updated_at = excluded.updated_at,
 			last_accessed = excluded.last_accessed,
 			embedding = excluded.embedding,
@@ -277,7 +280,7 @@ func (s *TursoStore) SaveWithEmbedding(ctx context.Context, entry NamedEntry, em
 	`, vectorStr)
 
 	_, err = s.db.ExecContext(ctx, query,
-		entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON,
+		entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON, entry.SessionID,
 		sqlutil.FormatTimestamp(entry.CreatedAt), sqlutil.FormatTimestamp(entry.UpdatedAt),
 		sqlutil.FormatTimestamp(entry.LastAccess), model)
 	if err != nil {
@@ -316,7 +319,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 		distExpr := s.vh.CosineSimilarity("m.embedding", vec)
 		query = fmt.Sprintf(`
 			SELECT m.id, m.name, m.type, m.workspace, m.summary, m.result, m.digests,
-				m.created_at, m.updated_at, m.last_accessed, m.access_count,
+				m.created_at, m.updated_at, m.last_accessed, m.access_count, m.session_id,
 				%s as distance
 			FROM %s vt
 			JOIN named_memory m ON m.rowid = vt.id
@@ -327,7 +330,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 		distExpr := s.vh.CosineSimilarity("embedding", vec)
 		query = fmt.Sprintf(`
 			SELECT id, name, type, workspace, summary, result, digests,
-				created_at, updated_at, last_accessed, access_count,
+				created_at, updated_at, last_accessed, access_count, session_id,
 				%s as distance
 			FROM named_memory
 			WHERE embedding IS NOT NULL AND workspace = ?
@@ -345,12 +348,13 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 		var entry NamedEntry
 		var digestsJSON string
 		var createdAt, updatedAt, lastAccess string
+		var sessionID sql.NullString
 		var distance float64
 
 		err := rows.Scan(
 			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
 			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess,
-			&entry.AccessCount, &distance,
+			&entry.AccessCount, &sessionID, &distance,
 		)
 		if err != nil {
 			continue
@@ -363,6 +367,9 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, embedd
 		entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
 		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
 		entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
 
 		// Convert cosine distance to similarity (distance is in [0, 2], normalize to [0, 1])
 		// distance=0 (identical) → similarity=1.0
@@ -412,18 +419,19 @@ func (s *TursoStore) Save(ctx context.Context, entry NamedEntry) (NamedEntry, er
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO named_memory (
-			id, name, type, workspace, summary, result, digests,
+			id, name, type, workspace, summary, result, digests, session_id,
 			created_at, updated_at, last_accessed, access_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 		ON CONFLICT(name, workspace) DO UPDATE SET
 			id = excluded.id,
 			type = excluded.type,
 			summary = excluded.summary,
 			result = excluded.result,
 			digests = excluded.digests,
+			session_id = COALESCE(NULLIF(excluded.session_id, ''), session_id),
 			updated_at = excluded.updated_at,
 			last_accessed = excluded.last_accessed
-	`, entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON,
+	`, entry.ID, entry.Name, entry.Type, entry.Workspace, entry.Summary, entry.Result, digestsJSON, entry.SessionID,
 		sqlutil.FormatTimestamp(entry.CreatedAt), sqlutil.FormatTimestamp(entry.UpdatedAt),
 		sqlutil.FormatTimestamp(entry.LastAccess))
 	if err != nil {
@@ -437,17 +445,18 @@ func (s *TursoStore) Save(ctx context.Context, entry NamedEntry) (NamedEntry, er
 func (s *TursoStore) Get(ctx context.Context, name, workspace string) (NamedEntry, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests,
-			created_at, updated_at, last_accessed, access_count
+			created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
 		WHERE name = ? AND workspace = ?`, name, workspace)
 
 	var entry NamedEntry
 	var digestsJSON string
 	var createdAt, updatedAt, lastAccess string
+	var sessionID sql.NullString
 
 	err := row.Scan(
 		&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
-		&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &entry.AccessCount,
+		&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &entry.AccessCount, &sessionID,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -460,6 +469,9 @@ func (s *TursoStore) Get(ctx context.Context, name, workspace string) (NamedEntr
 	entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
 	entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
 	entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
+	}
 
 	// Update access metadata
 	_, _ = s.db.ExecContext(ctx, `
@@ -478,7 +490,7 @@ func (s *TursoStore) List(ctx context.Context, workspace string, limit int) ([]N
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests,
-			created_at, updated_at, last_accessed, access_count
+			created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
 		WHERE workspace = ?
 		ORDER BY updated_at DESC
@@ -493,10 +505,11 @@ func (s *TursoStore) List(ctx context.Context, workspace string, limit int) ([]N
 		var entry NamedEntry
 		var digestsJSON string
 		var createdAt, updatedAt, lastAccess string
+		var sessionID sql.NullString
 
 		if err := rows.Scan(
 			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
-			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &entry.AccessCount,
+			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &entry.AccessCount, &sessionID,
 		); err != nil {
 			continue
 		}
@@ -505,6 +518,9 @@ func (s *TursoStore) List(ctx context.Context, workspace string, limit int) ([]N
 		entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
 		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
 		entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
 
 		entries = append(entries, entry)
 	}
@@ -534,7 +550,7 @@ func (s *TursoStore) Search(ctx context.Context, workspace, query string, limit 
 	like := "%" + strings.ToLower(query) + "%"
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, name, type, workspace, summary, result, digests,
-			created_at, updated_at, last_accessed, access_count
+			created_at, updated_at, last_accessed, access_count, session_id
 		FROM named_memory
 		WHERE workspace = ? AND (LOWER(name) LIKE ? OR LOWER(summary) LIKE ?)
 		ORDER BY updated_at DESC
@@ -549,10 +565,11 @@ func (s *TursoStore) Search(ctx context.Context, workspace, query string, limit 
 		var entry NamedEntry
 		var digestsJSON string
 		var createdAt, updatedAt, lastAccess string
+		var sessionID sql.NullString
 
 		if err := rows.Scan(
 			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
-			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &entry.AccessCount,
+			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &entry.AccessCount, &sessionID,
 		); err != nil {
 			continue
 		}
@@ -561,6 +578,9 @@ func (s *TursoStore) Search(ctx context.Context, workspace, query string, limit 
 		entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
 		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
 		entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
 
 		results = append(results, ScoredEntry{
 			Entry: entry,
@@ -624,7 +644,7 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float3
 		distExpr := s.vh.CosineSimilarity("m.embedding", vec)
 		query = fmt.Sprintf(`
 			SELECT m.id, m.name, m.type, m.workspace, m.summary, m.result, m.digests,
-				m.created_at, m.updated_at, m.last_accessed, m.access_count,
+				m.created_at, m.updated_at, m.last_accessed, m.access_count, m.session_id,
 				%s as distance
 			FROM %s vt
 			JOIN named_memory m ON m.rowid = vt.id`, distExpr, topKExpr)
@@ -634,7 +654,7 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float3
 		distExpr := s.vh.CosineSimilarity("embedding", vec)
 		query = fmt.Sprintf(`
 			SELECT id, name, type, workspace, summary, result, digests,
-				created_at, updated_at, last_accessed, access_count,
+				created_at, updated_at, last_accessed, access_count, session_id,
 				%s as distance
 			FROM named_memory
 			WHERE embedding IS NOT NULL
@@ -652,12 +672,13 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float3
 		var entry NamedEntry
 		var digestsJSON string
 		var createdAt, updatedAt, lastAccess string
+		var sessionID sql.NullString
 		var distance float64
 
 		err := rows.Scan(
 			&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
 			&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess,
-			&entry.AccessCount, &distance,
+			&entry.AccessCount, &sessionID, &distance,
 		)
 		if err != nil {
 			continue
@@ -670,8 +691,13 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, embedding []float3
 		entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
 		entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
 		entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+		if sessionID.Valid {
+			entry.SessionID = sessionID.String
+		}
 
-		// Convert cosine distance to similarity
+		// Convert cosine distance to similarity (distance is in [0, 2], normalize to [0, 1])
+		// distance=0 (identical) → similarity=1.0
+		// distance=2 (opposite) → similarity=0.0
 		similarity := 1.0 - distance/2.0
 
 		results = append(results, ScoredEntry{

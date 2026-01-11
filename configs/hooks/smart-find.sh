@@ -26,8 +26,13 @@ if [[ -z "$pattern" || "$pattern" == "null" ]]; then
 fi
 
 # Skip very simple patterns that don't need enhancement
+# Note: specific patterns (package.json) must come before generic globs (*.json)
 case "$pattern" in
-  *.md|*.txt|*.json|*.yaml|*.yml|package.json|go.mod|Makefile)
+  package.json|go.mod|Makefile)
+    echo '{}'
+    exit 0
+    ;;
+  *.md|*.txt|*.json|*.yaml|*.yml)
     echo '{}'
     exit 0
     ;;

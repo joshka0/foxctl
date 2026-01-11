@@ -110,6 +110,26 @@ signature:
       type: integer
       required: false
       description: Duration in milliseconds for swipe
+  help:
+    short: "Automate Android emulators via ADB."
+    long: |
+      Use mobile/android for device control, app lifecycle, and UI actions.
+      Example commands:
+        agentctl run mobile/android --input '{"operation":"list_devices"}'
+        agentctl skills run mobile/android --operation list_devices
+        agentctl run mobile/android --input '{"operation":"tap","x":200,"y":400}'
+        agentctl skills run mobile/android --operation tap --x 200 --y 400
+    workflows:
+      - id: list-devices
+        description: "List Android devices."
+        example_input:
+          operation: "list_devices"
+      - id: tap-screen
+        description: "Tap on screen coordinates."
+        example_input:
+          operation: "tap"
+          x: 200
+          y: 400
   returns:
     - name: devices
       type: array

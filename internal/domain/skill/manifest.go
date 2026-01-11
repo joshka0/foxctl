@@ -69,6 +69,8 @@ type Parameter struct {
 	Description string   `yaml:"description" json:"description"`
 	Default     any      `yaml:"default" json:"default"`
 	Enum        []string `yaml:"enum,omitempty" json:"enum,omitempty"`
+	Items       *Parameter           `yaml:"items,omitempty" json:"items,omitempty"`
+	Properties  map[string]Parameter `yaml:"properties,omitempty" json:"properties,omitempty"`
 }
 
 // Help describes skill-level help and example workflows.

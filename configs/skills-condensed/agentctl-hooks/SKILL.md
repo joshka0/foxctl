@@ -35,4 +35,4 @@ Intercept Claude Code operations for coordination.
 | `AGENTCTL_TASK_GUARD_MODE` | `auto` | `auto` or `strict` |
 | `AGENTCTL_FILE_GUARD_MODE` | `advisory` | `advisory` or `strict` |
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-hooks/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-hooks/Skill.md`

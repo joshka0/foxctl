@@ -47,3 +47,16 @@ signature:
       type: object
       required: false
       description: HTTP headers for SSE connection
+  help:
+    short: "Install skills from an MCP server."
+    long: |
+      Use mcp/install to discover MCP tools and generate skill manifests.
+      Example commands:
+        agentctl run mcp/install --input '{"server_url":"http://localhost:8080/sse","output_dir":"./skills"}'
+        agentctl skills run mcp/install --server_url http://localhost:8080/sse --output_dir ./skills
+    workflows:
+      - id: install-from-url
+        description: "Install MCP tools from a server URL."
+        example_input:
+          server_url: "http://localhost:8080/sse"
+          output_dir: "./skills"

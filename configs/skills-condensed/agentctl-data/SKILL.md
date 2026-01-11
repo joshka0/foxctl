@@ -85,4 +85,4 @@ agentctl run data/jq --input '{
 | `raw_output` | Output raw strings |
 | `yaml_input` | Parse as YAML |
 
-Full docs: See `configs/skills/agentctl-fs/` and `configs/skills/agentctl-jq/`
+Full docs: See `~/.agentctl/share/configs/skills/agentctl-fs/` and `~/.agentctl/share/configs/skills/agentctl-jq/`

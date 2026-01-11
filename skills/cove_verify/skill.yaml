@@ -1,0 +1,208 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: verification/cove_verify
+  version: 0.1.0
+  description: "Chain-of-Verification (CoVe) verifier/refiner for draft answers"
+  tags: ["verification", "cove", "llm"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: verification/cove_verify
+  parameters:
+    - name: question
+      type: string
+      required: true
+      description: "User question being answered"
+    - name: baseline
+      type: string
+      required: false
+      description: "Draft answer to verify; if omitted, the skill generates one"
+    - name: context
+      type: object
+      required: false
+      description: "Extra context for baseline generation"
+    - name: max_verifiers
+      type: integer
+      required: false
+      default: 6
+      description: "Max parallel verifiers"
+    - name: skip_refine
+      type: boolean
+      required: false
+      default: false
+      description: "Skip refinement; only return extracted claims + verification results"
+    - name: mode
+      type: string
+      required: false
+      description: "Refiner output mode (supported: gate)"
+    - name: timeouts
+      type: object
+      required: false
+      description: "Timeouts in milliseconds: baseline_ms, extraction_ms, verification_ms, refinement_ms"
+    - name: llm
+      type: object
+      required: false
+      description: "LLM override: provider, model (API key via env)"
+  returns:
+    - name: summary
+      type: object
+    - name: result
+      type: object
+    - name: artifact
+      type: string
+    - name: cas_hint
+      type: object
+help:
+  short: "Verify and refine a draft answer via CoVe"
+  long: |
+    verification/cove_verify runs Draft-Accelerated Chain-of-Verification:
+    baseline (optional) -> claim extraction -> parallel draft verification -> refinement.
+
+    Modes:
+      - mode: "gate" turns refinement into a strict completion gate.
+        It writes a structured "DONE/NOT DONE" decision into `result.final_answer`.
+        Note: this requires `skip_refine=false`.
+
+    LLM configuration:
+      - AGENTCTL_LLM_PROVIDER (gemini|groq|openrouter|openai|anthropic)
+      - AGENTCTL_LLM_MODEL
+      - AGENTCTL_LLM_API_KEY
+    Provider-specific fallbacks:
+      - GEMINI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY
+
+  workflows:
+    - id: verify-draft-code-review
+      description: "Verify a draft code-review note about concurrency"
+      example_input:
+        question: "Does this proposed Go change actually fix the data race and preserve semantics?"
+        baseline: |
+          I think this code has a data race because `cached` is read/written without synchronization:
+
+          ```go
+          var cached *Foo
+
+          func Get() *Foo {
+            if cached != nil {
+              return cached
+            }
+            cached = build()
+            return cached
+          }
+          ```
+
+          Proposed fix:
+
+          ```go
+          var (
+            cached *Foo
+            cachedOnce sync.Once
+          )
+
+          func Get() *Foo {
+            cachedOnce.Do(func() { cached = build() })
+            return cached
+          }
+          ```
+
+          Claims:
+          - The original code can race under concurrent calls to `Get()`.
+          - `sync.Once` provides the necessary memory synchronization so all goroutines see the initialized `cached`.
+          - `build()` runs at most once.
+          - The new code preserves behavior for single-threaded callers.
+        max_verifiers: 4
+
+    - id: verify-refactor-plan
+      description: "Verify a draft bugfix plan for a real codebase"
+      example_input:
+        question: "Is this plan technically sound and do the claims hold?"
+        baseline: |
+          Plan:
+          1) Add a request-scoped `context.Context` to the entrypoint.
+          2) Thread it through all I/O boundaries.
+          3) Replace manual goroutine cancellation with `errgroup.WithContext`.
+
+          Claims:
+          - Using `errgroup.WithContext` guarantees that when one goroutine fails, the others are canceled.
+          - Adding context plumbing should not change behavior in the happy path.
+          - This should prevent leaked goroutines in timeout scenarios.
+        max_verifiers: 4
+
+    - id: verify-only-claims
+      description: "Just extract + verify claims (no refinement)"
+      example_input:
+        question: "Are these statements correct?"
+        baseline: |
+          Claims:
+          - In Go, ranging over a nil slice is safe and produces zero iterations.
+          - Appending to a nil slice works and allocates as needed.
+          - A nil map can be read from but cannot be assigned to.
+        skip_refine: true
+        max_verifiers: 3
+
+    - id: verify-todo-definition-of-done
+      description: "Gate a TODO using Definition of Done + evidence (terse draft claims)"
+      example_input:
+        question: "Given the TODO, Definition of Done, and evidence, is the work truly done?"
+        baseline: |
+          TODO:
+          - Add `--dry-run` support to `agentctl cas gc`.
+
+          Definition of Done (DoD):
+          - The CLI accepts `agentctl cas gc --older-than=<duration> --dry-run`.
+          - In dry-run, no files are deleted (preview only).
+          - Output is still a valid Core Profile v1 envelope (stdout only JSON).
+          - Unit test covers dry-run behavior.
+
+          Evidence (condensed):
+          - Code change summary: `cas gc` now has a DryRun flag wired to deletion path.
+          - Tests: `go test ./...` passes locally.
+          - Manual check: ran `agentctl cas gc --older-than=168h --dry-run` and observed no deletions.
+
+          Claims to verify (Draft-style, atomic):
+          - `agentctl cas gc` accepts a `--dry-run` flag.
+          - In dry-run mode, `cas gc` performs no deletions.
+          - The command still emits only a JSON envelope to stdout.
+          - There is a unit test that would fail if dry-run deletes anything.
+        skip_refine: true
+        max_verifiers: 6
+
+    - id: verify-todo-definition-of-done-with-summary
+      description: "Gate a TODO and produce a final 'DONE/NOT DONE' call"
+      example_input:
+        question: "Is this TODO actually done? Output a concise DONE/NOT DONE with reasons."
+        baseline: |
+          Status (draft): DONE
+
+          TODO:
+          - Add `--dry-run` support to `agentctl cas gc`.
+
+          Definition of Done (DoD):
+          - CLI accepts `agentctl cas gc --older-than=<duration> --dry-run`.
+          - In dry-run, no files are deleted (preview only).
+          - Output is a valid Core Profile v1 envelope (stdout only JSON).
+          - Unit test covers dry-run behavior.
+
+          Evidence (condensed):
+          - Code: Added a DryRun flag and used it to guard the deletion loop.
+          - Tests: `go test ./...` passes.
+          - Observed: running `agentctl cas gc --older-than=168h --dry-run` shows a preview but deletes nothing.
+
+          Claims to verify (atomic):
+          - The command accepts a `--dry-run` flag.
+          - Dry-run mode performs no deletions.
+          - Stdout contains only a JSON envelope.
+          - There is a unit test that would fail if deletions happened in dry-run.
+        skip_refine: false
+        mode: gate
+        max_verifiers: 6
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

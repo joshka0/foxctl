@@ -37,4 +37,4 @@ agentctl cas get sha256:abc...
 
 Path safety: Escapes via `../` or symlinks are blocked.
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-fs/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-fs/Skill.md`

@@ -47,4 +47,4 @@ agentctl agent list
 agentctl agent hierarchy --session <session-id>
 ```
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-agents/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-agents/Skill.md`

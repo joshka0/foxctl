@@ -23,6 +23,22 @@ const (
 	optimizeAnalyzeCommand  = "optimize.analyze"
 )
 
+func absWorkspacePath(workspace string) string {
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return workspace
+	}
+	return abs
+}
+
+func absWorkspaceOrWriteError(out io.Writer, command, workspace string) (string, error) {
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", writeOptimizeError(out, command, fmt.Sprintf("resolve workspace: %v", err))
+	}
+	return abs, nil
+}
+
 func newOptimizeCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "optimize",
@@ -97,10 +113,7 @@ func newOptimizePatternsListCommand() *cobra.Command {
 				"cli_command": cmd.CommandPath(),
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
-			if err != nil {
-				absWorkspace = workspace // Fallback to original
-			}
+			absWorkspace := absWorkspacePath(workspace)
 			return protocol.WriteOK(out, optimizePatternsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
@@ -157,10 +170,7 @@ func newOptimizePatternsClearCommand() *cobra.Command {
 				"cli_command": cmd.CommandPath(),
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
-			if err != nil {
-				absWorkspace = workspace // Fallback to original
-			}
+			absWorkspace := absWorkspacePath(workspace)
 			return protocol.WriteOK(out, optimizePatternsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
@@ -222,10 +232,7 @@ func newOptimizePatternsHintsCommand() *cobra.Command {
 				"cli_command":  cmd.CommandPath(),
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
-			if err != nil {
-				absWorkspace = workspace // Fallback to original
-			}
+			absWorkspace := absWorkspacePath(workspace)
 			return protocol.WriteOK(out, optimizePatternsCommand, data,
 				protocol.WithSource("run"),
 				protocol.WithWorkspace(absWorkspace),
@@ -275,9 +282,9 @@ successful patterns.`,
 				return writeOptimizeError(out, optimizeCommand, err.Error())
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
@@ -373,9 +380,9 @@ func newOptimizeAnalyzeCommand() *cobra.Command {
 				return writeOptimizeError(out, optimizeAnalyzeCommand, err.Error())
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeAnalyzeCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeAnalyzeCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
@@ -530,9 +537,9 @@ func newOptimizeWeightsShowCommand() *cobra.Command {
 			ctx := cmd.Context()
 			out := cmd.OutOrStdout()
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeWeightsCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeWeightsCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			cfg, err := config.Load(ctx)
@@ -595,9 +602,9 @@ to suggest improved weight distributions.`,
 			out := cmd.OutOrStdout()
 			start := time.Now()
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeWeightsCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeWeightsCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			cfg, err := config.Load(ctx)
@@ -682,9 +689,9 @@ trajectories for an agent role.`,
 			out := cmd.OutOrStdout()
 			start := time.Now()
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			cfg, err := config.Load(ctx)
@@ -792,9 +799,9 @@ func newOptimizeFeedbackAddCommand() *cobra.Command {
 				return writeOptimizeError(out, optimizeCommand, err.Error())
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			if rating < 1 || rating > 5 {
@@ -868,9 +875,9 @@ func newOptimizeFeedbackStatsCommand() *cobra.Command {
 				return writeOptimizeError(out, optimizeCommand, err.Error())
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			trajStore, err := trajectory.Open(ctx, cfg.Storage.Root)
@@ -956,9 +963,9 @@ Examples:
 				return writeOptimizeError(out, optimizeSessionCommand, err.Error())
 			}
 
-			absWorkspace, err := filepath.Abs(workspace)
+			absWorkspace, err := absWorkspaceOrWriteError(out, optimizeSessionCommand, workspace)
 			if err != nil {
-				return writeOptimizeError(out, optimizeSessionCommand, fmt.Sprintf("resolve workspace: %v", err))
+				return err
 			}
 
 			// Build input for optimize/feedback skill

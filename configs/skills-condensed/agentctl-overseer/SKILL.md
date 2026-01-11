@@ -41,4 +41,4 @@ Depth 0: Overseer (planner)
 
 Default max depth: 3 levels
 
-Full docs: `~/repos/personal/agentctl/configs/skills/agentctl-overseer/Skill.md`
+Full docs: `~/.agentctl/share/configs/skills/agentctl-overseer/Skill.md`

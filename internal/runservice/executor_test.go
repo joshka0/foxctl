@@ -507,6 +507,10 @@ func TestEnforceOutputLimit(t *testing.T) {
 		Paths: config.Paths{
 			CAS: filepath.Join(tmp, "cas"),
 		},
+		CAS: config.CASPolicy{
+			Store:  true,
+			Expose: config.ExposePolicyDigest,
+		},
 	}
 	if err := ensureDir(cfg.Paths.CAS); err != nil {
 		t.Fatalf("ensure dir: %v", err)

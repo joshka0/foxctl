@@ -2,23 +2,31 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 // Input defines the skill input parameters.
 type Input struct {
-	Trigger   string `json:"trigger"`   // "compact", "resume", "startup"
-	Workspace string `json:"workspace"` // Project path
+	Trigger             string `json:"trigger"`                        // "compact", "resume", "startup"
+	Workspace           string `json:"workspace"`                      // Project path
+	SessionID           string `json:"session_id,omitempty"`           // Optional: specific session to restore from
+	ConversationSummary string `json:"conversation_summary,omitempty"` // Summary from current context window (passed by Claude Code)
+	RunSemanticSearch   *bool  `json:"run_semantic_search,omitempty"`  // nil: default true
+	MaxSearchResults    int    `json:"max_search_results"`             // Max results per query (default: 3)
 }
 
 // SessionSnapshot represents the captured session state (must match session_save).
@@ -66,61 +74,103 @@ type HookOutput struct {
 	Env      map[string]string `json:"env,omitempty"`     // Environment variables
 }
 
+// SemanticSearchResult represents results from a key question search.
+type SemanticSearchResult struct {
+	Question string   `json:"question"`
+	Results  []string `json:"results"` // Tree-formatted file paths with context
+}
+
+// SimilarContextWindow represents a similar past context window found via embedding search.
+// Used for searching CURRENT session's context windows.
+type SimilarContextWindow struct {
+	WindowID    string    `json:"window_id"`    // UUID for direct lookup
+	SessionID   string    `json:"session_id"`   // Parent session
+	WindowIndex int       `json:"window_index"` // 0-indexed within session
+	Summary     string    `json:"summary"`
+	Trigger     string    `json:"trigger"`
+	Similarity  float64   `json:"similarity"`
+	StartedAt   time.Time `json:"started_at"` // When this window started
+}
+
+// SimilarSession represents a similar past session found via embedding search.
+// Used for searching OTHER sessions' summaries.
+type SimilarSession struct {
+	SessionID   string    `json:"session_id"`
+	Summary     string    `json:"summary"`
+	Accomplished string   `json:"accomplished,omitempty"` // What was completed
+	Similarity  float64   `json:"similarity"`
+	StartedAt   time.Time `json:"started_at"`
+	EndedAt     time.Time `json:"ended_at,omitempty"`
+}
+
+// MemoryResult represents a relevant memory entry.
+type MemoryResult struct {
+	Type    string `json:"type"`    // gotcha, decision, user_pref, time_sink
+	Summary string `json:"summary"` // The memory content
+}
+
 // Output defines the skill output.
 type Output struct {
-	HookOutput    HookOutput `json:"hook_output"`
-	SnapshotID    string     `json:"snapshot_id,omitempty"`
-	SnapshotAge   string     `json:"snapshot_age,omitempty"`
-	ItemsRestored int        `json:"items_restored"`
+	HookOutput       HookOutput             `json:"hook_output"`
+	SnapshotID       string                 `json:"snapshot_id,omitempty"`
+	SnapshotAge      string                 `json:"snapshot_age,omitempty"`
+	ItemsRestored    int                    `json:"items_restored"`
+	KeyQuestions     []string               `json:"key_questions,omitempty"`
+	SearchResults    []SemanticSearchResult `json:"search_results,omitempty"`
+	RelevantMemories []MemoryResult         `json:"relevant_memories,omitempty"`
 }
 
 const command = "session/restore"
 
 func main() {
-	ctx := context.Background()
+	skillmain.Main(command, run)
+}
 
-	// Read input from stdin
-	var input Input
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fail("DECODE_ERROR", fmt.Errorf("decode input: %w", err))
-	}
-
-	// Default workspace to current directory
-	if input.Workspace == "" {
-		if wd, err := os.Getwd(); err == nil {
-			input.Workspace = wd
-		}
-	}
+func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
+	// Default workspace
+	input.Workspace = sessionkit.WorkspaceOrDefault(input.Workspace, rc.Workspace)
 
 	// Default trigger
 	if input.Trigger == "" {
 		input.Trigger = "compact"
 	}
 
-	// Get agentctl home
-	home := os.Getenv("AGENTCTL_HOME")
-	if home == "" {
-		homeDir, _ := os.UserHomeDir()
-		home = filepath.Join(homeDir, ".agentctl")
+	// Default max search results
+	if input.MaxSearchResults <= 0 {
+		input.MaxSearchResults = 3
 	}
 
 	// Open memory store - use cache path (matches CLI)
-	cachePath := filepath.Join(home, "cache")
-	casPath := filepath.Join(home, "cas")
-
-	memStore, err := memory.Open(ctx, cachePath, casPath)
+	paths := sessionkit.ResolvePaths(rc.Config)
+	memStore, err := memory.Open(ctx, paths.CachePath, paths.CASPath)
 	if err != nil {
 		// No snapshot available - that's ok, just return empty context
-		writeEmptyOutput("no memory store")
-		return
+		return emitEmptyOutput(rc, "no memory store")
 	}
-	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+	defer func() { _ = memStore.Close() }()
+
+	// Open sessions store for fallback data
+	sessStore, err := sessions.Open(ctx, paths.StorageRoot)
+	if err != nil {
+		sessStore = nil
+	}
+	if sessStore != nil {
+		defer func() { _ = sessStore.Close() }()
+	}
+
+	// Open tasks store for pending todos
+	taskStore, err := tasks.Open(ctx, paths.StorageRoot)
+	if err != nil {
+		taskStore = nil
+	}
+	if taskStore != nil {
+		defer func() { _ = taskStore.Close() }()
+	}
 
 	// Search for most recent session snapshot
 	snapshots, err := memStore.Search(ctx, input.Workspace, "session-snapshot", 5)
 	if err != nil || len(snapshots) == 0 {
-		writeEmptyOutput("no snapshots found")
-		return
+		return emitEmptyOutput(rc, "no snapshots found")
 	}
 
 	// Get the most recent one
@@ -129,12 +179,89 @@ func main() {
 	// Parse the snapshot
 	var snapshot SessionSnapshot
 	if err := json.Unmarshal(latestEntry.Result, &snapshot); err != nil {
-		writeEmptyOutput("invalid snapshot format")
-		return
+		return emitEmptyOutput(rc, "invalid snapshot format")
 	}
 
-	// Format context for injection
-	contextStr := formatContext(snapshot, input.Trigger)
+	// Use conversation summary from input (current context window) if provided
+	// This is the summary Claude Code generates during compact
+	if input.ConversationSummary != "" {
+		snapshot.Summary = input.ConversationSummary
+	}
+
+	// Get session ID for scoping
+	sessionID := sessionkit.ResolveSessionID(input.Workspace, input.SessionID)
+	if sessionID == "" {
+		sessionID = snapshot.SessionID
+	}
+
+	// Build search queries from pending todos (current session context)
+	var searchQueries []string
+	var searchResults []SemanticSearchResult
+
+	if taskStore != nil {
+		// Get pending/in_progress tasks for this session
+		pendingTasks, taskErr := taskStore.ListWithOptions(ctx, input.Workspace, tasks.ListOptions{
+			SessionID: sessionID,
+			Statuses:  []string{tasks.StatusPending, tasks.StatusInProgress},
+		})
+		if taskErr != nil || len(pendingTasks) == 0 {
+			// Fallback to workspace-scoped
+			pendingTasks, _ = taskStore.ListWithOptions(ctx, input.Workspace, tasks.ListOptions{
+				Statuses: []string{tasks.StatusPending, tasks.StatusInProgress},
+				Limit:    5,
+			})
+		}
+
+		// Use task titles as search queries
+		for _, t := range pendingTasks {
+			if t.Title != "" {
+				searchQueries = append(searchQueries, t.Title)
+			}
+			if len(searchQueries) >= 5 {
+				break
+			}
+		}
+	}
+
+	// Run semantic searches for todo-based queries (default: true)
+	runSearch := true
+	if input.RunSemanticSearch != nil {
+		runSearch = *input.RunSemanticSearch
+	}
+	if runSearch && len(searchQueries) > 0 {
+		searchResults = runSemanticSearches(ctx, searchQueries, input.Workspace, input.MaxSearchResults)
+	}
+
+	// Get git status for files modified
+	filesModified := getGitModifiedFiles(input.Workspace)
+
+	// Search for related context using embedding
+	// Use conversation summary if provided, otherwise auto-generate from snapshot
+	contextSummary := input.ConversationSummary
+	if contextSummary == "" {
+		contextSummary = buildContextSummaryFromSnapshot(snapshot)
+	}
+
+	// Two-level search:
+	// 1. SESSION summaries from OTHER sessions (high-level: "what did we work on before?")
+	// 2. CONTEXT WINDOW summaries from CURRENT session (granular: "what was in recent context?")
+	var similarSessions []SimilarSession
+	var similarWindows []SimilarContextWindow
+	if contextSummary != "" && sessStore != nil {
+		// Search other sessions' summaries (excluding current session)
+		similarSessions = searchSimilarSessions(ctx, sessStore, contextSummary, sessionID, 3)
+		// Search current session's context windows
+		similarWindows = searchCurrentSessionWindows(ctx, sessStore, contextSummary, sessionID, 3)
+	}
+
+	// Search for relevant memories (gotchas, decisions, user_prefs) based on active task/plan
+	// Falls back to recent memories if no semantic search query available
+	var relevantMemories []MemoryResult
+	contextQuery := buildContextQuery(snapshot)
+	relevantMemories = searchRelevantMemories(ctx, contextQuery, input.Workspace, 5, memStore)
+
+	// Format context for injection (with todo-based search results, memories, files modified, and related context)
+	contextStr := formatContextWithSearch(snapshot, input.Trigger, searchQueries, searchResults, relevantMemories, filesModified, similarSessions, similarWindows)
 	snapshotAge := formatAge(snapshot.Timestamp)
 
 	// Build output
@@ -148,16 +275,18 @@ func main() {
 				"AGENTCTL_SNAPSHOT_ID":      snapshot.SnapshotID,
 			},
 		},
-		SnapshotID:    snapshot.SnapshotID,
-		SnapshotAge:   snapshotAge,
-		ItemsRestored: countItems(snapshot),
+		SnapshotID:       snapshot.SnapshotID,
+		SnapshotAge:      snapshotAge,
+		ItemsRestored:    countItems(snapshot),
+		KeyQuestions:     searchQueries, // Now based on pending todos
+		SearchResults:    searchResults,
+		RelevantMemories: relevantMemories,
 	}
 
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/restore result")
+	return skillout.Emit(rc, command, output)
 }
 
-func writeEmptyOutput(reason string) {
+func emitEmptyOutput(rc *skillmain.RunContext, reason string) error {
 	output := Output{
 		HookOutput: HookOutput{
 			Decision: "approve",
@@ -165,21 +294,340 @@ func writeEmptyOutput(reason string) {
 		},
 		ItemsRestored: 0,
 	}
-	env := envelope.OK(command, output)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/restore result")
+	return skillout.Emit(rc, command, output)
 }
 
-func fail(code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit session/restore failure")
-	os.Exit(1)
+func formatAge(t time.Time) string {
+	d := time.Since(t)
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
-func formatContext(snap SessionSnapshot, trigger string) string {
+func countItems(snap SessionSnapshot) int {
+	count := 0
+	if snap.ActivePlan != nil {
+		count++
+	}
+	if snap.ActiveTask != nil {
+		count++
+	}
+	count += len(snap.PendingTodos)
+	count += len(snap.Decisions)
+	count += len(snap.Insights)
+	return count
+}
+
+// runSemanticSearches executes semantic search for each key question using agentctl CLI.
+func runSemanticSearches(ctx context.Context, keyQuestions []string, workspace string, maxResults int) []SemanticSearchResult {
+	if len(keyQuestions) == 0 {
+		return nil
+	}
+
+	var results []SemanticSearchResult
+
+	for _, question := range keyQuestions {
+		// Build input for code/semantic_search skill
+		searchInput := map[string]any{
+			"query":     question,
+			"workspace": workspace,
+			"limit":     maxResults,
+			"scope":     []string{"symbols", "codemaps"}, // Focus on code structure
+			"format":    "tree",
+		}
+
+		inputJSON, err := json.Marshal(searchInput)
+		if err != nil {
+			continue
+		}
+
+		// Execute agentctl run code/semantic_search
+		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		cmd := exec.CommandContext(ctx, "agentctl", "run", "code/semantic_search", "--input", string(inputJSON))
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		err = cmd.Run()
+		cancel()
+
+		if err != nil {
+			// Search failed, skip this question
+			continue
+		}
+
+		// Parse the envelope response
+		var envResp struct {
+			Status string `json:"status"`
+			Data   struct {
+				TreeText string `json:"tree_text"`
+				Results  []struct {
+					Name    string `json:"name"`
+					Path    string `json:"path"`
+					Line    int    `json:"line"`
+					Snippet string `json:"snippet"`
+				} `json:"results"`
+			} `json:"data"`
+		}
+
+		if err := json.Unmarshal(stdout.Bytes(), &envResp); err != nil {
+			continue
+		}
+
+		// Build result
+		result := SemanticSearchResult{
+			Question: question,
+		}
+
+		// Prefer tree_text if available, otherwise format results
+		if envResp.Data.TreeText != "" {
+			result.Results = []string{envResp.Data.TreeText}
+		} else if len(envResp.Data.Results) > 0 {
+			// Format results as tree
+			for _, r := range envResp.Data.Results {
+				if r.Path != "" {
+					line := ""
+					if r.Line > 0 {
+						line = fmt.Sprintf(":%d", r.Line)
+					}
+					entry := fmt.Sprintf("├── %s%s", r.Path, line)
+					if r.Name != "" {
+						entry += fmt.Sprintf(" (%s)", r.Name)
+					}
+					result.Results = append(result.Results, entry)
+				}
+			}
+		}
+
+		if len(result.Results) > 0 {
+			results = append(results, result)
+		}
+	}
+
+	return results
+}
+
+// buildContextQuery creates a search query from the snapshot to find relevant memories.
+func buildContextQuery(snap SessionSnapshot) string {
+	var parts []string
+	if snap.ActiveTask != nil && snap.ActiveTask.Title != "" {
+		parts = append(parts, snap.ActiveTask.Title)
+	}
+	if snap.ActivePlan != nil && snap.ActivePlan.Title != "" {
+		parts = append(parts, snap.ActivePlan.Title)
+	}
+	if len(parts) == 0 && snap.Summary != "" {
+		summary := snap.Summary
+		if len(summary) > 100 {
+			summary = summary[:100]
+		}
+		parts = append(parts, summary)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
+}
+
+// searchRelevantMemories searches for relevant gotchas, decisions, user_prefs via semantic search
+// with fallback to direct memory store query.
+func searchRelevantMemories(ctx context.Context, query, workspace string, limit int, memStore *memory.Store) []MemoryResult {
+	learningTypes := map[string]bool{"gotcha": true, "decision": true, "user_pref": true, "time_sink": true, "pattern": true}
+	var results []MemoryResult
+	seen := make(map[string]bool)
+
+	// Try semantic search first if query is provided
+	if query != "" {
+		searchInput := map[string]any{
+			"query":     query,
+			"workspace": workspace,
+			"limit":     limit,
+			"scope":     []string{"memories"},
+		}
+		inputJSON, err := json.Marshal(searchInput)
+		if err == nil {
+			searchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			cmd := exec.CommandContext(searchCtx, "agentctl", "run", "code/semantic_search", "--input", string(inputJSON))
+			var stdout bytes.Buffer
+			cmd.Stdout = &stdout
+			if err := cmd.Run(); err == nil {
+				var envResp struct {
+					Status string `json:"status"`
+					Data   struct {
+						Results []struct {
+							Source  string `json:"source"`
+							Name    string `json:"name"`
+							Summary string `json:"summary"`
+							Type    string `json:"type"`
+						} `json:"results"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &envResp); err == nil {
+					for _, r := range envResp.Data.Results {
+						// Accept both "memory" and "memories" source names
+						if (r.Source != "memory" && r.Source != "memories") || !learningTypes[r.Type] || seen[r.Summary] {
+							continue
+						}
+						seen[r.Summary] = true
+						results = append(results, MemoryResult{Type: r.Type, Summary: r.Summary})
+					}
+				}
+			}
+			cancel()
+		}
+	}
+
+	// Fallback: query memory store directly for recent memories by type if semantic search returned nothing
+	if len(results) == 0 && memStore != nil {
+		for memType := range learningTypes {
+			entries, err := memStore.ListByType(ctx, workspace, memType, 3)
+			if err != nil {
+				continue
+			}
+			for _, entry := range entries {
+				if seen[entry.Entry.Summary] {
+					continue
+				}
+				seen[entry.Entry.Summary] = true
+				results = append(results, MemoryResult{
+					Type:    entry.Entry.Type,
+					Summary: entry.Entry.Summary,
+				})
+				if len(results) >= limit {
+					break
+				}
+			}
+			if len(results) >= limit {
+				break
+			}
+		}
+	}
+
+	return results
+}
+
+// formatContextWithSearch formats the context including todo-based search results, files modified, and related context.
+func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries []string, searchResults []SemanticSearchResult, memories []MemoryResult, filesModified []string, similarSessions []SimilarSession, similarWindows []SimilarContextWindow) string {
+	// Start with the base context, wrapped in clear delimiters
 	var sb strings.Builder
+
+	// Opening delimiter - makes it clear this is system-injected context after compaction
+	sb.WriteString("<session-restore>\n")
+	sb.WriteString("<!-- Auto-injected after context compaction. This is NOT part of the user's message. -->\n\n")
 
 	sb.WriteString("## Session Continuity Context\n\n")
 	sb.WriteString(fmt.Sprintf("*Restored after %s (snapshot from %s ago)*\n\n", trigger, formatAge(snap.Timestamp)))
+
+	// Session Summary first (current context window)
+	if snap.Summary != "" {
+		sb.WriteString("### Context Window Summary\n")
+		sb.WriteString(snap.Summary)
+		sb.WriteString("\n\n")
+	}
+
+	// Files modified (from git status)
+	if len(filesModified) > 0 {
+		sb.WriteString("### Files Modified\n")
+		sb.WriteString("```\n")
+		for _, f := range filesModified {
+			sb.WriteString(f)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("```\n\n")
+	}
+
+	// Related past sessions (from OTHER sessions - high level)
+	if len(similarSessions) > 0 {
+		sb.WriteString("### Related Past Sessions\n")
+		sb.WriteString("*Similar work from previous sessions:*\n\n")
+		for _, s := range similarSessions {
+			age := formatAge(s.StartedAt)
+			shortSession := s.SessionID
+			if len(shortSession) > 8 {
+				shortSession = shortSession[:8]
+			}
+			// Show accomplished if available, otherwise summary
+			content := s.Accomplished
+			if content == "" {
+				content = s.Summary
+			}
+			sb.WriteString(fmt.Sprintf("- **[%.0f%% match]** *%s* | `session:%s` | %s\n", s.Similarity*100, age, shortSession, truncateSummary(content, 150)))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Related context windows from CURRENT session (granular)
+	if len(similarWindows) > 0 {
+		sb.WriteString("### Earlier Context (this session)\n")
+		sb.WriteString("*Relevant context windows from earlier in this session:*\n\n")
+		for _, w := range similarWindows {
+			age := formatAge(w.StartedAt)
+			ref := fmt.Sprintf("`window #%d`", w.WindowIndex)
+			sb.WriteString(fmt.Sprintf("- **[%.0f%% match]** *%s* | %s | %s\n", w.Similarity*100, age, ref, truncateSummary(w.Summary, 150)))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Add query hints if we have any related context
+	if len(similarSessions) > 0 || len(similarWindows) > 0 {
+		sb.WriteString("*To explore further:*\n")
+		sb.WriteString("```bash\n")
+		sb.WriteString("# Semantic search across sessions:\n")
+		sb.WriteString("agentctl run session/recall --input '{\"query\": \"<topic>\"}'\n")
+		if len(similarSessions) > 0 {
+			sb.WriteString("\n# View specific session:\n")
+			for _, s := range similarSessions {
+				sb.WriteString(fmt.Sprintf("agentctl sessions get %s  # %s\n", s.SessionID, truncateSummary(s.Summary, 40)))
+				break // Just show first one as example
+			}
+		}
+		sb.WriteString("```\n\n")
+	}
+
+	// Todo-based Search Results (codebase context related to pending work)
+	if len(searchResults) > 0 {
+		sb.WriteString("### Codebase Context (from pending todos)\n\n")
+		for _, sr := range searchResults {
+			sb.WriteString(fmt.Sprintf("**%s**\n", sr.Question))
+			sb.WriteString("```\n")
+			for _, r := range sr.Results {
+				sb.WriteString(r)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("```\n\n")
+		}
+	} else if len(todoQueries) > 0 {
+		// Show todos even if search failed
+		sb.WriteString("### Pending Todos (for context)\n")
+		for _, q := range todoQueries {
+			sb.WriteString(fmt.Sprintf("- %s\n", q))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Relevant memories from semantic search
+	if len(memories) > 0 {
+		sb.WriteString("### Relevant Memories\n")
+		for _, m := range memories {
+			typeLabel := m.Type
+			switch m.Type {
+			case "user_pref":
+				typeLabel = "preference"
+			case "time_sink":
+				typeLabel = "time sink"
+			}
+			sb.WriteString(fmt.Sprintf("- **[%s]** %s\n", typeLabel, m.Summary))
+		}
+		sb.WriteString("\n")
+	}
 
 	// Active plan (from ~/.claude/plans/)
 	if snap.ActivePlan != nil {
@@ -259,43 +707,285 @@ func formatContext(snap SessionSnapshot, trigger string) string {
 		sb.WriteString("\n")
 	}
 
-	// Summary
-	if snap.Summary != "" {
-		sb.WriteString("### Session Summary\n")
-		sb.WriteString(snap.Summary)
-		sb.WriteString("\n\n")
-	}
+	// Note: Summary is shown at the top as "Context Window Summary"
+
+	// Append agentctl skills reference
+	sb.WriteString(getSkillsReference())
 
 	sb.WriteString("---\n")
-	sb.WriteString("*Continue where you left off. Use `agentctl todo list` to see full task details.*\n")
+	sb.WriteString("*Continue where you left off.*\n\n")
+
+	// Closing delimiter
+	sb.WriteString("</session-restore>\n")
 
 	return sb.String()
 }
 
-func formatAge(t time.Time) string {
-	d := time.Since(t)
-	if d < time.Minute {
-		return "just now"
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	}
-	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
+// getSkillsReference returns the agentctl skills quick reference.
+func getSkillsReference() string {
+	return `### agentctl Skills Reference
+
+Run: ` + "`agentctl run <skill> --input '<json>'`" + ` | Help: ` + "`agentctl run <skill> --help`" + `
+
+**Files & Search**
+| Skill | Purpose |
+|-------|---------|
+| ` + "`code/context_ripgrep`" + ` | Search + expand to full functions |
+| ` + "`code/swe_grep`" + ` | Smart code retrieval |
+| ` + "`code/symbols`" + ` | Extract functions/types/vars |
+| ` + "`code/semantic_search`" + ` | Vector search (symbols/codemaps/memories) |
+
+**Code Intelligence**
+| Skill | Purpose |
+|-------|---------|
+| ` + "`code/complexity`" + ` | Cyclomatic complexity, hotspots |
+| ` + "`code/smart_write`" + ` | Symbol-based editing with diff preview |
+| ` + "`lsp/gopls`" + ` | Go: definitions, references, hover |
+
+**Testing & CI**
+| Skill | Purpose |
+|-------|---------|
+| ` + "`test/run`" + ` | Run tests with coverage |
+| ` + "`ci/github_checks`" + ` | CI status, failed checks |
+| ` + "`ci/prcomments`" + ` | PR review comments |
+
+**Tasks & Memory**
+| Skill | Purpose |
+|-------|---------|
+| ` + "`todo/manage`" + ` | Create/list/complete tasks |
+| ` + "`memory/query`" + ` | Query gotchas/decisions/patterns |
+| ` + "`session/recall`" + ` | Search past sessions |
+
+**CLI Shortcuts**
+` + "```bash" + `
+agentctl todo list|add|complete    # Task management
+agentctl ci status --pr 123        # CI + comments + merge
+agentctl memory list|get|put       # Named memories
+agentctl search "pattern"          # Quick ripgrep
+` + "```" + `
+
+`
 }
 
-func countItems(snap SessionSnapshot) int {
-	count := 0
-	if snap.ActivePlan != nil {
-		count++
+// getGitModifiedFiles returns files modified in the workspace from git status.
+func getGitModifiedFiles(workspace string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd.Dir = workspace
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil
 	}
+
+	var files []string
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if line == "" {
+			continue
+		}
+		// Git status --porcelain format: "XY filename" where XY is 2 chars + 1 space
+		// Examples: " M file.go", "?? file.go", "M  file.go"
+		if len(line) >= 4 {
+			status := line[:2]
+			filename := line[3:] // Skip "XY " (2 status chars + 1 space)
+			files = append(files, fmt.Sprintf("%s %s", status, filename))
+		}
+	}
+
+	// Limit to 20 files
+	if len(files) > 20 {
+		files = files[:20]
+		files = append(files, fmt.Sprintf("... and %d more files", len(files)-20))
+	}
+
+	return files
+}
+
+// buildContextSummaryFromSnapshot creates a search query from snapshot data.
+// Used when no conversation_summary is provided in the input.
+func buildContextSummaryFromSnapshot(snap SessionSnapshot) string {
+	var parts []string
+
+	// Add active task title and description
 	if snap.ActiveTask != nil {
-		count++
+		if snap.ActiveTask.Title != "" {
+			parts = append(parts, snap.ActiveTask.Title)
+		}
+		if snap.ActiveTask.Description != "" {
+			parts = append(parts, snap.ActiveTask.Description)
+		}
 	}
-	count += len(snap.PendingTodos)
-	count += len(snap.Decisions)
-	count += len(snap.Insights)
-	return count
+
+	// Add active plan title
+	if snap.ActivePlan != nil && snap.ActivePlan.Title != "" {
+		parts = append(parts, snap.ActivePlan.Title)
+	}
+
+	// Add pending todo titles (up to 5)
+	for i, todo := range snap.PendingTodos {
+		if i >= 5 {
+			break
+		}
+		if todo.Title != "" {
+			parts = append(parts, todo.Title)
+		}
+	}
+
+	// Add existing snapshot summary if nothing else
+	if len(parts) == 0 && snap.Summary != "" {
+		summary := snap.Summary
+		if len(summary) > 200 {
+			summary = summary[:200]
+		}
+		parts = append(parts, summary)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.Join(parts, ". ")
+}
+
+// searchSimilarSessions searches OTHER sessions' summaries (excluding current session).
+// Returns high-level matches: "what similar work have we done before?"
+func searchSimilarSessions(ctx context.Context, sessStore *sessions.Store, summary, currentSessionID string, limit int) []SimilarSession {
+	if summary == "" || sessStore == nil {
+		return nil
+	}
+
+	// Generate embedding for the summary
+	embedding, err := embedText(ctx, summary)
+	if err != nil || len(embedding) == 0 {
+		return nil
+	}
+
+	// Search sessions using the store's built-in method
+	// Request more than limit to account for filtering out current session
+	scoredSessions, err := sessStore.SearchSimilar(ctx, embedding, limit+5)
+	if err != nil || len(scoredSessions) == 0 {
+		return nil
+	}
+
+	// Convert to output format, excluding current session
+	var results []SimilarSession
+	for _, ss := range scoredSessions {
+		// Skip current session
+		if ss.Session.ID == currentSessionID {
+			continue
+		}
+		// Skip low similarity
+		if ss.Similarity < 0.3 {
+			continue
+		}
+		// Skip sessions without summary
+		if ss.Session.Summary == "" && len(ss.Session.Accomplished) == 0 {
+			continue
+		}
+
+		// Join accomplished items into a single string
+		accomplished := strings.Join(ss.Session.Accomplished, "; ")
+
+		results = append(results, SimilarSession{
+			SessionID:    ss.Session.ID,
+			Summary:      ss.Session.Summary,
+			Accomplished: accomplished,
+			Similarity:   ss.Similarity,
+			StartedAt:    ss.Session.StartedAt,
+			EndedAt:      ss.Session.EndedAt,
+		})
+
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	return results
+}
+
+// searchCurrentSessionWindows searches context windows from the CURRENT session only.
+// Returns granular matches: "what similar context was in previous windows of this session?"
+func searchCurrentSessionWindows(ctx context.Context, sessStore *sessions.Store, summary, currentSessionID string, limit int) []SimilarContextWindow {
+	if summary == "" || sessStore == nil || currentSessionID == "" {
+		return nil
+	}
+
+	// Generate embedding for the summary
+	embedding, err := embedText(ctx, summary)
+	if err != nil || len(embedding) == 0 {
+		return nil
+	}
+
+	// Search context windows using the sessions store's built-in method
+	// Request more to account for filtering
+	scoredWindows, err := sessStore.SearchContextWindows(ctx, embedding, limit*3)
+	if err != nil || len(scoredWindows) == 0 {
+		return nil
+	}
+
+	// Filter to only current session's windows
+	var results []SimilarContextWindow
+	for _, sw := range scoredWindows {
+		// Only include windows from current session
+		if sw.Window.SessionID != currentSessionID {
+			continue
+		}
+		// Skip low similarity
+		if sw.Similarity < 0.3 {
+			continue
+		}
+		// Only include windows with summaries
+		if sw.Window.Summary == "" {
+			continue
+		}
+
+		results = append(results, SimilarContextWindow{
+			WindowID:    sw.Window.ID,
+			SessionID:   sw.Window.SessionID,
+			WindowIndex: sw.Window.WindowIndex,
+			Summary:     sw.Window.Summary,
+			Trigger:     sw.Window.Trigger,
+			Similarity:  sw.Similarity,
+			StartedAt:   sw.Window.StartedAt,
+		})
+
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	return results
+}
+
+// embedText generates an embedding for the given text using the Embedder.
+func embedText(ctx context.Context, text string) ([]float32, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+
+	embedder, err := semantic.NewEmbedder(semantic.ScopeSessions)
+	if err != nil {
+		// No provider available - not an error, just skip embedding
+		return nil, nil
+	}
+
+	result, err := embedder.Embed(ctx, text)
+	if err != nil {
+		return nil, err
+	}
+	return result.Vec, nil
+}
+
+// truncateSummary truncates a summary to the specified length.
+func truncateSummary(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
 }

@@ -19,18 +19,48 @@ signature:
       type: string
       required: false
       description: "Tool name from hook (Edit, Write, etc.)"
+    - name: tool_canonical
+      type: string
+      required: false
+      description: "Canonical tool name (edit.apply_patch, fs.write_file, etc.)"
+    - name: tool_kind
+      type: string
+      required: false
+      description: "Tool category: read, write, exec, search, any"
     - name: tool_input
       type: object
       required: false
       description: "Tool input containing file_path"
-    - name: tool_response
+    - name: tool_observation
       type: object
       required: false
-      description: "Tool response from hook"
-returns:
-  - name: hook_output
-    type: object
-    description: "Hook output with decision and context"
+      description: "Tool observation from hook"
+    - name: workspace_root
+      type: string
+      required: false
+      description: "Workspace root (optional)"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
+  help:
+    short: "Analyze impact of edits via LSP."
+    long: |
+      Use hooks/impact_analysis to emit impact context from tool usage.
+      Example commands:
+        agentctl run hooks/impact_analysis --input '{"tool_name":"Edit","tool_input":{"file_path":"main.go"}}'
+        agentctl skills run hooks/impact_analysis --tool_name Edit --tool_input '{"file_path":"main.go"}'
+    workflows:
+      - id: impact-edit
+        description: "Analyze an edit to main.go."
+        example_input:
+          tool_name: "Edit"
+          tool_input:
+            file_path: "main.go"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Hook output with decision and context"
 capabilities:
   network: "none"
   filesystem:

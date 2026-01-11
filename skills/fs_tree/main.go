@@ -4,28 +4,25 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-type input struct {
+// Input defines the input parameters for fs/tree.
+type Input struct {
 	Path          string `json:"path"`
-	MaxDepth      int    `json:"max_depth"`
+	MaxDepth      int    `json:"max_depth" validate:"gte=0"`
 	IncludeHidden bool   `json:"include_hidden"`
 	IncludeSize   bool   `json:"include_size"`
 	DirsOnly      bool   `json:"dirs_only"`
 	Pattern       string `json:"pattern"`
-	Format        string `json:"format"`
+	Format        string `json:"format" validate:"omitempty,oneof=tree list json"`
 }
 
 type treeNode struct {
@@ -52,30 +49,18 @@ type treeOutput struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("fs/tree", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("fs/tree", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("fs/tree", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("fs/tree", "ERUNTIME", err)
-	}
+	skillmain.Main("fs/tree", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
+	if in.MaxDepth <= 0 {
+		in.MaxDepth = 3
+	}
+	if in.Format == "" {
+		in.Format = "tree"
+	}
+
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -109,13 +94,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	// Prepare artifact for tree text (can be large)
-	var artifact runner.Artifact
+	var artifactDigest string
 	if in.Format == "tree" && len(output.TreeText) > 1024 {
 		buf := bytes.NewBufferString(output.TreeText)
-		artifact, err = runner.PersistBuffer(ctx, rc, buf, "text/plain", "fs_tree")
+		artifact, err := skillout.PersistBuffer(ctx, rc, buf, "text/plain", "fs_tree")
 		if err != nil {
 			return err
 		}
+		artifactDigest = artifact.Digest
 		// Keep a preview of the tree
 		lines := strings.Split(output.TreeText, "\n")
 		if len(lines) > 50 {
@@ -128,28 +114,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"tree":   output,
 		"format": in.Format,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
+	if artifactDigest != "" {
+		data["artifact"] = artifactDigest
 	}
 
-	return rc.Emit("fs/tree", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, "fs/tree", data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.MaxDepth <= 0 {
-		in.MaxDepth = 3
-	}
-	if in.Format == "" {
-		in.Format = "tree"
-	}
-	return in, nil
-}
-
-func buildTree(path, workspace string, in input, level int) (*treeNode, treeStats, error) {
+func buildTree(path, workspace string, in Input, level int) (*treeNode, treeStats, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, treeStats{}, fmt.Errorf("stat path: %w", err)
@@ -368,10 +340,4 @@ func relativeTo(base, target string) string {
 		return filepath.ToSlash(target)
 	}
 	return filepath.ToSlash(rel)
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit fs/tree failure")
-	os.Exit(1)
 }

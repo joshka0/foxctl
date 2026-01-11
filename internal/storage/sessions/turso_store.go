@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
+	"github.com/jkatigb/agentctl/internal/storage/vector"
 )
 
 // Ensure TursoStore implements storage.SessionStore.
@@ -1145,9 +1146,9 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 	chunk_start = excluded.chunk_start,
 	chunk_end = excluded.chunk_end,
 	message_count = excluded.message_count,
-	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	summary = COALESCE(NULLIF(excluded.summary, ''), session_context_windows.summary),
 	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
-	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`,
+	embedding_model = COALESCE(NULLIF(excluded.embedding_model, ''), session_context_windows.embedding_model)`,
 		window.ID, window.SessionID, window.WindowIndex,
 		sqlutil.FormatTimestamp(window.StartedAt), sqlutil.FormatTimestamp(window.EndedAt),
 		window.PreCompactTokens, window.Trigger, window.ChunkStart, window.ChunkEnd,
@@ -1185,9 +1186,9 @@ ON CONFLICT(session_id, window_index) DO UPDATE SET
 	chunk_start = excluded.chunk_start,
 	chunk_end = excluded.chunk_end,
 	message_count = excluded.message_count,
-	summary = COALESCE(excluded.summary, session_context_windows.summary),
+	summary = COALESCE(NULLIF(excluded.summary, ''), session_context_windows.summary),
 	embedding = COALESCE(excluded.embedding, session_context_windows.embedding),
-	embedding_model = COALESCE(excluded.embedding_model, session_context_windows.embedding_model)`)
+	embedding_model = COALESCE(NULLIF(excluded.embedding_model, ''), session_context_windows.embedding_model)`)
 	if err != nil {
 		return fmt.Errorf("sessions: prepare window stmt: %w", err)
 	}
@@ -1245,15 +1246,74 @@ WHERE session_id = ? AND window_index = ?`, sessionID, windowIndex)
 }
 
 // UpdateWindowSummary updates the summary and embedding for a context window.
+// Nil/empty values are treated as "no change" to preserve existing data.
+//
+// Deprecated: Use UpdateContextWindowSummary or SetContextWindowEmbedding instead
+// for clearer intent and to prevent accidental overwrites.
 func (s *TursoStore) UpdateWindowSummary(ctx context.Context, windowID string, summary string, embedding []byte, model string) error {
+	// Normalize: treat empty slice as nil so COALESCE works correctly
+	if len(embedding) == 0 {
+		embedding = nil
+	}
+	summary = strings.TrimSpace(summary)
+	model = strings.TrimSpace(model)
+
 	result, err := s.db.ExecContext(ctx, `
 UPDATE session_context_windows SET
-	summary = ?,
-	embedding = ?,
-	embedding_model = ?
+	summary = COALESCE(NULLIF(?, ''), summary),
+	embedding = COALESCE(?, embedding),
+	embedding_model = COALESCE(NULLIF(?, ''), embedding_model)
 WHERE id = ?`, summary, embedding, model, windowID)
 	if err != nil {
 		return fmt.Errorf("sessions: update window summary: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateContextWindowSummary updates only the summary text for a context window.
+// Use this when generating summaries without affecting embeddings.
+func (s *TursoStore) UpdateContextWindowSummary(ctx context.Context, windowID string, summary string) error {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return nil // No-op for empty summary
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE session_context_windows SET summary = ?
+WHERE id = ?`, summary, windowID)
+	if err != nil {
+		return fmt.Errorf("sessions: update context window summary: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetContextWindowEmbedding sets the embedding and model for a context window.
+// Use this when generating embeddings without affecting the summary.
+func (s *TursoStore) SetContextWindowEmbedding(ctx context.Context, windowID string, embedding []byte, model string) error {
+	if len(embedding) == 0 {
+		return nil // No-op for empty embedding
+	}
+	model = strings.TrimSpace(model)
+
+	result, err := s.db.ExecContext(ctx, `
+UPDATE session_context_windows SET embedding = ?, embedding_model = ?
+WHERE id = ?`, embedding, model, windowID)
+	if err != nil {
+		return fmt.Errorf("sessions: set context window embedding: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -1292,11 +1352,11 @@ WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0`)
 		if len(window.Embedding) == 0 {
 			continue
 		}
-		windowEmb := deserializeEmbedding(window.Embedding)
+		windowEmb := vector.DeserializeF32(window.Embedding)
 		if len(windowEmb) == 0 {
 			continue
 		}
-		sim := cosineSimilarity(queryEmbedding, windowEmb)
+		sim := vector.Cosine(queryEmbedding, windowEmb)
 		scored = append(scored, ScoredContextWindow{Window: window, Similarity: sim})
 	}
 

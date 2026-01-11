@@ -5,13 +5,71 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 )
+
+// parseInput is a test helper that parses JSON and validates required fields.
+// Behavior:
+//  1. Parse JSON - return error with "decode input" on failure (including empty input)
+//  2. Validate required fields (workspace_id, question, candidates)
+//  3. Normalize negative limits to 0
+//
+// Note: This does NOT apply defaults - those are applied in run().
+func parseInput(r io.Reader) (Input, error) {
+	// Read all input first to detect empty input
+	data, _ := io.ReadAll(r)
+	if len(bytes.TrimSpace(data)) == 0 {
+		return Input{}, &ValidationError{Code: ErrCodeArg, Message: "decode input: EOF"}
+	}
+
+	in, err := skilltest.ParseInput[Input](bytes.NewReader(data))
+	if err != nil {
+		return in, &ValidationError{Code: ErrCodeArg, Message: fmt.Sprintf("decode input: %v", err)}
+	}
+
+	// Validate required fields
+	if in.WorkspaceID == "" {
+		return in, &ValidationError{Code: ErrCodeArg, Message: "workspace_id is required"}
+	}
+	if in.Question == "" {
+		return in, &ValidationError{Code: ErrCodeArg, Message: "question is required"}
+	}
+
+	// Validate candidates have usable paths (spec §5.4)
+	usable := 0
+	for _, c := range in.Candidates {
+		if c.Path != "" {
+			usable++
+		}
+	}
+	if usable == 0 {
+		return in, &ValidationError{
+			Code:    ErrCodeNoCandidates,
+			Message: "no usable candidates (all paths empty)",
+		}
+	}
+
+	// Normalize negative limits to 0
+	if in.Limits.MaxFiles < 0 {
+		in.Limits.MaxFiles = 0
+	}
+	if in.Limits.MaxSnippets < 0 {
+		in.Limits.MaxSnippets = 0
+	}
+	if in.Limits.MaxBytesPerFile < 0 {
+		in.Limits.MaxBytesPerFile = 0
+	}
+
+	return in, nil
+}
 
 func TestParseInput(t *testing.T) {
 	tests := []struct {

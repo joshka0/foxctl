@@ -9,26 +9,23 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib"
-	runner "github.com/jkatigb/agentctl/internal/adapters/skillslib/runner"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-type input struct {
+// Input defines the input parameters for code/symbols.
+type Input struct {
 	Path           string `json:"path"`
-	SymbolType     string `json:"symbol_type"`
-	Language       string `json:"language"`
+	SymbolType     string `json:"symbol_type" validate:"omitempty,oneof=all function method struct interface type const var"`
+	Language       string `json:"language" validate:"omitempty,oneof=auto go python javascript typescript"`
 	IncludePrivate bool   `json:"include_private"`
 	IncludeDocs    bool   `json:"include_docs"`
-	MaxResults     int    `json:"max_results"`
+	MaxResults     int    `json:"max_results" validate:"gte=0"`
 }
 
 type symbol struct {
@@ -47,30 +44,21 @@ type symbol struct {
 }
 
 func main() {
-	ctx := context.Background()
-	cfg, err := config.Load(ctx)
-	if err != nil {
-		fail("code/symbols", "ERUNTIME", err)
-	}
-
-	rc, err := runner.NewRunnerContext(cfg, os.Stdout)
-	if err != nil {
-		fail("code/symbols", "ERUNTIME", err)
-	}
-	defer func() {
-		errs.Ignore(rc.Close(), "runner context close")
-	}()
-
-	in, err := parseInput(os.Stdin)
-	if err != nil {
-		fail("code/symbols", "EARG", err)
-	}
-	if err := run(ctx, rc, in); err != nil {
-		fail("code/symbols", "ERUNTIME", err)
-	}
+	skillmain.Main("code/symbols", run)
 }
 
-func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply defaults
+	if in.SymbolType == "" {
+		in.SymbolType = "all"
+	}
+	if in.Language == "" {
+		in.Language = "auto"
+	}
+	if in.MaxResults <= 0 {
+		in.MaxResults = 500
+	}
+
 	// Resolve workspace and search path
 	workspace := rc.PathValidator.Workspace()
 	searchPath := workspace
@@ -126,10 +114,22 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 	}
 
 	// Prepare preview and artifact
-	preview, truncated := preparePreview(symbols, rc.MaxPreview)
-	artifact, err := persistSymbolsArtifact(ctx, rc, symbols, truncated)
-	if err != nil {
-		return err
+	preview, truncated := skillout.PreparePreview(symbols, rc.MaxPreview)
+
+	var artifactDigest string
+	if truncated {
+		buf := &bytes.Buffer{}
+		enc := json.NewEncoder(buf)
+		for _, s := range symbols {
+			if err := enc.Encode(s); err != nil {
+				return fmt.Errorf("encode symbol: %w", err)
+			}
+		}
+		artifact, err := skillout.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_symbols")
+		if err != nil {
+			return err
+		}
+		artifactDigest = artifact.Digest
 	}
 
 	// Count by type
@@ -146,31 +146,14 @@ func run(ctx context.Context, rc *runner.RunnerContext, in input) error {
 		"symbol_type":  in.SymbolType,
 		"language":     in.Language,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
+	if artifactDigest != "" {
+		data["artifact"] = artifactDigest
 	}
 
-	return rc.Emit("code/symbols", data, "application/json", envelope.Meta{Source: "run", Runner: "exec"})
+	return skillout.Emit(rc, "code/symbols", data)
 }
 
-func parseInput(r io.Reader) (input, error) {
-	var in input
-	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
-	}
-	if in.SymbolType == "" {
-		in.SymbolType = "all"
-	}
-	if in.Language == "" {
-		in.Language = "auto"
-	}
-	if in.MaxResults <= 0 {
-		in.MaxResults = 500
-	}
-	return in, nil
-}
-
-func extractFromDirectory(dir, workspace string, in input) ([]symbol, error) {
+func extractFromDirectory(dir, workspace string, in Input) ([]symbol, error) {
 	var symbols []symbol
 
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
@@ -210,7 +193,7 @@ func extractFromDirectory(dir, workspace string, in input) ([]symbol, error) {
 	return symbols, err
 }
 
-func extractFromFile(path, workspace string, in input) ([]symbol, error) {
+func extractFromFile(path, workspace string, in Input) ([]symbol, error) {
 	// Detect language
 	lang := detectLanguage(in.Language, filepath.Ext(path))
 	if lang == "" {
@@ -229,7 +212,7 @@ func extractFromFile(path, workspace string, in input) ([]symbol, error) {
 	}
 }
 
-func extractGoSymbols(path, workspace string, in input) ([]symbol, error) {
+func extractGoSymbols(path, workspace string, in Input) ([]symbol, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
@@ -255,7 +238,7 @@ func extractGoSymbols(path, workspace string, in input) ([]symbol, error) {
 	return symbols, nil
 }
 
-func extractGoFunction(decl *ast.FuncDecl, fset *token.FileSet, file string, in input) *symbol {
+func extractGoFunction(decl *ast.FuncDecl, fset *token.FileSet, file string, in Input) *symbol {
 	if decl.Name == nil {
 		return nil
 	}
@@ -324,7 +307,7 @@ func extractGoFunction(decl *ast.FuncDecl, fset *token.FileSet, file string, in 
 	return sym
 }
 
-func extractGoGenDecl(decl *ast.GenDecl, fset *token.FileSet, file string, in input) []symbol {
+func extractGoGenDecl(decl *ast.GenDecl, fset *token.FileSet, file string, in Input) []symbol {
 	var symbols []symbol
 
 	for _, spec := range decl.Specs {
@@ -440,7 +423,7 @@ func exprToString(expr ast.Expr) string {
 	}
 }
 
-func extractPythonSymbols(path, workspace string, _ input) ([]symbol, error) {
+func extractPythonSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	// Simple regex-based extraction for Python
 	// A full AST parser would be better but this provides basic functionality
 	content, err := os.ReadFile(path)
@@ -494,7 +477,7 @@ func extractPythonSymbols(path, workspace string, _ input) ([]symbol, error) {
 	return symbols, nil
 }
 
-func extractJSSymbols(path, workspace string, _ input) ([]symbol, error) {
+func extractJSSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	// Simple regex-based extraction for JavaScript/TypeScript
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -606,34 +589,4 @@ func relativeTo(base, target string) string {
 		return filepath.ToSlash(target)
 	}
 	return filepath.ToSlash(rel)
-}
-
-func preparePreview(symbols []symbol, limit int) ([]symbol, bool) {
-	preview, truncated := skillslib.PreparePreview(symbols, limit)
-	if truncated {
-		dup := make([]symbol, len(preview))
-		copy(dup, preview)
-		preview = dup
-	}
-	return preview, truncated
-}
-
-func persistSymbolsArtifact(ctx context.Context, rc *runner.RunnerContext, symbols []symbol, truncated bool) (runner.Artifact, error) {
-	if !truncated {
-		return runner.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, s := range symbols {
-		if err := enc.Encode(s); err != nil {
-			return runner.Artifact{}, fmt.Errorf("encode symbol: %w", err)
-		}
-	}
-	return runner.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_symbols")
-}
-
-func fail(command, code string, err error) {
-	env := envelope.Error(command, code, err.Error(), nil)
-	errs.Ignore(envelope.Write(os.Stdout, env), "emit code/symbols failure")
-	os.Exit(1)
 }
