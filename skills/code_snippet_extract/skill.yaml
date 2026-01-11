@@ -1,19 +1,19 @@
 apiVersion: agentctl/v1
 kind: Skill
 metadata:
-  name: code/swe_grep
-  version: 0.1.0
-  description: "Extract high-signal code snippets from candidate files using live workspace reads"
-  tags: ["code", "grep", "snippets", "retrieval", "swe"]
+  name: code/snippet_extract
+  version: 0.2.0
+  description: "Extract code snippets from candidate files (requires candidates - use code/smart_search if you don't have them)"
+  tags: ["code", "extract", "snippets", "retrieval"]
 distribution:
   type: exec
   exec:
-    entry: skills/code_swe_grep/code_swe_grep
+    entry: skills/code_snippet_extract/code_snippet_extract
 io:
   format: JSON
   inline_output_kb: 32
 signature:
-  command: code/swe_grep
+  command: code/snippet_extract
   parameters:
     - name: workspace_id
       type: string
@@ -23,6 +23,10 @@ signature:
       type: string
       required: true
       description: "Natural-language question or task guiding snippet extraction"
+    - name: query
+      type: string
+      required: false
+      description: "Alias for 'question' (for convenience)"
     - name: candidates
       type: array
       required: true
@@ -95,8 +99,8 @@ signature:
       See docs/spec/code_symbol_index_and_swe_grep.md §5 for the full contract.
 
       Example commands:
-        agentctl run code/swe_grep --input '{"workspace_id":"my-workspace","question":"How does user authentication work?","candidates":[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}],"limits":{"max_files":10,"max_snippets":20}}'
-        agentctl skills run code/swe_grep --workspace_id my-workspace --question "How does user authentication work?" --candidates '[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}]' --limits '{"max_files":10,"max_snippets":20}'
+        agentctl run code/snippet_extract --input '{"workspace_id":"my-workspace","question":"How does user authentication work?","candidates":[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}],"limits":{"max_files":10,"max_snippets":20}}'
+        agentctl skills run code/snippet_extract --workspace_id my-workspace --question "How does user authentication work?" --candidates '[{"path":"internal/auth/login.go","symbol_id":"internal/auth/login.go:Login","priority":0.95},{"path":"internal/auth/session.go"}]' --limits '{"max_files":10,"max_snippets":20}'
     workflows:
       - id: extract-snippets-for-question
         description: "Extract code snippets relevant to a question from candidates."

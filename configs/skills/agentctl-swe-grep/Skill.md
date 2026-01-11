@@ -19,7 +19,7 @@ SWE Grep is the final stage in code retrieval:
 ## Usage
 
 ```bash
-agentctl run code/swe_grep --input '{
+agentctl run code/snippet_extract --input '{
   "workspace_id": "my-project",
   "question": "How does user authentication work?",
   "candidates": [
@@ -63,7 +63,7 @@ agentctl run code/swe_grep --input '{
 ### Basic Query
 
 ```bash
-agentctl run code/swe_grep --input '{
+agentctl run code/snippet_extract --input '{
   "workspace_id": "agentctl",
   "question": "Where are HTTP handlers defined?",
   "candidates": [
@@ -77,7 +77,7 @@ agentctl run code/swe_grep --input '{
 ### With Symbol Hints
 
 ```bash
-agentctl run code/swe_grep --input '{
+agentctl run code/snippet_extract --input '{
   "workspace_id": "agentctl",
   "question": "How does the cache invalidation logic work?",
   "candidates": [
@@ -90,7 +90,7 @@ agentctl run code/swe_grep --input '{
 ### With Limits
 
 ```bash
-agentctl run code/swe_grep --input '{
+agentctl run code/snippet_extract --input '{
   "workspace_id": "agentctl",
   "question": "Error handling patterns",
   "candidates": [

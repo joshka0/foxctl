@@ -1,11 +1,11 @@
-# Phase 5 – SWE Grep Skill (`code/swe_grep`) Todo Spec
+# Phase 5 – SWE Grep Skill (`code/snippet_extract`) Todo Spec
 
 This spec breaks down Phase 5 of `universal_swe_grep_and_agents` into concrete
 steps focused on the **SWE Grep exec skill** that reads live workspace files and
 emits high-signal snippets via Protocol v1 envelopes and CAS.
 
 - Phase 3/4 provide semantic + symbol index candidates.
-- Phase 5 consumes those candidates in a kernel-owned `code/swe_grep` skill,
+- Phase 5 consumes those candidates in a kernel-owned `code/snippet_extract` skill,
   relying on semantic + symbol index scoring for **recall**, and using cheap
   LLMs for **snippet extraction** alongside PathValidator and CAS, without
   introducing new wire-level fields.
@@ -32,7 +32,7 @@ emits high-signal snippets via Protocol v1 envelopes and CAS.
 
 ## A. Skill Contract & Manifest
 
-Goal: define a **stable kernel-owned skill** `code/swe_grep` with clear input /
+Goal: define a **stable kernel-owned skill** `code/snippet_extract` with clear input /
 output contracts, manifest, and CLI surface.
 
 ### A1. Skill manifest and wiring
@@ -40,7 +40,7 @@ output contracts, manifest, and CLI surface.
 - [x] Add a new exec skill under `skills/code_swe_grep/` (or equivalent):
   - `skills/code_swe_grep/main.go` – skill implementation.
   - `skills/code_swe_grep/skill.yaml` – manifest with:
-    - `metadata.name: "code/swe_grep"`.
+    - `metadata.name: "code/snippet_extract"`.
     - `distribution.type: "exec"`.
     - `capabilities.network: "none"` (no network required).
     - `capabilities.filesystem: [ { type: "workdir" } ]`.
@@ -52,7 +52,7 @@ output contracts, manifest, and CLI surface.
 
 ### A2. CLI/runner integration
 
-- [x] Ensure `agentctl run code/swe_grep` works end-to-end:
+- [x] Ensure `agentctl run code/snippet_extract` works end-to-end:
   - Discovery via existing skill resolver (`skills_run.go` +
     `skill_helpers.go`).
   - Execution via exec runner with `AGENTCTL_WORKSPACE` correctly set.
@@ -125,7 +125,7 @@ scoring and limits that can be upgraded later without breaking contracts.
   - Rely on semantic file index + symbol index (and their DAG/call-graph
     context) to rank and down-select candidate files/symbols.
   - Do not introduce a second, independent full-repo retrieval scorer inside
-    `code/swe_grep`; respect upstream ranking and any candidate limits.
+    `code/snippet_extract`; respect upstream ranking and any candidate limits.
   - When available, upstream retrieval MAY incorporate `code_symbol` embeddings
     (see `code_symbol_index_and_swe_grep.md` §3.1.2) to rank and filter
     candidate symbols more precisely. SWE Grep itself remains embedding-
@@ -198,7 +198,7 @@ integration, and snippet behavior**, and make it observable in logs and metrics.
       SWE Grep:
   - Use a small fixture repo.
   - Generate candidates (e.g. via a trivial grep or hard-coded list).
-  - Run `code/swe_grep` and assert the end-to-end flow behaves as expected.
+  - Run `code/snippet_extract` and assert the end-to-end flow behaves as expected.
 - [ ] Optionally add a test that combines semantic/symbol index candidates with
       SWE Grep to verify the Phase 3/4 → 5 funnel on fixtures.
 

@@ -1,4 +1,4 @@
-// Package main implements the code/swe_grep skill.
+// Package main implements the code/snippet_extract skill.
 // It reads live workspace files and extracts high-signal code snippets
 // based on a natural-language question and candidate files/symbols.
 //
@@ -33,7 +33,7 @@ import (
 )
 
 // Command is the envelope command for this skill.
-const Command = "code/swe_grep"
+const Command = "code/snippet_extract"
 
 // Error codes per Core Profile v1 §13 and spec §5.4.
 const (
@@ -148,10 +148,13 @@ const (
 )
 
 // Input is the expected JSON input per spec §5.2.
+// Note: This skill requires candidates. If you don't have candidates,
+// use code/smart_search instead which auto-generates them.
 type Input struct {
 	WorkspaceID string      `json:"workspace_id"`
-	Question    string      `json:"question" validate:"required"`
-	Candidates  []Candidate `json:"candidates" validate:"required,min=1"`
+	Question    string      `json:"question"` // Required (validated after Query alias applied)
+	Query       string      `json:"query"`    // Alias for question (for convenience)
+	Candidates  []Candidate `json:"candidates" validate:"min=1"`
 	Limits      Limits      `json:"limits,omitempty"`
 }
 
@@ -161,6 +164,19 @@ func main() {
 
 // run is the main skill logic.
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Apply query alias for question (convenience for callers using "query")
+	if in.Question == "" && in.Query != "" {
+		in.Question = in.Query
+	}
+
+	// Validate question is provided (after alias applied)
+	if in.Question == "" {
+		return &ValidationError{
+			Code:    ErrCodeArg,
+			Message: "question or query is required",
+		}
+	}
+
 	// Apply workspace default
 	if in.WorkspaceID == "" {
 		in.WorkspaceID = rc.PathValidator.Workspace()
@@ -176,7 +192,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if usable == 0 {
 		return &ValidationError{
 			Code:    ErrCodeNoCandidates,
-			Message: "no usable candidates (all paths empty)",
+			Message: "no usable candidates provided. Hint: use code/smart_search if you don't have candidates - it auto-generates them from indexes",
 		}
 	}
 

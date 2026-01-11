@@ -22,7 +22,7 @@ Help: `--help` | Examples: `--examples` | List: `agentctl skills list`
 |-------|---------|
 | `fs/tree`, `fs/ls`, `fs/read`, `fs/find` | File ops |
 | `text/ripgrep`, `code/context_ripgrep` | Search (expand to functions) |
-| `code/swe_grep` | Smart code retrieval |
+| `code/smart_search` | Smart code search |
 
 ### Code Intelligence
 | Skill | Purpose |

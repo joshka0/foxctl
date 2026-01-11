@@ -10,7 +10,7 @@ Extract relevant code snippets from candidate files based on natural language qu
 ## Usage
 
 ```bash
-agentctl run code/swe_grep --input '{
+agentctl run code/snippet_extract --input '{
   "workspace_id": "my-project",
   "question": "How does user authentication work?",
   "candidates": [

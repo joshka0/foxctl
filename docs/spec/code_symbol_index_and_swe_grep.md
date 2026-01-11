@@ -313,7 +313,7 @@ not an always-live view:
 
 SWE Grep always operates on **live workspace files**:
 
-- `code/swe_grep` reads directly from disk under `PathValidator`, independent of
+- `code/snippet_extract` reads directly from disk under `PathValidator`, independent of
   whether symbol/semantic indexes have caught up.
 - For unreviewed or in-progress changes it is expected that:
   - Index-based candidates may be slightly stale.
@@ -325,7 +325,7 @@ In the typical funnel:
 1. Use semantic file index and symbol index to propose candidate
    `(file, symbol_id)` pairs.
 2. Optionally enrich candidates with recent git commits or diffs.
-3. Call `code/swe_grep` over those candidates (often in parallel per file) to
+3. Call `code/snippet_extract` over those candidates (often in parallel per file) to
    obtain high-signal snippets from the current workspace contents.
 
 Agents MUST NOT assume that index entries always match live files; when there is
@@ -334,7 +334,7 @@ current task over stale index metadata.
 
 ---
 
-## 5. SWE Grep Skill Contract (`code/swe_grep`)
+## 5. SWE Grep Skill Contract (`code/snippet_extract`)
 
 ### 5.1 Purpose and Role
 
@@ -352,7 +352,7 @@ it only via tools.
 
 ### 5.2 Input Shape (`data`)
 
-Command: `code/swe_grep`
+Command: `code/snippet_extract`
 
 Conceptual `data` fields:
 
@@ -466,7 +466,7 @@ SQL to agents.
 ### 6.2 `code.swe_grep` Tool
 
 The tools layer SHOULD expose a `code.swe_grep` tool that calls the
-`code/swe_grep` skill.
+`code/snippet_extract` skill.
 
 Inputs (conceptual):
 
@@ -507,7 +507,7 @@ When SWE Grep and symbol search are used by agents, trajectory capture
 
 Events SHOULD include:
 
-- `command` set to the Protocol v1 `command` (e.g. `"code/swe_grep"`).
+- `command` set to the Protocol v1 `command` (e.g. `"code/snippet_extract"`).
 - `meta.correlation_id`, `meta.task_id`, and other fields per the trajectory
   spec.
 - `data_artifact` referencing CAS digests for large result sets, when present.

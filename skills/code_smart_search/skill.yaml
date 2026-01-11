@@ -1,19 +1,19 @@
 apiVersion: agentctl/v1
 kind: Skill
 metadata:
-  name: code/universal_swe_grep
-  version: 0.1.0
-  description: "Auto-candidate SWE grep: generates candidates from indexes then extracts snippets"
-  tags: ["code", "grep", "snippets", "retrieval", "swe", "universal", "auto"]
+  name: code/smart_search
+  version: 0.2.0
+  description: "Smart code search: auto-generates candidates from indexes and extracts relevant snippets"
+  tags: ["code", "search", "snippets", "retrieval", "smart", "auto"]
 distribution:
   type: exec
   exec:
-    entry: skills/code_universal_swe_grep/code_universal_swe_grep
+    entry: skills/code_smart_search/code_smart_search
 io:
   format: JSON
   inline_output_kb: 32
 signature:
-  command: code/universal_swe_grep
+  command: code/smart_search
   parameters:
     - name: workspace_id
       type: string
@@ -60,9 +60,9 @@ signature:
       type: string
       description: "CAS digest of full snippets when output exceeds inline threshold"
   help:
-    short: "Universal SWE Grep with auto-candidate generation from symbol/semantic indexes"
+    short: "Smart code search with auto-candidate generation from symbol/semantic indexes"
     long: |
-      Universal SWE Grep combines candidate generation with snippet extraction:
+      Smart Search combines candidate generation with snippet extraction:
 
       1. Generates candidates from multiple sources:
          - Symbol index: BM25 search over indexed code symbols
@@ -71,14 +71,14 @@ signature:
 
       2. Merges and ranks candidates by relevance score
 
-      3. Passes candidates to code/swe_grep for live snippet extraction
+      3. Passes candidates to code/snippet_extract for live snippet extraction
 
       This is the recommended entry point for code search when you don't have
       pre-determined candidate files. For direct snippet extraction from known
-      files, use code/swe_grep directly.
+      files, use code/snippet_extract directly.
 
       Example:
-        agentctl run code/universal_swe_grep --input '{
+        agentctl run code/smart_search --input '{
           "question": "How does user authentication work?",
           "sources": ["symbols", "ripgrep"],
           "limits": {"max_candidates": 30, "max_snippets": 15}

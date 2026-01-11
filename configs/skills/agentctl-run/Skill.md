@@ -30,7 +30,7 @@ agentctl run <skill-name> --input '<json>'
 - `code/complexity` - Analyze code complexity metrics
 - `code/imports` - Analyze import dependencies
 - `code/security` - Security pattern scanning
-- `code/swe_grep` - High-signal code snippet extraction
+- `code/smart_search` - High-signal code snippet extraction
 
 ### Text Operations
 

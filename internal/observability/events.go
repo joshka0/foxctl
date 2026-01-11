@@ -145,11 +145,11 @@ func HashQuestion(q string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
-// SweGrepEvent is the NDJSON observation for a single code/swe_grep run.
+// SweGrepEvent is the NDJSON observation for a single code/snippet_extract run.
 // See docs/observability/events.md §3.1 for field semantics.
 type SweGrepEvent struct {
 	Ts              time.Time `json:"ts"`
-	Command         string    `json:"command"` // "code/swe_grep"
+	Command         string    `json:"command"` // "code/snippet_extract"
 	WorkspaceID     string    `json:"workspace_id"`
 	QuestionHash    string    `json:"question_hash"` // 8 hex chars
 	Candidates      int       `json:"candidates"`
@@ -171,7 +171,7 @@ func NewSweGrepEvent(
 ) SweGrepEvent {
 	return SweGrepEvent{
 		Ts:              time.Now().UTC(),
-		Command:         "code/swe_grep",
+		Command:         "code/snippet_extract",
 		WorkspaceID:     workspaceID,
 		QuestionHash:    HashQuestion(question),
 		Candidates:      candidates,

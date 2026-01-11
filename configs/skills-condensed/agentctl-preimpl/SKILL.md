@@ -25,7 +25,7 @@ agentctl run lsp/gopls --input '{"operation": "references", "file": "main.go", "
 agentctl run lsp/gopls --input '{"operation": "call_hierarchy", "file": "main.go", "line": 25, "column": 6}'
 
 # Smart code search
-agentctl run code/swe_grep --input '{"query": "error handling", "files": ["handler.go"]}'
+agentctl run code/smart_search --input '{"query": "error handling", "files": ["handler.go"]}'
 ```
 
 ## Output Template

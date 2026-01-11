@@ -37,7 +37,7 @@ func TestEventBuilder_FluentAPI(t *testing.T) {
 		WithTraceID("trace-123").
 		WithParentID("parent-456").
 		WithComponent(ComponentSkill).
-		WithCommand("code/swe_grep").
+		WithCommand("code/snippet_extract").
 		WithSubtype("search").
 		WithSession("session-abc", "agent-def").
 		WithWorkspace("workspace-xyz").
@@ -55,8 +55,8 @@ func TestEventBuilder_FluentAPI(t *testing.T) {
 	if event.Component != ComponentSkill {
 		t.Errorf("Component = %q, want %q", event.Component, ComponentSkill)
 	}
-	if event.Command != "code/swe_grep" {
-		t.Errorf("Command = %q, want code/swe_grep", event.Command)
+	if event.Command != "code/snippet_extract" {
+		t.Errorf("Command = %q, want code/snippet_extract", event.Command)
 	}
 	if event.Subtype != "search" {
 		t.Errorf("Subtype = %q, want search", event.Subtype)
@@ -341,7 +341,7 @@ func TestEmit_Enabled(t *testing.T) {
 	event := NewEvent(OpSkillRun).
 		WithTraceID("test-trace").
 		WithComponent(ComponentSkill).
-		WithCommand("code/swe_grep").
+		WithCommand("code/snippet_extract").
 		WithWorkspace("test-ws").
 		WithData("files", 5).
 		Success(250 * time.Millisecond)
@@ -372,8 +372,8 @@ func TestEmit_Enabled(t *testing.T) {
 	if decoded.Operation != OpSkillRun {
 		t.Errorf("Operation = %q, want %q", decoded.Operation, OpSkillRun)
 	}
-	if decoded.Command != "code/swe_grep" {
-		t.Errorf("Command = %q, want code/swe_grep", decoded.Command)
+	if decoded.Command != "code/snippet_extract" {
+		t.Errorf("Command = %q, want code/snippet_extract", decoded.Command)
 	}
 	if decoded.Status != StatusOK {
 		t.Errorf("Status = %q, want %q", decoded.Status, StatusOK)

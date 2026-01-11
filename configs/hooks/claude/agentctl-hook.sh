@@ -16,7 +16,8 @@
 # Emits Claude-compatible hook output JSON on stdout.
 #
 # Environment:
-#   AGENTCTL_BIN           - Path to agentctl binary (default: agentctl)
+#   AGENTCTL_BIN           - Path to agentctl binary (fallback chain: PATH, project/bin,
+#                            ~/.agentctl/bin, ~/.local/bin, ~/go/bin)
 #   CLAUDE_PROJECT_DIR     - Workspace root (set by CC)
 #   CLAUDE_SESSION_ID      - Session ID (set by CC)
 #   AGENTCTL_SESSION_ID    - Alternate session ID
@@ -50,9 +51,27 @@ if [[ -z "${EVENT}" ]]; then
 fi
 
 # Configuration
-AGENTCTL_BIN="${AGENTCTL_BIN:-agentctl}"
 WORKSPACE_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 PAYLOAD="$(cat)"
+
+# Find agentctl binary with fallback chain
+if [[ -n "${AGENTCTL_BIN:-}" ]]; then
+  : # Use provided path
+elif command -v agentctl &>/dev/null; then
+  AGENTCTL_BIN="agentctl"
+elif [[ -x "${CLAUDE_PROJECT_DIR:-}/bin/agentctl" ]]; then
+  AGENTCTL_BIN="${CLAUDE_PROJECT_DIR}/bin/agentctl"
+elif [[ -x "$HOME/.agentctl/bin/agentctl" ]]; then
+  AGENTCTL_BIN="$HOME/.agentctl/bin/agentctl"
+elif [[ -x "$HOME/.local/bin/agentctl" ]]; then
+  AGENTCTL_BIN="$HOME/.local/bin/agentctl"
+elif [[ -x "$HOME/go/bin/agentctl" ]]; then
+  AGENTCTL_BIN="$HOME/go/bin/agentctl"
+else
+  # Can't find agentctl - fail silently
+  echo '{}'
+  exit 0
+fi
 
 # Session ID resolution (prefer env, then payload)
 SESSION_ID="${AGENTCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"

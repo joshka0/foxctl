@@ -33,7 +33,7 @@ agentctl run text/grep --input '{"pattern": "TODO", "path": "."}'
 | `code/symbols` | Extract functions, types, methods | `{"path": "file.go"}` |
 | `code/security` | Vulnerability detection | `{"path": "src/"}` |
 | `code/imports` | Dependency graph analysis | `{"path": "."}` |
-| `code/swe_grep` | Smart code retrieval | `{"question": "auth flow", "paths": ["src/"]}` |
+| `code/smart_search` | Smart code retrieval | `{"question": "auth flow", "paths": ["src/"]}` |
 | `text/grep` | Regex search | `{"pattern": "func.*Error", "path": "."}` |
 | `text/ripgrep` | Fast recursive search | `{"pattern": "TODO", "path": "."}` |
 | `fs/tree` | Directory structure | `{"path": ".", "max_depth": 3}` |
@@ -63,7 +63,7 @@ All skills return JSON envelope:
 Check `status` field, extract useful info from `data`.
 
 ### When to Use agentctl
-- **Precise searches**: Use `text/grep` or `code/swe_grep` over manual searching
+- **Precise searches**: Use `text/grep` or `code/smart_search` over manual searching
 - **Code analysis**: Use `code/complexity`, `code/symbols` for structured analysis
 - **File operations**: Use `fs/tree`, `fs/read` for exploration
 - **Tests**: Use `test/run` for running tests with proper output parsing

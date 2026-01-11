@@ -174,7 +174,7 @@ on it.
 
 ---
 
-## Phase 5 – SWE Grep Skill (`code/swe_grep`)
+## Phase 5 – SWE Grep Skill (`code/snippet_extract`)
 
 **Focus:** live reads, snippet extraction, and CAS behavior.
 
@@ -211,7 +211,7 @@ on it.
   - [x] `code.symbol_search`:
     - Given symbol index data, returns ranked candidates with expected fields.
   - [x] `code.swe_grep` tool:
-    - Correctly maps inputs to `code/swe_grep` and unwraps results.
+    - Correctly maps inputs to `code/snippet_extract` and unwraps results.
 
 - **Patch round-trip tests**
   - [x] `code/diff` → `edit.apply_structured_diff`:

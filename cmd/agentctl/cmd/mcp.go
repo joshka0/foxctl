@@ -57,7 +57,7 @@ var skillGroups = map[string][]string{
 		"code/semantic_search",
 		"code/symbols",
 		"code/complexity",
-		"code/swe_grep",
+		"code/snippet_extract",
 		"code/context_ripgrep",
 	},
 	// code-write: Code modification tools

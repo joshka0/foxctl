@@ -459,7 +459,7 @@ For cost efficiency, embeddings should be processed via a job queue:
 | Scope | Content Type | Model | Price/1M | Dimensions |
 |-------|--------------|-------|----------|------------|
 | `symbols` | Code | `voyage-code-3` | $0.18 | 1024 |
-| `memory` | Gotchas/notes | `voyage-3-large` | $0.18 | 1024 |
+| `memory` | Gotchas/notes | `voyage-3-large` | $0.06 | 1024 |
 | `tasks` | Task descriptions | `voyage-3.5` | $0.06 | 1024 |
 | `sessions` | Session context | `voyage-3.5` | $0.06 | 1024 |
 

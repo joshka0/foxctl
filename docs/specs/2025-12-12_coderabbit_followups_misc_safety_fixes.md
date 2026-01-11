@@ -25,7 +25,7 @@ safety:
 ## Non-goals
 
 - No envelope or `meta.*` contract changes.
-- No functional change to the `code/swe_grep` skill behavior (this is testdata +
+- No functional change to the `code/snippet_extract` skill behavior (this is testdata +
   tests only).
 - No changes to CLI behavior.
 

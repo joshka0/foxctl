@@ -141,7 +141,7 @@ func WithSpanMailbox(mailboxMsgID string) SpanOpt {
 //
 //	ctx, done, span := observability.StartSpan(ctx, observability.OpSkillRun,
 //	    observability.WithSpanComponent(observability.ComponentSkill),
-//	    observability.WithSpanCommand("code/swe_grep"),
+//	    observability.WithSpanCommand("code/snippet_extract"),
 //	)
 //	defer func() { done(err) }()
 //	span.WithData("files", count)

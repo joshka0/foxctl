@@ -26,9 +26,9 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name:         "agentctl with env vars",
-			command:      "AGENTCTL_WORKSPACE=/foo agentctl run code/swe_grep",
+			command:      "AGENTCTL_WORKSPACE=/foo agentctl run code/snippet_extract",
 			wantAgentctl: true,
-			wantSkill:    "code/swe_grep",
+			wantSkill:    "code/snippet_extract",
 			wantEnvVars:  map[string]string{"AGENTCTL_WORKSPACE": "/foo"},
 		},
 		{
@@ -82,9 +82,9 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name:         "agentctl with complex input",
-			command:      `agentctl run code/swe_grep --input '{"question":"Where is auth?"}'`,
+			command:      `agentctl run code/snippet_extract --input '{"question":"Where is auth?"}'`,
 			wantAgentctl: true,
-			wantSkill:    "code/swe_grep",
+			wantSkill:    "code/snippet_extract",
 		},
 	}
 
@@ -150,11 +150,11 @@ func TestAuthorizeBash(t *testing.T) {
 			wantSkill:    "code/semantic_search",
 		},
 		{
-			name:         "explorer allows code/swe_grep",
+			name:         "explorer allows code/snippet_extract",
 			profile:      ProfileExplorer,
-			command:      "agentctl run code/swe_grep",
+			command:      "agentctl run code/snippet_extract",
 			wantDecision: DecisionAllow,
-			wantSkill:    "code/swe_grep",
+			wantSkill:    "code/snippet_extract",
 		},
 		{
 			name:         "explorer allows code/symbols",
@@ -285,7 +285,7 @@ func TestIsSkillAllowed(t *testing.T) {
 		{"unrestricted allows any skill", ProfileUnrestricted, "any/skill", true},
 		{"empty profile allows any skill", "", "any/skill", true},
 		{"explorer allows semantic_search", ProfileExplorer, "code/semantic_search", true},
-		{"explorer allows swe_grep", ProfileExplorer, "code/swe_grep", true},
+		{"explorer allows swe_grep", ProfileExplorer, "code/snippet_extract", true},
 		{"explorer allows symbols", ProfileExplorer, "code/symbols", true},
 		{"explorer allows fs/read", ProfileExplorer, "fs/read", true},
 		{"explorer blocks test/run", ProfileExplorer, "test/run", false},

@@ -38,7 +38,7 @@
 │                        Code Context Funnel                          │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  code/semantic_search ──► code/swe_grep ──► code/counsel            │
+│  code/semantic_search ──► code/snippet_extract ──► code/counsel            │
 │         │                      │                  │                 │
 │    "where to look"      "what's relevant"  "what it means"          │
 │         │                      │                  │                 │

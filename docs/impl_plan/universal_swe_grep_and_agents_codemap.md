@@ -138,7 +138,7 @@ Treat all symbol-index tasks in this phase as sharing the same codemap set:
 
 ### Phase 5 – SWE Grep
 
-Remember: `code/context_ripgrep` is the basis for `code/swe_grep`.
+Remember: `code/context_ripgrep` is the basis for `code/snippet_extract`.
 
 - **Phase 5 (all tasks: live workspace grep, symbol/semantic awareness, error
   codes)**\
@@ -202,7 +202,7 @@ readable.
   - **Phase 0:** Pre-flight checks around hooks/skills readiness (hooks are just
     skills built and run through this system).
   - **Phase 1:** `hooks/task_guard` implementation and usage.
-  - **Phase 5:** SWE Grep skill (`code/swe_grep` / `code/context_ripgrep`) as a
+  - **Phase 5:** SWE Grep skill (`code/snippet_extract` / `code/context_ripgrep`) as a
     first-class skill.
   - **Phase 6:** dspy-go tools exposed as skills (`todo/manage`, SWE Grep,
     http/openapi, etc.).
@@ -218,7 +218,7 @@ readable.
   - **Phase 0:** Verifying that existing hooks/skills are discoverable under the
     configured search paths.
   - **Phase 1:** `hooks/task_guard` manifest and execution behavior.
-  - **Phase 5:** Skill naming, manifests, and execution for `code/swe_grep`.
+  - **Phase 5:** Skill naming, manifests, and execution for `code/snippet_extract`.
   - **Phase 6:** Discovery + validation for dspy-go tools and other agent-facing
     skills.
 - **Test plan phases**
@@ -246,7 +246,7 @@ readable.
 - **Impl plan phases**
   - **Phase 0:** Verifying skill install footprint and that installed skills
     execute correctly with Jobs + CAS.
-  - **Phase 5:** Distribution/installation story for `code/swe_grep` as a skill.
+  - **Phase 5:** Distribution/installation story for `code/snippet_extract` as a skill.
   - **Phase 6:** Any plugin-based skills used by agents (e.g., skills that rely
     on auth/pagination plugins).
 - **Test plan phases**
@@ -332,7 +332,7 @@ readable.
 - **Impl plan phases**
   - **Phase 0:** Verifying exec/WASI runners and path/network policies.
   - **Phase 1:** `hooks/task_guard` (exec) and its path policy behavior.
-  - **Phase 5:** Runner behavior for `code/swe_grep` (likely exec), including
+  - **Phase 5:** Runner behavior for `code/snippet_extract` (likely exec), including
     workspace path handling.
   - **Phase 6:** Runners for agent-facing skills (exec or WASI) with correct
     policies.

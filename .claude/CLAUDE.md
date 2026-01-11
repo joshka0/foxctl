@@ -40,7 +40,8 @@ Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 | PostToolUse      | `counsel-suggest`          | Suggests /counsel after reading 3+ code files                                  |
 | PostToolUse      | `lsp-diagnostics`          | Shows LSP errors after editing                                                 |
 | PostToolUse      | `memory-prompt`            | Prompts to save memories when tasks are completed                              |
-| PreCompact       | `session-save`             | Captures session state                                                         |
+| PreCompact       | `session-save`             | Captures session state (context window)                                        |
+| PreCompact       | `session-summarize`        | Extracts gotchas/decisions per window via LLM                                  |
 | SessionStart     | `session-restore`          | Restores context on compact/resume                                             |
 | UserPromptSubmit | `memory-detector`          | Detects save/recall/todo patterns                                              |
 | UserPromptSubmit | `skill-advisor`            | Suggests agentctl skills based on prompt patterns                              |
@@ -221,7 +222,8 @@ agentctl run code/symbols --input '...' -f table
 | ------------------------------ | --------------------------------------------------------- |
 | `code/complexity`              | Complexity analysis                                       |
 | `code/symbols`                 | Extract symbols                                           |
-| `code/swe_grep`                | Smart code retrieval                                      |
+| `code/smart_search`            | Smart code search with auto-candidate generation          |
+| `code/snippet_extract`         | Extract code snippets from candidate files                |
 | `code/context_ripgrep`         | Search and return full function bodies containing matches |
 | `code/smart_write`             | Symbol-based editing with dry-run diff preview            |
 | `test/run`                     | Run tests with coverage                                   |
@@ -247,7 +249,8 @@ agentctl run code/symbols --input '...' -f table
 | `AGENTCTL_SEMANTIC_RERANK`    | `0`           | Set to `1` to enable Voyage rerank-2.5 in hooks      |
 | `AGENTCTL_EMBEDDING_RATE_LIMIT` | `3`         | Embedding RPM: 0=disabled (paid tier), >0=limit      |
 | `AGENTCTL_EMBEDDING_MODEL_CODE` | `voyage-code-3` | Override model for code scopes (symbols)         |
-| `AGENTCTL_EMBEDDING_MODEL_TEXT` | `voyage-3.5`    | Override model for text scopes (memory, tasks, sessions, codemaps) |
+| `AGENTCTL_EMBEDDING_MODEL_TEXT` | -               | Override model for all text scopes (fallback)    |
+| `AGENTCTL_EMBEDDING_MODEL_<SCOPE>` | -            | Per-scope override (SYMBOLS, MEMORY, TASKS, etc) |
 
 ### Scope-Based Embedding Models
 
@@ -256,13 +259,13 @@ Voyage AI is the recommended provider for embeddings (based on Dec 2024 benchmar
 | Scope      | Content Type    | Model            | Price/1M | Rationale                             |
 | ---------- | --------------- | ---------------- | -------- | ------------------------------------- |
 | `symbols`  | Code            | `voyage-code-3`  | $0.18    | 13.80% better than OpenAI on code     |
-| `memory`   | Gotchas/notes   | `voyage-3.5`     | $0.06    | Good quality at 3x cost savings       |
-| `codemaps` | Semantic maps   | `voyage-3.5`     | $0.06    | Matches memory - semantic text        |
-| `tasks`    | Task desc       | `voyage-3.5`     | $0.06    | Good quality at 1/3 cost              |
-| `sessions` | Session context | `voyage-3.5`     | $0.06    | Good quality at 1/3 cost              |
+| `memory`   | Gotchas/notes   | `voyage-3-large` | $0.06    | Best quality for memories/gotchas     |
+| `codemaps` | Semantic maps   | `voyage-3.5`     | $0.06    | Good quality, lower cost              |
+| `tasks`    | Task desc       | `voyage-3.5`     | $0.06    | Good quality, lower cost              |
+| `sessions` | Session context | `voyage-3.5`     | $0.06    | Good quality, lower cost              |
 
 All Voyage models use 1024 dimensions. Use `ScopeModelRecommendation(scope)` to get the
-appropriate model for each scope.
+appropriate model for each scope. Env var priority: per-scope > category > default.
 
 > ⚠️ **Embedding Dimension Mismatch**: Gemini=3072, Voyage/Mistral/Codestral=1024.
 > Query and stored embeddings MUST use the same provider per scope.
@@ -393,16 +396,17 @@ skills/ ──────────► internal/adapters/skillslib/  (skills 
 **Funnel design - each layer has ONE job:**
 
 ```
-semantic_search → swe_grep (evidence) → counsel (analysis)
-     ↓                  ↓                      ↓
-  "where to look"   "what's relevant"    "what does it mean"
+semantic_search → snippet_extract (evidence) → counsel (analysis)
+     ↓                      ↓                         ↓
+  "where to look"      "what's relevant"       "what does it mean"
 ```
 
 **Rules:**
 - `code/semantic_search`: Upstream discovery only - returns candidates (path, symbol_id, line, priority)
-- `code/swe_grep`: The **canonical evidence collector** - reads files, extracts snippets, validates paths
+- `code/snippet_extract`: The **canonical evidence collector** - reads files, extracts snippets, validates paths
+- `code/smart_search`: End-to-end search - auto-generates candidates then extracts snippets
 - `code/counsel`: Analysis only - consumes evidence artifacts, never reads files directly
-- `smart_read_file`: Alias for `swe_grep` with `mode=masked`
+- `smart_read_file`: Alias for `snippet_extract` with `mode=masked`
 
 **`internal/codecontext/` - Shared extraction engine:**
 
@@ -477,6 +481,29 @@ echo "$context" | gemini -p "Refactoring priorities?"
 **TOCTOU:** Always use resolved paths for all file operations after validation.
 
 ## Gotchas
+
+### Session Archives are Gzipped
+
+Session JSONL files are archived as `.jsonl.gz` in `~/.agentctl/archives/`. Any
+skill reading `session.RawJSONLPath` must handle gzip decompression:
+
+```go
+if strings.HasSuffix(path, ".gz") {
+    gzReader, err := gzip.NewReader(file)
+    if err != nil {
+        return err
+    }
+    defer gzReader.Close()
+    reader = gzReader
+}
+```
+
+### Session Learnings are Idempotent
+
+`session/summarize` persists learnings (gotchas, decisions, etc.) with embeddings.
+The skill uses content hash-based naming (`session:<id>:<type>:<hash>`) and checks
+for existing embeddings before re-processing. Running summarize multiple times on
+the same session is safe - existing entries are skipped.
 
 ### Batch Search and Replace
 
@@ -591,13 +618,24 @@ Without this, `os.Getenv("VOYAGE_API_KEY")` returns empty even if the key is in
 
 ### Context Window Summaries
 
+**Architecture:** Summaries are at the **context window** level, not the session
+level. A session may have multiple context windows (created on each compaction).
+
+**Rules:**
+- **Never summarize a full session directly** - this loses window-specific context
+- **Summarize each context window** within a session individually
+- **Embed the window summary** for semantic search recall
+
 `session/restore` searches for similar past context windows via embedding, but
 the **summaries must be populated** by `session/summarize` for them to display.
 Empty summaries are filtered out.
 
+**Flow:** `PreCompact` → `session-save.sh` (captures window) →
+`session-summarize.sh` (extracts gotchas/decisions per window) → embed summary
+
 To populate summaries for existing windows:
 ```bash
-# Re-run summarization for a session
+# Re-run summarization for a session (summarizes each window)
 agentctl run session/summarize --input '{"session_id": "<id>"}'
 ```
 
@@ -624,7 +662,7 @@ agentctl run session/summarize --input '{"session_id": "<id>"}'
 | "pr comments", "review comments", "feedback" | `ci/prcomments`                    |
 | "ci status", "build status", "checks failed" | `ci/github_checks`                 |
 | "semantic search", "vector search"           | `code/semantic_search`             |
-| "investigate", "dig into", "explore"         | `code/swe_grep`, `semantic_search` |
+| "investigate", "dig into", "explore"         | `code/smart_search`, `semantic_search` |
 | "complexity", "cyclomatic", "nesting"        | `code/complexity`                  |
 | "symbols", "functions", "types"              | `code/symbols`                     |
 | "imports", "dependencies"                    | `code/imports`                     |
@@ -681,7 +719,7 @@ data, _ := os.ReadFile(path)  // ❌ File could change between validate and read
 ```
 
 **Why:** Attackers can swap files via symlinks between validation and read. The
-`code_swe_grep` skill demonstrates the correct pattern - open first, validate
+`code_snippet_extract` skill demonstrates the correct pattern - open first, validate
 symlinks, then read from the open descriptor.
 
 ### Memory Storage Path

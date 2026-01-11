@@ -4,7 +4,7 @@
 # containing matches (functions, methods, classes) for better understanding.
 #
 # For conceptual queries (multi-word, natural language), chains:
-#   semantic_search (find candidates) → swe_grep (extract snippets)
+#   semantic_search (find candidates) → snippet_extract (extract snippets)
 #
 # For literal patterns (identifiers, symbols), uses context_ripgrep directly.
 #
@@ -77,8 +77,8 @@ result=""
 search_method="ripgrep"
 
 if [[ "$is_conceptual" == "true" ]]; then
-  # Chain: semantic_search (candidates) → swe_grep (snippets)
-  search_method="semantic+swe_grep"
+  # Chain: semantic_search (candidates) → snippet_extract (snippets)
+  search_method="semantic+snippet_extract"
 
   # Get candidates from semantic search
   candidates=$("$AGENTCTL_BIN" run code/semantic_search --ephemeral --input "$(jq -nc --arg q "$pattern" '{
@@ -87,9 +87,9 @@ if [[ "$is_conceptual" == "true" ]]; then
     limit: 10
   }')" 2>/dev/null | jq -c '[.data.results[]? | {path: .path, symbol_id: .symbol_id}] | unique_by(.path)[:8]') || candidates="[]"
 
-  # If we got candidates, use swe_grep
+  # If we got candidates, use snippet_extract
   if [[ "$candidates" != "[]" && "$candidates" != "null" && -n "$candidates" ]]; then
-    result=$("$AGENTCTL_BIN" run code/swe_grep --ephemeral --input "$(jq -nc --arg q "$pattern" --argjson cands "$candidates" '{
+    result=$("$AGENTCTL_BIN" run code/snippet_extract --ephemeral --input "$(jq -nc --arg q "$pattern" --argjson cands "$candidates" '{
       question: $q,
       candidates: $cands,
       max_files: 8,
@@ -113,8 +113,8 @@ if [[ -z "$result" ]]; then
 fi
 
 # Handle different output formats based on search method
-if [[ "$search_method" == "semantic+swe_grep" ]]; then
-  # swe_grep output format
+if [[ "$search_method" == "semantic+snippet_extract" ]]; then
+  # snippet_extract output format
   snippet_count=$(echo "$result" | jq -r '.data.stats.snippets_extracted // .data.snippet_count // 0')
   file_count=$(echo "$result" | jq -r '.data.stats.files_processed // .data.file_count // 0')
 
@@ -138,8 +138,8 @@ if [[ "$search_method" == "semantic+swe_grep" ]]; then
   fi
 fi
 
-if [[ "$search_method" == "semantic+swe_grep" ]]; then
-  # Format swe_grep results
+if [[ "$search_method" == "semantic+snippet_extract" ]]; then
+  # Format snippet_extract results
   snippet_count=$(echo "$result" | jq -r '.data.stats.snippets_extracted // 0')
   file_count=$(echo "$result" | jq -r '.data.stats.files_processed // 0')
 

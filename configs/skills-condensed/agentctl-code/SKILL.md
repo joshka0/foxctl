@@ -26,7 +26,7 @@ agentctl run code/security --input '{"path": ".", "recursive": true}'
 agentctl run code/imports --input '{"path": "internal/", "recursive": true}'
 
 # Smart code search
-agentctl run code/swe_grep --input '{"query": "error handling", "files": ["handler.go"]}'
+agentctl run code/smart_search --input '{"query": "error handling", "files": ["handler.go"]}'
 
 # Git operations
 agentctl run code/git --input '{"action": "log", "count": 10}'

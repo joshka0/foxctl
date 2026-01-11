@@ -133,7 +133,7 @@ agentctl todo complete \
 |-------|---------|---------|
 | `code/complexity` | Find complexity hotspots | ~50ms |
 | `code/symbols` | Extract code structure | ~100ms |
-| `code/swe_grep` | Smart code search | ~200ms |
+| `code/snippet_extract` | Smart code search | ~200ms |
 | `test/run` | Run tests with coverage | varies |
 
 Usage from Claude Code:

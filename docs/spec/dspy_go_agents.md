@@ -242,7 +242,7 @@ policies apply.
   - Purpose: Given a question and candidate files/symbols, extract high-signal
     code snippets via live reads and the SWE Grep skill.
   - Inputs: `workspace_id`, `question`, candidate files/symbols.
-  - Backend: `code/swe_grep` exec skill as defined in
+  - Backend: `code/snippet_extract` exec skill as defined in
     `code_symbol_index_and_swe_grep.md`.
 
 ### 5.2 Editing & Refactoring

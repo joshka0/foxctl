@@ -298,7 +298,7 @@ func Load() *Config {
 	})
 }
 
-// runSWEGrep invokes the code/swe_grep skill and returns the parsed envelope.
+// runSWEGrep invokes the code/snippet_extract skill and returns the parsed envelope.
 func runSWEGrep(t *testing.T, binPath, runRoot, workspaceDir string, input map[string]any, extraEnv ...string) map[string]any {
 	t.Helper()
 
@@ -310,7 +310,7 @@ func runSWEGrep(t *testing.T, binPath, runRoot, workspaceDir string, input map[s
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binPath, "run", "code/swe_grep", "--cache=off", "--workspace", workspaceDir, "--input", string(inputJSON))
+	cmd := exec.CommandContext(ctx, binPath, "run", "code/snippet_extract", "--cache=off", "--workspace", workspaceDir, "--input", string(inputJSON))
 	cmd.Dir = runRoot
 	cmd.Env = os.Environ()
 	for _, kv := range extraEnv {
@@ -406,8 +406,8 @@ func assertEnvelopeOK(t *testing.T, envelope map[string]any) {
 	}
 
 	command, ok := envelope["command"].(string)
-	if !ok || command != "code/swe_grep" {
-		t.Errorf("envelope.command = %q, want 'code/swe_grep'", command)
+	if !ok || command != "code/snippet_extract" {
+		t.Errorf("envelope.command = %q, want 'code/snippet_extract'", command)
 	}
 }
 

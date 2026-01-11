@@ -29,7 +29,7 @@ agentctl run text/ripgrep --input '{"pattern": "func.*Handler", "path": ".", "fi
 agentctl run code/context_ripgrep --input '{"query": "auth", "expand_functions": true}'
 
 # Smart semantic extraction
-agentctl run code/swe_grep --input '{"question": "How does auth work?", "candidates": [{"path": "auth/login.go"}]}'
+agentctl run code/snippet_extract --input '{"question": "How does auth work?", "candidates": [{"path": "auth/login.go"}]}'
 
 # Semantic code search (vector similarity)
 agentctl run code/semantic_search --input '{"query": "error handling middleware", "limit": 10}'

@@ -29,7 +29,7 @@ on external review feedback.
     **heuristic triggers** (e.g. on git commits) for the symbol index.
   - Added a section on **live SWE Grep vs index staleness**, stating that:
     - The symbol/semantic indexes represent the last accepted snapshot.
-    - `code/swe_grep` always reads **live workspace files**.
+    - `code/snippet_extract` always reads **live workspace files**.
     - When there is a discrepancy, reasoning should favor SWE Grep snippets and
       diffs for the current task over stale index metadata.
 
