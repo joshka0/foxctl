@@ -229,10 +229,7 @@ func defaultSearchPaths() []string {
 	return paths
 }
 
-// normalizeSkillName converts skill names to the internal storage format.
-// For example: "text/grep" -> "text_grep", "my-skill" -> "my_skill"
+// normalizeSkillName is an alias for NormalizeSkillName for internal use.
 func normalizeSkillName(name string) string {
-	n := strings.ReplaceAll(name, "/", "_")
-	n = strings.ReplaceAll(n, "-", "_")
-	return n
+	return NormalizeSkillName(name)
 }

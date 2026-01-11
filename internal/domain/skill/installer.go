@@ -127,28 +127,30 @@ func (i *Installer) loadAndValidateManifest(path string) (Manifest, error) {
 }
 
 // ensureSkillDir creates and validates the skill installation directory.
+// Uses normalized naming (category/skill -> category_skill) for flat directory structure.
 func (i *Installer) ensureSkillDir(manifest Manifest) (string, error) {
 	name := strings.TrimSpace(manifest.Metadata.Name)
 	if name == "" {
 		return "", fmt.Errorf("skill metadata name is required")
 	}
 
-	// Clean and validate name
-	cleanName := filepath.Clean(name)
-	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
+	// Validate the canonical name before normalization
+	if name == "." || name == ".." || filepath.IsAbs(name) {
 		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
 	}
 
-	// Prevent path traversal
-	for _, segment := range strings.Split(cleanName, string(os.PathSeparator)) {
-		if segment == "" || segment == "." || segment == ".." {
-			return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
-		}
+	// Normalize: "code/semantic_search" -> "code_semantic_search"
+	// This creates flat directories instead of nested ones
+	normalizedName := NormalizeSkillName(name)
+
+	// Prevent path traversal in normalized name
+	if strings.Contains(normalizedName, "..") || strings.Contains(normalizedName, string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
 	}
 
-	// Construct destination path
+	// Construct destination path with normalized name
 	root := filepath.Clean(i.installPath)
-	dest := filepath.Join(root, cleanName)
+	dest := filepath.Join(root, normalizedName)
 	dest = filepath.Clean(dest)
 
 	// Final safety check: ensure dest is within root
@@ -258,8 +260,10 @@ func copyFile(src, dst string) (err error) {
 }
 
 // Uninstall removes an installed skill by name.
+// Accepts both canonical (code/semantic_search) and normalized (code_semantic_search) names.
 func (i *Installer) Uninstall(name string) error {
-	skillPath := filepath.Join(i.installPath, name)
+	normalizedName := NormalizeSkillName(name)
+	skillPath := filepath.Join(i.installPath, normalizedName)
 
 	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 		return fmt.Errorf("skill not installed: %s", name)
@@ -269,8 +273,10 @@ func (i *Installer) Uninstall(name string) error {
 }
 
 // IsInstalled checks if a skill is installed.
+// Accepts both canonical (code/semantic_search) and normalized (code_semantic_search) names.
 func (i *Installer) IsInstalled(name string) bool {
-	manifestPath := filepath.Join(i.installPath, name, "skill.yaml")
+	normalizedName := NormalizeSkillName(name)
+	manifestPath := filepath.Join(i.installPath, normalizedName, "skill.yaml")
 	_, err := os.Stat(manifestPath)
 	return err == nil
 }
