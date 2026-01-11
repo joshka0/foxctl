@@ -714,7 +714,7 @@ func TestTelemetry_RecordsNewToolNames(t *testing.T) {
 	// Phase 6 tools should be registered
 	expectedTools := []string{
 		"code.symbol_search",
-		"code.swe_grep",
+		"code.snippet_extract",
 		"edit.apply_structured_diff",
 	}
 

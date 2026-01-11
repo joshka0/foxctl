@@ -29,7 +29,7 @@ func TestNewRegistry_RegistersAllTools(t *testing.T) {
 		// Code search tools (PR1)
 		"code.search",
 		"code.symbol_search",
-		"code.swe_grep",
+		"code.snippet_extract",
 		// Edit tools (PR2)
 		"edit.apply_patch",
 		"edit.apply_structured_diff",
@@ -67,8 +67,8 @@ func TestNewRegistry_CodeToolsPresent(t *testing.T) {
 
 	// Specifically verify the new Phase 6 code tools
 	codeTools := map[string]bool{
-		"code.symbol_search": false,
-		"code.swe_grep":      false,
+		"code.symbol_search":   false,
+		"code.snippet_extract": false,
 	}
 
 	for _, tool := range tools {
@@ -188,7 +188,7 @@ func TestNewRegistry_NoUnexpectedPlannerTools(t *testing.T) {
 	lowLevelCodingTools := []string{
 		"code.search",
 		"code.symbol_search",
-		"code.swe_grep",
+		"code.snippet_extract",
 		"edit.apply_patch",
 		"edit.apply_structured_diff",
 		"fs.read_file",

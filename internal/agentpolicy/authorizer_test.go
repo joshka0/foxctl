@@ -285,7 +285,7 @@ func TestIsSkillAllowed(t *testing.T) {
 		{"unrestricted allows any skill", ProfileUnrestricted, "any/skill", true},
 		{"empty profile allows any skill", "", "any/skill", true},
 		{"explorer allows semantic_search", ProfileExplorer, "code/semantic_search", true},
-		{"explorer allows swe_grep", ProfileExplorer, "code/snippet_extract", true},
+		{"explorer allows snippet_extract", ProfileExplorer, "code/snippet_extract", true},
 		{"explorer allows symbols", ProfileExplorer, "code/symbols", true},
 		{"explorer allows fs/read", ProfileExplorer, "fs/read", true},
 		{"explorer blocks test/run", ProfileExplorer, "test/run", false},

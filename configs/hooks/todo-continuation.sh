@@ -126,5 +126,5 @@ jq -n \
   --argjson blocked "$BLOCKED_COUNT" \
   --argjson in_progress "$IN_PROGRESS_COUNT" \
   --argjson incomplete "$OPEN_COUNT" \
-  '{decision:"block", reason:$reason}'
+  '{decision:"block", reason:$reason, inject_prompt:$prompt}'
 exit 0

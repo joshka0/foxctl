@@ -55,10 +55,20 @@ workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 session_id="${CLAUDE_SESSION_ID:-}"
 if [[ -z "$session_id" ]]; then
   # Try to get from active session file
-  ws_hash=$(echo -n "$workspace" | shasum -a 256 | cut -c1-16)
-  active_file="$HOME/.agentctl/sessions/active/${ws_hash}.json"
-  if [[ -f "$active_file" ]]; then
-    session_id=$(jq -r '.session_id // ""' "$active_file" 2>/dev/null || true)
+  # Use portable hash command (sha256sum on Linux, shasum on macOS)
+  if command -v sha256sum &>/dev/null; then
+    ws_hash=$(echo -n "$workspace" | sha256sum | cut -c1-16)
+  elif command -v shasum &>/dev/null; then
+    ws_hash=$(echo -n "$workspace" | shasum -a 256 | cut -c1-16)
+  else
+    # Fallback: can't compute hash, skip session file lookup
+    ws_hash=""
+  fi
+  if [[ -n "$ws_hash" ]]; then
+    active_file="$HOME/.agentctl/sessions/active/${ws_hash}.json"
+    if [[ -f "$active_file" ]]; then
+      session_id=$(jq -r '.session_id // ""' "$active_file" 2>/dev/null || true)
+    fi
   fi
 fi
 
