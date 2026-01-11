@@ -1,0 +1,369 @@
+{
+  "env": {
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "64000",
+    "MAX_THINKING_TOKENS": "31999"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash|Grep|Glob|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/overseer-inbox.sh",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/session-identity.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/file-memory-recall.sh",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/task-guard.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/security-scanner.sh",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/smart-read.sh",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/bash-advisor.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/semantic-search.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/smart-grep.sh",
+            "timeout": 8
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/bash-advisor.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/semantic-search.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/bash-advisor.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/bash-advisor.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "TodoWrite",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/todo-advisor.sh",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/claude/agentctl-hook.sh --event PostToolUse",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/hooks-error-drain.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Bash|Grep|Glob|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/overseer-inbox-post.sh",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/read-context-suggestions.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/counsel-suggest.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "TodoWrite",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/todo-sync.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/memory-prompt.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/lsp-diagnostics.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/test-feedback.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/complexity-warning.sh",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/impact-analysis.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/live-index.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/memory-capture.sh",
+            "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/memory-embed.sh",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/task-file-link.sh",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/session-save.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/daemon-warmup.sh",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/session-identity.sh",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "compact|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/claude/agentctl-hook.sh --event SessionStart",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/session-restore.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/todo-continuation.sh",
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/plan-sync.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/embedding-flush.sh",
+            "timeout": 120
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/session-capture.sh",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/graph-cleanup.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/graph-pagerank.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/claude/agentctl-hook.sh --event UserPromptSubmit",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/session-restore-postcompact.sh",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/memory-detector.sh",
+            "timeout": 1
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/skill-advisor.sh",
+            "timeout": 1
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/anchor-detect.sh",
+            "timeout": 2
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/counsel-detect.sh",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/context-detect.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/claude/agentctl-hook.sh --event SubagentStart",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/agentctl/claude/agentctl-hook.sh --event SubagentStop",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

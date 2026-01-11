@@ -1,5 +1,0 @@
-{
-  "spec": "./tests/fixtures/openapi/specs/petstore.yaml",
-  "operationId": "nonExistentOperation",
-  "params": {}
-}

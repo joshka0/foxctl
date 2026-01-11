@@ -44,8 +44,8 @@ SKILLS_CONFIG="$REPO_ROOT/configs/providers/skills.json"
 
 expand_home_path() {
     local p="$1"
-    if [[ "$p" == "~/"* ]]; then
-        echo "$HOME/${p#~/}"
+    if [[ "$p" == ~/* ]]; then
+        echo "$HOME/${p#\~/}"
         return
     fi
     echo "$p"
@@ -60,12 +60,12 @@ provider_cfg() {
         local v
         v="$(jq -r --arg p "$provider" --arg k "$key" '.providers[$p][$k] // empty' "$SKILLS_CONFIG" 2>/dev/null || true)"
         if [[ -n "$v" && "$v" != "null" ]]; then
-            echo "$(expand_home_path "$v")"
+            expand_home_path "$v"
             return
         fi
     fi
 
-    echo "$(expand_home_path "$default_value")"
+    expand_home_path "$default_value"
 }
 
 resolve_repo_path() {
@@ -210,6 +210,41 @@ if [[ -d "$HOOKS_SOURCE" ]]; then
     success "Symlinked agentctl hooks -> $HOOKS_TARGET"
 else
     warn "No hooks to symlink (configs/hooks not found)"
+fi
+
+# Configure Claude Code settings.json with agentctl hooks
+echo -e "${BLUE}5a1. Configuring Claude Code settings.json...${NC}"
+
+CLAUDE_SETTINGS_TEMPLATE="$REPO_ROOT/configs/claude-settings.json"
+CLAUDE_SETTINGS_TARGET="$CLAUDE_DIR/settings.json"
+
+if [[ -f "$CLAUDE_SETTINGS_TEMPLATE" ]]; then
+    if command -v jq &>/dev/null; then
+        if [[ -f "$CLAUDE_SETTINGS_TARGET" ]]; then
+            # Merge: preserve user's existing settings, add/update hooks from template
+            # .[0] * .[1] merges all fields, then we ensure hooks come from template
+            MERGED=$(jq -s '.[0] * .[1] * {hooks: .[1].hooks}' \
+                "$CLAUDE_SETTINGS_TARGET" "$CLAUDE_SETTINGS_TEMPLATE" 2>/dev/null)
+
+            if [[ -n "$MERGED" ]]; then
+                # Backup existing settings
+                cp "$CLAUDE_SETTINGS_TARGET" "$CLAUDE_SETTINGS_TARGET.bak"
+                echo "$MERGED" > "$CLAUDE_SETTINGS_TARGET"
+                success "Merged agentctl hooks into $CLAUDE_SETTINGS_TARGET (backup: .bak)"
+            else
+                warn "Failed to merge settings.json, keeping existing"
+            fi
+        else
+            # No existing settings, use template directly
+            cp "$CLAUDE_SETTINGS_TEMPLATE" "$CLAUDE_SETTINGS_TARGET"
+            success "Created $CLAUDE_SETTINGS_TARGET with agentctl hooks"
+        fi
+    else
+        warn "jq not found. Manually configure $CLAUDE_SETTINGS_TARGET with hooks from:"
+        echo "    $CLAUDE_SETTINGS_TEMPLATE"
+    fi
+else
+    warn "No Claude settings template found (configs/claude-settings.json)"
 fi
 
 # Copy skills manifest reference
