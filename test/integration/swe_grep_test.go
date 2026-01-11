@@ -363,28 +363,29 @@ func repoRootFromCWD(t *testing.T) string {
 
 func prepareSweGrepDist(t *testing.T, repoRoot, runRoot string) {
 	t.Helper()
-	outDir := filepath.Join(runRoot, "dist", "skills", "code_swe_grep")
+	// Use the renamed skill directory (code_swe_grep -> code_snippet_extract)
+	outDir := filepath.Join(runRoot, "dist", "skills", "code_snippet_extract")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		t.Fatalf("mkdir swe_grep dist: %v", err)
+		t.Fatalf("mkdir snippet_extract dist: %v", err)
 	}
 
-	manifestSrc := filepath.Join(repoRoot, "skills", "code_swe_grep", "skill.yaml")
+	manifestSrc := filepath.Join(repoRoot, "skills", "code_snippet_extract", "skill.yaml")
 	manifestDst := filepath.Join(outDir, "skill.yaml")
 	data, err := os.ReadFile(manifestSrc)
 	if err != nil {
-		t.Fatalf("read swe_grep manifest: %v", err)
+		t.Fatalf("read snippet_extract manifest: %v", err)
 	}
 	if err := os.WriteFile(manifestDst, data, 0o644); err != nil {
-		t.Fatalf("write swe_grep manifest: %v", err)
+		t.Fatalf("write snippet_extract manifest: %v", err)
 	}
 
 	binOut := filepath.Join(outDir, "bin")
-	cmd := exec.Command("go", "build", "-o", binOut, "./skills/code_swe_grep")
+	cmd := exec.Command("go", "build", "-o", binOut, "./skills/code_snippet_extract")
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("build swe_grep skill: %v\n%s", err, string(output))
+		t.Fatalf("build snippet_extract skill: %v\n%s", err, string(output))
 	}
 }
 
