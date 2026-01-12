@@ -12,7 +12,7 @@ Get a second opinion from Gemini on code/architecture questions, using agentctl 
 1. **Gather structured context using agentctl skills:**
    - `agentctl run code/complexity` - Get complexity hotspots
    - `agentctl run code/symbols` - Extract code structure
-   - `agentctl run code/swe_grep` - Find relevant code snippets
+   - `agentctl run code/smart_search` - Find relevant code snippets
 
 2. **Format context for Gemini:**
    - Create a structured summary from agentctl output

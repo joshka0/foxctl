@@ -94,9 +94,9 @@ func (r *Registry) registerCodeTools() error {
 		return fmt.Errorf("register code.symbol_search: %w", err)
 	}
 
-	// code.swe_grep - extracts high-signal code snippets from candidate files
-	sweGrepTool := dstools.NewFuncTool(
-		"code.swe_grep",
+	// code.snippet_extract - extracts high-signal code snippets from candidate files
+	snippetExtractTool := dstools.NewFuncTool(
+		"code.snippet_extract",
 		"Extract high-signal code snippets from candidate files based on a natural language question. Use this after code.symbol_search to get detailed code context.",
 		models.InputSchema{
 			Type: "object",
@@ -118,10 +118,10 @@ func (r *Registry) registerCodeTools() error {
 				},
 			},
 		},
-		r.wrapWithTelemetry("code.swe_grep", r.codeSweGrep),
+		r.wrapWithTelemetry("code.snippet_extract", r.codeSnippetExtract),
 	)
-	if err := r.tools.Register(sweGrepTool); err != nil {
-		return fmt.Errorf("register code.swe_grep: %w", err)
+	if err := r.tools.Register(snippetExtractTool); err != nil {
+		return fmt.Errorf("register code.snippet_extract: %w", err)
 	}
 
 	return nil
@@ -707,7 +707,7 @@ type SweGrepSnippet struct {
 	Preview   string `json:"preview"`
 }
 
-// SweGrepInput represents the input to the code/swe_grep skill.
+// SweGrepInput represents the input to the code/snippet_extract skill.
 type SweGrepInput struct {
 	WorkspaceID string             `json:"workspace_id"`
 	Question    string             `json:"question"`
@@ -729,8 +729,8 @@ type SweGrepLimits struct {
 	MaxBytesPerFile int `json:"max_bytes_per_file,omitempty"`
 }
 
-// codeSweGrep implements the code.swe_grep tool by invoking the code/swe_grep skill.
-func (r *Registry) codeSweGrep(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
+// codeSnippetExtract implements the code.snippet_extract tool by invoking the code/snippet_extract skill.
+func (r *Registry) codeSnippetExtract(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 	// Validate required args
 	workspaceID, ok := args["workspace_id"].(string)
 	if !ok || workspaceID == "" {
@@ -778,15 +778,15 @@ func (r *Registry) codeSweGrep(ctx context.Context, args map[string]any) (*model
 		return errorResult(fmt.Sprintf("marshal input: %v", err)), nil
 	}
 
-	// Resolve the code/swe_grep skill
+	// Resolve the code/snippet_extract skill
 	resolver := skill.NewResolver(skill.WithSearchPaths(
 		r.config.WorkspaceRoot+"/dist/skills",
 		r.config.WorkspaceRoot+"/skills",
 	))
-	handle, err := resolver.Resolve("code/swe_grep")
+	handle, err := resolver.Resolve("code/snippet_extract")
 	if err != nil {
 		// Skill not found - return helpful error
-		return errorResult(fmt.Sprintf("skill code/swe_grep not found: %v (ensure skill is installed)", err)), nil
+		return errorResult(fmt.Sprintf("skill code/snippet_extract not found: %v (ensure skill is installed)", err)), nil
 	}
 
 	// Load manifest

@@ -20,7 +20,7 @@ Related impl plan: `docs/impl_plan/universal_swe_grep_followups_impl_plan.md`
 
 ## Decision: Artifactization Policy
 
-The `code/swe_grep` skill must use **inline-threshold artifactization**:
+The `code/snippet_extract` skill must use **inline-threshold artifactization**:
 
 - Keep all snippet results in `data.snippets_inline` when the overall output
   fits within configured inline thresholds.
@@ -38,7 +38,7 @@ Inline thresholds must be derived from existing configuration
 
 ## Background / Current Drift Summary
 
-### 1) `code/swe_grep` spec drift
+### 1) `code/snippet_extract` spec drift
 
 - **Error codes drift**
   - Spec requires:
@@ -80,7 +80,7 @@ Inline thresholds must be derived from existing configuration
 
 ## Proposed Changes
 
-### A) Bring `code/swe_grep` into spec conformance
+### A) Bring `code/snippet_extract` into spec conformance
 
 #### A1. Error code alignment
 
@@ -171,7 +171,7 @@ Regardless, the docs must match the implementation.
 graph TD
   A[Phase 3/4 retrieval] --> B[code.symbol_search]
   B --> C[candidates]
-  C --> D[code/swe_grep]
+  C --> D[code/snippet_extract]
   D -->|small| E[snippets_inline only]
   D -->|large| F[snippets_inline + CAS artifact]
 
@@ -185,7 +185,7 @@ graph TD
 | Step | Action                                                    | Validation                                         |
 | ---- | --------------------------------------------------------- | -------------------------------------------------- |
 | 1    | Update docs/spec + docs/impl_plan to remove known drift   | `go test ./...` (docs-only change should be no-op) |
-| 2    | Fix `code/swe_grep` error codes + artifact thresholding   | `CGO_ENABLED=0 go test ./...`                      |
+| 2    | Fix `code/snippet_extract` error codes + artifact thresholding   | `CGO_ENABLED=0 go test ./...`                      |
 | 3    | Add/adjust swe_grep goldens + integration tests           | golden tests + `go test ./...`                     |
 | 4    | Implement real `code.symbol_search` (completed)           | tool unit tests + agent integration tests          |
 | 5    | Align call graph representation (code + spec) (completed) | unit + integration tests                           |

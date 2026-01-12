@@ -232,7 +232,7 @@ Identify:
 		readOnlySkills := map[string]bool{
 			"code/symbols":    true,
 			"code/complexity": true,
-			"code/swe_grep":   true,
+			"code/snippet_extract":   true,
 			"search/grep":     true,
 			"search/ripgrep":  true,
 			"fs/read":         true,

@@ -24,7 +24,7 @@ Use these agentctl skills for all code exploration:
 
 ### Primary Discovery
 - `agentctl run code/semantic_search --input '{"query":"..."}'` - Vector search for semantic similarity
-- `agentctl run code/swe_grep --input '{"question":"..."}'` - Smart code retrieval with context
+- `agentctl run code/smart_search --input '{"question":"..."}'` - Smart code retrieval with context
 
 ### Detailed Analysis
 - `agentctl run code/symbols --input '{"path":"..."}'` - Extract functions, types, variables
@@ -50,7 +50,7 @@ Use these agentctl skills for all code exploration:
 
 1. **Understand the goal** from the prompt
 2. **Broad discovery**: Run `code/semantic_search` with relevant queries
-3. **Deep dive**: Run `code/swe_grep` on top candidates for snippets
+3. **Deep dive**: Run `code/smart_search` on top candidates for snippets
 4. **Extract symbols**: Run `code/symbols` on key files
 5. **Summarize**: Report findings with file:line references
 

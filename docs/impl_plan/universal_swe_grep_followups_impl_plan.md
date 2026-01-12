@@ -13,7 +13,7 @@ Core Profile v1 envelope shape.
 
 This implementation plan covers follow-ups A–E from the follow-up spec:
 
-- **A)** Bring `code/swe_grep` into spec conformance.
+- **A)** Bring `code/snippet_extract` into spec conformance.
 - **B)** Implement `code.symbol_search` over the symbol index.
 - **C)** Resolve symbol call graph representation (persisted call edges vs
   embedded calls).
@@ -28,7 +28,7 @@ Non-goals (repeat / enforce):
 
 Key invariants to preserve:
 
-- **Artifactization policy:** `code/swe_grep` uses **inline-threshold
+- **Artifactization policy:** `code/snippet_extract` uses **inline-threshold
   artifactization**. Thresholds are derived from existing config
   (`inline_output_kb`) and/or the skill manifest `io.inline_output_kb`.
 - **Correlation naming:** correlation is sourced from envelope
@@ -78,7 +78,7 @@ Key invariants to preserve:
 
 This section anchors the plan in the current code layout.
 
-### 2.1 `code/swe_grep`
+### 2.1 `code/snippet_extract`
 
 - Skill:
   - `skills/code_swe_grep/main.go`
@@ -120,7 +120,7 @@ This section anchors the plan in the current code layout.
 
 Recommended order (minimizes blast radius and keeps tests meaningful):
 
-1. **Phase A:** `code/swe_grep` spec conformance.
+1. **Phase A:** `code/snippet_extract` spec conformance.
 2. **Phase B:** `code.symbol_search` (mode=`search`) backed by symbol index.
 3. **Phase C:** choose + align call graph representation; then enable
    callers/callees mode if desired.
@@ -129,7 +129,7 @@ Recommended order (minimizes blast radius and keeps tests meaningful):
 
 ---
 
-## Phase A – Bring `code/swe_grep` into spec conformance
+## Phase A – Bring `code/snippet_extract` into spec conformance
 
 **Goal:** align error codes and artifactization behavior with
 `docs/spec/code_symbol_index_and_swe_grep.md` §5 without changing the envelope

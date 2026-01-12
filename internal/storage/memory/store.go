@@ -634,6 +634,28 @@ func (s *Store) ListByType(ctx context.Context, workspace, entryType string, lim
 	return scored, nil
 }
 
+// ListWithoutEmbedding returns memories that don't have an embedding yet.
+// Used for incremental embedding generation.
+func (s *Store) ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]NamedEntry, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+		FROM named_memory
+		WHERE workspace = ? AND (embedding IS NULL OR LENGTH(embedding) = 0) AND summary IS NOT NULL AND summary != ''
+		ORDER BY created_at DESC
+		LIMIT ?`, workspace, limit)
+	if err != nil {
+		return nil, fmt.Errorf("memory: list without embedding: %w", err)
+	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close memory list rows")
+	}()
+
+	return scanEntries(rows)
+}
+
 // Update mutates summary and/or type for a named entry.
 func (s *Store) Update(ctx context.Context, name, workspace string, summary, typ *string) (NamedEntry, error) {
 	entry, err := s.Get(ctx, name, workspace)

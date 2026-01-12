@@ -5,7 +5,7 @@ steps focused on **wiring the new retrieval primitives into dspy-go agents** via
 kernel-owned tools, without exposing raw DBs or skills directly to LLMs.
 
 - Phases 3–4: provide semantic file + symbol index candidates.
-- Phase 5: provides the `code/swe_grep` exec skill over live files.
+- Phase 5: provides the `code/snippet_extract` exec skill over live files.
 - Phase 6: exposes `code.symbol_search` and `code.swe_grep` as dspy-go tools and
   aligns `edit.apply_patch` with the `code/diff` skill.
 
@@ -65,7 +65,7 @@ Goal: define **dspy-go tool contracts** for `code.symbol_search` and
     - `snippets[]` with `file`, optional `symbol_id`, `start_line`, `end_line`,
       and `text` or truncated preview.
     - Optional `cas_artifact` reference when snippets are large.
-- [ ] Implement the tool as a **thin wrapper** around the `code/swe_grep` exec
+- [ ] Implement the tool as a **thin wrapper** around the `code/snippet_extract` exec
       skill:
   - Use the existing CLI/runner path (`agentctl run code_swe_grep`-equivalent)
     or direct skill invocation consistent with other skills.
@@ -175,7 +175,7 @@ with unit tests, golden tests, and at least one end-to-end agent flow.
   - Assert that queries return expected candidates (file, symbol_id, name, kind,
     score) and respect `max_results`.
 - [ ] Add unit tests for `code.swe_grep` tool:
-  - Stub or fixture the `code/swe_grep` skill invocation (no real LM).
+  - Stub or fixture the `code/snippet_extract` skill invocation (no real LM).
   - Verify input mapping and that tool outputs match the SWE Grep contract
     (snippets, optional CAS artifact descriptor).
 

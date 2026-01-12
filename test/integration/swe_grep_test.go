@@ -298,7 +298,7 @@ func Load() *Config {
 	})
 }
 
-// runSWEGrep invokes the code/swe_grep skill and returns the parsed envelope.
+// runSWEGrep invokes the code/snippet_extract skill and returns the parsed envelope.
 func runSWEGrep(t *testing.T, binPath, runRoot, workspaceDir string, input map[string]any, extraEnv ...string) map[string]any {
 	t.Helper()
 
@@ -310,7 +310,7 @@ func runSWEGrep(t *testing.T, binPath, runRoot, workspaceDir string, input map[s
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binPath, "run", "code/swe_grep", "--cache=off", "--workspace", workspaceDir, "--input", string(inputJSON))
+	cmd := exec.CommandContext(ctx, binPath, "run", "code/snippet_extract", "--cache=off", "--workspace", workspaceDir, "--input", string(inputJSON))
 	cmd.Dir = runRoot
 	cmd.Env = os.Environ()
 	for _, kv := range extraEnv {
@@ -363,28 +363,29 @@ func repoRootFromCWD(t *testing.T) string {
 
 func prepareSweGrepDist(t *testing.T, repoRoot, runRoot string) {
 	t.Helper()
-	outDir := filepath.Join(runRoot, "dist", "skills", "code_swe_grep")
+	// Use the renamed skill directory (code_swe_grep -> code_snippet_extract)
+	outDir := filepath.Join(runRoot, "dist", "skills", "code_snippet_extract")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		t.Fatalf("mkdir swe_grep dist: %v", err)
+		t.Fatalf("mkdir snippet_extract dist: %v", err)
 	}
 
-	manifestSrc := filepath.Join(repoRoot, "skills", "code_swe_grep", "skill.yaml")
+	manifestSrc := filepath.Join(repoRoot, "skills", "code_snippet_extract", "skill.yaml")
 	manifestDst := filepath.Join(outDir, "skill.yaml")
 	data, err := os.ReadFile(manifestSrc)
 	if err != nil {
-		t.Fatalf("read swe_grep manifest: %v", err)
+		t.Fatalf("read snippet_extract manifest: %v", err)
 	}
 	if err := os.WriteFile(manifestDst, data, 0o644); err != nil {
-		t.Fatalf("write swe_grep manifest: %v", err)
+		t.Fatalf("write snippet_extract manifest: %v", err)
 	}
 
 	binOut := filepath.Join(outDir, "bin")
-	cmd := exec.Command("go", "build", "-o", binOut, "./skills/code_swe_grep")
+	cmd := exec.Command("go", "build", "-o", binOut, "./skills/code_snippet_extract")
 	cmd.Dir = repoRoot
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("build swe_grep skill: %v\n%s", err, string(output))
+		t.Fatalf("build snippet_extract skill: %v\n%s", err, string(output))
 	}
 }
 
@@ -406,8 +407,8 @@ func assertEnvelopeOK(t *testing.T, envelope map[string]any) {
 	}
 
 	command, ok := envelope["command"].(string)
-	if !ok || command != "code/swe_grep" {
-		t.Errorf("envelope.command = %q, want 'code/swe_grep'", command)
+	if !ok || command != "code/snippet_extract" {
+		t.Errorf("envelope.command = %q, want 'code/snippet_extract'", command)
 	}
 }
 

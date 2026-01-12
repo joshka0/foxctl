@@ -392,7 +392,7 @@ Based on research, the highest-impact integrations are:
 │ │                             │ > Analyzing patterns...   │ │
 │ │ Dependencies:               │                           │ │
 │ │ ├─ auth/middleware.ts       │ [Tools Used]              │ │
-│ │ └─ lib/jwt.ts               │ • code/swe_grep (0.8s)    │ │
+│ │ └─ lib/jwt.ts               │ • code/snippet_extract (0.8s)    │ │
 │ │                             │ • fs/read (0.1s)          │ │
 │ │ PageRank: 0.85              │                           │ │
 │ │ Critical Path: YES          │ [Memory Recalled]         │ │
@@ -700,7 +700,7 @@ app.post('/api/consoles/:id/send', async (req, res) => {
 │ ─────────                                                       │
 │ [12:34:56] USER: Fix the JWT refresh race condition             │
 │ [12:34:57] AGENT: Searching for token refresh patterns...       │
-│ [12:34:58] TOOL: code/swe_grep (3 results)                      │
+│ [12:34:58] TOOL: code/snippet_extract (3 results)                      │
 │ [12:34:59] AGENT: Found issue in auth/jwt.ts:123                │
 │ [12:35:00] TOOL: fs/read auth/jwt.ts                            │
 │ [12:35:01] AGENT: Applying mutex pattern...                     │

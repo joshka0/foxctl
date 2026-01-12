@@ -154,16 +154,16 @@ Dependencies: Phase 2 (and Phase 3 for shared patterns, but not strictly).
 
 ---
 
-## Phase 5 – SWE Grep Skill (`code/swe_grep`)
+## Phase 5 – SWE Grep Skill (`code/snippet_extract`)
 
 **Goals**
 
-- Implement the `code/swe_grep` exec skill that reads **live workspace files**
+- Implement the `code/snippet_extract` exec skill that reads **live workspace files**
   and emits high-signal snippets.
 
 **Tasks**
 
-- [x] Implement `code/swe_grep` binary/skill:
+- [x] Implement `code/snippet_extract` binary/skill:
   - Input / output contracts per §5.
   - Live reads via `PathValidator` and `AGENTCTL_WORKSPACE`.
   - CAS artifact emission for large results.
@@ -192,7 +192,7 @@ semantic index + grep candidates.
   - Go helper over the symbol index per `code_symbol_index_and_swe_grep.md`
     §6.1.
 - [x] Implement `code.swe_grep` tool:
-  - Thin wrapper that calls the `code/swe_grep` skill.
+  - Thin wrapper that calls the `code/snippet_extract` skill.
 - [x] Align edit tools with `code/diff`:
   - Use `edit.apply_structured_diff` to consume the structured JSON diff from
     the `code/diff` skill.
@@ -266,7 +266,7 @@ and graph insights exist.
     of SWE Grep and symbol search.
 - [ ] Tighten CI:
   - Golden tests for envelopes, CAS artifacts, and retrieval behavior.
-  - Optional integration tests for `code/swe_grep` and indexing on a small
+  - Optional integration tests for `code/snippet_extract` and indexing on a small
     sample repo.
 - [ ] Update top-level docs (`AGENTS.md`, `ARCHITECTURE.md`, README) to link to
       specs and this implementation plan.

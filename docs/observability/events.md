@@ -59,7 +59,7 @@ Skills and subsystems choose an appropriate `<name>.ndjson` but MUST use only
 
 ## 3. SWE Grep Events (`code_swe_grep.ndjson`)
 
-This section defines the event schema for the `code/swe_grep` skill. Each
+This section defines the event schema for the `code/snippet_extract` skill. Each
 successful run MAY emit exactly one event into:
 
 ```text
@@ -73,7 +73,7 @@ Each line is a JSON object with the following fields:
 ```jsonc
 {
   "ts": "2025-12-03T17:19:11Z", // RFC3339 UTC timestamp
-  "command": "code/swe_grep", // envelope command
+  "command": "code/snippet_extract", // envelope command
   "workspace_id": "test-ws", // logical workspace id from input
   "question_hash": "a1b2c3d4", // SHA-256(question) hex, truncated
   "candidates": 3, // len(input.candidates)
@@ -95,7 +95,7 @@ Notes:
   - Snippet contents, file contents, and raw paths MUST NOT appear. The event
     only carries aggregate counts and booleans.
 - **Consistency:**
-  - `command` MUST always be `"code/swe_grep"` for this file.
+  - `command` MUST always be `"code/snippet_extract"` for this file.
   - `has_artifact` MUST be `true` when the envelope includes `data.artifact`,
     and `false` otherwise.
 
@@ -104,10 +104,10 @@ Notes:
 The following struct illustrates the schema in Go:
 
 ```go
-// SweGrepEvent is the NDJSON observation for a single code/swe_grep run.
+// SweGrepEvent is the NDJSON observation for a single code/snippet_extract run.
 type SweGrepEvent struct {
     Ts              time.Time `json:"ts"`
-    Command         string    `json:"command"`          // "code/swe_grep"
+    Command         string    `json:"command"`          // "code/snippet_extract"
     WorkspaceID     string    `json:"workspace_id"`
     QuestionHash    string    `json:"question_hash"`    // 8+ hex chars
     Candidates      int       `json:"candidates"`

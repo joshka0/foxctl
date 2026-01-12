@@ -14,7 +14,7 @@ Get Gemini's perspective using agentctl-gathered context.
 1. Gather context via agentctl:
    - `code/complexity` - Hotspots
    - `code/symbols` - Structure
-   - `code/swe_grep` - Relevant snippets
+   - `code/smart_search` - Relevant snippets
 
 2. Log query: `agentctl mailbox send gemini-queries --from claude-agent --type agent.ask`
 

@@ -54,12 +54,12 @@ This doc does **not** introduce new wire contracts. It only:
 
 ---
 
-### 1.3 Phase 5 – SWE Grep Skill (`code/swe_grep`)
+### 1.3 Phase 5 – SWE Grep Skill (`code/snippet_extract`)
 
 - **Impl plan**  \
-  - `docs/impl_plan/universal_swe_grep_and_agents.md` → _Phase 5 – SWE Grep Skill (`code/swe_grep`)_
+  - `docs/impl_plan/universal_swe_grep_and_agents.md` → _Phase 5 – SWE Grep Skill (`code/snippet_extract`)_
 - **Testing plan**  \
-  - `docs/impl_plan/universal_swe_grep_and_agents_testing.md` → _Phase 5 – SWE Grep Skill (`code/swe_grep`)_
+  - `docs/impl_plan/universal_swe_grep_and_agents_testing.md` → _Phase 5 – SWE Grep Skill (`code/snippet_extract`)_
 - **Phase todo-spec**  \
   - `docs/impl_plan/universal_swe_grep_and_agents_specs_phase5_swe_grep_todo.md`
 - **Primary specs**  \
@@ -179,9 +179,9 @@ Phase 3–9 todo-spec.
 
 ---
 
-### 2.3 Phase 5 – SWE Grep Skill (`code/swe_grep`)
+### 2.3 Phase 5 – SWE Grep Skill (`code/snippet_extract`)
 
-- **[P5-Q1]** **Resolved:** `code/swe_grep` uses cheap LLMs for snippet
+- **[P5-Q1]** **Resolved:** `code/snippet_extract` uses cheap LLMs for snippet
   extraction only; recall and scoring are handled upstream by the semantic
   file index + symbol index/DAG.
 - **[P5-Q2]** What default limits (`max_files`, `max_snippets`,
@@ -263,7 +263,7 @@ prioritize decisions.
 ### 3.2 Retrieval Behavior, Limits, and Tool Usage
 
 - **SWE Grep behavior**  \
-  - [P5-Q1] **Resolved:** `code/swe_grep` does LLM-based snippet extraction over
+  - [P5-Q1] **Resolved:** `code/snippet_extract` does LLM-based snippet extraction over
     candidates selected by semantic + symbol index/DAG; it does **not**
     implement its own full-repo retrieval scorer.  \
   - [P5-Q2] Default limits for files/snippets/bytes.  \

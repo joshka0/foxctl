@@ -210,7 +210,7 @@ func TestCodeSymbolSearch_Cancellation(t *testing.T) {
 	}
 }
 
-func TestCodeSweGrep_MissingWorkspaceID(t *testing.T) {
+func TestCodeSnippetExtract_MissingWorkspaceID(t *testing.T) {
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
@@ -227,9 +227,9 @@ func TestCodeSweGrep_MissingWorkspaceID(t *testing.T) {
 		},
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	if !result.IsError {
@@ -237,7 +237,7 @@ func TestCodeSweGrep_MissingWorkspaceID(t *testing.T) {
 	}
 }
 
-func TestCodeSweGrep_MissingQuestion(t *testing.T) {
+func TestCodeSnippetExtract_MissingQuestion(t *testing.T) {
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
@@ -254,9 +254,9 @@ func TestCodeSweGrep_MissingQuestion(t *testing.T) {
 		},
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	if !result.IsError {
@@ -264,7 +264,7 @@ func TestCodeSweGrep_MissingQuestion(t *testing.T) {
 	}
 }
 
-func TestCodeSweGrep_MissingCandidates(t *testing.T) {
+func TestCodeSnippetExtract_MissingCandidates(t *testing.T) {
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
@@ -279,9 +279,9 @@ func TestCodeSweGrep_MissingCandidates(t *testing.T) {
 		"question":     "How does login work?",
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	if !result.IsError {
@@ -289,7 +289,7 @@ func TestCodeSweGrep_MissingCandidates(t *testing.T) {
 	}
 }
 
-func TestCodeSweGrep_EmptyCandidates(t *testing.T) {
+func TestCodeSnippetExtract_EmptyCandidates(t *testing.T) {
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
@@ -305,9 +305,9 @@ func TestCodeSweGrep_EmptyCandidates(t *testing.T) {
 		"candidate_files": []any{},
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	if !result.IsError {
@@ -315,7 +315,7 @@ func TestCodeSweGrep_EmptyCandidates(t *testing.T) {
 	}
 }
 
-func TestCodeSweGrep_InvalidCandidateFormat(t *testing.T) {
+func TestCodeSnippetExtract_InvalidCandidateFormat(t *testing.T) {
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
@@ -333,9 +333,9 @@ func TestCodeSweGrep_InvalidCandidateFormat(t *testing.T) {
 		},
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	if !result.IsError {
@@ -343,7 +343,7 @@ func TestCodeSweGrep_InvalidCandidateFormat(t *testing.T) {
 	}
 }
 
-func TestCodeSweGrep_CandidateMissingPath(t *testing.T) {
+func TestCodeSnippetExtract_CandidateMissingPath(t *testing.T) {
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
@@ -361,9 +361,9 @@ func TestCodeSweGrep_CandidateMissingPath(t *testing.T) {
 		},
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	if !result.IsError {
@@ -371,7 +371,7 @@ func TestCodeSweGrep_CandidateMissingPath(t *testing.T) {
 	}
 }
 
-func TestCodeSweGrep_SkillNotInstalled(t *testing.T) {
+func TestCodeSnippetExtract_SkillNotInstalled(t *testing.T) {
 	// Use a workspace without the skill installed
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
@@ -390,9 +390,9 @@ func TestCodeSweGrep_SkillNotInstalled(t *testing.T) {
 		},
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	// Should get an error because the skill isn't installed in the temp dir
@@ -628,7 +628,7 @@ func seedSymbolSearchStore(t *testing.T) (func(context.Context) (storage.MemoryS
 	}, workspaceID
 }
 
-func TestCodeSweGrep_WithPriority(t *testing.T) {
+func TestCodeSnippetExtract_WithPriority(t *testing.T) {
 	cfg := Config{
 		WorkspaceRoot:    t.TempDir(),
 		MaxSearchResults: 50,
@@ -647,9 +647,9 @@ func TestCodeSweGrep_WithPriority(t *testing.T) {
 		},
 	}
 
-	result, err := registry.codeSweGrep(context.Background(), args)
+	result, err := registry.codeSnippetExtract(context.Background(), args)
 	if err != nil {
-		t.Fatalf("codeSweGrep: %v", err)
+		t.Fatalf("codeSnippetExtract: %v", err)
 	}
 
 	// Should fail because skill is not installed, but validates input correctly
@@ -714,7 +714,7 @@ func TestTelemetry_RecordsNewToolNames(t *testing.T) {
 	// Phase 6 tools should be registered
 	expectedTools := []string{
 		"code.symbol_search",
-		"code.swe_grep",
+		"code.snippet_extract",
 		"edit.apply_structured_diff",
 	}
 

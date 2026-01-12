@@ -40,9 +40,14 @@ var explorerSkills = []SkillInfo{
 		Example:     `agentctl run code/semantic_search --input '{"query":"auth middleware"}'`,
 	},
 	{
-		Name:        "code/swe_grep",
-		Description: "Smart code retrieval with context expansion",
-		Example:     `agentctl run code/swe_grep --input '{"question":"Where is auth enforced?"}'`,
+		Name:        "code/snippet_extract",
+		Description: "Extract code snippets from candidate files",
+		Example:     `agentctl run code/snippet_extract --input '{"question":"Where is auth enforced?","candidates":[{"path":"..."}]}'`,
+	},
+	{
+		Name:        "code/smart_search",
+		Description: "Smart code search with auto-candidate generation",
+		Example:     `agentctl run code/smart_search --input '{"question":"Where is auth enforced?"}'`,
 	},
 	{
 		Name:        "code/context_ripgrep",

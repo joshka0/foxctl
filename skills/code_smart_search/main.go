@@ -1,7 +1,7 @@
-// Package main implements the code/universal_swe_grep skill.
+// Package main implements the code/smart_search skill.
 //
 // This skill combines candidate generation from symbol/semantic indexes
-// with snippet extraction via code/swe_grep. It's the recommended entry
+// with snippet extraction via code/snippet_extract. It's the recommended entry
 // point for code search when you don't have pre-determined candidates.
 package main
 
@@ -24,7 +24,7 @@ import (
 )
 
 // Command is the envelope command for this skill.
-const Command = "code/universal_swe_grep"
+const Command = "code/smart_search"
 
 // Error codes per Core Profile v1 §13.
 const (
@@ -137,11 +137,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		})
 	}
 
-	// Step 2: Invoke code/swe_grep with candidates
+	// Step 2: Invoke code/snippet_extract with candidates
 	snippetStart := time.Now()
-	sweGrepResult, err := invokeSweGrep(ctx, rc, in, candidates)
+	extractResult, err := invokeSnippetExtract(ctx, rc, in, candidates)
 	if err != nil {
-		return fmt.Errorf("invoke swe_grep: %w", err)
+		return fmt.Errorf("invoke snippet_extract: %w", err)
 	}
 	snippetDuration := time.Since(snippetStart)
 
@@ -160,15 +160,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Summary: Summary{
 			CandidatesGenerated:   len(candidates),
 			CandidatesBySource:    bySource,
-			FilesRelevant:         sweGrepResult.FilesRelevant,
-			SnippetsEmitted:       sweGrepResult.SnippetsEmitted,
+			FilesRelevant:         extractResult.FilesRelevant,
+			SnippetsEmitted:       extractResult.SnippetsEmitted,
 			DurationMS:            time.Since(start).Milliseconds(),
 			CandidateGenerationMS: candidateDuration.Milliseconds(),
 			SnippetExtractionMS:   snippetDuration.Milliseconds(),
 		},
 		Candidates:     candidateOutputs,
-		SnippetsInline: sweGrepResult.SnippetsInline,
-		Artifact:       sweGrepResult.Artifact,
+		SnippetsInline: extractResult.SnippetsInline,
+		Artifact:       extractResult.Artifact,
 	}
 
 	return skillout.Emit(rc, Command, output)
@@ -215,54 +215,54 @@ func generateCandidates(ctx context.Context, rc *skillmain.RunContext, in Input)
 	return result.Candidates, nil
 }
 
-// SweGrepResult holds the parsed result from code/swe_grep.
-type SweGrepResult struct {
+// ExtractResult holds the parsed result from code/snippet_extract.
+type ExtractResult struct {
 	FilesRelevant   int
 	SnippetsEmitted int
 	SnippetsInline  []json.RawMessage
 	Artifact        string
 }
 
-// invokeSweGrep calls the code/swe_grep skill with generated candidates.
-func invokeSweGrep(ctx context.Context, rc *skillmain.RunContext, in Input, candidates []retrieval.Candidate) (*SweGrepResult, error) {
-	// Build swe_grep input
-	sweGrepCandidates := make([]map[string]any, len(candidates))
+// invokeSnippetExtract calls the code/snippet_extract skill with generated candidates.
+func invokeSnippetExtract(ctx context.Context, rc *skillmain.RunContext, in Input, candidates []retrieval.Candidate) (*ExtractResult, error) {
+	// Build snippet_extract input
+	extractCandidates := make([]map[string]any, len(candidates))
 	for i, c := range candidates {
-		sweGrepCandidates[i] = map[string]any{
+		extractCandidates[i] = map[string]any{
 			"path":     c.Path,
 			"priority": c.Score,
 		}
 		if c.SymbolID != "" {
-			sweGrepCandidates[i]["symbol_id"] = c.SymbolID
+			extractCandidates[i]["symbol_id"] = c.SymbolID
 		}
 	}
 
-	sweGrepInput := map[string]any{
+	extractInput := map[string]any{
 		"workspace_id": in.WorkspaceID,
 		"question":     in.Question,
-		"candidates":   sweGrepCandidates,
+		"candidates":   extractCandidates,
 		"limits": map[string]any{
 			"max_snippets":       in.Limits.MaxSnippets,
 			"max_bytes_per_file": in.Limits.MaxBytesPerFile,
 		},
 	}
 
-	inputJSON, err := json.Marshal(sweGrepInput)
+	inputJSON, err := json.Marshal(extractInput)
 	if err != nil {
-		return nil, fmt.Errorf("marshal swe_grep input: %w", err)
+		return nil, fmt.Errorf("marshal snippet_extract input: %w", err)
 	}
 
 	// Find agentctl binary
 	agentctlBin := findAgentctlBin()
 
 	// Get workspace root for subprocess working directory
-	// This ensures swe_grep resolves relative paths correctly
+	// This ensures snippet_extract resolves relative paths correctly
 	workspace := rc.PathValidator.Workspace()
 
-	// Execute swe_grep skill with JSON input via stdin to avoid command-line length limits
+	// Execute snippet_extract skill with JSON input via stdin to avoid command-line length limits
 	// (some systems limit argv to ~128KB, but JSON input can be much larger with many candidates)
 	// NOTE: --input-file - is required to read JSON from stdin; without it, agentctl run ignores stdin
-	cmd := exec.CommandContext(ctx, agentctlBin, "run", "code/swe_grep", "--input-file", "-")
+	cmd := exec.CommandContext(ctx, agentctlBin, "run", "code/snippet_extract", "--input-file", "-")
 	cmd.Dir = workspace // Run from workspace root so relative paths resolve correctly
 	cmd.Stdin = bytes.NewReader(inputJSON)
 
@@ -271,7 +271,7 @@ func invokeSweGrep(ctx context.Context, rc *skillmain.RunContext, in Input, cand
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("swe_grep execution failed: %w\nstderr: %s", err, stderr.String())
+		return nil, fmt.Errorf("snippet_extract execution failed: %w\nstderr: %s", err, stderr.String())
 	}
 
 	// Parse envelope
@@ -292,14 +292,14 @@ func invokeSweGrep(ctx context.Context, rc *skillmain.RunContext, in Input, cand
 	}
 
 	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		return nil, fmt.Errorf("parse swe_grep output: %w", err)
+		return nil, fmt.Errorf("parse snippet_extract output: %w", err)
 	}
 
 	if env.Status == "error" {
-		return nil, fmt.Errorf("swe_grep error: %s: %s", env.Error.Code, env.Error.Message)
+		return nil, fmt.Errorf("snippet_extract error: %s: %s", env.Error.Code, env.Error.Message)
 	}
 
-	return &SweGrepResult{
+	return &ExtractResult{
 		FilesRelevant:   env.Data.Summary.FilesRelevant,
 		SnippetsEmitted: env.Data.Summary.SnippetsEmitted,
 		SnippetsInline:  env.Data.SnippetsInline,

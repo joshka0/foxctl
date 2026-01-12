@@ -82,7 +82,7 @@ agentctl run code/security --input '{"path": "internal/auth/", "recursive": true
 Find code snippets relevant to a natural language query:
 
 ```bash
-agentctl run code/swe_grep --input '{
+agentctl run code/smart_search --input '{
   "query": "how errors are handled in HTTP responses",
   "files": ["internal/client/http.go", "internal/client/errors.go"]
 }'

@@ -113,7 +113,7 @@ accepted review (see `review_gate.md` and `semantic_file_index.md` §8.2–8.3).
 
 These are new skills implied by the symbol index and dspy-go specs.
 
-### 4.1 `code/swe_grep` (exec skill)
+### 4.1 `code/snippet_extract` (exec skill)
 
 - **Purpose:** Given a natural-language question and candidate files/symbols,
   extract high-signal code snippets via live reads and a small LM.
@@ -132,7 +132,7 @@ These are new skills implied by the symbol index and dspy-go specs.
 ### 4.2 Agent Tools (dspy-go Layer)
 
 While not skills themselves, the following tools wrap skills or internal helpers
-and should be implemented alongside `code/swe_grep`:
+and should be implemented alongside `code/snippet_extract`:
 
 - **`code.symbol_search`**
   - **Backend:** Go helper over the symbol index.
@@ -140,7 +140,7 @@ and should be implemented alongside `code/swe_grep`:
     §5.1.
 
 - **`code.swe_grep`** (tool)
-  - **Backend:** `code/swe_grep` skill.
+  - **Backend:** `code/snippet_extract` skill.
   - **Spec:** `code_symbol_index_and_swe_grep.md` §6.2, `dspy_go_agents.md`
     §5.1.
 

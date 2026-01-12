@@ -265,6 +265,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if err != nil {
 			return err
 		}
+		// Recompute and persist PageRank after adding task
+		persistPageRanks(ctx, store, workspaceID)
 		data = map[string]any{
 			"task":          task,
 			"total_tasks":   len(allTasks),
@@ -277,6 +279,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if err != nil {
 			return err
 		}
+		// Recompute and persist PageRank after updating task (dependencies may have changed)
+		persistPageRanks(ctx, store, workspaceID)
 		data = map[string]any{
 			"task":          task,
 			"total_tasks":   len(allTasks),
@@ -289,6 +293,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if err != nil {
 			return err
 		}
+		// Recompute and persist PageRank after completing task (graph structure changed)
+		persistPageRanks(ctx, store, workspaceID)
 		data = map[string]any{
 			"task":          task,
 			"pending_tasks": countPending(allTasks),
@@ -490,6 +496,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		summary := fmt.Sprintf("plan for %q: %d tasks", goal, len(planResult.Tasks))
 		if planResult.Applied {
 			summary += " (applied)"
+			// Recompute and persist PageRank after applying plan (new tasks created)
+			persistPageRanks(ctx, store, workspaceID)
 		} else {
 			summary += " (draft)"
 		}
@@ -1954,6 +1962,38 @@ func toOutputListWithMetrics(taskList []tasks.Task, metrics map[string]tasksgrap
 		}
 	}
 	return out
+}
+
+// persistPageRanks recomputes PageRank for all tasks in a workspace and persists the scores.
+// This should be called after any mutation that changes the task graph (add, complete, update with deps).
+func persistPageRanks(ctx context.Context, store tasks.Store, workspaceID string) {
+	// List all tasks in the workspace
+	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return // Fail silently - PageRank is optional enhancement
+	}
+
+	if len(allTasks) == 0 {
+		return
+	}
+
+	// Compute PageRank using tasksgraph analyzer
+	insights, err := tasksgraph.NewAnalyzer().Analyze(allTasks, workspaceID)
+	if err != nil {
+		return // Fail silently
+	}
+
+	// Build map of task ID -> PageRank score
+	ranks := make(map[string]float64, len(insights.Nodes))
+	for _, node := range insights.Nodes {
+		ranks[node.TaskID] = node.PageRank
+	}
+
+	// Persist to database
+	if err := store.SetPageRanks(ctx, ranks); err != nil {
+		// Log but don't fail
+		fmt.Fprintf(os.Stderr, "warning: failed to persist PageRank scores: %v\n", err)
+	}
 }
 
 // createTaskDependencyEdges creates graph edges for task relationships.

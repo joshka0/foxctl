@@ -23,13 +23,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Scope-based model recommendations (from semantic.ScopeModelRecommendation)
-const (
-	modelSymbols  = "voyage-code-3"  // Best for code
-	modelMemory   = "voyage-3-large" // Best text retrieval
-	modelTasks    = "voyage-3.5"     // Good quality, lower cost
-	modelSessions = "voyage-3.5"     // Good quality, lower cost
-)
+// modelForScope returns the recommended model for a scope.
+// Delegates to semantic.ScopeModelRecommendation to avoid duplication.
+func modelForScope(scope string) string {
+	var s semantic.EmbeddingScope
+	switch scope {
+	case "symbols":
+		s = semantic.ScopeSymbols
+	case "memory":
+		s = semantic.ScopeMemory
+	case "tasks":
+		s = semantic.ScopeTasks
+	case "sessions":
+		s = semantic.ScopeSessions
+	default:
+		s = semantic.ScopeDefault
+	}
+	model, _ := semantic.ScopeModelRecommendation(s)
+	return model
+}
 
 func newIndexCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -40,11 +52,13 @@ func newIndexCommand() *cobra.Command {
 This is a simplified interface for full-repo embedding management.
 For fine-grained control, use 'agentctl semantic-index'.
 
-Scopes and models:
-  symbols   - Code files indexed with voyage-code-3 ($0.18/1M)
-  memory    - Gotchas/notes with voyage-3-large ($0.18/1M)
-  tasks     - Task descriptions with voyage-3.5 ($0.06/1M)
-  sessions  - Session context with voyage-3.5 ($0.06/1M)
+Scopes (model selection via semantic.ScopeModelRecommendation):
+  symbols   - Code files (voyage-code-3)
+  memory    - Gotchas/notes (voyage-3-large)
+  tasks     - Task descriptions (voyage-3.5)
+  sessions  - Session context (voyage-3.5)
+
+Override with AGENTCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.
 
 All Voyage models use 1024 dimensions.
 
@@ -75,14 +89,15 @@ func newIndexInitCommand() *cobra.Command {
 		Long: `Initialize embeddings for the entire repository across all scopes.
 
 This command performs one-time full embedding generation using the
-recommended Voyage AI models for each scope:
+recommended Voyage AI models for each scope (see semantic.ScopeModelRecommendation):
 
   symbols   → voyage-code-3   (code files)
   memory    → voyage-3-large  (gotchas, notes)
   tasks     → voyage-3.5      (task descriptions)
   sessions  → voyage-3.5      (session summaries)
 
-Requires VOYAGE_API_KEY environment variable.`,
+Requires VOYAGE_API_KEY environment variable.
+Override with AGENTCTL_EMBEDDING_MODEL_<SCOPE> or _CODE/_TEXT env vars.`,
 		Example: `  # Index everything (all scopes)
   agentctl index init
 
@@ -180,7 +195,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 
 		switch scope {
 		case "symbols":
-			result.Model = modelSymbols
+			result.Model = modelForScope("symbols")
 			count, err := indexSymbols(ctx, cfg, absWorkspace, glob, exclude, voyageKey)
 			result.Count = count
 			if err != nil {
@@ -188,7 +203,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 			}
 
 		case "memory":
-			result.Model = modelMemory
+			result.Model = modelForScope("memory")
 			count, err := reembedMemories(ctx, cfg, absWorkspace, voyageKey)
 			result.Count = count
 			if err != nil {
@@ -196,15 +211,15 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 			}
 
 		case "tasks":
-			result.Model = modelTasks
-			count, err := reembedTasks(ctx, cfg, voyageKey)
+			result.Model = modelForScope("tasks")
+			count, err := reembedTasks(ctx, cfg, absWorkspace, voyageKey)
 			result.Count = count
 			if err != nil {
 				result.Error = err.Error()
 			}
 
 		case "sessions":
-			result.Model = modelSessions
+			result.Model = modelForScope("sessions")
 			count, err := reembedSessions(ctx, cfg, voyageKey)
 			result.Count = count
 			if err != nil {
@@ -231,7 +246,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 		wg.Wait()
 	} else {
 		for _, scope := range scopes {
-			fmt.Fprintf(os.Stderr, "Indexing %s with %s...\n", scope, scopeModel(scope))
+			fmt.Fprintf(os.Stderr, "Indexing %s with %s...\n", scope, modelForScope(scope))
 			result := indexScope(scope)
 			results = append(results, result)
 			if result.Error != "" {
@@ -264,7 +279,7 @@ func runIndexDryRun(cmd *cobra.Command, workspace string, scopes []string, glob 
 	for _, scope := range scopes {
 		info := map[string]any{
 			"scope": scope,
-			"model": scopeModel(scope),
+			"model": modelForScope(scope),
 		}
 
 		if scope == "symbols" {
@@ -318,7 +333,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		stats, _ := memStore.Stats(ctx)
 		scopes = append(scopes, map[string]any{
 			"scope":             "symbols",
-			"recommended_model": modelSymbols,
+			"recommended_model": modelForScope("symbols"),
 			"total_memories":    stats.Named,
 		})
 	}
@@ -326,7 +341,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 	// Memory count
 	scopes = append(scopes, map[string]any{
 		"scope":             "memory",
-		"recommended_model": modelMemory,
+		"recommended_model": modelForScope("memory"),
 		"status":            "use 'agentctl memory stats' for details",
 	})
 
@@ -337,7 +352,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		all, _ := taskStore.ListAll(ctx, 1000)
 		scopes = append(scopes, map[string]any{
 			"scope":             "tasks",
-			"recommended_model": modelTasks,
+			"recommended_model": modelForScope("tasks"),
 			"total_count":       len(all),
 		})
 	}
@@ -350,7 +365,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		recent, _ := sessStore.List(ctx, opts)
 		scopes = append(scopes, map[string]any{
 			"scope":             "sessions",
-			"recommended_model": modelSessions,
+			"recommended_model": modelForScope("sessions"),
 			"recent_count":      len(recent),
 		})
 	}
@@ -359,21 +374,6 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 
 	env := protocol.OK("index.status", status, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
-}
-
-func scopeModel(scope string) string {
-	switch scope {
-	case "symbols":
-		return modelSymbols
-	case "memory":
-		return modelMemory
-	case "tasks":
-		return modelTasks
-	case "sessions":
-		return modelSessions
-	default:
-		return "unknown"
-	}
 }
 
 func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string, exclude []string, apiKey string) (int, error) {
@@ -391,7 +391,7 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 		APIKey:        apiKey,
-		Model:         modelSymbols,
+		Model:         modelForScope("symbols"),
 		RateLimitWait: boolPtr(true),
 	})
 	if err != nil {
@@ -442,45 +442,55 @@ func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey s
 
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 		APIKey:        apiKey,
-		Model:         modelMemory,
+		Model:         modelForScope("memory"),
 		RateLimitWait: boolPtr(true),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("create voyage provider: %w", err)
 	}
 
-	// Get all memories and re-embed them
-	memories, err := store.List(ctx, workspace, 1000)
-	if err != nil {
-		return 0, fmt.Errorf("list memories: %w", err)
-	}
-
-	count := 0
-	for _, mem := range memories {
-		// Generate embedding for summary
-		text := mem.Summary
-		if text == "" {
-			continue
-		}
-
-		fmt.Fprintf(os.Stderr, "  [memory] %s\n", mem.Name)
-		embedding, err := provider.Embed(ctx, text)
+	// Get memories without embeddings and generate them
+	// Process in batches to handle large stores
+	totalCount := 0
+	batchSize := 1000
+	for {
+		memories, err := store.ListWithoutEmbedding(ctx, workspace, batchSize)
 		if err != nil {
-			continue // Skip on error, don't fail entire batch
+			return totalCount, fmt.Errorf("list memories: %w", err)
 		}
 
-		// Store embedding
-		if err := store.UpdateEmbedding(ctx, mem.Name, workspace, embedding); err != nil {
-			continue
+		if len(memories) == 0 {
+			break // All memories have embeddings
 		}
-		count++
+
+		batchCount := 0
+		for _, mem := range memories {
+			fmt.Fprintf(os.Stderr, "  [memory] %s\n", mem.Name)
+			embedding, err := provider.Embed(ctx, mem.Summary)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "    [error] %v\n", err)
+				continue // Skip on error, don't fail entire batch
+			}
+
+			if err := store.UpdateEmbedding(ctx, mem.Name, workspace, embedding); err != nil {
+				fmt.Fprintf(os.Stderr, "    [error] %v\n", err)
+				continue
+			}
+			batchCount++
+		}
+		totalCount += batchCount
+		fmt.Fprintf(os.Stderr, "  Batch complete: %d items\n", batchCount)
 	}
 
-	return count, nil
+	return totalCount, nil
 }
 
-func reembedTasks(ctx context.Context, cfg config.Config, apiKey string) (int, error) {
+func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiKey string) (int, error) {
 	storageDir := filepath.Join(cfg.Home, "storage")
+	casDir := cfg.Paths.CAS
+	if casDir == "" {
+		casDir = filepath.Join(cfg.Home, "cas")
+	}
 
 	store, err := tasks.Open(ctx, storageDir)
 	if err != nil {
@@ -488,9 +498,16 @@ func reembedTasks(ctx context.Context, cfg config.Config, apiKey string) (int, e
 	}
 	defer store.Close()
 
+	// Also open memory store to store task embeddings for semantic search
+	memStore, err := memory.Open(ctx, storageDir, casDir)
+	if err != nil {
+		return 0, fmt.Errorf("open memory store: %w", err)
+	}
+	defer memStore.Close()
+
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 		APIKey:        apiKey,
-		Model:         modelTasks,
+		Model:         modelForScope("tasks"),
 		RateLimitWait: boolPtr(true),
 	})
 	if err != nil {
@@ -524,9 +541,41 @@ func reembedTasks(ctx context.Context, cfg config.Config, apiKey string) (int, e
 			continue
 		}
 
-		if err := store.SetEmbedding(ctx, task.ID, embeddingBytes, modelTasks); err != nil {
+		// Store embedding in tasks.db
+		if err := store.SetEmbedding(ctx, task.ID, embeddingBytes, modelForScope("tasks")); err != nil {
 			continue
 		}
+
+		// Also store in memory.db for semantic search skill compatibility
+		// Use name format: task://<task_id> with type: task_embedding
+		workspace := task.WorkspaceID
+		if workspace == "" {
+			workspace = defaultWorkspace // fallback to current workspace
+		}
+		entryName := "task://" + task.ID
+
+		// Create task metadata as result JSON
+		taskResult, _ := json.Marshal(map[string]string{
+			"task_id": task.ID,
+			"status":  task.Status,
+		})
+
+		if _, err := memStore.SaveResult(ctx, memory.SaveOptions{
+			Name:      entryName,
+			Type:      "task_embedding",
+			Workspace: workspace,
+			Summary:   text,
+			Result:    taskResult,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "    [warn] save to memory: %v\n", err)
+			// Continue anyway - tasks.db already has the embedding
+		}
+
+		// Update embedding in memory.db
+		if err := memStore.UpdateEmbedding(ctx, entryName, workspace, embedding); err != nil {
+			fmt.Fprintf(os.Stderr, "    [warn] update embedding in memory: %v\n", err)
+		}
+
 		count++
 	}
 
@@ -544,7 +593,7 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 		APIKey:        apiKey,
-		Model:         modelSessions,
+		Model:         modelForScope("sessions"),
 		RateLimitWait: boolPtr(true),
 	})
 	if err != nil {
@@ -576,7 +625,7 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 			continue
 		}
 
-		if err := store.SetEmbedding(ctx, sess.ID, embeddingBytes, modelSessions); err != nil {
+		if err := store.SetEmbedding(ctx, sess.ID, embeddingBytes, modelForScope("sessions")); err != nil {
 			continue
 		}
 		count++
@@ -815,7 +864,7 @@ func runIndexSyncQuery(cmd *cobra.Command, remoteURL, remoteToken, query string,
 	// Generate query embedding
 	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 		APIKey:        voyageKey,
-		Model:         modelMemory, // Use memory model for text queries
+		Model:         modelForScope("memory"), // Use memory model for text queries
 		RateLimitWait: boolPtr(true),
 	})
 	if err != nil {
@@ -1136,7 +1185,7 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 	if embed && voyageKey != "" {
 		provider, err = semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey:        voyageKey,
-			Model:         modelSymbols,
+			Model:         modelForScope("symbols"),
 			RateLimitWait: boolPtr(true),
 		})
 		if err != nil {

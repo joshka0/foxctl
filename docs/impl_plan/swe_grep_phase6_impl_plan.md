@@ -22,7 +22,7 @@ doc.
   - A1/A2/A3 in the Phase 6 spec map directly to:
     - A new `code.symbol_search` tool in `internal/agent/tools/` over the symbol
       index.
-    - A `code.swe_grep` tool as a thin wrapper over the `code/swe_grep` exec
+    - A `code.swe_grep` tool as a thin wrapper over the `code/snippet_extract` exec
       skill.
     - Alignment of `edit.apply_patch` (or a sibling tool) with the `code/diff`
       structured JSON diff format.
@@ -79,7 +79,7 @@ put Go glue, how to phase PRs, and how to validate each slice.
     - Uses internal Go APIs over the symbol index (no raw SQL or direct DB
       access).
   - Add `code.swe_grep` tool:
-    - Wraps `code/swe_grep` exec skill via the existing skills runner /
+    - Wraps `code/snippet_extract` exec skill via the existing skills runner /
       `agentctl run` path.
     - Maps Protocol v1 envelope → tool result payload (`snippets[]`, optional
       CAS ref).
@@ -168,7 +168,7 @@ put Go glue, how to phase PRs, and how to validate each slice.
   - **D1 – Tool unit tests**
     - `code.symbol_search`: in-memory / fixture index; assert ranking,
       `max_results`.
-    - `code.swe_grep`: stub `code/swe_grep` envelopes; assert mapping and error
+    - `code.swe_grep`: stub `code/snippet_extract` envelopes; assert mapping and error
       propagation.
   - **D2 – Patch round-trip tests**
     - Round-trip `code/diff` → edit tool as described in PR 2.

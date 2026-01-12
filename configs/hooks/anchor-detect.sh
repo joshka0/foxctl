@@ -55,9 +55,29 @@ if [[ "$has_anchor" -eq 1 ]]; then
   if [[ -z "$clean_prompt" ]]; then
     append_context "Usage: /anchor <goal>"
   else
+    # Persist anchor via session/anchor skill
     anchor_input="$(jq -nc --arg op "set" --arg ws "$workspace_root" --arg sid "$session_id" --arg mp "$clean_prompt" '{operation:$op, workspace:$ws, session_id:$sid, main_prompt:$mp, trigger:"user_prompt_submit"}')"
     "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace_root" --input "$anchor_input" >/dev/null 2>/dev/null || true
-    append_context "**Anchor set**: $clean_prompt"
+    
+    # Write anchor flag file for stop hook (lightweight check)
+    if [[ -n "$session_id" && "$session_id" != "null" ]]; then
+      mkdir -p "$MODE_DIR" 2>/dev/null || true
+      now_ms="$(( $(date +%s) * 1000 ))"
+      anchor_hash="$(printf '%s' "anchor:${session_id}" | shasum -a 256 | cut -c1-16)"
+      jq -nc --arg goal "$clean_prompt" --argjson ts "$now_ms" '{goal: $goal, updated_at: $ts}' >"${MODE_DIR}/anchor-${anchor_hash}.json" 2>/dev/null || true
+    fi
+    clarify_prompt="**Anchor set**: $clean_prompt
+
+**IMPORTANT - Verify Understanding**:
+Before proceeding, use AskUser to confirm you understood the request correctly:
+1. Briefly restate what you think the user is asking for
+2. List any assumptions you're making
+3. Ask if there are parts that need clarification
+
+If the user corrects or refines the goal, re-anchor with: \`/anchor <corrected goal>\`
+
+**Stop hook**: will check for incomplete tasks before allowing stop"
+    append_context "$clarify_prompt"
   fi
 fi
 

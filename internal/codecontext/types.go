@@ -1,5 +1,5 @@
 // Package codecontext provides shared code extraction and context retrieval
-// functionality used by skills like code/swe_grep, code/context_ripgrep, and
+// functionality used by skills like code/snippet_extract, code/context_ripgrep, and
 // code/semantic_search.
 //
 // It implements the Code Context Funnel architecture:

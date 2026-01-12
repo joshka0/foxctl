@@ -19,7 +19,7 @@ List: `agentctl skills list`
 | `text/ripgrep` | Fast regex search |
 | `text/grep`, `text/replace` | Text ops |
 | `code/context_ripgrep` | Search + expand to full functions |
-| `code/swe_grep` | Smart code retrieval |
+| `code/smart_search` | Smart code search |
 
 ### Code Intelligence
 | Skill | Purpose |

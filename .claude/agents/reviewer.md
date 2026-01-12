@@ -28,7 +28,7 @@ You analyze code for quality, security, complexity, and correctness. You identif
 
 ### Discovery Skills (inherited from explorer)
 - `agentctl run code/semantic_search --input '{"query":"..."}'` - Vector search
-- `agentctl run code/swe_grep --input '{"question":"..."}'` - Smart code retrieval
+- `agentctl run code/smart_search --input '{"question":"..."}'` - Smart code retrieval
 - `agentctl run code/symbols --input '{"path":"..."}'` - Extract symbols
 - `agentctl run code/context_ripgrep --input '{"pattern":"...","path":"."}'` - Full function bodies
 

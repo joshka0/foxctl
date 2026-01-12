@@ -10,7 +10,7 @@
 #
 # SEARCH/INVESTIGATE PATTERNS:
 # - "search for", "find", "look for", "where is" → code/semantic_search
-# - "investigate", "dig into", "explore", "understand" → code/swe_grep
+# - "investigate", "dig into", "explore", "understand" → code/smart_search
 # - "query", "semantic search" → code/semantic_search
 #
 # CODE ANALYSIS PATTERNS:
@@ -76,7 +76,7 @@ elif [[ "$prompt" =~ (investigate|dig\ into|explore.*code|understand.*how|figure
   hint="**Skill hint:** Code investigation:
 \`\`\`bash
 # Smart grep with context
-agentctl run code/swe_grep --input '{\"query\": \"<pattern>\", \"path\": \".\"}'
+agentctl run code/smart_search --input '{\"query\": \"<pattern>\", \"path\": \".\"}'
 # Or semantic search
 agentctl run code/semantic_search --input '{\"query\": \"<question>\"}'
 \`\`\`"

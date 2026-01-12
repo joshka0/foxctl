@@ -62,7 +62,7 @@ Current tools work file-by-file. Need true unified diff patchset support.
 | Component | Location | Status |
 |-----------|----------|--------|
 | code/context_ripgrep | `skills/code_context_ripgrep/` | ✅ Done |
-| code/swe_grep | `skills/code_swe_grep/` | ✅ Done |
+| code/snippet_extract | `skills/code_swe_grep/` | ✅ Done |
 | code/semantic_search | `skills/code_semantic_search/` | ✅ Done |
 | session/recall | `skills/session_recall/` | ✅ Done |
 | context/filter | `skills/context_filter/` | ✅ Done |

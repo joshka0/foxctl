@@ -68,8 +68,8 @@ const (
 
 // Timeout constants.
 const (
-	DefaultSourceTimeout = 3 * time.Second // Per-source timeout (includes embedding generation)
-	DefaultTotalTimeout  = 5 * time.Second // Total search timeout
+	DefaultSourceTimeout = 10 * time.Second // Per-source timeout (includes embedding generation)
+	DefaultTotalTimeout  = 15 * time.Second // Total search timeout
 )
 
 // Supported scopes.
@@ -268,17 +268,17 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	}
 
 	// Generate scope-specific query embeddings in parallel
-	// Model selection is configurable via EMBEDDING_MODEL_CODE and EMBEDDING_MODEL_TEXT
+	// Model selection is configurable via EMBEDDING_MODEL_CODE, EMBEDDING_MODEL_MEMORY, EMBEDDING_MODEL_TEXT
 	var scopedEmb scopedEmbeddings
 	var embedProvider semantic.EmbeddingProvider // Keep for backward compat with some functions
-	var codeModel, textModel string
+	var codeModel, memoryModel, textModel string
 
 	if providerName != "" {
-		codeModel, textModel = embeddingModelConfig(providerName)
+		codeModel, memoryModel, textModel = embeddingModelConfig(providerName)
 
 		start := time.Now()
 		var embErr error
-		scopedEmb, embErr = generateScopedEmbeddings(searchCtx, in.Query, scopeSet, codeModel, textModel)
+		scopedEmb, embErr = generateScopedEmbeddings(searchCtx, in.Query, scopeSet, codeModel, memoryModel, textModel)
 		if embErr != nil {
 			out.Stats.Hint = fmt.Sprintf("embedding failed: %v; using BM25-only", embErr)
 		} else {
@@ -300,8 +300,9 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	}
 
 	// Use appropriate embedding per scope
-	queryEmbedding := scopedEmb.code // For symbols scope
-	textEmbedding := scopedEmb.text  // For memory, tasks, sessions, codemaps scopes
+	queryEmbedding := scopedEmb.code   // For symbols scope
+	memoryEmbedding := scopedEmb.memory // For memories scope (voyage-3-large)
+	textEmbedding := scopedEmb.text    // For tasks, sessions, codemaps scopes (voyage-3.5)
 
 	// Parallel search across enabled scopes
 	var wg sync.WaitGroup
@@ -377,8 +378,8 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 			sourceCtx, sourceCancel := context.WithTimeout(searchCtx, DefaultSourceTimeout)
 			defer sourceCancel()
 
-			// Memory search requires embeddings for vector similarity (uses text model)
-			if textEmbedding == nil {
+			// Memory search requires embeddings for vector similarity (uses memory model: voyage-3-large)
+			if memoryEmbedding == nil {
 				resultsCh <- sourceResults{
 					source:  ScopeMemories,
 					results: nil,
@@ -389,7 +390,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 				return
 			}
 
-			results, hint, err := searchMemories(sourceCtx, cfg, storageRoot, casRoot, workspacePath, in.Query, textEmbedding, in.Limit*2, in)
+			results, hint, err := searchMemories(sourceCtx, cfg, storageRoot, casRoot, workspacePath, in.Query, memoryEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeMemories,
 				results: results,
@@ -566,44 +567,59 @@ type sourceResults struct {
 }
 
 // scopedEmbeddings holds query embeddings for different scope groups.
-// Code scopes may use a different model than text scopes.
+// Different scopes may use different embedding models optimized for that content type.
 type scopedEmbeddings struct {
-	code []float32 // For symbols scope
-	text []float32 // For memory, tasks, sessions, codemaps
+	code   []float32 // For symbols scope (voyage-code-3)
+	memory []float32 // For memories scope (voyage-3-large)
+	text   []float32 // For tasks, sessions, codemaps (voyage-3.5)
 }
 
-// embeddingModelConfig returns the models to use for code and text scopes.
-// Configuration priority: env vars > defaults per provider.
+// embeddingModelConfig returns the models to use for different scope categories.
+// Uses semantic.ScopeModelRecommendation for consistent defaults with indexing.
 //
-// Environment variables:
-//   - EMBEDDING_MODEL_CODE: Model for symbols scope (default: voyage-code-3 for Voyage)
-//   - EMBEDDING_MODEL_TEXT: Model for text scopes (default: voyage-3.5 for Voyage)
-//   - EMBEDDING_MODEL: Fallback for both if scope-specific not set
+// Configuration priority: env vars > ScopeModelRecommendation defaults
 //
-// For Gemini, all scopes use the same model (no code-specific model available).
-func embeddingModelConfig(providerName string) (codeModel, textModel string) {
+// Environment variables (optional overrides):
+//   - EMBEDDING_MODEL_CODE: Model for symbols scope
+//   - EMBEDDING_MODEL_MEMORY: Model for memories scope
+//   - EMBEDDING_MODEL_TEXT: Model for tasks, sessions, codemaps
+//   - EMBEDDING_MODEL: Fallback for all if scope-specific not set
+//
+// Default models (via ScopeModelRecommendation):
+//   - symbols: voyage-code-3
+//   - memories: voyage-3-large
+//   - tasks/sessions/codemaps: voyage-3.5
+func embeddingModelConfig(providerName string) (codeModel, memoryModel, textModel string) {
 	// Check for scope-specific overrides first
 	codeModel = os.Getenv("EMBEDDING_MODEL_CODE")
+	memoryModel = os.Getenv("EMBEDDING_MODEL_MEMORY")
 	textModel = os.Getenv("EMBEDDING_MODEL_TEXT")
 
 	// Fall back to generic EMBEDDING_MODEL
 	fallback := os.Getenv("EMBEDDING_MODEL")
 
-	// Apply provider-specific defaults
+	// Apply provider-specific defaults using ScopeModelRecommendation
 	switch providerName {
 	case "voyage":
 		if codeModel == "" {
 			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
 				codeModel = fallback
 			} else {
-				codeModel = "voyage-code-3" // Best for code retrieval
+				codeModel, _ = semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
+			}
+		}
+		if memoryModel == "" {
+			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
+				memoryModel = fallback
+			} else {
+				memoryModel, _ = semantic.ScopeModelRecommendation(semantic.ScopeMemory)
 			}
 		}
 		if textModel == "" {
 			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
 				textModel = fallback
 			} else {
-				textModel = "voyage-3.5" // Best price/performance for text
+				textModel, _ = semantic.ScopeModelRecommendation(semantic.ScopeTasks)
 			}
 		}
 	case "gemini":
@@ -615,12 +631,15 @@ func embeddingModelConfig(providerName string) (codeModel, textModel string) {
 		if codeModel == "" {
 			codeModel = model
 		}
+		if memoryModel == "" {
+			memoryModel = model
+		}
 		if textModel == "" {
 			textModel = model
 		}
 	}
 
-	return codeModel, textModel
+	return codeModel, memoryModel, textModel
 }
 
 // createProviderWithModel creates an embedding provider with a specific model.
@@ -674,20 +693,43 @@ func createProviderWithModel(model string) (semantic.EmbeddingProvider, error) {
 
 // generateScopedEmbeddings creates query embeddings for the requested scopes.
 // Only generates embeddings for scope groups that are actually requested.
-// Uses scope-specific models: code model for symbols, text model for others.
-func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[string]bool, codeModel, textModel string) (scopedEmbeddings, error) {
+// Uses scope-specific models:
+//   - code model for symbols (voyage-code-3)
+//   - memory model for memories (voyage-3-large)
+//   - text model for tasks, sessions, codemaps (voyage-3.5)
+func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[string]bool, codeModel, memoryModel, textModel string) (scopedEmbeddings, error) {
 	var emb scopedEmbeddings
 	var wg sync.WaitGroup
-	var codeErr, textErr error
+	var codeErr, memoryErr, textErr error
 
-	// Check if code scope is requested
+	// Check which scope groups are requested
 	needsCode := scopeSet[ScopeSymbols]
-	// Check if any text scope is requested
-	needsText := scopeSet[ScopeSessions] || scopeSet[ScopeMemories] || scopeSet[ScopeTasks] || scopeSet[ScopeCodemaps]
+	needsMemory := scopeSet[ScopeMemories]
+	needsText := scopeSet[ScopeSessions] || scopeSet[ScopeTasks] || scopeSet[ScopeCodemaps]
 
-	// Optimization: if both models are the same, only generate one embedding
-	if needsCode && needsText && codeModel == textModel {
-		provider, err := createProviderWithModel(codeModel)
+	// Optimization: if all needed models are the same, generate one embedding
+	allSameModel := true
+	baseModel := ""
+	if needsCode {
+		baseModel = codeModel
+	}
+	if needsMemory {
+		if baseModel == "" {
+			baseModel = memoryModel
+		} else if baseModel != memoryModel {
+			allSameModel = false
+		}
+	}
+	if needsText {
+		if baseModel == "" {
+			baseModel = textModel
+		} else if baseModel != textModel {
+			allSameModel = false
+		}
+	}
+
+	if allSameModel && baseModel != "" {
+		provider, err := createProviderWithModel(baseModel)
 		if err != nil {
 			return emb, err
 		}
@@ -695,8 +737,15 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 		if err != nil {
 			return emb, err
 		}
-		emb.code = embedding
-		emb.text = embedding
+		if needsCode {
+			emb.code = embedding
+		}
+		if needsMemory {
+			emb.memory = embedding
+		}
+		if needsText {
+			emb.text = embedding
+		}
 		return emb, nil
 	}
 
@@ -714,7 +763,21 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 		}()
 	}
 
-	// Generate text embedding if needed
+	// Generate memory embedding if needed (separate from other text scopes)
+	if needsMemory {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			provider, err := createProviderWithModel(memoryModel)
+			if err != nil {
+				memoryErr = err
+				return
+			}
+			emb.memory, memoryErr = provider.Embed(ctx, query)
+		}()
+	}
+
+	// Generate text embedding if needed (for tasks, sessions, codemaps)
 	if needsText {
 		wg.Add(1)
 		go func() {
@@ -731,11 +794,14 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 	wg.Wait()
 
 	// Return first error encountered (if any)
-	if codeErr != nil && textErr != nil {
-		return emb, fmt.Errorf("code: %v; text: %v", codeErr, textErr)
+	if codeErr != nil && memoryErr != nil && textErr != nil {
+		return emb, fmt.Errorf("code: %v; memory: %v; text: %v", codeErr, memoryErr, textErr)
 	}
 	if codeErr != nil {
 		return emb, codeErr
+	}
+	if memoryErr != nil {
+		return emb, memoryErr
 	}
 	if textErr != nil {
 		return emb, textErr
@@ -1039,8 +1105,9 @@ func searchMemories(
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip symbol entries - they're handled separately
-		if entry.Type == "symbol" {
+		// Skip code-related entries - they're handled by symbol search
+		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
+		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
 			continue
 		}
 
@@ -1076,8 +1143,12 @@ func searchMemoriesBM25(
 	}
 	defer memStore.Close()
 
+	// Request more items than limit to account for type filtering
+	// Code-related types (code_symbol, file_embedding, edit) often dominate the memory store
+	fetchLimit := max(limit*10, 100)
+
 	// Use basic text search on memories (BM25-like)
-	scoredEntries, err := memStore.Search(ctx, workspaceID, query, limit)
+	scoredEntries, err := memStore.Search(ctx, workspaceID, query, fetchLimit)
 	if err != nil {
 		return nil, fmt.Errorf("search memories: %w", err)
 	}
@@ -1087,9 +1158,18 @@ func searchMemoriesBM25(
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip symbol entries - they're handled separately
-		if entry.Type == "symbol" {
+		// Skip code-related entries - they're handled by symbol search
+		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
+		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
 			continue
+		}
+
+		// BM25 scores are based on recency/frequency (0-1 range, typically <0.3)
+		// Normalize to 0.3-1.0 range so results pass min_similarity filter
+		// RRF uses ranks for fusion, so score mainly affects threshold filtering
+		normalizedScore := 0.3 + (scored.Score * 0.7)
+		if normalizedScore > 1.0 {
+			normalizedScore = 1.0
 		}
 
 		result := Result{
@@ -1097,7 +1177,7 @@ func searchMemoriesBM25(
 			ID:         normalizeMemoryID(entry.Name),
 			Name:       entry.Name,
 			Summary:    truncate(entry.Summary, 200),
-			Similarity: scored.Score,
+			Similarity: normalizedScore,
 			SourceRank: rank,
 		}
 		results = append(results, result)
@@ -1125,8 +1205,12 @@ func searchMemoriesVector(
 	}
 	defer memStore.Close()
 
+	// Request more items than limit to account for type filtering
+	// Code-related types (code_symbol, file_embedding, edit) often dominate the memory store
+	fetchLimit := max(limit*10, 100)
+
 	// Use vector similarity search
-	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit)
+	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, fetchLimit)
 	if err != nil {
 		return nil, fmt.Errorf("vector search memories: %w", err)
 	}
@@ -1136,8 +1220,9 @@ func searchMemoriesVector(
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
-		// Skip symbol entries - they're handled separately
-		if entry.Type == "symbol" {
+		// Skip code-related entries - they're handled by symbol search
+		// Only include semantic memory types: gotcha, pattern, decision, note, etc.
+		if entry.Type == "code_symbol" || entry.Type == "symbol" || entry.Type == "file_embedding" || entry.Type == "edit" {
 			continue
 		}
 

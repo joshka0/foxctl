@@ -165,8 +165,8 @@ func TestSweGrepEvent(t *testing.T) {
 	}
 
 	// Verify fields
-	if decoded.Command != "code/swe_grep" {
-		t.Errorf("Command = %q, want code/swe_grep", decoded.Command)
+	if decoded.Command != "code/snippet_extract" {
+		t.Errorf("Command = %q, want code/snippet_extract", decoded.Command)
 	}
 	if decoded.WorkspaceID != "test-workspace" {
 		t.Errorf("WorkspaceID = %q, want test-workspace", decoded.WorkspaceID)

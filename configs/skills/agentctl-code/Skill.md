@@ -66,7 +66,7 @@ agentctl run code/imports --input '{"path": "internal/", "recursive": true}'
 Extract high-signal code snippets from candidates:
 
 ```bash
-agentctl run code/swe_grep --input '{"query": "error handling", "files": ["handler.go", "service.go"]}'
+agentctl run code/smart_search --input '{"query": "error handling", "files": ["handler.go", "service.go"]}'
 ```
 
 ## Git Operations

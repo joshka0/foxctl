@@ -19,7 +19,7 @@ var version = "dev"
 //
 //	event := observability.NewEvent("skill.run").
 //	    WithTraceID(traceID).
-//	    WithCommand("code/swe_grep").
+//	    WithCommand("code/snippet_extract").
 //	    WithWorkspace(wsID).
 //	    EnrichFromEnv()
 //

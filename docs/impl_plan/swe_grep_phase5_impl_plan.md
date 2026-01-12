@@ -1,6 +1,6 @@
 ### Phase 5 SWE Grep – Short Summary (3–5 sentences)
 
-Phase 5 implements `code/swe_grep` as a kernel‑owned **exec** skill that takes a
+Phase 5 implements `code/snippet_extract` as a kernel‑owned **exec** skill that takes a
 `workspace_id`, natural‑language `question`, and a list of candidate
 files/symbols and returns high‑signal code snippets. It **always** reads live
 workspace files off disk under `PathValidator` + `AGENTCTL_WORKSPACE`, so
@@ -17,11 +17,11 @@ it), without adding new wire fields or changing error semantics.
 ## A/B/C/D Todo Structure – Sanity Check + Small Gaps
 
 - **Section A (Skill contract & manifest)**
-  - Matches the spec and codemap: `code/swe_grep` as an **exec** skill under
+  - Matches the spec and codemap: `code/snippet_extract` as an **exec** skill under
     `skills/code_swe_grep/`, `network:"none"`, `filesystem: [{type:"workdir"}]`,
     discovery via existing resolver + exec runner.
   - **Minor addition to keep in mind:** explicitly note that `command` in
-    envelopes is `"code/swe_grep"` and must align with `metadata.name` and the
+    envelopes is `"code/snippet_extract"` and must align with `metadata.name` and the
     dspy `code.swe_grep` tool later in Phase 6.
 
 - **Section B (Input/output + path safety)**
@@ -64,7 +64,7 @@ we design Phase 5.
 
 - **Scope**
   - `skills/code_swe_grep/skill.yaml` – exec manifest:
-    - `metadata.name: "code/swe_grep"`, `distribution.type: "exec"`,
+    - `metadata.name: "code/snippet_extract"`, `distribution.type: "exec"`,
     - `capabilities.network: "none"`,
       `capabilities.filesystem: [{type:"workdir"}]`.
   - `skills/code_swe_grep/main.go` – `main` + minimal `run` stub using
@@ -79,7 +79,7 @@ we design Phase 5.
 
 - **Maps to Phase 5 todo**
   - **A1** (skill manifest and wiring).
-  - **A2** (CLI/runner integration: “`agentctl run code/swe_grep` works” at a
+  - **A2** (CLI/runner integration: “`agentctl run code/snippet_extract` works” at a
     smoke level).
 
 - **Validation**
@@ -89,7 +89,7 @@ we design Phase 5.
   - A tiny unit/integration test that:
     - Invokes the binary with empty/malformed stdin and asserts a valid Protocol
       v1 **error envelope** (correct `version`, `status:"error"`,
-      `command:"code/swe_grep"`).
+      `command:"code/snippet_extract"`).
 
 ---
 
@@ -243,7 +243,7 @@ we design Phase 5.
     - Sets up a small fixture workspace (few files with obvious matches).
     - Uses a trivial candidate generator (hard‑coded list or simple grep) to
       construct `candidates`.
-    - Invokes `code/swe_grep` via the normal runner path (or `agentctl run`
+    - Invokes `code/snippet_extract` via the normal runner path (or `agentctl run`
       harness).
     - Asserts end‑to‑end behavior:
       - Correct summary counts.
@@ -281,7 +281,7 @@ we design Phase 5.
     - Implement `code.swe_grep` tool that:
       - Accepts `workspace_id`, `question`,
         `candidate_files[] { path, symbol_id?, priority? }`, optional limits.
-      - Invokes the `code/swe_grep` skill via the skills runner and maps the
+      - Invokes the `code/snippet_extract` skill via the skills runner and maps the
         envelope’s `data.snippets_inline` / CAS artifact into the tool’s output
         schema as in §6.2 of the spec.
   - No new wire fields; the tool is a **thin mapper** over the skill.
@@ -294,7 +294,7 @@ we design Phase 5.
 
 - **Validation**
   - dspy‑go level unit tests (without running an actual LM):
-    - Stub a `code/swe_grep` envelope and assert the tool decodes it correctly
+    - Stub a `code/snippet_extract` envelope and assert the tool decodes it correctly
       into the tool’s typed output.
     - Ensure errors (`E_GUARD_VIOLATION`, `E_FILE_NOT_FOUND`,
       `E_SWE_GREP_NO_CANDIDATES`, `ERUNTIME`, `ETIMEOUT`) are mapped to
@@ -360,7 +360,7 @@ we design Phase 5.
 - **Integration tests**
   - At least one end‑to‑end test (PR 6) that:
     - Starts from a `question` + fabricated `candidates[]`.
-    - Runs `code/swe_grep` via the normal runner path.
+    - Runs `code/snippet_extract` via the normal runner path.
     - Asserts both envelope correctness and snippet usefulness on a small
       fixture repo.
   - Optionally, a follow‑on integration that pipes real candidates from Phase

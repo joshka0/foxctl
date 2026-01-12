@@ -731,7 +731,7 @@ Run: ` + "`agentctl run <skill> --input '<json>'`" + ` | Help: ` + "`agentctl ru
 | Skill | Purpose |
 |-------|---------|
 | ` + "`code/context_ripgrep`" + ` | Search + expand to full functions |
-| ` + "`code/swe_grep`" + ` | Smart code retrieval |
+| ` + "`code/snippet_extract`" + ` | Smart code retrieval |
 | ` + "`code/symbols`" + ` | Extract functions/types/vars |
 | ` + "`code/semantic_search`" + ` | Vector search (symbols/codemaps/memories) |
 

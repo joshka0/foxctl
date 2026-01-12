@@ -17,7 +17,7 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      swe_grep (current)                         │
-│                   code/swe_grep skill                           │
+│                   code/snippet_extract skill                           │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -951,7 +951,7 @@ Output:
 ### Enhanced swe_grep
 
 ```bash
-agentctl run code/swe_grep --input '{
+agentctl run code/snippet_extract --input '{
   "question": "How do we handle rate limiting?",
   "path": "internal/"
 }'

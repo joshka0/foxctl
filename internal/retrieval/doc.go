@@ -1,6 +1,6 @@
 // Package retrieval provides unified candidate generation for code search and SWE grep.
 //
-// This package implements the candidate generation layer that feeds into code/swe_grep,
+// This package implements the candidate generation layer that feeds into code/snippet_extract,
 // combining multiple retrieval sources for comprehensive code discovery:
 //
 //   - Symbol Index: BM25 search over code symbols (functions, methods, types)
@@ -30,7 +30,7 @@
 //
 // This package is used by:
 //
-//   - code/universal_swe_grep skill: Standalone skill for auto-candidate SWE grep
+//   - code/smart_search skill: Standalone skill for auto-candidate SWE grep
 //   - code.swe_grep tool: Agent tool with auto_candidates=true mode
 //   - Future hooks: Could power smart search enhancements
 //

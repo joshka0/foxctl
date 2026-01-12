@@ -451,7 +451,8 @@ function ensureAgentDaemon(actorId, workspace = "", meta = null) {
       }
       db.close();
       db = null;
-      spawnAgentDaemon(existing.id, actorId);
+      // Pass llmConfig if available (from overrides), otherwise daemon will detect from env
+      spawnAgentDaemon(existing.id, actorId, llmConfig);
       return { agentId: existing.id, status: "daemon_spawned" };
     }
 
@@ -499,8 +500,8 @@ function ensureAgentDaemon(actorId, workspace = "", meta = null) {
 
     console.log(`Created agent ${agentId} with provider: ${llmConfig.provider}, model: ${llmConfig.model}`);
 
-    // Spawn daemon for the new agent
-    spawnAgentDaemon(agentId, actorId);
+    // Spawn daemon for the new agent with the detected LLM config
+    spawnAgentDaemon(agentId, actorId, llmConfig);
 
     return { agentId, status: "created_and_spawned" };
   } catch (err) {
@@ -519,7 +520,8 @@ function ensureAgentDaemon(actorId, workspace = "", meta = null) {
 }
 
 // Spawn agent daemon as background process
-function spawnAgentDaemon(agentId, actorId) {
+// llmConfig is optional - if provided, use it; otherwise detect from environment
+function spawnAgentDaemon(agentId, actorId, llmConfig = null) {
   // Check if already running
   if (runningDaemons.has(actorId)) {
     console.log(`Daemon already running for ${actorId}`);
@@ -529,11 +531,22 @@ function spawnAgentDaemon(agentId, actorId) {
   try {
     console.log(`Spawning daemon for agent ${agentId} (${actorId})`);
 
+    // Use provided llmConfig or detect from environment
+    const config = llmConfig || detectLLMProvider();
+    const daemonEnv = { ...process.env };
+
+    // Ensure AGENTCTL_LLM_API_KEY is set for the daemon
+    if (config?.apiKey && !daemonEnv.AGENTCTL_LLM_API_KEY) {
+      daemonEnv.AGENTCTL_LLM_API_KEY = config.apiKey;
+      daemonEnv.AGENTCTL_LLM_PROVIDER = config.provider;
+      daemonEnv.AGENTCTL_LLM_MODEL = config.model;
+    }
+
     // Spawn detached process
     const daemonProc = spawn(AGENTCTL_BIN, ["agent", "run", agentId], {
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: daemonEnv,
     });
 
     // Track the process

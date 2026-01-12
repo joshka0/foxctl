@@ -56,7 +56,7 @@ Each line in the NDJSON file is a `WideEvent`:
   "version": "0.1.0",
   "component": "skill",
   "operation": "skill.run",
-  "command": "code/swe_grep",
+  "command": "code/snippet_extract",
   "session_id": "sess_abc123",
   "agent_id": "agent_def456",
   "workspace_id": "my-project",
@@ -143,7 +143,7 @@ import "github.com/jkatigb/agentctl/internal/observability"
 // Create an event builder
 event := observability.NewEvent(observability.OpSkillRun).
     WithComponent(observability.ComponentSkill).
-    WithCommand("code/swe_grep").
+    WithCommand("code/snippet_extract").
     WithWorkspace(workspaceID).
     EnrichFromEnv().
     EnrichFromContext(ctx)

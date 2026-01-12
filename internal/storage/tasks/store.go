@@ -53,6 +53,10 @@ type Store interface {
 
 	// SetEmbedding stores an embedding vector for a task.
 	SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error
+
+	// SetPageRanks bulk updates PageRank scores for multiple tasks.
+	// The map key is task ID, value is the PageRank score.
+	SetPageRanks(ctx context.Context, ranks map[string]float64) error
 }
 
 // Task represents a persisted task record.
@@ -82,6 +86,9 @@ type Task struct {
 
 	// Session tracking - links task to AI coding tool session
 	SessionID string // AI coding tool session ID (Claude Code, OpenCode, Cursor, etc.)
+
+	// Graph metrics - computed by tasksgraph analyzer
+	PageRank float64 // PageRank score for priority ordering (higher = more important)
 }
 
 // ListOptions configures task list queries.
@@ -183,6 +190,7 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 		`ALTER TABLE tasks ADD COLUMN session_id TEXT`,
 		`ALTER TABLE tasks ADD COLUMN embedding BLOB`,
 		`ALTER TABLE tasks ADD COLUMN embedding_model TEXT`,
+		`ALTER TABLE tasks ADD COLUMN pagerank REAL`,
 	}
 	for _, stmt := range alterDDL {
 		// Ignore errors from "duplicate column" - columns may already exist.
@@ -298,7 +306,7 @@ WHERE id = ?`,
 // Get returns a task by ID.
 func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
 FROM tasks WHERE id = ?`, id)
 	return scanTask(row)
 }
@@ -306,7 +314,7 @@ FROM tasks WHERE id = ?`, id)
 // ListByWorkspace returns tasks scoped to a workspace.
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
 FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
@@ -330,7 +338,7 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 // ListWithOptions returns tasks scoped to a workspace with filtering options.
 func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts ListOptions) ([]Task, error) {
 	// Build query with optional filters
-	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id FROM tasks WHERE workspace_id = ?`
+	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank FROM tasks WHERE workspace_id = ?`
 	args := []any{workspaceID}
 
 	if opts.SessionID != "" {
@@ -376,7 +384,7 @@ func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts
 // ListByPlanFile returns tasks linked to a specific plan file.
 func (s *sqlStore) ListByPlanFile(ctx context.Context, planFile string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
 FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by plan: %w", err)
@@ -397,7 +405,7 @@ FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
 // GetActive returns the active task for a workspace, if any.
 func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id
+SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank
 FROM tasks t
 JOIN active_tasks a ON t.id = a.task_id
 WHERE a.workspace_id = ?`, workspaceID)
@@ -505,7 +513,7 @@ func (s *sqlStore) ListAll(ctx context.Context, limit int) ([]Task, error) {
 		limit = DefaultListAllLimit
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
 FROM tasks ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list all: %w", err)
@@ -546,6 +554,38 @@ func (s *sqlStore) SetEmbedding(ctx context.Context, id string, embedding []byte
 	return nil
 }
 
+// SetPageRanks bulk updates PageRank scores for multiple tasks.
+func (s *sqlStore) SetPageRanks(ctx context.Context, ranks map[string]float64) error {
+	if len(ranks) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("tasks: begin tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback() //nolint:errcheck
+	}()
+
+	stmt, err := tx.PrepareContext(ctx, `UPDATE tasks SET pagerank = ? WHERE id = ?`)
+	if err != nil {
+		return fmt.Errorf("tasks: prepare pagerank update: %w", err)
+	}
+	defer stmt.Close()
+
+	for id, rank := range ranks {
+		if _, err := stmt.ExecContext(ctx, rank, id); err != nil {
+			return fmt.Errorf("tasks: set pagerank for %s: %w", id, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("tasks: commit pagerank updates: %w", err)
+	}
+	return nil
+}
+
 // scanTask scans a single task from a row.
 func scanTask(row *sql.Row) (Task, error) {
 	var t Task
@@ -556,12 +596,13 @@ func scanTask(row *sql.Row) (Task, error) {
 	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
 	var planFile, planSection sql.NullString
 	var sessionID sql.NullString
+	var pagerank sql.NullFloat64
 
 	err := row.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection, &sessionID)
+		&planFile, &planSection, &sessionID, &pagerank)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return Task{}, err
@@ -579,6 +620,7 @@ func scanTask(row *sql.Row) (Task, error) {
 	t.PlanFile = planFile.String
 	t.PlanSection = planSection.String
 	t.SessionID = sessionID.String
+	t.PageRank = pagerank.Float64
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
@@ -606,12 +648,13 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	var lastReviewStatus, lastReviewAt, lastReviewID sql.NullString
 	var planFile, planSection sql.NullString
 	var sessionID sql.NullString
+	var pagerank sql.NullFloat64
 
 	err := rows.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection, &sessionID)
+		&planFile, &planSection, &sessionID, &pagerank)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
 	}
@@ -626,6 +669,7 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.PlanFile = planFile.String
 	t.PlanSection = planSection.String
 	t.SessionID = sessionID.String
+	t.PageRank = pagerank.Float64
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {

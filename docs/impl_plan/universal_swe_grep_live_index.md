@@ -43,7 +43,7 @@ This plan builds on `universal_swe_grep_and_agents.md` to add:
 │  │  └── Ripgrep Fallback (if too few candidates)               │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │         ↓                                                            │
-│  code/swe_grep skill (existing)                                      │
+│  code/snippet_extract skill (existing)                                      │
 │         ↓                                                            │
 │  High-signal code snippets                                           │
 └─────────────────────────────────────────────────────────────────────┘
@@ -56,7 +56,7 @@ This plan builds on `universal_swe_grep_and_agents.md` to add:
 | `internal/retrieval/` | Go package | Shared candidate generation logic |
 | `code/incremental_index` | Exec skill | Index single file (symbols + optional embed) |
 | `live-index.sh` | Hook | Trigger indexing on edit |
-| `code/universal_swe_grep` | Exec skill | Standalone auto-candidate SWE grep |
+| `code/smart_search` | Exec skill | Standalone auto-candidate SWE grep |
 | `code.swe_grep` tool | Agent tool | Enhanced with `auto_candidates` flag |
 
 ---
@@ -412,7 +412,7 @@ fi
 {
   "version": 1,
   "status": "ok",
-  "command": "code/universal_swe_grep",
+  "command": "code/smart_search",
   "data": {
     "summary": {
       "candidates_generated": 45,
@@ -482,7 +482,7 @@ func run(ctx context.Context, rc *runner.RunnerContext, in Input) error {
         }
     }
 
-    // 5. Invoke code/swe_grep skill
+    // 5. Invoke code/snippet_extract skill
     sweGrepInput := map[string]any{
         "workspace_id": in.WorkspaceID,
         "question":     in.Question,
@@ -964,7 +964,7 @@ Phase 7 ────────────────────────
 
 - `internal/retrieval/` - Mock memory store, test scoring/merging
 - `code/incremental_index` - Test with fixture Go/Python/TS files
-- `code/universal_swe_grep` - Mock retrieval, test flow
+- `code/smart_search` - Mock retrieval, test flow
 
 ### Integration Tests
 
@@ -980,7 +980,7 @@ echo 'package foo\nfunc Bar() {}' > /tmp/test.go
 agentctl run code/incremental_index --input '{"file":"/tmp/test.go","symbols":true}'
 
 # Test universal swe grep
-agentctl run code/universal_swe_grep --input '{"question":"How does Bar work?"}'
+agentctl run code/smart_search --input '{"question":"How does Bar work?"}'
 
 # Test tool via agent
 # (requires agent runtime)
@@ -992,7 +992,7 @@ agentctl run code/universal_swe_grep --input '{"question":"How does Bar work?"}'
 
 1. **Live Index**: Editing a Go file indexes symbols within 100ms
 2. **Symbol Search**: `code.symbol_search` returns newly indexed symbols
-3. **Universal Skill**: `code/universal_swe_grep` works standalone via CLI
+3. **Universal Skill**: `code/smart_search` works standalone via CLI
 4. **Tool Enhancement**: `code.swe_grep` with `auto_candidates=true` works for agents
 5. **Hook Integration**: Claude Code edits trigger live indexing automatically
 

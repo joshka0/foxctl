@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -509,23 +510,35 @@ func persistSessionLearnings(ctx context.Context, agentctlHome string, session s
 	}
 	defer func() { _ = store.Close() }()
 
+	// Initialize embedding provider (optional - learnings work without embeddings)
+	var embedProvider *semantic.VoyageProvider
+	if apiKey := os.Getenv("VOYAGE_API_KEY"); apiKey != "" {
+		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeMemory)
+		waitOnLimit := true
+		embedProvider, _ = semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey:        apiKey,
+			Model:         model,
+			RateLimitWait: &waitOnLimit,
+		})
+	}
+
 	count := 0
-	if n, err := persistLearnings(ctx, store, session.ID, workspace, "gotcha", resp.Gotchas); err != nil {
+	if n, err := persistLearnings(ctx, store, embedProvider, session.ID, workspace, "gotcha", resp.Gotchas); err != nil {
 		return count, err
 	} else {
 		count += n
 	}
-	if n, err := persistLearnings(ctx, store, session.ID, workspace, "decision", resp.Decisions); err != nil {
+	if n, err := persistLearnings(ctx, store, embedProvider, session.ID, workspace, "decision", resp.Decisions); err != nil {
 		return count, err
 	} else {
 		count += n
 	}
-	if n, err := persistLearnings(ctx, store, session.ID, workspace, "user_pref", resp.UserPreferences); err != nil {
+	if n, err := persistLearnings(ctx, store, embedProvider, session.ID, workspace, "user_pref", resp.UserPreferences); err != nil {
 		return count, err
 	} else {
 		count += n
 	}
-	if n, err := persistLearnings(ctx, store, session.ID, workspace, "time_sink", resp.TimeSinks); err != nil {
+	if n, err := persistLearnings(ctx, store, embedProvider, session.ID, workspace, "time_sink", resp.TimeSinks); err != nil {
 		return count, err
 	} else {
 		count += n
@@ -534,7 +547,7 @@ func persistSessionLearnings(ctx context.Context, agentctlHome string, session s
 	return count, nil
 }
 
-func persistLearnings(ctx context.Context, store *memory.Store, sessionID, workspace, typ string, items []string) (int, error) {
+func persistLearnings(ctx context.Context, store *memory.Store, embedProvider *semantic.VoyageProvider, sessionID, workspace, typ string, items []string) (int, error) {
 	count := 0
 	for _, raw := range items {
 		text := normalizeLearning(raw)
@@ -544,10 +557,17 @@ func persistLearnings(ctx context.Context, store *memory.Store, sessionID, works
 		digest := shortHash(text)
 		name := fmt.Sprintf("session:%s:%s:%s", sessionID, typ, digest)
 
+		// Idempotency: check if entry already exists with embedding
+		if existing, err := store.GetEmbedding(ctx, name, workspace); err == nil && len(existing) > 0 {
+			// Already has embedding, skip
+			continue
+		}
+
 		payload, err := json.Marshal(map[string]any{
-			"session_id": sessionID,
-			"type":       typ,
-			"text":       text,
+			"session_id":   sessionID,
+			"type":         typ,
+			"text":         text,
+			"content_hash": digest, // Store hash for future idempotency checks
 		})
 		if err != nil {
 			return count, fmt.Errorf("marshal %s: %w", typ, err)
@@ -564,6 +584,14 @@ func persistLearnings(ctx context.Context, store *memory.Store, sessionID, works
 		if err != nil {
 			return count, fmt.Errorf("save %s: %w", typ, err)
 		}
+
+		// Generate embedding if provider available
+		if embedProvider != nil {
+			if embedding, err := embedProvider.Embed(ctx, text); err == nil && len(embedding) > 0 {
+				_ = store.UpdateEmbedding(ctx, name, workspace, embedding)
+			}
+		}
+
 		count++
 	}
 	return count, nil
@@ -584,6 +612,7 @@ func shortHash(s string) string {
 
 // filterJSONL reads the raw JSONL and extracts high-signal content.
 // Aggressively filters to reduce 35MB+ session files to a few hundred KB.
+// Handles both plain .jsonl and gzip-compressed .jsonl.gz files.
 func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMessage, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -591,8 +620,19 @@ func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMes
 	}
 	defer func() { _ = file.Close() }()
 
+	// Handle gzip-compressed files
+	var reader io.Reader = file
+	if strings.HasSuffix(path, ".gz") {
+		gzReader, err := gzip.NewReader(file)
+		if err != nil {
+			return nil, fmt.Errorf("gzip open: %w", err)
+		}
+		defer func() { _ = gzReader.Close() }()
+		reader = gzReader
+	}
+
 	var filtered []FilteredMessage
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 
 	// Increase buffer size for large lines (still need to read them to skip)
 	const maxCapacity = 10 * 1024 * 1024 // 10MB

@@ -31,7 +31,7 @@ You make targeted code changes to implement features, fix bugs, and refactor cod
 
 ### Discovery Skills (inherited from explorer)
 - `agentctl run code/semantic_search --input '{"query":"..."}'` - Vector search
-- `agentctl run code/swe_grep --input '{"question":"..."}'` - Smart code retrieval
+- `agentctl run code/smart_search --input '{"question":"..."}'` - Smart code retrieval
 - `agentctl run code/symbols --input '{"path":"..."}'` - Extract symbols
 
 ### File & Git
@@ -49,7 +49,7 @@ You make targeted code changes to implement features, fix bugs, and refactor cod
 ## Workflow
 
 1. **Understand the task** from the prompt
-2. **Find relevant code** using semantic_search and swe_grep
+2. **Find relevant code** using semantic_search and smart_search
 3. **Analyze current state** with symbols and complexity
 4. **Make targeted changes** using Edit or smart_write
 5. **Run tests** using test/run
