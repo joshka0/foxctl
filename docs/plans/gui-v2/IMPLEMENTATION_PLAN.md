@@ -2,6 +2,36 @@
 
 > Comprehensive plan for replacing the Bun/Express server with a Go backend + optionally migrating to Svelte SPA, including "Console" functionality as a Claude Code alternative.
 
+---
+
+## Continuation Notes
+
+**Current Progress:** Implementing Phases 1-5 (Go backend foundation + Skills/Tools)
+
+**After Phase 5, pick up:**
+- **Phases 6-10:** Console functionality (WebSocket, REST/SSE, streaming, sessions, GUI page)
+- **Phases 11-12:** Replace Bun server, optional Svelte SPA migration
+
+**Full implementation plan location:** `docs/plans/gui-v2/IMPLEMENTATION_PLAN.md`
+
+---
+
+## Svelte SPA Migration Progress (Phase 12)
+
+**Completed:**
+- Phase A: Foundation (scaffold, UI components, layout, routing, simple pages)
+- Phase B: Detail pages (JobDetailPage, TaskDetailPage, SessionsPage, AgentsPage, StatsPage)
+- Phase C: Advanced pages (SearchPage, SQLitePage, InsightsPage, CodemapsPage)
+
+**In Progress:**
+- Phase D: Console page (wired to `/api/console/sessions/*`)
+
+**Pending:**
+- Console polish (tool result rendering, metrics, retry UX)
+- Workspace selection in header (global vs per-page)
+
+---
+
 ## Executive Summary
 
 **Goal:** Create a native "agentctl Studio" experience that:

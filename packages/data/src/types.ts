@@ -166,7 +166,9 @@ export interface Workspace {
   path: string;
   name: string;
   session_count: number;
-  last_used: string;
+  last_used?: string;
+  last_active?: string;
+  is_active?: boolean;
 }
 
 // Sessions

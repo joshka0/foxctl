@@ -14,12 +14,14 @@ import {
   MessageSquare,
   Map as MapIcon,
   Bot,
+  Terminal,
 } from "lucide-react";
 
 const navigation = [
   { name: "Jobs", href: "/jobs", icon: Briefcase },
   { name: "Tasks", href: "/tasks", icon: ListTodo },
   { name: "Sessions", href: "/sessions", icon: MessageSquare },
+  { name: "Console", href: "/console", icon: Terminal },
   { name: "Agents", href: "/agents", icon: Bot },
   { name: "Codemaps", href: "/codemaps", icon: MapIcon },
   { name: "Stats", href: "/stats", icon: BarChart3 },

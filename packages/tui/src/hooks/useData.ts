@@ -206,22 +206,41 @@ export function useInsights() {
 }
 
 // Mailbox
-export function useMailbox(params?: { actor?: string; limit?: number }) {
+export function useMailbox(params?: { actor?: string; limit?: number; workspace?: string }) {
   return useQuery(
     async () => {
-      const result = await getMailbox(params);
+      const workspace =
+        params?.workspace ||
+        (typeof process !== "undefined" && typeof process.cwd === "function"
+          ? process.cwd()
+          : undefined);
+      if (!workspace) {
+        return [];
+      }
+      const result = await getMailbox({ ...params, workspace });
       return result.messages;
     },
-    [params?.actor, params?.limit]
+    [params?.actor, params?.limit, params?.workspace]
   );
 }
 
 // Reservations
-export function useReservations() {
-  return useQuery(async () => {
-    const result = await getReservations();
-    return result.reservations;
-  }, []);
+export function useReservations(params?: { workspace?: string }) {
+  return useQuery(
+    async () => {
+      const workspace =
+        params?.workspace ||
+        (typeof process !== "undefined" && typeof process.cwd === "function"
+          ? process.cwd()
+          : undefined);
+      if (!workspace) {
+        return [];
+      }
+      const result = await getReservations({ workspace });
+      return result.reservations;
+    },
+    [params?.workspace]
+  );
 }
 
 // Blackboard

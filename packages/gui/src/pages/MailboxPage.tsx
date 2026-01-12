@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMailbox } from "@/api/hooks";
+import { useMailbox, useWorkspaces } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,8 +17,14 @@ import { RefreshCw, Mail } from "lucide-react";
 
 export function MailboxPage() {
   const [actorFilter, setActorFilter] = useState("");
+  const { data: workspacesData } = useWorkspaces();
+  const currentWorkspace =
+    workspacesData?.current ||
+    workspacesData?.workspaces?.find((ws) => ws.is_active)?.path ||
+    workspacesData?.workspaces?.[0]?.path;
   const { data, isLoading, refetch, isFetching } = useMailbox({
     actor: actorFilter || undefined,
+    workspace: currentWorkspace,
     limit: 100,
   });
 

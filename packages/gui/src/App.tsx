@@ -13,6 +13,7 @@ import {
   SessionsPage,
   CodemapsPage,
   AgentsPage,
+  ConsolePage,
 } from "@/pages";
 
 function App() {
@@ -35,6 +36,7 @@ function App() {
           <Route path="sqlite" element={<SQLitePage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="codemaps" element={<CodemapsPage />} />
+          <Route path="console" element={<ConsolePage />} />
         </Route>
       </Routes>
     </BrowserRouter>

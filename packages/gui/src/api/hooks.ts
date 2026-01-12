@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useEffect, useRef, useState, useCallback } from "react";
 import * as api from "./client";
 
 // Query keys
@@ -10,8 +10,8 @@ export const queryKeys = {
   agents: (params?: { state?: string; limit?: number }) => ["agents", params] as const,
   stats: () => ["stats"] as const,
   insights: () => ["insights"] as const,
-  mailbox: (params?: { actor?: string; limit?: number }) => ["mailbox", params] as const,
-  reservations: () => ["reservations"] as const,
+  mailbox: (params?: { actor?: string; limit?: number; workspace?: string }) => ["mailbox", params] as const,
+  reservations: (params?: { workspace?: string }) => ["reservations", params] as const,
   blackboard: (params?: { ns?: string; topic?: string; limit?: number }) => ["blackboard", params] as const,
   sqlite: {
     databases: () => ["sqlite", "databases"] as const,
@@ -20,15 +20,17 @@ export const queryKeys = {
     schema: (db: string, table: string) => ["sqlite", "schema", db, table] as const,
     indexes: (db: string, table?: string) => ["sqlite", "indexes", db, table] as const,
   },
-  search: (params: { q: string; limit?: number; rerank?: boolean; scope?: string }) => ["search", params] as const,
+  search: (params: { q: string; limit?: number; rerank?: boolean; scope?: string; workspace?: string }) =>
+    ["search", params] as const,
   workspaces: () => ["workspaces"] as const,
   sessions: (params?: { limit?: number; offset?: number }) => ["sessions", params] as const,
   session: (id: string) => ["sessions", id] as const,
   sessionMessages: (id: string, params?: { limit?: number; offset?: number }) => ["sessions", id, "messages", params] as const,
   sessionSearch: (params: { pattern: string; limit?: number }) => ["sessions", "search", params] as const,
   codemaps: (params?: { workspace?: string; limit?: number }) => ["codemaps", params] as const,
-  codemap: (id: string) => ["codemaps", id] as const,
-  codemapSearch: (params: { query: string; limit?: number }) => ["codemaps", "search", params] as const,
+  codemap: (id: string, workspace?: string) => ["codemaps", id, workspace] as const,
+  codemapSearch: (params: { query: string; limit?: number; workspace?: string }) =>
+    ["codemaps", "search", params] as const,
 };
 
 // Jobs
@@ -79,18 +81,20 @@ export function useInsights() {
 }
 
 // Mailbox
-export function useMailbox(params?: { actor?: string; limit?: number }) {
+export function useMailbox(params?: { actor?: string; limit?: number; workspace?: string }) {
   return useQuery({
     queryKey: queryKeys.mailbox(params),
     queryFn: () => api.getMailbox(params),
+    enabled: !!params?.workspace,
   });
 }
 
 // Reservations
-export function useReservations() {
+export function useReservations(params?: { workspace?: string }) {
   return useQuery({
-    queryKey: queryKeys.reservations(),
-    queryFn: api.getReservations,
+    queryKey: queryKeys.reservations(params),
+    queryFn: () => api.getReservations(params),
+    enabled: !!params?.workspace,
   });
 }
 
@@ -143,7 +147,13 @@ export function useSQLiteIndexes(db: string, table?: string) {
 }
 
 // Search
-export function useSearch(params: { q: string; limit?: number; rerank?: boolean; scope?: string }) {
+export function useSearch(params: {
+  q: string;
+  limit?: number;
+  rerank?: boolean;
+  scope?: string;
+  workspace?: string;
+}) {
   return useQuery({
     queryKey: queryKeys.search(params),
     queryFn: () => api.search(params),
@@ -199,15 +209,15 @@ export function useCodemaps(params?: { workspace?: string; limit?: number }) {
   });
 }
 
-export function useCodemap(id: string) {
+export function useCodemap(id: string, workspace?: string) {
   return useQuery({
-    queryKey: queryKeys.codemap(id),
-    queryFn: () => api.getCodemap(id),
+    queryKey: queryKeys.codemap(id, workspace),
+    queryFn: () => api.getCodemap(id, workspace),
     enabled: !!id,
   });
 }
 
-export function useCodemapSearch(params: { query: string; limit?: number }) {
+export function useCodemapSearch(params: { query: string; limit?: number; workspace?: string }) {
   return useQuery({
     queryKey: queryKeys.codemapSearch(params),
     queryFn: () => api.searchCodemaps(params),
@@ -250,4 +260,307 @@ export function useSSE() {
 
     return unsubscribe;
   }, [queryClient]);
+}
+
+// ============================================================================
+// Console WebSocket Hook
+// ============================================================================
+
+export interface ConsoleMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: number;
+  correlationId?: string;
+  metadata?: Record<string, unknown>;
+  isStreaming?: boolean;
+}
+
+export interface ConsoleWebSocketState {
+  connected: boolean;
+  connecting: boolean;
+  error: string | null;
+  messages: ConsoleMessage[];
+  inflight: string | null; // correlation ID of pending request
+}
+
+type PayloadType = "ask" | "cmd" | "event" | "reply";
+
+interface WsPayload {
+  type: PayloadType;
+  console_id?: string;
+  correlation_id?: string;
+  content?: string;
+  metadata?: Record<string, unknown>;
+  cmd?: { name: string; correlation_id?: string };
+}
+
+export function useConsoleWebSocket(sessionId: string | null, workspace?: string) {
+  const [state, setState] = useState<ConsoleWebSocketState>({
+    connected: false,
+    connecting: false,
+    error: null,
+    messages: [],
+    inflight: null,
+  });
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const correlationIdRef = useRef<number>(0);
+
+  // Generate correlation ID
+  const generateCorrelationId = useCallback(() => {
+    correlationIdRef.current += 1;
+    return `msg-${Date.now()}-${correlationIdRef.current}`;
+  }, []);
+
+  // Connect to WebSocket
+  const connect = useCallback(() => {
+    if (!sessionId) return;
+
+    // Clear any pending reconnect
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
+    // Close existing connection
+    if (wsRef.current) {
+      wsRef.current.close();
+    }
+
+    setState((s) => ({ ...s, connecting: true, error: null }));
+
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/ws/console/${sessionId}${workspace ? `?workspace=${encodeURIComponent(workspace)}` : ""}`;
+
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setState((s) => ({ ...s, connected: true, connecting: false, error: null }));
+    };
+
+    ws.onclose = (event) => {
+      setState((s) => ({ ...s, connected: false, connecting: false }));
+
+      // Auto-reconnect on abnormal close
+      if (event.code !== 1000 && event.code !== 1001) {
+        reconnectTimeoutRef.current = setTimeout(connect, 3000);
+      }
+    };
+
+    ws.onerror = () => {
+      setState((s) => ({ ...s, error: "WebSocket connection error" }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const payload: WsPayload = JSON.parse(event.data);
+        handlePayload(payload);
+      } catch (err) {
+        console.error("Failed to parse WebSocket message:", err);
+      }
+    };
+  }, [sessionId, workspace]);
+
+  // Handle incoming payloads
+  const handlePayload = useCallback((payload: WsPayload) => {
+    const correlationId = payload.correlation_id || "";
+
+    switch (payload.type) {
+      case "event":
+        // Streaming event - update or append to messages
+        setState((s: ConsoleWebSocketState) => {
+          const existing = s.messages.find(
+            (m: ConsoleMessage) => m.correlationId === correlationId && m.role === "assistant" && m.isStreaming
+          );
+
+          if (existing) {
+            // Append to existing streaming message
+            return {
+              ...s,
+              messages: s.messages.map((m: ConsoleMessage) =>
+                m.id === existing.id ? { ...m, content: m.content + (payload.content || "") } : m
+              ),
+            };
+          } else {
+            // New streaming message
+            const newMsg: ConsoleMessage = {
+              id: `${correlationId}-stream`,
+              role: "assistant",
+              content: payload.content || "",
+              timestamp: Date.now(),
+              correlationId,
+              metadata: payload.metadata,
+              isStreaming: true,
+            };
+            return {
+              ...s,
+              messages: [...s.messages, newMsg],
+            };
+          }
+        });
+        break;
+
+      case "reply":
+        // Final reply - complete the streaming message
+        setState((s: ConsoleWebSocketState) => {
+          const streamingMsg = s.messages.find(
+            (m: ConsoleMessage) => m.correlationId === correlationId && m.isStreaming
+          );
+
+          if (streamingMsg) {
+            // Mark as complete
+            return {
+              ...s,
+              inflight: null,
+              messages: s.messages.map((m: ConsoleMessage) =>
+                m.id === streamingMsg.id
+                  ? { ...m, content: payload.content || m.content, isStreaming: false }
+                  : m
+              ),
+            };
+          } else {
+            // Add as new complete message
+            const newMsg: ConsoleMessage = {
+              id: `${correlationId}-reply`,
+              role: "assistant",
+              content: payload.content || "",
+              timestamp: Date.now(),
+              correlationId,
+              isStreaming: false,
+            };
+            return {
+              ...s,
+              inflight: null,
+              messages: [...s.messages, newMsg],
+            };
+          }
+        });
+        break;
+    }
+  }, []);
+
+  // Send a message
+  const sendMessage = useCallback(
+    (content: string) => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        setState((s: ConsoleWebSocketState) => ({ ...s, error: "Not connected" }));
+        return null;
+      }
+
+      const correlationId = generateCorrelationId();
+
+      // Add user message to state
+      const userMsg: ConsoleMessage = {
+        id: correlationId,
+        role: "user",
+        content,
+        timestamp: Date.now(),
+        correlationId,
+      };
+
+      setState((s: ConsoleWebSocketState) => ({
+        ...s,
+        messages: [...s.messages, userMsg],
+        inflight: correlationId,
+      }));
+
+      // Send to server
+      const payload: WsPayload = {
+        type: "ask",
+        correlation_id: correlationId,
+        content,
+      };
+
+      wsRef.current.send(JSON.stringify(payload));
+      return correlationId;
+    },
+    [generateCorrelationId]
+  );
+
+  // Cancel current request
+  const cancel = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const payload: WsPayload = {
+      type: "cmd",
+      cmd: { name: "cancel" },
+    };
+
+    wsRef.current.send(JSON.stringify(payload));
+    setState((s: ConsoleWebSocketState) => ({ ...s, inflight: null }));
+  }, []);
+
+  // Clear messages
+  const clearMessages = useCallback(() => {
+    setState((s: ConsoleWebSocketState) => ({ ...s, messages: [] }));
+  }, []);
+
+  // Disconnect
+  const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close(1000);
+      wsRef.current = null;
+    }
+    setState((s: ConsoleWebSocketState) => ({ ...s, connected: false, connecting: false }));
+  }, []);
+
+  // Connect on mount, disconnect on unmount
+  useEffect(() => {
+    if (sessionId) {
+      connect();
+    }
+
+    return () => {
+      disconnect();
+    };
+  }, [sessionId, connect, disconnect]);
+
+  return {
+    ...state,
+    sendMessage,
+    cancel,
+    clearMessages,
+    reconnect: connect,
+    disconnect,
+  };
+}
+
+// Console Sessions API hooks
+export function useConsoles(params?: { limit?: number }) {
+  return useQuery({
+    queryKey: ["consoles", params],
+    queryFn: () => api.getConsoles(params),
+  });
+}
+
+export function useCreateConsole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.createConsole,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["consoles"] });
+    },
+  });
+}
+
+export function useDeleteConsole() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.deleteConsole,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["consoles"] });
+    },
+  });
 }

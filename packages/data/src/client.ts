@@ -168,19 +168,26 @@ export async function getInsights(): Promise<InsightsData> {
 export async function getMailbox(params?: {
   actor?: string;
   limit?: number;
+  workspace?: string;
 }): Promise<{ messages: MailboxMessage[] }> {
   const searchParams = new URLSearchParams();
   if (params?.actor) searchParams.set("actor", params.actor);
   if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.workspace) searchParams.set("workspace_id", params.workspace);
   const query = searchParams.toString();
   return request(`/api/mailbox${query ? `?${query}` : ""}`);
 }
 
 // Reservations
-export async function getReservations(): Promise<{
+export async function getReservations(params?: {
+  workspace?: string;
+}): Promise<{
   reservations: Reservation[];
 }> {
-  return request("/api/reservations");
+  const searchParams = new URLSearchParams();
+  if (params?.workspace) searchParams.set("workspace_id", params.workspace);
+  const query = searchParams.toString();
+  return request(`/api/reservations${query ? `?${query}` : ""}`);
 }
 
 // Blackboard
@@ -260,6 +267,7 @@ export async function search(params: {
   limit?: number;
   rerank?: boolean;
   scope?: string;
+  workspace?: string;
 }): Promise<{
   results: SearchResult[];
   stats: SearchStats;
@@ -269,6 +277,7 @@ export async function search(params: {
   if (params.limit) searchParams.set("limit", String(params.limit));
   if (params.rerank) searchParams.set("rerank", "true");
   if (params.scope) searchParams.set("scope", params.scope);
+  if (params.workspace) searchParams.set("workspace", params.workspace);
   return request(`/api/search?${searchParams.toString()}`);
 }
 
@@ -371,12 +380,18 @@ export async function getCodemaps(params?: {
   return request(`/api/codemaps${query ? `?${query}` : ""}`);
 }
 
-export async function getCodemap(id: string): Promise<Codemap> {
-  return request(`/api/codemaps/${encodeURIComponent(id)}`);
+export async function getCodemap(id: string, workspace?: string): Promise<Codemap> {
+  const searchParams = new URLSearchParams();
+  if (workspace) searchParams.set("workspace", workspace);
+  const query = searchParams.toString();
+  return request(`/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`);
 }
 
-export async function deleteCodemap(id: string): Promise<void> {
-  return requestVoid(`/api/codemaps/${encodeURIComponent(id)}`, {
+export async function deleteCodemap(id: string, workspace?: string): Promise<void> {
+  const searchParams = new URLSearchParams();
+  if (workspace) searchParams.set("workspace", workspace);
+  const query = searchParams.toString();
+  return requestVoid(`/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`, {
     method: "DELETE",
   });
 }
@@ -384,10 +399,12 @@ export async function deleteCodemap(id: string): Promise<void> {
 export async function searchCodemaps(params: {
   query: string;
   limit?: number;
+  workspace?: string;
 }): Promise<{ results: SearchResult[] }> {
   const searchParams = new URLSearchParams();
   searchParams.set("q", params.query);
   if (params.limit) searchParams.set("limit", String(params.limit));
+  if (params.workspace) searchParams.set("workspace", params.workspace);
   return request(`/api/codemaps/search?${searchParams.toString()}`);
 }
 

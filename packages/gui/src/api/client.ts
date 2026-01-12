@@ -130,19 +130,26 @@ export async function getInsights(): Promise<import("../types").InsightsData> {
 export async function getMailbox(params?: {
   actor?: string;
   limit?: number;
+  workspace?: string;
 }): Promise<{ messages: import("../types").MailboxMessage[] }> {
   const searchParams = new URLSearchParams();
   if (params?.actor) searchParams.set("actor", params.actor);
   if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.workspace) searchParams.set("workspace_id", params.workspace);
   const query = searchParams.toString();
   return request(`/api/mailbox${query ? `?${query}` : ""}`);
 }
 
 // Reservations
-export async function getReservations(): Promise<{
+export async function getReservations(params?: {
+  workspace?: string;
+}): Promise<{
   reservations: import("../types").Reservation[];
 }> {
-  return request("/api/reservations");
+  const searchParams = new URLSearchParams();
+  if (params?.workspace) searchParams.set("workspace_id", params.workspace);
+  const query = searchParams.toString();
+  return request(`/api/reservations${query ? `?${query}` : ""}`);
 }
 
 // Blackboard
@@ -222,6 +229,7 @@ export async function search(params: {
   limit?: number;
   rerank?: boolean;
   scope?: string;
+  workspace?: string;
 }): Promise<{
   results: import("../types").SearchResult[];
   stats: import("../types").SearchStats;
@@ -231,6 +239,7 @@ export async function search(params: {
   if (params.limit) searchParams.set("limit", String(params.limit));
   if (params.rerank) searchParams.set("rerank", "true");
   if (params.scope) searchParams.set("scope", params.scope);
+  if (params.workspace) searchParams.set("workspace", params.workspace);
   return request(`/api/search?${searchParams.toString()}`);
 }
 
@@ -349,13 +358,20 @@ export async function getCodemaps(params?: {
 }
 
 export async function getCodemap(
-  id: string
+  id: string,
+  workspace?: string
 ): Promise<import("../types").Codemap> {
-  return request(`/api/codemaps/${encodeURIComponent(id)}`);
+  const searchParams = new URLSearchParams();
+  if (workspace) searchParams.set("workspace", workspace);
+  const query = searchParams.toString();
+  return request(`/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`);
 }
 
-export async function deleteCodemap(id: string): Promise<void> {
-  return requestVoid(`/api/codemaps/${encodeURIComponent(id)}`, {
+export async function deleteCodemap(id: string, workspace?: string): Promise<void> {
+  const searchParams = new URLSearchParams();
+  if (workspace) searchParams.set("workspace", workspace);
+  const query = searchParams.toString();
+  return requestVoid(`/api/codemaps/${encodeURIComponent(id)}${query ? `?${query}` : ""}`, {
     method: "DELETE",
   });
 }
@@ -363,9 +379,46 @@ export async function deleteCodemap(id: string): Promise<void> {
 export async function searchCodemaps(params: {
   query: string;
   limit?: number;
+  workspace?: string;
 }): Promise<{ results: import("../types").SearchResult[] }> {
   const searchParams = new URLSearchParams();
   searchParams.set("q", params.query);
   if (params.limit) searchParams.set("limit", String(params.limit));
+  if (params.workspace) searchParams.set("workspace", params.workspace);
   return request(`/api/codemaps/search?${searchParams.toString()}`);
+}
+
+// Console Sessions
+export interface ConsoleSessionInfo {
+  id: string;
+  workspace: string;
+  profile: string;
+  created: string;
+  message_count: number;
+  client_count: number;
+}
+
+export async function getConsoles(params?: {
+  limit?: number;
+}): Promise<{ sessions: ConsoleSessionInfo[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/console/sessions${query ? `?${query}` : ""}`);
+}
+
+export async function createConsole(body: {
+  workspace?: string;
+  profile?: string;
+}): Promise<{ id: string; workspace: string; profile: string }> {
+  return request("/api/console/sessions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteConsole(id: string): Promise<void> {
+  return requestVoid(`/api/console/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }

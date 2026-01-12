@@ -199,11 +199,12 @@ ts-dev-gui: ts-install
 	@cd packages/gui && bun run dev:all
 
 # Runs both API server and TUI binary together
-ts-tui: ts-build-tui
+ts-tui: ts-build-tui build
 	@echo "Starting API server and TUI..."
-	@bun run --cwd packages/gui server > /dev/null 2>&1 & \
+	@./bin/agentctl web serve --dev-cors > /dev/null 2>&1 & \
 	SERVER_PID=$$!; \
 	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT; \
+	sleep 1; \
 	AGENTCTL_API_URL=http://localhost:8090 ./bin/agentctl-tui
 
 ts-build: ts-install
