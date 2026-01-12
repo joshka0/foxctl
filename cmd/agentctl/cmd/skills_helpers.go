@@ -63,20 +63,23 @@ func ensureSkillDir(skillsRoot string, manifest skill.Manifest) (string, error) 
 	if name == "" {
 		return "", fmt.Errorf("skill metadata name is required")
 	}
-	cleanName := filepath.Clean(name)
-	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
+	// Validate the canonical name before normalization
+	if name == "." || name == ".." || filepath.IsAbs(name) {
 		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
 	}
-	for _, segment := range strings.Split(cleanName, string(os.PathSeparator)) {
-		if segment == "" || segment == "." || segment == ".." {
-			return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
-		}
+	// Normalize: "code/semantic_search" -> "code_semantic_search"
+	// This creates flat directories instead of nested ones
+	normalizedName := skill.NormalizeSkillName(name)
+	// Prevent path traversal in normalized name
+	if strings.Contains(normalizedName, "..") || strings.Contains(normalizedName, string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
 	}
 	root := filepath.Clean(skillsRoot)
-	dest := filepath.Join(root, cleanName)
+	dest := filepath.Join(root, normalizedName)
 	dest = filepath.Clean(dest)
+	// Final safety check: ensure dest is within root
 	if rel, err := filepath.Rel(root, dest); err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("invalid skill name %q", manifest.Metadata.Name)
+		return "", fmt.Errorf("invalid skill name %q (path traversal detected)", manifest.Metadata.Name)
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return "", err
@@ -86,25 +89,28 @@ func ensureSkillDir(skillsRoot string, manifest skill.Manifest) (string, error) 
 
 // skillDirPath validates and returns the skill directory path without requiring a valid manifest.
 // This is useful for operations like uninstall where the manifest may be corrupted.
+// Accepts both canonical (text/grep) and normalized (text_grep) names.
 func skillDirPath(skillsRoot, name string) (string, error) {
 	cleanName := strings.TrimSpace(name)
 	if cleanName == "" {
 		return "", fmt.Errorf("skill name is required")
 	}
-	cleanName = filepath.Clean(cleanName)
+	// Validate the canonical name before normalization
 	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
 		return "", fmt.Errorf("invalid skill name %q", name)
 	}
-	for _, segment := range strings.Split(cleanName, string(os.PathSeparator)) {
-		if segment == "" || segment == "." || segment == ".." {
-			return "", fmt.Errorf("invalid skill name %q", name)
-		}
+	// Normalize: "text/grep" -> "text_grep" for flat directory structure
+	normalizedName := skill.NormalizeSkillName(cleanName)
+	// Prevent path traversal in normalized name
+	if strings.Contains(normalizedName, "..") || strings.Contains(normalizedName, string(os.PathSeparator)) {
+		return "", fmt.Errorf("invalid skill name %q", name)
 	}
 	root := filepath.Clean(skillsRoot)
-	dest := filepath.Join(root, cleanName)
+	dest := filepath.Join(root, normalizedName)
 	dest = filepath.Clean(dest)
+	// Final safety check: ensure dest is within root
 	if rel, err := filepath.Rel(root, dest); err != nil || strings.HasPrefix(rel, "..") {
-		return "", fmt.Errorf("invalid skill name %q", name)
+		return "", fmt.Errorf("invalid skill name %q (path traversal detected)", name)
 	}
 	return dest, nil
 }

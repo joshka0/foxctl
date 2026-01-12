@@ -262,8 +262,30 @@ func copyFile(src, dst string) (err error) {
 // Uninstall removes an installed skill by name.
 // Accepts both canonical (code/semantic_search) and normalized (code_semantic_search) names.
 func (i *Installer) Uninstall(name string) error {
-	normalizedName := NormalizeSkillName(name)
-	skillPath := filepath.Join(i.installPath, normalizedName)
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" {
+		return fmt.Errorf("skill name is required")
+	}
+	// Validate the canonical name before normalization
+	if cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
+		return fmt.Errorf("invalid skill name %q", name)
+	}
+
+	normalizedName := NormalizeSkillName(cleanName)
+
+	// Prevent path traversal in normalized name
+	if strings.Contains(normalizedName, "..") || strings.Contains(normalizedName, string(os.PathSeparator)) {
+		return fmt.Errorf("invalid skill name %q", name)
+	}
+
+	root := filepath.Clean(i.installPath)
+	skillPath := filepath.Join(root, normalizedName)
+	skillPath = filepath.Clean(skillPath)
+
+	// Final safety check: ensure skillPath is within root
+	if rel, err := filepath.Rel(root, skillPath); err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("invalid skill name %q (path traversal detected)", name)
+	}
 
 	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
 		return fmt.Errorf("skill not installed: %s", name)
@@ -275,8 +297,27 @@ func (i *Installer) Uninstall(name string) error {
 // IsInstalled checks if a skill is installed.
 // Accepts both canonical (code/semantic_search) and normalized (code_semantic_search) names.
 func (i *Installer) IsInstalled(name string) bool {
-	normalizedName := NormalizeSkillName(name)
-	manifestPath := filepath.Join(i.installPath, normalizedName, "skill.yaml")
+	cleanName := strings.TrimSpace(name)
+	if cleanName == "" || cleanName == "." || cleanName == ".." || filepath.IsAbs(cleanName) {
+		return false
+	}
+
+	normalizedName := NormalizeSkillName(cleanName)
+
+	// Prevent path traversal in normalized name
+	if strings.Contains(normalizedName, "..") || strings.Contains(normalizedName, string(os.PathSeparator)) {
+		return false
+	}
+
+	root := filepath.Clean(i.installPath)
+	manifestPath := filepath.Join(root, normalizedName, "skill.yaml")
+	manifestPath = filepath.Clean(manifestPath)
+
+	// Safety check: ensure manifestPath is within root
+	if rel, err := filepath.Rel(root, manifestPath); err != nil || strings.HasPrefix(rel, "..") {
+		return false
+	}
+
 	_, err := os.Stat(manifestPath)
 	return err == nil
 }
