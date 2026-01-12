@@ -563,6 +563,73 @@ func TestStore_ListByPlanFile(t *testing.T) {
 	}
 }
 
+func TestStore_SetPageRanks(t *testing.T) {
+	ctx := context.Background()
+	store := setupTestStore(t)
+
+	// Create test tasks
+	task1, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Task 1"})
+	if err != nil {
+		t.Fatalf("Add task1 failed: %v", err)
+	}
+	task2, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Task 2"})
+	if err != nil {
+		t.Fatalf("Add task2 failed: %v", err)
+	}
+	task3, err := store.Add(ctx, Task{WorkspaceID: "ws-1", Title: "Task 3"})
+	if err != nil {
+		t.Fatalf("Add task3 failed: %v", err)
+	}
+
+	// Verify initial PageRank is 0
+	got1, _ := store.Get(ctx, task1.ID)
+	if got1.PageRank != 0 {
+		t.Errorf("expected initial PageRank to be 0, got %f", got1.PageRank)
+	}
+
+	// Set PageRank values
+	ranks := map[string]float64{
+		task1.ID: 0.85,
+		task2.ID: 0.12,
+		task3.ID: 0.03,
+	}
+	if err := store.SetPageRanks(ctx, ranks); err != nil {
+		t.Fatalf("SetPageRanks failed: %v", err)
+	}
+
+	// Verify PageRank values were persisted
+	got1, _ = store.Get(ctx, task1.ID)
+	if got1.PageRank != 0.85 {
+		t.Errorf("task1 PageRank: expected 0.85, got %f", got1.PageRank)
+	}
+	got2, _ := store.Get(ctx, task2.ID)
+	if got2.PageRank != 0.12 {
+		t.Errorf("task2 PageRank: expected 0.12, got %f", got2.PageRank)
+	}
+	got3, _ := store.Get(ctx, task3.ID)
+	if got3.PageRank != 0.03 {
+		t.Errorf("task3 PageRank: expected 0.03, got %f", got3.PageRank)
+	}
+
+	// Verify empty map is a no-op
+	if err := store.SetPageRanks(ctx, map[string]float64{}); err != nil {
+		t.Errorf("SetPageRanks with empty map should not error: %v", err)
+	}
+
+	// Verify PageRanks appear in list queries
+	tasks, _ := store.ListByWorkspace(ctx, "ws-1")
+	var foundHighRank bool
+	for _, task := range tasks {
+		if task.ID == task1.ID && task.PageRank == 0.85 {
+			foundHighRank = true
+			break
+		}
+	}
+	if !foundHighRank {
+		t.Error("expected task1 with PageRank 0.85 in list results")
+	}
+}
+
 func setupTestStore(t *testing.T) Store {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "tasks-test-*")

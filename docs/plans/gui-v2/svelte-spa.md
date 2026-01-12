@@ -1,6 +1,8 @@
-Cool — SPA is the cleanest swap because it matches your current React/Vite mental model and keeps **Go backend + `/api/*` + SSE** unchanged.
+Cool — SPA is the cleanest swap because it matches your current React/Vite
+mental model and keeps **Go backend + `/api/*` + SSE** unchanged.
 
-Below is **copy/paste scaffolding** you (or Codex/Claude) can implement as a new package: `packages/gui-svelte/`, reusing `@agentctl/data`.
+Below is **copy/paste scaffolding** you (or Codex/Claude) can implement as a new
+package: `packages/gui-svelte/`, reusing `@agentctl/data`.
 
 ---
 
@@ -8,11 +10,11 @@ Below is **copy/paste scaffolding** you (or Codex/Claude) can implement as a new
 
 Create a Svelte SPA that:
 
-* uses the existing Go backend (`/api/...`)
-* reuses `@agentctl/data` for types + API calls
-* uses TanStack Query (Svelte) for caching + invalidation
-* uses SSE (`/api/events`) to invalidate queries in real-time
-* ports pages gradually (start with Jobs + Tasks)
+- uses the existing Go backend (`/api/...`)
+- reuses `@agentctl/data` for types + API calls
+- uses TanStack Query (Svelte) for caching + invalidation
+- uses SSE (`/api/events`) to invalidate queries in real-time
+- ports pages gradually (start with Jobs + Tasks)
 
 ---
 
@@ -63,37 +65,38 @@ packages/gui-svelte/
 
 ```json
 {
-  "name": "@agentctl/gui-svelte",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --port 5174",
-    "build": "vite build",
-    "preview": "vite preview --port 5174",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
-  },
-  "dependencies": {
-    "@agentctl/data": "workspace:*",
-    "@tanstack/svelte-query": "^5.0.0",
-    "lucide-svelte": "^0.500.0",
-    "svelte": "^4.2.0",
-    "svelte-spa-router": "^4.0.0"
-  },
-  "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^3.0.0",
-    "@types/node": "^24.0.0",
-    "autoprefixer": "^10.4.0",
-    "postcss": "^8.4.0",
-    "svelte-check": "^3.0.0",
-    "tailwindcss": "^3.4.0",
-    "typescript": "^5.9.0",
-    "vite": "^7.0.0"
-  }
+	"name": "@agentctl/gui-svelte",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite --port 5174",
+		"build": "vite build",
+		"preview": "vite preview --port 5174",
+		"typecheck": "svelte-check --tsconfig ./tsconfig.json"
+	},
+	"dependencies": {
+		"@agentctl/data": "workspace:*",
+		"@tanstack/svelte-query": "^5.0.0",
+		"lucide-svelte": "^0.500.0",
+		"svelte": "^4.2.0",
+		"svelte-spa-router": "^4.0.0"
+	},
+	"devDependencies": {
+		"@sveltejs/vite-plugin-svelte": "^3.0.0",
+		"@types/node": "^24.0.0",
+		"autoprefixer": "^10.4.0",
+		"postcss": "^8.4.0",
+		"svelte-check": "^3.0.0",
+		"tailwindcss": "^3.4.0",
+		"typescript": "^5.9.0",
+		"vite": "^7.0.0"
+	}
 }
 ```
 
-> If you’re already pinning versions repo-wide, align these with whatever you use in `packages/gui`.
+> If you’re already pinning versions repo-wide, align these with whatever you
+> use in `packages/gui`.
 
 ---
 
@@ -105,20 +108,20 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 import path from "node:path";
 
 export default defineConfig({
-  plugins: [svelte()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    proxy: {
-      "/api": {
-        target: "http://localhost:8090",
-        changeOrigin: true,
-      },
-    },
-  },
+	plugins: [svelte()],
+	resolve: {
+		alias: {
+			"@": path.resolve(__dirname, "./src"),
+		},
+	},
+	server: {
+		proxy: {
+			"/api": {
+				target: "http://localhost:8090",
+				changeOrigin: true,
+			},
+		},
+	},
 });
 ```
 
@@ -128,21 +131,21 @@ export default defineConfig({
 
 ```json
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "verbatimModuleSyntax": true,
-    "skipLibCheck": true,
-    "types": ["vite/client"],
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
-  },
-  "include": ["src/**/*.ts", "src/**/*.svelte"]
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"verbatimModuleSyntax": true,
+		"skipLibCheck": true,
+		"types": ["vite/client"],
+		"baseUrl": ".",
+		"paths": {
+			"@/*": ["src/*"]
+		}
+	},
+	"include": ["src/**/*.ts", "src/**/*.svelte"]
 }
 ```
 
@@ -153,43 +156,43 @@ export default defineConfig({
 ```js
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: ["class"],
-  content: ["./index.html", "./src/**/*.{svelte,ts,js}"],
-  theme: {
-    extend: {
-      colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
-        card: "hsl(var(--card))",
-        "card-foreground": "hsl(var(--card-foreground))",
-        muted: "hsl(var(--muted))",
-        "muted-foreground": "hsl(var(--muted-foreground))",
-        primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))"
-        },
-        secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))"
-        },
-        destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))"
-        },
-        accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))"
-        }
-      },
-      borderRadius: {
-        md: "calc(var(--radius))"
-      }
-    }
-  },
-  plugins: []
+	darkMode: ["class"],
+	content: ["./index.html", "./src/**/*.{svelte,ts,js}"],
+	theme: {
+		extend: {
+			colors: {
+				border: "hsl(var(--border))",
+				input: "hsl(var(--input))",
+				ring: "hsl(var(--ring))",
+				background: "hsl(var(--background))",
+				foreground: "hsl(var(--foreground))",
+				card: "hsl(var(--card))",
+				"card-foreground": "hsl(var(--card-foreground))",
+				muted: "hsl(var(--muted))",
+				"muted-foreground": "hsl(var(--muted-foreground))",
+				primary: {
+					DEFAULT: "hsl(var(--primary))",
+					foreground: "hsl(var(--primary-foreground))",
+				},
+				secondary: {
+					DEFAULT: "hsl(var(--secondary))",
+					foreground: "hsl(var(--secondary-foreground))",
+				},
+				destructive: {
+					DEFAULT: "hsl(var(--destructive))",
+					foreground: "hsl(var(--destructive-foreground))",
+				},
+				accent: {
+					DEFAULT: "hsl(var(--accent))",
+					foreground: "hsl(var(--accent-foreground))",
+				},
+			},
+			borderRadius: {
+				md: "calc(var(--radius))",
+			},
+		},
+	},
+	plugins: [],
 };
 ```
 
@@ -199,10 +202,10 @@ module.exports = {
 
 ```js
 module.exports = {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
-  },
+	plugins: {
+		tailwindcss: {},
+		autoprefixer: {},
+	},
 };
 ```
 
@@ -218,55 +221,55 @@ module.exports = {
 @tailwind utilities;
 
 @layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
+	:root {
+		--background: 0 0% 100%;
+		--foreground: 222.2 84% 4.9%;
+		--card: 0 0% 100%;
+		--card-foreground: 222.2 84% 4.9%;
+		--popover: 0 0% 100%;
+		--popover-foreground: 222.2 84% 4.9%;
+		--primary: 222.2 47.4% 11.2%;
+		--primary-foreground: 210 40% 98%;
+		--secondary: 210 40% 96.1%;
+		--secondary-foreground: 222.2 47.4% 11.2%;
+		--muted: 210 40% 96.1%;
+		--muted-foreground: 215.4 16.3% 46.9%;
+		--accent: 210 40% 96.1%;
+		--accent-foreground: 222.2 47.4% 11.2%;
+		--destructive: 0 84.2% 60.2%;
+		--destructive-foreground: 210 40% 98%;
+		--border: 214.3 31.8% 91.4%;
+		--input: 214.3 31.8% 91.4%;
+		--ring: 222.2 84% 4.9%;
+		--radius: 0.5rem;
+	}
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-  }
+	.dark {
+		--background: 222.2 84% 4.9%;
+		--foreground: 210 40% 98%;
+		--card: 222.2 84% 4.9%;
+		--card-foreground: 210 40% 98%;
+		--popover: 222.2 84% 4.9%;
+		--popover-foreground: 210 40% 98%;
+		--primary: 210 40% 98%;
+		--primary-foreground: 222.2 47.4% 11.2%;
+		--secondary: 217.2 32.6% 17.5%;
+		--secondary-foreground: 210 40% 98%;
+		--muted: 217.2 32.6% 17.5%;
+		--muted-foreground: 215 20.2% 65.1%;
+		--accent: 217.2 32.6% 17.5%;
+		--accent-foreground: 210 40% 98%;
+		--destructive: 0 62.8% 30.6%;
+		--destructive-foreground: 210 40% 98%;
+		--border: 217.2 32.6% 17.5%;
+		--input: 217.2 32.6% 17.5%;
+		--ring: 212.7 26.8% 83.9%;
+	}
 
-  body {
-    margin: 0;
-    min-height: 100vh;
-  }
+	body {
+		margin: 0;
+		min-height: 100vh;
+	}
 }
 ```
 
@@ -281,14 +284,14 @@ import Root from "./Root.svelte";
 // Theme init (mirrors your React app)
 const savedTheme = localStorage.getItem("theme");
 if (
-  savedTheme === "dark" ||
-  (!savedTheme && window.matchMedia("(prefers-color-scheme: dark)").matches)
+	savedTheme === "dark" ||
+	(!savedTheme && window.matchMedia("(prefers-color-scheme: dark)").matches)
 ) {
-  document.documentElement.classList.add("dark");
+	document.documentElement.classList.add("dark");
 }
 
 new Root({
-  target: document.getElementById("app")!,
+	target: document.getElementById("app")!,
 });
 ```
 
@@ -316,12 +319,12 @@ new Root({
 import { QueryClient } from "@tanstack/svelte-query";
 
 export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 10_000,
-      refetchOnWindowFocus: false,
-    },
-  },
+	defaultOptions: {
+		queries: {
+			staleTime: 10_000,
+			refetchOnWindowFocus: false,
+		},
+	},
 });
 ```
 
@@ -345,19 +348,19 @@ Simple “invalidate on any event” version (works immediately, refine later):
 import { queryClient } from "./queryClient";
 
 export function startSSE(): () => void {
-  const es = new EventSource("/api/events", { withCredentials: true });
+	const es = new EventSource("/api/events", { withCredentials: true });
 
-  es.onmessage = () => {
-    // blunt but reliable
-    queryClient.invalidateQueries();
-  };
+	es.onmessage = () => {
+		// blunt but reliable
+		queryClient.invalidateQueries();
+	};
 
-  es.onerror = () => {
-    // keep it alive; backend restarts happen in dev
-    // browser will auto-retry EventSource
-  };
+	es.onerror = () => {
+		// keep it alive; backend restarts happen in dev
+		// browser will auto-retry EventSource
+	};
 
-  return () => es.close();
+	return () => es.close();
 }
 ```
 
@@ -371,15 +374,15 @@ import TasksPage from "@/pages/TasksPage.svelte";
 import PlaceholderPage from "@/pages/PlaceholderPage.svelte";
 
 export default {
-  "/": JobsPage,
-  "/jobs": JobsPage,
-  "/tasks": TasksPage,
-  "/sessions": PlaceholderPage,
-  "/agents": PlaceholderPage,
-  "/mailbox": PlaceholderPage,
-  "/search": PlaceholderPage,
-  "/sqlite": PlaceholderPage,
-  "/insights": PlaceholderPage,
+	"/": JobsPage,
+	"/jobs": JobsPage,
+	"/tasks": TasksPage,
+	"/sessions": PlaceholderPage,
+	"/agents": PlaceholderPage,
+	"/mailbox": PlaceholderPage,
+	"/search": PlaceholderPage,
+	"/sqlite": PlaceholderPage,
+	"/insights": PlaceholderPage,
 } as const;
 ```
 
@@ -507,7 +510,8 @@ export default {
 
 ## `packages/gui-svelte/src/lib/components/WorkspaceFilter.svelte`
 
-This includes a safe “fallback POST path” because your backend path may be either.
+This includes a safe “fallback POST path” because your backend path may be
+either.
 
 ```svelte
 <script lang="ts">
@@ -591,20 +595,20 @@ This includes a safe “fallback POST path” because your backend path may be e
 
 ```ts
 export function formatRelativeTime(dateString: string): string {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
+	if (!dateString) return "-";
+	const date = new Date(dateString);
+	const now = new Date();
+	const diffMs = now.getTime() - date.getTime();
 
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHour = Math.floor(diffMin / 60);
-  const diffDay = Math.floor(diffHour / 24);
+	const diffSec = Math.floor(diffMs / 1000);
+	const diffMin = Math.floor(diffSec / 60);
+	const diffHour = Math.floor(diffMin / 60);
+	const diffDay = Math.floor(diffHour / 24);
 
-  if (diffSec < 60) return `${diffSec}s ago`;
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHour < 24) return `${diffHour}h ago`;
-  return `${diffDay}d ago`;
+	if (diffSec < 60) return `${diffSec}s ago`;
+	if (diffMin < 60) return `${diffMin}m ago`;
+	if (diffHour < 24) return `${diffHour}h ago`;
+	return `${diffDay}d ago`;
 }
 ```
 
@@ -763,17 +767,17 @@ Uses `@agentctl/data` (via the re-export in `client.ts`).
 ## `packages/gui-svelte/index.html`
 
 ```html
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>agentctl</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>agentctl</title>
+	</head>
+	<body>
+		<div id="app"></div>
+		<script type="module" src="/src/main.ts"></script>
+	</body>
 </html>
 ```
 
@@ -797,11 +801,11 @@ Backend should be running on `localhost:8090` (same as your React proxy setup).
 
 ### Phase 1 — Scaffold + parity baseline
 
-* Create `packages/gui-svelte` with Vite + Svelte + TS
-* Add Tailwind theme vars (copy from React)
-* Wire TanStack Query + SSE invalidation
-* Implement pages: `JobsPage`, `TasksPage`
-  **Acceptance:** loads data + refresh works + SSE updates trigger UI refresh.
+- Create `packages/gui-svelte` with Vite + Svelte + TS
+- Add Tailwind theme vars (copy from React)
+- Wire TanStack Query + SSE invalidation
+- Implement pages: `JobsPage`, `TasksPage` **Acceptance:** loads data + refresh
+  works + SSE updates trigger UI refresh.
 
 ### Phase 2 — Port the rest of the “viewer” pages
 
@@ -812,21 +816,24 @@ Port in order:
 3. Mailbox
 4. Search
 5. SQLite
-6. Insights
-   **Acceptance:** feature parity with existing React GUI.
+6. Insights **Acceptance:** feature parity with existing React GUI.
 
 ### Phase 3 — “Console” / “Chat” UI (your Claude Code replacement surface)
 
-* A dedicated page to attach to an agent/overseer
-* Stream events/toolcalls (SSE or WS)
-* Show correlation IDs + allow cancel/retry via console commands
-  **Acceptance:** you can chat with overseer + see tool execution timeline.
+- A dedicated page to attach to an agent/overseer
+- Stream events/toolcalls (SSE or WS)
+- Show correlation IDs + allow cancel/retry via console commands **Acceptance:**
+  you can chat with overseer + see tool execution timeline.
 
 ---
 
-Awesome — here’s a **ConsolePage SPA skeleton** that shows a Claude-Code-like **streaming timeline** (user → events/toolcalls → final reply), with **send + cancel**, backed by **SSE**.
+Awesome — here’s a **ConsolePage SPA skeleton** that shows a Claude-Code-like
+**streaming timeline** (user → events/toolcalls → final reply), with **send +
+cancel**, backed by **SSE**.
 
-I’m going to assume a minimal backend API (paths below). If your server already has console endpoints with different paths, you only need to change the `BASE` constant in `consoleApi.ts`.
+I’m going to assume a minimal backend API (paths below). If your server already
+has console endpoints with different paths, you only need to change the `BASE`
+constant in `consoleApi.ts`.
 
 ---
 
@@ -838,11 +845,11 @@ I’m going to assume a minimal backend API (paths below). If your server alread
 import ConsolePage from "@/pages/ConsolePage.svelte";
 // ...
 export default {
-  "/": JobsPage,
-  "/jobs": JobsPage,
-  "/tasks": TasksPage,
-  "/console": ConsolePage,
-  // ...
+	"/": JobsPage,
+	"/jobs": JobsPage,
+	"/tasks": TasksPage,
+	"/console": ConsolePage,
+	// ...
 } as const;
 ```
 
@@ -871,68 +878,68 @@ Matches the spirit of `internal/domain/console/types.go`:
 export type ConsolePayloadType = "ask" | "reply" | "event" | "cmd";
 
 export interface ConsoleProgress {
-  pct: number;   // 0-100
-  phase: string; // "planning" | "tool" | "final" etc
+	pct: number; // 0-100
+	phase: string; // "planning" | "tool" | "final" etc
 }
 
 export interface ConsoleMetadata {
-  mime?: string;        // text/plain | text/markdown | application/json
-  partial?: boolean;    // for streaming chunks
-  exit_code?: number;
-  error?: string;
-  progress?: ConsoleProgress;
-  tool?: string;        // tool name for tool events
-  cas_digest?: string;  // sha256:...
+	mime?: string; // text/plain | text/markdown | application/json
+	partial?: boolean; // for streaming chunks
+	exit_code?: number;
+	error?: string;
+	progress?: ConsoleProgress;
+	tool?: string; // tool name for tool events
+	cas_digest?: string; // sha256:...
 }
 
 export interface ConsoleCommand {
-  name: string;               // "cancel"
-  correlation_id?: string;
+	name: string; // "cancel"
+	correlation_id?: string;
 }
 
 export interface ConsolePayload {
-  type: ConsolePayloadType;
-  actor_id: string;
-  console_id: string;
-  correlation_id: string;
-  content: string;
-  metadata?: ConsoleMetadata;
-  cmd?: ConsoleCommand;
+	type: ConsolePayloadType;
+	actor_id: string;
+	console_id: string;
+	correlation_id: string;
+	content: string;
+	metadata?: ConsoleMetadata;
+	cmd?: ConsoleCommand;
 }
 
 export interface ConsoleSession {
-  console_id: string;
-  actor_id: string;
-  session_id?: string;
-  workspace: string;
-  created_at: string;
-  last_attached_at: string;
-  meta?: Record<string, unknown>;
+	console_id: string;
+	actor_id: string;
+	session_id?: string;
+	workspace: string;
+	created_at: string;
+	last_attached_at: string;
+	meta?: Record<string, unknown>;
 }
 
 export interface CreateConsoleSessionRequest {
-  actor_id: string;
-  session_id?: string;
-  workspace?: string;
-  meta?: Record<string, unknown>;
+	actor_id: string;
+	session_id?: string;
+	workspace?: string;
+	meta?: Record<string, unknown>;
 }
 
 export interface SendConsoleRequest {
-  content: string;
-  correlation_id?: string;
-  mime?: string;
+	content: string;
+	correlation_id?: string;
+	mime?: string;
 }
 
 export interface SendConsoleResponse {
-  correlation_id: string;
+	correlation_id: string;
 }
 
 export interface CancelConsoleRequest {
-  correlation_id: string;
+	correlation_id: string;
 }
 
 export interface ListConsoleSessionsResponse {
-  sessions: ConsoleSession[];
+	sessions: ConsoleSession[];
 }
 ```
 
@@ -940,49 +947,59 @@ export interface ListConsoleSessionsResponse {
 
 ```ts
 import type {
-  CancelConsoleRequest,
-  CreateConsoleSessionRequest,
-  ListConsoleSessionsResponse,
-  SendConsoleRequest,
-  SendConsoleResponse,
-  ConsoleSession
+	CancelConsoleRequest,
+	ConsoleSession,
+	CreateConsoleSessionRequest,
+	ListConsoleSessionsResponse,
+	SendConsoleRequest,
+	SendConsoleResponse,
 } from "./consoleTypes";
 
 const BASE = "/api/console";
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    credentials: "include",
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json() as Promise<T>;
+	const res = await fetch(`${BASE}${path}`, {
+		...init,
+		headers: {
+			"Content-Type": "application/json",
+			...(init?.headers ?? {}),
+		},
+		credentials: "include",
+	});
+	if (!res.ok) throw new Error(await res.text());
+	return res.json() as Promise<T>;
 }
 
-export async function listConsoleSessions(): Promise<ListConsoleSessionsResponse> {
-  return req(`/sessions`);
+export async function listConsoleSessions(): Promise<
+	ListConsoleSessionsResponse
+> {
+	return req(`/sessions`);
 }
 
-export async function createConsoleSession(body: CreateConsoleSessionRequest): Promise<ConsoleSession> {
-  return req(`/sessions`, { method: "POST", body: JSON.stringify(body) });
+export async function createConsoleSession(
+	body: CreateConsoleSessionRequest,
+): Promise<ConsoleSession> {
+	return req(`/sessions`, { method: "POST", body: JSON.stringify(body) });
 }
 
-export async function sendConsole(consoleId: string, body: SendConsoleRequest): Promise<SendConsoleResponse> {
-  return req(`/sessions/${encodeURIComponent(consoleId)}/send`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+export async function sendConsole(
+	consoleId: string,
+	body: SendConsoleRequest,
+): Promise<SendConsoleResponse> {
+	return req(`/sessions/${encodeURIComponent(consoleId)}/send`, {
+		method: "POST",
+		body: JSON.stringify(body),
+	});
 }
 
-export async function cancelConsole(consoleId: string, body: CancelConsoleRequest): Promise<{ ok: true }> {
-  return req(`/sessions/${encodeURIComponent(consoleId)}/cancel`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+export async function cancelConsole(
+	consoleId: string,
+	body: CancelConsoleRequest,
+): Promise<{ ok: true }> {
+	return req(`/sessions/${encodeURIComponent(consoleId)}/cancel`, {
+		method: "POST",
+		body: JSON.stringify(body),
+	});
 }
 
 /**
@@ -990,7 +1007,7 @@ export async function cancelConsole(consoleId: string, body: CancelConsoleReques
  * Example URL: /api/console/sessions/:id/events
  */
 export function consoleEventsURL(consoleId: string): string {
-  return `${BASE}/sessions/${encodeURIComponent(consoleId)}/events`;
+	return `${BASE}/sessions/${encodeURIComponent(consoleId)}/events`;
 }
 ```
 
@@ -1361,33 +1378,37 @@ If you don’t already have console endpoints, implement these:
 
 ### 4.1 Routes
 
-* `GET  /api/console/sessions` → `{ sessions: ConsoleSession[] }`
-* `POST /api/console/sessions` → creates a console session
-* `POST /api/console/sessions/:id/send` → enqueues an ask message to the actor; returns `{ correlation_id }`
-* `POST /api/console/sessions/:id/cancel` → enqueues cancel command to the actor; returns `{ ok:true }`
-* `GET  /api/console/sessions/:id/events` → **SSE** stream of `ConsolePayload` JSON
+- `GET  /api/console/sessions` → `{ sessions: ConsoleSession[] }`
+- `POST /api/console/sessions` → creates a console session
+- `POST /api/console/sessions/:id/send` → enqueues an ask message to the actor;
+  returns `{ correlation_id }`
+- `POST /api/console/sessions/:id/cancel` → enqueues cancel command to the
+  actor; returns `{ ok:true }`
+- `GET  /api/console/sessions/:id/events` → **SSE** stream of `ConsolePayload`
+  JSON
 
 ### 4.2 Minimal server behavior
 
-* Persist `ConsoleSession` using `internal/storage/console` (you already have it).
-* For `send` / `cancel`, write to `internal/storage/mailbox`:
+- Persist `ConsoleSession` using `internal/storage/console` (you already have
+  it).
+- For `send` / `cancel`, write to `internal/storage/mailbox`:
 
-  * `to_ns = <actor_id>` (target actor)
-  * `from_ns = actor:human:web` (or similar)
-  * `type = console.ask | console.cmd` (or your existing schema)
-  * `payload = ConsolePayload{ type:"ask"/"cmd", console_id, correlation_id, content, ... }`
+  - `to_ns = <actor_id>` (target actor)
+  - `from_ns = actor:human:web` (or similar)
+  - `type = console.ask | console.cmd` (or your existing schema)
+  - `payload = ConsolePayload{ type:"ask"/"cmd", console_id, correlation_id, content, ... }`
 
 ### 4.3 SSE implementation (simple & reliable)
 
-* SSE handler loops:
+- SSE handler loops:
 
-  * `Poll(ctx, consumerNS, lease, max)` the mailbox store
-  * Stream each message payload (already JSON) as `data: <json>\n\n`
-  * `Ack(messageID)` after successfully writing to client
-* Consumer namespace: pick a stable inbox per console session, e.g.
+  - `Poll(ctx, consumerNS, lease, max)` the mailbox store
+  - Stream each message payload (already JSON) as `data: <json>\n\n`
+  - `Ack(messageID)` after successfully writing to client
+- Consumer namespace: pick a stable inbox per console session, e.g.
 
-  * `consumerNS = "actor:console:" + consoleID`
-  * and ensure actors reply to that namespace.
+  - `consumerNS = "actor:console:" + consoleID`
+  - and ensure actors reply to that namespace.
 
 ---
 
@@ -1395,19 +1416,25 @@ If you don’t already have console endpoints, implement these:
 
 Once this is wired end-to-end, upgrade the actor/overseer so it emits:
 
-* `event` with `metadata.tool=<toolName>` + `content=<tool args>` (tool_call)
-* `event` with `metadata.tool=<toolName>` + `metadata.cas_digest` or `metadata.error` + `content=<result preview>` (tool_result)
-* `reply` with final assistant answer
+- `event` with `metadata.tool=<toolName>` + `content=<tool args>` (tool_call)
+- `event` with `metadata.tool=<toolName>` + `metadata.cas_digest` or
+  `metadata.error` + `content=<result preview>` (tool_result)
+- `reply` with final assistant answer
 
 That gets you 90% of the “Claude Code experience” in your own app.
 
 ---
 
-You’re basically **already 70–80% there**: `packages/gui/server/index.js` already implements `/api/consoles/*` + a console-specific SSE channel + mailbox writes.
+You’re basically **already 70–80% there**: `packages/gui/server/index.js`
+already implements `/api/consoles/*` + a console-specific SSE channel + mailbox
+writes.
 
-What’s missing is mostly **schema/shape alignment** + a couple **correctness fixes** so the UI can rely on it like Claude Code.
+What’s missing is mostly **schema/shape alignment** + a couple **correctness
+fixes** so the UI can rely on it like Claude Code.
 
-Below is a **Codex/Claude-ready patch plan** (with concrete code blocks you can paste/replace), plus an exact mapping from the “generic console API” I suggested earlier to your **existing** server structure.
+Below is a **Codex/Claude-ready patch plan** (with concrete code blocks you can
+paste/replace), plus an exact mapping from the “generic console API” I suggested
+earlier to your **existing** server structure.
 
 ---
 
@@ -1415,20 +1442,25 @@ Below is a **Codex/Claude-ready patch plan** (with concrete code blocks you can 
 
 ### Storage
 
-* `agents.db` (in `~/.agentctl/storage/`) holds `console_sessions` (created lazily) and `agents`.
-* `mailbox.db` holds mailbox messages:
+- `agents.db` (in `~/.agentctl/storage/`) holds `console_sessions` (created
+  lazily) and `agents`.
+- `mailbox.db` holds mailbox messages:
 
-  * UI → actor daemon: `type = "console.ask"` / `"console.cmd"`, `to_ns = actor_id`
-  * actor daemon → UI: expected `type = "console.event"` / `"console.reply"` (not guaranteed yet, but your poll loop looks for them).
+  - UI → actor daemon: `type = "console.ask"` / `"console.cmd"`,
+    `to_ns = actor_id`
+  - actor daemon → UI: expected `type = "console.event"` / `"console.reply"`
+    (not guaranteed yet, but your poll loop looks for them).
 
 ### HTTP routes that exist today
 
-* `GET  /api/consoles` → `{ consoles: [...], total }`
-* `POST /api/consoles` → creates a session and `ensureAgentDaemon(actor_id, workspace, meta)`
-* `POST /api/consoles/:id/send` → inserts `console.ask` into `mailbox.db`
-* `POST /api/consoles/:id/cancel` → inserts `console.cmd` into `mailbox.db`
-* `GET  /api/consoles/:id/events` → SSE connection (no heartbeat right now)
-* background poll loop reads `mailbox.db` and calls `broadcastConsoleEvent(consoleId, "console.event"/"console.reply", data)`
+- `GET  /api/consoles` → `{ consoles: [...], total }`
+- `POST /api/consoles` → creates a session and
+  `ensureAgentDaemon(actor_id, workspace, meta)`
+- `POST /api/consoles/:id/send` → inserts `console.ask` into `mailbox.db`
+- `POST /api/consoles/:id/cancel` → inserts `console.cmd` into `mailbox.db`
+- `GET  /api/consoles/:id/events` → SSE connection (no heartbeat right now)
+- background poll loop reads `mailbox.db` and calls
+  `broadcastConsoleEvent(consoleId, "console.event"/"console.reply", data)`
 
 ---
 
@@ -1446,22 +1478,29 @@ Your SSE currently sends:
 
 ✅ Fix options:
 
-* **A (minimal change):** Update the Svelte client to parse your wrapper.
-* **B (recommended):** Add `?format=payload` to SSE to emit canonical payloads (UI stays clean).
+- **A (minimal change):** Update the Svelte client to parse your wrapper.
+- **B (recommended):** Add `?format=payload` to SSE to emit canonical payloads
+  (UI stays clean).
 
 I’ll show **B** below (keeps backward compatibility).
 
 ### 2) **Console SSE has no heartbeat**
 
-You add console SSE `res` to `sseClients`, but only `/api/events` installs a heartbeat interval. `/api/consoles/:id/events` does not.
+You add console SSE `res` to `sseClients`, but only `/api/events` installs a
+heartbeat interval. `/api/consoles/:id/events` does not.
 
 ✅ Add a per-connection heartbeat in the console SSE handler.
 
 ### 3) **Console mailbox poll can drop messages**
 
-You use a single global `lastConsoleMessageId` and skip `msg.id <= lastConsoleMessageId`. With your `generateId()` this can drop messages created in the same millisecond (lexicographic ordering isn’t guaranteed for “time + random”).
+You use a single global `lastConsoleMessageId` and skip
+`msg.id <= lastConsoleMessageId`. With your `generateId()` this can drop
+messages created in the same millisecond (lexicographic ordering isn’t
+guaranteed for “time + random”).
 
-✅ Fix: stop using `lastConsoleMessageId` and instead **ACK/delete** messages after broadcasting (or track a `(ts,id)` cursor per console). Deleting is simplest + prevents mailbox growth.
+✅ Fix: stop using `lastConsoleMessageId` and instead **ACK/delete** messages
+after broadcasting (or track a `(ts,id)` cursor per console). Deleting is
+simplest + prevents mailbox growth.
 
 ### 4) **No ACK/delete of delivered console messages**
 
@@ -1479,12 +1518,12 @@ Add this to `runMigrations()`:
 
 ```js
 function runMigrations() {
-  // ... existing migrations ...
+	// ... existing migrations ...
 
-  const agentsDbPath = join(AGENTCTL_HOME, "storage", "agents.db");
-  const adb = new Database(agentsDbPath);
-  try {
-    adb.exec(`
+	const agentsDbPath = join(AGENTCTL_HOME, "storage", "agents.db");
+	const adb = new Database(agentsDbPath);
+	try {
+		adb.exec(`
       CREATE TABLE IF NOT EXISTS console_sessions (
         console_id       TEXT PRIMARY KEY,
         actor_id         TEXT NOT NULL,
@@ -1498,12 +1537,12 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_console_workspace ON console_sessions(workspace);
       CREATE INDEX IF NOT EXISTS idx_console_session ON console_sessions(session_id);
     `);
-    console.log("Migration: ensured console_sessions table exists");
-  } catch (err) {
-    console.error("Migration: console_sessions error:", err.message);
-  } finally {
-    adb.close();
-  }
+		console.log("Migration: ensured console_sessions table exists");
+	} catch (err) {
+		console.error("Migration: console_sessions error:", err.message);
+	} finally {
+		adb.close();
+	}
 }
 ```
 
@@ -1542,23 +1581,23 @@ Then update headers/payload to include both names:
 
 ```js
 const payload = JSON.stringify({
-  status: "ok",
-  command: "console.ask",
-  data: {
-    ask_id: askId,
-    correlation_id: askId,
-    prompt,
-    content: prompt,
-    context,
-    console_id: consoleId,
-  }
+	status: "ok",
+	command: "console.ask",
+	data: {
+		ask_id: askId,
+		correlation_id: askId,
+		prompt,
+		content: prompt,
+		context,
+		console_id: consoleId,
+	},
 });
 
 const headers = JSON.stringify({
-  correlation: askId,
-  ask_id: askId,
-  correlation_id: askId,
-  console_id: consoleId,
+	correlation: askId,
+	ask_id: askId,
+	correlation_id: askId,
+	console_id: consoleId,
 });
 ```
 
@@ -1566,12 +1605,12 @@ And update the response to include both:
 
 ```js
 res.json({
-  message_id: messageId,
-  ask_id: askId,
-  correlation_id: askId,
-  status: "sent",
-  daemon_status: daemonResult.status || "unknown",
-  daemon_error: daemonResult.error || null,
+	message_id: messageId,
+	ask_id: askId,
+	correlation_id: askId,
+	status: "sent",
+	daemon_status: daemonResult.status || "unknown",
+	daemon_error: daemonResult.error || null,
 });
 ```
 
@@ -1588,31 +1627,30 @@ const { ask_id } = req.body;
 to:
 
 ```js
-const ask_id =
-  (typeof req.body.ask_id === "string" && req.body.ask_id) ||
-  (typeof req.body.correlation_id === "string" && req.body.correlation_id) ||
-  "";
+const ask_id = (typeof req.body.ask_id === "string" && req.body.ask_id) ||
+	(typeof req.body.correlation_id === "string" && req.body.correlation_id) ||
+	"";
 ```
 
 And include `correlation_id` in payload + headers:
 
 ```js
 const payload = JSON.stringify({
-  status: "ok",
-  command: "console.cmd",
-  data: {
-    cmd_id: cmdId,
-    action: "cancel",
-    ask_id,
-    correlation_id: ask_id,
-    console_id: consoleId,
-  }
+	status: "ok",
+	command: "console.cmd",
+	data: {
+		cmd_id: cmdId,
+		action: "cancel",
+		ask_id,
+		correlation_id: ask_id,
+		console_id: consoleId,
+	},
 });
 
 const headers = JSON.stringify({
-  ask_id,
-  correlation_id: ask_id,
-  console_id: consoleId,
+	ask_id,
+	correlation_id: ask_id,
+	console_id: consoleId,
 });
 ```
 
@@ -1624,106 +1662,133 @@ In `GET /api/consoles/:id/events`, add:
 
 ```js
 app.get("/api/consoles/:id/events", (req, res) => {
-  const consoleId = req.params.id;
-  const format = (req.query.format || "").toString(); // "" | "payload"
+	const consoleId = req.params.id;
+	const format = (req.query.format || "").toString(); // "" | "payload"
 
-  // ... existing verification ...
+	// ... existing verification ...
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders();
+	res.setHeader("Content-Type", "text/event-stream");
+	res.setHeader("Cache-Control", "no-cache");
+	res.setHeader("Connection", "keep-alive");
+	res.setHeader("X-Accel-Buffering", "no");
+	res.flushHeaders();
 
-  // Heartbeat every 30s
-  const heartbeat = setInterval(() => {
-    if (format === "payload") {
-      res.write(`data: ${JSON.stringify({
-        type: "event",
-        actor_id: "server",
-        console_id: consoleId,
-        correlation_id: "",
-        content: "",
-        metadata: { mime: "application/json", partial: true },
-      })}\n\n`);
-    } else {
-      res.write(`data: ${JSON.stringify({ type: "heartbeat", console_id: consoleId, ts: Date.now() })}\n\n`);
-    }
-  }, 30000);
+	// Heartbeat every 30s
+	const heartbeat = setInterval(() => {
+		if (format === "payload") {
+			res.write(`data: ${
+				JSON.stringify({
+					type: "event",
+					actor_id: "server",
+					console_id: consoleId,
+					correlation_id: "",
+					content: "",
+					metadata: { mime: "application/json", partial: true },
+				})
+			}\n\n`);
+		} else {
+			res.write(
+				`data: ${
+					JSON.stringify({
+						type: "heartbeat",
+						console_id: consoleId,
+						ts: Date.now(),
+					})
+				}\n\n`,
+			);
+		}
+	}, 30000);
 
-  // Send initial
-  if (format === "payload") {
-    res.write(`data: ${JSON.stringify({
-      type: "event",
-      actor_id: "server",
-      console_id: consoleId,
-      correlation_id: "",
-      content: "[connected]",
-      metadata: { mime: "text/plain", partial: true },
-    })}\n\n`);
-  } else {
-    res.write(`data: ${JSON.stringify({ type: "connected", console_id: consoleId, ts: Date.now() })}\n\n`);
-  }
+	// Send initial
+	if (format === "payload") {
+		res.write(`data: ${
+			JSON.stringify({
+				type: "event",
+				actor_id: "server",
+				console_id: consoleId,
+				correlation_id: "",
+				content: "[connected]",
+				metadata: { mime: "text/plain", partial: true },
+			})
+		}\n\n`);
+	} else {
+		res.write(
+			`data: ${
+				JSON.stringify({
+					type: "connected",
+					console_id: consoleId,
+					ts: Date.now(),
+				})
+			}\n\n`,
+		);
+	}
 
-  // Track client + store preferred format on res object
-  res.__console_format = format;
+	// Track client + store preferred format on res object
+	res.__console_format = format;
 
-  if (!consoleSSEClients.has(consoleId)) consoleSSEClients.set(consoleId, new Set());
-  consoleSSEClients.get(consoleId).add(res);
+	if (!consoleSSEClients.has(consoleId)) {
+		consoleSSEClients.set(consoleId, new Set());
+	}
+	consoleSSEClients.get(consoleId).add(res);
 
-  req.on("close", () => {
-    clearInterval(heartbeat);
-    const clients = consoleSSEClients.get(consoleId);
-    if (clients) {
-      clients.delete(res);
-      if (clients.size === 0) consoleSSEClients.delete(consoleId);
-    }
-  });
+	req.on("close", () => {
+		clearInterval(heartbeat);
+		const clients = consoleSSEClients.get(consoleId);
+		if (clients) {
+			clients.delete(res);
+			if (clients.size === 0) consoleSSEClients.delete(consoleId);
+		}
+	});
 });
 ```
 
-Then update `broadcastConsoleEvent` to emit canonical payloads when a client requested it:
+Then update `broadcastConsoleEvent` to emit canonical payloads when a client
+requested it:
 
 ```js
 function broadcastConsoleEvent(consoleId, type, data = {}) {
-  const clients = consoleSSEClients.get(consoleId);
-  if (!clients || clients.size === 0) return;
+	const clients = consoleSSEClients.get(consoleId);
+	if (!clients || clients.size === 0) return;
 
-  for (const client of clients) {
-    const format = client.__console_format || "";
+	for (const client of clients) {
+		const format = client.__console_format || "";
 
-    if (format === "payload") {
-      // Convert current wrapper -> ConsolePayload-like
-      const correlationId = data.correlation_id || data.ask_id || "";
-      const actorId = data.from || "actor";
+		if (format === "payload") {
+			// Convert current wrapper -> ConsolePayload-like
+			const correlationId = data.correlation_id || data.ask_id || "";
+			const actorId = data.from || "actor";
 
-      const payload = {
-        type: type === "console.reply" ? "reply" : "event",
-        actor_id: actorId,
-        console_id: consoleId,
-        correlation_id: correlationId,
-        content: data.content || data.prompt || data.response || "",
-        metadata: {
-          partial: type !== "console.reply",
-          tool: data.tool_name || data.tool || undefined,
-          error: data.error || undefined,
-          cas_digest: data.cas_digest || undefined,
-        },
-      };
+			const payload = {
+				type: type === "console.reply" ? "reply" : "event",
+				actor_id: actorId,
+				console_id: consoleId,
+				correlation_id: correlationId,
+				content: data.content || data.prompt || data.response || "",
+				metadata: {
+					partial: type !== "console.reply",
+					tool: data.tool_name || data.tool || undefined,
+					error: data.error || undefined,
+					cas_digest: data.cas_digest || undefined,
+				},
+			};
 
-      client.write(`data: ${JSON.stringify(payload)}\n\n`);
-    } else {
-      const event = JSON.stringify({ type, data: { ...data, console_id: consoleId }, ts: Date.now() });
-      client.write(`data: ${event}\n\n`);
-    }
-  }
+			client.write(`data: ${JSON.stringify(payload)}\n\n`);
+		} else {
+			const event = JSON.stringify({
+				type,
+				data: { ...data, console_id: consoleId },
+				ts: Date.now(),
+			});
+			client.write(`data: ${event}\n\n`);
+		}
+	}
 }
 ```
 
 This lets your Svelte client just do:
 
-* `new EventSource("/api/consoles/<id>/events?format=payload")`
-  …and it receives *exactly* what the UI expects.
+- `new EventSource("/api/consoles/<id>/events?format=payload")` …and it receives
+  _exactly_ what the UI expects.
 
 ---
 
@@ -1733,19 +1798,19 @@ Replace the **entire** current console mailbox polling `setInterval` with:
 
 ```js
 setInterval(() => {
-  if (consoleSSEClients.size === 0) return;
+	if (consoleSSEClients.size === 0) return;
 
-  const mailboxDB = join(AGENTCTL_HOME, "storage", "mailbox.db");
-  if (!existsSync(mailboxDB)) return;
+	const mailboxDB = join(AGENTCTL_HOME, "storage", "mailbox.db");
+	if (!existsSync(mailboxDB)) return;
 
-  const now = Math.floor(Date.now() / 1000);
+	const now = Math.floor(Date.now() / 1000);
 
-  try {
-    const db = new Database(mailboxDB);
+	try {
+		const db = new Database(mailboxDB);
 
-    // For each active console, pull messages addressed to that console
-    for (const [consoleId] of consoleSSEClients) {
-      const rows = db.prepare(`
+		// For each active console, pull messages addressed to that console
+		for (const [consoleId] of consoleSSEClients) {
+			const rows = db.prepare(`
         SELECT id, from_ns, to_ns, type, payload, ts, headers
         FROM mailbox
         WHERE to_ns = ?
@@ -1755,41 +1820,50 @@ setInterval(() => {
         LIMIT 200
       `).all(consoleId, now);
 
-      for (const msg of rows) {
-        let env = null;
-        let headers = null;
+			for (const msg of rows) {
+				let env = null;
+				let headers = null;
 
-        try { env = msg.payload ? JSON.parse(msg.payload) : null; } catch {}
-        try { headers = msg.headers ? JSON.parse(msg.headers) : null; } catch {}
+				try {
+					env = msg.payload ? JSON.parse(msg.payload) : null;
+				} catch {}
+				try {
+					headers = msg.headers ? JSON.parse(msg.headers) : null;
+				} catch {}
 
-        const data = env?.data || {};
-        const eventType = msg.type === "console.reply" ? "console.reply" : "console.event";
+				const data = env?.data || {};
+				const eventType = msg.type === "console.reply"
+					? "console.reply"
+					: "console.event";
 
-        broadcastConsoleEvent(consoleId, eventType, {
-          message_id: msg.id,
-          from: msg.from_ns,
-          ...data,
-          // normalize
-          ask_id: data.ask_id || headers?.ask_id || headers?.correlation_id || "",
-          correlation_id: data.correlation_id || data.ask_id || headers?.correlation_id || headers?.ask_id || "",
-        });
+				broadcastConsoleEvent(consoleId, eventType, {
+					message_id: msg.id,
+					from: msg.from_ns,
+					...data,
+					// normalize
+					ask_id: data.ask_id || headers?.ask_id ||
+						headers?.correlation_id || "",
+					correlation_id: data.correlation_id || data.ask_id ||
+						headers?.correlation_id || headers?.ask_id || "",
+				});
 
-        // ACK by deleting to prevent duplicates + DB growth
-        db.prepare(`DELETE FROM mailbox WHERE id = ?`).run(msg.id);
-      }
-    }
+				// ACK by deleting to prevent duplicates + DB growth
+				db.prepare(`DELETE FROM mailbox WHERE id = ?`).run(msg.id);
+			}
+		}
 
-    db.close();
-  } catch (err) {
-    if (Date.now() % 60000 < 500) {
-      console.debug("Console mailbox poll error:", err?.message);
-    }
-  }
+		db.close();
+	} catch (err) {
+		if (Date.now() % 60000 < 500) {
+			console.debug("Console mailbox poll error:", err?.message);
+		}
+	}
 }, 250);
 ```
 
-**Important note:** this assumes the actor daemon sends console events to `to_ns = consoleId`.
-If it currently sends them elsewhere, you should update the actor to do this (it’s the correct mailbox semantics anyway).
+**Important note:** this assumes the actor daemon sends console events to
+`to_ns = consoleId`. If it currently sends them elsewhere, you should update the
+actor to do this (it’s the correct mailbox semantics anyway).
 
 ---
 
@@ -1807,34 +1881,40 @@ If you stick with `/api/consoles`, here’s the direct mapping:
 
 So your Svelte UI should set:
 
-* `BASE = "/api/consoles"`
-* `EventSource("/api/consoles/<id>/events?format=payload")`
+- `BASE = "/api/consoles"`
+- `EventSource("/api/consoles/<id>/events?format=payload")`
 
 ---
 
 ## What’s done particularly well already
 
-* You already have `ensureAgentDaemon()` integrated into console creation and send, which is exactly what you want for “Claude Code alternative” UX.
-* You’re routing UI→actor via `mailbox.db` (correct integration point with your Go daemon model).
-* You already separated global SSE vs console SSE client sets (good architecture).
+- You already have `ensureAgentDaemon()` integrated into console creation and
+  send, which is exactly what you want for “Claude Code alternative” UX.
+- You’re routing UI→actor via `mailbox.db` (correct integration point with your
+  Go daemon model).
+- You already separated global SSE vs console SSE client sets (good
+  architecture).
 
 ---
 
 ## Next steps (what to hand to Codex/Claude)
 
-1. Apply **Patch 1–4** above (send/cancel compatibility, SSE heartbeat + `format=payload`, mailbox consume+delete).
+1. Apply **Patch 1–4** above (send/cancel compatibility, SSE heartbeat +
+   `format=payload`, mailbox consume+delete).
 2. Update the Svelte client to:
 
-   * use `/api/consoles`
-   * connect to `/api/consoles/:id/events?format=payload`
-   * send `{ content, correlation_id }` (or `{ prompt }` still works)
-
+   - use `/api/consoles`
+   - connect to `/api/consoles/:id/events?format=payload`
+   - send `{ content, correlation_id }` (or `{ prompt }` still works)
 
 ---
 
-Below is the **actual, end-to-end console message flow** in *your current code*, from SPA → Express → `mailbox.db` → Go daemon → back into `mailbox.db` → Express SSE.
+Below is the **actual, end-to-end console message flow** in _your current code_,
+from SPA → Express → `mailbox.db` → Go daemon → back into `mailbox.db` → Express
+SSE.
 
-I’ll also call out the **one critical routing mismatch** that currently prevents `console.event` / `console.reply` from reliably reaching the right SSE stream.
+I’ll also call out the **one critical routing mismatch** that currently prevents
+`console.event` / `console.reply` from reliably reaching the right SSE stream.
 
 ---
 
@@ -1842,22 +1922,25 @@ I’ll also call out the **one critical routing mismatch** that currently preven
 
 ### Browser (SPA)
 
-* Calls `/api/consoles/*`
-* Opens SSE stream `GET /api/consoles/:id/events`
-* Sends user input via `POST /api/consoles/:id/send`
+- Calls `/api/consoles/*`
+- Opens SSE stream `GET /api/consoles/:id/events`
+- Sends user input via `POST /api/consoles/:id/send`
 
 ### Express server (`packages/gui/server/index.js`)
 
-* Stores console session metadata in `~/.agentctl/storage/agents.db` → `console_sessions`
-* Writes mailbox messages directly into `~/.agentctl/storage/mailbox.db` → `mailbox`
-* Polls mailbox for `console.event` and `console.reply` and broadcasts them via SSE
+- Stores console session metadata in `~/.agentctl/storage/agents.db` →
+  `console_sessions`
+- Writes mailbox messages directly into `~/.agentctl/storage/mailbox.db` →
+  `mailbox`
+- Polls mailbox for `console.event` and `console.reply` and broadcasts them via
+  SSE
 
 ### Go daemon (`agentctl agent run <agentId>`)
 
-* Runs the actor system (`Supervisor` + `AgentActor`)
-* Claims messages from mailbox for its namespace (`to_ns = actor_id`)
-* Handles `console.ask` and `console.cmd`
-* Emits `console.event` and `console.reply` back into mailbox
+- Runs the actor system (`Supervisor` + `AgentActor`)
+- Claims messages from mailbox for its namespace (`to_ns = actor_id`)
+- Handles `console.ask` and `console.cmd`
+- Emits `console.event` and `console.reply` back into mailbox
 
 ---
 
@@ -1870,23 +1953,24 @@ I’ll also call out the **one critical routing mismatch** that currently preven
 1. Express reads `actor_id` from body.
 2. Calls `ensureAgentDaemon(actor_id, workspace, meta)`:
 
-   * Ensures `agents` table exists in `agents.db`
-   * Creates an `agents` row if needed
-   * Spawns daemon process:
+   - Ensures `agents` table exists in `agents.db`
+   - Creates an `agents` row if needed
+   - Spawns daemon process:
 
      ```js
      spawn(AGENTCTL_BIN, ["agent", "run", agentId], { detached: true, ... })
      ```
 3. Inserts console session row in `console_sessions`:
 
-   * `console_id` = `generateId()`
-   * `actor_id` = provided `actor_id`
-   * `workspace`, `meta`, etc.
+   - `console_id` = `generateId()`
+   - `actor_id` = provided `actor_id`
+   - `workspace`, `meta`, etc.
 
 ✅ At this point:
 
-* A daemon process should be running for the actor namespace (which is `agents.ns` in `agents.db`)
-* The UI has a `console_id` to use
+- A daemon process should be running for the actor namespace (which is
+  `agents.ns` in `agents.db`)
+- The UI has a `console_id` to use
 
 ---
 
@@ -1896,18 +1980,20 @@ I’ll also call out the **one critical routing mismatch** that currently preven
 
 **In-memory only**: adds `res` to `consoleSSEClients.get(consoleId)`
 
-* Express verifies the console exists in `agents.db` (`console_sessions`).
-* Sets SSE headers and immediately sends:
+- Express verifies the console exists in `agents.db` (`console_sessions`).
+- Sets SSE headers and immediately sends:
 
   ```json
   { "type": "connected", "console_id": "...", "ts": ... }
   ```
-* Adds the response object to:
+- Adds the response object to:
 
-  * `consoleSSEClients.get(consoleId)` (console-specific)
-  * `sseClients` (global set) — **but there is no heartbeat interval here**, only on `/api/events`.
+  - `consoleSSEClients.get(consoleId)` (console-specific)
+  - `sseClients` (global set) — **but there is no heartbeat interval here**,
+    only on `/api/events`.
 
-So: SSE is “connected”, but no messages will flow until the poll loop finds mailbox rows.
+So: SSE is “connected”, but no messages will flow until the poll loop finds
+mailbox rows.
 
 ---
 
@@ -1915,8 +2001,7 @@ So: SSE is “connected”, but no messages will flow until the poll loop finds 
 
 ### HTTP: `POST /api/consoles/:id/send`
 
-**Reads**: `agents.db` → `console_sessions`
-**Writes**: `mailbox.db` → `mailbox`
+**Reads**: `agents.db` → `console_sessions` **Writes**: `mailbox.db` → `mailbox`
 
 1. Express looks up console session:
 
@@ -1930,12 +2015,12 @@ So: SSE is “connected”, but no messages will flow until the poll loop finds 
 
 3. Creates an **ask message** and inserts directly into mailbox:
 
-* `from_ns = consoleId`
-* `to_ns = actor_id`  ✅ **this is how the daemon receives it**
-* `type = "console.ask"`
-* `visible_at = nowSeconds` (so it is immediately claimable)
-* `ts = nowSeconds`
-* `payload` is an **envelope JSON**:
+- `from_ns = consoleId`
+- `to_ns = actor_id` ✅ **this is how the daemon receives it**
+- `type = "console.ask"`
+- `visible_at = nowSeconds` (so it is immediately claimable)
+- `ts = nowSeconds`
+- `payload` is an **envelope JSON**:
 
   ```json
   {
@@ -1949,7 +2034,7 @@ So: SSE is “connected”, but no messages will flow until the poll loop finds 
     }
   }
   ```
-* headers include:
+- headers include:
 
   ```json
   { "correlation": "<askId>", "ask_id": "<askId>", "console_id": "<consoleId>" }
@@ -1957,8 +2042,8 @@ So: SSE is “connected”, but no messages will flow until the poll loop finds 
 
 ✅ Result: There is now a mailbox row:
 
-* `to_ns = actor_id`
-* `type = console.ask`
+- `to_ns = actor_id`
+- `type = console.ask`
 
 ---
 
@@ -1966,7 +2051,8 @@ So: SSE is “connected”, but no messages will flow until the poll loop finds 
 
 ### Go: `Supervisor` → `MailboxStore.Poll(...)` → `Actor.OnMailReceived(...)`
 
-1. Supervisor wakes up / polls mailbox for the actor namespace (details depend on Watcher + mailbox Poll implementation).
+1. Supervisor wakes up / polls mailbox for the actor namespace (details depend
+   on Watcher + mailbox Poll implementation).
 
 2. It calls:
 
@@ -1984,7 +2070,8 @@ So: SSE is “connected”, but no messages will flow until the poll loop finds 
 
 4. `BaseActor.OnMailReceived` dispatches by `msg.Subject`:
 
-   * For mailbox rows, the `type` column becomes `msg.Subject` (your actor is registering `"console.ask"`, `"console.cmd"` handlers, so this matches).
+   - For mailbox rows, the `type` column becomes `msg.Subject` (your actor is
+     registering `"console.ask"`, `"console.cmd"` handlers, so this matches).
 
 ✅ Therefore the ask hits:
 
@@ -2006,7 +2093,7 @@ json.Unmarshal(msg.Body, &env)
 askData := env.Data
 ```
 
-* Correlation id is derived from headers:
+- Correlation id is derived from headers:
 
   ```go
   correlID := msg.Headers["correlation"]
@@ -2015,9 +2102,9 @@ askData := env.Data
 
 #### 5.2 Cancellation wiring
 
-* Creates `execCtx, cancel := context.WithTimeout(ctx, timeout)`
-* Stores `cancel` in `a.cancelFuncs[askID]`
-* `console.cmd cancel` later calls that cancel()
+- Creates `execCtx, cancel := context.WithTimeout(ctx, timeout)`
+- Stores `cancel` in `a.cancelFuncs[askID]`
+- `console.cmd cancel` later calls that cancel()
 
 #### 5.3 Emit streaming events (`console.event`)
 
@@ -2027,17 +2114,18 @@ When it calls:
 a.emitConsoleEvent(msg.FromNS, askData.AskID, correlID, 1, 0, "progress", "Starting execution...")
 ```
 
-**Important:** `msg.FromNS` for the ask is the console id, because Express inserted `from_ns = consoleId`.
+**Important:** `msg.FromNS` for the ask is the console id, because Express
+inserted `from_ns = consoleId`.
 
 So the daemon emits events to **ToNS = consoleId**.
 
 `emitConsoleEvent` builds:
 
-* subject `console.event`
-* ToNS = `toNS` argument (consoleId)
-* FromNS = actor namespace
-* Headers = `{ "correlation": correlID, "ask_id": askID }`
-* Envelope payload is `envelope.OK("console.event", ConsoleEventData{...})`
+- subject `console.event`
+- ToNS = `toNS` argument (consoleId)
+- FromNS = actor namespace
+- Headers = `{ "correlation": correlID, "ask_id": askID }`
+- Envelope payload is `envelope.OK("console.event", ConsoleEventData{...})`
 
 Then it calls:
 
@@ -2056,11 +2144,12 @@ setter.SetReplySender(func(ctx context.Context, msg *Message) error {
 })
 ```
 
-So `emitConsoleEvent(...)` → `sendReply` → `mailbox.Send` → inserts mailbox row with:
+So `emitConsoleEvent(...)` → `sendReply` → `mailbox.Send` → inserts mailbox row
+with:
 
-* `to_ns = consoleId` ✅
-* `type = "console.event"`
-* payload = envelope JSON
+- `to_ns = consoleId` ✅
+- `type = "console.event"`
+- payload = envelope JSON
 
 #### 5.5 Final reply (`console.reply`)
 
@@ -2076,7 +2165,8 @@ return &Message{
 
 Then `BaseActor.OnMailReceived` sends it via `BaseActor.Reply(...)`.
 
-**Key detail**: `BaseActor.Reply(...)` routes replies back to the original sender:
+**Key detail**: `BaseActor.Reply(...)` routes replies back to the original
+sender:
 
 ```go
 reply.ToNS = original.FromNS // original.FromNS == consoleId
@@ -2085,8 +2175,8 @@ reply.FromNS = actor.Namespace()
 
 So the final `console.reply` is also inserted into mailbox with:
 
-* `to_ns = consoleId` ✅
-* `type = "console.reply"`
+- `to_ns = consoleId` ✅
+- `type = "console.reply"`
 
 ---
 
@@ -2107,29 +2197,31 @@ LIMIT 50
 
 Then it tries to determine the console id like this:
 
-* `headers.console_id`, else
-* `envelope.data.console_id`
+- `headers.console_id`, else
+- `envelope.data.console_id`
 
 ### ⚠️ Critical mismatch: daemon does NOT include `console_id` in headers or payload
 
 From the Go code:
 
-* `ConsoleEventData` does **not** include `ConsoleID`
-* `ConsoleReplyData` does **not** include `ConsoleID`
-* `emitConsoleEvent` headers do **not** include `console_id`
-* `handleConsoleAsk` reply headers only include `correlation`
-* `BaseActor.Reply` will **not copy** the original ask headers unless `reply.Headers == nil` (but reply.Headers is non-nil)
+- `ConsoleEventData` does **not** include `ConsoleID`
+- `ConsoleReplyData` does **not** include `ConsoleID`
+- `emitConsoleEvent` headers do **not** include `console_id`
+- `handleConsoleAsk` reply headers only include `correlation`
+- `BaseActor.Reply` will **not copy** the original ask headers unless
+  `reply.Headers == nil` (but reply.Headers is non-nil)
 
 ✅ The daemon’s **only reliable routing key** is:
 
-* `to_ns == consoleId`
+- `to_ns == consoleId`
 
-So the Express poller should route using `msg.to_ns`, not `headers.console_id` nor `payload.data.console_id`.
+So the Express poller should route using `msg.to_ns`, not `headers.console_id`
+nor `payload.data.console_id`.
 
 That’s also why I previously recommended switching the poll loop to:
 
-* either query `WHERE to_ns = consoleId`
-* or at minimum `consoleId = msg.to_ns`
+- either query `WHERE to_ns = consoleId`
+- or at minimum `consoleId = msg.to_ns`
 
 ---
 
@@ -2137,18 +2229,19 @@ That’s also why I previously recommended switching the poll loop to:
 
 ### HTTP: `POST /api/consoles/:id/cancel`
 
-* Writes mailbox row:
+- Writes mailbox row:
 
-  * `from_ns = consoleId`
-  * `to_ns = actor_id`
-  * `type = "console.cmd"`
-  * payload envelope `console.cmd` with `{ action:"cancel", ask_id }`
+  - `from_ns = consoleId`
+  - `to_ns = actor_id`
+  - `type = "console.cmd"`
+  - payload envelope `console.cmd` with `{ action:"cancel", ask_id }`
 
 ### Go: `AgentActor.handleConsoleCmd`
 
-* Extract ask_id
-* Finds `a.cancelFuncs[askID]` and calls cancel()
-* `handleConsoleAsk` sees `context.Canceled` and returns a `console.reply` with `status = "cancelled"`
+- Extract ask_id
+- Finds `a.cancelFuncs[askID]` and calls cancel()
+- `handleConsoleAsk` sees `context.Canceled` and returns a `console.reply` with
+  `status = "cancelled"`
 
 ---
 
@@ -2176,12 +2269,12 @@ You can fix it in either place:
 
 ### Option A (recommended): Express routes by `to_ns`
 
-* In the poll loop, set:
+- In the poll loop, set:
 
   ```js
   const consoleId = msg.to_ns;
   ```
-* Or query per-console:
+- Or query per-console:
 
   ```sql
   WHERE to_ns = ? AND type IN (...)
@@ -2189,9 +2282,9 @@ You can fix it in either place:
 
 ### Option B: Daemon includes `console_id` in every event/reply
 
-* Add `ConsoleID` field to `ConsoleEventData` / `ConsoleReplyData`, or
-* Add header `console_id` in `emitConsoleEvent`, and ensure replies copy it.
+- Add `ConsoleID` field to `ConsoleEventData` / `ConsoleReplyData`, or
+- Add header `console_id` in `emitConsoleEvent`, and ensure replies copy it.
 
-Option A is cleaner: mailbox already *is* the router (`to_ns`).
+Option A is cleaner: mailbox already _is_ the router (`to_ns`).
 
 ---

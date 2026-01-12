@@ -529,11 +529,22 @@ function spawnAgentDaemon(agentId, actorId) {
   try {
     console.log(`Spawning daemon for agent ${agentId} (${actorId})`);
 
+    // Get LLM config to pass API key to daemon
+    const llmConfig = detectLLMProvider();
+    const daemonEnv = { ...process.env };
+
+    // Ensure AGENTCTL_LLM_API_KEY is set for the daemon
+    if (llmConfig?.apiKey && !daemonEnv.AGENTCTL_LLM_API_KEY) {
+      daemonEnv.AGENTCTL_LLM_API_KEY = llmConfig.apiKey;
+      daemonEnv.AGENTCTL_LLM_PROVIDER = llmConfig.provider;
+      daemonEnv.AGENTCTL_LLM_MODEL = llmConfig.model;
+    }
+
     // Spawn detached process
     const daemonProc = spawn(AGENTCTL_BIN, ["agent", "run", agentId], {
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: daemonEnv,
     });
 
     // Track the process
