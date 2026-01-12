@@ -30,7 +30,8 @@ func TestSkillsInstallCommandInstallsExecSkill(t *testing.T) {
 		t.Fatalf("install command: %v (stderr=%s)", err, stderr.String())
 	}
 
-	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep"))
+	// Installer normalizes skill names: text/grep -> text_grep (flat directory)
+	dest := filepath.Join(cfg.Paths.Skills, "text_grep")
 	if _, err := os.Stat(filepath.Join(dest, "skill.yaml")); err != nil {
 		t.Fatalf("expected skill.yaml to be installed: %v", err)
 	}
@@ -44,7 +45,8 @@ func TestSkillsInstallCommandInstallsExecSkill(t *testing.T) {
 	if got := data["version"]; got != "0.1.0" {
 		t.Fatalf("unexpected skill version: %v", got)
 	}
-	if got := data["path"]; got != filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep")) {
+	// Path uses normalized name (text_grep) not canonical name (text/grep)
+	if got := data["path"]; got != filepath.Join(cfg.Paths.Skills, "text_grep") {
 		t.Fatalf("unexpected skill path: %v", got)
 	}
 }
@@ -196,14 +198,15 @@ func TestSkillsUninstallCommandRemovesSkill(t *testing.T) {
 		t.Fatalf("skills uninstall: %v (stderr=%s)", err, stderr.String())
 	}
 
-	if _, err := os.Stat(filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep"))); !os.IsNotExist(err) {
+	// Uninstall removes normalized path (text_grep)
+	if _, err := os.Stat(filepath.Join(cfg.Paths.Skills, "text_grep")); !os.IsNotExist(err) {
 		t.Fatalf("expected skill directory removed, got err=%v", err)
 	}
 	data := decodeEnvelopeData(t, stdout.Bytes())
 	if got := data["name"]; got != "text/grep" {
 		t.Fatalf("unexpected uninstall name: %v", got)
 	}
-	if got := data["path"]; got != filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep")) {
+	if got := data["path"]; got != filepath.Join(cfg.Paths.Skills, "text_grep") {
 		t.Fatalf("unexpected uninstall path: %v", got)
 	}
 }
@@ -234,7 +237,8 @@ func TestSkillsUpgradeCommandUpdatesManifest(t *testing.T) {
 		t.Fatalf("skills upgrade: %v (stderr=%s)", err, stderr.String())
 	}
 
-	installed, err := os.ReadFile(filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep"), "skill.yaml"))
+	// Upgrade writes to normalized path (text_grep)
+	installed, err := os.ReadFile(filepath.Join(cfg.Paths.Skills, "text_grep", "skill.yaml"))
 	if err != nil {
 		t.Fatalf("read installed manifest: %v", err)
 	}
@@ -248,7 +252,7 @@ func TestSkillsUpgradeCommandUpdatesManifest(t *testing.T) {
 	if got := envData["version"]; got != "0.2.0" {
 		t.Fatalf("unexpected upgrade version: %v", got)
 	}
-	if got := envData["path"]; got != filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep")) {
+	if got := envData["path"]; got != filepath.Join(cfg.Paths.Skills, "text_grep") {
 		t.Fatalf("unexpected upgrade path: %v", got)
 	}
 }

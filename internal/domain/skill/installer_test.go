@@ -90,9 +90,9 @@ func TestInstaller_Install_ExecSkill(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test/skill", handle.Name)
 
-	// Verify files were copied
-	expectedManifest := filepath.Join(installRoot, "test", "skill", "skill.yaml")
-	expectedBinary := filepath.Join(installRoot, "test", "skill", "bin")
+	// Verify files were copied to normalized path (test/skill -> test_skill)
+	expectedManifest := filepath.Join(installRoot, "test_skill", "skill.yaml")
+	expectedBinary := filepath.Join(installRoot, "test_skill", "bin")
 
 	assert.FileExists(t, expectedManifest)
 	assert.FileExists(t, expectedBinary)
@@ -116,9 +116,9 @@ func TestInstaller_Install_WASISkill(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "test/skill", handle.Name)
 
-	// Verify files were copied
-	expectedManifest := filepath.Join(installRoot, "test", "skill", "skill.yaml")
-	expectedModule := filepath.Join(installRoot, "test", "skill", "module.wasm")
+	// Verify files were copied to normalized path (test/skill -> test_skill)
+	expectedManifest := filepath.Join(installRoot, "test_skill", "skill.yaml")
+	expectedModule := filepath.Join(installRoot, "test_skill", "module.wasm")
 
 	assert.FileExists(t, expectedManifest)
 	assert.FileExists(t, expectedModule)
@@ -164,8 +164,8 @@ func TestInstaller_Install_ForceReinstall(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify files still exist
-	expectedManifest := filepath.Join(installRoot, "test", "skill", "skill.yaml")
+	// Verify files still exist at normalized path
+	expectedManifest := filepath.Join(installRoot, "test_skill", "skill.yaml")
 	assert.FileExists(t, expectedManifest)
 }
 
@@ -302,8 +302,8 @@ func TestInstaller_Install_FileSchemeStripped(t *testing.T) {
 
 	require.NoError(t, err)
 
-	// Verify installation succeeded
-	expectedManifest := filepath.Join(installRoot, "test", "skill", "skill.yaml")
+	// Verify installation succeeded at normalized path
+	expectedManifest := filepath.Join(installRoot, "test_skill", "skill.yaml")
 	assert.FileExists(t, expectedManifest)
 }
 
@@ -336,11 +336,11 @@ func TestInstaller_Uninstall(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Verify installation
-	skillDir := filepath.Join(installRoot, "test", "skill")
+	// Verify installation at normalized path
+	skillDir := filepath.Join(installRoot, "test_skill")
 	assert.DirExists(t, skillDir)
 
-	// Uninstall
+	// Uninstall using canonical name (should work via normalization)
 	err = installer.Uninstall("test/skill")
 	require.NoError(t, err)
 
@@ -377,7 +377,7 @@ func TestInstaller_Install_CleanupOnArtifactFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "binary path required")
 
-	// Verify the skill directory was cleaned up
-	skillDir := filepath.Join(installRoot, "test", "skill")
+	// Verify the skill directory was cleaned up (uses normalized path)
+	skillDir := filepath.Join(installRoot, "test_skill")
 	assert.NoDirExists(t, skillDir)
 }

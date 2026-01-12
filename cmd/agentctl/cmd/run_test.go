@@ -68,7 +68,8 @@ func installTextGrepSkill(t *testing.T) config.Config {
 		}
 	}
 
-	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("text/grep"))
+	// Use normalized path (text_grep) to match how the Installer creates directories
+	dest := filepath.Join(cfg.Paths.Skills, "text_grep")
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatalf("skill dir: %v", err)
 	}
@@ -84,7 +85,8 @@ func installTextGrepSkill(t *testing.T) config.Config {
 
 func installHTTPOpenAPISkill(t *testing.T, cfg config.Config) {
 	t.Helper()
-	dest := filepath.Join(cfg.Paths.Skills, filepath.FromSlash("http/openapi"))
+	// Use normalized path (http_openapi) to match how the Installer creates directories
+	dest := filepath.Join(cfg.Paths.Skills, "http_openapi")
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatalf("skill dir: %v", err)
 	}
