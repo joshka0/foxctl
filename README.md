@@ -1,583 +1,435 @@
 # agentctl
 
-> **Bash for LLMs** — A single-binary CLI for structured, deterministic AI
-> workflows
+> **AI Agent Toolkit** — Skills, memory, hooks, and orchestration for AI coding assistants
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/jkatigb/agentctl)](https://goreportcard.com/report/github.com/jkatigb/agentctl)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
 [![Go Version](https://img.shields.io/badge/go-1.22+-blue.svg)](https://golang.org/dl/)
 
-**agentctl** implements the [Core Profile v1](docs/spec/core_profile_v1.md)
-specification, providing a universal toolkit for building reliable, reproducible
-AI-powered workflows with structured JSON I/O, content-addressable storage, and
-deterministic caching.
+**agentctl** provides infrastructure for AI coding assistants: discoverable skills,
+persistent memory, hook-based context injection, semantic code search, and
+multi-agent orchestration.
 
 ---
 
-## 🎯 What is agentctl?
+## What is agentctl?
 
-Think of agentctl as **Unix pipelines for AI agents**. It provides:
+```mermaid
+flowchart LR
+    subgraph "AI Assistants"
+        CC[Claude Code]
+        OC[Opencode]
+        CX[Codex]
+    end
 
-- **Structured I/O**: Canonical JSON envelopes (Version 1) for deterministic
-  communication
-- **Skills**: Discoverable, sandboxed tools (like bash commands) that AI agents
-  can invoke
-- **Job Persistence**: Durable async execution with crash recovery and progress
-  tracking
-- **Content-Addressable Storage (CAS)**: SHA-256 integrity for large outputs
-- **Memory System**: Auto-cache (24h TTL) + named persistent memories for
-  context reuse
-- **Universal API Client**: Call any OpenAPI 3.x REST API without code
-  generation (in development)
+    subgraph "agentctl"
+        H[Hooks]
+        S[Skills]
+        M[Memory]
+        I[Index]
+    end
 
-### Design Principles
+    subgraph "Storage"
+        DB[(SQLite)]
+        CAS[CAS]
+        VEC[Vectors]
+    end
 
-1. **Token Efficiency**: Large outputs go to CAS, only summaries in envelopes
-2. **Deterministic**: Same inputs → same outputs (via cryptographic caching)
-3. **Memory-First**: Recent work auto-cached, important work explicitly named
-4. **Zero Config**: Works out-of-the-box, advanced features opt-in
-5. **Composable**: Unix-style piping, digest chaining, skill composition
-6. **Secure**: Workspace confinement, egress policies, path validation
+    CC --> H
+    OC --> H
+    CX --> H
+    H --> S
+    S --> M
+    S --> I
+    M --> DB
+    M --> CAS
+    I --> VEC
+```
+
+**Core capabilities:**
+
+- **Skills** — Discoverable tools (code analysis, semantic search, LSP, mobile automation)
+- **Hooks** — Context injection at tool boundaries (PreToolUse, PostToolUse, SessionStart)
+- **Memory** — Persistent gotchas, decisions, and learnings with vector search
+- **Sessions** — Context preservation across compaction with lineage tracking
+- **Codemaps** — AI-generated semantic code traces with mermaid diagrams
+- **MCP Server** — Expose skills as MCP tools via SSE for any client
 
 ---
 
-## 🚀 Quick Start
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph CLI["CLI Layer"]
+        CMD[agentctl commands]
+        MCP[MCP Server]
+    end
+
+    subgraph Skills["Skills System"]
+        SR[Skill Resolver]
+        EX[Exec Runner]
+        WA[WASI Runner]
+    end
+
+    subgraph Hooks["Hook System"]
+        PRE[PreToolUse]
+        POST[PostToolUse]
+        SESS[SessionStart]
+        STOP[Stop]
+    end
+
+    subgraph Storage["Storage Layer"]
+        MEM[(memory.db)]
+        TASK[(tasks.db)]
+        SESDB[(sessions.db)]
+        CASDB[CAS sha256]
+    end
+
+    subgraph Agents["Agent System"]
+        DSPY[dspy-go ReAct]
+        CMAP[Codemap Agent]
+    end
+
+    CMD --> SR
+    CMD --> Hooks
+    MCP --> SR
+    SR --> EX
+    SR --> WA
+    EX --> Storage
+    WA --> Storage
+    Hooks --> Skills
+    DSPY --> Skills
+    CMAP --> DSPY
+```
+
+### Directory Structure
+
+```
+agentctl/
+├── cmd/agentctl/           # CLI (Cobra commands)
+├── internal/
+│   ├── domain/             # Core types (envelope, skill, policy)
+│   ├── storage/            # SQLite, CAS, vector stores
+│   ├── execution/          # Skill runners (exec, WASI)
+│   ├── codemap/            # Codemap agent system
+│   ├── codecontext/        # Code snippet extraction
+│   └── platform/           # Config, workspace, logging
+├── skills/                 # Skill implementations
+├── configs/
+│   ├── hooks/              # Claude Code hooks
+│   ├── skills/             # Skill documentation
+│   └── agents/             # Agent profiles
+├── packages/               # TypeScript (GUI, TUI, API)
+└── docs/                   # Specifications and guides
+```
+
+---
+
+## Quick Start
 
 ### Installation
 
 ```bash
-# From source (requires Go 1.22+)
 git clone https://github.com/jkatigb/agentctl.git
 cd agentctl
 make build
-./agentctl version
+make skills-install
 
-# Build bundled skills
-make skills-build
+# Set up hooks for Claude Code
+./scripts/init.sh
+```
+
+### Environment Setup
+
+```bash
+# Required for semantic search
+export VOYAGE_API_KEY=...
+
+# Optional: For codemap generation
+export ANTHROPIC_API_KEY=...
+# or
+export OPENROUTER_API_KEY=...
 ```
 
 ### Basic Usage
 
 ```bash
-# List files in a directory
-agentctl run fs/ls --path ./src
+# Run a skill
+agentctl run code/symbols --input '{"path": "main.go"}'
 
-# Search for patterns
-agentctl run text/grep --pattern "TODO" --path ./src
+# Semantic code search
+agentctl run code/semantic_search --input '{"query": "error handling", "limit": 10}'
 
-# Read a file with automatic preview
-agentctl run fs/read --path ./main.go
+# Task management
+agentctl todo add --title "Implement feature" --description "Details..."
+agentctl todo list -f table
 
-# Manage tasks with dependencies
-agentctl run todo/manage --input '{"operation":"add","title":"Implement feature X"}'
+# Memory operations
+agentctl memory put --name "gotcha-auth" --type "gotcha" --summary "Watch out for..."
+agentctl memory search "authentication"
 
-# Discover example usage
-agentctl run --examples
-agentctl run todo/manage --examples
-agentctl ci --examples
+# Generate a codemap
+agentctl codemap generate "trace user authentication flow"
 ```
 
-### Working with Jobs (Async)
+---
+
+## Skills
+
+Skills are the primary interface for AI assistants to interact with code and infrastructure.
+
+| Category | Skills | Description |
+|----------|--------|-------------|
+| **Code Analysis** | `code/symbols`, `code/complexity`, `code/imports` | Extract symbols, measure complexity, analyze imports |
+| **Code Search** | `code/semantic_search`, `code/smart_search`, `code/context_ripgrep` | Vector search, smart candidate generation, full function bodies |
+| **Code Editing** | `code/smart_write`, `code/snippet_extract` | Symbol-based editing, code extraction |
+| **Testing** | `test/run` | Run tests with coverage |
+| **LSP** | `lsp/gopls` | Go language server operations |
+| **Mobile** | `mobile/ios`, `mobile/android` | Simulator/emulator automation |
+| **Sessions** | `session/restore`, `session/summarize`, `session/recall` | Context preservation |
+| **Memory** | `memory/put`, `memory/search`, `memory/query` | Persistent knowledge |
+| **Codemaps** | `codemap/generate`, `codemap/search` | Semantic code traces |
 
 ```bash
-# Submit a long-running job
-JOB_ID=$(agentctl jobs submit text/grep --pattern "error" --path ./logs | jq -r '.data.job_id')
+# List all available skills
+agentctl skills list
 
-# Tail progress in real-time
-agentctl jobs tail $JOB_ID
-
-# Get final result
-agentctl jobs result $JOB_ID
+# Get skill details
+agentctl skills info code/semantic_search
 ```
 
-### Using Memory
+---
+
+## Hook System
+
+Hooks inject context at tool boundaries in AI coding sessions.
+
+```mermaid
+flowchart LR
+    subgraph "Claude Code"
+        TP[Tool Call]
+    end
+
+    subgraph "PreToolUse Hooks"
+        SS[semantic-search]
+        FMR[file-memory-recall]
+        OI[overseer-inbox]
+    end
+
+    subgraph "PostToolUse Hooks"
+        RCS[read-context-suggestions]
+        LD[lsp-diagnostics]
+        MP[memory-prompt]
+    end
+
+    TP --> SS
+    TP --> FMR
+    TP --> OI
+    SS --> TP
+    FMR --> TP
+    OI --> TP
+    TP --> RCS
+    TP --> LD
+    TP --> MP
+```
+
+### Active Hooks
+
+| Event | Hook | Purpose |
+|-------|------|---------|
+| PreToolUse | `semantic-search` | Vector search on Grep/Glob |
+| PreToolUse | `file-memory-recall` | Surface memories before editing |
+| PreToolUse | `overseer-inbox` | Human-in-the-loop messages |
+| PostToolUse | `read-context-suggestions` | Suggest context after reading code |
+| PostToolUse | `lsp-diagnostics` | Show LSP errors after editing |
+| SessionStart | `session-restore` | Restore context on resume |
+| PreCompact | `session-summarize` | Extract learnings before compaction |
+| Stop | `todo-continuation` | Block stop if tasks remain |
+
+---
+
+## Memory System
+
+Persistent knowledge storage with vector search.
 
 ```bash
-# Run a skill and remember the result
-agentctl run fs/ls --path ./src --remember project-structure
-
-# Retrieve from memory
-agentctl memory get project-structure
+# Store a gotcha
+agentctl memory put \
+  --name "gotcha-session-archives" \
+  --type "gotcha" \
+  --summary "Session JSONL files are gzipped in archives"
 
 # Search memories
-agentctl memory search "project structure"
+agentctl memory search "session archives"
+
+# Types: gotcha, decision, pattern, learning, reference
 ```
 
-### Content-Addressable Storage
+### Memory Types
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `gotcha` | Pitfalls and warnings | "Skills must call config.LoadDotEnv()" |
+| `decision` | Architectural choices | "Using Voyage AI for embeddings (better benchmarks)" |
+| `pattern` | Code patterns | "TOCTOU-safe file reading pattern" |
+| `learning` | Discovered knowledge | "Session lineage via parent_session_id" |
+
+---
+
+## Session Management
+
+Sessions track context across compaction boundaries.
+
+```mermaid
+flowchart TD
+    S1[Session 1] --> |compaction| W1[Window 1]
+    S1 --> |compaction| W2[Window 2]
+    S1 --> |fork| S2[Session 2]
+    S2 --> |compaction| W3[Window 3]
+
+    W1 --> |summarize| L1[Learnings]
+    W2 --> |summarize| L2[Learnings]
+    W3 --> |summarize| L3[Learnings]
+```
 
 ```bash
-# Store large content
-DIGEST=$(agentctl cas put < large-file.json)
+# View session chain
+agentctl sessions chain
 
-# Retrieve by digest
-agentctl cas get $DIGEST
+# Restore context
+agentctl run session/restore --input '{"session_id": "..."}'
 
-# Pin important artifacts (prevent GC)
-agentctl cas pin $DIGEST
+# Summarize session learnings
+agentctl run session/summarize --input '{"session_id": "..."}'
 ```
 
 ---
 
-## ✨ Key Features
+## Codemaps
 
-### 📦 Structured JSON Envelopes
-
-All I/O uses a canonical envelope format for deterministic communication:
-
-```json
-{
-  "version": 1,
-  "command": "fs/ls",
-  "status": "ok",
-  "data": {
-    "files": ["main.go", "README.md"]
-  },
-  "meta": {
-    "source": "run",
-    "timestamp": "2025-11-14T12:00:00Z"
-  }
-}
-```
-
-### 🔧 Built-in Skills
-
-| Skill          | Purpose                           | Distribution          |
-| -------------- | --------------------------------- | --------------------- |
-| `fs/ls`        | List directory contents           | exec                  |
-| `fs/read`      | Read files with preview           | exec                  |
-| `text/grep`    | Regex search across files         | exec                  |
-| `todo/manage`  | Task management with dependencies | exec                  |
-| `wasi/echo`    | WASM demo skill                   | WASI                  |
-| `http/openapi` | Universal REST API client         | exec (in development) |
-
-### 💾 Content-Addressable Storage
-
-Large outputs automatically stored with SHA-256 integrity:
+AI-generated semantic code traces.
 
 ```bash
-# Small response - inline
-agentctl run fs/read --path small.txt
-# → {"data": {"content": "..."}}
+# Generate a codemap
+agentctl codemap generate "trace the skill execution flow"
 
-# Large response - CAS with summary
-agentctl run fs/read --path large.json
-# → {"data": {"digest": "sha256:abc123...", "preview": "...", "size": 1048576}}
+# Search existing codemaps
+agentctl codemap search "authentication"
 ```
 
-### 📋 Durable Job Execution
+Codemaps include:
+- **ASCII Trees** — Hierarchical file/function traces
+- **Mermaid Diagrams** — Visual flowcharts
+- **Annotations** — Detailed explanations with file:line references
+
+---
+
+## MCP Server
+
+Expose skills as MCP tools for any client.
 
 ```bash
-# Jobs persist across crashes
-agentctl jobs submit http/openapi --spec memory:github --operationId listRepos
+# Start MCP server
+agentctl mcp serve
 
-# Automatic deduplication
-agentctl jobs submit --dedupe text/grep --pattern "error"
+# Check status
+agentctl mcp status
 
-# Cancel running jobs
-agentctl jobs cancel <job-id>
+# Stop server
+agentctl mcp stop
 ```
 
-### 🧠 Memory System
+The MCP server exposes all available skills as MCP tools via SSE transport,
+allowing any MCP-compatible client to discover and invoke them.
 
-Two memory types:
+---
 
-1. **Auto-cache** (24h TTL): Currently disabled
-2. **Named memory**: Explicitly saved, persistent, workspace-scoped
+## GUI & TUI
+
+### Web GUI
 
 ```bash
-# Cache mode
-agentctl run fs/ls --cache off    # Cache is currently disabled
-
-# Named memory with metadata
-agentctl memory save api-spec \
-  --content "$(cat openapi.yaml)" \
-  --tags "api,v1,production"
+# Start API server + Web GUI
+make ts-dev-gui
+# Open http://localhost:5173
 ```
 
-### 🌐 OpenAPI Skill (In Development)
-
-Universal REST API client without code generation:
+### Terminal UI
 
 ```bash
-# Import an OpenAPI spec
-agentctl openapi import https://api.github.com/openapi.yaml --as github
-
-# Call any operation
-agentctl run http/openapi \
-  --spec memory:github \
-  --operationId repos/listForUser \
-  --params '{"username": "torvalds"}' \
-  --auth '{"type": "bearer", "token": "$GITHUB_TOKEN"}'
-
-# Automatic pagination
-agentctl run http/openapi \
-  --spec memory:stripe \
-  --operationId CustomerList \
-  --paging '{"strategy": "cursor", "max_pages": 10}'
+# Start TUI (requires API server)
+AGENTCTL_API_URL=http://localhost:8090 bun run --cwd packages/tui dev
 ```
 
-**Status**: Core loader and auth in progress (see
-[docs/roadmap.md](docs/roadmap.md))
+| Key | View | Description |
+|-----|------|-------------|
+| 1 | Jobs | Job queue with status |
+| 2 | Tasks | Task list with dependencies |
+| 3 | Insights | PageRank, critical path |
+| 4 | Mailbox | Actor messages |
+| 5 | Search | Full-text search |
 
 ---
 
-## 🏗️ Architecture
-
-### Layered Structure
-
-```
-internal/
-├── domain/          # Pure business logic (no external deps)
-│   ├── envelope/   # JSON envelope types & validation
-│   ├── skill/      # Skill manifests & discovery
-│   └── policy/     # Security policies (path validation, egress)
-│
-├── storage/        # Persistence layer
-│   ├── cas/        # Content-addressable storage (SHA-256)
-│   ├── cache/      # Auto-cache (24h TTL)
-│   ├── memory/     # Named memories
-│   └── jobs/       # Job state & execution
-│
-├── execution/      # Skill runners
-│   ├── exec/       # Native process executor (with rlimits)
-│   └── wasi/       # WASM executor (wazero, pure Go)
-│
-├── adapters/       # External integrations
-│   ├── artifacts/  # Artifact lifecycle management
-│   └── skillslib/  # Skill execution helpers
-│
-└── platform/       # Infrastructure
-    ├── config/     # Configuration (Viper)
-    ├── logging/    # Structured logging (Zerolog)
-    ├── secrets/    # Secrets redaction
-    └── workspace/  # Workspace detection
-```
-
-### Skill Execution Flow
-
-```
-User Command
-    ↓
-Skill Discovery (internal/domain/skill)
-    ↓
-Job Submission (internal/storage/jobs)
-    ↓
-Executor Selection (internal/execution)
-    ├─→ WASI Runner (network isolated)
-    └─→ Exec Runner (rlimits, ephemeral /work)
-    ↓
-Policy Enforcement (workspace confinement)
-    ↓
-CAS Storage (large outputs)
-    ↓
-JSON Envelope Output
-```
-
-See `docs/spec/review_semantic_trajectory_specs.md` for how the review gate,
-post-review handler, semantic/symbol index, SWE Grep, and trajectory capture fit
-into this execution pipeline.
-
----
-
-## 📊 Current Status
-
-### Phase Completion
-
-| Phase           | Status  | Features                                                    |
-| --------------- | ------- | ----------------------------------------------------------- |
-| 0-2: Foundation | ✅ 100% | Bootstrap, envelopes, CAS, CLI                              |
-| 3: Jobs         | ✅ 100% | SQLite persistence, async execution, crash recovery         |
-| 4: Runners      | ✅ 100% | WASI + exec, skill manifests, sandboxing                    |
-| 5: Memory       | ✅ 100% | Auto-cache, named memories, search                          |
-| **6: OpenAPI**  | 🚧 5%   | **Spec loader, request builder, HTTP client (in progress)** |
-| 7: Plugins      | 🔜 0%   | Custom auth/pagination (deferred to v1.1)                   |
-| 8: UX           | 🔜 75%  | Docs, golden tests, polish                                  |
-
-**Overall Progress**: ~60% toward v1.0
-
-### What's Working
-
-- ✅ All core infrastructure (envelopes, CAS, jobs, memory)
-- ✅ Skill execution (WASI + exec runners)
-- ✅ 6 built-in skills (fs/ls, fs/read, text/grep, todo/manage, wasi/echo,
-  http/openapi stub)
-- ✅ Deterministic caching with 24h TTL
-- ✅ SQLite-backed persistence
-- ✅ ~70% test coverage with strict CI/CD
-
-### What's In Progress
-
-- 🚧 OpenAPI skill implementation (SPEC-012 through SPEC-016)
-  - Spec loader (file, CAS, memory sources)
-  - Request builder (parameter validation)
-  - HTTP client (response processing, CAS integration)
-  - Pagination (Link headers, cursor, offset/limit)
-  - Retry logic (exponential backoff)
-
-See [docs/roadmap.md](docs/roadmap.md) for detailed timeline.
-
----
-
-## 📚 Documentation
-
-### Core Specifications
-
-- **[Protocol v1](docs/spec/protocol_v1.md)** — Canonical wire contract
-  (envelope, commands, errors, artifactization)
-- **[Core Profile v1](docs/spec/core_profile_v1.md)** — Complete agentctl
-  specification
-- **[OpenAPI Skill](docs/spec/openapi_skill.md)** — Universal REST API client
-  (implementation in progress)
-- **[Plugin Protocol v1](docs/spec/plugin_protocol.md)** — Extensibility via
-  auth/pagination plugins
-- **[Agent Profile v1](docs/spec/agent_profile_v1.md)** — Multi-agent
-  orchestration (optional, v1.1+)
-
-### Implementation Guides
-
-- **[Protocol v1 Implementation](docs/guides/protocol_v1_implementation.md)** —
-  Build-out plan, code organization, acceptance criteria
-- **[Agent Loop Guide](docs/guides/agent_loop.md)** — Using agentctl as LLM
-  agent substrate
-- **[docs/roadmap.md](docs/roadmap.md)** — High-level roadmap and timeline
-- **[Refactoring Specs](docs/refactoring/README.md)** — Detailed implementation
-  specs (SPEC-001 through SPEC-019)
-- **[AGENTS.md](AGENTS.md)** — Guide for AI coding assistants
-
-### Examples
-
-- **[Minimum Workflow Skills](docs/examples/minimum_workflow_skills.md)** —
-  Essential skills guide
-- **[Skills Chain](docs/examples/skills_chain.md)** — Composing skills together
-
----
-
-## 🛠️ Development
-
-### Prerequisites
-
-- **Go 1.22+** (modules enabled, `CGO_ENABLED=0` for pure Go builds)
-- **Make** (optional, for convenience targets)
-- **golangci-lint** (for linting)
-- **gofumpt** (for formatting)
-
-### Building
+## Development
 
 ```bash
-# Build CLI
-make build
-# → ./agentctl
+# Build
+make build              # Pure Go
+make build-cgo          # With CGO (required for Turso)
+make skills-install     # Build and install skills
 
-# Build skills
-make skills-build
-# → ./dist/skills/*/
+# Test
+make test               # Unit tests
+make test-race          # Race detection
+make lint               # Linting
 
-# Run tests
-make test
-
-# Run with race detection
-make test-race
-
-# Check coverage (target: 85%)
-make cover
-
-# Lint
-make lint
-
-# Format
-make fmt
-
-# All checks (format, lint, vet, test)
-make check
+# TypeScript
+bun install             # Install deps
+make ts-dev-gui         # Start GUI
 ```
 
-### Project Structure
+### CGO Build Note
 
-```
-agentctl/
-├── cmd/agentctl/           # CLI entry point (Cobra)
-├── internal/               # Internal packages (see Architecture)
-├── skills/                 # Built-in skills
-│   ├── fs_ls/
-│   ├── fs_read/
-│   ├── text_grep/
-│   ├── todo/
-│   ├── wasi_echo/
-│   └── http_openapi/
-├── packages/               # TypeScript applications (Bun workspace)
-│   ├── data/               # Shared API client (@agentctl/data)
-│   ├── gui/                # Web dashboard (@agentctl/gui) + API server
-│   └── tui/                # Terminal UI (@agentctl/tui, OpenTUI)
-├── docs/
-│   ├── spec/               # Specifications
-│   ├── refactoring/        # Implementation specs
-│   └── examples/           # Usage examples
-├── test/
-│   ├── golden/             # Golden fixtures (in progress)
-│   └── integration/        # Integration tests (in progress)
-└── scripts/                # Build and utility scripts
-```
-
-### Testing Philosophy
-
-- **Unit tests**: All packages have `*_test.go` files
-- **Integration tests**: E2E workflows in `cmd/agentctl/cmd/e2e_test.go`
-- **Golden tests**: Envelope fixtures for regression prevention (in progress)
-- **CI/CD**: Lint → Test → Race → Coverage (50% threshold, targeting 85%)
+Never use raw `CGO_ENABLED=1 go build` — it causes duplicate SQLite symbol errors.
+Always use `make build-cgo` which includes `-tags=libsqlite3`.
 
 ---
 
-## 🤝 Contributing
+## Storage
 
-We welcome contributions! Here's how to get started:
-
-### Quick Contribution Path
-
-1. **Pick a task** from [docs/roadmap.md](docs/roadmap.md)
-2. **Read the spec** in [docs/refactoring/](docs/refactoring/)
-3. **Create a branch**: `codex/<feature-name>` or `<username>/<feature-name>`
-4. **Implement** following the spec's step-by-step plan
-5. **Test**: `make check` must pass
-6. **Open a PR** to `main` (never push directly to main)
-
-### High-Impact Areas (Help Wanted!)
-
-| Area                       | Specs        | Impact      | Effort |
-| -------------------------- | ------------ | ----------- | ------ |
-| **OpenAPI Implementation** | SPEC-012-016 | 🔥 Critical | 55h    |
-| **Security Hardening**     | SPEC-011     | 🔒 High     | 5.5h   |
-| **Golden Test Fixtures**   | SPEC-018     | ✅ Medium   | 8h     |
-| **Documentation**          | SPEC-019     | 📖 Medium   | 5h     |
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution
-guide.
-
-### Development Guidelines
-
-- **Read [AGENTS.md](AGENTS.md)** for AI assistant guidelines (applies to humans
-  too!)
-- **Follow Go conventions**: gofumpt formatting, golangci-lint rules
-- **Write tests**: Aim for 80%+ coverage on new code
-- **Update docs**: Specs, README, examples as needed
-- **Conventional commits**: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
-
-### Code Review Process
-
-1. CI must pass (lint, test, race, coverage)
-2. At least one human approval required
-3. AI-generated PRs labeled `codex/*` auto-labeled `ai-generated`
-4. Squash merge to main
-5. Release handled by maintainers (goreleaser)
+| Database | Path | Purpose |
+|----------|------|---------|
+| `memory.db` | `~/.agentctl/storage/` | Memories, codemaps, symbols |
+| `tasks.db` | `~/.agentctl/storage/` | Task management |
+| `sessions.db` | `~/.agentctl/storage/` | Session lineage |
+| `trajectory.db` | `~/.agentctl/storage/` | Agent audit trail |
+| CAS | `~/.agentctl/cas/sha256/` | Content-addressable storage |
 
 ---
 
-## 🗺️ Roadmap
+## Documentation
 
-### v1.0 (Target: Q1 2026)
-
-**Remaining Work**: ~87.5 hours over 11 weeks
-
-#### Critical Path
-
-1. **Complete refactoring** (SPEC-008, SPEC-009) — 9h
-2. **Security hardening** (SPEC-011) — 5.5h
-3. **OpenAPI implementation** (SPEC-012-016) — 55h
-   - Spec loader
-   - Request builder
-   - HTTP client & response processing
-   - Pagination
-   - Retry logic
-4. **Quality & docs** (SPEC-018, SPEC-019) — 13h
-
-#### Success Criteria
-
-- ✅ Call any OpenAPI 3.x REST API (GitHub, Stripe, Slack)
-- ✅ Automatic pagination handles 100+ pages
-- ✅ Retry logic resilient to rate limits
-- ✅ PathValidator prevents all workspace escapes
-- ✅ 85%+ test coverage
-- ✅ Comprehensive documentation (README, CONTRIBUTING, examples)
-
-### v1.1+ (Future)
-
-- **Plugin System** (SPEC-017): Custom auth/pagination strategies
-- **Skill Codegen**: Per-operation wrappers for OpenAPI specs
-- **Daemon Mode**: REST API server for multi-tenant access
-- **Interactive Mode**: REPL with autocomplete
-- **Observability**: Prometheus, OpenTelemetry, audit logging
-- **Skill Registry**: Centralized discovery and installation
-
-See [docs/roadmap.md](docs/roadmap.md) for detailed timeline.
+| Document | Description |
+|----------|-------------|
+| [AGENTS.md](AGENTS.md) | AI assistant contribution guide |
+| [.claude/CLAUDE.md](.claude/CLAUDE.md) | Claude Code integration reference |
+| [docs/spec/](docs/spec/) | Technical specifications |
+| [docs/observability/](docs/observability/) | Wide events documentation |
 
 ---
 
-## 🔐 Security
-
-### Security Model
-
-- **Workspace Confinement**: Skills cannot access files outside allowed paths
-- **Egress Policies**: Network access controlled per skill
-- **WASI Isolation**: WASM skills have no network access by default
-- **Path Validation**: Prevents traversal, symlink, null byte attacks
-- **Secrets Redaction**: Automatic redaction in logs and envelopes
-- **CAS Integrity**: SHA-256 verification on all reads
-
-### Reporting Security Issues
-
-**Do not open public issues for security vulnerabilities.**
-
-Please report security vulnerabilities responsibly by creating a private
-security advisory on GitHub or contacting the maintainers directly.
-
----
-
-## 📄 License
+## License
 
 Apache License 2.0
 
 ---
 
-## 🙏 Acknowledgments
-
-agentctl builds on excellent open source projects:
-
-- **[Cobra](https://github.com/spf13/cobra)** — CLI framework
-- **[Viper](https://github.com/spf13/viper)** — Configuration
-- **[wazero](https://github.com/tetratelabs/wazero)** — Pure Go WASM runtime
-- **[modernc.org/sqlite](https://modernc.org/sqlite)** — Pure Go SQLite
-- **[zerolog](https://github.com/rs/zerolog)** — Structured logging
-- **[kin-openapi](https://github.com/getkin/kin-openapi)** — OpenAPI parser
-
----
-
-## 📞 Community & Support
-
-- **Documentation**: [docs/](docs/)
-- **Specifications**: [docs/spec/](docs/spec/)
-- **Roadmap**: [docs/roadmap.md](docs/roadmap.md)
-- **Contributing**: [AGENTS.md](AGENTS.md)
-
----
-
-## 🚀 Getting Started
-
-Ready to dive in?
-
-1. **Read** [Core Profile v1](docs/spec/core_profile_v1.md) for the vision
-2. **Build** with `make build && make skills-build`
-3. **Try** the examples in [docs/examples/](docs/examples/)
-4. **Contribute** by picking a task from [docs/roadmap.md](docs/roadmap.md)
-5. **Explore** the [roadmap to v1.0](docs/roadmap.md)
-
----
-
 <div align="center">
 
-**agentctl** — Structured, deterministic, composable AI workflows
+**agentctl** — Infrastructure for AI coding assistants
 
-Built with ❤️ by the agentctl community
-
-[Documentation](docs/) • [Roadmap](docs/roadmap.md) • [Contributing](CONTRIBUTING.md)
-• [Specifications](docs/spec/)
+[Documentation](docs/) • [Contributing](AGENTS.md) • [Specifications](docs/spec/)
 
 </div>

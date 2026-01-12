@@ -1,7 +1,7 @@
 # agentctl Claude Code Integration
 
-> Protocol, profiles, invariants: `AGENTS.md` | Full docs: `docs/`
-> Start-of-session checklist: read `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`.
+> Quick links: [README](../README.md) | [AGENTS.md](../AGENTS.md) | [Detailed docs](../docs/general/)
+> Start-of-session: read `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`
 
 ## Architecture
 
@@ -9,733 +9,295 @@
 Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 ```
 
-## New: Session Lineage & Context Preservation
+**Detailed:** [docs/general/architecture.md](../docs/general/architecture.md)
 
-- **Single active session per workspace/agent**: session start/resume/fork
-  checks for an active session and requires `--force` to override. Active is
-  determined by status (e.g., `running`), not `ended_at`.
-- **Status-driven lifecycle**: terminal statuses (`ok`, `error`, `canceled`) set
-  `ended_at`; non-terminal statuses clear it when a session reopens.
-- **Identity fallback file**:
-  `~/.agentctl/sessions/active/<workspace_hash>.json` stores `session_id`,
-  `agent_id`, and lineage fields for hooks without env access.
-- **Env propagation to skills**: Exec and WASI runners now forward
-  `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID`, and fallbacks
-  (`CLAUDE_SESSION_ID`, `OPENCODE_SESSION_ID`, `CURSOR_SESSION_ID`,
-  `TERM_SESSION_ID`) so skills correctly attribute turns, embeddings, and
-  artifacts.
-- **Lineage visibility**: `agentctl sessions chain` shows ancestors via
-  `parent_session_id`; trajectories and capture now record `session_id` for
-  joins.
+---
 
-## Active Hooks
+## Hooks
 
-| Event            | Hook                       | Purpose                                                                        |
-| ---------------- | -------------------------- | ------------------------------------------------------------------------------ |
-| PreToolUse       | `overseer-inbox`           | Surfaces human messages on Read/Bash/Grep/Glob/Task for human-in-the-loop      |
-| PreToolUse       | `semantic-search`          | Vector search on Grep/Glob (symbols, sessions, memories, tasks, codemaps)      |
-| PreToolUse       | `file-memory-recall`       | Surfaces memories/gotchas before editing                                       |
-| PreToolUse       | `task-guard`               | Ensures task exists for writes                                                 |
-| PostToolUse      | `read-context-suggestions` | Suggests context_ripgrep for symbols after reading code (full function bodies) |
-| PostToolUse      | `counsel-suggest`          | Suggests /counsel after reading 3+ code files                                  |
-| PostToolUse      | `lsp-diagnostics`          | Shows LSP errors after editing                                                 |
-| PostToolUse      | `memory-prompt`            | Prompts to save memories when tasks are completed                              |
-| PreCompact       | `session-save`             | Captures session state (context window)                                        |
-| PreCompact       | `session-summarize`        | Extracts gotchas/decisions per window via LLM                                  |
-| SessionStart     | `session-restore`          | Restores context on compact/resume                                             |
-| UserPromptSubmit | `memory-detector`          | Detects save/recall/todo patterns                                              |
-| UserPromptSubmit | `skill-advisor`            | Suggests agentctl skills based on prompt patterns                              |
-| UserPromptSubmit | `anchor-detect`            | Sets the session anchor goal via `/anchor <goal>`                              |
-| UserPromptSubmit | `counsel-detect`           | Runs `/counsel` multi-perspective code analysis                                |
-| UserPromptSubmit | `context-detect`           | Runs `/context` quick code context gathering                                   |
-| Stop             | `todo-continuation`        | Blocks stop if tasks remain; injects PageRank-prioritized continuation prompt  |
-| Stop             | `plan-sync`                | Syncs plans to tasks                                                           |
+| Event | Hook | Purpose |
+|-------|------|---------|
+| PreToolUse | `semantic-search` | Vector search on Grep/Glob |
+| PreToolUse | `file-memory-recall` | Surface memories before editing |
+| PreToolUse | `overseer-inbox` | Human-in-the-loop messages |
+| PostToolUse | `read-context-suggestions` | Suggest context after reading |
+| PostToolUse | `lsp-diagnostics` | Show LSP errors after editing |
+| SessionStart | `session-restore` | Restore context on resume |
+| PreCompact | `session-summarize` | Extract learnings via LLM |
+| Stop | `todo-continuation` | Block stop if tasks remain |
+| UserPromptSubmit | `skill-advisor` | Suggest skills based on prompt |
 
-### Human-in-the-Loop: Overseer Inbox
+**Detailed:** [docs/general/hooks.md](../docs/general/hooks.md)
 
-Send messages to a running Claude session from terminal, scripts, or other agents:
+### Human-in-the-Loop
 
 ```bash
-# Using agentctl-mail (recommended - auto-detects workspace)
-agentctl-mail "Priority change" "Focus on auth bug first"
-agentctl-mail -p 1 "STOP" "Pause and review this issue"
-agentctl-mail --ack "Review needed" "Check the API changes"
-agentctl-mail --to claude "Question" "How should we handle auth?"
-
-# Shell script wrapper (backwards compatibility)
-./scripts/overseer-send.sh "Subject" "Body"
+agentctl-mail "Subject" "Message body"
+agentctl-mail -p 1 "URGENT" "Stop and review"
 ```
 
-**How it works:**
-- `agentctl-mail` binary auto-detects workspace via git root, CLAUDE_PROJECT_DIR, or cwd
-- `overseer-inbox` hook runs on Read/Bash/Grep/Glob/Task tool calls (PreToolUse)
-- Checks board mailbox for unread messages addressed to `overseer`
-- Injects messages into Claude's context before tool execution
-- Auto-acks displayed messages (configurable via `AGENTCTL_OVERSEER_AUTOACK=0`)
-
-**Environment variables:**
-| Variable                     | Default    | Description                                      |
-| ---------------------------- | ---------- | ------------------------------------------------ |
-| `AGENTCTL_OVERSEER_RECIPIENT` | `overseer` | Recipient to monitor (use `*` for broadcast)    |
-| `AGENTCTL_OVERSEER_AUTOACK`  | `1`        | Auto-mark displayed messages as read            |
+---
 
 ## Slash Commands
 
-Available slash commands in Claude Code chat:
+| Command | Purpose |
+|---------|---------|
+| `/anchor <goal>` | Set persistent session goal |
+| `/todo` | Enable todo check-in mode |
+| `/counsel <question>` | Multi-perspective code analysis |
+| `/context <query>` | Quick code context gathering |
 
-| Command | Purpose | Example |
-|---------|---------|---------|
-| `/anchor <goal>` | Set session goal | `/anchor Fix authentication bug` |
-| `/todo` | Enable todo check-in mode | `/todo` |
-| `/counsel <question>` | Multi-perspective code analysis | `/counsel review auth flow for security issues` |
-| `/context <query>` | Quick code context gathering | `/context database connection handling` |
-
-### /anchor
-
-Set a durable session goal:
-```
-/anchor Fix failing stop hook behavior
-```
-
-This persists via `session/anchor` and will be re-injected on resume/compaction.
-
-### /todo
-
-Enable a lightweight todo check-in prompt (no graph analysis) for this session.
-
-### /counsel
-
-Run multi-perspective code analysis using LLM-powered insights:
-```
-/counsel check for race conditions in the worker pool
-/counsel security review of auth flow
-```
-
-**Perspectives analyzed:** security, correctness (configurable via `AGENTCTL_COUNSEL_PERSPECTIVES`)
-
-**Requirements:** Needs an LLM API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, or CEREBRAS_API_KEY)
-
-### /context
-
-Quickly gather relevant code snippets without LLM analysis:
-```
-/context user authentication
-/context error handling patterns
-```
-
-Uses `code/smart_read` to auto-select and extract relevant code based on your query.
+---
 
 ## Quick Commands
 
 ```bash
 # Tasks
-# If the request is specific, use it as the task title; only ask when ambiguous.
 agentctl todo add --title "Task" --description "Details"
-agentctl todo list                              # JSON output (default)
-agentctl todo list -f table                     # Pretty table with status icons
-agentctl todo list -f compact                   # One-liner per task
-agentctl todo list --status pending -f table    # Filter by status
-agentctl todo list --jq '.data.tasks[].title'   # Extract with jq
-agentctl todo active
-agentctl todo complete --id <id> --notes "Done"
-
-# CI / PR Review
-agentctl ci status --pr 123                      # Unified: CI + comments + merge
-agentctl ci comments --pr 123 --source greptile  # Filter: coderabbit, greptile, human
-agentctl ci results --pr 123 --failed            # CI check results
-
-# Incremental Indexing
-agentctl index git-diff                          # Index files changed by git pull
-agentctl index git-diff --base HEAD~3            # Index last 3 commits
-agentctl index git-diff --dry-run                # Preview what would be indexed
+agentctl todo list -f table
+agentctl todo complete --id <id>
 
 # Skills
 agentctl run <skill> --input '<json>'
-agentctl run <skill> --input '<json>' -f table   # Format output as table
-agentctl run <skill> --input '<json>' --jq '...' # Filter with jq expression
+agentctl run <skill> -f table
 agentctl skills list
 
-# Workflows
-agentctl workflow run pre-impl-analysis --input '{"path": "."}'
-agentctl workflow list
-
-# Cross-Workspace Index Sync (Turso)
-agentctl index sync push --scope memory     # Push local embeddings to Turso
-agentctl index sync query --query "..." --global  # Search across all workspaces
-```
-
-### Cross-Workspace Turso Sync
-
-Push local embeddings to a central Turso database for cross-workspace knowledge sharing:
-
-```bash
-# Set Turso credentials
-export TURSO_DATABASE_URL=libsql://your-db.turso.io
-export TURSO_AUTH_TOKEN=your-token
-
-# Push local memory embeddings to Turso
-agentctl index sync push --scope memory
-
-# Query across all workspaces globally
-agentctl index sync query --query "authentication middleware" --global
-
-# Query specific workspaces
-agentctl index sync query --query "API design" --workspaces project-a,project-b
-```
-
-**Requirements:**
-- CGO build (`make build-cgo`) for Turso support
-- `VOYAGE_API_KEY` for query embedding generation
-- `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for remote access
-
-### Git Pull Auto-Index
-
-Automatically index changed files after `git pull`:
-
-```bash
-# One-time setup
-echo '#!/bin/sh
-agentctl index git-diff' > .git/hooks/post-merge
-chmod +x .git/hooks/post-merge
-```
-
-### Output Formatting
-
-The `--format` (`-f`) and `--jq` flags work on `agentctl run` and `agentctl todo list`:
-
-| Format    | Description                                      |
-| --------- | ------------------------------------------------ |
-| `json`    | Default JSON output                              |
-| `table`   | Pretty table with columns, status icons (✅🔄⏳🚫) |
-| `compact` | One-liner per item                               |
-
-```bash
-# Examples
-agentctl todo list -f table                    # Pretty task table
-agentctl todo list --jq '.data.tasks[].title'  # Extract just titles
-agentctl run code/symbols --input '...' -f table
-```
-
-## Key Skills
-
-| Skill                          | Description                                               |
-| ------------------------------ | --------------------------------------------------------- |
-| `code/complexity`              | Complexity analysis                                       |
-| `code/symbols`                 | Extract symbols                                           |
-| `code/smart_search`            | Smart code search with auto-candidate generation          |
-| `code/snippet_extract`         | Extract code snippets from candidate files                |
-| `code/context_ripgrep`         | Search and return full function bodies containing matches |
-| `code/smart_write`             | Symbol-based editing with dry-run diff preview            |
-| `test/run`                     | Run tests with coverage                                   |
-| `lsp/gopls`                    | Go LSP operations                                         |
-| `mobile/ios`, `mobile/android` | Simulator automation                                      |
-| `embedding/queue`              | Background embedding generation                           |
-| `code/semantic_search`         | Semantic code search                                      |
-
-## Environment
-
-| Variable                              | Default       | Description                                          |
-| ------------------------------------- | ------------- | ---------------------------------------------------- |
-| `AGENTCTL_TASK_GUARD_MODE`            | `auto`        | `auto` or `strict`                                   |
-| `AGENTCTL_TODO_CONTINUATION_DISABLED` | `0`           | Set to `1` to disable todo continuation enforcement  |
-| `AGENTCTL_TODO_CONTINUATION_MIN_PENDING` | `1`        | Minimum pending tasks to trigger continuation        |
-| `AGENTCTL_TODO_CONTINUATION_TOP_N`    | `5`           | Number of top tasks to show in continuation prompt   |
-| `AGENTCTL_TODO_CONTINUATION_VERIFY`   | `0`           | Set to `1` to enable CoVe verification when tasks=0  |
-| `AGENTCTL_HOME`               | `~/.agentctl` | Storage root                                         |
-| `VOYAGE_API_KEY`              | -             | For Voyage embeddings/reranking (1024 dimensions)    |
-| `GEMINI_API_KEY`              | -             | For Gemini embeddings (3072 dimensions)              |
-| `MISTRAL_API_KEY`             | -             | For Mistral/Codestral embeddings (1024 dimensions)   |
-| `AGENTCTL_VECTOR_DIMS`        | `1024`        | Global default vector dimensions (Voyage=1024)       |
-| `AGENTCTL_SEMANTIC_RERANK`    | `0`           | Set to `1` to enable Voyage rerank-2.5 in hooks      |
-| `AGENTCTL_EMBEDDING_RATE_LIMIT` | `3`         | Embedding RPM: 0=disabled (paid tier), >0=limit      |
-| `AGENTCTL_EMBEDDING_MODEL_CODE` | `voyage-code-3` | Override model for code scopes (symbols)         |
-| `AGENTCTL_EMBEDDING_MODEL_TEXT` | -               | Override model for all text scopes (fallback)    |
-| `AGENTCTL_EMBEDDING_MODEL_<SCOPE>` | -            | Per-scope override (SYMBOLS, MEMORY, TASKS, etc) |
-
-### Scope-Based Embedding Models
-
-Voyage AI is the recommended provider for embeddings (based on Dec 2024 benchmarks):
-
-| Scope      | Content Type    | Model            | Price/1M | Rationale                             |
-| ---------- | --------------- | ---------------- | -------- | ------------------------------------- |
-| `symbols`  | Code            | `voyage-code-3`  | $0.18    | 13.80% better than OpenAI on code     |
-| `memory`   | Gotchas/notes   | `voyage-3-large` | $0.06    | Best quality for memories/gotchas     |
-| `codemaps` | Semantic maps   | `voyage-3.5`     | $0.06    | Good quality, lower cost              |
-| `tasks`    | Task desc       | `voyage-3.5`     | $0.06    | Good quality, lower cost              |
-| `sessions` | Session context | `voyage-3.5`     | $0.06    | Good quality, lower cost              |
-
-All Voyage models use 1024 dimensions. Use `ScopeModelRecommendation(scope)` to get the
-appropriate model for each scope. Env var priority: per-scope > category > default.
-
-> ⚠️ **Embedding Dimension Mismatch**: Gemini=3072, Voyage/Mistral/Codestral=1024.
-> Query and stored embeddings MUST use the same provider per scope.
-
-### Observability (Wide Events)
-
-**ENABLED** via `.env`: `AGENTCTL_OBS_DIR=$HOME/.agentctl/observability`
-(Note: Use absolute path, not `~` - tilde isn't expanded in env vars)
-
-| Variable                       | Default | Description                           |
-| ------------------------------ | ------- | ------------------------------------- |
-| `AGENTCTL_OBS_DIR`             | -       | Enable observability; root directory  |
-| `AGENTCTL_OBS_SAMPLE_ERRORS`   | `true`  | Always sample error events            |
-| `AGENTCTL_OBS_SLOW_THRESHOLD_MS` | `1000`  | Slow request threshold (ms)         |
-| `AGENTCTL_OBS_SAMPLE_RATE`     | `0.05`  | Random sample rate for healthy events |
-| `AGENTCTL_TRACE_ID`            | auto    | Propagate trace ID to child processes |
-
-**Why enabled:** Captures skill execution events, errors, and timing for debugging.
-Events are stored as NDJSON in `~/.agentctl/observability/events/`.
-
-See `docs/observability/wide-events.md` for full documentation.
-
-## Storage
-
-**Persistent data** (`~/.agentctl/storage/`):
-- `memory.db` - Named memories (gotchas, decisions, patterns, codemaps, symbols)
-- `tasks.db` - Task management with dependencies
-- `sessions.db` - Session lineage and context
-- `trajectory.db` - Agent work audit trail
-- `agents.db` - Agent registry
-
-**Cache/ephemeral** (`~/.agentctl/cache/`):
-- `embedding_queue.db` - Symbol embedding job queue (regenerable)
-- `cache.db` - Skill result cache with TTL
-
-**Other**:
-- CAS: `~/.agentctl/cas/sha256/<digest>`
-- Jobs: `~/.agentctl/jobs/<ulid>/`
-- Observability: `~/.agentctl/observability/events/` (NDJSON event logs)
-- Backups: `~/.agentctl/backups/` (includes observability component)
-
-## TypeScript Packages (GUI/TUI/API)
-
-The `packages/` directory contains TypeScript applications for viewing agentctl data:
-
-```
-packages/
-├── data/     # Shared API client + types (@agentctl/data)
-├── gui/      # Web GUI - React/Vite/Tailwind (@agentctl/gui)
-│   └── server/index.js  # API server (Express, port 8090)
-└── tui/      # Terminal UI - OpenTUI (@agentctl/tui)
-```
-
-### Running the Viewers
-
-```bash
-# Install dependencies (from repo root)
-bun install
-
-# Start API server + Web GUI (concurrent)
-make ts-dev-gui
-# or: bun run dev:all
-
-# Start TUI (connect to running API server)
-AGENTCTL_API_URL=http://localhost:8090 bun run --cwd packages/tui dev
-
-# Individual commands
-bun run dev:server   # API server only (port 8090)
-bun run dev:gui      # Web GUI only (needs server)
-bun run dev:tui      # TUI only (needs server)
-```
-
-### TUI Views (keyboard shortcuts)
-
-| Key | View         | Description                           |
-| --- | ------------ | ------------------------------------- |
-| 1   | Jobs         | Job queue with status, timing         |
-| 2   | Tasks        | Task list with dependencies           |
-| 3   | Insights     | PageRank, critical path, cycles       |
-| 4   | Mailbox      | Actor messages with priority          |
-| 5   | Reservations | File locks (exclusive/shared)         |
-| 6   | Stats        | Job statistics dashboard              |
-| 7   | Blackboard   | Key-value store browser               |
-| 8   | SQLite       | Direct SQL query interface            |
-| 9   | Search       | Full-text search                      |
-
-Navigation: `j/k` (up/down), `[/]` (prev/next view), `r` (refresh), `q` (quit)
-
-## Development
-
-```bash
-make build        # Build agentctl (pure Go, no CGO)
-make build-cgo    # Build with CGO (required for Turso vector search)
-go test ./...     # Run tests
-make skills-install # Build AND install all skills (preferred over skills-build)
-```
-
-> **Note:** Use `make skills-install` instead of `make skills-build` - it
-> rebuilds everything and installs to `~/.agentctl/skills/`. **TODO:** Add
-> `make skills-install SKILL=<name>` for single-skill rebuild+install.
-
-## Package Design Patterns
-
-### Dependency Direction
-
-```
-skills/ ──────────► internal/adapters/skillslib/  (skills import skillslib)
-                            │
-                            ▼
-                    internal/platform/            (skillslib imports platform)
-                    internal/storage/
-                    internal/domain/
-```
-
-**Rules:**
-- `internal/` packages **MUST NOT** import `skillslib` - keeps core logic reusable
-- `skillslib` is the **skill-facing API** - only `skills/` should import it
-- Shared utilities go in `internal/platform/` (config, workspace, fsutil)
-- `sessionkit` uses `config.Config` directly, not `skillmain.RunContext`
-
-### Workspace Detection
-
-**Always use `internal/platform/workspace.Detect()`** - never roll your own
-`os.Getwd()` chains. The platform function handles sandbox scenarios:
-
-### Code Context Retrieval Architecture
-
-**Funnel design - each layer has ONE job:**
-
-```
-semantic_search → snippet_extract (evidence) → counsel (analysis)
-     ↓                      ↓                         ↓
-  "where to look"      "what's relevant"       "what does it mean"
-```
-
-**Rules:**
-- `code/semantic_search`: Upstream discovery only - returns candidates (path, symbol_id, line, priority)
-- `code/snippet_extract`: The **canonical evidence collector** - reads files, extracts snippets, validates paths
-- `code/smart_search`: End-to-end search - auto-generates candidates then extracts snippets
-- `code/counsel`: Analysis only - consumes evidence artifacts, never reads files directly
-- `smart_read_file`: Alias for `snippet_extract` with `mode=masked`
-
-**`internal/codecontext/` - Shared extraction engine:**
-
-```go
-// Skills call these, never re-implement extraction logic
-codecontext.Collect(ctx, query, candidates, opts) → Evidence
-codecontext.Render(evidence, mode) → string/ndjson
-
-// Modes: snippets | masked | structure | flow
-```
-
-**Anti-patterns:**
-- ❌ Skills implementing their own `readFileContent()` or `extractSnippet()` functions
-- ❌ Multiple `detectLanguage()` implementations (use `platform/fsutil.DetectLanguage()`)
-- ❌ Duplicate block boundary detection (`findBraceEnd`, `findIndentEnd`)
-- ❌ `code_counsel` or analysis skills reading files directly
-
-**Shared utilities location:**
-- Language detection: `internal/platform/fsutil/fsutil.go` → `DetectLanguage()`
-- File reading with limits: `internal/codecontext/files/reader.go`
-- Block expansion: `internal/codecontext/expander/` (language-specific)
-- Comment markers: `internal/codecontext/lang/comments.go`
-
-```go
-// Priority chain (handles sandboxes correctly):
-// 1. AGENTCTL_WORKSPACE  ← set by agentctl for sandboxed execution
-// 2. CLAUDE_PROJECT_DIR  ← set by Claude Code
-// 3. Git root detection  ← walk up looking for .git/.agentctl
-// 4. Current directory   ← fallback
-
-import "github.com/jkatigb/agentctl/internal/platform/workspace"
-
-ws := workspace.Detect("")  // empty string = start from cwd
-ws := workspace.Detect(somePath)  // start from specific path
-```
-
-**Why this matters:** Agents may spawn skills from sandbox directories. Raw
-`os.Getwd()` returns the sandbox path, not the repo. `AGENTCTL_WORKSPACE` is
-set by the runner to preserve the correct workspace context.
-
-## ⚠️ CGO Build Requirement
-
-**NEVER use raw `CGO_ENABLED=1 go build`** - it causes duplicate SQLite symbol
-errors.
-
-Both `go-libsql` (Turso) and `go-sqlite3` embed SQLite, causing 266 linker
-conflicts.
-
-**Always use:**
-
-```bash
-# Makefile target (recommended)
-make build-cgo
-
-# Or with the required tag
-CGO_ENABLED=1 go build -tags=libsqlite3 -o bin/agentctl-cgo ./cmd/agentctl
-```
-
-The `-tags=libsqlite3` flag tells `go-sqlite3` to use system SQLite instead of
-embedding.
-
-## Gemini Coordination
-
-```bash
-# Get second opinion
-context=$(agentctl run code/complexity --input '{"path": "."}')
-echo "$context" | gemini -p "Refactoring priorities?"
-```
-
-## Security
-
-**TOCTOU:** Always use resolved paths for all file operations after validation.
-
-## Gotchas
-
-### Session Archives are Gzipped
-
-Session JSONL files are archived as `.jsonl.gz` in `~/.agentctl/archives/`. Any
-skill reading `session.RawJSONLPath` must handle gzip decompression:
-
-```go
-if strings.HasSuffix(path, ".gz") {
-    gzReader, err := gzip.NewReader(file)
-    if err != nil {
-        return err
-    }
-    defer gzReader.Close()
-    reader = gzReader
-}
-```
-
-### Session Learnings are Idempotent
-
-`session/summarize` persists learnings (gotchas, decisions, etc.) with embeddings.
-The skill uses content hash-based naming (`session:<id>:<type>:<hash>`) and checks
-for existing embeddings before re-processing. Running summarize multiple times on
-the same session is safe - existing entries are skipped.
-
-### Batch Search and Replace
-
-For cross-file search and replace operations, use specialized tools instead of
-manual Edit tool calls:
-
-```bash
-# RepoPrompt MCP (preferred for complex edits)
-mcp__RepoPrompt__apply_edits  # Single file with multiple edits
-mcp__RepoPrompt__file_search  # Find files to edit
-
-# agentctl text/replace skill
-agentctl run text/replace --input '{
-  "path": ".",
-  "pattern": "oldText",
-  "replacement": "newText",
-  "glob": ["*.go"],
-  "dry_run": true
-}'
-```
-
-**Why:** Manual Edit calls are error-prone for batch operations (broken imports,
-missed files). These tools handle quoting, preserve formatting, and provide
-dry-run previews.
-
-### Claude Max OAuth (Future Enhancement)
-
-**Discovery:** Claude Max subscription uses **OAuth authentication**, not API keys.
-The dspy-go library used by agent daemons requires traditional API keys.
-
-**Current workaround:** Use OpenRouter with Claude models:
-```bash
-# In .env
-OPENROUTER_API_KEY=sk-or-...
-CLAUDE_MAX_MODEL=claude-haiku-4-5  # or claude-opus-4-5
-```
-
-**Future TODO:** Implement Anthropic OAuth provider that wraps the Claude CLI:
-- Remove `ANTHROPIC_API_KEY` to force subscription auth
-- Set `CLAUDE_CODE_ENTRYPOINT=max-alias` and `CLAUDE_USE_SUBSCRIPTION=true`
-- Spawn `claude --print` as subprocess for LLM calls
-- This would allow free usage via Max subscription
-
-**Environment for CLI wrapper (when implemented):**
-```bash
-CLAUDE_CODE_ENTRYPOINT=max-alias
-CLAUDE_USE_SUBSCRIPTION=true
-CLAUDE_BYPASS_BALANCE_CHECK=true
-# Remove ANTHROPIC_API_KEY to force OAuth
-```
-
-### Build Commands
-
-**NEVER run `go build ./...`** - causes 266 duplicate SQLite symbol errors due
-to `go-libsql` (Turso) and `go-sqlite3` both embedding SQLite.
-
-Use instead:
-
-```bash
-make build          # Pure Go (no CGO)
-make build-cgo      # CGO with -tags=libsqlite3
-CGO_ENABLED=0 go build ./internal/...  # Compile-check specific packages
-```
-
-### Skill Build → Install (Two-Stage Process)
-
-**Skills require TWO steps to deploy changes:**
-
-1. **Build**: Compiles the skill source code to a binary
-2. **Install**: Copies the binary to `~/.agentctl/skills/<name>/bin`
-
-The skill resolver always looks for `bin` in the installed skill directory
-(`~/.agentctl/skills/<skill-name>/`), NOT the source directory.
-
-**Common mistake:** Running `go build ./skills/<name>` creates a binary in the
-wrong location. The installed skill continues running the OLD binary.
-
-**Correct workflow:**
-
-```bash
-# Option 1: Rebuild all skills and install (safest)
-make skills-install
-
-# Option 2: Single skill build + install
-CGO_ENABLED=0 go build -o ~/.agentctl/skills/<skill-category>/<skill-name>/bin ./skills/<source-dir>
-
-# Example for code/semantic_search:
-CGO_ENABLED=0 go build -o ~/.agentctl/skills/code/semantic_search/bin ./skills/code_semantic_search
-```
-
-**Debug tip:** If skill changes aren't taking effect:
-1. Check timestamps: `ls -la ~/.agentctl/skills/<path>/bin`
-2. Verify binary: `strings ~/.agentctl/skills/<path>/bin | grep "<expected-string>"`
-3. Rebuild to correct location as shown above
-
-### Skills Must Load .env
-
-Skills that need API keys (VOYAGE_API_KEY, GEMINI_API_KEY, etc.) must explicitly
-load `.env` files at startup. The runner does NOT automatically load them.
-
-```go
-import "github.com/jkatigb/agentctl/internal/platform/config"
-
-func main() {
-    config.LoadDotEnv() // Must call BEFORE os.Getenv()
-    // ... rest of skill
-}
-```
-
-Without this, `os.Getenv("VOYAGE_API_KEY")` returns empty even if the key is in
-`~/.agentctl/.env`.
-
-### Context Window Summaries
-
-**Architecture:** Summaries are at the **context window** level, not the session
-level. A session may have multiple context windows (created on each compaction).
-
-**Rules:**
-- **Never summarize a full session directly** - this loses window-specific context
-- **Summarize each context window** within a session individually
-- **Embed the window summary** for semantic search recall
-
-`session/restore` searches for similar past context windows via embedding, but
-the **summaries must be populated** by `session/summarize` for them to display.
-Empty summaries are filtered out.
-
-**Flow:** `PreCompact` → `session-save.sh` (captures window) →
-`session-summarize.sh` (extracts gotchas/decisions per window) → embed summary
-
-To populate summaries for existing windows:
-```bash
-# Re-run summarization for a session (summarizes each window)
-agentctl run session/summarize --input '{"session_id": "<id>"}'
-```
-
-### Memory Hooks
-
-| Hook                 | Trigger                  | Notes                                                               |
-| -------------------- | ------------------------ | ------------------------------------------------------------------- |
-| `memory-detector`    | UserPromptSubmit         | Detects patterns → suggests `/remember`                             |
-| `memory-prompt`      | PostToolUse (TodoWrite)  | Prompts to save memories when tasks are completed                   |
-| `memory-capture`     | PostToolUse (Edit/Write) | **Enabled by default** - set `AGENTCTL_MEMORY_CAPTURE=0` to disable |
-| `file-memory-recall` | PreToolUse (Edit/Write)  | Surfaces stored memories before editing                             |
-
-**memory-detector patterns:**
-
-- **Save**: "remember this", "the trick is", "TIL", "watch out for", "please
-  don't", "don't forget"
-- **Recall**: "how did we", "didn't we already", "last time we"
-- **Todo**: "we need to", "let's make sure", "TODO:", "before we"
-
-**skill-advisor patterns:**
-
-| Pattern                                      | Suggested Skill                    |
-| -------------------------------------------- | ---------------------------------- |
-| "pr comments", "review comments", "feedback" | `ci/prcomments`                    |
-| "ci status", "build status", "checks failed" | `ci/github_checks`                 |
-| "semantic search", "vector search"           | `code/semantic_search`             |
-| "investigate", "dig into", "explore"         | `code/smart_search`, `semantic_search` |
-| "complexity", "cyclomatic", "nesting"        | `code/complexity`                  |
-| "symbols", "functions", "types"              | `code/symbols`                     |
-| "imports", "dependencies"                    | `code/imports`                     |
-| "security", "vulnerabilities"                | `code/security`                    |
-| "git status", "uncommitted"                  | `git/status`                       |
-| "blame", "hotspots", "who changed"           | `code/git`                         |
-| "run tests", "coverage"                      | `test/run`                         |
-| "definition", "references", "call hierarchy" | `lsp/gopls`                        |
-| "past sessions", "session history"           | `session/recall`                   |
-| "codemap", "trace code"                      | `codemap/generate`                 |
-
-**`/remember` skill** - Dual-save to both agentctl memory AND CLAUDE.md:
-
-```bash
-# 1. Saves to agentctl memory
-agentctl memory put --name "gotcha-<topic>" --type "gotcha" \
-  --summary "<note>" --data '{"details": "..."}'
-
-# 2. Appends to CLAUDE.md under Gotchas section
-```
-
-### TOCTOU-Safe File Reading
-
-Skills that read user files **MUST** use TOCTOU-safe patterns. Never use
-`os.ReadFile()` directly - it creates a race window between validation and read.
-
-```go
-// CORRECT - open immediately after validation, then read from descriptor
-path, err := pathValidator.ValidatePath(requested)
-if err != nil { return err }
-
-f, err := os.Open(path)  // Open file immediately
-if err != nil { return err }
-defer f.Close()
-
-info, err := f.Stat()
-if err != nil { return err }
-if info.IsDir() { return errors.New("is directory") }
-
-// Re-validate resolved path for symlink escapes
-resolved, err := filepath.EvalSymlinks(path)
-if err != nil { return err }
-if _, err := pathValidator.ValidatePath(resolved); err != nil {
-    return fmt.Errorf("symlink escape: %w", err)
-}
-
-// Read from already-open descriptor (no race window)
-data := make([]byte, min(info.Size(), maxBytes))
-n, err := io.ReadFull(f, data)
-
-// WRONG - race window between validation and read
-path, _ := pathValidator.ValidatePath(requested)
-data, _ := os.ReadFile(path)  // ❌ File could change between validate and read
-```
-
-**Why:** Attackers can swap files via symlinks between validation and read. The
-`code_snippet_extract` skill demonstrates the correct pattern - open first, validate
-symlinks, then read from the open descriptor.
-
-### Memory Storage Path
-
-**Memory is stored in `storage/memory.db`, NOT `cache/memory.db`.**
-
-When opening memory stores in Go code, always use `cfg.Storage.Root`:
-```go
-// CORRECT - persistent user data goes in storage/
-store, err := memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
-
-// WRONG - cache is for ephemeral/regenerable data
-store, err := memory.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+# Memory
+agentctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
+agentctl memory search "query"
+
+# CI
+agentctl ci status --pr 123
+agentctl ci comments --pr 123
+
+# Codemap
+agentctl codemap generate "trace auth flow"
 ```
 
 ---
 
-Full documentation: `docs/` | Skills: `.claude/skills/` | Workflows:
-`.claude/workflows/`
+## Code Intelligence Tools
+
+### Search & Extract
+
+```bash
+# Semantic search - find code by meaning
+agentctl run code/semantic_search --input '{"query": "auth middleware", "limit": 10}'
+
+# Smart search - auto-find candidates + extract snippets (all-in-one)
+agentctl run code/smart_search --input '{"query": "error handling patterns"}'
+
+# Snippet extract - extract from known files
+agentctl run code/snippet_extract --input '{
+  "query": "validation logic",
+  "candidates": [{"path": "internal/auth/validate.go", "line": 25}]
+}'
+
+# Context ripgrep - full function bodies matching pattern
+agentctl run code/context_ripgrep --input '{"pattern": "func.*Auth", "path": "."}'
+```
+
+### Codemaps
+
+```bash
+# Generate new codemap (AI-powered)
+agentctl run codemap/generate --input '{"query": "trace session lifecycle"}'
+
+# Get existing codemap by ID
+agentctl run codemap/get --input '{"id": "01KES88RGGVWG0T33WY7NH3AFR"}'
+
+# List codemaps
+agentctl run codemap/list --input '{"limit": 10}'
+
+# Check if codemap is stale
+agentctl run codemap/check --input '{"id": "01KES..."}'
+```
+
+### Analysis
+
+```bash
+# Complexity analysis
+agentctl run code/complexity --input '{"path": "internal/auth/"}'
+
+# Security scan
+agentctl run code/security --input '{"path": "."}'
+
+# Extract symbols
+agentctl run code/symbols --input '{"path": "internal/auth/handler.go"}'
+
+# Import analysis
+agentctl run code/imports --input '{"path": ".", "mode": "graph"}'
+```
+
+### Pipeline Pattern
+
+```
+semantic_search → snippet_extract → counsel
+   "where"           "what"          "meaning"
+```
+
+| Skill | When to Use |
+|-------|-------------|
+| `code/semantic_search` | Find code by concept/meaning |
+| `code/smart_search` | Don't know which files - search + extract |
+| `code/snippet_extract` | Have file list - just extract snippets |
+| `code/context_ripgrep` | Regex pattern - need full function bodies |
+| `codemap/generate` | Need AI-traced code relationships |
+| `codemap/get` | Retrieve previously generated map |
+
+**Detailed:** [docs/general/skills.md](../docs/general/skills.md)
+
+---
+
+## Environment
+
+### Required
+
+| Variable | Purpose |
+|----------|---------|
+| `VOYAGE_API_KEY` | Vector embeddings (1024 dims) |
+
+### Optional
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AGENTCTL_HOME` | `~/.agentctl` | Storage root |
+| `ANTHROPIC_API_KEY` | - | Codemap generation |
+| `AGENTCTL_SEMANTIC_RERANK` | `0` | Enable reranking |
+| `AGENTCTL_OBS_DIR` | - | Observability (use `$HOME`, not `~`) |
+
+### Embedding Models (Voyage AI)
+
+| Scope | Model | Use |
+|-------|-------|-----|
+| `symbols` | `voyage-code-3` | Code |
+| `memory` | `voyage-3-large` | Text |
+| `codemaps` | `voyage-3.5` | Mixed |
+
+---
+
+## Storage
+
+| Path | Purpose |
+|------|---------|
+| `~/.agentctl/storage/memory.db` | Memories, codemaps |
+| `~/.agentctl/storage/tasks.db` | Tasks |
+| `~/.agentctl/storage/sessions.db` | Sessions |
+| `~/.agentctl/cas/sha256/` | Large artifacts |
+
+**Detailed:** [docs/general/storage.md](../docs/general/storage.md)
+
+---
+
+## Development
+
+```bash
+make build           # Pure Go
+make build-cgo       # With CGO (Turso)
+make skills-install  # Build + install skills
+make test            # Run tests
+```
+
+---
+
+## Critical Gotchas
+
+### CGO Build
+```bash
+# Correct
+make build-cgo
+
+# Wrong - duplicate SQLite symbols
+CGO_ENABLED=1 go build ./...
+```
+
+### Skill Binary Location
+```bash
+# Correct
+go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
+
+# Wrong - loader won't find it
+go build -o ./my_skill ./skills/my_skill
+```
+
+### Skills Must Load .env
+```go
+import "github.com/jkatigb/agentctl/internal/platform/config"
+
+func main() {
+    config.LoadDotEnv() // BEFORE os.Getenv()
+}
+```
+
+### Memory Path
+```go
+// Correct - storage/
+store, err := memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
+
+// Wrong - cache/
+store, err := memory.Open(ctx, cfg.Paths.Cache, cfg.Paths.CAS)
+```
+
+### Session Archives are Gzipped
+```go
+if strings.HasSuffix(path, ".gz") {
+    gzReader, err := gzip.NewReader(file)
+    // ...
+}
+```
+
+**All gotchas:** [docs/general/gotchas.md](../docs/general/gotchas.md)
+
+---
+
+## Package Patterns
+
+### Dependency Direction
+```
+skills/ → internal/adapters/skillslib/ → internal/platform/
+```
+
+- `internal/` must NOT import `skillslib`
+- `skillslib` is skill-facing API only
+
+### Workspace Detection
+```go
+import "github.com/jkatigb/agentctl/internal/platform/workspace"
+ws := workspace.Detect("")  // Handles sandboxes correctly
+```
+
+### Code Context Funnel
+```
+semantic_search → snippet_extract → counsel
+  "where"           "what"          "meaning"
+```
+
+---
+
+## GUI/TUI
+
+```bash
+make ts-dev-gui  # Web GUI at http://localhost:5173
+```
+
+| Key | TUI View |
+|-----|----------|
+| 1 | Jobs |
+| 2 | Tasks |
+| 3 | Insights |
+| 4 | Mailbox |
+| 5 | Search |
+
+---
+
+## Links
+
+| Topic | Document |
+|-------|----------|
+| Architecture | [docs/general/architecture.md](../docs/general/architecture.md) |
+| Skills | [docs/general/skills.md](../docs/general/skills.md) |
+| Hooks | [docs/general/hooks.md](../docs/general/hooks.md) |
+| Memory | [docs/general/memory.md](../docs/general/memory.md) |
+| Sessions | [docs/general/sessions.md](../docs/general/sessions.md) |
+| Storage | [docs/general/storage.md](../docs/general/storage.md) |
+| Gotchas | [docs/general/gotchas.md](../docs/general/gotchas.md) |
