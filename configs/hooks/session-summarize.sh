@@ -22,7 +22,8 @@
 # Environment variables:
 #   AGENTCTL_BIN - Path to agentctl binary (default: searches PATH)
 #   AGENTCTL_SUMMARIZE_DISABLED - Set to 1 to skip summarization
-#   AGENTCTL_SUMMARIZE_MODE - "summary" (default) or "windows" for context windows
+#   AGENTCTL_SUMMARIZE_MODE - "windows" (default) or "summary" for full session
+#   AGENTCTL_SUMMARIZE_BATCH_SIZE - Windows per compaction (default: 5)
 
 set -euo pipefail
 
@@ -78,16 +79,19 @@ if [[ -z "$session_id" ]]; then
   exit 0
 fi
 
-# Summarization mode
-mode="${AGENTCTL_SUMMARIZE_MODE:-summary}"
+# Summarization mode and batch size
+mode="${AGENTCTL_SUMMARIZE_MODE:-windows}"
+batch_size="${AGENTCTL_SUMMARIZE_BATCH_SIZE:-5}"
 
 # Build skill input
 skill_input=$(jq -nc \
   --arg session_id "$session_id" \
   --arg mode "$mode" \
+  --argjson batch_size "$batch_size" \
   '{
     session_id: $session_id,
     mode: $mode,
+    batch_size: $batch_size,
     force: false
   }'
 )
@@ -100,13 +104,29 @@ result=$("$AGENTCTL_BIN" run session/summarize --ephemeral --input "$skill_input
   exit 0
 }
 
-# Extract gotchas count for feedback
-gotchas_count=$(echo "$result" | jq -r '.data.gotchas | length // 0' 2>/dev/null || echo "0")
-decisions_count=$(echo "$result" | jq -r '.data.decisions | length // 0' 2>/dev/null || echo "0")
+# Extract results based on mode
+if [[ "$mode" == "windows" ]]; then
+  # Windows mode: report summarized/remaining counts
+  summarized=$(echo "$result" | jq -r '.data.windows_summarized // 0' 2>/dev/null || echo "0")
+  remaining=$(echo "$result" | jq -r '.data.windows_remaining // 0' 2>/dev/null || echo "0")
+  embedded=$(echo "$result" | jq -r '.data.windows_reembedded // 0' 2>/dev/null || echo "0")
 
-# Return success with context about what was learned
-if [[ "$gotchas_count" -gt 0 ]] || [[ "$decisions_count" -gt 0 ]]; then
-  echo "{\"context\": \"Session summarized: $gotchas_count gotchas, $decisions_count decisions extracted.\"}"
+  if [[ "$summarized" -gt 0 ]] || [[ "$remaining" -gt 0 ]]; then
+    msg="Windows: $summarized summarized"
+    [[ "$embedded" -gt 0 ]] && msg="$msg, $embedded embedded"
+    [[ "$remaining" -gt 0 ]] && msg="$msg, $remaining remaining"
+    echo "{\"context\": \"$msg\"}"
+  else
+    echo '{}'
+  fi
 else
-  echo '{}'
+  # Summary mode: report gotchas/decisions counts
+  gotchas_count=$(echo "$result" | jq -r '.data.gotchas | length // 0' 2>/dev/null || echo "0")
+  decisions_count=$(echo "$result" | jq -r '.data.decisions | length // 0' 2>/dev/null || echo "0")
+
+  if [[ "$gotchas_count" -gt 0 ]] || [[ "$decisions_count" -gt 0 ]]; then
+    echo "{\"context\": \"Session summarized: $gotchas_count gotchas, $decisions_count decisions extracted.\"}"
+  else
+    echo '{}'
+  fi
 fi

@@ -1,0 +1,91 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: embedding/memories
+  description: Generate embeddings for memories in a workspace
+  version: 0.1.0
+  author: agentctl
+  tags: [embedding, memories, indexing]
+distribution:
+  type: exec
+  exec:
+    entry: skills/embedding_memories/embedding_memories
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: embedding/memories
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: Workspace to process memories for (defaults to cwd)
+    - name: batch_size
+      type: integer
+      required: false
+      default: 10
+      description: Number of memories to process per batch
+    - name: process_all
+      type: boolean
+      required: false
+      default: false
+      description: Loop until all memories are embedded
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: List memories without generating embeddings
+  returns:
+    - name: workspace
+      type: string
+      description: Workspace that was processed
+    - name: memories_found
+      type: integer
+      description: Total memories found needing embeddings
+    - name: embedded
+      type: integer
+      description: Number of memories successfully embedded
+    - name: skipped
+      type: integer
+      description: Number of memories skipped (no content)
+    - name: errors
+      type: integer
+      description: Number of embedding errors
+    - name: remaining
+      type: integer
+      description: Memories remaining to embed
+    - name: batch_count
+      type: integer
+      description: Number of batches processed
+    - name: duration_ms
+      type: integer
+      description: Processing time in milliseconds
+    - name: error_details
+      type: array
+      description: Details of any errors encountered
+  help:
+    short: "Generate embeddings for memories in a workspace"
+    long: |
+      embedding/memories generates embeddings for memories that don't have them.
+      Uses Voyage AI (preferred) or Gemini for embedding generation.
+
+      Examples:
+      - Process one batch: agentctl run embedding/memories
+      - Process all: agentctl run embedding/memories --input '{"process_all": true}'
+      - Dry run: agentctl run embedding/memories --input '{"dry_run": true}'
+    workflows:
+      - id: embed-all
+        description: "Embed all memories in workspace"
+        example_input:
+          process_all: true
+      - id: dry-run
+        description: "Preview what would be embedded"
+        example_input:
+          dry_run: true
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

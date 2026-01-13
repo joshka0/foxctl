@@ -36,8 +36,12 @@ type Input struct {
 	// TaskID is optional - if set, only embed this specific task.
 	TaskID string `json:"task_id,omitempty"`
 
-	// BatchSize limits how many tasks to process in one invocation.
+	// BatchSize limits how many tasks to process per batch.
 	BatchSize int `json:"batch_size,omitempty"`
+
+	// ProcessAll loops internally until all tasks are embedded.
+	// When false, returns after one batch.
+	ProcessAll bool `json:"process_all,omitempty"`
 
 	// DryRun if true, lists tasks but doesn't generate embeddings.
 	DryRun bool `json:"dry_run,omitempty"`
@@ -50,6 +54,8 @@ type Output struct {
 	Embedded     int          `json:"embedded"`
 	Skipped      int          `json:"skipped"`
 	Errors       int          `json:"errors"`
+	Remaining    int          `json:"remaining,omitempty"`
+	BatchCount   int          `json:"batch_count,omitempty"`
 	DurationMs   int64        `json:"duration_ms"`
 	Tasks        []TaskResult `json:"tasks,omitempty"`
 	ErrorDetails []string     `json:"error_details,omitempty"`
@@ -99,33 +105,32 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 	defer taskStore.Close() //nolint:errcheck
 
-	// Get tasks based on scope
-	var taskList []tasks.Task
+	// Open memory store
+	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	if err != nil {
+		return skillerr.Runtime("open memory store", skillerr.WithCause(err))
+	}
+	defer memStore.Close() //nolint:errcheck
+
+	// Get initial task list to count total
+	var allTasks []tasks.Task
 	if in.TaskID != "" {
-		// Single task mode
 		task, err := taskStore.Get(ctx, in.TaskID)
 		if err != nil {
 			return skillerr.Runtime(fmt.Sprintf("get task %s", in.TaskID), skillerr.WithCause(err))
 		}
-		taskList = []tasks.Task{task}
+		allTasks = []tasks.Task{task}
 	} else {
-		// List tasks - we get all and filter by scope
-		taskList, err = listAllTasks(ctx, taskStore, in.Scope, in.WorkspaceID)
+		allTasks, err = listAllTasks(ctx, taskStore, in.Scope, in.WorkspaceID)
 		if err != nil {
 			return skillerr.Runtime("list tasks", skillerr.WithCause(err))
 		}
 	}
-
-	output.TasksFound = len(taskList)
-
-	// Apply batch limit
-	if len(taskList) > in.BatchSize {
-		taskList = taskList[:in.BatchSize]
-	}
+	output.TasksFound = len(allTasks)
 
 	// Dry run - just list tasks
 	if in.DryRun {
-		for _, t := range taskList {
+		for _, t := range allTasks {
 			content := taskEmbeddingContent(t)
 			output.Tasks = append(output.Tasks, TaskResult{
 				TaskID:  t.ID,
@@ -145,11 +150,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	if voyageKey != "" {
-		// Get model from scope-based recommendation (supports env var override)
 		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeTasks)
 		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
 			APIKey:        voyageKey,
-			Model:         model, // Text content (tasks) - not code
+			Model:         model,
 			RateLimitWait: boolPtr(true),
 		})
 		if err != nil {
@@ -167,99 +171,120 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		provider = gp
 	}
 
-	// Open memory store
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
-	if err != nil {
-		return skillerr.Runtime("open memory store", skillerr.WithCause(err))
-	}
-	defer memStore.Close() //nolint:errcheck
-
-	// Resolve session ID for all entries
 	sessionID := resolveSessionID()
 
-	// Process each task
-	for _, t := range taskList {
-		content := taskEmbeddingContent(t)
-		if content == "" {
-			output.Skipped++
-			output.Tasks = append(output.Tasks, TaskResult{
-				TaskID:  t.ID,
-				Title:   t.Title,
-				Status:  "skipped",
-				Message: "No content to embed",
+	// Track already embedded tasks to skip
+	embeddedIDs := make(map[string]bool)
+
+	// Process in batches
+	for {
+		// Get fresh task list each iteration
+		var taskList []tasks.Task
+		if in.TaskID != "" {
+			task, err := taskStore.Get(ctx, in.TaskID)
+			if err != nil {
+				output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("get task %s: %v", in.TaskID, err))
+				output.Errors++
+				break
+			}
+			if !embeddedIDs[task.ID] {
+				taskList = []tasks.Task{task}
+			}
+		} else {
+			all, err := listAllTasks(ctx, taskStore, in.Scope, in.WorkspaceID)
+			if err != nil {
+				output.ErrorDetails = append(output.ErrorDetails, "list tasks: "+err.Error())
+				output.Errors++
+				break
+			}
+			// Filter out already embedded
+			for _, t := range all {
+				if !embeddedIDs[t.ID] {
+					taskList = append(taskList, t)
+				}
+			}
+		}
+
+		// Nothing left
+		if len(taskList) == 0 {
+			break
+		}
+
+		// Apply batch limit
+		batch := taskList
+		remaining := 0
+		if len(batch) > in.BatchSize {
+			batch = batch[:in.BatchSize]
+			remaining = len(taskList) - in.BatchSize
+		}
+
+		// Process batch
+		for _, t := range batch {
+			content := taskEmbeddingContent(t)
+			if content == "" {
+				output.Skipped++
+				embeddedIDs[t.ID] = true
+				continue
+			}
+
+			embedding, err := provider.Embed(ctx, content)
+			if err != nil {
+				output.Errors++
+				output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: %v", t.ID, err))
+				embeddedIDs[t.ID] = true
+				continue
+			}
+
+			name := fmt.Sprintf("task://%s", t.ID)
+			workspace := t.WorkspaceID
+			if workspace == "" {
+				workspace = "default"
+			}
+
+			resultData, _ := json.Marshal(map[string]any{
+				"task_id": t.ID,
+				"status":  t.Status,
 			})
-			continue
+
+			entry := storage.NamedEntry{
+				Name:      name,
+				Type:      taskType,
+				Workspace: workspace,
+				Summary:   content,
+				Result:    resultData,
+				SessionID: sessionID,
+			}
+
+			if _, err := memStore.Save(ctx, entry); err != nil {
+				output.Errors++
+				output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: save failed: %v", t.ID, err))
+				embeddedIDs[t.ID] = true
+				continue
+			}
+
+			if err := memStore.UpdateEmbedding(ctx, name, workspace, embedding); err != nil {
+				output.Errors++
+				output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: update embedding failed: %v", t.ID, err))
+				embeddedIDs[t.ID] = true
+				continue
+			}
+
+			output.Embedded++
+			embeddedIDs[t.ID] = true
+		}
+		output.BatchCount++
+
+		// If not process_all, return after one batch
+		if !in.ProcessAll {
+			output.Remaining = remaining
+			break
 		}
 
-		// Generate embedding
-		embedding, err := provider.Embed(ctx, content)
-		if err != nil {
-			output.Errors++
-			output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: %v", t.ID, err))
-			output.Tasks = append(output.Tasks, TaskResult{
-				TaskID:  t.ID,
-				Title:   t.Title,
-				Status:  "error",
-				Message: err.Error(),
-			})
-			continue
+		// Check context
+		if ctx.Err() != nil {
+			output.Remaining = remaining
+			break
 		}
-
-		// Store embedding in memory.db
-		// Name format: task://<task_id>
-		name := fmt.Sprintf("task://%s", t.ID)
-		workspace := t.WorkspaceID
-		if workspace == "" {
-			workspace = "default"
-		}
-
-		// Build result metadata
-		resultData, _ := json.Marshal(map[string]any{
-			"task_id": t.ID,
-			"status":  t.Status,
-		})
-
-		entry := storage.NamedEntry{
-			Name:      name,
-			Type:      taskType,
-			Workspace: workspace,
-			Summary:   content,
-			Result:    resultData,
-			SessionID: sessionID,
-		}
-
-		if _, err := memStore.Save(ctx, entry); err != nil {
-			output.Errors++
-			output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: save failed: %v", t.ID, err))
-			output.Tasks = append(output.Tasks, TaskResult{
-				TaskID:  t.ID,
-				Title:   t.Title,
-				Status:  "error",
-				Message: err.Error(),
-			})
-			continue
-		}
-
-		// Update embedding
-		if err := memStore.UpdateEmbedding(ctx, name, workspace, embedding); err != nil {
-			output.Errors++
-			output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: update embedding failed: %v", t.ID, err))
-			output.Tasks = append(output.Tasks, TaskResult{
-				TaskID:  t.ID,
-				Title:   t.Title,
-				Status:  "error",
-				Message: err.Error(),
-			})
-			continue
-		}
-
-		output.Embedded++
-		output.Tasks = append(output.Tasks, TaskResult{
-			TaskID:     t.ID,
-			Title:      t.Title,
-			Status:     "embedded",
-			Dimensions: len(embedding),
-		})
 	}
 
 	output.DurationMs = time.Since(start).Milliseconds()

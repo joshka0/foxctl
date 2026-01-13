@@ -18,7 +18,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
-	"github.com/rs/zerolog"
 )
 
 const (
@@ -36,6 +35,10 @@ type Input struct {
 	// MaxDuration is the maximum processing time in seconds (default: 300).
 	MaxDuration int `json:"max_duration,omitempty"`
 
+	// ProcessAll loops until queue is empty or MaxDuration is reached.
+	// When false, returns after processing BatchSize jobs.
+	ProcessAll bool `json:"process_all,omitempty"`
+
 	// DryRun if true, claims jobs but doesn't call the embedding API.
 	DryRun bool `json:"dry_run,omitempty"`
 }
@@ -45,6 +48,7 @@ type Output struct {
 	Processed  int            `json:"processed"`
 	Errors     int            `json:"errors"`
 	Remaining  int            `json:"remaining"`
+	BatchCount int            `json:"batch_count,omitempty"`
 	Status     string         `json:"status"` // "completed", "timeout", "no_jobs", "error"
 	DurationMs int64          `json:"duration_ms"`
 	LastError  string         `json:"last_error,omitempty"`
@@ -170,112 +174,139 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	output := Output{Status: "completed"}
 
 	// Process jobs in batches
-	for i := 0; i < in.BatchSize; i++ {
-		// Check deadline
-		if time.Now().After(deadline.Add(-5 * time.Second)) {
-			output.Status = "timeout"
-			log.Warn().Msg("approaching deadline, stopping processing")
-			break
-		}
+	for {
+		batchProcessed := 0
+		noMoreJobs := false
 
-		// Claim next job
-		job, err := store.ClaimNext(ctx)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to claim job")
-			output.LastError = err.Error()
-			output.Errors++
-			continue
-		}
-
-		if job == nil {
-			// No more jobs
-			if output.Processed == 0 && output.Errors == 0 {
-				output.Status = "no_jobs"
+		for i := 0; i < in.BatchSize; i++ {
+			// Check deadline
+			if time.Now().After(deadline.Add(-5 * time.Second)) {
+				output.Status = "timeout"
+				log.Warn().Msg("approaching deadline, stopping processing")
+				break
 			}
-			log.Debug().Msg("no more jobs in queue")
-			break
-		}
 
-		// Log job claimed with content preview
-		contentPreview := job.Content
-		if len(contentPreview) > 100 {
-			contentPreview = contentPreview[:100] + "..."
-		}
-		log.Info().
-			Str("job_id", job.ID).
-			Str("content_preview", contentPreview).
-			Msg("claimed job")
-
-		// Generate embedding
-		if in.DryRun {
-			// Dry run: mark as complete with fake embedding using config dimensions
-			fakeEmbed := make([]float32, expectedDims)
-			if err := store.Complete(ctx, job.ID, fakeEmbed, "dry-run"); err != nil {
-				log.Error().Err(err).Str("job_id", job.ID).Msg("failed to complete dry-run job")
+			// Claim next job
+			job, err := store.ClaimNext(ctx)
+			if err != nil {
+				log.Error().Err(err).Msg("failed to claim job")
 				output.LastError = err.Error()
 				output.Errors++
 				continue
 			}
-			log.Info().Str("job_id", job.ID).Str("status", "dry-run").Int("dims", expectedDims).Msg("job completed")
-		} else {
-			var embed []float32
-			var err error
 
-			if voyageProvider != nil {
-				// Use Voyage with built-in rate limiting and 429 retry
-				embed, err = voyageProvider.Embed(ctx, job.Content)
-			} else {
-				// Fall back to Gemini
-				embed, err = generateGeminiEmbedding(ctx, log, geminiKey, embeddingModel, job.Content)
+			if job == nil {
+				// No more jobs
+				noMoreJobs = true
+				if output.Processed == 0 && output.Errors == 0 {
+					output.Status = "no_jobs"
+				}
+				log.Debug().Msg("no more jobs in queue")
+				break
 			}
 
-			if err != nil {
-				log.Error().Err(err).Str("job_id", job.ID).Msg("embedding generation failed")
-				// Rate limit or API error - fail with retry
-				if failErr := store.Fail(ctx, job.ID, err.Error()); failErr != nil {
-					output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, err)
-				} else {
-					output.LastError = err.Error()
-				}
-				output.Errors++
-
-				// If rate limited (Gemini only - Voyage handles this internally)
-				if voyageProvider == nil && isRateLimited(err) {
-					log.Warn().Str("job_id", job.ID).Msg("rate limited, backing off")
-					time.Sleep(2 * time.Second)
-				}
-				continue
+			// Log job claimed with content preview
+			contentPreview := job.Content
+			if len(contentPreview) > 100 {
+				contentPreview = contentPreview[:100] + "..."
 			}
-
-			// Validate embedding dimensions match config
-			if len(embed) != expectedDims {
-				errMsg := fmt.Sprintf("dimension mismatch: got %d, expected %d from config; update embedding.model or embedding.dimensions", len(embed), expectedDims)
-				log.Error().Str("job_id", job.ID).Msg(errMsg)
-				if failErr := store.Fail(ctx, job.ID, errMsg); failErr != nil {
-					output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, errMsg)
-				} else {
-					output.LastError = errMsg
-				}
-				output.Errors++
-				continue
-			}
-
 			log.Info().
 				Str("job_id", job.ID).
-				Int("embedding_dim", len(embed)).
-				Msg("embedding generated")
+				Str("content_preview", contentPreview).
+				Msg("claimed job")
 
-			// Store the embedding with model from config
-			if err := store.Complete(ctx, job.ID, embed, embeddingModel); err != nil {
-				log.Error().Err(err).Str("job_id", job.ID).Msg("failed to store embedding")
-				output.LastError = err.Error()
-				output.Errors++
-				continue
+			// Generate embedding
+			if in.DryRun {
+				// Dry run: mark as complete with fake embedding using config dimensions
+				fakeEmbed := make([]float32, expectedDims)
+				if err := store.Complete(ctx, job.ID, fakeEmbed, "dry-run"); err != nil {
+					log.Error().Err(err).Str("job_id", job.ID).Msg("failed to complete dry-run job")
+					output.LastError = err.Error()
+					output.Errors++
+					continue
+				}
+				log.Info().Str("job_id", job.ID).Str("status", "dry-run").Int("dims", expectedDims).Msg("job completed")
+			} else {
+				var embed []float32
+				var err error
+
+				if voyageProvider != nil {
+					// Use Voyage with built-in rate limiting and 429 retry
+					embed, err = voyageProvider.Embed(ctx, job.Content)
+				} else {
+					// Fall back to Gemini
+					embed, err = generateGeminiEmbedding(ctx, geminiKey, embeddingModel, job.Content)
+				}
+
+				if err != nil {
+					log.Error().Err(err).Str("job_id", job.ID).Msg("embedding generation failed")
+					// Rate limit or API error - fail with retry
+					if failErr := store.Fail(ctx, job.ID, err.Error()); failErr != nil {
+						output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, err)
+					} else {
+						output.LastError = err.Error()
+					}
+					output.Errors++
+
+					// If rate limited (Gemini only - Voyage handles this internally)
+					if voyageProvider == nil && isRateLimited(err) {
+						log.Warn().Str("job_id", job.ID).Msg("rate limited, backing off")
+						time.Sleep(2 * time.Second)
+					}
+					continue
+				}
+
+				// Validate embedding dimensions match config
+				if len(embed) != expectedDims {
+					errMsg := fmt.Sprintf("dimension mismatch: got %d, expected %d from config; update embedding.model or embedding.dimensions", len(embed), expectedDims)
+					log.Error().Str("job_id", job.ID).Msg(errMsg)
+					if failErr := store.Fail(ctx, job.ID, errMsg); failErr != nil {
+						output.LastError = fmt.Sprintf("fail job: %v (original: %v)", failErr, errMsg)
+					} else {
+						output.LastError = errMsg
+					}
+					output.Errors++
+					continue
+				}
+
+				log.Info().
+					Str("job_id", job.ID).
+					Int("embedding_dim", len(embed)).
+					Msg("embedding generated")
+
+				// Store the embedding with model from config
+				if err := store.Complete(ctx, job.ID, embed, embeddingModel); err != nil {
+					log.Error().Err(err).Str("job_id", job.ID).Msg("failed to store embedding")
+					output.LastError = err.Error()
+					output.Errors++
+					continue
+				}
+				log.Info().Str("job_id", job.ID).Str("status", "completed").Str("model", embeddingModel).Msg("job completed")
 			}
-			log.Info().Str("job_id", job.ID).Str("status", "completed").Str("model", embeddingModel).Msg("job completed")
+
+			output.Processed++
+			batchProcessed++
 		}
 
-		output.Processed++
+		// Only count batch if we processed at least one job
+		if batchProcessed > 0 {
+			output.BatchCount++
+		}
+
+		// If not process_all, return after one batch
+		if !in.ProcessAll {
+			break
+		}
+
+		// If no more jobs or timeout, exit
+		if noMoreJobs || output.Status == "timeout" {
+			break
+		}
+
+		// Check context
+		if ctx.Err() != nil {
+			break
+		}
 	}
 
 	output.DurationMs = time.Since(start).Milliseconds()
@@ -316,7 +347,7 @@ func boolPtr(b bool) *bool {
 }
 
 // generateGeminiEmbedding calls the Gemini embedding API with the specified model.
-func generateGeminiEmbedding(ctx context.Context, log zerolog.Logger, apiKey, model, text string) ([]float32, error) {
+func generateGeminiEmbedding(ctx context.Context, apiKey, model, text string) ([]float32, error) {
 	// Use header-based authentication to prevent API key leakage in logs
 	url := fmt.Sprintf("%s/models/%s:embedContent", geminiBaseURL, model)
 

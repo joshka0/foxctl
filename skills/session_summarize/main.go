@@ -53,6 +53,13 @@ type Input struct {
 
 	// SeedChunksPerWindow caps chunk previews per window.
 	SeedChunksPerWindow int `json:"seed_chunks_per_window,omitempty"`
+
+	// BatchSize limits windows processed per batch (mode=windows). Default: 5.
+	BatchSize int `json:"batch_size,omitempty"`
+
+	// ProcessAll loops internally until all windows are done (mode=windows).
+	// When false, returns after one batch with windows_remaining count.
+	ProcessAll bool `json:"process_all,omitempty"`
 }
 
 // Output defines the skill output.
@@ -80,6 +87,8 @@ type Output struct {
 	WindowsSummarized int `json:"windows_summarized,omitempty"`
 	// WindowsSkipped is the count of windows that already had summaries (mode=windows).
 	WindowsSkipped int `json:"windows_skipped,omitempty"`
+	// WindowsRemaining is the count of windows still needing summarization (mode=windows with batch_size).
+	WindowsRemaining int `json:"windows_remaining,omitempty"`
 
 	// SessionsReembedded is the count of sessions re-embedded (mode=reembed).
 	SessionsReembedded int `json:"sessions_reembedded,omitempty"`
@@ -173,31 +182,23 @@ type LLMProvider struct {
 }
 
 // getProviders returns available LLM providers in priority order.
-// Priority: OpenRouter (devstral free) → Groq → Cerebras → CLI (slow startup)
+// Priority: Cerebras (fastest) → Groq → OpenRouter → CLI (slow startup)
 func getProviders() []LLMProvider {
 	var providers []LLMProvider
 
-	// OpenRouter - devstral is the preferred free model
-	// Set OPENROUTER_MODELS as comma-separated list, or use defaults
-	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
-		models := os.Getenv("OPENROUTER_MODELS")
-		if models == "" {
-			// Default: devstral (free, fast, good at code)
-			models = "minimax/minimax-m2.1"
+	// Cerebras - fastest inference (~2000 tok/s), prioritized for speed
+	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
+		model := os.Getenv("CEREBRAS_MODEL")
+		if model == "" {
+			model = "llama-3.3-70b"
 		}
-		for _, model := range strings.Split(models, ",") {
-			model = strings.TrimSpace(model)
-			if model == "" {
-				continue
-			}
-			providers = append(providers, LLMProvider{
-				Name:      "openrouter:" + model,
-				Endpoint:  "https://openrouter.ai/api/v1/chat/completions",
-				APIKey:    key,
-				Model:     model,
-				MaxTokens: 24000, // 32k context minus output buffer
-			})
-		}
+		providers = append(providers, LLMProvider{
+			Name:      "cerebras",
+			Endpoint:  "https://api.cerebras.ai/v1/chat/completions",
+			APIKey:    key,
+			Model:     model,
+			MaxTokens: 8000, // conservative for rate limits
+		})
 	}
 
 	// Groq - fast and cheap with 128k context
@@ -216,19 +217,26 @@ func getProviders() []LLMProvider {
 		})
 	}
 
-	// Cerebras - fastest inference but rate limits
-	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
-		model := os.Getenv("CEREBRAS_MODEL")
-		if model == "" {
-			model = "llama-3.3-70b"
+	// OpenRouter - fallback with many model options
+	// Set OPENROUTER_MODELS as comma-separated list, or use defaults
+	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
+		models := os.Getenv("OPENROUTER_MODELS")
+		if models == "" {
+			models = "minimax/minimax-m2.1"
 		}
-		providers = append(providers, LLMProvider{
-			Name:      "cerebras",
-			Endpoint:  "https://api.cerebras.ai/v1/chat/completions",
-			APIKey:    key,
-			Model:     model,
-			MaxTokens: 8000, // conservative for rate limits
-		})
+		for _, model := range strings.Split(models, ",") {
+			model = strings.TrimSpace(model)
+			if model == "" {
+				continue
+			}
+			providers = append(providers, LLMProvider{
+				Name:      "openrouter:" + model,
+				Endpoint:  "https://openrouter.ai/api/v1/chat/completions",
+				APIKey:    key,
+				Model:     model,
+				MaxTokens: 24000, // 32k context minus output buffer
+			})
+		}
 	}
 
 	// CLI providers as fallback (slow startup ~60s)
@@ -1573,46 +1581,136 @@ func buildEmbeddingTextFromSession(sess sessions.Session) string {
 	return strings.Join(parts, "\n")
 }
 
-// summarizeWindows generates LLM-based summaries for each context window.
+// summarizeWindows generates LLM-based summaries for context windows with batch processing.
+// When process_all=true, loops until all windows are done. Otherwise returns after one batch.
 func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input) Output {
 	output := Output{
 		SessionID: session.ID,
 		Status:    "windows_summarized",
 	}
 
-	// Get all context windows for this session
-	windows, err := sessionStore.GetContextWindows(ctx, session.ID)
-	if err != nil {
-		output.Status = "error"
-		output.Message = fmt.Sprintf("failed to get windows: %v", err)
-		return output
+	// Default batch size: 5 windows per batch
+	batchSize := input.BatchSize
+	if batchSize <= 0 {
+		batchSize = 5
 	}
 
-	if len(windows) == 0 {
-		output.Status = "no_windows"
-		output.Message = "no context windows found for session"
-		return output
-	}
+	// Create embedder once for reuse across all batches
+	embedder, embedderErr := semantic.NewEmbedder(semantic.ScopeSessions, semantic.WithAllowFallback(true))
 
-	summarized := 0
-	skipped := 0
+	// Totals across all batches
+	totalSummarized := 0
+	totalEmbedded := 0
+	totalSkipped := 0
+	batchCount := 0
 
-	for _, window := range windows {
-		// Skip windows that already have LLM summaries (unless force)
-		// Check for marker that indicates LLM-generated summary
-		if !input.Force && strings.TrimSpace(window.Summary) != "" && len(window.Summary) < 2000 {
-			// Existing summary that's reasonably sized (not raw compact message)
-			skipped++
-			continue
+	for {
+		// Get fresh window list each iteration (to see newly summarized ones)
+		windows, err := sessionStore.GetContextWindows(ctx, session.ID)
+		if err != nil {
+			output.Status = "error"
+			output.Message = fmt.Sprintf("failed to get windows: %v", err)
+			return output
 		}
 
-		// Build content from chunks using the window's chunk range
+		if len(windows) == 0 {
+			if batchCount == 0 {
+				output.Status = "no_windows"
+				output.Message = "no context windows found for session"
+			}
+			return output
+		}
+
+		// Filter windows that need summarization
+		var needsSummarization []sessions.ContextWindow
+		alreadyDone := 0
+		for _, window := range windows {
+			if !input.Force && strings.TrimSpace(window.Summary) != "" && len(window.Summary) < 2000 {
+				alreadyDone++
+				continue
+			}
+			needsSummarization = append(needsSummarization, window)
+		}
+
+		// Nothing left to process
+		if len(needsSummarization) == 0 {
+			output.WindowsSummarized = totalSummarized
+			output.WindowsSkipped = alreadyDone + totalSkipped
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsRemaining = 0
+			output.Message = fmt.Sprintf("Summarized %d windows (%d embedded, %d skipped) for session %s",
+				totalSummarized, totalEmbedded, alreadyDone+totalSkipped, session.ID)
+			return output
+		}
+
+		// Apply batch limit
+		batch := needsSummarization
+		remaining := 0
+		if len(batch) > batchSize {
+			batch = batch[:batchSize]
+			remaining = len(needsSummarization) - batchSize
+		}
+
+		// Process this batch
+		batchSummarized, batchEmbedded, batchSkipped := processBatch(ctx, sessionStore, session.ID, batch, providers, embedder, embedderErr)
+		totalSummarized += batchSummarized
+		totalEmbedded += batchEmbedded
+		totalSkipped += batchSkipped
+		batchCount++
+
+		// If not process_all mode, return after one batch
+		if !input.ProcessAll {
+			output.WindowsSummarized = totalSummarized
+			output.WindowsSkipped = alreadyDone + totalSkipped
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsRemaining = remaining
+
+			if remaining > 0 {
+				output.Status = "windows_partial"
+				output.Message = fmt.Sprintf("Processed %d windows (%d embedded), %d remaining. Run again to continue.",
+					totalSummarized, totalEmbedded, remaining)
+			} else {
+				output.Message = fmt.Sprintf("Summarized %d windows (%d embedded, %d skipped) for session %s",
+					totalSummarized, totalEmbedded, alreadyDone+totalSkipped, session.ID)
+			}
+			return output
+		}
+
+		// process_all mode: continue if there are more windows
+		if remaining == 0 {
+			output.WindowsSummarized = totalSummarized
+			output.WindowsSkipped = alreadyDone + totalSkipped
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsRemaining = 0
+			output.Message = fmt.Sprintf("Summarized %d windows (%d embedded, %d skipped) in %d batches for session %s",
+				totalSummarized, totalEmbedded, alreadyDone+totalSkipped, batchCount, session.ID)
+			return output
+		}
+
+		// Check context cancellation between batches
+		if ctx.Err() != nil {
+			output.Status = "interrupted"
+			output.WindowsSummarized = totalSummarized
+			output.WindowsSkipped = totalSkipped
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsRemaining = remaining
+			output.Message = fmt.Sprintf("Interrupted after %d batches (%d windows), %d remaining",
+				batchCount, totalSummarized, remaining)
+			return output
+		}
+	}
+}
+
+// processBatch summarizes a batch of windows, returning counts.
+func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID string, batch []sessions.ContextWindow, providers []LLMProvider, embedder *semantic.Embedder, embedderErr error) (summarized, embedded, skipped int) {
+	for _, window := range batch {
+		// Build content from chunks
 		var contentParts []string
 		estimatedTokens := 0
-		maxTokens := 4000 // Keep window summaries focused
+		maxTokens := 4000
 
 		for chunkIdx := window.ChunkStart; chunkIdx <= window.ChunkEnd; chunkIdx++ {
-			chunk, err := sessionStore.GetChunk(ctx, session.ID, chunkIdx)
+			chunk, err := sessionStore.GetChunk(ctx, sessionID, chunkIdx)
 			if err != nil {
 				continue
 			}
@@ -1620,7 +1718,7 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 			if preview == "" {
 				continue
 			}
-			chunkTokens := len(preview) / 4 // rough estimate
+			chunkTokens := len(preview) / 4
 			if estimatedTokens+chunkTokens > maxTokens {
 				break
 			}
@@ -1633,29 +1731,35 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 			continue
 		}
 
-		// Build prompt for window summarization
+		// Call LLM for summary
 		windowContent := strings.Join(contentParts, "\n")
 		summary, err := summarizeWindowContent(ctx, providers, window.WindowIndex, windowContent)
 		if err != nil {
-			// Log error but continue with other windows
+			log.Printf("[WARN] session_summarize: LLM failed for window %d: %v", window.WindowIndex, err)
 			skipped++
 			continue
 		}
 
-		// Update window summary only (embedding unchanged)
+		// Save summary
 		if err := sessionStore.UpdateContextWindowSummary(ctx, window.ID, summary); err != nil {
 			skipped++
 			continue
 		}
-
 		summarized++
+
+		// Generate and save embedding
+		if embedderErr == nil && embedder != nil {
+			if result, err := embedder.Embed(ctx, summary); err == nil && len(result.Vec) > 0 {
+				embeddingBytes := vector.SerializeF32(result.Vec)
+				if err := sessionStore.SetContextWindowEmbedding(ctx, window.ID, embeddingBytes, result.Model); err != nil {
+					log.Printf("[WARN] session_summarize: failed to set window %s embedding: %v", window.ID, err)
+				} else {
+					embedded++
+				}
+			}
+		}
 	}
-
-	output.WindowsSummarized = summarized
-	output.WindowsSkipped = skipped
-	output.Message = fmt.Sprintf("Summarized %d windows (%d skipped) for session %s", summarized, skipped, session.ID)
-
-	return output
+	return
 }
 
 // summarizeWindowContent calls LLM to generate a concise summary for a window.
@@ -1687,7 +1791,8 @@ Be concise and specific. Output only the summary text, no JSON or formatting.
 			return strings.TrimSpace(summary), nil
 		}
 
-		if !isRetryableError(err) {
+		// Skip retry check if no error (empty response case)
+		if err != nil && !isRetryableError(err) {
 			return "", err
 		}
 	}
