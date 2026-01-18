@@ -47,6 +47,15 @@ type Store struct {
 // Stats aliases the shared memory stats type.
 type Stats = storage.MemoryStats
 
+// ListFilter aliases the shared filter type for backwards compatibility.
+type ListFilter = storage.MemoryListFilter
+
+// SaveOptions aliases the shared save options type for backwards compatibility.
+type SaveOptions = storage.MemorySaveOptions
+
+// EmbeddingMetadata aliases the shared embedding metadata type.
+type EmbeddingMetadata = storage.EmbeddingMetadata
+
 // Connection pool defaults for SQLite file-based storage
 // These values provide reasonable defaults for typical workloads with moderate concurrency
 const (
@@ -260,11 +269,6 @@ func (s *Store) List(ctx context.Context, workspace string, limit int) ([]NamedE
 	return entries, nil
 }
 
-type ListFilter struct {
-	Types     []string
-	SessionID string
-}
-
 // ListFiltered returns named memories for a workspace with optional filters.
 //
 // This is intended for stable pagination and for session-scoped context injection
@@ -433,16 +437,6 @@ func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix st
 	return int(count), nil
 }
 
-// SaveOptions contains parameters for saving memory entries.
-type SaveOptions struct {
-	Name      string
-	Type      string
-	Workspace string
-	Summary   string
-	Result    []byte
-	SessionID string // AI coding tool session ID (optional)
-}
-
 // SaveResult stores a result envelope using structured options.
 func (s *Store) SaveResult(ctx context.Context, opts SaveOptions) (NamedEntry, error) {
 	entry := NamedEntry{
@@ -604,6 +598,20 @@ func (s *Store) Search(ctx context.Context, workspace, query string, limit int) 
 	return scored, nil
 }
 
+// ExistsByNameSuffix checks if any entry exists with a name ending in the given suffix.
+// Used for content-hash deduplication across sessions (e.g., suffix ":<type>:<digest>").
+func (s *Store) ExistsByNameSuffix(ctx context.Context, workspace, suffix string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM named_memory
+		WHERE workspace = ? AND name LIKE '%' || ?`,
+		workspace, suffix).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("memory: exists by suffix: %w", err)
+	}
+	return count > 0, nil
+}
+
 // ListByType returns entries of a specific type for a workspace, ordered by recency.
 func (s *Store) ListByType(ctx context.Context, workspace, entryType string, limit int) ([]ScoredEntry, error) {
 	if limit <= 0 {
@@ -729,16 +737,6 @@ func (s *Store) GetEmbedding(ctx context.Context, name, workspace string) ([]flo
 	}
 
 	return embedding, nil
-}
-
-// EmbeddingMetadata tracks embedding configuration per workspace.
-type EmbeddingMetadata struct {
-	Workspace  string    `json:"workspace"`
-	Provider   string    `json:"provider"`
-	Model      string    `json:"model"`
-	Dimensions int       `json:"dimensions"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // GetEmbeddingMetadata retrieves embedding metadata for a workspace.

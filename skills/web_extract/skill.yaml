@@ -1,0 +1,79 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: web/extract
+  version: 0.1.0
+  description: "Extract content from URLs with query-based snippet filtering"
+  tags: ["web", "extract", "fetch", "scrape"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: web/extract
+  parameters:
+    - name: urls
+      type: array
+      required: true
+      description: "URLs to extract content from"
+    - name: query
+      type: string
+      required: false
+      description: "Query to filter/extract relevant snippets from content"
+    - name: max_content_kb
+      type: integer
+      required: false
+      default: 50
+      description: "Maximum content size per URL in KB"
+    - name: include_links
+      type: boolean
+      required: false
+      default: false
+      description: "Include extracted links from pages"
+  help:
+    short: "Extract and filter content from URLs."
+    long: |
+      Use web/extract to fetch content from URLs and optionally filter
+      for relevant snippets based on a query.
+
+      Features:
+      - HTML to markdown conversion
+      - Query-based snippet extraction
+      - CAS storage for large results
+      - Rate limiting and caching
+
+      Example commands:
+        agentctl run web/extract --input '{"urls": ["https://example.com"]}'
+        agentctl run web/extract --input '{"urls": ["https://docs.example.com"], "query": "authentication"}'
+        agentctl run web/extract --input '{"urls": ["https://api.example.com/docs"], "query": "rate limits", "max_content_kb": 100}'
+    workflows:
+      - id: basic-extract
+        description: "Extract content from a URL"
+        example_input:
+          urls: ["https://example.com"]
+      - id: query-extract
+        description: "Extract content filtered by query"
+        example_input:
+          urls: ["https://docs.example.com/api"]
+          query: "authentication methods"
+      - id: multi-url
+        description: "Extract from multiple URLs"
+        example_input:
+          urls: ["https://docs.example.com/intro", "https://docs.example.com/api"]
+          query: "getting started"
+          max_content_kb: 30
+returns:
+  - name: extractions
+    type: array
+    description: "Extracted content from each URL"
+  - name: artifact
+    type: string
+    description: "CAS digest if results were truncated"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

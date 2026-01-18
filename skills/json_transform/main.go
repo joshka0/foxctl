@@ -11,11 +11,14 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 const command = "json/transform"
+
+var allowedOps = []string{"extract", "merge", "validate", "format", "keys"}
 
 type input struct {
 	Operation string `json:"operation"`
@@ -31,12 +34,16 @@ func main() {
 }
 
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
-	// Validate required fields
-	if err := oputil.Require(in.Operation, "operation"); err != nil {
-		return err
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 	if err := oputil.Require(in.Input, "input"); err != nil {
-		return err
+		return skillerr.Arg(err.Error(), skillerr.WithHint("Provide JSON input as a string."))
 	}
 
 	// Apply defaults
@@ -51,7 +58,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Dispatch operation
-	result, err := oputil.NewSwitch(in.Operation).
+	result, err := oputil.NewSwitch(op).
 		Case("extract", func() (map[string]any, error) { return extractOperation(data, in.Path), nil }).
 		Case("merge", func() (map[string]any, error) { return mergeOperation(data, in.MergeWith), nil }).
 		Case("validate", func() (map[string]any, error) { return validateOperation(data), nil }).
@@ -59,7 +66,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 		Case("keys", func() (map[string]any, error) { return keysOperation(data), nil }).
 		Run()
 	if err != nil {
-		return err
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 
 	return skillout.Emit(rc, command, result)
@@ -361,4 +368,3 @@ func calculateDepth(data any) int {
 		return 1
 	}
 }
-

@@ -2,13 +2,14 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/gitutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -43,22 +44,23 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Validate and resolve repository path
-	repoPath, err := resolveRepoPath(rc, in.RepoPath)
+	repoPath, err := gitutil.ResolveRepoPath(rc, in.RepoPath)
 	if err != nil {
-		return fmt.Errorf("resolve repo path: %w", err)
+		return err
 	}
 
 	// Check if git is available
-	if _, err := exec.LookPath("git"); err != nil {
-		return fmt.Errorf("git command not found: %w", err)
+	gitPath, err := gitutil.RequireGit()
+	if err != nil {
+		return err
 	}
 
 	// Dispatch operation
 	data, err := oputil.NewSwitch(in.Operation).
-		Case("list", func() (map[string]any, error) { return listWorktrees(ctx, repoPath) }).
-		Case("add", func() (map[string]any, error) { return addWorktree(ctx, rc, repoPath, in) }).
-		Case("remove", func() (map[string]any, error) { return removeWorktree(ctx, rc, repoPath, in) }).
-		Case("prune", func() (map[string]any, error) { return pruneWorktrees(ctx, repoPath) }).
+		Case("list", func() (map[string]any, error) { return listWorktrees(ctx, gitPath, repoPath) }).
+		Case("add", func() (map[string]any, error) { return addWorktree(ctx, rc, gitPath, repoPath, in) }).
+		Case("remove", func() (map[string]any, error) { return removeWorktree(ctx, rc, gitPath, repoPath, in) }).
+		Case("prune", func() (map[string]any, error) { return pruneWorktrees(ctx, gitPath, repoPath) }).
 		Run()
 	if err != nil {
 		return err
@@ -67,28 +69,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
-func resolveRepoPath(rc *skillmain.RunContext, path string) (string, error) {
-	if path == "" {
-		path = "."
-	}
-	valid, err := rc.PathValidator.ValidatePath(path)
-	if err != nil {
-		return "", fmt.Errorf("path validation failed: %w", err)
-	}
-	return valid, nil
-}
-
-func listWorktrees(ctx context.Context, repoPath string) (map[string]any, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "list", "--porcelain")
-	output, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("git worktree list failed: %s", string(exitErr.Stderr))
-		}
-		return nil, fmt.Errorf("git worktree list failed: %w", err)
+func listWorktrees(ctx context.Context, gitPath, repoPath string) (map[string]any, error) {
+	result := executil.Run(ctx, "", gitPath, "-C", repoPath, "worktree", "list", "--porcelain")
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git worktree list failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	worktrees := parseWorktreeList(string(output))
+	worktrees := parseWorktreeList(string(result.Stdout))
 
 	return map[string]any{
 		"operation":      "list",
@@ -131,15 +118,18 @@ func parseWorktreeList(output string) []worktree {
 	return worktrees
 }
 
-func addWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath string, in input) (map[string]any, error) {
+func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
-		return nil, fmt.Errorf("path is required for add operation")
+		return nil, skillerr.Arg(
+			"path is required for add operation",
+			skillerr.WithHint("Provide path when operation is add."),
+		)
 	}
 
 	// Validate the target path
-	targetPath, err := rc.PathValidator.ValidatePath(in.Path)
+	targetPath, err := skillmain.ValidatePath(rc, in.Path, skillmain.WithPathMessage("invalid target path"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid target path: %w", err)
+		return nil, err
 	}
 
 	args := []string{"-C", repoPath, "worktree", "add"}
@@ -154,12 +144,9 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath string,
 		args = append(args, in.Branch)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git worktree add failed: %s", stderr.String())
+	result := executil.Run(ctx, "", gitPath, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git worktree add failed: %s", string(result.Stderr))
 	}
 
 	return map[string]any{
@@ -170,15 +157,18 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath string,
 	}, nil
 }
 
-func removeWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath string, in input) (map[string]any, error) {
+func removeWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
-		return nil, fmt.Errorf("path is required for remove operation")
+		return nil, skillerr.Arg(
+			"path is required for remove operation",
+			skillerr.WithHint("Provide path when operation is remove."),
+		)
 	}
 
 	// Validate the target path
-	targetPath, err := rc.PathValidator.ValidatePath(in.Path)
+	targetPath, err := skillmain.ValidatePath(rc, in.Path, skillmain.WithPathMessage("invalid target path"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid target path: %w", err)
+		return nil, err
 	}
 
 	args := []string{"-C", repoPath, "worktree", "remove"}
@@ -189,12 +179,9 @@ func removeWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath stri
 
 	args = append(args, targetPath)
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("git worktree remove failed: %s", stderr.String())
+	result := executil.Run(ctx, "", gitPath, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git worktree remove failed: %s", string(result.Stderr))
 	}
 
 	return map[string]any{
@@ -204,11 +191,12 @@ func removeWorktree(ctx context.Context, rc *skillmain.RunContext, repoPath stri
 	}, nil
 }
 
-func pruneWorktrees(ctx context.Context, repoPath string) (map[string]any, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "worktree", "prune", "-v")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("git worktree prune failed: %s", string(output))
+func pruneWorktrees(ctx context.Context, gitPath, repoPath string) (map[string]any, error) {
+	result := executil.Run(ctx, "", gitPath, "-C", repoPath, "worktree", "prune", "-v")
+	output := append([]byte{}, result.Stdout...)
+	output = append(output, result.Stderr...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git worktree prune failed: %s", string(output))
 	}
 
 	message := strings.TrimSpace(string(output))
@@ -221,4 +209,3 @@ func pruneWorktrees(ctx context.Context, repoPath string) (map[string]any, error
 		"message":   message,
 	}, nil
 }
-

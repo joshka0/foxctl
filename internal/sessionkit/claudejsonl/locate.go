@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // LocateSessionJSONL tries to find a Claude Code JSONL file for a session.
@@ -105,10 +106,17 @@ func LocateAllSessionJSONLs(workspacePath string) []struct {
 }
 
 // ClaudeProjectDir returns the Claude project directory for a workspace.
-// This is ~/.claude/projects/<workspace_hash>/ where the workspace hash
-// is the first 16 characters of the SHA256 hash of the workspace path.
+// Claude Code uses the workspace path with slashes replaced by dashes.
+// e.g., /Users/joe/project -> -Users-joe-project
 func ClaudeProjectDir(workspacePath string) string {
 	homeDir, _ := os.UserHomeDir()
+	// Claude Code uses dash-separated path format
+	dashPath := strings.ReplaceAll(workspacePath, "/", "-")
+	projectDir := filepath.Join(homeDir, ".claude", "projects", dashPath)
+	if _, err := os.Stat(projectDir); err == nil {
+		return projectDir
+	}
+	// Fallback: try hash-based path for older versions
 	hash := sha256.Sum256([]byte(workspacePath))
 	workspaceHash := fmt.Sprintf("%x", hash)[:16]
 	return filepath.Join(homeDir, ".claude", "projects", workspaceHash)

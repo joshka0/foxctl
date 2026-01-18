@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"

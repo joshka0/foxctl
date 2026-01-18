@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/stretchr/testify/require"
 )
@@ -39,12 +40,11 @@ func TestCreateSkillResolver_EnvPrecedence(t *testing.T) {
 	resolver := createSkillResolver(cfg)
 	paths := resolver.SearchPaths()
 
-	expected := []string{
-		filepath.Clean(env1),
-		filepath.Clean(env2),
-		filepath.Clean(cfgSkills),
-		filepath.Join(realCwd, "dist", "skills"),
-		filepath.Join(realCwd, "skills"),
-	}
+	expected := append([]string{}, skill.EnvSearchPaths()...)
+	expected = append(expected, cfgSkills)
+	expected = append(expected, skill.UserSearchPaths()...)
+	expected = append(expected, skill.BuiltinSearchPaths()...)
+	expected = append(expected, skill.DevSearchPaths()...)
+	expected = skill.NormalizeSearchPaths(expected)
 	require.Equal(t, expected, paths)
 }

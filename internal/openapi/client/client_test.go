@@ -17,7 +17,7 @@ import (
 func TestExecuteInlineJSON(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Api-Key", "secret")
 		if err := json.NewEncoder(w).Encode([]map[string]any{
@@ -26,14 +26,14 @@ func TestExecuteInlineJSON(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
-	}))
-	t.Cleanup(srv.Close)
+	})
 
 	cfg := config.Config{InlineOutputKB: 64, MaxCaptureKB: 1024}
 	casStore := newTestCAS(t)
-	c := client.New(cfg, casStore)
+	httpClient := &http.Client{Transport: &handlerTransport{handler: handler}}
+	c := client.New(cfg, casStore, client.WithHTTPClient(httpClient))
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, "http://mock", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -72,19 +72,19 @@ func TestExecuteStoresLargeBodyInCAS(t *testing.T) {
 
 	payload := buildLargeJSONArray(t, 200)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write(payload); err != nil {
 			t.Fatalf("write payload: %v", err)
 		}
-	}))
-	t.Cleanup(srv.Close)
+	})
 
 	cfg := config.Config{InlineOutputKB: 1, MaxCaptureKB: 2048}
 	casStore := newTestCAS(t)
-	c := client.New(cfg, casStore)
+	httpClient := &http.Client{Transport: &handlerTransport{handler: handler}}
+	c := client.New(cfg, casStore, client.WithHTTPClient(httpClient))
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, "http://mock", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -116,20 +116,20 @@ func TestExecuteStoresLargeBodyInCAS(t *testing.T) {
 func TestExecuteReturnsHTTPError(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		if err := json.NewEncoder(w).Encode(map[string]any{"error": "invalid"}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
-	}))
-	t.Cleanup(srv.Close)
+	})
 
 	cfg := config.Config{InlineOutputKB: 64, MaxCaptureKB: 1024}
 	casStore := newTestCAS(t)
-	c := client.New(cfg, casStore)
+	httpClient := &http.Client{Transport: &handlerTransport{handler: handler}}
+	c := client.New(cfg, casStore, client.WithHTTPClient(httpClient))
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, "http://mock", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -163,18 +163,20 @@ func TestExecuteReturnsHTTPError(t *testing.T) {
 func TestExecuteTimeout(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
+	})
 
 	cfg := config.Config{InlineOutputKB: 64, MaxCaptureKB: 1024}
 	casStore := newTestCAS(t)
-	httpClient := &http.Client{Timeout: 50 * time.Millisecond}
+	httpClient := &http.Client{
+		Timeout:   50 * time.Millisecond,
+		Transport: &handlerTransport{handler: handler},
+	}
 	c := client.New(cfg, casStore, client.WithHTTPClient(httpClient))
 
-	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequest(http.MethodGet, "http://mock", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -193,6 +195,22 @@ func TestExecuteTimeout(t *testing.T) {
 	if clientErr.Code != "ETIMEOUT" {
 		t.Fatalf("expected code ETIMEOUT, got %s", clientErr.Code)
 	}
+}
+
+type handlerTransport struct {
+	handler http.Handler
+}
+
+func (t *handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	recorder := httptest.NewRecorder()
+	t.handler.ServeHTTP(recorder, req)
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return recorder.Result(), nil
 }
 
 func newTestCAS(t *testing.T) *cas.Store {

@@ -1,0 +1,61 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/extract_learnings
+  version: 0.1.0
+  description: "Extract actionable learnings (gotchas, decisions, preferences, anti-patterns) from session"
+  tags: ["session", "memory", "learning", "gotcha", "decision"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_extract_learnings/session_extract_learnings
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: session/extract_learnings
+  parameters:
+    - name: session_id
+      type: string
+      required: true
+      description: "Session ID to extract learnings from"
+    - name: force
+      type: boolean
+      required: false
+      description: "Re-extract even if already done"
+    - name: max_tokens
+      type: integer
+      required: false
+      description: "Limit for transcript tokens"
+    - name: epic_id
+      type: string
+      required: false
+      description: "Link learnings to this epic"
+    - name: dry_run
+      type: boolean
+      required: false
+      description: "Skip LLM extraction and persistence"
+    - name: mode
+      type: string
+      required: false
+      description: "Extraction scope: 'session' (default) or 'windows' (per context window)"
+    - name: batch_size
+      type: integer
+      required: false
+      description: "Windows processed per batch in windows mode (default: 5)"
+    - name: process_all
+      type: boolean
+      required: false
+      description: "Process all remaining windows in windows mode"
+  help:
+    short: "Extract structured learnings from a session transcript."
+    long: |
+      Example commands:
+        agentctl run session/extract_learnings --input '{"session_id":"01HXYZ..."}'
+        agentctl run session/extract_learnings --input '{"session_id":"01HXYZ...","epic_id":"01HEPIC..."}'
+        agentctl run session/extract_learnings --input '{"session_id":"01HXYZ...","dry_run":true}'
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

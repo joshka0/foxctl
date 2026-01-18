@@ -39,6 +39,16 @@ type Options struct {
 	// for similar tasks based on past successful executions.
 	EnableOptimization bool
 
+	// LLMProvider is the LLM provider to use (e.g., "gemini", "openai", "anthropic").
+	// Loaded from config at startup (FC/IS compliant - no os.Getenv in daemon core).
+	LLMProvider string
+
+	// LLMModel is the model name to use.
+	LLMModel string
+
+	// LLMAPIKey is the API key for the LLM provider.
+	LLMAPIKey string
+
 	// AgentFactory allows injecting a custom agent for testing.
 	AgentFactory func(context.Context, agent.Agent, *tools.Registry) (agents.Agent, error)
 }

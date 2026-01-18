@@ -12,12 +12,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	lsphelpers "github.com/jkatigb/agentctl/internal/adapters/skillslib/lsp"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 	"github.com/jkatigb/agentctl/internal/lsp/jsonrpc"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
@@ -27,6 +31,8 @@ const defaultTimeout = 30 * time.Second
 
 const command = "lsp/tsserver"
 
+var allowedOps = []string{"definition", "references", "symbols", "workspace_symbol"}
+
 type input struct {
 	Operation  string `json:"operation"`
 	File       string `json:"file"`
@@ -35,36 +41,6 @@ type input struct {
 	Query      string `json:"query"`
 	MaxResults int    `json:"max_results"`
 	Timeout    int    `json:"timeout"` // timeout in seconds, defaults to 30
-}
-
-// LSP types
-type Position struct {
-	Line      int `json:"line"`
-	Character int `json:"character"`
-}
-
-type Range struct {
-	Start Position `json:"start"`
-	End   Position `json:"end"`
-}
-
-type Location struct {
-	URI   string `json:"uri"`
-	Range Range  `json:"range"`
-}
-
-type SymbolInformation struct {
-	Name     string   `json:"name"`
-	Kind     int      `json:"kind"`
-	Location Location `json:"location"`
-}
-
-type DocumentSymbol struct {
-	Name           string           `json:"name"`
-	Kind           int              `json:"kind"`
-	Range          Range            `json:"range"`
-	SelectionRange Range            `json:"selectionRange"`
-	Children       []DocumentSymbol `json:"children,omitempty"`
 }
 
 // Output types
@@ -117,10 +93,23 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		in.Column = 1
 	}
 
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
+
 	// Check typescript-language-server availability
-	serverPath, err := exec.LookPath("typescript-language-server")
+	serverPath, err := executil.RequireTool("typescript-language-server", "install with: npm i -g typescript-language-server")
 	if err != nil {
-		return fmt.Errorf("typescript-language-server not found in PATH (install: npm i -g typescript-language-server): %w", err)
+		return skillerr.Runtime(
+			"typescript-language-server not found in PATH",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Install with: npm i -g typescript-language-server"),
+		)
 	}
 
 	// Apply timeout to context
@@ -132,24 +121,24 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	defer cancel()
 
 	workspace := rc.Workspace
-	out := output{Operation: in.Operation}
+	out := output{Operation: op}
 
 	// Create and initialize LSP client
 	client, err := newLSPClient(ctx, serverPath, workspace)
 	if err != nil {
-		return fmt.Errorf("failed to start language server: %w", err)
+		return skillerr.WrapRuntime("failed to start language server", err)
 	}
 	defer func() { errs.Ignore(client.Close(), "close LSP client") }()
 
 	// Open the file if needed
 	if in.File != "" {
-		filePath := resolvePath(workspace, in.File)
+		filePath := lsphelpers.ResolvePath(workspace, in.File)
 		if err := client.openFile(ctx, filePath); err != nil {
-			return fmt.Errorf("failed to open file: %w", err)
+			return err
 		}
 	}
 
-	switch in.Operation {
+	switch op {
 	case "definition":
 		def, err := client.definition(ctx, workspace, in)
 		if err != nil {
@@ -163,9 +152,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if err != nil {
 			return err
 		}
-		if len(refs) > in.MaxResults {
-			refs = refs[:in.MaxResults]
-		}
+		refs = sliceutil.Limit(refs, in.MaxResults)
 		out.References = refs
 		out.Count = len(refs)
 
@@ -174,9 +161,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if err != nil {
 			return err
 		}
-		if len(syms) > in.MaxResults {
-			syms = syms[:in.MaxResults]
-		}
+		syms = sliceutil.Limit(syms, in.MaxResults)
 		out.Symbols = syms
 		out.Count = len(syms)
 
@@ -185,14 +170,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if err != nil {
 			return err
 		}
-		if len(syms) > in.MaxResults {
-			syms = syms[:in.MaxResults]
-		}
+		syms = sliceutil.Limit(syms, in.MaxResults)
 		out.Symbols = syms
 		out.Count = len(syms)
 
 	default:
-		return fmt.Errorf("unknown operation: %s", in.Operation)
+		return skillerr.Arg("invalid operation", skillerr.WithHint(opHint))
 	}
 
 	return writeOutput(rc, out)
@@ -252,7 +235,7 @@ func (c *LSPClient) Close() error {
 		if c.cmd.Process != nil {
 			_ = c.cmd.Process.Kill()
 		}
-		return fmt.Errorf("LSP server shutdown timed out after %v", shutdownTimeout)
+		return skillerr.Runtimef("LSP server shutdown timed out after %v", shutdownTimeout)
 	}
 }
 
@@ -288,7 +271,7 @@ func (c *LSPClient) initialize(ctx context.Context, workspace string) error {
 func (c *LSPClient) openFile(_ context.Context, filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return err
+		return skillerr.WrapIO("open file", err)
 	}
 
 	params := map[string]any{
@@ -301,7 +284,7 @@ func (c *LSPClient) openFile(_ context.Context, filePath string) error {
 	}
 
 	if err := c.rpc.Notify("textDocument/didOpen", params); err != nil {
-		return err
+		return skillerr.WrapRuntime("notify didOpen", err)
 	}
 
 	// Give the server a moment to process
@@ -311,10 +294,10 @@ func (c *LSPClient) openFile(_ context.Context, filePath string) error {
 
 func (c *LSPClient) definition(ctx context.Context, workspace string, in input) (*Definition, error) {
 	if in.File == "" || in.Line <= 0 {
-		return nil, fmt.Errorf("definition requires file and line")
+		return nil, skillerr.Arg("definition requires file and line")
 	}
 
-	filePath := resolvePath(workspace, in.File)
+	filePath := lsphelpers.ResolvePath(workspace, in.File)
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -331,22 +314,22 @@ func (c *LSPClient) definition(ctx context.Context, workspace string, in input) 
 	}
 
 	// Parse result - can be Location or []Location
-	var locations []Location
+	var locations []lsphelpers.Location
 	if err := json.Unmarshal(result, &locations); err != nil {
-		var loc Location
+		var loc lsphelpers.Location
 		if err := json.Unmarshal(result, &loc); err != nil {
-			return nil, fmt.Errorf("failed to parse definition result: %w", err)
+			return nil, skillerr.WrapParse("failed to parse definition result", err)
 		}
-		locations = []Location{loc}
+		locations = []lsphelpers.Location{loc}
 	}
 
 	if len(locations) == 0 {
-		return nil, fmt.Errorf("no definition found")
+		return nil, skillerr.NotFound("no definition found")
 	}
 
 	loc := locations[0]
 	return &Definition{
-		File:   uriToPath(loc.URI, workspace),
+		File:   lsphelpers.URIToPath(loc.URI, workspace),
 		Line:   loc.Range.Start.Line + 1,
 		Column: loc.Range.Start.Character + 1,
 	}, nil
@@ -354,10 +337,10 @@ func (c *LSPClient) definition(ctx context.Context, workspace string, in input) 
 
 func (c *LSPClient) references(ctx context.Context, workspace string, in input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
-		return nil, fmt.Errorf("references requires file and line")
+		return nil, skillerr.Arg("references requires file and line")
 	}
 
-	filePath := resolvePath(workspace, in.File)
+	filePath := lsphelpers.ResolvePath(workspace, in.File)
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -376,15 +359,15 @@ func (c *LSPClient) references(ctx context.Context, workspace string, in input) 
 		return nil, err
 	}
 
-	var locations []Location
+	var locations []lsphelpers.Location
 	if err := json.Unmarshal(result, &locations); err != nil {
-		return nil, fmt.Errorf("failed to parse references result: %w", err)
+		return nil, skillerr.WrapParse("failed to parse references result", err)
 	}
 
 	refs := make([]Reference, 0, len(locations))
 	for _, loc := range locations {
 		refs = append(refs, Reference{
-			File:   uriToPath(loc.URI, workspace),
+			File:   lsphelpers.URIToPath(loc.URI, workspace),
 			Line:   loc.Range.Start.Line + 1,
 			Column: loc.Range.Start.Character + 1,
 		})
@@ -395,10 +378,10 @@ func (c *LSPClient) references(ctx context.Context, workspace string, in input) 
 
 func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in input) ([]Symbol, error) {
 	if in.File == "" {
-		return nil, fmt.Errorf("symbols requires file")
+		return nil, skillerr.Arg("symbols requires file")
 	}
 
-	filePath := resolvePath(workspace, in.File)
+	filePath := lsphelpers.ResolvePath(workspace, in.File)
 	params := map[string]any{
 		"textDocument": map[string]any{
 			"uri": "file://" + filePath,
@@ -411,22 +394,33 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 	}
 
 	// Can be DocumentSymbol[] or SymbolInformation[]
-	var docSymbols []DocumentSymbol
+	var docSymbols []lsphelpers.DocumentSymbol
 	if err := json.Unmarshal(result, &docSymbols); err == nil && len(docSymbols) > 0 {
-		return flattenDocSymbols(docSymbols, in.File), nil
+		flat := lsphelpers.FlattenDocumentSymbols(docSymbols)
+		syms := make([]Symbol, 0, len(flat))
+		for _, s := range flat {
+			syms = append(syms, Symbol{
+				Name:   s.Name,
+				Kind:   lsphelpers.SymbolKindToString(s.Kind),
+				File:   in.File,
+				Line:   s.Range.Start.Line + 1,
+				Column: s.Range.Start.Character + 1,
+			})
+		}
+		return syms, nil
 	}
 
-	var symInfos []SymbolInformation
+	var symInfos []lsphelpers.SymbolInformation
 	if err := json.Unmarshal(result, &symInfos); err != nil {
-		return nil, fmt.Errorf("failed to parse symbols result: %w", err)
+		return nil, skillerr.WrapParse("failed to parse symbols result", err)
 	}
 
 	syms := make([]Symbol, 0, len(symInfos))
 	for _, si := range symInfos {
 		syms = append(syms, Symbol{
 			Name:   si.Name,
-			Kind:   symbolKindToString(si.Kind),
-			File:   uriToPath(si.Location.URI, workspace),
+			Kind:   lsphelpers.SymbolKindToString(si.Kind),
+			File:   lsphelpers.URIToPath(si.Location.URI, workspace),
 			Line:   si.Location.Range.Start.Line + 1,
 			Column: si.Location.Range.Start.Character + 1,
 		})
@@ -437,7 +431,7 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 
 func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in input) ([]Symbol, error) {
 	if in.Query == "" {
-		return nil, fmt.Errorf("workspace_symbol requires query")
+		return nil, skillerr.Arg("workspace_symbol requires query")
 	}
 
 	params := map[string]any{
@@ -449,41 +443,23 @@ func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in i
 		return nil, err
 	}
 
-	var symInfos []SymbolInformation
+	var symInfos []lsphelpers.SymbolInformation
 	if err := json.Unmarshal(result, &symInfos); err != nil {
-		return nil, fmt.Errorf("failed to parse workspace symbols result: %w", err)
+		return nil, skillerr.WrapParse("failed to parse workspace symbols result", err)
 	}
 
 	syms := make([]Symbol, 0, len(symInfos))
 	for _, si := range symInfos {
 		syms = append(syms, Symbol{
 			Name:   si.Name,
-			Kind:   symbolKindToString(si.Kind),
-			File:   uriToPath(si.Location.URI, workspace),
+			Kind:   lsphelpers.SymbolKindToString(si.Kind),
+			File:   lsphelpers.URIToPath(si.Location.URI, workspace),
 			Line:   si.Location.Range.Start.Line + 1,
 			Column: si.Location.Range.Start.Character + 1,
 		})
 	}
 
 	return syms, nil
-}
-
-// Helper functions
-
-func resolvePath(workspace, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(workspace, path)
-}
-
-func uriToPath(uri, workspace string) string {
-	path := strings.TrimPrefix(uri, "file://")
-	rel, err := filepath.Rel(workspace, path)
-	if err != nil {
-		return path
-	}
-	return rel
 }
 
 func detectLanguage(path string) string {
@@ -500,62 +476,6 @@ func detectLanguage(path string) string {
 	default:
 		return "typescript"
 	}
-}
-
-func flattenDocSymbols(symbols []DocumentSymbol, file string) []Symbol {
-	var result []Symbol
-	var flatten func([]DocumentSymbol)
-	flatten = func(syms []DocumentSymbol) {
-		for _, s := range syms {
-			result = append(result, Symbol{
-				Name:   s.Name,
-				Kind:   symbolKindToString(s.Kind),
-				File:   file,
-				Line:   s.Range.Start.Line + 1,
-				Column: s.Range.Start.Character + 1,
-			})
-			if len(s.Children) > 0 {
-				flatten(s.Children)
-			}
-		}
-	}
-	flatten(symbols)
-	return result
-}
-
-func symbolKindToString(kind int) string {
-	kinds := map[int]string{
-		1:  "File",
-		2:  "Module",
-		3:  "Namespace",
-		4:  "Package",
-		5:  "Class",
-		6:  "Method",
-		7:  "Property",
-		8:  "Field",
-		9:  "Constructor",
-		10: "Enum",
-		11: "Interface",
-		12: "Function",
-		13: "Variable",
-		14: "Constant",
-		15: "String",
-		16: "Number",
-		17: "Boolean",
-		18: "Array",
-		19: "Object",
-		20: "Key",
-		21: "Null",
-		22: "EnumMember",
-		23: "Struct",
-		24: "Event",
-		25: "Operator",
-		26: "TypeParameter",
-	}
-	if s, ok := kinds[kind]; ok {
-		return s
-	}
-	return strconv.Itoa(kind)
 }
 
 func writeOutput(rc *skillmain.RunContext, out output) error {

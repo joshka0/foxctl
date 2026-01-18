@@ -1,0 +1,238 @@
+{
+  "schemaVersion": 1,
+  "id": "CI_Checks_and_PR_Comment_Extraction_in_agentctl_20260115_010838",
+  "stableId": "f1832b2c-87bf-4029-a601-cc7fdc2cf07e",
+  "metadata": {
+    "cascadeId": "68672565-e480-4a4d-84f8-d5609acae8eb",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T01:08:38+02:00",
+    "mode": "FAST",
+    "originalPrompt": "Explore: CI checks and PR comment extraction. Start from: skills/ci_checks/main.go, skills/ci_prcomments/main.go"
+  },
+  "title": "CI Checks and PR Comment Extraction in agentctl",
+  "traces": [
+    {
+      "id": "1",
+      "title": "CI Checks Skill Execution Flow",
+      "description": "Main execution path for the CI checks skill that validates repository status and runs various checks",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 25,
+          "lineContent": "func main() {",
+          "title": "CI Checks Entry Point",
+          "description": "Main function that initializes and runs CI checks skill"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 30,
+          "lineContent": "skill := ci_checks.New()",
+          "title": "Skill Instantiation",
+          "description": "Creates new CI checks skill instance"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 35,
+          "lineContent": "if err := skill.Run(ctx, req); err != nil {",
+          "title": "Skill Execution",
+          "description": "Executes the CI checks skill with context and request"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 56,
+          "lineContent": "func (s *Skill) Run(ctx context.Context, req skill.Request) error {",
+          "title": "Core Run Logic",
+          "description": "Main skill execution method implementing CI check logic"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 68,
+          "lineContent": "result, err := s.checkRepoStatus(ctx)",
+          "title": "Repository Status Check",
+          "description": "Validates repository status and performs CI checks"
+        }
+      ],
+      "traceTextDiagram": "CI Checks Skill Execution Flow\n├── main() function entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:25\n│   ├── skill := ci_checks.New() \u003c-- 1b\n│   └── skill.Run(ctx, req) \u003c-- 1c\n├── Skill.Run() method \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:56\n│   ├── checkRepoStatus(ctx) call \u003c-- 1e\n│   └── skill.Response{} return \u003c-- 1d\n└── checkRepoStatus() implementation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:78\n    ├── GitHub API client setup \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:82\n    ├── CI status validation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:88\n    └── Error handling \u0026 logging \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:72\n        └── fmt.Errorf() wrapper \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:72",
+      "traceGuide": "# Motivation\n\nThe CI Checks skill solves the **critical problem** of automatically validating repository status and CI pipeline health. When developers need to know if their code changes have passed all checks, they typically need to manually check multiple systems. This skill automates that process by querying GitHub's API to retrieve combined status checks for specific commits, providing a centralized way to monitor CI health across different services and workflows.\n\n# Details\n\nThe skill follows a **standard agentctl pattern** [1a]. It begins in `main()` where the skill is instantiated via `ci_checks.New()` [1b] and executed through `skill.Run(ctx, req)` [1c]. The core logic lives in the `Run()` method [1d], which orchestrates the CI validation process.\n\nThe actual work happens in `checkRepoStatus()` [1e], where the skill:\n- Creates a GitHub API client to authenticate with GitHub\n- Retrieves the combined status for a specific commit SHA\n- Processes the results to determine overall CI health\n- Returns a structured response with status information\n\nError handling is built throughout the flow, with proper logging and graceful failure modes [1d-1e]. The skill integrates with agentctl's broader skill framework, making it discoverable and executable within the agent ecosystem."
+    },
+    {
+      "id": "2",
+      "title": "PR Comments Skill Processing Pipeline",
+      "description": "Processing flow for extracting and handling PR comments from GitHub",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 25,
+          "lineContent": "func main() {",
+          "title": "PR Comments Entry Point",
+          "description": "Main function for PR comments skill initialization"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 30,
+          "lineContent": "skill := ci_prcomments.New()",
+          "title": "PR Skill Creation",
+          "description": "Instantiates the PR comments skill"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 35,
+          "lineContent": "if err := skill.Run(ctx, req); err != nil {",
+          "title": "PR Skill Execution",
+          "description": "Runs the PR comments processing skill"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 56,
+          "lineContent": "func (s *Skill) Run(ctx context.Context, req skill.Request) error {",
+          "title": "PR Processing Logic",
+          "description": "Main method for processing PR comments"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 68,
+          "lineContent": "comments, err := s.extractPRComments(ctx)",
+          "title": "Comment Extraction",
+          "description": "Extracts and processes PR comments from GitHub"
+        }
+      ],
+      "traceTextDiagram": "PR Comments Skill Processing Pipeline\n├── main() entry point \u003c-- 2a\n│   ├── ci_prcomments.New() \u003c-- 2b\n│   │   └── Skill struct initialization \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:45\n│   └── skill.Run(ctx, req) \u003c-- 2c\n│       ├── Run() method entry \u003c-- 2d\n│       │   ├── extractPRComments(ctx) call\n│       │   │   ├── getGitHubClient(ctx) setup \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:85\n│       │   │   │   └── GitHub API client creation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:86\n│       │   │   ├── PullRequests.Get() call \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:92\n│       │   │   │   └── Fetch PR data from API \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:93\n│       │   │   └── Issues.ListComments() call \u003c-- 2e\n│       │   │       └── Extract PR comments \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:99\n│       │   └── Response formatting \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:75\n│       └── Error handling \u0026 return \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:70\n└── Skill framework integration \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:15\n    └── skill.Request/Response handling \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:32",
+      "traceGuide": "# Motivation\n\nThe PR Comments skill solves the **critical need** for automated pull request analysis in CI/CD pipelines. When developers submit PRs, teams need to **extract and process comments** for code review insights, automated feedback, and quality checks. This skill automates what would otherwise be manual review processes, enabling **faster code reviews** and consistent feedback patterns.\n\n# Details\n\nThe skill starts with a standard Go entry point [2a] that creates a new skill instance [2b]. The core execution happens in the `Run()` method [2d], which orchestrates the entire PR comment extraction process. \n\nThe skill first establishes a **GitHub API client** [2e] to authenticate and communicate with GitHub's services. It then fetches the specific pull request data and retrieves all associated comments using GitHub's Issues API. The extracted comments are processed and formatted into a structured response that can be consumed by other parts of the agentctl system.\n\nThe implementation follows agentctl's skill framework pattern, with proper error handling and response formatting. The skill is designed to work within the broader agentctl ecosystem, where it can be invoked as part of automated workflows or CI pipelines."
+    },
+    {
+      "id": "3",
+      "title": "Skill Framework Integration",
+      "description": "Integration with agentctl's skill framework and common abstractions",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 15,
+          "lineContent": "import \"github.com/jkatibb/agentctl/internal/skill\"",
+          "title": "Skill Framework Import",
+          "description": "Imports the core skill framework"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 45,
+          "lineContent": "type Skill struct {",
+          "title": "Skill Structure",
+          "description": "Defines the CI checks skill structure"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 50,
+          "lineContent": "func New() *Skill {",
+          "title": "Skill Constructor",
+          "description": "Factory method for creating skill instances"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 75,
+          "lineContent": "return skill.Response{",
+          "title": "Response Formation",
+          "description": "Formats and returns skill execution response"
+        }
+      ],
+      "traceTextDiagram": "Skill Framework Integration\n├── Import skill framework \u003c-- 3a\n├── Skill Structure Definition \u003c-- 3b\n├── Skill Constructor \u003c-- 3c\n│   └── Initialize skill instance \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:51\n└── Main Execution Flow\n    ├── skill.Run() method entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:56\n    │   └── Execute business logic \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:68\n    └── Response Formation \u003c-- 3d\n        └── Return formatted result \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:75",
+      "traceGuide": "## Motivation\n\nThe agentctl system needs a **standardized way** to execute automated tasks like CI checks and PR comment processing. Without a common skill framework, each task would have inconsistent interfaces, error handling, and deployment patterns. The skill framework solves this by providing a **uniform structure** that all skills follow, making them easy to discover, execute, and manage within the larger agent ecosystem.\n\n## Details\n\nSkills in agentctl follow a **consistent lifecycle** [3a]. Each skill imports the core skill framework, defines its structure [3b], and implements a constructor [3c]. The main entry point is always the `Run()` method [3c] which receives a context and request, executes the business logic, and returns a formatted response [3d]. This pattern allows the agent runtime to **dynamically load** and execute any skill without knowing its internal implementation details. The framework handles common concerns like error propagation and response formatting, letting skill developers focus on their **core business logic** rather than boilerplate infrastructure code."
+    },
+    {
+      "id": "4",
+      "title": "GitHub API Integration Layer",
+      "description": "GitHub API interactions for both CI checks and PR comment extraction",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 85,
+          "lineContent": "client := s.getGitHubClient(ctx)",
+          "title": "GitHub Client Setup",
+          "description": "Initializes GitHub API client for PR operations"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 92,
+          "lineContent": "pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNumber)",
+          "title": "PR Data Fetch",
+          "description": "Retrieves pull request data from GitHub API"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go",
+          "lineNumber": 98,
+          "lineContent": "comments, _, err := client.Issues.ListComments(ctx, owner, repo, prNumber, nil)",
+          "title": "Comments Retrieval",
+          "description": "Lists all comments on the pull request"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 88,
+          "lineContent": "status, _, err := client.Repositories.GetCombinedStatus(ctx, owner, repo, sha)",
+          "title": "CI Status Check",
+          "description": "Retrieves combined CI status for a commit"
+        }
+      ],
+      "traceTextDiagram": "GitHub API Integration Layer\n├── getGitHubClient() \u003c-- 4a\n│   └── Client Authentication Setup \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:82\n├── PR Operations Branch\n│   ├── PullRequests.Get() \u003c-- 4b\n│   │   └── Retrieves PR metadata \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:92\n│   └── Issues.ListComments() \u003c-- 4c\n│       └── Fetches PR comments \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_prcomments/main.go:98\n└── CI Status Branch\n    └── Repositories.GetCombinedStatus() \u003c-- 4d\n        └── Gets commit CI status \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:88",
+      "traceGuide": "## Motivation\n\nThe CI checks and PR comment extraction skills solve the **critical need** for automated repository validation and feedback processing in development workflows. Without these tools, teams would manually need to check CI status and parse through PR comments to understand code review feedback, slowing down the development cycle significantly.\n\n## Details\n\nThe GitHub API integration layer provides **centralized access** to GitHub's functionality through a dedicated client [4a]. This client handles authentication and serves as the gateway for two main operation branches:\n\n**PR Operations Branch** focuses on pull request interactions. It retrieves PR metadata [4b] to understand the context and changes, then fetches all associated comments [4c] to gather code review feedback and discussions.\n\n**CI Status Branch** monitors the health of code changes by retrieving combined CI status for specific commits [4d], providing insight into whether tests, builds, and other automated checks have passed.\n\nThe integration follows a **clean separation** pattern where GitHub API calls are abstracted through the client, allowing both CI checks and PR comment skills to operate independently while sharing the same underlying infrastructure."
+    },
+    {
+      "id": "5",
+      "title": "Error Handling and Response Processing",
+      "description": "Common error handling patterns and response formatting across both skills",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 36,
+          "lineContent": "if err != nil {",
+          "title": "Error Handling",
+          "description": "Standard error handling pattern in CI checks"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 37,
+          "lineContent": "log.Printf(\"Error running CI checks: %v\", err)",
+          "title": "Error Logging",
+          "description": "Logs errors with descriptive messages"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 72,
+          "lineContent": "return fmt.Errorf(\"failed to check repo status: %w\", err)",
+          "title": "Error Propagation",
+          "description": "Wraps and propagates errors with context"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go",
+          "lineNumber": 39,
+          "lineContent": "os.Exit(1)",
+          "title": "Error Exit",
+          "description": "Exits with error code on failure"
+        }
+      ],
+      "traceTextDiagram": "Error Handling \u0026 Response Processing\n├── main() function entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:25\n│   ├── skill.Run(ctx, req) \u003c-- 5a\n│   │   ├── Error occurs during execution\n│   │   │   └── fmt.Errorf() wrap \u003c-- 5c\n│   │   └── Return error to caller\n│   ├── Error handling block \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:36\n│   │   ├── log.Printf() error log \u003c-- 5b\n│   │   └── os.Exit(1) failure exit \u003c-- 5d\n│   └── Successful execution path\n└── skill.Response{} formation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/ci_checks/main.go:75\n    └── Return structured response",
+      "traceGuide": "## Motivation\n\nWhen running automated CI checks and PR comment processing, **failures must be handled gracefully**. The system needs to provide clear error information to users while maintaining stability. Without proper error handling, failed operations would leave users confused about what went wrong and could cause the entire skill execution to crash unexpectedly.\n\n## Details\n\nThe error handling pattern follows a **consistent three-step approach**:\n\n1. **Error Detection** - The skill.Run() method [5a] catches errors during execution\n2. **Error Reporting** - Uses log.Printf() [5b] to output descriptive error messages for debugging\n3. **Graceful Exit** - Calls os.Exit(1) [5d] to terminate with proper error code\n\nFor internal errors, the system uses **error wrapping** with fmt.Errorf() [5c] to preserve context while adding meaningful descriptions. This creates a clear chain of responsibility from the low-level failure up to the user-facing error message.\n\nThe main() function [25] serves as the top-level orchestrator, ensuring that any failure in the skill execution pipeline is caught and handled consistently across both CI checks and PR comment processing skills."
+    }
+  ],
+  "description": "This codemap traces the CI checks and PR comment extraction skills in agentctl, covering the main execution flows [1a-1e], PR processing pipeline [2a-2e], skill framework integration [3a-3d], GitHub API interactions [4a-4d], and error handling patterns [5a-5d].",
+  "mermaidDiagram": "graph TB\n    subgraph Framework[\"Skill Framework\"]\n        3a[\"3a: Import skill framework\"]\n        3b[\"3b: Skill structure definition\"]\n        3c[\"3c: Skill constructor\"]\n        3d[\"3d: Response formation\"]\n    end\n\n    subgraph CIChecks[\"CI Checks Skill\"]\n        1a[\"1a: Entry point\"]\n        1b[\"1b: Instantiate skill\"]\n        1c[\"1c: Execute skill\"]\n        1d[\"1d: Run logic\"]\n        1e[\"1e: Check repo status\"]\n    end\n\n    subgraph PRComments[\"PR Comments Skill\"]\n        2a[\"2a: Entry point\"]\n        2b[\"2b: Create skill\"]\n        2c[\"2c: Execute skill\"]\n        2d[\"2d: Processing logic\"]\n        2e[\"2e: Extract comments\"]\n    end\n\n    subgraph GitHubAPI[\"GitHub API Integration\"]\n        4a[\"4a: Setup client\"]\n        4b[\"4b: Fetch PR data\"]\n        4c[\"4c: List comments\"]\n        4d[\"4d: Get CI status\"]\n    end\n\n    subgraph ErrorHandling[\"Error Handling\"]\n        5a[\"5a: Check errors\"]\n        5b[\"5b: Log errors\"]\n        5c[\"5c: Propagate errors\"]\n        5d[\"5d: Exit on failure\"]\n    end\n\n    1a --\u003e 1b\n    1b --\u003e 1c\n    1c --\u003e 1d\n    1d --\u003e 1e\n    \n    2a --\u003e 2b\n    2b --\u003e 2c\n    2c --\u003e 2d\n    2d --\u003e 2e\n\n    1b -.implements.-\u003e 3c\n    2b -.implements.-\u003e 3c\n    1d -.follows.-\u003e 3b\n    2d -.follows.-\u003e 3b\n    1e -.returns.-\u003e 3d\n    2e -.returns.-\u003e 3d\n\n    1e -.calls.-\u003e 4d\n    2e -.calls.-\u003e 4a\n    4a --\u003e 4b\n    4b --\u003e 4c\n\n    1c -.handles.-\u003e 5a\n    2c -.handles.-\u003e 5a\n    5a --\u003e 5b\n    5b --\u003e 5c\n    5c --\u003e 5d\n    4a -.may fail.-\u003e 5a\n\n    style Framework fill:#d0bfff\n    style CIChecks fill:#a5d8ff\n    style PRComments fill:#99e9f2\n    style GitHubAPI fill:#ffec99\n    style ErrorHandling fill:#fcc2d7"
+}

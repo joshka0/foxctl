@@ -21,8 +21,13 @@ import (
 	"github.com/jkatigb/agentctl/internal/execution/runner"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/queue"
+	"github.com/jkatigb/agentctl/internal/sessionkit/summary"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/rs/zerolog"
 )
 
 // ServiceOptions configures the daemon service.
@@ -59,6 +64,11 @@ type Service struct {
 	shutdownMu   sync.Mutex // protects shutdown state for acceptLoop
 	isShutdown   bool       // set to true when shutdownCh is closed
 	wg           sync.WaitGroup
+
+	// Background workers
+	summaryWorker *summary.Worker
+	summaryCtx    context.Context
+	summaryCancel context.CancelFunc
 }
 
 // NewService creates a new daemon service.
@@ -79,6 +89,7 @@ func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
 
 	// Pre-warm workspace if specified
 	if opts.Workspace != "" {
+		svc.wg.Add(1)
 		go svc.warmWorkspace(opts.Workspace)
 	}
 
@@ -116,6 +127,12 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	defer s.removePIDFile()
 
+	// Start background summary worker
+	if err := s.startSummaryWorker(ctx); err != nil {
+		// Log but don't fail daemon startup - worker is optional
+		fmt.Fprintf(os.Stderr, "warning: summary worker failed to start: %v\n", err)
+	}
+
 	// Accept connections
 	go s.acceptLoop(ctx)
 
@@ -152,6 +169,16 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	case <-done:
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+
+	// Stop summary worker
+	if s.summaryWorker != nil {
+		if err := s.summaryWorker.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: summary worker stop error: %v\n", err)
+		}
+	}
+	if s.summaryCancel != nil {
+		s.summaryCancel()
 	}
 
 	// Close shared resources
@@ -357,7 +384,6 @@ func (s *Service) handleRun(ctx context.Context, params json.RawMessage) (*RunRe
 		Input:        input,
 		ExtraEnv:     extraEnv,
 	})
-
 	// Handle execution error
 	if err != nil {
 		// If there's stderr output, include it in the error envelope
@@ -434,6 +460,8 @@ func (s *Service) handleWarm(params json.RawMessage) (map[string]any, error) {
 
 // warmWorkspace pre-warms resources for a workspace.
 func (s *Service) warmWorkspace(workspace string) {
+	defer s.wg.Done()
+
 	// Check if already warm
 	s.warmMu.RLock()
 	if s.warmWorkspaces[workspace] {
@@ -548,6 +576,57 @@ func Daemonize() error {
 	}
 
 	// Don't wait for child - let it run independently
+	return nil
+}
+
+// startSummaryWorker initializes and starts the background summary worker.
+func (s *Service) startSummaryWorker(ctx context.Context) error {
+	// Check if LLM providers are available
+	providers := llmproviders.SummarizationProviders()
+	if len(providers) == 0 {
+		// No providers configured - skip worker silently
+		return nil
+	}
+
+	// Open queue store
+	queueDBPath := filepath.Join(s.cfg.Storage.Root, summary.QueueDBName)
+	queueStore, err := queue.Open(ctx, queueDBPath, queue.Options{Table: summary.QueueTable})
+	if err != nil {
+		return fmt.Errorf("open queue store: %w", err)
+	}
+
+	// Open session store
+	sessionStore, err := sessions.OpenFromConfig(ctx, s.cfg)
+	if err != nil {
+		queueStore.Close()
+		return fmt.Errorf("open session store: %w", err)
+	}
+
+	// Create worker with default config
+	workerCfg := summary.DefaultWorkerConfig()
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+
+	worker := summary.NewWorker(
+		workerCfg,
+		queueStore,
+		sessionStore,
+		providers,
+		s.cfg,
+		logger,
+	)
+
+	// Create cancellable context for worker
+	s.summaryCtx, s.summaryCancel = context.WithCancel(ctx)
+
+	// Start the worker
+	if err := worker.Start(s.summaryCtx); err != nil {
+		s.summaryCancel()
+		queueStore.Close()
+		sessionStore.Close()
+		return fmt.Errorf("start worker: %w", err)
+	}
+
+	s.summaryWorker = worker
 	return nil
 }
 

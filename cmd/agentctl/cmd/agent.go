@@ -112,6 +112,7 @@ var (
 // Flags for agent list
 var (
 	listLimit int
+	listState string
 )
 
 // Flags for agent ask
@@ -155,6 +156,7 @@ func init() {
 
 	// List flags
 	agentListCmd.Flags().IntVar(&listLimit, "limit", 20, "Maximum number of agents to list")
+	agentListCmd.Flags().StringVar(&listState, "state", "", "Filter by state (starting|running|stopped|error|all). Defaults to excluding stopped.")
 
 	// Ask flags
 	agentAskCmd.Flags().String("question", "", "The question to ask (required)")
@@ -297,10 +299,15 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 		return writeErrorEnvelope(cmd, "agent/list", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to list agents: %v", err))
 	}
 
+	filtered, err := filterAgentsByState(list, listState)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/list", string(protocol.ErrorCodeEARG), err.Error())
+	}
+
 	// Write success envelope
 	return writeOK(cmd, "agent/list", map[string]any{
-		"agents": list,
-		"count":  len(list),
+		"agents": filtered,
+		"count":  len(filtered),
 	}, "run", nil)
 }
 
@@ -615,6 +622,36 @@ func parseCommaSeparated(s string) []string {
 		}
 	}
 	return out
+}
+
+func filterAgentsByState(list []agent.Agent, stateFilter string) ([]agent.Agent, error) {
+	trimmed := strings.ToLower(strings.TrimSpace(stateFilter))
+	if trimmed == "" {
+		filtered := make([]agent.Agent, 0, len(list))
+		for _, a := range list {
+			if a.State != agent.StateStopped {
+				filtered = append(filtered, a)
+			}
+		}
+		return filtered, nil
+	}
+	if trimmed == "all" {
+		return list, nil
+	}
+
+	state := agent.State(trimmed)
+	switch state {
+	case agent.StateStarting, agent.StateRunning, agent.StateStopped, agent.StateError:
+		filtered := make([]agent.Agent, 0, len(list))
+		for _, a := range list {
+			if a.State == state {
+				filtered = append(filtered, a)
+			}
+		}
+		return filtered, nil
+	default:
+		return nil, fmt.Errorf("invalid state filter %q", stateFilter)
+	}
 }
 
 func runAgentRun(cmd *cobra.Command, args []string) error {

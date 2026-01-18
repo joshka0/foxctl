@@ -59,6 +59,10 @@ signature:
 returns:
   - name: statistics
     type: object
+  - name: artifact
+    type: string
+  - name: cas_hint
+    type: object
 capabilities:
   network: "none"
   filesystem:

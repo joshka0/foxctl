@@ -5,15 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -84,7 +86,7 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate: at least one search criteria must be provided
 	if in.Query == "" && in.File == "" && in.Types == "" {
-		return fmt.Errorf("at least one of query, file, or types must be provided")
+		return skillerr.Arg("at least one of query, file, or types must be provided", skillerr.WithHint("Provide query text, a file filter, or types."))
 	}
 
 	// Apply defaults
@@ -99,18 +101,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 func normalizeInput(in *Input, rc *skillmain.RunContext) {
-	if in.Limit <= 0 {
-		in.Limit = DefaultLimit
-	}
+	in.Limit = mathutil.DefaultPositiveInt(in.Limit, DefaultLimit)
 	if in.Limit > 100 {
 		in.Limit = 100
 	}
 	if in.Offset < 0 {
 		in.Offset = 0
 	}
-	if in.MinSimilarity <= 0 {
-		in.MinSimilarity = DefaultMinSimilarity
-	}
+	in.MinSimilarity = mathutil.DefaultPositiveFloat(in.MinSimilarity, DefaultMinSimilarity)
 	if in.Workspace == "" {
 		in.Workspace = rc.Workspace
 	}
@@ -144,34 +142,24 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 		}
 	}
 
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("determine home directory: %w", err)
-		}
-		agentctlHome = filepath.Join(home, ".agentctl")
-	}
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	casRoot := filepath.Join(agentctlHome, "cas")
-
 	workspacePath := in.Workspace
 	if absPath, err := filepath.Abs(workspacePath); err == nil {
 		workspacePath = absPath
 	}
 
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	// TODO: Migrate to OpenWithConfig once ListFiltered is added to interface
+	memStore, cleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
-	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
+	defer cleanup()
 
 	var scoredEntries []storage.ScoredEntry
 
 	if in.Query == "" && in.File == "" && (strings.TrimSpace(in.SessionID) != "" || len(typeFilters) > 0) {
 		entries, total, err := memStore.ListFiltered(ctx, workspacePath, memory.ListFilter{Types: typeFilters, SessionID: in.SessionID}, in.Limit, in.Offset)
 		if err != nil {
-			return nil, fmt.Errorf("list memories with filters: %w", err)
+			return nil, skillerr.WrapIO("list memories with filters", err)
 		}
 
 		out.Stats.SearchMethod = "filter"
@@ -184,7 +172,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 			result := MemoryResult{
 				Name:      entry.Name,
 				Type:      entry.Type,
-				Summary:   truncate(entry.Summary, 500),
+				Summary:   skillout.TruncateString(entry.Summary, 500),
 				Score:     1.0,
 				SessionID: entry.SessionID,
 			}
@@ -206,12 +194,12 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	}
 
 	if in.Query != "" {
-		scoredEntries, err = searchWithEmbeddings(ctx, memStore, workspacePath, in)
+		scoredEntries, err = searchWithEmbeddings(ctx, memStore, rc.Config, workspacePath, in)
 		if err != nil {
 			out.Stats.Hint = fmt.Sprintf("vector search failed: %v; using BM25", err)
 			scoredEntries, err = memStore.Search(ctx, workspacePath, in.Query, in.Limit*3)
 			if err != nil {
-				return nil, fmt.Errorf("search memories: %w", err)
+				return nil, skillerr.WrapIO("search memories", err)
 			}
 			out.Stats.SearchMethod = "bm25"
 		} else {
@@ -220,7 +208,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	} else {
 		entries, err := memStore.List(ctx, workspacePath, in.Limit*3)
 		if err != nil {
-			return nil, fmt.Errorf("list memories: %w", err)
+			return nil, skillerr.WrapIO("list memories", err)
 		}
 		for _, entry := range entries {
 			scoredEntries = append(scoredEntries, storage.ScoredEntry{
@@ -290,7 +278,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 		result := MemoryResult{
 			Name:      entry.Name,
 			Type:      entry.Type,
-			Summary:   truncate(entry.Summary, 500),
+			Summary:   skillout.TruncateString(entry.Summary, 500),
 			Score:     scored.Score,
 			SessionID: entry.SessionID,
 		}
@@ -327,20 +315,22 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	return out, nil
 }
 
-func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, workspacePath string, in *Input) ([]storage.ScoredEntry, error) {
-	embedder, err := semantic.NewEmbedder(semantic.ScopeMemory)
+func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, cfg config.Config, workspacePath string, in *Input) ([]storage.ScoredEntry, error) {
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create embedder: %w", err)
+		return nil, skillerr.WrapRuntime("create embedder", err)
 	}
 
-	result, err := embedder.Embed(ctx, in.Query)
+	// Enrich query with temporal/type patterns for better matching
+	enrichedQuery := semantic.EnrichQuery(in.Query)
+	result, err := embedder.Embed(ctx, enrichedQuery)
 	if err != nil {
-		return nil, fmt.Errorf("generate query embedding: %w", err)
+		return nil, skillerr.WrapRuntime("generate query embedding", err)
 	}
 
 	results, err := memStore.SearchSimilar(ctx, workspacePath, result.Vec, in.Limit*3)
 	if err != nil {
-		return nil, fmt.Errorf("vector search: %w", err)
+		return nil, skillerr.WrapIO("vector search", err)
 	}
 
 	return results, nil
@@ -403,11 +393,4 @@ func normalizePath(p string) string {
 	p = strings.TrimPrefix(p, "./")
 	p = strings.TrimPrefix(p, "/")
 	return p
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

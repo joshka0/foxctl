@@ -5,16 +5,18 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/sessionkit/archive"
 	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
+	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
@@ -24,7 +26,8 @@ import (
 type Input struct {
 	SessionID    string `json:"session_id"`
 	JSONLPath    string `json:"jsonl_path,omitempty"`
-	Workspace    string `json:"workspace,omitempty"`     // Workspace path (for auto-creating session)
+	Workspace    string `json:"workspace,omitempty"` // Workspace path (for auto-creating session)
+	Source       string `json:"source,omitempty"`    // "claude" (default) or "codex"
 	MaxChunkSize int    `json:"max_chunk_size,omitempty"`
 	EmbedWindows bool   `json:"embed_windows,omitempty"` // Generate embeddings for context windows
 	Force        bool   `json:"force,omitempty"`         // Force re-archive even if already done
@@ -33,18 +36,18 @@ type Input struct {
 
 // Output defines the skill output.
 type Output struct {
-	SessionID       string              `json:"session_id"`
-	ArchivePath     string              `json:"archive_path,omitempty"`
-	OriginalSize    int64               `json:"original_size"`
-	CompressedSize  int64               `json:"compressed_size,omitempty"`
-	ChunkCount      int                 `json:"chunk_count"`
-	WindowCount     int                 `json:"window_count"`
-	EmbeddedWindows int                 `json:"embedded_windows,omitempty"`
-	EmbeddingModel  string              `json:"embedding_model,omitempty"`
+	SessionID       string               `json:"session_id"`
+	ArchivePath     string               `json:"archive_path,omitempty"`
+	OriginalSize    int64                `json:"original_size"`
+	CompressedSize  int64                `json:"compressed_size,omitempty"`
+	ChunkCount      int                  `json:"chunk_count"`
+	WindowCount     int                  `json:"window_count"`
+	EmbeddedWindows int                  `json:"embedded_windows,omitempty"`
+	EmbeddingModel  string               `json:"embedding_model,omitempty"`
 	Windows         []archive.WindowInfo `json:"windows,omitempty"`
 	Chunks          []archive.ChunkInfo  `json:"chunks,omitempty"`
-	Status          string              `json:"status"`
-	Message         string              `json:"message"`
+	Status          string               `json:"status"`
+	Message         string               `json:"message"`
 }
 
 const command = "session/archive"
@@ -58,10 +61,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillerr.Arg("session_id is required")
 	}
 
+	source := strings.ToLower(strings.TrimSpace(in.Source))
+	if source == "" {
+		source = "claude"
+	}
+	if source != "claude" && source != "codex" {
+		return skillerr.Arg("source must be \"claude\" or \"codex\"")
+	}
+
 	paths := sessionkit.ResolvePaths(rc.Config)
 
 	if in.MaxChunkSize <= 0 {
-		in.MaxChunkSize = archive.DefaultMaxChunkSize
+		if source == "codex" {
+			in.MaxChunkSize = archive.DefaultCodexWindowTokens
+		} else {
+			in.MaxChunkSize = archive.DefaultMaxChunkSize
+		}
 	}
 
 	// Open sessions store
@@ -79,15 +94,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			return skillerr.Arg("session not found and no jsonl_path provided")
 		}
 		// Create a minimal session record
-		workspace := in.Workspace
-		if workspace == "" {
-			workspace, _ = os.Getwd()
-		}
+		workspace := workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
 		session = sessions.Session{
 			ID:            in.SessionID,
 			WorkspacePath: workspace,
 			RawJSONLPath:  in.JSONLPath,
 			Status:        "active",
+			AgentType:     source,
 		}
 		if _, err := sessionStore.Save(ctx, session); err != nil {
 			return skillerr.IO("create session", skillerr.WithCause(err))
@@ -100,8 +113,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		jsonlPath = session.RawJSONLPath
 	}
 	if jsonlPath == "" {
-		// Try to find in Claude's default location
-		jsonlPath = claudejsonl.LocateSessionJSONL(session.WorkspacePath, in.SessionID)
+		switch source {
+		case "claude":
+			jsonlPath = claudejsonl.LocateSessionJSONL(session.WorkspacePath, in.SessionID)
+		case "codex":
+			jsonlPath = codexjsonl.LocateSessionJSONL(in.SessionID)
+		}
 	}
 	if jsonlPath == "" {
 		return skillerr.Arg("no JSONL path found for session; specify jsonl_path")
@@ -132,12 +149,23 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Parse JSONL and create chunks and context windows using archive package
-	result, err := archive.ChunkFile(jsonlPath, archive.ChunkOptions{
-		SessionID:        in.SessionID,
-		MaxChunkSize:     in.MaxChunkSize,
-		SkipToChunk:      skipToChunk,
-		StartWindowIndex: startWindowIndex,
-	})
+	var result archive.ChunkResult
+	switch source {
+	case "claude":
+		result, err = archive.ChunkFile(jsonlPath, archive.ChunkOptions{
+			SessionID:        in.SessionID,
+			MaxChunkSize:     in.MaxChunkSize,
+			SkipToChunk:      skipToChunk,
+			StartWindowIndex: startWindowIndex,
+		})
+	case "codex":
+		result, err = archive.ChunkCodexFile(jsonlPath, archive.ChunkOptions{
+			SessionID:        in.SessionID,
+			MaxChunkSize:     in.MaxChunkSize,
+			SkipToChunk:      skipToChunk,
+			StartWindowIndex: startWindowIndex,
+		})
+	}
 	if err != nil {
 		return skillerr.IO("parse JSONL", skillerr.WithCause(err))
 	}
@@ -167,8 +195,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	for _, w := range result.Windows {
 		output.Windows = append(output.Windows, archive.WindowInfo{
 			Index:            w.WindowIndex,
-			StartedAt:        formatTimestamp(w.StartedAt),
-			EndedAt:          formatTimestamp(w.EndedAt),
+			StartedAt:        archive.FormatTimestamp(w.StartedAt),
+			EndedAt:          archive.FormatTimestamp(w.EndedAt),
 			PreCompactTokens: w.PreCompactTokens,
 			Trigger:          w.Trigger,
 			ChunkCount:       w.ChunkEnd - w.ChunkStart + 1,
@@ -182,13 +210,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Create archives directory
-	archiveDir := filepath.Join(paths.AgentctlHome, "archives")
-	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+	if err := os.MkdirAll(paths.ArchivesDir, 0o755); err != nil {
 		return skillerr.IO("create archives dir", skillerr.WithCause(err))
 	}
 
 	// Compress and save
-	archivePath := archive.ArchivePath(archiveDir, in.SessionID)
+	archivePath := archive.ArchivePath(paths.ArchivesDir, in.SessionID)
 	compressedSize, err := archive.CompressFile(jsonlPath, archivePath)
 	if err != nil {
 		return skillerr.IO("compress JSONL", skillerr.WithCause(err))
@@ -216,7 +243,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			savedWindows = nil
 		}
 		if len(savedWindows) > 0 {
-			embeddedCount, embeddingModel := embedContextWindows(ctx, sessionStore, savedWindows, result.Chunks)
+			embeddedCount, embeddingModel := embedContextWindows(ctx, sessionStore, savedWindows, result.Chunks, rc.Config)
 			output.EmbeddedWindows = embeddedCount
 			output.EmbeddingModel = embeddingModel
 		}
@@ -238,14 +265,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-// formatTimestamp formats a time as RFC3339 or returns empty string if zero.
-func formatTimestamp(t interface{ IsZero() bool; Format(string) string }) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format("2006-01-02T15:04:05Z07:00")
-}
-
 // embedContextWindows generates embeddings for each context window.
 // Returns the count of successfully embedded windows and the model used.
 func embedContextWindows(
@@ -253,9 +272,10 @@ func embedContextWindows(
 	store storage.SessionStore,
 	windows []storage.ContextWindow,
 	chunks []storage.SessionChunk,
+	cfg config.Config,
 ) (int, string) {
 	// Create embedder for sessions scope
-	embedder, err := semantic.NewEmbedder(semantic.ScopeSessions)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg)
 	if err != nil {
 		return 0, ""
 	}
@@ -328,18 +348,18 @@ func buildWindowEmbeddingText(window storage.ContextWindow, chunkMap map[int]sto
 			// Filter out noise from user requests
 			filtered := filterEmbeddingContent(chunk.ContentPreview)
 			if filtered != "" {
-				parts = append(parts, "User: "+truncateText(filtered, 500))
+				parts = append(parts, "User: "+skillout.TruncateString(filtered, 500))
 			}
 		case "assistant_response":
 			// Filter out noise from assistant responses
 			filtered := filterEmbeddingContent(chunk.ContentPreview)
 			if filtered != "" {
-				parts = append(parts, "Assistant: "+truncateText(filtered, 300))
+				parts = append(parts, "Assistant: "+skillout.TruncateString(filtered, 300))
 			}
 		case "error":
 			// Errors are always valuable for understanding what went wrong
 			if chunk.ContentPreview != "" {
-				parts = append(parts, "Error: "+truncateText(chunk.ContentPreview, 200))
+				parts = append(parts, "Error: "+skillout.TruncateString(chunk.ContentPreview, 200))
 			}
 		}
 		// Skip: tool_use, tool_output, compact_boundary, other
@@ -404,12 +424,4 @@ func filterEmbeddingContent(content string) string {
 	}
 
 	return strings.TrimSpace(content)
-}
-
-// truncateText truncates text to maxLen with ellipsis.
-func truncateText(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
 }

@@ -8,18 +8,51 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mobileutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 const command = "mobile/ios"
+
+var allowedOps = []string{
+	"list_devices",
+	"device_info",
+	"boot",
+	"install",
+	"launch",
+	"terminate",
+	"screenshot",
+	"tap",
+	"swipe",
+	"type_text",
+	"button",
+	"ui_tree",
+	"describe_point",
+	"logs",
+	"open_url",
+	"set_location",
+	"approve_permissions",
+	"record_start",
+	"record_stop",
+	"crash_logs",
+	"add_media",
+	"clear_keychain",
+	"focus",
+	"shake",
+	"expo_deep_link",
+	"expo_reload",
+}
 
 type input struct {
 	Operation   string   `json:"operation"`
@@ -40,31 +73,33 @@ type input struct {
 	MediaPath   string   `json:"media_path,omitempty"`
 }
 
-// IDBDevice represents a device from idb list-targets.
-type IDBDevice struct {
-	UDID       string `json:"udid"`
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	TargetType string `json:"type"`
-	OSVersion  string `json:"os_version"`
-	Arch       string `json:"architecture"`
-}
-
 func main() {
 	skillmain.Main(command, run)
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
-	if in.Operation == "" {
-		return errors.New("operation is required")
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg(
+			"operation is required",
+			skillerr.WithHint(opHint),
+		)
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 	// Check IDB availability
-	if _, err := exec.LookPath("idb"); err != nil {
-		return fmt.Errorf("idb not found: install with 'brew install idb-companion'")
+	if _, err := executil.RequireTool("idb", "install idb-companion"); err != nil {
+		return skillerr.Runtime(
+			"idb not found",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Install idb-companion (brew install idb-companion)."),
+		)
 	}
 
-	switch in.Operation {
+	switch op {
 	case "list_devices":
 		return listDevices(ctx, rc)
 	case "device_info":
@@ -102,7 +137,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "record_start":
 		return recordStart(ctx, rc, in.UDID, in.Output)
 	case "record_stop":
-		return recordStop(ctx, rc)
+		return recordStop(ctx, rc, in.UDID)
 	case "crash_logs":
 		return crashLogs(ctx, rc, in.UDID)
 	case "add_media":
@@ -118,59 +153,42 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "expo_reload":
 		return expoReload(ctx, rc, in.UDID)
 	default:
-		return fmt.Errorf("unknown operation: %s", in.Operation)
+		return skillerr.Arg(fmt.Sprintf("unknown operation: %s", in.Operation), skillerr.WithHint(opHint))
 	}
 }
 
 // listDevices lists all available iOS simulators.
 func listDevices(ctx context.Context, rc *skillmain.RunContext) error {
-	cmd := exec.CommandContext(ctx, "idb", "list-targets", "--json")
-	output, err := cmd.Output()
+	devices, err := mobileutil.ListIDBDevices(ctx)
 	if err != nil {
-		return fmt.Errorf("idb list-targets: %w", err)
+		return skillerr.WrapRuntime("idb list-targets", err)
 	}
 
-	// IDB outputs one JSON object per line
-	// Initialize to empty slice so JSON serializes as [] not null
-	devices := make([]IDBDevice, 0)
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		var dev IDBDevice
-		if err := json.Unmarshal([]byte(line), &dev); err != nil {
-			continue // Skip malformed lines
-		}
+	simulators := make([]mobileutil.IDBDevice, 0, len(devices))
+	for _, dev := range devices {
 		// Only include simulators (not real devices)
 		if dev.TargetType == "simulator" {
-			devices = append(devices, dev)
+			simulators = append(simulators, dev)
 		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "list_devices",
-		"devices":   devices,
-		"count":     len(devices),
+		"devices":   simulators,
+		"count":     len(simulators),
 	})
 }
 
 // deviceInfo gets detailed info about a specific device.
 func deviceInfo(ctx context.Context, rc *skillmain.RunContext, udid string) error {
-	args := []string{"describe", "--json"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("idb describe: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "describe", "--json")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb describe", result.Err)
 	}
 
 	var device map[string]any
-	if err := json.Unmarshal(output, &device); err != nil {
-		return fmt.Errorf("parse device info: %w", err)
+	if err := json.Unmarshal(result.Stdout, &device); err != nil {
+		return skillerr.WrapParse("parse device info", err)
 	}
 
 	return emit(rc, map[string]any{
@@ -182,12 +200,12 @@ func deviceInfo(ctx context.Context, rc *skillmain.RunContext, udid string) erro
 // boot boots a simulator.
 func boot(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	if udid == "" {
-		return fmt.Errorf("udid is required for boot operation")
+		return skillerr.Arg("udid is required for boot operation")
 	}
 
-	cmd := exec.CommandContext(ctx, "idb", "boot", udid)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb boot: %w", err)
+	result := mobileutil.RunIDB(ctx, "", "boot", udid)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb boot", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -201,41 +219,39 @@ func boot(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 // install installs an app on the simulator.
 func install(ctx context.Context, rc *skillmain.RunContext, udid, app string) error {
 	if app == "" {
-		return fmt.Errorf("app path is required for install operation")
+		return skillerr.Arg(
+			"app path is required for install operation",
+			skillerr.WithHint("Provide the .app or .ipa path in app."),
+		)
 	}
 
 	// Resolve app path to absolute and validate
 	absPath, err := filepath.Abs(app)
 	if err != nil {
-		return fmt.Errorf("resolve app path: %w", err)
+		return skillerr.WrapIO("resolve app path", err)
 	}
 
 	// Resolve symlinks to get the real path
 	resolvedPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		return fmt.Errorf("app path does not exist or is inaccessible: %w", err)
+		return skillerr.WrapIO("app path does not exist or is inaccessible", err)
 	}
 
 	// Verify the file exists and is not a directory (should be .app bundle or .ipa)
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		return fmt.Errorf("app path invalid: %w", err)
+		return skillerr.WrapIO("app path invalid", err)
 	}
 
 	// .app bundles are directories, .ipa files are not
 	ext := strings.ToLower(filepath.Ext(resolvedPath))
 	if ext == ".ipa" && info.IsDir() {
-		return fmt.Errorf("app path %s: expected .ipa file but got directory", resolvedPath)
+		return skillerr.Validation(fmt.Sprintf("app path %s: expected .ipa file but got directory", resolvedPath))
 	}
 
-	args := []string{"install", resolvedPath}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb install: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "install", resolvedPath)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb install", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -249,17 +265,15 @@ func install(ctx context.Context, rc *skillmain.RunContext, udid, app string) er
 // launch launches an app by bundle ID.
 func launch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
-		return fmt.Errorf("app bundle ID is required for launch operation")
+		return skillerr.Arg(
+			"app bundle ID is required for launch operation",
+			skillerr.WithHint("Provide the app bundle ID in app."),
+		)
 	}
 
-	args := []string{"launch", bundleID}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb launch: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "launch", bundleID)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb launch", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -273,17 +287,15 @@ func launch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string
 // terminate stops a running app.
 func terminate(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
-		return fmt.Errorf("app bundle ID is required for terminate operation")
+		return skillerr.Arg(
+			"app bundle ID is required for terminate operation",
+			skillerr.WithHint("Provide the app bundle ID in app."),
+		)
 	}
 
-	args := []string{"terminate", bundleID}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb terminate: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "terminate", bundleID)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb terminate", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -310,25 +322,20 @@ func screenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath 
 		}()
 	}
 
-	args := []string{"screenshot", outputPath}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb screenshot: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "screenshot", outputPath)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb screenshot", result.Err)
 	}
 
 	// Read screenshot and store in CAS
 	data, err := os.ReadFile(outputPath)
 	if err != nil {
-		return fmt.Errorf("read screenshot: %w", err)
+		return skillerr.WrapIO("read screenshot", err)
 	}
 
 	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(data), "image/png", "ios_screenshot")
 	if err != nil {
-		return fmt.Errorf("persist screenshot: %w", err)
+		return skillerr.WrapIO("persist screenshot", err)
 	}
 
 	return emit(rc, map[string]any{
@@ -342,14 +349,9 @@ func screenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath 
 
 // tap performs a tap at coordinates.
 func tap(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) error {
-	args := []string{"ui", "tap", strconv.Itoa(x), strconv.Itoa(y)}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb ui tap: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "ui", "tap", strconv.Itoa(x), strconv.Itoa(y))
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb ui tap", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -362,18 +364,12 @@ func tap(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) e
 
 // swipe performs a swipe gesture.
 func swipe(ctx context.Context, rc *skillmain.RunContext, udid string, x1, y1, x2, y2 int) error {
-	args := []string{
-		"ui", "swipe",
+	result := mobileutil.RunIDB(ctx, udid, "ui", "swipe",
 		strconv.Itoa(x1), strconv.Itoa(y1),
 		strconv.Itoa(x2), strconv.Itoa(y2),
-	}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb ui swipe: %w", err)
+	)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb ui swipe", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -387,17 +383,12 @@ func swipe(ctx context.Context, rc *skillmain.RunContext, udid string, x1, y1, x
 // typeText types text into the simulator.
 func typeText(ctx context.Context, rc *skillmain.RunContext, udid, text string) error {
 	if text == "" {
-		return fmt.Errorf("text is required for type_text operation")
+		return skillerr.Arg("text is required for type_text operation", skillerr.WithHint("Provide text to type."))
 	}
 
-	args := []string{"ui", "text", text}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb ui text: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "ui", "text", text)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb ui text", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -410,17 +401,12 @@ func typeText(ctx context.Context, rc *skillmain.RunContext, udid, text string) 
 // button presses a hardware button.
 func button(ctx context.Context, rc *skillmain.RunContext, udid, buttonName string) error {
 	if buttonName == "" {
-		return fmt.Errorf("button name is required")
+		return skillerr.Arg("button name is required", skillerr.WithHint("Provide the button name to press."))
 	}
 
-	args := []string{"ui", "button", buttonName}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb ui button: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "ui", "button", buttonName)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb ui button", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -432,22 +418,16 @@ func button(ctx context.Context, rc *skillmain.RunContext, udid, buttonName stri
 
 // uiTree gets the UI accessibility tree.
 func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
-	args := []string{"ui", "describe-all", "--json"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("idb ui describe-all: %w", err)
+	cmdResult := mobileutil.RunIDB(ctx, udid, "ui", "describe-all", "--json")
+	if cmdResult.Err != nil {
+		return skillerr.WrapRuntime("idb ui describe-all", cmdResult.Err)
 	}
 
 	// Initialize to empty slice so JSON serializes as [] not null
 	elements := make([]any, 0)
-	if err := json.Unmarshal(output, &elements); err != nil {
+	if err := json.Unmarshal(cmdResult.Stdout, &elements); err != nil {
 		// Try line-by-line parsing
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		lines := strings.Split(strings.TrimSpace(string(cmdResult.Stdout)), "\n")
 		for _, line := range lines {
 			if line == "" {
 				continue
@@ -468,7 +448,7 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 		truncated = true
 	}
 
-	result := map[string]any{
+	payload := map[string]any{
 		"operation": "ui_tree",
 		"elements":  preview,
 		"count":     len(elements),
@@ -477,33 +457,27 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 
 	// Store full tree in CAS if truncated
 	if truncated {
-		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/json", "ios_ui_tree")
+		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(cmdResult.Stdout), "application/json", "ios_ui_tree")
 		if err != nil {
-			return fmt.Errorf("persist ui tree: %w", err)
+			return skillerr.WrapIO("persist ui tree", err)
 		}
-		result["artifact"] = artifact.Digest
-		result["hint"] = "Full UI tree stored in CAS; fetch via: agentctl cas get " + artifact.Digest
+		payload["artifact"] = artifact.Digest
+		payload["hint"] = skillout.FormatCASHint("UI tree", artifact.Digest)
 	}
 
-	return emit(rc, result)
+	return emit(rc, payload)
 }
 
 // describePoint describes the UI element at a specific point.
 func describePoint(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) error {
-	args := []string{"ui", "describe-point", strconv.Itoa(x), strconv.Itoa(y), "--json"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("idb ui describe-point: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "ui", "describe-point", strconv.Itoa(x), strconv.Itoa(y), "--json")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb ui describe-point", result.Err)
 	}
 
 	var element any
-	if err := json.Unmarshal(output, &element); err != nil {
-		return fmt.Errorf("parse element: %w", err)
+	if err := json.Unmarshal(result.Stdout, &element); err != nil {
+		return skillerr.WrapParse("parse element", err)
 	}
 
 	return emit(rc, map[string]any{
@@ -516,50 +490,40 @@ func describePoint(ctx context.Context, rc *skillmain.RunContext, udid string, x
 
 // logs gets simulator logs.
 func logs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
-	args := []string{"log", "--style", "json"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
 	// Use a timeout context to get recent logs
 	logCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(logCtx, "idb", args...)
-	output, cmdErr := cmd.Output()
+	result := mobileutil.RunIDB(logCtx, udid, "log", "--style", "json")
 
 	// Distinguish expected timeout from real command failures
-	if cmdErr != nil {
+	if result.Err != nil {
 		// Context timeout/cancellation is expected - we use it to limit log capture time
 		if errors.Is(logCtx.Err(), context.DeadlineExceeded) || errors.Is(logCtx.Err(), context.Canceled) {
 			// Expected: timeout used to limit log capture, continue with captured output
 		} else {
 			// Real command failure - return the error
-			var exitErr *exec.ExitError
-			if errors.As(cmdErr, &exitErr) {
-				return fmt.Errorf("idb log failed (exit %d): %s", exitErr.ExitCode(), string(exitErr.Stderr))
+			if result.ExitCode > 0 {
+				return skillerr.Runtimef("idb log failed (exit %d): %s", result.ExitCode, string(result.Stderr))
 			}
-			return fmt.Errorf("idb log: %w", cmdErr)
+			return skillerr.WrapRuntime("idb log", result.Err)
 		}
 	}
 
 	// Store logs in CAS
-	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/x-ndjson", "ios_logs")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(result.Stdout), "application/x-ndjson", "ios_logs")
 	if err != nil {
-		return fmt.Errorf("persist logs: %w", err)
+		return skillerr.WrapIO("persist logs", err)
 	}
 
 	// Get a preview of recent logs
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	previewLines := lines
-	if len(lines) > 50 {
-		previewLines = lines[len(lines)-50:]
-	}
+	lines := strings.Split(strings.TrimSpace(string(result.Stdout)), "\n")
+	preview := textutil.JoinTail(lines, 50, "\n")
 
 	return emit(rc, map[string]any{
 		"operation":    "logs",
 		"artifact":     artifact.Digest,
-		"preview":      strings.Join(previewLines, "\n"),
+		"preview":      preview,
 		"total_lines":  len(lines),
 		"preview_from": "last_50",
 	})
@@ -568,17 +532,12 @@ func logs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 // openURL opens a URL in the simulator.
 func openURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) error {
 	if url == "" {
-		return fmt.Errorf("url is required for open_url operation")
+		return skillerr.Arg("url is required for open_url operation", skillerr.WithHint("Provide a URL to open."))
 	}
 
-	args := []string{"open", url}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb open: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "open", url)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb open", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -590,18 +549,12 @@ func openURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) er
 
 // setLocation sets the simulated GPS location.
 func setLocation(ctx context.Context, rc *skillmain.RunContext, udid string, lat, long float64) error {
-	args := []string{
-		"set_location",
+	result := mobileutil.RunIDB(ctx, udid, "set_location",
 		strconv.FormatFloat(lat, 'f', 6, 64),
 		strconv.FormatFloat(long, 'f', 6, 64),
-	}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb set_location: %w", err)
+	)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb set_location", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -615,21 +568,16 @@ func setLocation(ctx context.Context, rc *skillmain.RunContext, udid string, lat
 // approvePermissions approves permissions for an app.
 func approvePermissions(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string, permissions []string) error {
 	if bundleID == "" {
-		return fmt.Errorf("app bundle ID is required for approve_permissions")
+		return skillerr.Arg("app bundle ID is required for approve_permissions", skillerr.WithHint("Provide the app bundle ID in app."))
 	}
 	if len(permissions) == 0 {
-		return fmt.Errorf("permissions list is required")
+		return skillerr.Arg("permissions list is required", skillerr.WithHint("Provide at least one permission to approve."))
 	}
 
-	args := []string{"approve", bundleID}
-	args = append(args, permissions...)
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb approve: %w", err)
+	args := append([]string{"approve", bundleID}, permissions...)
+	result := mobileutil.RunIDB(ctx, udid, args...)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb approve", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -640,7 +588,14 @@ func approvePermissions(ctx context.Context, rc *skillmain.RunContext, udid, bun
 	})
 }
 
-const iosRecordPIDFile = "/tmp/agentctl_ios_record.pid"
+// recordPIDFile returns the PID file path for a specific device (or "default" if no UDID).
+// This scopes recordings per-device, preventing conflicts when automating different simulators.
+func recordPIDFile(udid string) string {
+	if udid == "" {
+		udid = "default"
+	}
+	return fmt.Sprintf("/tmp/agentctl_ios_record_%s.pid", udid)
+}
 
 // recordStart starts video recording.
 func recordStart(ctx context.Context, rc *skillmain.RunContext, udid, outputPath string) error {
@@ -648,28 +603,25 @@ func recordStart(ctx context.Context, rc *skillmain.RunContext, udid, outputPath
 		outputPath = fmt.Sprintf("/tmp/ios_recording_%d.mp4", time.Now().UnixNano())
 	}
 
-	args := []string{"record", outputPath}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
+	pidFile := recordPIDFile(udid)
 
 	// Start recording in background
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("idb record start: %w", err)
+	cmd, err := executil.Start(ctx, "", "idb", mobileutil.IDBArgs(udid, "record", outputPath)...)
+	if err != nil {
+		return skillerr.WrapRuntime("idb record start", err)
 	}
 
 	// Store PID for later stop
 	pid := cmd.Process.Pid
-	if err := os.WriteFile(iosRecordPIDFile, []byte(strconv.Itoa(pid)), 0o600); err != nil {
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0o600); err != nil {
 		errs.Ignore(cmd.Process.Kill(), "kill recording process after pid file write failure")
-		return fmt.Errorf("write pid file: %w", err)
+		return skillerr.WrapIO("write pid file", err)
 	}
 
 	// Start a goroutine to wait for the process (prevents zombie)
 	go func() {
 		errs.Ignore(cmd.Wait(), "wait for recording process")
-		_ = os.Remove(iosRecordPIDFile)
+		_ = os.Remove(pidFile)
 	}()
 
 	return emit(rc, map[string]any{
@@ -682,28 +634,32 @@ func recordStart(ctx context.Context, rc *skillmain.RunContext, udid, outputPath
 }
 
 // recordStop stops video recording.
-func recordStop(ctx context.Context, rc *skillmain.RunContext) error {
-	pidData, err := os.ReadFile(iosRecordPIDFile)
+func recordStop(ctx context.Context, rc *skillmain.RunContext, udid string) error {
+	pidFile := recordPIDFile(udid)
+	pidData, err := os.ReadFile(pidFile)
 	if err != nil {
 		// No PID file means no known recording in progress
 		// Return error instead of using dangerous broad pkill fallback
 		if os.IsNotExist(err) {
-			return fmt.Errorf("no active recording found (PID file missing): start a recording with record_start first")
+			return skillerr.NotFound(
+				"no active recording found (PID file missing)",
+				skillerr.WithHint("Start a recording with record_start first."),
+			)
 		}
-		return fmt.Errorf("read recording PID file: %w", err)
+		return skillerr.WrapIO("read recording PID file", err)
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
 	if err != nil {
-		_ = os.Remove(iosRecordPIDFile)
-		return fmt.Errorf("invalid pid file: %w", err)
+		_ = os.Remove(pidFile)
+		return skillerr.WrapParse("invalid pid file", err)
 	}
 
 	proc, err := os.FindProcess(pid)
 	if err == nil {
 		errs.Ignore(proc.Signal(os.Interrupt), "send interrupt to recording process")
 	}
-	_ = os.Remove(iosRecordPIDFile)
+	_ = os.Remove(pidFile)
 
 	return emit(rc, map[string]any{
 		"operation": "record_stop",
@@ -714,22 +670,16 @@ func recordStop(ctx context.Context, rc *skillmain.RunContext) error {
 
 // crashLogs lists crash logs.
 func crashLogs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
-	args := []string{"crash", "list", "--json"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("idb crash list: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "crash", "list", "--json")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb crash list", result.Err)
 	}
 
 	// Initialize to empty slice so JSON serializes as [] not null
 	crashes := make([]any, 0)
-	if err := json.Unmarshal(output, &crashes); err != nil {
+	if err := json.Unmarshal(result.Stdout, &crashes); err != nil {
 		// Try line-by-line parsing
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		lines := strings.Split(strings.TrimSpace(string(result.Stdout)), "\n")
 		for _, line := range lines {
 			if line == "" {
 				continue
@@ -751,43 +701,38 @@ func crashLogs(ctx context.Context, rc *skillmain.RunContext, udid string) error
 // addMedia adds media files to the simulator.
 func addMedia(ctx context.Context, rc *skillmain.RunContext, udid, mediaPath string) error {
 	if mediaPath == "" {
-		return fmt.Errorf("media_path is required for add_media operation")
+		return skillerr.Arg("media_path is required for add_media operation", skillerr.WithHint("Provide the media file path."))
 	}
 
 	// Resolve media path to absolute and validate to prevent path traversal
 	absPath, err := filepath.Abs(mediaPath)
 	if err != nil {
-		return fmt.Errorf("resolve media path: %w", err)
+		return skillerr.WrapIO("resolve media path", err)
 	}
 
 	// Resolve symlinks to get the real path (prevents TOCTOU attacks)
 	resolvedPath, err := filepath.EvalSymlinks(absPath)
 	if err != nil {
-		return fmt.Errorf("media path does not exist or is inaccessible: %w", err)
+		return skillerr.WrapIO("media path does not exist or is inaccessible", err)
 	}
 
 	// Verify the file exists and is a regular file (not a directory or device)
 	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		return fmt.Errorf("media path invalid: %w", err)
+		return skillerr.WrapIO("media path invalid", err)
 	}
 
 	if info.IsDir() {
-		return fmt.Errorf("media_path %s: expected file but got directory", resolvedPath)
+		return skillerr.Validation(fmt.Sprintf("media_path %s: expected file but got directory", resolvedPath))
 	}
 
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("media_path %s: not a regular file", resolvedPath)
+		return skillerr.Validation(fmt.Sprintf("media_path %s: not a regular file", resolvedPath))
 	}
 
-	args := []string{"add-media", resolvedPath}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb add-media: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "add-media", resolvedPath)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb add-media", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -799,14 +744,9 @@ func addMedia(ctx context.Context, rc *skillmain.RunContext, udid, mediaPath str
 
 // clearKeychain clears the keychain.
 func clearKeychain(ctx context.Context, rc *skillmain.RunContext, udid string) error {
-	args := []string{"clear_keychain"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb clear_keychain: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "clear_keychain")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb clear_keychain", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -817,14 +757,9 @@ func clearKeychain(ctx context.Context, rc *skillmain.RunContext, udid string) e
 
 // focus brings the simulator window to front.
 func focus(ctx context.Context, rc *skillmain.RunContext, udid string) error {
-	args := []string{"focus"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb focus: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "focus")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb focus", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -838,14 +773,8 @@ func focus(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 func doShake(ctx context.Context, udid string) error {
 	// IDB doesn't have a direct shake command, so we simulate it
 	// by sending the shake hardware event through button
-	args := []string{"ui", "button", "SHAKE"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	err := cmd.Run()
-	if err != nil {
+	result := mobileutil.RunIDB(ctx, udid, "ui", "button", "SHAKE")
+	if result.Err != nil {
 		// Fallback: Try using simctl
 		simArgs := []string{"simctl"}
 		if udid != "" {
@@ -855,9 +784,9 @@ func doShake(ctx context.Context, udid string) error {
 		}
 		simArgs = append(simArgs, "shake")
 
-		simCmd := exec.CommandContext(ctx, "xcrun", simArgs...)
-		if simErr := simCmd.Run(); simErr != nil {
-			return fmt.Errorf("shake failed (idb: %v, simctl: %v)", err, simErr)
+		simResult := executil.Run(ctx, "", "xcrun", simArgs...)
+		if simResult.Err != nil {
+			return skillerr.Runtimef("shake failed (idb: %v, simctl: %v)", result.Err, simResult.Err)
 		}
 	}
 
@@ -880,7 +809,7 @@ func shake(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 // expoDeepLink opens an Expo deep link URL.
 func expoDeepLink(ctx context.Context, rc *skillmain.RunContext, udid, expoURL string) error {
 	if expoURL == "" {
-		return fmt.Errorf("expo_url is required for expo_deep_link operation")
+		return skillerr.Arg("expo_url is required for expo_deep_link operation", skillerr.WithHint("Provide the Expo URL to open."))
 	}
 
 	// Ensure URL has exp:// or exps:// scheme
@@ -888,14 +817,9 @@ func expoDeepLink(ctx context.Context, rc *skillmain.RunContext, udid, expoURL s
 		expoURL = "exp://" + expoURL
 	}
 
-	args := []string{"open", expoURL}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("idb open expo URL: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "open", expoURL)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("idb open expo URL", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -911,21 +835,16 @@ func expoReload(ctx context.Context, rc *skillmain.RunContext, udid string) erro
 	// Method 1: Shake to open dev menu, then tap reload
 	// Use doShake to avoid double envelope emission
 	if err := doShake(ctx, udid); err != nil {
-		return fmt.Errorf("shake for expo reload: %w", err)
+		return skillerr.WrapRuntime("shake for expo reload", err)
 	}
 
 	// Give the menu time to appear
 	time.Sleep(500 * time.Millisecond)
 
 	// Type 'r' which is the keyboard shortcut for reload in Expo
-	args := []string{"ui", "text", "r"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("type 'r' for reload: %w", err)
+	result := mobileutil.RunIDB(ctx, udid, "ui", "text", "r")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("type 'r' for reload", result.Err)
 	}
 
 	return emit(rc, map[string]any{

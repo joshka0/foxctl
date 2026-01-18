@@ -6,27 +6,37 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hashutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
+	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
+)
+
+const (
+	summaryQueueDBName = "summary_queue.db"
+	summaryQueueTable  = "summary_queue_jobs"
 )
 
 // Input defines the skill input parameters.
@@ -60,6 +70,39 @@ type Input struct {
 	// ProcessAll loops internally until all windows are done (mode=windows).
 	// When false, returns after one batch with windows_remaining count.
 	ProcessAll bool `json:"process_all,omitempty"`
+
+	// Queue enables queue-backed processing for window summaries.
+	Queue bool `json:"queue,omitempty"`
+
+	// QueueOnly enqueues windows without processing them.
+	QueueOnly bool `json:"queue_only,omitempty"`
+}
+
+// SummarizeStats tracks token usage, costs, and skip reasons for summarization.
+type SummarizeStats struct {
+	// Token usage
+	InputTokens  int `json:"input_tokens,omitempty"`
+	OutputTokens int `json:"output_tokens,omitempty"`
+	TotalTokens  int `json:"total_tokens,omitempty"`
+
+	// Cost estimation (USD)
+	InputCost  float64 `json:"input_cost,omitempty"`
+	OutputCost float64 `json:"output_cost,omitempty"`
+	TotalCost  float64 `json:"total_cost,omitempty"`
+
+	// Provider info
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+
+	// Skip tracking
+	Skipped    bool   `json:"skipped,omitempty"`
+	SkipReason string `json:"skip_reason,omitempty"` // "content_hash_dedup", "already_summarized", "no_jsonl"
+
+	// Dedup info (when skipped due to content hash match)
+	DedupFromSession string `json:"dedup_from_session,omitempty"`
+
+	// Learnings persisted to memory
+	LearningsPersisted int `json:"learnings_persisted,omitempty"`
 }
 
 // Output defines the skill output.
@@ -85,6 +128,8 @@ type Output struct {
 
 	// WindowsSummarized is the count of windows that were summarized (mode=windows).
 	WindowsSummarized int `json:"windows_summarized,omitempty"`
+	// WindowsQueued is the count of windows enqueued (mode=windows with queue).
+	WindowsQueued int `json:"windows_queued,omitempty"`
 	// WindowsSkipped is the count of windows that already had summaries (mode=windows).
 	WindowsSkipped int `json:"windows_skipped,omitempty"`
 	// WindowsRemaining is the count of windows still needing summarization (mode=windows with batch_size).
@@ -97,11 +142,79 @@ type Output struct {
 	// WindowsReembedded is the count of context windows re-embedded (mode=reembed).
 	WindowsReembedded int `json:"windows_reembedded,omitempty"`
 
+	// Statistics for tracking costs and deduplication
+	Stats *SummarizeStats `json:"stats,omitempty"`
+
 	Status  string `json:"status"`
 	Message string `json:"message"`
 }
 
-// SummaryResponse is the expected JSON response from Cerebras.
+// TokenUsage captures API response token usage for cost tracking.
+type TokenUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
+}
+
+// ProviderCost defines per-million-token costs for a provider.
+type ProviderCost struct {
+	InputPerMillion  float64
+	OutputPerMillion float64
+}
+
+// providerCosts maps provider names to their per-million-token costs (USD).
+// Prices as of January 2026 - update as needed.
+// Sources: cerebras.ai/pricing, groq.com/pricing, openrouter.ai/pricing
+var providerCosts = map[string]ProviderCost{
+	// Primary providers used by agentctl
+	"cerebras":       {InputPerMillion: 0.60, OutputPerMillion: 2.20}, // GLM-4.7 (Z.ai pricing)
+	"cerebras:llama": {InputPerMillion: 0.60, OutputPerMillion: 0.60}, // Llama 3.3 70B
+	"groq":           {InputPerMillion: 0.59, OutputPerMillion: 0.79}, // Llama 3.3 70B Versatile
+
+	// OpenRouter models (name format: "openrouter:{provider}/{model}")
+	// Models from .env OPENROUTER_MODELS config
+	"openrouter:mistralai":      {InputPerMillion: 0.15, OutputPerMillion: 0.60},  // Devstral 2512 (paid tier)
+	"openrouter:arcee-ai":       {InputPerMillion: 0.045, OutputPerMillion: 0.15}, // Trinity Mini (paid tier)
+	"openrouter:bytedance-seed": {InputPerMillion: 0.075, OutputPerMillion: 0.30}, // Seed 1.6 Flash
+	"openrouter:x-ai":           {InputPerMillion: 0.20, OutputPerMillion: 0.50},  // Grok 4.1 Fast
+	"openrouter:openai":         {InputPerMillion: 0.25, OutputPerMillion: 2.00},  // GPT-5.1 Codex Mini
+	// Other OpenRouter providers
+	"openrouter:minimax":    {InputPerMillion: 0.27, OutputPerMillion: 1.12},   // MiniMax M2.1
+	"openrouter:anthropic":  {InputPerMillion: 0.25, OutputPerMillion: 1.25},   // Claude 3 Haiku
+	"openrouter:meta-llama": {InputPerMillion: 0.055, OutputPerMillion: 0.055}, // Llama 3.3 70B
+	"openrouter:google":     {InputPerMillion: 0.075, OutputPerMillion: 0.30},  // Gemini Flash
+	"openrouter:deepseek":   {InputPerMillion: 0.14, OutputPerMillion: 0.28},   // DeepSeek V3
+
+	// Direct API providers (less commonly used)
+	"anthropic": {InputPerMillion: 3.00, OutputPerMillion: 15.00}, // Claude 3.5 Sonnet
+	"openai":    {InputPerMillion: 0.15, OutputPerMillion: 0.60},  // GPT-4o-mini
+	"gemini":    {InputPerMillion: 0.075, OutputPerMillion: 0.30}, // Gemini 1.5 Flash
+}
+
+// calculateCost returns input cost, output cost, total cost in USD.
+func calculateCost(provider string, usage TokenUsage) (inputCost, outputCost, totalCost float64) {
+	cost, ok := providerCosts[provider]
+	if !ok {
+		// Try prefix match for openrouter variants
+		for prefix, c := range providerCosts {
+			if strings.HasPrefix(provider, prefix) {
+				cost = c
+				ok = true
+				break
+			}
+		}
+	}
+	if !ok {
+		return 0, 0, 0 // Unknown provider
+	}
+
+	inputCost = float64(usage.InputTokens) * cost.InputPerMillion / 1_000_000
+	outputCost = float64(usage.OutputTokens) * cost.OutputPerMillion / 1_000_000
+	totalCost = inputCost + outputCost
+	return
+}
+
+// SummaryResponse is the expected JSON response from the LLM.
 type SummaryResponse struct {
 	Summary         string   `json:"summary"`
 	Accomplished    []string `json:"accomplished"`
@@ -156,6 +269,13 @@ type UserContentBlock struct {
 	Content   string `json:"content,omitempty"` // tool result content (often large)
 }
 
+// codexEventPayload models Codex event_msg payloads for summarization.
+type codexEventPayload struct {
+	Type    string `json:"type"`
+	Message string `json:"message,omitempty"`
+	Text    string `json:"text,omitempty"`
+}
+
 // FilteredMessage is a high-signal message for summarization.
 type FilteredMessage struct {
 	Role       string   `json:"role"`
@@ -172,104 +292,7 @@ const (
 )
 
 // LLMProvider represents a chat completion API provider.
-type LLMProvider struct {
-	Name      string
-	Endpoint  string // empty for CLI providers
-	APIKey    string // empty for CLI providers
-	Model     string
-	IsCLI     bool // true for CLI tools like gemini/claude
-	MaxTokens int  // max input tokens for this provider
-}
-
-// getProviders returns available LLM providers in priority order.
-// Priority: Cerebras (fastest) → Groq → OpenRouter → CLI (slow startup)
-func getProviders() []LLMProvider {
-	var providers []LLMProvider
-
-	// Cerebras - fastest inference (~2000 tok/s), prioritized for speed
-	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
-		model := os.Getenv("CEREBRAS_MODEL")
-		if model == "" {
-			model = "llama-3.3-70b"
-		}
-		providers = append(providers, LLMProvider{
-			Name:      "cerebras",
-			Endpoint:  "https://api.cerebras.ai/v1/chat/completions",
-			APIKey:    key,
-			Model:     model,
-			MaxTokens: 8000, // conservative for rate limits
-		})
-	}
-
-	// Groq - fast and cheap with 128k context
-	// Free tier: 12k TPM limit, so use 10k to be safe
-	if key := os.Getenv("GROQ_API_KEY"); key != "" {
-		model := os.Getenv("GROQ_MODEL")
-		if model == "" {
-			model = "llama-3.3-70b-versatile" // 128k context, $0.59/$0.79 per M
-		}
-		providers = append(providers, LLMProvider{
-			Name:      "groq",
-			Endpoint:  "https://api.groq.com/openai/v1/chat/completions",
-			APIKey:    key,
-			Model:     model,
-			MaxTokens: 10000, // free tier TPM limit
-		})
-	}
-
-	// OpenRouter - fallback with many model options
-	// Set OPENROUTER_MODELS as comma-separated list, or use defaults
-	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
-		models := os.Getenv("OPENROUTER_MODELS")
-		if models == "" {
-			models = "minimax/minimax-m2.1"
-		}
-		for _, model := range strings.Split(models, ",") {
-			model = strings.TrimSpace(model)
-			if model == "" {
-				continue
-			}
-			providers = append(providers, LLMProvider{
-				Name:      "openrouter:" + model,
-				Endpoint:  "https://openrouter.ai/api/v1/chat/completions",
-				APIKey:    key,
-				Model:     model,
-				MaxTokens: 24000, // 32k context minus output buffer
-			})
-		}
-	}
-
-	// CLI providers as fallback (slow startup ~60s)
-	// Gemini CLI - 1M context
-	if _, err := exec.LookPath("gemini"); err == nil {
-		model := os.Getenv("GEMINI_MODEL")
-		if model == "" {
-			model = "gemini-2.5-flash" // 1M context
-		}
-		providers = append(providers, LLMProvider{
-			Name:      "gemini-cli",
-			Model:     model,
-			IsCLI:     true,
-			MaxTokens: 100000, // can handle much more
-		})
-	}
-
-	// Claude CLI - 200k context
-	if _, err := exec.LookPath("claude"); err == nil {
-		model := os.Getenv("CLAUDE_MODEL")
-		if model == "" {
-			model = "claude-haiku-4-5"
-		}
-		providers = append(providers, LLMProvider{
-			Name:      "claude-cli",
-			Model:     model,
-			IsCLI:     true,
-			MaxTokens: 50000, // conservative for 200k context
-		})
-	}
-
-	return providers
-}
+type LLMProvider = llmproviders.Provider
 
 func main() {
 	skillmain.Main(command, run)
@@ -285,13 +308,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Get available LLM providers
-	providers := getProviders()
+	providers := llmproviders.SummarizationProviders()
 	if len(providers) == 0 {
 		return skillerr.Arg("no LLM provider configured (set GROQ_API_KEY, CEREBRAS_API_KEY, or OPENROUTER_API_KEY)")
 	}
-
-	// Get paths from sessionkit
-	paths := sessionkit.ResolvePaths(rc.Config)
+	windowProviders := windowSummaryProviders(providers)
 
 	// Parse mode early - some modes don't need session_id
 	mode := strings.ToLower(strings.TrimSpace(in.Mode))
@@ -311,7 +332,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Handle reembed mode early - doesn't need a specific session
 	if mode == "reembed" {
-		output := reembedAll(ctx, sessionStore, in)
+		output := reembedAll(ctx, sessionStore, in, rc.Config)
 		return skillout.Emit(rc, command, output)
 	}
 
@@ -337,7 +358,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Handle windows mode - summarize context windows with LLM
 	if mode == "windows" {
-		output := summarizeWindows(ctx, sessionStore, session, providers, in)
+		var output Output
+		if in.Queue || in.QueueOnly {
+			output = summarizeWindowsQueued(ctx, sessionStore, session, windowProviders, in, rc.Config)
+		} else {
+			output = summarizeWindows(ctx, sessionStore, session, windowProviders, in, rc.Config)
+		}
 		return skillout.Emit(rc, command, output)
 	}
 
@@ -348,33 +374,82 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		output := Output{
 			SessionID:    session.ID,
 			Summary:      session.Summary,
-			Accomplished: ensureSlice(session.Accomplished),
-			Decisions:    ensureSlice(session.Decisions),
-			Gotchas:      ensureSlice(session.Gotchas),
-			Tags:         ensureSlice(session.Tags),
-			KeyFiles:     ensureSlice(session.KeyFiles),
+			Accomplished: sliceutil.Clone(session.Accomplished),
+			Decisions:    sliceutil.Clone(session.Decisions),
+			Gotchas:      sliceutil.Clone(session.Gotchas),
+			Tags:         sliceutil.Clone(session.Tags),
+			KeyFiles:     sliceutil.Clone(session.KeyFiles),
 			ToolsPattern: session.ToolsPattern,
-			Status:       "exists",
-			Message:      fmt.Sprintf("Session %s already summarized (use force=true to re-summarize)", session.ID),
+			Stats: &SummarizeStats{
+				Skipped:    true,
+				SkipReason: "already_summarized",
+			},
+			Status:  "exists",
+			Message: fmt.Sprintf("Session %s already summarized (use force=true to re-summarize)", session.ID),
 		}
 		return skillout.Emit(rc, command, output)
 	}
 
 	var (
 		summaryResp        *SummaryResponse
+		contentHash        string
 		usedProvider       string
+		tokenUsage         *TokenUsage
 		persistedLearnings int
 		persistErr         error
+		deduped            bool
+		dedupFromSession   string
 	)
 
 	if needsSummarize {
-		// Call LLM for summarization (with fallback, filtering per-provider)
-		var err error
-		summaryResp, usedProvider, err = summarizeWithFallback(ctx, providers, session.RawJSONLPath, in.MaxTokens)
-		if err != nil {
-			return skillerr.Runtime(fmt.Sprintf("summarization failed (tried %d providers)", len(providers)), skillerr.WithCause(err))
+		// Compute content hash for deduplication check
+		// Use the same max tokens logic as summarizeWithFallback to ensure consistent hashing
+		firstProviderMaxTokens := providers[0].MaxTokens
+		if in.MaxTokens > 0 && in.MaxTokens < firstProviderMaxTokens {
+			firstProviderMaxTokens = in.MaxTokens // Apply user cap (same as summarizeWithFallback)
 		}
-		_ = usedProvider // TODO: could log which provider was used
+		if firstProviderMaxTokens <= 0 {
+			firstProviderMaxTokens = defaultMaxTokens
+		}
+		_, preHash, err := filterJSONL(ctx, session.RawJSONLPath, firstProviderMaxTokens)
+		if err == nil && preHash != "" {
+			// Check if another session with same content already has a summary
+			existingSession, _ := sessionStore.FindByContentHash(ctx, preHash)
+			if existingSession != nil && existingSession.ID != session.ID && existingSession.Summary != "" {
+				// Determine if we should dedupe:
+				// - force=false: always dedupe from any matching session
+				// - force=true: only dedupe from sessions updated in last 5 minutes
+				//   (handles batch re-summarize: first one calls LLM, rest dedupe)
+				recentThreshold := time.Now().Add(-5 * time.Minute)
+				shouldDedupe := !in.Force || existingSession.UpdatedAt.After(recentThreshold)
+
+				if shouldDedupe {
+					// Reuse existing summary from session with identical content
+					summaryResp = &SummaryResponse{
+						Summary:      existingSession.Summary,
+						Accomplished: sliceutil.Clone(existingSession.Accomplished),
+						Decisions:    sliceutil.Clone(existingSession.Decisions),
+						Gotchas:      sliceutil.Clone(existingSession.Gotchas),
+						UserInsights: sliceutil.Clone(existingSession.UserInsights),
+						Tags:         sliceutil.Clone(existingSession.Tags),
+						KeyFiles:     sliceutil.Clone(existingSession.KeyFiles),
+						ToolsPattern: existingSession.ToolsPattern,
+						KeyQuestions: sliceutil.Clone(existingSession.KeyQuestions),
+					}
+					contentHash = preHash
+					deduped = true
+					dedupFromSession = existingSession.ID
+				}
+			}
+		}
+
+		if !deduped {
+			// Call LLM for summarization (with fallback, filtering per-provider)
+			summaryResp, contentHash, usedProvider, tokenUsage, err = summarizeWithFallback(ctx, providers, session.RawJSONLPath, in.MaxTokens)
+			if err != nil {
+				return skillerr.Runtime(fmt.Sprintf("summarization failed (tried %d providers)", len(providers)), skillerr.WithCause(err))
+			}
+		}
 
 		// Update session with summary (including key_questions for session restore)
 		err = sessionStore.UpdateSummaryWithQuestions(ctx, session.ID,
@@ -392,44 +467,74 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			return skillerr.IO("save summary", skillerr.WithCause(err))
 		}
 
-		persistedLearnings, persistErr = persistSessionLearnings(ctx, paths.AgentctlHome, session, summaryResp)
+		// Store the content hash for future deduplication
+		if contentHash != "" {
+			_ = sessionStore.SetContentHash(ctx, session.ID, contentHash)
+		}
+
+		persistedLearnings, persistErr = persistSessionLearnings(ctx, rc, session, summaryResp)
 	} else {
 		// Use persisted session fields.
 		summaryResp = &SummaryResponse{
 			Summary:         session.Summary,
-			Accomplished:    ensureSlice(session.Accomplished),
-			Decisions:       ensureSlice(session.Decisions),
-			Gotchas:         ensureSlice(session.Gotchas),
-			UserInsights:    ensureSlice(session.UserInsights),
+			Accomplished:    sliceutil.Clone(session.Accomplished),
+			Decisions:       sliceutil.Clone(session.Decisions),
+			Gotchas:         sliceutil.Clone(session.Gotchas),
+			UserInsights:    sliceutil.Clone(session.UserInsights),
 			UserPreferences: []string{},
 			TimeSinks:       []string{},
-			Tags:            ensureSlice(session.Tags),
-			KeyFiles:        ensureSlice(session.KeyFiles),
+			Tags:            sliceutil.Clone(session.Tags),
+			KeyFiles:        sliceutil.Clone(session.KeyFiles),
 			ToolsPattern:    session.ToolsPattern,
-			KeyQuestions:    ensureSlice(session.KeyQuestions),
+			KeyQuestions:    sliceutil.Clone(session.KeyQuestions),
 		}
 	}
 
 	status := "summarized"
-	message := fmt.Sprintf("Summarized session %s: %s", session.ID, truncate(summaryResp.Summary, 100))
-	if !needsSummarize {
+	message := fmt.Sprintf("Summarized session %s: %s", session.ID, skillout.TruncateSingleLine(summaryResp.Summary, 100))
+	if deduped {
+		status = "deduped"
+		message = fmt.Sprintf("Reused summary from session with identical content: %s", skillout.TruncateSingleLine(summaryResp.Summary, 100))
+	} else if !needsSummarize {
 		status = "exists"
 		message = fmt.Sprintf("Loaded existing summary for session %s", session.ID)
+	}
+
+	// Build stats for cost tracking and deduplication insight
+	stats := &SummarizeStats{
+		LearningsPersisted: persistedLearnings,
+	}
+	if deduped {
+		stats.Skipped = true
+		stats.SkipReason = "content_hash_dedup"
+		stats.DedupFromSession = dedupFromSession
+	} else if !needsSummarize {
+		stats.Skipped = true
+		stats.SkipReason = "already_summarized"
+	} else if tokenUsage != nil {
+		// LLM was called - populate token and cost info
+		stats.InputTokens = tokenUsage.InputTokens
+		stats.OutputTokens = tokenUsage.OutputTokens
+		stats.TotalTokens = tokenUsage.TotalTokens
+		stats.Provider = usedProvider
+		// Calculate cost
+		stats.InputCost, stats.OutputCost, stats.TotalCost = calculateCost(usedProvider, *tokenUsage)
 	}
 
 	output := Output{
 		SessionID:       session.ID,
 		Summary:         summaryResp.Summary,
-		Accomplished:    ensureSlice(summaryResp.Accomplished),
-		Decisions:       ensureSlice(summaryResp.Decisions),
-		Gotchas:         ensureSlice(summaryResp.Gotchas),
-		UserInsights:    ensureSlice(summaryResp.UserInsights),
-		UserPreferences: ensureSlice(summaryResp.UserPreferences),
-		TimeSinks:       ensureSlice(summaryResp.TimeSinks),
-		KeyQuestions:    ensureSlice(summaryResp.KeyQuestions),
-		Tags:            ensureSlice(summaryResp.Tags),
-		KeyFiles:        ensureSlice(summaryResp.KeyFiles),
+		Accomplished:    sliceutil.Clone(summaryResp.Accomplished),
+		Decisions:       sliceutil.Clone(summaryResp.Decisions),
+		Gotchas:         sliceutil.Clone(summaryResp.Gotchas),
+		UserInsights:    sliceutil.Clone(summaryResp.UserInsights),
+		UserPreferences: sliceutil.Clone(summaryResp.UserPreferences),
+		TimeSinks:       sliceutil.Clone(summaryResp.TimeSinks),
+		KeyQuestions:    sliceutil.Clone(summaryResp.KeyQuestions),
+		Tags:            sliceutil.Clone(summaryResp.Tags),
+		KeyFiles:        sliceutil.Clone(summaryResp.KeyFiles),
 		ToolsPattern:    summaryResp.ToolsPattern,
+		Stats:           stats,
 		Status:          status,
 		Message:         message,
 	}
@@ -442,7 +547,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	if mode == "seed" {
-		seedPrompt, err := buildSeedPrompt(ctx, sessionStore, session, summaryResp, in)
+		seedPrompt, err := buildSeedPrompt(ctx, sessionStore, session, summaryResp, in, rc.Config)
 		if err != nil {
 			output.Message += fmt.Sprintf(" (seed failed: %v)", err)
 		} else {
@@ -460,11 +565,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	if needsSummarize {
 		// Generate embedding using unified Embedder (handles provider selection and fallback)
-		embeddingText := buildEmbeddingText(summaryResp)
+		embeddingText := buildEmbeddingText(summaryResp, session.StartedAt, session.KeyFiles)
 		var embeddingResult semantic.EmbedResult
 		var embeddingErr error
 
-		embedder, err := semantic.NewEmbedder(semantic.ScopeSessions, semantic.WithAllowFallback(true))
+		embedder, err := semantic.NewEmbedderFromConfig(
+			semantic.ScopeSessions,
+			rc.Config,
+			semantic.WithAllowFallback(true),
+		)
 		if err != nil {
 			embeddingErr = err
 		} else {
@@ -504,30 +613,31 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-func persistSessionLearnings(ctx context.Context, agentctlHome string, session sessions.Session, resp *SummaryResponse) (int, error) {
+func persistSessionLearnings(ctx context.Context, rc *skillmain.RunContext, session sessions.Session, resp *SummaryResponse) (int, error) {
 	workspace := session.WorkspacePath
 	if strings.TrimSpace(workspace) == "" {
-		return 0, fmt.Errorf("missing session workspace_path")
+		return 0, skillerr.Validation("missing session workspace_path")
 	}
 
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	casRoot := filepath.Join(agentctlHome, "cas")
-	store, err := memory.Open(ctx, storageRoot, casRoot)
+	store, cleanup, err := sessionkit.OpenMemory(ctx, rc.Config)
 	if err != nil {
-		return 0, fmt.Errorf("open memory store: %w", err)
+		return 0, skillerr.WrapIO("open memory store", err)
 	}
-	defer func() { _ = store.Close() }()
+	defer cleanup()
 
 	// Initialize embedding provider (optional - learnings work without embeddings)
-	var embedProvider *semantic.VoyageProvider
-	if apiKey := os.Getenv("VOYAGE_API_KEY"); apiKey != "" {
-		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeMemory)
+	var embedProvider semantic.EmbeddingProvider
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if voyageKey != "" || geminiKey != "" {
 		waitOnLimit := true
-		embedProvider, _ = semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        apiKey,
-			Model:         model,
-			RateLimitWait: &waitOnLimit,
-		})
+		embedProvider, _ = semantic.NewProviderForScope(
+			semantic.ScopeMemory,
+			rc.Config,
+			semantic.WithVoyageKey(voyageKey),
+			semantic.WithGeminiKey(geminiKey),
+			semantic.WithRateLimitWait(waitOnLimit),
+		)
 	}
 
 	count := 0
@@ -555,15 +665,23 @@ func persistSessionLearnings(ctx context.Context, agentctlHome string, session s
 	return count, nil
 }
 
-func persistLearnings(ctx context.Context, store *memory.Store, embedProvider *semantic.VoyageProvider, sessionID, workspace, typ string, items []string) (int, error) {
+func persistLearnings(ctx context.Context, store *memory.Store, embedProvider semantic.EmbeddingProvider, sessionID, workspace, typ string, items []string) (int, error) {
 	count := 0
 	for _, raw := range items {
 		text := normalizeLearning(raw)
 		if text == "" {
 			continue
 		}
-		digest := shortHash(text)
+		digest := hashutil.ShortHash(text)
 		name := fmt.Sprintf("session:%s:%s:%s", sessionID, typ, digest)
+
+		// Content-hash deduplication: check if ANY entry with this content exists
+		// (handles forked sessions that share identical learnings)
+		suffix := fmt.Sprintf(":%s:%s", typ, digest)
+		if exists, err := store.ExistsByNameSuffix(ctx, workspace, suffix); err == nil && exists {
+			// Content already stored (possibly from another session), skip
+			continue
+		}
 
 		// Idempotency: check if entry already exists with embedding
 		if existing, err := store.GetEmbedding(ctx, name, workspace); err == nil && len(existing) > 0 {
@@ -578,7 +696,7 @@ func persistLearnings(ctx context.Context, store *memory.Store, embedProvider *s
 			"content_hash": digest, // Store hash for future idempotency checks
 		})
 		if err != nil {
-			return count, fmt.Errorf("marshal %s: %w", typ, err)
+			return count, skillerr.WrapRuntime(fmt.Sprintf("marshal %s", typ), err)
 		}
 
 		_, err = store.SaveResult(ctx, memory.SaveOptions{
@@ -590,7 +708,7 @@ func persistLearnings(ctx context.Context, store *memory.Store, embedProvider *s
 			SessionID: sessionID,
 		})
 		if err != nil {
-			return count, fmt.Errorf("save %s: %w", typ, err)
+			return count, skillerr.WrapIO(fmt.Sprintf("save %s", typ), err)
 		}
 
 		// Generate embedding if provider available
@@ -613,18 +731,14 @@ func normalizeLearning(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func shortHash(s string) string {
-	sum := sha256.Sum256([]byte(s))
-	return fmt.Sprintf("%x", sum)[:16]
-}
-
 // filterJSONL reads the raw JSONL and extracts high-signal content.
 // Aggressively filters to reduce 35MB+ session files to a few hundred KB.
 // Handles both plain .jsonl and gzip-compressed .jsonl.gz files.
-func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMessage, error) {
+// Returns the filtered messages and a content hash for deduplication.
+func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMessage, string, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, "", skillerr.WrapIO("open JSONL", err)
 	}
 	defer func() { _ = file.Close() }()
 
@@ -633,7 +747,7 @@ func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMes
 	if strings.HasSuffix(path, ".gz") {
 		gzReader, err := gzip.NewReader(file)
 		if err != nil {
-			return nil, fmt.Errorf("gzip open: %w", err)
+			return nil, "", skillerr.WrapIO("open gzip", err)
 		}
 		defer func() { _ = gzReader.Close() }()
 		reader = gzReader
@@ -649,13 +763,14 @@ func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMes
 
 	estimatedTokens := 0
 	tokensPerChar := 0.25 // Rough estimate: 4 chars per token
+	format := ""
 
 	// Pre-filter patterns for quick rejection
 	const maxLineSize = 50 * 1024 // Skip lines >50KB (likely tool_result or huge tool_use)
 
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, "", skillerr.WrapRuntime("context canceled", err)
 		}
 
 		line := scanner.Bytes()
@@ -670,9 +785,31 @@ func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMes
 			continue
 		}
 
+		lineStr := string(line)
+		if format == "" && detectCodexLine(lineStr) {
+			format = "codex"
+		}
+
+		if format == "codex" {
+			fm := filterCodexLine(line)
+			if fm == nil {
+				continue
+			}
+
+			// Estimate tokens for this message
+			msgTokens := int(float64(len(fm.Content)) * tokensPerChar)
+			if estimatedTokens+msgTokens > maxTokens {
+				// Truncate remaining messages
+				break
+			}
+
+			filtered = append(filtered, *fm)
+			estimatedTokens += msgTokens
+			continue
+		}
+
 		// OPTIMIZATION 2: Quick type check before full JSON parse
 		// Skip known noise types without parsing
-		lineStr := string(line)
 		if strings.Contains(lineStr, `"type":"file-history-snapshot"`) ||
 			strings.Contains(lineStr, `"type":"queue-operation"`) ||
 			strings.Contains(lineStr, `"type":"system"`) {
@@ -707,10 +844,17 @@ func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMes
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan error: %w", err)
+		return nil, "", skillerr.WrapIO("scan JSONL", err)
 	}
 
-	return filtered, nil
+	// Compute content hash for deduplication
+	filteredJSON, err := json.Marshal(filtered)
+	if err != nil {
+		return nil, "", skillerr.WrapRuntime("marshal filtered for hash", err)
+	}
+	contentHash := hashutil.FullHash(string(filteredJSON))
+
+	return filtered, contentHash, nil
 }
 
 // filterMessage extracts high-signal content from a message.
@@ -726,7 +870,7 @@ func filterMessage(msg ClaudeMessage) *FilteredMessage {
 		if err := json.Unmarshal(msg.Message.Content, &content); err == nil && content != "" {
 			return &FilteredMessage{
 				Role:    "user",
-				Content: truncate(content, 1000), // Increased limit for user requests
+				Content: skillout.TruncateSingleLine(content, 1000), // Increased limit for user requests
 			}
 		}
 
@@ -740,7 +884,7 @@ func filterMessage(msg ClaudeMessage) *FilteredMessage {
 		var textParts []string
 		for _, block := range blocks {
 			if block.Type == "text" && block.Text != "" {
-				textParts = append(textParts, truncate(block.Text, 1000))
+				textParts = append(textParts, skillout.TruncateSingleLine(block.Text, 1000))
 			}
 			// Skip tool_result blocks entirely - they contain file contents, command output, etc.
 		}
@@ -771,7 +915,7 @@ func filterMessage(msg ClaudeMessage) *FilteredMessage {
 			switch block.Type {
 			case "text":
 				if block.Text != "" {
-					textParts = append(textParts, truncate(block.Text, 300))
+					textParts = append(textParts, skillout.TruncateSingleLine(block.Text, 300))
 				}
 			case "tool_use":
 				if block.Name != "" {
@@ -812,8 +956,85 @@ func filterMessage(msg ClaudeMessage) *FilteredMessage {
 
 // summarizeWithFallback tries providers in order until one succeeds.
 // Each provider gets filtered content based on its MaxTokens limit.
-func summarizeWithFallback(ctx context.Context, providers []LLMProvider, jsonlPath string, userMaxTokens int) (*SummaryResponse, string, error) {
+func detectCodexLine(line string) bool {
+	return strings.Contains(line, `"type":"event_msg"`) ||
+		strings.Contains(line, `"type":"response_item"`) ||
+		strings.Contains(line, `"type":"session_meta"`) ||
+		strings.Contains(line, `"type":"turn_context"`) ||
+		strings.Contains(line, `"type":"compacted"`)
+}
+
+func filterCodexLine(line []byte) *FilteredMessage {
+	var msg codexjsonl.Message
+	if err := json.Unmarshal(line, &msg); err != nil {
+		return nil
+	}
+
+	switch msg.Type {
+	case "event_msg":
+		var payload codexEventPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			return nil
+		}
+		return filterCodexEvent(payload)
+	case "response_item":
+		var item codexjsonl.ResponseItem
+		if err := json.Unmarshal(msg.Payload, &item); err != nil {
+			return nil
+		}
+		return filterCodexResponseItem(item)
+	default:
+		return nil
+	}
+}
+
+func filterCodexEvent(payload codexEventPayload) *FilteredMessage {
+	text := codexEventText(payload)
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+
+	switch payload.Type {
+	case "user_message":
+		return &FilteredMessage{
+			Role:    "user",
+			Content: skillout.TruncateSingleLine(text, 1000),
+		}
+	case "agent_message":
+		return &FilteredMessage{
+			Role:    "assistant",
+			Content: skillout.TruncateSingleLine(text, 300),
+		}
+	default:
+		return nil
+	}
+}
+
+func codexEventText(payload codexEventPayload) string {
+	if payload.Message != "" {
+		return payload.Message
+	}
+	return payload.Text
+}
+
+func filterCodexResponseItem(item codexjsonl.ResponseItem) *FilteredMessage {
+	switch item.Type {
+	case "function_call", "custom_tool_call":
+		if item.Name == "" {
+			return nil
+		}
+		return &FilteredMessage{
+			Role:      "assistant",
+			ToolsUsed: []string{item.Name},
+		}
+	default:
+		return nil
+	}
+}
+
+func summarizeWithFallback(ctx context.Context, providers []LLMProvider, jsonlPath string, userMaxTokens int) (*SummaryResponse, string, string, *TokenUsage, error) {
 	var lastErr error
+	var contentHash string
 	for _, p := range providers {
 		// Determine max tokens: user override > provider limit > default
 		maxTokens := p.MaxTokens
@@ -825,37 +1046,44 @@ func summarizeWithFallback(ctx context.Context, providers []LLMProvider, jsonlPa
 		}
 
 		// Filter JSONL for this provider's context limit
-		filtered, err := filterJSONL(ctx, jsonlPath, maxTokens)
+		filtered, hash, err := filterJSONL(ctx, jsonlPath, maxTokens)
 		if err != nil {
-			lastErr = fmt.Errorf("%s: filter error: %w", p.Name, err)
+			lastErr = skillerr.Runtimef("%s: filter error: %v", p.Name, err)
 			continue
+		}
+		// Keep the hash from the first successful filter (largest context)
+		if contentHash == "" {
+			contentHash = hash
 		}
 
 		var resp *SummaryResponse
+		var usage *TokenUsage
 		if p.IsCLI {
+			// CLI providers don't report token usage
 			resp, err = summarizeWithCLI(ctx, p, filtered)
 		} else {
-			resp, err = summarizeWithProvider(ctx, p, filtered)
+			resp, usage, err = summarizeWithProvider(ctx, p, filtered)
 		}
 
 		if err == nil {
-			return resp, p.Name, nil
+			return resp, contentHash, p.Name, usage, nil
 		}
-		lastErr = fmt.Errorf("%s: %w", p.Name, err)
+		lastErr = skillerr.Runtimef("%s: %v", p.Name, err)
 		// Continue to next provider on rate limit or server errors
 		if !isRetryableError(err) {
-			return nil, "", lastErr
+			return nil, "", "", nil, lastErr
 		}
 	}
-	return nil, "", lastErr
+	return nil, "", "", nil, lastErr
 }
 
 // summarizeWithCLI calls a local CLI tool (gemini or claude) to generate a summary.
+// CLI providers don't return token usage info.
 func summarizeWithCLI(ctx context.Context, provider LLMProvider, filtered []FilteredMessage) (*SummaryResponse, error) {
 	// Build the conversation content (compact JSON)
 	filteredJSON, err := json.Marshal(filtered)
 	if err != nil {
-		return nil, fmt.Errorf("marshal filtered: %w", err)
+		return nil, skillerr.WrapRuntime("marshal filtered", err)
 	}
 
 	prompt := buildSummarizationPrompt(string(filteredJSON))
@@ -864,27 +1092,27 @@ func summarizeWithCLI(ctx context.Context, provider LLMProvider, filtered []Filt
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	var cmd *exec.Cmd
+	var cmdName string
+	var args []string
 	switch provider.Name {
 	case "gemini-cli":
 		// gemini -m <model> -p "<prompt>"
-		cmd = exec.CommandContext(ctx, "gemini", "-m", provider.Model, "-p", prompt)
+		cmdName = "gemini"
+		args = []string{"-m", provider.Model, "-p", prompt}
 	case "claude-cli":
 		// claude -p "<prompt>" --model <model> --output-format text
-		cmd = exec.CommandContext(ctx, "claude", "-p", prompt, "--model", provider.Model, "--output-format", "text")
+		cmdName = "claude"
+		args = []string{"-p", prompt, "--model", provider.Model, "--output-format", "text"}
 	default:
-		return nil, fmt.Errorf("unknown CLI provider: %s", provider.Name)
+		return nil, skillerr.Runtimef("unknown CLI provider: %s", provider.Name)
 	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("CLI error: %w (stderr: %s)", err, stderr.String())
+	result := executil.Run(ctx, "", cmdName, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("CLI error: %v (stderr: %s)", result.Err, string(result.Stderr))
 	}
 
-	return parseSummaryResponse(stdout.String())
+	return parseSummaryResponse(string(result.Stdout))
 }
 
 // isRetryableError returns true if we should try the next provider.
@@ -900,11 +1128,12 @@ func isRetryableError(err error) bool {
 }
 
 // summarizeWithProvider calls an OpenAI-compatible API to generate a summary.
-func summarizeWithProvider(ctx context.Context, provider LLMProvider, filtered []FilteredMessage) (*SummaryResponse, error) {
+// Returns the parsed summary, token usage from the API, and any error.
+func summarizeWithProvider(ctx context.Context, provider LLMProvider, filtered []FilteredMessage) (*SummaryResponse, *TokenUsage, error) {
 	// Build the conversation content (compact JSON to save tokens)
 	filteredJSON, err := json.Marshal(filtered)
 	if err != nil {
-		return nil, fmt.Errorf("marshal filtered: %w", err)
+		return nil, nil, skillerr.WrapRuntime("marshal filtered", err)
 	}
 
 	prompt := buildSummarizationPrompt(string(filteredJSON))
@@ -919,7 +1148,7 @@ func summarizeWithProvider(ctx context.Context, provider LLMProvider, filtered [
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, nil, skillerr.WrapRuntime("marshal request", err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
@@ -927,7 +1156,7 @@ func summarizeWithProvider(ctx context.Context, provider LLMProvider, filtered [
 
 	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, nil, skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -942,13 +1171,13 @@ func summarizeWithProvider(ctx context.Context, provider LLMProvider, filtered [
 	client := &http.Client{Timeout: 90 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, nil, skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return nil, nil, skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -957,18 +1186,34 @@ func summarizeWithProvider(ctx context.Context, provider LLMProvider, filtered [
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, nil, skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("empty response from %s", provider.Name)
+		return nil, nil, skillerr.Runtimef("empty response from %s", provider.Name)
+	}
+
+	// Extract token usage
+	usage := &TokenUsage{
+		InputTokens:  result.Usage.PromptTokens,
+		OutputTokens: result.Usage.CompletionTokens,
+		TotalTokens:  result.Usage.TotalTokens,
 	}
 
 	// Parse the JSON response
-	return parseSummaryResponse(result.Choices[0].Message.Content)
+	summaryResp, err := parseSummaryResponse(result.Choices[0].Message.Content)
+	if err != nil {
+		return nil, usage, err // Return usage even on parse error for cost tracking
+	}
+	return summaryResp, usage, nil
 }
 
 func buildSummarizationPrompt(filteredJSON string) string {
@@ -1036,7 +1281,7 @@ func parseSummaryResponse(response string) (*SummaryResponse, error) {
 	start := strings.Index(response, "{")
 	end := strings.LastIndex(response, "}")
 	if start == -1 || end == -1 || start >= end {
-		return nil, fmt.Errorf("no JSON object found in response")
+		return nil, skillerr.Parse("no JSON object found in response")
 	}
 	response = response[start : end+1]
 
@@ -1045,7 +1290,7 @@ func parseSummaryResponse(response string) (*SummaryResponse, error) {
 
 	var summary SummaryResponse
 	if err := json.Unmarshal([]byte(response), &summary); err != nil {
-		return nil, fmt.Errorf("parse summary JSON: %w (response: %s)", err, truncate(response, 200))
+		return nil, skillerr.Parsef("parse summary JSON: %v (response: %s)", err, skillout.TruncateSingleLine(response, 200))
 	}
 
 	return &summary, nil
@@ -1172,30 +1417,12 @@ func removeTrailingCommas(s string) string {
 	return result.String()
 }
 
-// ensureSlice returns an empty slice if s is nil, otherwise returns s.
-// This ensures proper JSON serialization ([] instead of null).
-func ensureSlice(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
-}
-
-func truncate(s string, maxLen int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}
-
 type scoredSeedWindow struct {
 	Window     sessions.ContextWindow
 	Similarity float64
 }
 
-func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, summary *SummaryResponse, in Input) (string, error) {
+func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, summary *SummaryResponse, in Input, cfg config.Config) (string, error) {
 	maxChars := in.SeedMaxChars
 	if maxChars <= 0 {
 		maxChars = 12000
@@ -1207,7 +1434,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 
 	windows, err := sessionStore.GetContextWindows(ctx, session.ID)
 	if err != nil {
-		return "", fmt.Errorf("get context windows: %w", err)
+		return "", skillerr.WrapIO("get context windows", err)
 	}
 
 	var latest *sessions.ContextWindow
@@ -1217,7 +1444,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 
 	var queryEmbedding []float32
 	if query != "" {
-		if emb, _, err := embedSeedQuery(ctx, query); err == nil {
+		if emb, _, err := embedSeedQuery(ctx, query, cfg); err == nil {
 			queryEmbedding = emb
 		}
 	}
@@ -1282,7 +1509,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 				break
 			}
 			if window.Summary != "" {
-				if !appendLine(truncate(window.Summary, 800)) {
+				if !appendLine(skillout.TruncateSingleLine(window.Summary, 800)) {
 					break
 				}
 			}
@@ -1297,7 +1524,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 				if err != nil {
 					continue
 				}
-				line := fmt.Sprintf("- [%s #%d] %s", chunk.ChunkType, chunk.ChunkIndex, truncate(chunk.ContentPreview, 240))
+				line := fmt.Sprintf("- [%s #%d] %s", chunk.ChunkType, chunk.ChunkIndex, skillout.TruncateSingleLine(chunk.ContentPreview, 240))
 				if !appendLine(line) {
 					break
 				}
@@ -1308,7 +1535,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 
 	// Fallback: if we couldn't include any windows/chunks, include recent filtered messages.
 	if len(selected) == 0 && session.RawJSONLPath != "" {
-		filtered, err := filterJSONL(ctx, session.RawJSONLPath, 800)
+		filtered, _, err := filterJSONL(ctx, session.RawJSONLPath, 800)
 		if err == nil && len(filtered) > 0 {
 			appendLine("### Recent Messages")
 			start := 0
@@ -1320,7 +1547,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 				if role == "" {
 					role = "msg"
 				}
-				text := truncate(fm.Content, 240)
+				text := skillout.TruncateSingleLine(fm.Content, 240)
 				if !appendLine(fmt.Sprintf("- [%s] %s", role, text)) {
 					break
 				}
@@ -1330,7 +1557,7 @@ func buildSeedPrompt(ctx context.Context, sessionStore *sessions.Store, session 
 
 	out := strings.TrimSpace(b.String())
 	if out == "" {
-		return "", fmt.Errorf("seed prompt empty")
+		return "", skillerr.Validation("seed prompt empty")
 	}
 	return out, nil
 }
@@ -1356,13 +1583,17 @@ func buildSeedQuery(session sessions.Session, summary *SummaryResponse) string {
 	return strings.Join(parts, "\n")
 }
 
-func embedSeedQuery(ctx context.Context, text string) ([]float32, string, error) {
+func embedSeedQuery(ctx context.Context, text string, cfg config.Config) ([]float32, string, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, "", nil
 	}
 
 	// Use Embedder with Gemini fallback for query embedding
-	embedder, err := semantic.NewEmbedder(semantic.ScopeSessions, semantic.WithAllowFallback(true))
+	embedder, err := semantic.NewEmbedderFromConfig(
+		semantic.ScopeSessions,
+		cfg,
+		semantic.WithAllowFallback(true),
+	)
 	if err != nil {
 		return nil, "", nil
 	}
@@ -1449,13 +1680,13 @@ func sampleChunkIndices(start, end, max int) []int {
 // reembedAll re-embeds sessions and context windows that have wrong embedding model/dimensions.
 // This is a no-LLM operation - it only calls the embedding API using existing summaries.
 // Skips items that already have correct embeddings (voyage-3.5, 1024 dims = 4096 bytes).
-func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input) Output {
+func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input, cfg config.Config) Output {
 	output := Output{
 		Status: "reembed_complete",
 	}
 
 	// Create embedder for sessions scope
-	embedder, err := semantic.NewEmbedder(semantic.ScopeSessions)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSessions, cfg)
 	if err != nil {
 		output.Status = "error"
 		output.Message = fmt.Sprintf("no embedding provider: %v", err)
@@ -1539,8 +1770,9 @@ func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input) 
 				continue
 			}
 
-			// Generate new embedding
-			result, err := embedder.Embed(ctx, win.Summary)
+			// Generate new embedding with date prefix
+			windowText := buildWindowEmbeddingTextFromWindow(win)
+			result, err := embedder.Embed(ctx, windowText)
 			if err != nil {
 				log.Printf("warning: failed to embed window %s: %v", win.ID, err)
 				continue
@@ -1564,8 +1796,15 @@ func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input) 
 }
 
 // buildEmbeddingTextFromSession creates embedding text from an existing session's fields.
+// Format: [Jan 2, 2026] [activity] Summary\nAccomplished: ...\nFiles: ...\nTopics: ...
 func buildEmbeddingTextFromSession(sess sessions.Session) string {
 	var parts []string
+
+	// Date and activity type prefix
+	dateStr := sess.StartedAt.Format("Jan 2, 2006")
+	activity := inferActivityType(sess.Tags)
+	parts = append(parts, fmt.Sprintf("[%s] [%s]", dateStr, activity))
+
 	if s := strings.TrimSpace(sess.Summary); s != "" {
 		parts = append(parts, s)
 	}
@@ -1578,15 +1817,282 @@ func buildEmbeddingTextFromSession(sess sessions.Session) string {
 	if len(sess.Gotchas) > 0 {
 		parts = append(parts, "Gotchas: "+strings.Join(sess.Gotchas, "; "))
 	}
+	if len(sess.KeyFiles) > 0 {
+		parts = append(parts, "Files: "+strings.Join(sess.KeyFiles, ", "))
+	}
+	if len(sess.Tags) > 0 {
+		parts = append(parts, "Topics: "+strings.Join(sess.Tags, ", "))
+	}
 	return strings.Join(parts, "\n")
+}
+
+// buildWindowEmbeddingTextFromWindow creates embedding text for a context window.
+// Format: [Jan 2, 2026 15:04] [auto] Summary text
+func buildWindowEmbeddingTextFromWindow(win sessions.ContextWindow) string {
+	dateStr := win.StartedAt.Format("Jan 2, 2006 15:04")
+	trigger := win.Trigger
+	if trigger == "" {
+		trigger = "context"
+	}
+	return fmt.Sprintf("[%s] [%s] %s", dateStr, trigger, win.Summary)
+}
+
+// inferActivityType extracts activity type from session tags.
+func inferActivityType(tags []string) string {
+	for _, tag := range tags {
+		lower := strings.ToLower(tag)
+		switch {
+		case strings.Contains(lower, "debug"):
+			return "debugging"
+		case strings.Contains(lower, "fix") || strings.Contains(lower, "bug"):
+			return "bug-fix"
+		case strings.Contains(lower, "feature") || strings.Contains(lower, "implement"):
+			return "feature"
+		case strings.Contains(lower, "refactor"):
+			return "refactoring"
+		case strings.Contains(lower, "test"):
+			return "testing"
+		case strings.Contains(lower, "doc"):
+			return "documentation"
+		case strings.Contains(lower, "review"):
+			return "code-review"
+		case strings.Contains(lower, "setup") || strings.Contains(lower, "config"):
+			return "setup"
+		}
+	}
+	return "development"
+}
+
+// summarizeWindowsQueued processes window summaries via the queue.
+func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input, cfg config.Config) Output {
+	output := Output{
+		SessionID: session.ID,
+		Status:    "windows_queued",
+	}
+
+	windows, err := sessionStore.GetContextWindows(ctx, session.ID)
+	if err != nil {
+		output.Status = "error"
+		output.Message = fmt.Sprintf("failed to get windows: %v", err)
+		return output
+	}
+
+	if len(windows) == 0 {
+		output.Status = "no_windows"
+		output.Message = "no context windows found for session"
+		return output
+	}
+
+	tasks, alreadyDone, skippedWindows := buildWindowTasks(windows, input.Force)
+
+	queueStore, err := queue.OpenInRoot(ctx, cfg.Storage.Root, summaryQueueDBName, queue.Options{Table: summaryQueueTable})
+	if err != nil {
+		output.Status = "error"
+		output.Message = fmt.Sprintf("open summary queue: %v", err)
+		return output
+	}
+	defer queueStore.Close()
+
+	enqueueResult, err := enqueueWindowTasks(ctx, queueStore, session.ID, tasks, input.Force)
+	if err != nil {
+		output.Status = "error"
+		output.Message = fmt.Sprintf("enqueue windows: %v", err)
+		return output
+	}
+	output.WindowsQueued = enqueueResult.Queued
+
+	totalSkipped := alreadyDone + skippedWindows + enqueueResult.Skipped
+
+	if input.QueueOnly {
+		remaining := queueRemaining(ctx, queueStore, session.ID)
+		output.WindowsSkipped = totalSkipped
+		output.WindowsRemaining = remaining
+		if remaining > 0 {
+			output.Message = fmt.Sprintf("Queued %d windows (%d skipped), %d remaining in queue for session %s",
+				output.WindowsQueued, totalSkipped, remaining, session.ID)
+		} else {
+			output.Message = fmt.Sprintf("Queued %d windows (%d skipped) for session %s",
+				output.WindowsQueued, totalSkipped, session.ID)
+		}
+		return output
+	}
+
+	batchSize := input.BatchSize
+	if batchSize <= 0 {
+		batchSize = 5
+	}
+
+	chunkProviders := chunkSummaryProviders(providers)
+	embedder, embedderErr := semantic.NewEmbedderFromConfig(
+		semantic.ScopeSessions,
+		cfg,
+		semantic.WithAllowFallback(true),
+	)
+
+	totalSummarized := 0
+	totalEmbedded := 0
+	batchCount := 0
+
+	for {
+		var batchTasks []windowTask
+		var batchTasksForced []windowTask
+		var jobIDs []string
+		var jobIDsForced []string
+		batchSkipped := 0
+
+		for len(batchTasks)+len(batchTasksForced) < batchSize {
+			job, err := queueStore.ClaimNext(ctx, queue.ClaimOptions{GroupID: session.ID})
+			if err != nil {
+				output.Status = "error"
+				output.Message = fmt.Sprintf("claim queue job: %v", err)
+				return output
+			}
+			if job == nil {
+				break
+			}
+
+			payload, err := decodeWindowQueuePayload(job.Payload)
+			if err != nil {
+				log.Printf("[WARN] session_summarize: invalid queue payload: %v", err)
+				_ = queueStore.Fail(ctx, job.ID, fmt.Sprintf("decode payload: %v", err))
+				continue
+			}
+			if payload.SessionID != "" && payload.SessionID != session.ID {
+				log.Printf("[WARN] session_summarize: queue payload session mismatch: %s", payload.SessionID)
+				_ = queueStore.Fail(ctx, job.ID, "session mismatch")
+				continue
+			}
+
+			window, err := sessionStore.GetContextWindow(ctx, session.ID, payload.WindowIndex)
+			if err != nil {
+				log.Printf("[WARN] session_summarize: missing window %d: %v", payload.WindowIndex, err)
+				_ = queueStore.Fail(ctx, job.ID, fmt.Sprintf("get window %d: %v", payload.WindowIndex, err))
+				continue
+			}
+
+			effectiveForce := input.Force || payload.Force
+			task, ok := buildWindowTaskFromWindow(window, effectiveForce)
+			if !ok {
+				batchSkipped++
+				_ = queueStore.Complete(ctx, job.ID)
+				continue
+			}
+
+			if effectiveForce {
+				batchTasksForced = append(batchTasksForced, task)
+				jobIDsForced = append(jobIDsForced, job.ID)
+			} else {
+				batchTasks = append(batchTasks, task)
+				jobIDs = append(jobIDs, job.ID)
+			}
+		}
+
+		if len(batchTasks) == 0 && len(batchTasksForced) == 0 {
+			remaining := queueRemaining(ctx, queueStore, session.ID)
+			output.WindowsSummarized = totalSummarized
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsSkipped = totalSkipped + batchSkipped
+			output.WindowsRemaining = remaining
+
+			if remaining == 0 {
+				output.Status = "windows_summarized"
+				output.Message = fmt.Sprintf("Summarized %d windows (%d embedded, %d skipped) for session %s",
+					totalSummarized, totalEmbedded, output.WindowsSkipped, session.ID)
+				return output
+			}
+			if !input.ProcessAll {
+				output.Status = "windows_partial"
+				output.Message = fmt.Sprintf("Processed %d windows (%d embedded), %d remaining in queue for session %s",
+					totalSummarized, totalEmbedded, remaining, session.ID)
+				return output
+			}
+
+			output.Status = "windows_partial"
+			output.Message = fmt.Sprintf("No eligible jobs to claim; %d remaining in queue for session %s",
+				remaining, session.ID)
+			return output
+		}
+
+		if len(batchTasks) > 0 {
+			batchSummarized, batchEmbedded, batchSkippedBatch := processBatch(ctx, sessionStore, session.ID, batchTasks, providers, chunkProviders, embedder, embedderErr, false)
+			totalSummarized += batchSummarized
+			totalEmbedded += batchEmbedded
+			totalSkipped += batchSkippedBatch
+			batchCount++
+			for _, jobID := range jobIDs {
+				if err := queueStore.Complete(ctx, jobID); err != nil {
+					log.Printf("[WARN] session_summarize: failed to complete queue job %s: %v", jobID, err)
+				}
+			}
+		}
+
+		if len(batchTasksForced) > 0 {
+			batchSummarized, batchEmbedded, batchSkippedBatch := processBatch(ctx, sessionStore, session.ID, batchTasksForced, providers, chunkProviders, embedder, embedderErr, true)
+			totalSummarized += batchSummarized
+			totalEmbedded += batchEmbedded
+			totalSkipped += batchSkippedBatch
+			batchCount++
+			for _, jobID := range jobIDsForced {
+				if err := queueStore.Complete(ctx, jobID); err != nil {
+					log.Printf("[WARN] session_summarize: failed to complete queue job %s: %v", jobID, err)
+				}
+			}
+		}
+
+		totalSkipped += batchSkipped
+
+		remaining := queueRemaining(ctx, queueStore, session.ID)
+		if !input.ProcessAll {
+			output.WindowsSummarized = totalSummarized
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsSkipped = totalSkipped
+			output.WindowsRemaining = remaining
+			if remaining > 0 {
+				output.Status = "windows_partial"
+				output.Message = fmt.Sprintf("Processed %d windows (%d embedded), %d remaining in queue for session %s",
+					totalSummarized, totalEmbedded, remaining, session.ID)
+			} else {
+				output.Status = "windows_summarized"
+				output.Message = fmt.Sprintf("Summarized %d windows (%d embedded, %d skipped) for session %s",
+					totalSummarized, totalEmbedded, totalSkipped, session.ID)
+			}
+			return output
+		}
+
+		if remaining == 0 {
+			output.WindowsSummarized = totalSummarized
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsSkipped = totalSkipped
+			output.WindowsRemaining = 0
+			output.Status = "windows_summarized"
+			output.Message = fmt.Sprintf("Summarized %d windows (%d embedded, %d skipped) in %d batches for session %s",
+				totalSummarized, totalEmbedded, totalSkipped, batchCount, session.ID)
+			return output
+		}
+
+		if ctx.Err() != nil {
+			output.Status = "interrupted"
+			output.WindowsSummarized = totalSummarized
+			output.WindowsReembedded = totalEmbedded
+			output.WindowsSkipped = totalSkipped
+			output.WindowsRemaining = remaining
+			output.Message = fmt.Sprintf("Interrupted after %d batches (%d windows), %d remaining",
+				batchCount, totalSummarized, remaining)
+			return output
+		}
+	}
 }
 
 // summarizeWindows generates LLM-based summaries for context windows with batch processing.
 // When process_all=true, loops until all windows are done. Otherwise returns after one batch.
-func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input) Output {
+func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session sessions.Session, providers []LLMProvider, input Input, cfg config.Config) Output {
 	output := Output{
 		SessionID: session.ID,
 		Status:    "windows_summarized",
+	}
+
+	if input.Queue {
+		return summarizeWindowsQueued(ctx, sessionStore, session, providers, input, cfg)
 	}
 
 	// Default batch size: 5 windows per batch
@@ -1595,8 +2101,14 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 		batchSize = 5
 	}
 
+	chunkProviders := chunkSummaryProviders(providers)
+
 	// Create embedder once for reuse across all batches
-	embedder, embedderErr := semantic.NewEmbedder(semantic.ScopeSessions, semantic.WithAllowFallback(true))
+	embedder, embedderErr := semantic.NewEmbedderFromConfig(
+		semantic.ScopeSessions,
+		cfg,
+		semantic.WithAllowFallback(true),
+	)
 
 	// Totals across all batches
 	totalSummarized := 0
@@ -1621,19 +2133,11 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 			return output
 		}
 
-		// Filter windows that need summarization
-		var needsSummarization []sessions.ContextWindow
-		alreadyDone := 0
-		for _, window := range windows {
-			if !input.Force && strings.TrimSpace(window.Summary) != "" && len(window.Summary) < 2000 {
-				alreadyDone++
-				continue
-			}
-			needsSummarization = append(needsSummarization, window)
-		}
+		// Build work list (summarize or embed-only)
+		tasks, alreadyDone, skippedWindows := buildWindowTasks(windows, input.Force)
 
 		// Nothing left to process
-		if len(needsSummarization) == 0 {
+		if len(tasks) == 0 {
 			output.WindowsSummarized = totalSummarized
 			output.WindowsSkipped = alreadyDone + totalSkipped
 			output.WindowsReembedded = totalEmbedded
@@ -1644,18 +2148,18 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 		}
 
 		// Apply batch limit
-		batch := needsSummarization
+		batch := tasks
 		remaining := 0
 		if len(batch) > batchSize {
 			batch = batch[:batchSize]
-			remaining = len(needsSummarization) - batchSize
+			remaining = len(tasks) - batchSize
 		}
 
 		// Process this batch
-		batchSummarized, batchEmbedded, batchSkipped := processBatch(ctx, sessionStore, session.ID, batch, providers, embedder, embedderErr)
+		batchSummarized, batchEmbedded, batchSkipped := processBatch(ctx, sessionStore, session.ID, batch, providers, chunkProviders, embedder, embedderErr, input.Force)
 		totalSummarized += batchSummarized
 		totalEmbedded += batchEmbedded
-		totalSkipped += batchSkipped
+		totalSkipped += batchSkipped + skippedWindows
 		batchCount++
 
 		// If not process_all mode, return after one batch
@@ -1702,54 +2206,971 @@ func summarizeWindows(ctx context.Context, sessionStore *sessions.Store, session
 }
 
 // processBatch summarizes a batch of windows, returning counts.
-func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID string, batch []sessions.ContextWindow, providers []LLMProvider, embedder *semantic.Embedder, embedderErr error) (summarized, embedded, skipped int) {
-	for _, window := range batch {
+const (
+	windowSummaryHintMaxChars  = 1200
+	windowContentTokensReserve = 1200
+	windowContentTokensMin     = 1500
+	windowContentTokensMax     = 8000
+	windowContentHeadChunks    = 4
+	windowContentTailChunks    = 4
+
+	windowChunkSummaryTokensReserve = 800
+	windowChunkSummaryTokensMin     = 2400
+	windowChunkSummaryTokensMax     = 8000
+
+	windowSummaryMaxTokens         = 500
+	windowChunkTokensMax           = 1800
+	windowChunkSummaryMaxTokens    = 300
+	windowChunkSummaryLineMaxChars = 600
+	windowChunkSummariesMaxChars   = 6000
+	windowChunkIndicesDisplayMax   = 12
+	windowChunkEmbeddingMaxChars   = 6000
+
+	chunkSummaryModelEnv      = "CEREBRAS_CHUNK_MODEL"
+	chunkSummaryDefaultModel  = "zai-glm-4.7"
+	windowSummaryModelEnv     = "CEREBRAS_MODEL"
+	windowSummaryDefaultModel = "zai-glm-4.7"
+)
+
+type windowTask struct {
+	Window    sessions.ContextWindow
+	Summarize bool
+}
+
+type windowQueuePayload struct {
+	SessionID   string `json:"session_id"`
+	WindowIndex int    `json:"window_index"`
+	Force       bool   `json:"force,omitempty"`
+}
+
+func buildWindowTaskFromWindow(window sessions.ContextWindow, force bool) (windowTask, bool) {
+	if shouldSkipWindow(window) {
+		return windowTask{}, false
+	}
+	summary := strings.TrimSpace(window.Summary)
+	if isPlaceholderSummary(summary) {
+		summary = ""
+	}
+	if force || summary == "" {
+		return windowTask{Window: window, Summarize: true}, true
+	}
+	if len(window.Embedding) == 0 {
+		return windowTask{Window: window, Summarize: false}, true
+	}
+	return windowTask{}, false
+}
+
+func enqueueWindowTasks(ctx context.Context, store *queue.Store, sessionID string, tasks []windowTask, force bool) (*queue.EnqueueResult, error) {
+	if len(tasks) == 0 {
+		return &queue.EnqueueResult{}, nil
+	}
+	requests := make([]queue.EnqueueRequest, 0, len(tasks))
+	for _, task := range tasks {
+		payload, err := json.Marshal(windowQueuePayload{
+			SessionID:   sessionID,
+			WindowIndex: task.Window.WindowIndex,
+			Force:       force,
+		})
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, queue.EnqueueRequest{
+			GroupID:   sessionID,
+			Payload:   payload,
+			DedupeKey: windowQueueDedupeKey(task.Window.WindowIndex, force),
+			Priority:  queue.PriorityNormal,
+		})
+	}
+	return store.EnqueueBatch(ctx, requests)
+}
+
+func windowQueueDedupeKey(windowIndex int, force bool) string {
+	if force {
+		return fmt.Sprintf("window:%d:force", windowIndex)
+	}
+	return fmt.Sprintf("window:%d", windowIndex)
+}
+
+func decodeWindowQueuePayload(payload []byte) (windowQueuePayload, error) {
+	var decoded windowQueuePayload
+	if len(payload) == 0 {
+		return decoded, fmt.Errorf("empty payload")
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return decoded, err
+	}
+	if decoded.WindowIndex < 0 {
+		return decoded, fmt.Errorf("invalid window_index: %d", decoded.WindowIndex)
+	}
+	return decoded, nil
+}
+
+func queueRemaining(ctx context.Context, store *queue.Store, sessionID string) int {
+	stats, err := store.Stats(ctx, sessionID)
+	if err != nil || stats == nil {
+		return 0
+	}
+	return stats.QueuedCount + stats.RunningCount
+}
+
+func buildWindowTasks(windows []sessions.ContextWindow, force bool) (tasks []windowTask, alreadyDone int, skipped int) {
+	for _, window := range windows {
+		if shouldSkipWindow(window) {
+			skipped++
+			continue
+		}
+		summary := strings.TrimSpace(window.Summary)
+		if isPlaceholderSummary(summary) {
+			summary = ""
+		}
+		if force || summary == "" {
+			tasks = append(tasks, windowTask{Window: window, Summarize: true})
+			continue
+		}
+		if len(window.Embedding) == 0 {
+			tasks = append(tasks, windowTask{Window: window, Summarize: false})
+			continue
+		}
+		alreadyDone++
+	}
+	return
+}
+
+type windowChunkCandidate struct {
+	Chunk    sessions.SessionChunk
+	Preview  string
+	Tokens   int
+	HasTools bool
+	HasFiles bool
+	IsError  bool
+}
+
+type windowSummaryMeta struct {
+	WindowIndex int
+	Trigger     string
+	Tools       []string
+	Files       []string
+	Errors      []string
+}
+
+type windowChunkSummaryMeta struct {
+	WindowIndex  int
+	Trigger      string
+	ChunkIndices []int
+	Tools        []string
+	Files        []string
+	Errors       []string
+}
+
+type windowChunkGroup struct {
+	Candidates []windowChunkCandidate
+	Meta       windowChunkSummaryMeta
+	Content    string
+}
+
+type windowChunkSummary struct {
+	Meta       windowChunkSummaryMeta
+	Summary    string
+	Model      string
+	Candidates []windowChunkCandidate
+}
+
+var placeholderSummaryValues = map[string]struct{}{
+	"none":                {},
+	"n/a":                 {},
+	"na":                  {},
+	"no details":          {},
+	"no specific content": {},
+	"no information":      {},
+	"no content":          {},
+	"not provided":        {},
+	"not mentioned":       {},
+	"unknown":             {},
+}
+
+func isPlaceholderSummary(summary string) bool {
+	trimmed := strings.TrimSpace(summary)
+	if trimmed == "" {
+		return true
+	}
+	lines := strings.Split(trimmed, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		value := line
+		if idx := strings.Index(line, ":"); idx != -1 {
+			value = strings.TrimSpace(line[idx+1:])
+		}
+		value = strings.ToLower(strings.Trim(value, " \t-()[].{}"))
+		if value == "" {
+			continue
+		}
+		if _, ok := placeholderSummaryValues[value]; ok {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func shouldSkipWindow(window sessions.ContextWindow) bool {
+	trigger := strings.ToLower(strings.TrimSpace(window.Trigger))
+	if trigger == "" {
+		return false
+	}
+	if trigger == "auto" || trigger == "manual" {
+		if window.MessageCount <= 4 || window.ChunkStart == window.ChunkEnd {
+			return true
+		}
+	}
+	return false
+}
+
+func windowContentBudget(providers []LLMProvider) int {
+	minTokens := 0
+	for _, p := range providers {
+		if p.MaxTokens <= 0 {
+			continue
+		}
+		if minTokens == 0 || p.MaxTokens < minTokens {
+			minTokens = p.MaxTokens
+		}
+	}
+	if minTokens == 0 {
+		minTokens = windowContentTokensMax
+	}
+	budget := minTokens - windowContentTokensReserve
+	if budget < windowContentTokensMin {
+		budget = windowContentTokensMin
+	}
+	if budget > windowContentTokensMax {
+		budget = windowContentTokensMax
+	}
+	return budget
+}
+
+func windowChunkSummaryBudget(providers []LLMProvider) int {
+	minTokens := 0
+	for _, p := range providers {
+		if p.MaxTokens <= 0 {
+			continue
+		}
+		if minTokens == 0 || p.MaxTokens < minTokens {
+			minTokens = p.MaxTokens
+		}
+	}
+	if minTokens == 0 {
+		minTokens = windowChunkSummaryTokensMax
+	}
+	budget := minTokens - windowChunkSummaryTokensReserve
+	if budget < windowChunkSummaryTokensMin {
+		budget = windowChunkSummaryTokensMin
+	}
+	if budget > windowChunkSummaryTokensMax {
+		budget = windowChunkSummaryTokensMax
+	}
+	return budget
+}
+
+func selectWindowChunks(candidates []windowChunkCandidate, maxTokens int) []windowChunkCandidate {
+	if len(candidates) == 0 || maxTokens <= 0 {
+		return nil
+	}
+	selected := make(map[int]windowChunkCandidate, len(candidates))
+	tokensUsed := 0
+	add := func(candidate windowChunkCandidate) bool {
+		if candidate.Tokens <= 0 || candidate.Preview == "" {
+			return true
+		}
+		index := candidate.Chunk.ChunkIndex
+		if _, ok := selected[index]; ok {
+			return true
+		}
+		if tokensUsed+candidate.Tokens > maxTokens {
+			return false
+		}
+		selected[index] = candidate
+		tokensUsed += candidate.Tokens
+		return true
+	}
+
+	for _, candidate := range candidates {
+		if candidate.IsError {
+			if !add(candidate) {
+				break
+			}
+		}
+	}
+
+	for _, candidate := range candidates {
+		if candidate.IsError || (!candidate.HasFiles && !candidate.HasTools) {
+			continue
+		}
+		if !add(candidate) {
+			break
+		}
+	}
+
+	head := windowContentHeadChunks
+	if head > len(candidates) {
+		head = len(candidates)
+	}
+	for i := 0; i < head; i++ {
+		if !add(candidates[i]) {
+			break
+		}
+	}
+
+	tail := windowContentTailChunks
+	if tail > len(candidates) {
+		tail = len(candidates)
+	}
+	for i := len(candidates) - tail; i < len(candidates); i++ {
+		if i < 0 {
+			continue
+		}
+		if !add(candidates[i]) {
+			break
+		}
+	}
+
+	i := 0
+	j := len(candidates) - 1
+	for tokensUsed < maxTokens && i <= j {
+		if !add(candidates[i]) {
+			break
+		}
+		i++
+		if i > j {
+			break
+		}
+		if !add(candidates[j]) {
+			break
+		}
+		j--
+	}
+
+	out := make([]windowChunkCandidate, 0, len(selected))
+	for _, candidate := range candidates {
+		if _, ok := selected[candidate.Chunk.ChunkIndex]; ok {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func chunkSummaryProviders(providers []LLMProvider) []LLMProvider {
+	if len(providers) == 0 {
+		return nil
+	}
+	model := strings.TrimSpace(os.Getenv(chunkSummaryModelEnv))
+	if model == "" {
+		model = chunkSummaryDefaultModel
+	}
+	out := make([]LLMProvider, 0, len(providers))
+	for _, p := range providers {
+		if p.Name == "cerebras" {
+			p.Model = model
+			out = append(out, p)
+		}
+	}
+	for _, p := range providers {
+		if p.Name != "cerebras" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return providers
+	}
+	return out
+}
+
+func windowSummaryProviders(providers []LLMProvider) []LLMProvider {
+	if len(providers) == 0 {
+		return nil
+	}
+	preferred := strings.TrimSpace(os.Getenv(windowSummaryModelEnv))
+	if preferred == "" {
+		preferred = windowSummaryDefaultModel
+	}
+	preferred = strings.TrimPrefix(preferred, "openrouter:")
+	if preferred == "" {
+		return providers
+	}
+	preferred = strings.ToLower(preferred)
+
+	var prioritized []LLMProvider
+	var rest []LLMProvider
+	for _, p := range providers {
+		if strings.Contains(strings.ToLower(p.Model), preferred) {
+			prioritized = append(prioritized, p)
+		} else {
+			rest = append(rest, p)
+		}
+	}
+	if len(prioritized) == 0 {
+		return providers
+	}
+	return append(prioritized, rest...)
+}
+
+func buildWindowChunkGroups(windowIndex int, trigger string, candidates []windowChunkCandidate, maxTokens int) []windowChunkGroup {
+	if len(candidates) == 0 {
+		return nil
+	}
+	if maxTokens <= 0 {
+		maxTokens = windowChunkTokensMax
+	}
+	var groups []windowChunkGroup
+	var current []windowChunkCandidate
+	tokens := 0
+
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		groups = append(groups, windowChunkGroup{
+			Candidates: current,
+			Meta:       buildWindowChunkSummaryMeta(windowIndex, trigger, current),
+			Content:    buildWindowChunkContent(current),
+		})
+		current = nil
+		tokens = 0
+	}
+
+	for _, candidate := range candidates {
+		if candidate.Preview == "" {
+			continue
+		}
+		tokenCount := candidate.Tokens
+		if tokenCount <= 0 {
+			tokenCount = 1
+		}
+		if tokens+tokenCount > maxTokens && len(current) > 0 {
+			flush()
+		}
+		current = append(current, candidate)
+		tokens += tokenCount
+	}
+	flush()
+	return groups
+}
+
+func buildWindowChunkSummaryMeta(windowIndex int, trigger string, candidates []windowChunkCandidate) windowChunkSummaryMeta {
+	var indices []int
+	toolsSeen := make(map[string]struct{})
+	filesSeen := make(map[string]struct{})
+	var errorSnippets []string
+
+	for _, candidate := range candidates {
+		indices = append(indices, candidate.Chunk.ChunkIndex)
+		for _, tool := range candidate.Chunk.ToolsUsed {
+			if tool != "" {
+				toolsSeen[tool] = struct{}{}
+			}
+		}
+		for _, file := range candidate.Chunk.FilesTouched {
+			if file != "" {
+				filesSeen[file] = struct{}{}
+			}
+		}
+		if candidate.IsError {
+			snippet := skillout.TruncateSingleLine(strings.TrimSpace(candidate.Preview), 200)
+			if snippet != "" {
+				errorSnippets = append(errorSnippets, snippet)
+			}
+		}
+	}
+
+	return windowChunkSummaryMeta{
+		WindowIndex:  windowIndex,
+		Trigger:      trigger,
+		ChunkIndices: sortedUniqueInts(indices),
+		Tools:        sortedSet(toolsSeen, 8),
+		Files:        sortedSet(filesSeen, 12),
+		Errors:       uniqueLimited(errorSnippets, 3),
+	}
+}
+
+func buildWindowChunkContent(candidates []windowChunkCandidate) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.Preview == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("[%s #%d] %s", candidate.Chunk.ChunkType, candidate.Chunk.ChunkIndex, candidate.Preview))
+	}
+	return strings.Join(parts, "\n")
+}
+
+func summarizeWindowChunkGroups(ctx context.Context, providers []LLMProvider, groups []windowChunkGroup) []windowChunkSummary {
+	if len(groups) == 0 {
+		return nil
+	}
+	var summaries []windowChunkSummary
+	for _, group := range groups {
+		summary, model, err := summarizeWindowChunk(ctx, providers, group.Meta, group.Content)
+		if err != nil {
+			log.Printf("[WARN] session_summarize: chunk summary failed for window %d: %v", group.Meta.WindowIndex, err)
+			continue
+		}
+		summary = strings.TrimSpace(summary)
+		if isPlaceholderSummary(summary) {
+			continue
+		}
+		summaries = append(summaries, windowChunkSummary{
+			Summary:    summary,
+			Meta:       group.Meta,
+			Model:      model,
+			Candidates: group.Candidates,
+		})
+	}
+	return summaries
+}
+
+func summarizeWindowChunk(ctx context.Context, providers []LLMProvider, meta windowChunkSummaryMeta, content string) (string, string, error) {
+	metaBlock := formatWindowChunkMeta(meta)
+	prompt := fmt.Sprintf(`Summarize this context window segment for retrieval.
+
+Output format: 2-4 short lines using labels:
+Focus: ...
+Work: ...
+Artifacts: ... (files, tools, configs, errors)
+Issues: ... (only if mentioned)
+
+Requirements:
+- Include exact identifiers from the content (file paths, function names, config keys, error messages, tool names).
+- Be compact but information-dense. No filler.
+- Output only the labeled lines. No JSON, no markdown.
+
+Chunk metadata:
+%s
+
+<content>
+%s
+</content>`, metaBlock, content)
+
+	for _, p := range providers {
+		var summary string
+		var err error
+
+		if p.IsCLI {
+			summary, err = callCLIForWindowSummary(ctx, p, prompt)
+		} else {
+			summary, err = callAPIForWindowSummary(ctx, p, prompt, windowChunkSummaryMaxTokens)
+		}
+
+		if err == nil && summary != "" {
+			return strings.TrimSpace(summary), p.Model, nil
+		}
+
+		if err != nil && !isRetryableError(err) {
+			return "", p.Model, err
+		}
+	}
+
+	return "", "", skillerr.Runtime("all providers failed")
+}
+
+func summarizeWindowFromSummaries(ctx context.Context, providers []LLMProvider, windowIndex int, summaries []windowChunkSummary, meta windowSummaryMeta, compactSummary string) (string, error) {
+	if len(summaries) == 0 {
+		return "", nil
+	}
+	summariesBlock := condenseChunkSummaries(summaries, windowChunkSummariesMaxChars)
+	if summariesBlock == "" {
+		return "", nil
+	}
+	metaBlock := formatWindowMeta(meta)
+	summaryHint := strings.TrimSpace(compactSummary)
+	summaryBlock := "None."
+	if summaryHint != "" {
+		summaryBlock = skillout.TruncateSingleLine(summaryHint, windowSummaryHintMaxChars)
+	}
+	prompt := fmt.Sprintf(`Summarize this coding session context window (window #%d) for retrieval + embedding.
+
+Output format: 4-6 short lines using labels:
+Goal: ...
+Work: ...
+Decisions/Issues (include gotchas + fixes when present): ...
+Artifacts: ... (files, tools, commands, configs, errors)
+Next: ... (only if mentioned)
+Preferences: ... (only if mentioned)
+Tags: ... (1-3, only if mentioned)
+
+Requirements:
+- Include exact identifiers from the chunk summaries and metadata.
+- If a compact summary is provided, use it as a hint and reconcile with the summaries.
+- Be compact but information-dense. No filler.
+- Output only the labeled lines. No JSON, no markdown.
+
+Compact summary (Claude Code, if present):
+%s
+
+Window metadata:
+%s
+
+Chunk summaries:
+%s`, windowIndex, summaryBlock, metaBlock, summariesBlock)
+
+	for _, p := range providers {
+		var summary string
+		var err error
+
+		if p.IsCLI {
+			summary, err = callCLIForWindowSummary(ctx, p, prompt)
+		} else {
+			summary, err = callAPIForWindowSummary(ctx, p, prompt, windowSummaryMaxTokens)
+		}
+
+		if err == nil && summary != "" {
+			return strings.TrimSpace(summary), nil
+		}
+
+		if err != nil && !isRetryableError(err) {
+			return "", err
+		}
+	}
+
+	return "", skillerr.Runtime("all providers failed")
+}
+
+func condenseChunkSummaries(summaries []windowChunkSummary, maxChars int) string {
+	if len(summaries) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	appendLine := func(line string) bool {
+		if line == "" {
+			return true
+		}
+		if maxChars > 0 && b.Len()+len(line)+1 > maxChars {
+			return false
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+		return true
+	}
+	for _, summary := range summaries {
+		chunkLabel := formatChunkIndices(summary.Meta.ChunkIndices, windowChunkIndicesDisplayMax)
+		text := skillout.TruncateSingleLine(summary.Summary, windowChunkSummaryLineMaxChars)
+		if !appendLine(fmt.Sprintf("Chunks %s: %s", chunkLabel, text)) {
+			break
+		}
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func chunkEmbeddingsMissing(expectedModel string, candidates []windowChunkCandidate) bool {
+	if len(candidates) == 0 {
+		return false
+	}
+	for _, candidate := range candidates {
+		if len(candidate.Chunk.Embedding) == 0 {
+			return true
+		}
+		if expectedModel != "" && candidate.Chunk.EmbeddingModel != expectedModel {
+			return true
+		}
+	}
+	return false
+}
+
+func embedChunkSummaries(ctx context.Context, sessionStore *sessions.Store, embedder *semantic.Embedder, embedderErr error, summaries []windowChunkSummary, force bool) {
+	if embedderErr != nil || embedder == nil || len(summaries) == 0 {
+		return
+	}
+
+	for _, summary := range summaries {
+		embeddingText := buildChunkEmbeddingText(summary.Summary, summary.Meta)
+		if embeddingText == "" {
+			continue
+		}
+		result, err := embedder.Embed(ctx, embeddingText)
+		if err != nil || len(result.Vec) == 0 {
+			continue
+		}
+		embeddingBytes := vector.SerializeF32(result.Vec)
+
+		for _, candidate := range summary.Candidates {
+			chunk := candidate.Chunk
+			if !force && len(chunk.Embedding) > 0 && chunk.EmbeddingModel == result.Model {
+				continue
+			}
+			chunk.Embedding = embeddingBytes
+			chunk.EmbeddingModel = result.Model
+			if _, err := sessionStore.SaveChunk(ctx, chunk); err != nil {
+				log.Printf("[WARN] session_summarize: failed to update chunk %d embedding: %v", chunk.ChunkIndex, err)
+			}
+		}
+	}
+}
+
+func chunkCandidateMap(candidates []windowChunkCandidate) map[int]windowChunkCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	out := make(map[int]windowChunkCandidate, len(candidates))
+	for _, candidate := range candidates {
+		out[candidate.Chunk.ChunkIndex] = candidate
+	}
+	return out
+}
+
+func chunkSummaryIndexSet(summaries []windowChunkSummary) map[int]struct{} {
+	if len(summaries) == 0 {
+		return nil
+	}
+	seen := make(map[int]struct{})
+	for _, summary := range summaries {
+		for _, idx := range summary.Meta.ChunkIndices {
+			seen[idx] = struct{}{}
+		}
+	}
+	return seen
+}
+
+func missingChunkSummaryCandidates(candidates []windowChunkCandidate, summaries []windowChunkSummary) []windowChunkCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	if len(summaries) == 0 {
+		return candidates
+	}
+	covered := chunkSummaryIndexSet(summaries)
+	var missing []windowChunkCandidate
+	for _, candidate := range candidates {
+		if _, ok := covered[candidate.Chunk.ChunkIndex]; ok {
+			continue
+		}
+		missing = append(missing, candidate)
+	}
+	return missing
+}
+
+func windowChunkSummariesFromRecords(records []sessions.SessionChunkSummary, candidates map[int]windowChunkCandidate) []windowChunkSummary {
+	if len(records) == 0 {
+		return nil
+	}
+	out := make([]windowChunkSummary, 0, len(records))
+	for _, record := range records {
+		if isPlaceholderSummary(record.Summary) {
+			continue
+		}
+		meta := windowChunkSummaryMeta{
+			WindowIndex:  record.WindowIndex,
+			Trigger:      record.Trigger,
+			ChunkIndices: sortedUniqueInts(record.ChunkIndices),
+			Tools:        record.Tools,
+			Files:        record.Files,
+			Errors:       record.Errors,
+		}
+		summary := windowChunkSummary{
+			Meta:    meta,
+			Summary: record.Summary,
+			Model:   record.SummaryModel,
+		}
+		for _, idx := range meta.ChunkIndices {
+			if candidate, ok := candidates[idx]; ok {
+				summary.Candidates = append(summary.Candidates, candidate)
+			}
+		}
+		out = append(out, summary)
+	}
+	return out
+}
+
+func buildChunkSummaryRecords(sessionID string, summaries []windowChunkSummary) []sessions.SessionChunkSummary {
+	if len(summaries) == 0 {
+		return nil
+	}
+	out := make([]sessions.SessionChunkSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if isPlaceholderSummary(summary.Summary) {
+			continue
+		}
+		meta := summary.Meta
+		indices := sortedUniqueInts(meta.ChunkIndices)
+		chunkMin := 0
+		chunkMax := 0
+		if len(indices) > 0 {
+			chunkMin = indices[0]
+			chunkMax = indices[len(indices)-1]
+		}
+		out = append(out, sessions.SessionChunkSummary{
+			ID:            chunkSummaryRecordID(sessionID, meta),
+			SessionID:     sessionID,
+			WindowIndex:   meta.WindowIndex,
+			Trigger:       meta.Trigger,
+			ChunkIndices:  indices,
+			ChunkIndexMin: chunkMin,
+			ChunkIndexMax: chunkMax,
+			Tools:         meta.Tools,
+			Files:         meta.Files,
+			Errors:        meta.Errors,
+			Summary:       summary.Summary,
+			SummaryModel:  summary.Model,
+		})
+	}
+	return out
+}
+
+func chunkSummaryRecordID(sessionID string, meta windowChunkSummaryMeta) string {
+	key := fmt.Sprintf("%s:%d:%s", sessionID, meta.WindowIndex, formatChunkIndices(meta.ChunkIndices, 0))
+	if meta.Trigger != "" {
+		key = fmt.Sprintf("%s:%s", key, meta.Trigger)
+	}
+	return "chunk_summary_" + hashutil.ShortHash(key)
+}
+
+func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID string, batch []windowTask, providers []LLMProvider, chunkProviders []LLMProvider, embedder *semantic.Embedder, embedderErr error, force bool) (summarized, embedded, skipped int) {
+	contentBudget := windowContentBudget(providers)
+	chunkSummaryBudget := windowChunkSummaryBudget(chunkProviders)
+	expectedEmbedModel := ""
+	if embedder != nil {
+		expectedEmbedModel = embedder.Model()
+	}
+	for _, task := range batch {
+		window := task.Window
 		// Build content from chunks
 		var contentParts []string
-		estimatedTokens := 0
-		maxTokens := 4000
+		var candidates []windowChunkCandidate
+		toolsSeen := make(map[string]struct{})
+		filesSeen := make(map[string]struct{})
+		var errorSnippets []string
 
 		for chunkIdx := window.ChunkStart; chunkIdx <= window.ChunkEnd; chunkIdx++ {
 			chunk, err := sessionStore.GetChunk(ctx, sessionID, chunkIdx)
 			if err != nil {
 				continue
 			}
-			preview := chunk.ContentPreview
+			for _, tool := range chunk.ToolsUsed {
+				if tool != "" {
+					toolsSeen[tool] = struct{}{}
+				}
+			}
+			for _, file := range chunk.FilesTouched {
+				if file != "" {
+					filesSeen[file] = struct{}{}
+				}
+			}
+			isError := chunk.HasError || chunk.ChunkType == "error"
+			if isError {
+				snippet := skillout.TruncateSingleLine(strings.TrimSpace(chunk.ContentPreview), 200)
+				if snippet == "" && chunk.ErrorType != "" {
+					snippet = chunk.ErrorType
+				}
+				if snippet != "" {
+					errorSnippets = append(errorSnippets, snippet)
+				}
+			}
+			preview := strings.TrimSpace(chunk.ContentPreview)
 			if preview == "" {
 				continue
 			}
 			chunkTokens := len(preview) / 4
-			if estimatedTokens+chunkTokens > maxTokens {
-				break
+			if chunkTokens == 0 {
+				chunkTokens = 1
 			}
-			contentParts = append(contentParts, fmt.Sprintf("[%s] %s", chunk.ChunkType, preview))
-			estimatedTokens += chunkTokens
+			candidates = append(candidates, windowChunkCandidate{
+				Chunk:    chunk,
+				Preview:  preview,
+				Tokens:   chunkTokens,
+				HasTools: len(chunk.ToolsUsed) > 0,
+				HasFiles: len(chunk.FilesTouched) > 0,
+				IsError:  isError,
+			})
 		}
 
-		if len(contentParts) == 0 {
+		selected := selectWindowChunks(candidates, contentBudget)
+		summaryCandidates := selected
+		if chunkSummaryBudget > contentBudget {
+			summaryCandidates = selectWindowChunks(candidates, chunkSummaryBudget)
+		}
+		for _, candidate := range selected {
+			contentParts = append(contentParts, fmt.Sprintf("[%s #%d] %s", candidate.Chunk.ChunkType, candidate.Chunk.ChunkIndex, candidate.Preview))
+		}
+
+		meta := windowSummaryMeta{
+			WindowIndex: window.WindowIndex,
+			Trigger:     window.Trigger,
+			Tools:       sortedSet(toolsSeen, 8),
+			Files:       sortedSet(filesSeen, 12),
+			Errors:      uniqueLimited(errorSnippets, 3),
+		}
+		summaryHint := strings.TrimSpace(window.Summary)
+
+		needsChunkSummaries := task.Summarize || force
+		if !needsChunkSummaries && embedderErr == nil && embedder != nil {
+			needsChunkSummaries = chunkEmbeddingsMissing(expectedEmbedModel, summaryCandidates)
+		}
+		var chunkSummaries []windowChunkSummary
+		candidateMap := chunkCandidateMap(candidates)
+		if !force {
+			storedSummaries, err := sessionStore.GetChunkSummaries(ctx, sessionID, window.WindowIndex)
+			if err == nil && len(storedSummaries) > 0 {
+				chunkSummaries = windowChunkSummariesFromRecords(storedSummaries, candidateMap)
+			}
+		}
+
+		missingCandidates := missingChunkSummaryCandidates(summaryCandidates, chunkSummaries)
+		if needsChunkSummaries && len(missingCandidates) > 0 {
+			missingGroups := buildWindowChunkGroups(window.WindowIndex, window.Trigger, missingCandidates, windowChunkTokensMax)
+			newSummaries := summarizeWindowChunkGroups(ctx, chunkProviders, missingGroups)
+			if len(newSummaries) > 0 {
+				if err := sessionStore.SaveChunkSummaries(ctx, buildChunkSummaryRecords(sessionID, newSummaries)); err != nil {
+					log.Printf("[WARN] session_summarize: failed to persist chunk summaries for window %d: %v", window.WindowIndex, err)
+				}
+				chunkSummaries = append(chunkSummaries, newSummaries...)
+			}
+		}
+
+		if len(chunkSummaries) > 0 {
+			embedChunkSummaries(ctx, sessionStore, embedder, embedderErr, chunkSummaries, force)
+		}
+
+		if task.Summarize {
+			if len(contentParts) == 0 && summaryHint == "" && len(chunkSummaries) == 0 {
+				skipped++
+				continue
+			}
+			summary, err := summarizeWindowFromSummaries(ctx, providers, window.WindowIndex, chunkSummaries, meta, summaryHint)
+			if err != nil {
+				log.Printf("[WARN] session_summarize: LLM failed for window %d: %v", window.WindowIndex, err)
+			}
+			if isPlaceholderSummary(summary) {
+				summary = ""
+			}
+			if summary == "" && len(contentParts) > 0 {
+				summary, err = summarizeWindowContent(ctx, providers, window.WindowIndex, strings.Join(contentParts, "\n"), meta, summaryHint)
+				if err != nil {
+					log.Printf("[WARN] session_summarize: LLM failed for window %d: %v", window.WindowIndex, err)
+				}
+			}
+			summary = strings.TrimSpace(summary)
+			if isPlaceholderSummary(summary) {
+				skipped++
+				continue
+			}
+			if err := sessionStore.UpdateContextWindowSummary(ctx, window.ID, summary); err != nil {
+				skipped++
+				continue
+			}
+			summarized++
+			summaryHint = summary
+		} else if summaryHint == "" {
 			skipped++
 			continue
 		}
-
-		// Call LLM for summary
-		windowContent := strings.Join(contentParts, "\n")
-		summary, err := summarizeWindowContent(ctx, providers, window.WindowIndex, windowContent)
-		if err != nil {
-			log.Printf("[WARN] session_summarize: LLM failed for window %d: %v", window.WindowIndex, err)
-			skipped++
-			continue
-		}
-
-		// Save summary
-		if err := sessionStore.UpdateContextWindowSummary(ctx, window.ID, summary); err != nil {
-			skipped++
-			continue
-		}
-		summarized++
 
 		// Generate and save embedding
-		if embedderErr == nil && embedder != nil {
-			if result, err := embedder.Embed(ctx, summary); err == nil && len(result.Vec) > 0 {
+		if embedderErr == nil && embedder != nil && summaryHint != "" {
+			embeddingText := buildWindowEmbeddingText(summaryHint, meta)
+			if result, err := embedder.Embed(ctx, embeddingText); err == nil && len(result.Vec) > 0 {
 				embeddingBytes := vector.SerializeF32(result.Vec)
 				if err := sessionStore.SetContextWindowEmbedding(ctx, window.ID, embeddingBytes, result.Model); err != nil {
 					log.Printf("[WARN] session_summarize: failed to set window %s embedding: %v", window.ID, err)
@@ -1763,18 +3184,39 @@ func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID s
 }
 
 // summarizeWindowContent calls LLM to generate a concise summary for a window.
-func summarizeWindowContent(ctx context.Context, providers []LLMProvider, windowIndex int, content string) (string, error) {
-	prompt := fmt.Sprintf(`Summarize this coding session context window (window #%d) in 2-3 sentences.
-Focus on:
-- What was the main task or goal?
-- What was accomplished or attempted?
-- Any key decisions or problems encountered?
+func summarizeWindowContent(ctx context.Context, providers []LLMProvider, windowIndex int, content string, meta windowSummaryMeta, compactSummary string) (string, error) {
+	metaBlock := formatWindowMeta(meta)
+	summaryHint := strings.TrimSpace(compactSummary)
+	summaryBlock := "None."
+	if summaryHint != "" {
+		summaryBlock = skillout.TruncateSingleLine(summaryHint, windowSummaryHintMaxChars)
+	}
+	prompt := fmt.Sprintf(`Summarize this coding session context window (window #%d) for retrieval + embedding.
 
-Be concise and specific. Output only the summary text, no JSON or formatting.
+Output format: 4-6 short lines using labels:
+Goal: ...
+Work: ...
+Decisions/Issues (include gotchas + fixes when present): ...
+Artifacts: ... (files, tools, commands, configs, errors)
+Next: ... (only if mentioned)
+Preferences: ... (only if mentioned)
+Tags: ... (1-3, only if mentioned)
+
+Requirements:
+- Include exact identifiers from the content (file paths, function names, config keys, error messages, tool names).
+- If a compact summary is provided, use it as a hint and reconcile with the content.
+- Be compact but information-dense. No filler.
+- Output only the labeled lines. No JSON, no markdown.
+
+Compact summary (Claude Code, if present):
+%s
+
+Window metadata:
+%s
 
 <content>
 %s
-</content>`, windowIndex, content)
+</content>`, windowIndex, summaryBlock, metaBlock, content)
 
 	// Try providers in order
 	for _, p := range providers {
@@ -1784,7 +3226,7 @@ Be concise and specific. Output only the summary text, no JSON or formatting.
 		if p.IsCLI {
 			summary, err = callCLIForWindowSummary(ctx, p, prompt)
 		} else {
-			summary, err = callAPIForWindowSummary(ctx, p, prompt)
+			summary, err = callAPIForWindowSummary(ctx, p, prompt, windowSummaryMaxTokens)
 		}
 
 		if err == nil && summary != "" {
@@ -1797,14 +3239,183 @@ Be concise and specific. Output only the summary text, no JSON or formatting.
 		}
 	}
 
-	return "", fmt.Errorf("all providers failed")
+	return "", skillerr.Runtime("all providers failed")
+}
+
+func formatWindowMeta(meta windowSummaryMeta) string {
+	var lines []string
+	if meta.Trigger != "" {
+		lines = append(lines, fmt.Sprintf("Trigger: %s", meta.Trigger))
+	}
+	if len(meta.Tools) > 0 {
+		lines = append(lines, fmt.Sprintf("Tools: %s", strings.Join(meta.Tools, ", ")))
+	}
+	if len(meta.Files) > 0 {
+		lines = append(lines, fmt.Sprintf("Files: %s", strings.Join(meta.Files, ", ")))
+	}
+	if len(meta.Errors) > 0 {
+		lines = append(lines, fmt.Sprintf("Errors: %s", strings.Join(meta.Errors, " | ")))
+	}
+	if len(lines) == 0 {
+		return "None."
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatWindowChunkMeta(meta windowChunkSummaryMeta) string {
+	var lines []string
+	if meta.Trigger != "" {
+		lines = append(lines, fmt.Sprintf("Trigger: %s", meta.Trigger))
+	}
+	if len(meta.ChunkIndices) > 0 {
+		lines = append(lines, fmt.Sprintf("Chunks: %s", formatChunkIndices(meta.ChunkIndices, windowChunkIndicesDisplayMax)))
+	}
+	if len(meta.Tools) > 0 {
+		lines = append(lines, fmt.Sprintf("Tools: %s", strings.Join(meta.Tools, ", ")))
+	}
+	if len(meta.Files) > 0 {
+		lines = append(lines, fmt.Sprintf("Files: %s", strings.Join(meta.Files, ", ")))
+	}
+	if len(meta.Errors) > 0 {
+		lines = append(lines, fmt.Sprintf("Errors: %s", strings.Join(meta.Errors, " | ")))
+	}
+	if len(lines) == 0 {
+		return "None."
+	}
+	return strings.Join(lines, "\n")
+}
+
+func buildWindowEmbeddingText(summary string, meta windowSummaryMeta) string {
+	var parts []string
+	header := fmt.Sprintf("Context window %d", meta.WindowIndex)
+	if meta.Trigger != "" {
+		header = fmt.Sprintf("%s (trigger: %s)", header, meta.Trigger)
+	}
+	parts = append(parts, header)
+	if summary != "" {
+		parts = append(parts, summary)
+	}
+	if len(meta.Files) > 0 {
+		parts = append(parts, fmt.Sprintf("Files: %s", strings.Join(meta.Files, ", ")))
+	}
+	if len(meta.Tools) > 0 {
+		parts = append(parts, fmt.Sprintf("Tools: %s", strings.Join(meta.Tools, ", ")))
+	}
+	if len(meta.Errors) > 0 {
+		parts = append(parts, fmt.Sprintf("Errors: %s", strings.Join(meta.Errors, " | ")))
+	}
+	result := strings.Join(parts, "\n")
+	if len(result) > 6000 {
+		result = result[:6000]
+	}
+	return result
+}
+
+func buildChunkEmbeddingText(summary string, meta windowChunkSummaryMeta) string {
+	if summary == "" {
+		return ""
+	}
+	chunkLabel := formatChunkIndices(meta.ChunkIndices, windowChunkIndicesDisplayMax)
+	header := fmt.Sprintf("Context window %d chunks %s", meta.WindowIndex, chunkLabel)
+	if meta.Trigger != "" {
+		header = fmt.Sprintf("%s (trigger: %s)", header, meta.Trigger)
+	}
+	parts := []string{header, summary}
+	if len(meta.Files) > 0 {
+		parts = append(parts, fmt.Sprintf("Files: %s", strings.Join(meta.Files, ", ")))
+	}
+	if len(meta.Tools) > 0 {
+		parts = append(parts, fmt.Sprintf("Tools: %s", strings.Join(meta.Tools, ", ")))
+	}
+	if len(meta.Errors) > 0 {
+		parts = append(parts, fmt.Sprintf("Errors: %s", strings.Join(meta.Errors, " | ")))
+	}
+	result := strings.Join(parts, "\n")
+	if len(result) > windowChunkEmbeddingMaxChars {
+		result = result[:windowChunkEmbeddingMaxChars]
+	}
+	return result
+}
+
+func sortedUniqueInts(values []int) []int {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[int]struct{})
+	out := make([]int, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func formatChunkIndices(indices []int, limit int) string {
+	if len(indices) == 0 {
+		return "none"
+	}
+	total := len(indices)
+	if limit > 0 && total > limit {
+		indices = indices[:limit]
+	}
+	parts := make([]string, 0, len(indices))
+	for _, idx := range indices {
+		parts = append(parts, strconv.Itoa(idx))
+	}
+	result := strings.Join(parts, ", ")
+	if limit > 0 && total > limit {
+		result = fmt.Sprintf("%s (+%d more)", result, total-limit)
+	}
+	return result
+}
+
+func sortedSet(values map[string]struct{}, limit int) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+func uniqueLimited(values []string, limit int) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 // callAPIForWindowSummary calls an OpenAI-compatible API for a simple text response.
-func callAPIForWindowSummary(ctx context.Context, provider LLMProvider, prompt string) (string, error) {
+func callAPIForWindowSummary(ctx context.Context, provider LLMProvider, prompt string, maxTokens int) (string, error) {
+	if maxTokens <= 0 {
+		maxTokens = windowSummaryMaxTokens
+	}
 	reqBody := map[string]any{
 		"model":      provider.Model,
-		"max_tokens": 500,
+		"max_tokens": maxTokens,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -1812,7 +3423,7 @@ func callAPIForWindowSummary(ctx context.Context, provider LLMProvider, prompt s
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", skillerr.WrapRuntime("marshal request", err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -1820,7 +3431,7 @@ func callAPIForWindowSummary(ctx context.Context, provider LLMProvider, prompt s
 
 	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return "", skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -1834,13 +3445,13 @@ func callAPIForWindowSummary(ctx context.Context, provider LLMProvider, prompt s
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return "", skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return "", skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -1852,11 +3463,11 @@ func callAPIForWindowSummary(ctx context.Context, provider LLMProvider, prompt s
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return "", skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response")
+		return "", skillerr.Runtime("empty response")
 	}
 
 	return result.Choices[0].Message.Content, nil
@@ -1867,30 +3478,36 @@ func callCLIForWindowSummary(ctx context.Context, provider LLMProvider, prompt s
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 
-	var cmd *exec.Cmd
+	var cmdName string
+	var args []string
 	switch provider.Name {
 	case "gemini-cli":
-		cmd = exec.CommandContext(ctx, "gemini", "-m", provider.Model, "-p", prompt)
+		cmdName = "gemini"
+		args = []string{"-m", provider.Model, "-p", prompt}
 	case "claude-cli":
-		cmd = exec.CommandContext(ctx, "claude", "-p", prompt, "--model", provider.Model, "--output-format", "text")
+		cmdName = "claude"
+		args = []string{"-p", prompt, "--model", provider.Model, "--output-format", "text"}
 	default:
-		return "", fmt.Errorf("unknown CLI provider: %s", provider.Name)
+		return "", skillerr.Runtimef("unknown CLI provider: %s", provider.Name)
 	}
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("CLI error: %w (stderr: %s)", err, stderr.String())
+	result := executil.Run(ctx, "", cmdName, args...)
+	if result.Err != nil {
+		return "", skillerr.Runtimef("CLI error: %v (stderr: %s)", result.Err, string(result.Stderr))
 	}
 
-	return stdout.String(), nil
+	return string(result.Stdout), nil
 }
 
 // buildEmbeddingText creates text to embed from the summary response.
-func buildEmbeddingText(summary *SummaryResponse) string {
+// Format: [Jan 2, 2026] [activity] Summary\nAccomplished: ...\nFiles: ...\nTopics: ...
+func buildEmbeddingText(summary *SummaryResponse, startedAt time.Time, keyFiles []string) string {
 	var parts []string
+
+	// Date and activity type prefix
+	dateStr := startedAt.Format("Jan 2, 2006")
+	activity := inferActivityType(summary.Tags)
+	parts = append(parts, fmt.Sprintf("[%s] [%s]", dateStr, activity))
 
 	if summary.Summary != "" {
 		parts = append(parts, summary.Summary)
@@ -1920,8 +3537,12 @@ func buildEmbeddingText(summary *SummaryResponse) string {
 		parts = append(parts, "Time sinks: "+strings.Join(summary.TimeSinks, "; "))
 	}
 
+	if len(keyFiles) > 0 {
+		parts = append(parts, "Files: "+strings.Join(keyFiles, ", "))
+	}
+
 	if len(summary.Tags) > 0 {
-		parts = append(parts, "Tags: "+strings.Join(summary.Tags, ", "))
+		parts = append(parts, "Topics: "+strings.Join(summary.Tags, ", "))
 	}
 
 	return strings.Join(parts, "\n")

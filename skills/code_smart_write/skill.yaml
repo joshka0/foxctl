@@ -17,8 +17,14 @@ signature:
   parameters:
     - name: path
       type: string
-      required: true
-      description: "File to edit (absolute or relative to workspace)"
+      required: false
+      description: "Single file to edit (backward compat, use paths for multiple files)"
+    - name: paths
+      type: array
+      required: false
+      description: "Multiple files or glob patterns to edit"
+      items:
+        type: string
     - name: edits
       type: array
       required: true
@@ -65,6 +71,15 @@ signature:
       required: false
       default: 3
       description: "Number of context lines in diff output"
+    - name: create_backup
+      type: boolean
+      required: false
+      default: false
+      description: "Store original content in CAS before editing (enables undo)"
+    - name: restore_digest
+      type: string
+      required: false
+      description: "CAS digest to restore from (undo mode - skips edits)"
   returns:
     - name: path
       type: string
@@ -80,6 +95,12 @@ signature:
     - name: symbols_found
       type: array
       description: "Symbols that were found and edited"
+    - name: backup_digest
+      type: string
+      description: "CAS digest of original content for undo (when create_backup=true)"
+    - name: restored
+      type: boolean
+      description: "Whether file was restored from CAS (restore mode)"
   help:
     short: "Edit files by symbol name, line range, or scoped search/replace with diff preview."
     long: |

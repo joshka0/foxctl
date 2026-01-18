@@ -5,17 +5,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 )
+
+var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup"}
 
 // Input is the skill input schema.
 type Input struct {
 	// Operation is the action to perform.
-	Operation string `json:"operation" validate:"required,oneof=enqueue stats get get_by_file job_status cleanup"`
+	Operation string `json:"operation" validate:"required"`
 
 	// WorkspaceID identifies the workspace.
 	WorkspaceID string `json:"workspace_id,omitempty"`
@@ -83,16 +89,27 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
+
+	in.WorkspaceID = workspaceutil.Resolve(in.WorkspaceID, "", rc.Workspace)
+
 	// Open store using cache path from config
 	store, err := embedding.OpenStore(ctx, rc.Config.Paths.Cache)
 	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+		return skillerr.WrapIO("open store", err)
 	}
 	defer store.Close()
 
-	output := Output{Operation: in.Operation}
+	output := Output{Operation: op}
 
-	switch in.Operation {
+	switch op {
 	case "enqueue":
 		if err := handleEnqueue(ctx, store, &in, &output); err != nil {
 			return err
@@ -128,11 +145,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
-	if input.WorkspaceID == "" {
-		input.WorkspaceID = "default"
-	}
 	if len(input.Symbols) == 0 {
-		return fmt.Errorf("symbols is required for enqueue")
+		return skillerr.Arg("symbols is required for enqueue")
 	}
 
 	// Convert input symbols
@@ -158,7 +172,7 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 		Deduplicate: input.Deduplicate,
 	})
 	if err != nil {
-		return fmt.Errorf("enqueue: %w", err)
+		return skillerr.WrapIO("enqueue", err)
 	}
 
 	output.Queued = result.Queued
@@ -171,7 +185,7 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 func handleStats(ctx context.Context, store *embedding.Store, output *Output) error {
 	stats, err := store.Stats(ctx)
 	if err != nil {
-		return fmt.Errorf("stats: %w", err)
+		return skillerr.WrapIO("stats", err)
 	}
 
 	output.Stats = stats
@@ -181,11 +195,8 @@ func handleStats(ctx context.Context, store *embedding.Store, output *Output) er
 }
 
 func handleGet(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
-	if input.WorkspaceID == "" {
-		input.WorkspaceID = "default"
-	}
 	if input.SymbolID == "" {
-		return fmt.Errorf("symbol_id is required for get")
+		return skillerr.Arg("symbol_id is required for get")
 	}
 
 	emb, err := store.GetEmbedding(ctx, input.WorkspaceID, input.SymbolID)
@@ -194,7 +205,7 @@ func handleGet(ctx context.Context, store *embedding.Store, input *Input, output
 			output.Message = "Embedding not found"
 			return nil
 		}
-		return fmt.Errorf("get embedding: %w", err)
+		return skillerr.WrapIO("get embedding", err)
 	}
 
 	output.Embedding = emb
@@ -203,16 +214,13 @@ func handleGet(ctx context.Context, store *embedding.Store, input *Input, output
 }
 
 func handleGetByFile(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
-	if input.WorkspaceID == "" {
-		input.WorkspaceID = "default"
-	}
 	if input.FilePath == "" {
-		return fmt.Errorf("file_path is required for get_by_file")
+		return skillerr.Arg("file_path is required for get_by_file")
 	}
 
 	embeddings, err := store.GetEmbeddingsByFile(ctx, input.WorkspaceID, input.FilePath)
 	if err != nil {
-		return fmt.Errorf("get embeddings by file: %w", err)
+		return skillerr.WrapIO("get embeddings by file", err)
 	}
 
 	output.Embeddings = embeddings
@@ -222,12 +230,12 @@ func handleGetByFile(ctx context.Context, store *embedding.Store, input *Input, 
 
 func handleJobStatus(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
 	if input.JobID == "" {
-		return fmt.Errorf("job_id is required for job_status")
+		return skillerr.Arg("job_id is required for job_status")
 	}
 
 	job, err := store.GetJob(ctx, input.JobID)
 	if err != nil {
-		return fmt.Errorf("get job: %w", err)
+		return skillerr.WrapIO("get job", err)
 	}
 
 	output.Job = job
@@ -243,7 +251,7 @@ func handleCleanup(ctx context.Context, store *embedding.Store, input *Input, ou
 
 	deleted, err := store.Cleanup(ctx, time.Duration(hours)*time.Hour)
 	if err != nil {
-		return fmt.Errorf("cleanup: %w", err)
+		return skillerr.WrapIO("cleanup", err)
 	}
 
 	output.Deleted = deleted

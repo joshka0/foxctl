@@ -1,0 +1,47 @@
+package langutil
+
+import "github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+
+// CommonCodeLanguages covers Go, Python, JS, and TS.
+var CommonCodeLanguages = map[string]struct{}{
+	"go":         {},
+	"python":     {},
+	"javascript": {},
+	"typescript": {},
+}
+
+// SnippetLanguages covers languages supported by code_snippet_extract.
+var SnippetLanguages = map[string]struct{}{
+	"go":         {},
+	"python":     {},
+	"javascript": {},
+	"typescript": {},
+	"gdscript":   {},
+	"rust":       {},
+	"java":       {},
+	"c":          {},
+	"cpp":        {},
+}
+
+// DetectAllowed returns a detected language if it is in the allowed set.
+func DetectAllowed(path string, allowed map[string]struct{}) string {
+	lang := fsutil.DetectLanguage(path)
+	if lang == "text" {
+		return ""
+	}
+	if len(allowed) == 0 {
+		return lang
+	}
+	if _, ok := allowed[lang]; ok {
+		return lang
+	}
+	return ""
+}
+
+// DetectAllowedWithHint returns a language hint when provided, otherwise detects and filters.
+func DetectAllowedWithHint(hint, path string, allowed map[string]struct{}) string {
+	if hint != "" && hint != "auto" {
+		return hint
+	}
+	return DetectAllowed(path, allowed)
+}

@@ -1,11 +1,13 @@
 package hooks
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 )
 
 // SkillResolver finds skill manifests and artifact paths.
@@ -28,40 +30,31 @@ func NewDefaultResolver(skillsDir string) *DefaultResolver {
 
 // Resolve finds a skill's manifest and binary path.
 func (r *DefaultResolver) Resolve(skillName string) (skill.Manifest, string, error) {
-	// Convert skill name to path: "hooks/task_guard" → "hooks/task_guard"
-	skillPath := filepath.Join(r.SkillsDir, skillName)
-
-	// Load manifest
-	manifestPath := filepath.Join(skillPath, "skill.yaml")
-	manifest, err := skill.LoadManifest(manifestPath)
-	if err != nil {
-		return skill.Manifest{}, "", fmt.Errorf("load manifest: %w", err)
+	paths := []string{filepath.Join(r.SkillsDir, skillName)}
+	if normalized := skill.NormalizeSkillName(skillName); normalized != skillName {
+		paths = append(paths, filepath.Join(r.SkillsDir, normalized))
 	}
 
-	// Find artifact
-	artifactPath := findArtifact(skillPath)
-	if artifactPath == "" {
-		return skill.Manifest{}, "", fmt.Errorf("no artifact found in %s", skillPath)
-	}
-
-	return manifest, artifactPath, nil
-}
-
-// findArtifact locates the skill binary in the standard locations.
-func findArtifact(skillPath string) string {
-	// Candidates in priority order:
-	// 1. bin-cgo - CGO build (has more capabilities)
-	// 2. bin - Pure Go build
-	candidates := []string{"bin-cgo", "bin"}
-
-	for _, name := range candidates {
-		p := filepath.Join(skillPath, name)
-		if info, err := os.Stat(p); err == nil && !info.IsDir() {
-			return p
+	for _, skillPath := range paths {
+		manifestPath := filepath.Join(skillPath, "skill.yaml")
+		if _, err := os.Stat(manifestPath); err != nil {
+			continue
 		}
+
+		manifest, artifactPath, err := skill.LoadManifestAndArtifactFromDir(skillPath, skill.ArtifactOptions{
+			PreferCGO: buildinfo.IsCGO(),
+		})
+		if err != nil {
+			if errors.Is(err, skill.ErrArtifactsMissing) {
+				return skill.Manifest{}, "", fmt.Errorf("no artifact found in %s", skillPath)
+			}
+			return skill.Manifest{}, "", err
+		}
+
+		return manifest, artifactPath, nil
 	}
 
-	return ""
+	return skill.Manifest{}, "", fmt.Errorf("no artifact found for %s", skillName)
 }
 
 // ResolverFunc is a function adapter for SkillResolver.

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,13 +39,43 @@ type sqlStore struct {
 }
 
 // Open initializes the persistent store rooted at the provided path.
+// Falls back to in-memory database if filesystem is readonly (e.g., sandbox environments).
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "jobs.db")
 	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
 	if err != nil {
+		// Check if error is due to readonly filesystem
+		if isReadonlyError(err) {
+			// Print helpful warning for sandbox users
+			fmt.Fprintf(os.Stderr, "warning: readonly filesystem detected, using in-memory job store\n")
+			fmt.Fprintf(os.Stderr, "hint: if using Codex, add: --add-dir ~/.agentctl\n")
+			fmt.Fprintf(os.Stderr, "hint: if using Claude Code, this is expected in sandbox mode\n")
+
+			// Fall back to in-memory database for sandbox environments
+			memDB, memErr := sql.Open("sqlite3", ":memory:")
+			if memErr != nil {
+				return nil, fmt.Errorf("jobs: open in-memory db: %w", memErr)
+			}
+			if memErr = migrate(ctx, memDB); memErr != nil {
+				errs.Ignore(memDB.Close(), "close failed in-memory db")
+				return nil, fmt.Errorf("jobs: migrate in-memory db: %w", memErr)
+			}
+			return &sqlStore{db: memDB}, nil
+		}
 		return nil, fmt.Errorf("jobs: open db: %w", err)
 	}
 	return &sqlStore{db: db}, nil
+}
+
+// isReadonlyError checks if an error indicates a readonly filesystem.
+func isReadonlyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "readonly database") ||
+		strings.Contains(errStr, "read-only file system") ||
+		strings.Contains(errStr, "attempt to write a readonly database")
 }
 
 func (s *sqlStore) Close() error {
@@ -56,7 +87,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at
+        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
         FROM jobs
         ORDER BY created_at DESC
         LIMIT ?`, limit)
@@ -70,8 +101,8 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 	var jobs []types.Job
 	for rows.Next() {
 		var job types.Job
-		var created, updated string
-		if err := rows.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated); err != nil {
+		var created, updated, expires string
+		if err := rows.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
 			return nil, fmt.Errorf("jobs: scan: %w", err)
 		}
 		var parseErr error
@@ -83,6 +114,10 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 		if parseErr != nil {
 			return nil, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
 		}
+		job.ExpiresAt, parseErr = sqlutil.ScanTimestamp(expires)
+		if parseErr != nil {
+			return nil, fmt.Errorf("jobs: scan expires_at: %w", parseErr)
+		}
 		jobs = append(jobs, job)
 	}
 	return jobs, nil
@@ -90,11 +125,11 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 
 func (s *sqlStore) Get(ctx context.Context, id string) (types.Job, error) {
 	row := s.db.QueryRowContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at
+        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
         FROM jobs WHERE id = ?`, id)
 	var job types.Job
-	var created, updated string
-	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated); err != nil {
+	var created, updated, expires string
+	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
 		if errorsIsNoRows(err) {
 			return types.Job{}, types.ErrNotFound
 		}
@@ -109,6 +144,10 @@ func (s *sqlStore) Get(ctx context.Context, id string) (types.Job, error) {
 	if parseErr != nil {
 		return types.Job{}, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
 	}
+	job.ExpiresAt, parseErr = sqlutil.ScanTimestamp(expires)
+	if parseErr != nil {
+		return types.Job{}, fmt.Errorf("jobs: scan expires_at: %w", parseErr)
+	}
 	return job, nil
 }
 
@@ -118,10 +157,13 @@ func (s *sqlStore) InsertJob(ctx context.Context, job types.Job) error {
 	// at the same millisecond, they could theoretically produce the same ID.
 	// When this happens (rows == 0), we treat the existing job as valid since
 	// the caller will proceed with their job ID which already exists in the DB.
+	if job.ExpiresAt.IsZero() && !job.CreatedAt.IsZero() {
+		job.ExpiresAt = job.CreatedAt.Add(types.DefaultMaxJobAge)
+	}
 	_, err := s.db.ExecContext(ctx, `
-        INSERT OR IGNORE INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,
-		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt))
+        INSERT OR IGNORE INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, '', '', ?, ?, ?)`,
+		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt), sqlutil.FormatTimestamp(job.ExpiresAt))
 	if err != nil {
 		return fmt.Errorf("jobs: insert: %w", err)
 	}
@@ -220,17 +262,41 @@ func (s *sqlStore) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
 	return rows, nil
 }
 
+func (s *sqlStore) RecoverOrphanedJobsBefore(ctx context.Context, before time.Time) (int64, error) {
+	cutoff := sqlutil.FormatTimestamp(before.UTC())
+	now := time.Now().UTC()
+	nowStamp := sqlutil.FormatTimestamp(now)
+	result, err := s.db.ExecContext(ctx, `
+        UPDATE jobs
+        SET state = ?, error = ?, updated_at = ?
+        WHERE state = ? AND ((expires_at != '' AND expires_at < ?) OR (expires_at = '' AND updated_at < ?))`,
+		types.StateError,
+		fmt.Sprintf("%s: stale running job", protocol.ErrorCodeERuntimeRestart),
+		nowStamp,
+		types.StateRunning,
+		nowStamp,
+		cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("recover stale orphans: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("recover stale orphans: get rows affected: %w", err)
+	}
+	return rows, nil
+}
+
 func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types.Job, error) {
 	row := s.db.QueryRowContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at
+        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
         FROM jobs
         WHERE args_hash = ?
         ORDER BY created_at DESC
         LIMIT 1`, argsHash)
 
 	var job types.Job
-	var created, updated string
-	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated); err != nil {
+	var created, updated, expires string
+	if err := row.Scan(&job.ID, &job.Command, &job.ArgsJSON, &job.ArgsHash, &job.State, &job.ResultPath, &job.Error, &created, &updated, &expires); err != nil {
 		if errorsIsNoRows(err) {
 			return types.Job{}, types.ErrNotFound
 		}
@@ -245,6 +311,10 @@ func (s *sqlStore) FindDuplicateJob(ctx context.Context, argsHash string) (types
 	if parseErr != nil {
 		return types.Job{}, fmt.Errorf("jobs: scan updated_at: %w", parseErr)
 	}
+	job.ExpiresAt, parseErr = sqlutil.ScanTimestamp(expires)
+	if parseErr != nil {
+		return types.Job{}, fmt.Errorf("jobs: scan expires_at: %w", parseErr)
+	}
 	return job, nil
 }
 
@@ -258,15 +328,15 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	}()
 
 	row := tx.QueryRowContext(ctx, `
-        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at
+        SELECT id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at
         FROM jobs
         WHERE args_hash = ?
         ORDER BY created_at DESC
         LIMIT 1`, job.ArgsHash)
 
 	var existing types.Job
-	var created, updated string
-	scanErr := row.Scan(&existing.ID, &existing.Command, &existing.ArgsJSON, &existing.ArgsHash, &existing.State, &existing.ResultPath, &existing.Error, &created, &updated)
+	var created, updated, expires string
+	scanErr := row.Scan(&existing.ID, &existing.Command, &existing.ArgsJSON, &existing.ArgsHash, &existing.State, &existing.ResultPath, &existing.Error, &created, &updated, &expires)
 	if scanErr == nil {
 		var parseErr error
 		existing.CreatedAt, parseErr = sqlutil.ScanTimestamp(created)
@@ -295,11 +365,14 @@ func (s *sqlStore) FindOrInsertJob(ctx context.Context, job types.Job) (types.Jo
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
 	}
+	if job.ExpiresAt.IsZero() {
+		job.ExpiresAt = job.CreatedAt.Add(types.DefaultMaxJobAge)
+	}
 
 	_, err = tx.ExecContext(ctx, `
-        INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,
-		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt))
+        INSERT INTO jobs (id, command, args_json, args_hash, state, result_path, error, created_at, updated_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, '', '', ?, ?, ?)`,
+		job.ID, job.Command, job.ArgsJSON, job.ArgsHash, job.State, sqlutil.FormatTimestamp(job.CreatedAt), sqlutil.FormatTimestamp(job.UpdatedAt), sqlutil.FormatTimestamp(job.ExpiresAt))
 	if err != nil {
 		return types.Job{}, false, fmt.Errorf("jobs: insert: %w", err)
 	}
@@ -321,15 +394,26 @@ CREATE TABLE IF NOT EXISTS jobs (
     result_path TEXT,
     error TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_state ON jobs(state);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_jobs_args_hash ON jobs(args_hash);
+CREATE INDEX IF NOT EXISTS idx_jobs_expires ON jobs(expires_at);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("jobs: migrate: %w", err)
 	}
+
+	alterDDL := []string{
+		`ALTER TABLE jobs ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range alterDDL {
+		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
+	}
+	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_jobs_expires ON jobs(expires_at)`) //nolint:errcheck
+
 	return nil
 }
 

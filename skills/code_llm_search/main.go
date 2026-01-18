@@ -19,6 +19,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -46,6 +47,41 @@ const (
 	DefaultMaxCandidates = 50
 	DefaultTimeout       = 30 * time.Second
 )
+
+// Environment variable names for LLM API keys.
+// FC/IS: Constants ensure consistency across detection and provider creation.
+const (
+	EnvCerebrasAPIKey  = "CEREBRAS_API_KEY"
+	EnvCerebrasModel   = "CEREBRAS_MODEL"
+	EnvAnthropicAPIKey = "ANTHROPIC_API_KEY"
+	EnvOpenAIAPIKey    = "OPENAI_API_KEY"
+	EnvGeminiAPIKey    = "GEMINI_API_KEY"
+	EnvGoogleAPIKey    = "GOOGLE_API_KEY"
+)
+
+// APIKeys holds all LLM provider API keys.
+// FC/IS: Collected at boundary (run) and passed to pure functions.
+type APIKeys struct {
+	Cerebras      string
+	CerebrasModel string
+	Anthropic     string
+	OpenAI        string
+	Gemini        string
+	Google        string
+}
+
+// LoadAPIKeys reads all API keys from environment.
+// FC/IS: Called once at boundary, returns pure data structure.
+func LoadAPIKeys() APIKeys {
+	return APIKeys{
+		Cerebras:      os.Getenv(EnvCerebrasAPIKey),
+		CerebrasModel: os.Getenv(EnvCerebrasModel),
+		Anthropic:     os.Getenv(EnvAnthropicAPIKey),
+		OpenAI:        os.Getenv(EnvOpenAIAPIKey),
+		Gemini:        os.Getenv(EnvGeminiAPIKey),
+		Google:        os.Getenv(EnvGoogleAPIKey),
+	}
+}
 
 // Input is the expected JSON input.
 type Input struct {
@@ -126,26 +162,27 @@ func main() {
 }
 
 // detectAvailableProviders returns providers that have API keys configured.
-func detectAvailableProviders() []string {
+// FC/IS: Pure function - uses keys passed from boundary.
+func detectAvailableProviders(keys APIKeys) []string {
 	var providers []string
 
 	// Cerebras first - fast inference, good for quick ranking
-	if os.Getenv("CEREBRAS_API_KEY") != "" {
+	if keys.Cerebras != "" {
 		providers = append(providers, ProviderCerebras)
 	}
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+	if keys.Anthropic != "" {
 		providers = append(providers, ProviderAnthropic)
 	}
-	if os.Getenv("OPENAI_API_KEY") != "" {
+	if keys.OpenAI != "" {
 		providers = append(providers, ProviderOpenAI)
 	}
-	if os.Getenv("GEMINI_API_KEY") != "" || os.Getenv("GOOGLE_API_KEY") != "" {
+	if keys.Gemini != "" || keys.Google != "" {
 		providers = append(providers, ProviderGemini)
 	}
 
 	// If no providers detected, use cerebras if available, else anthropic
 	if len(providers) == 0 {
-		if os.Getenv("CEREBRAS_API_KEY") != "" {
+		if keys.Cerebras != "" {
 			providers = []string{ProviderCerebras}
 		} else {
 			providers = []string{ProviderAnthropic}
@@ -157,12 +194,15 @@ func detectAvailableProviders() []string {
 
 // run is the main skill logic.
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// FC/IS: Load API keys at boundary
+	apiKeys := LoadAPIKeys()
+
 	// Apply defaults
 	if in.WorkspaceID == "" {
 		in.WorkspaceID = "default"
 	}
 	if len(in.Providers) == 0 {
-		in.Providers = detectAvailableProviders()
+		in.Providers = detectAvailableProviders(apiKeys)
 	}
 	if in.Limits.MaxCandidates <= 0 {
 		in.Limits.MaxCandidates = DefaultMaxCandidates
@@ -181,7 +221,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Create providers
 	providers := make([]RankingProvider, 0, len(in.Providers))
 	for _, name := range in.Providers {
-		p, err := createProvider(name)
+		p, err := createProvider(name, apiKeys)
 		if err != nil {
 			logger.Warn().Err(err).Str("provider", name).Msg("failed to create provider")
 			continue
@@ -190,7 +230,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	if len(providers) == 0 {
-		return fmt.Errorf("no valid providers configured")
+		return skillerr.Auth("no valid providers configured", skillerr.WithHint("Set provider API keys or configure providers with valid credentials."))
 	}
 
 	// Run providers in parallel
@@ -337,45 +377,43 @@ func mergeProviderResults(candidates []Candidate, results map[string]ProviderRes
 }
 
 // createProvider creates a ranking provider by name.
-func createProvider(name string) (RankingProvider, error) {
+// FC/IS: Pure function - uses keys passed from boundary.
+func createProvider(name string, keys APIKeys) (RankingProvider, error) {
 	switch name {
 	case ProviderCerebras:
-		apiKey := os.Getenv("CEREBRAS_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("CEREBRAS_API_KEY not set")
+		if keys.Cerebras == "" {
+			return nil, skillerr.Auth("CEREBRAS_API_KEY not set", skillerr.WithHint("Set CEREBRAS_API_KEY to use Cerebras."))
 		}
-		model := os.Getenv("CEREBRAS_MODEL")
+		model := keys.CerebrasModel
 		if model == "" {
 			model = "llama-3.3-70b" // Default to Llama 3.3 70B
 		}
-		return NewCerebrasProvider(apiKey, model), nil
+		return NewCerebrasProvider(keys.Cerebras, model), nil
 
 	case ProviderAnthropic:
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
+		if keys.Anthropic == "" {
+			return nil, skillerr.Auth("ANTHROPIC_API_KEY not set", skillerr.WithHint("Set ANTHROPIC_API_KEY to use Anthropic."))
 		}
-		return NewAnthropicProvider(apiKey), nil
+		return NewAnthropicProvider(keys.Anthropic), nil
 
 	case ProviderOpenAI:
-		apiKey := os.Getenv("OPENAI_API_KEY")
-		if apiKey == "" {
-			return nil, fmt.Errorf("OPENAI_API_KEY not set")
+		if keys.OpenAI == "" {
+			return nil, skillerr.Auth("OPENAI_API_KEY not set", skillerr.WithHint("Set OPENAI_API_KEY to use OpenAI."))
 		}
-		return NewOpenAIProvider(apiKey), nil
+		return NewOpenAIProvider(keys.OpenAI), nil
 
 	case ProviderGemini:
-		apiKey := os.Getenv("GEMINI_API_KEY")
+		apiKey := keys.Gemini
 		if apiKey == "" {
-			apiKey = os.Getenv("GOOGLE_API_KEY")
+			apiKey = keys.Google
 		}
 		if apiKey == "" {
-			return nil, fmt.Errorf("GEMINI_API_KEY not set")
+			return nil, skillerr.Auth("GEMINI_API_KEY not set", skillerr.WithHint("Set GEMINI_API_KEY (or GOOGLE_API_KEY) to use Gemini."))
 		}
 		return NewGeminiProvider(apiKey), nil
 
 	default:
-		return nil, fmt.Errorf("unknown provider: %s", name)
+		return nil, skillerr.Validationf("unknown provider: %s", name)
 	}
 }
 
@@ -414,12 +452,12 @@ func (p *CerebrasProvider) RankCandidates(ctx context.Context, question string, 
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, skillerr.WrapRuntime("marshal request", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.cerebras.ai/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -427,13 +465,13 @@ func (p *CerebrasProvider) RankCandidates(ctx context.Context, question string, 
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return nil, skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -445,11 +483,11 @@ func (p *CerebrasProvider) RankCandidates(ctx context.Context, question string, 
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("empty response")
+		return nil, skillerr.Runtime("empty response")
 	}
 
 	return parseRankingResponse(result.Choices[0].Message.Content, candidates)
@@ -489,12 +527,12 @@ func (p *AnthropicProvider) RankCandidates(ctx context.Context, question string,
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, skillerr.WrapRuntime("marshal request", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -503,13 +541,13 @@ func (p *AnthropicProvider) RankCandidates(ctx context.Context, question string,
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return nil, skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -519,11 +557,11 @@ func (p *AnthropicProvider) RankCandidates(ctx context.Context, question string,
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Content) == 0 {
-		return nil, fmt.Errorf("empty response")
+		return nil, skillerr.Runtime("empty response")
 	}
 
 	return parseRankingResponse(result.Content[0].Text, candidates)
@@ -562,12 +600,12 @@ func (p *OpenAIProvider) RankCandidates(ctx context.Context, question string, ca
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, skillerr.WrapRuntime("marshal request", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -575,13 +613,13 @@ func (p *OpenAIProvider) RankCandidates(ctx context.Context, question string, ca
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return nil, skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -593,11 +631,11 @@ func (p *OpenAIProvider) RankCandidates(ctx context.Context, question string, ca
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("empty response")
+		return nil, skillerr.Runtime("empty response")
 	}
 
 	return parseRankingResponse(result.Choices[0].Message.Content, candidates)
@@ -641,26 +679,26 @@ func (p *GeminiProvider) RankCandidates(ctx context.Context, question string, ca
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, skillerr.WrapRuntime("marshal request", err)
 	}
 
 	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=%s", p.apiKey)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return nil, skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -674,11 +712,11 @@ func (p *GeminiProvider) RankCandidates(ctx context.Context, question string, ca
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("empty response")
+		return nil, skillerr.Runtime("empty response")
 	}
 
 	return parseRankingResponse(result.Candidates[0].Content.Parts[0].Text, candidates)
@@ -736,13 +774,13 @@ func parseRankingResponse(response string, candidates []Candidate) ([]ProviderSc
 	start := strings.Index(response, "[")
 	end := strings.LastIndex(response, "]")
 	if start == -1 || end == -1 || start >= end {
-		return nil, fmt.Errorf("no JSON array found in response")
+		return nil, skillerr.Parse("no JSON array found in response")
 	}
 	response = response[start : end+1]
 
 	var scores []ProviderScore
 	if err := json.Unmarshal([]byte(response), &scores); err != nil {
-		return nil, fmt.Errorf("parse ranking JSON: %w", err)
+		return nil, skillerr.WrapParse("parse ranking JSON", err)
 	}
 
 	// Validate scores are in 0-1 range and normalize
@@ -757,4 +795,3 @@ func parseRankingResponse(response string, candidates []Candidate) ([]ProviderSc
 
 	return scores, nil
 }
-

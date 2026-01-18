@@ -12,19 +12,31 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
-	"github.com/oklog/ulid/v2"
 )
+
+const embeddingQueueTable = "embedding_queue_jobs"
 
 // ErrNotFound indicates the requested resource doesn't exist.
 var ErrNotFound = errors.New("not found")
 
 // Store manages the embedding job queue and results in SQLite.
 type Store struct {
-	db *sql.DB
+	db    *sql.DB
+	queue *queue.Store
 }
 
-// OpenStore opens or creates the embedding queue database.
+type embeddingPayload struct {
+	WorkspaceID   string `json:"workspace_id"`
+	SymbolID      string `json:"symbol_id"`
+	FilePath      string `json:"file_path"`
+	SymbolName    string `json:"symbol_name"`
+	Content       string `json:"content"`
+	ContentDigest string `json:"content_digest"`
+}
+
+// OpenStore opens the embedding store in the provided root directory.
 func OpenStore(ctx context.Context, root string) (*Store, error) {
 	dbPath := filepath.Join(root, "embedding_queue.db")
 	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
@@ -32,16 +44,21 @@ func OpenStore(ctx context.Context, root string) (*Store, error) {
 		return nil, fmt.Errorf("embedding: open db: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	queueStore, err := queue.NewStore(db, queue.Options{Table: embeddingQueueTable})
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	return &Store{db: db, queue: queueStore}, nil
 }
 
-// OpenStoreFromConfig opens the embedding queue store using paths from config.
-// This is the preferred way to open the store as it ensures correct path handling.
+// OpenStoreFromConfig opens the embedding store using config paths.
 func OpenStoreFromConfig(ctx context.Context, cfg config.Config) (*Store, error) {
 	return OpenStore(ctx, cfg.Paths.Cache)
 }
 
-// Close closes the database connection.
+// Close closes the underlying database handle.
 func (s *Store) Close() error {
 	if s.db != nil {
 		return s.db.Close()
@@ -50,33 +67,11 @@ func (s *Store) Close() error {
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
+	if err := queue.Migrate(ctx, db, queue.Options{Table: embeddingQueueTable}); err != nil {
+		return err
+	}
+
 	schema := `
-	CREATE TABLE IF NOT EXISTS embedding_jobs (
-		id TEXT PRIMARY KEY,
-		workspace_id TEXT NOT NULL,
-		symbol_id TEXT NOT NULL,
-		file_path TEXT NOT NULL,
-		symbol_name TEXT NOT NULL,
-		content TEXT NOT NULL,
-		content_digest TEXT NOT NULL,
-		state TEXT NOT NULL DEFAULT 'queued',
-		priority INTEGER NOT NULL DEFAULT 50,
-		attempts INTEGER NOT NULL DEFAULT 0,
-		max_attempts INTEGER NOT NULL DEFAULT 3,
-		error TEXT,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL,
-		scheduled_at TEXT,
-		completed_at TEXT,
-		UNIQUE(workspace_id, symbol_id, content_digest)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_jobs_state_priority
-		ON embedding_jobs(state, priority DESC, created_at);
-
-	CREATE INDEX IF NOT EXISTS idx_jobs_workspace_symbol
-		ON embedding_jobs(workspace_id, symbol_id);
-
 	CREATE TABLE IF NOT EXISTS symbol_embeddings (
 		symbol_id TEXT NOT NULL,
 		workspace_id TEXT NOT NULL,
@@ -93,45 +88,120 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		ON symbol_embeddings(workspace_id, file_path);
 	`
 
-	_, err := db.ExecContext(ctx, schema)
-	return err
+	if _, err := db.ExecContext(ctx, schema); err != nil {
+		return err
+	}
+
+	return migrateLegacyJobs(ctx, db)
+}
+
+func migrateLegacyJobs(ctx context.Context, db *sql.DB) error {
+	var legacyExists int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='embedding_jobs'`).Scan(&legacyExists); err != nil {
+		return err
+	}
+	if legacyExists == 0 {
+		return nil
+	}
+
+	var queuedCount int
+	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s`, embeddingQueueTable)).Scan(&queuedCount); err != nil {
+		return err
+	}
+	if queuedCount > 0 {
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, workspace_id, symbol_id, file_path, symbol_name, content, content_digest,
+		       state, priority, attempts, max_attempts, error, created_at, updated_at,
+		       scheduled_at, completed_at
+		FROM embedding_jobs
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	stmt, err := db.PrepareContext(ctx, fmt.Sprintf(`
+		INSERT OR IGNORE INTO %s
+			(id, group_id, payload, dedupe_key, state, priority, attempts, max_attempts, error,
+			 created_at, updated_at, scheduled_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, embeddingQueueTable))
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for rows.Next() {
+		var (
+			id            string
+			workspaceID   string
+			symbolID      string
+			filePath      string
+			symbolName    string
+			content       string
+			contentDigest string
+			state         string
+			priority      int
+			attempts      int
+			maxAttempts   int
+			createdAt     string
+			updatedAt     string
+			errStr        sql.NullString
+			scheduledStr  sql.NullString
+			completedStr  sql.NullString
+		)
+
+		if err := rows.Scan(
+			&id, &workspaceID, &symbolID, &filePath, &symbolName, &content, &contentDigest,
+			&state, &priority, &attempts, &maxAttempts, &errStr, &createdAt, &updatedAt,
+			&scheduledStr, &completedStr,
+		); err != nil {
+			return err
+		}
+
+		payloadBytes, err := json.Marshal(embeddingPayload{
+			WorkspaceID:   workspaceID,
+			SymbolID:      symbolID,
+			FilePath:      filePath,
+			SymbolName:    symbolName,
+			Content:       content,
+			ContentDigest: contentDigest,
+		})
+		if err != nil {
+			return err
+		}
+
+		dedupeKey := dedupeKeyForSymbol(workspaceID, symbolID, contentDigest)
+
+		if _, err := stmt.ExecContext(ctx,
+			id, workspaceID, payloadBytes, dedupeKey, state, priority, attempts, maxAttempts,
+			nullStringValue(errStr), createdAt, updatedAt, nullStringValue(scheduledStr), nullStringValue(completedStr),
+		); err != nil {
+			return err
+		}
+	}
+
+	return rows.Err()
 }
 
 // Enqueue adds symbols to the embedding queue.
 func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult, error) {
 	result := &EnqueueResult{}
-	now := time.Now().UTC()
-
-	priority := req.Priority
-	if priority == 0 {
-		priority = PriorityNormal
+	if len(req.Symbols) == 0 {
+		return result, nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO embedding_jobs
-			(id, workspace_id, symbol_id, file_path, symbol_name, content,
-			 content_digest, state, priority, max_attempts, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, 3, ?, ?)
-		ON CONFLICT(workspace_id, symbol_id, content_digest) DO NOTHING
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("prepare: %w", err)
-	}
-	defer stmt.Close()
-
+	queueReqs := make([]queue.EnqueueRequest, 0, len(req.Symbols))
 	for _, sym := range req.Symbols {
 		contentDigest := computeDigest(sym.Content)
 
 		// Check if embedding already exists with same digest (deduplication)
 		if req.Deduplicate {
 			var exists bool
-			err := tx.QueryRowContext(ctx, `
+			err := s.db.QueryRowContext(ctx, `
 				SELECT EXISTS(
 					SELECT 1 FROM symbol_embeddings
 					WHERE workspace_id = ? AND symbol_id = ? AND content_digest = ?
@@ -143,70 +213,76 @@ func (s *Store) Enqueue(ctx context.Context, req EnqueueRequest) (*EnqueueResult
 			}
 		}
 
-		id := ulid.Make().String()
-		nowStr := now.Format(time.RFC3339Nano)
-
-		res, err := stmt.ExecContext(ctx,
-			id, req.WorkspaceID, sym.SymbolID, sym.FilePath, sym.SymbolName,
-			sym.Content, contentDigest, priority, nowStr, nowStr,
-		)
+		payloadBytes, err := json.Marshal(embeddingPayload{
+			WorkspaceID:   req.WorkspaceID,
+			SymbolID:      sym.SymbolID,
+			FilePath:      sym.FilePath,
+			SymbolName:    sym.SymbolName,
+			Content:       sym.Content,
+			ContentDigest: contentDigest,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("insert job: %w", err)
+			return nil, fmt.Errorf("marshal payload: %w", err)
 		}
 
-		affected, _ := res.RowsAffected()
-		if affected > 0 {
-			result.Queued++
-			result.JobIDs = append(result.JobIDs, id)
-		} else {
-			result.Skipped++ // Conflict = already queued
-		}
+		queueReqs = append(queueReqs, queue.EnqueueRequest{
+			GroupID:   req.WorkspaceID,
+			Payload:   payloadBytes,
+			DedupeKey: dedupeKeyForSymbol(req.WorkspaceID, sym.SymbolID, contentDigest),
+			Priority:  req.Priority,
+		})
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
+	if len(queueReqs) == 0 {
+		return result, nil
 	}
+
+	queued, err := s.queue.EnqueueBatch(ctx, queueReqs)
+	if err != nil {
+		return nil, err
+	}
+	result.Queued += queued.Queued
+	result.Skipped += queued.Skipped
+	result.JobIDs = append(result.JobIDs, queued.JobIDs...)
 
 	return result, nil
 }
 
 // ClaimNext claims the next available job for processing.
-// Returns nil if no jobs are available.
 func (s *Store) ClaimNext(ctx context.Context) (*EmbeddingJob, error) {
-	now := time.Now().UTC()
-	nowStr := now.Format(time.RFC3339Nano)
-
-	// Atomically claim a job using UPDATE...RETURNING
-	row := s.db.QueryRowContext(ctx, `
-		UPDATE embedding_jobs
-		SET state = 'running', updated_at = ?, attempts = attempts + 1
-		WHERE id = (
-			SELECT id FROM embedding_jobs
-			WHERE state IN ('queued', 'retry')
-			AND (scheduled_at IS NULL OR scheduled_at <= ?)
-			ORDER BY priority DESC, created_at ASC
-			LIMIT 1
-		)
-		RETURNING id, workspace_id, symbol_id, file_path, symbol_name, content,
-		          content_digest, state, priority, attempts, max_attempts, error,
-		          created_at, updated_at, scheduled_at, completed_at
-	`, nowStr, nowStr)
-
-	job, err := scanJob(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+	job, err := s.queue.ClaimNext(ctx, queue.ClaimOptions{})
 	if err != nil {
 		return nil, err
 	}
+	if job == nil {
+		return nil, nil
+	}
 
-	return job, nil
+	payload, err := decodeEmbeddingPayload(job.Payload)
+	if err != nil {
+		_ = s.queue.Fail(ctx, job.ID, fmt.Sprintf("decode payload: %v", err))
+		return nil, err
+	}
+
+	return buildEmbeddingJob(job, payload), nil
 }
 
-// Complete marks a job as completed and stores the embedding.
+// Complete stores the embedding result and marks the job as completed.
 func (s *Store) Complete(ctx context.Context, jobID string, embedding []float32, model string) error {
-	now := time.Now().UTC()
-	nowStr := now.Format(time.RFC3339Nano)
+	job, err := s.queue.GetJob(ctx, jobID)
+	if err != nil {
+		if errors.Is(err, queue.ErrNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	payload, err := decodeEmbeddingPayload(job.Payload)
+	if err != nil {
+		return err
+	}
+
+	nowStr := time.Now().UTC().Format(time.RFC3339Nano)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -214,19 +290,6 @@ func (s *Store) Complete(ctx context.Context, jobID string, embedding []float32,
 	}
 	defer tx.Rollback()
 
-	// Get job details
-	var job EmbeddingJob
-	var createdStr string
-
-	err = tx.QueryRowContext(ctx, `
-		SELECT workspace_id, symbol_id, file_path, content_digest, created_at
-		FROM embedding_jobs WHERE id = ?
-	`, jobID).Scan(&job.WorkspaceID, &job.SymbolID, &job.FilePath, &job.ContentDigest, &createdStr)
-	if err != nil {
-		return fmt.Errorf("get job: %w", err)
-	}
-
-	// Store the embedding
 	embeddingBytes, err := json.Marshal(embedding)
 	if err != nil {
 		return fmt.Errorf("marshal embedding: %w", err)
@@ -242,73 +305,52 @@ func (s *Store) Complete(ctx context.Context, jobID string, embedding []float32,
 			model = excluded.model,
 			dimensions = excluded.dimensions,
 			created_at = excluded.created_at
-	`, job.SymbolID, job.WorkspaceID, job.FilePath, embeddingBytes, job.ContentDigest, model, len(embedding), nowStr)
+	`, payload.SymbolID, payload.WorkspaceID, payload.FilePath, embeddingBytes, payload.ContentDigest, model, len(embedding), nowStr)
 	if err != nil {
 		return fmt.Errorf("save embedding: %w", err)
 	}
 
-	// Mark job complete
-	_, err = tx.ExecContext(ctx, `
-		UPDATE embedding_jobs
+	result, err := tx.ExecContext(ctx, fmt.Sprintf(`
+		UPDATE %s
 		SET state = 'ok', updated_at = ?, completed_at = ?, error = NULL
 		WHERE id = ?
-	`, nowStr, nowStr, jobID)
+	`, embeddingQueueTable), nowStr, nowStr, jobID)
 	if err != nil {
 		return fmt.Errorf("update job: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	} else if affected == 0 {
+		return ErrNotFound
 	}
 
 	return tx.Commit()
 }
 
-// Fail marks a job as failed, potentially scheduling a retry.
+// Fail records a job failure with retry scheduling.
 func (s *Store) Fail(ctx context.Context, jobID string, errMsg string) error {
-	now := time.Now().UTC()
-	nowStr := now.Format(time.RFC3339Nano)
-
-	// Get current attempts and max
-	var attempts, maxAttempts int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT attempts, max_attempts FROM embedding_jobs WHERE id = ?
-	`, jobID).Scan(&attempts, &maxAttempts)
-	if err != nil {
-		return fmt.Errorf("get job: %w", err)
-	}
-
-	if attempts < maxAttempts {
-		// Schedule retry with exponential backoff
-		backoff := time.Duration(1<<uint(attempts-1)) * time.Minute
-		scheduledAt := now.Add(backoff).Format(time.RFC3339Nano)
-
-		_, err = s.db.ExecContext(ctx, `
-			UPDATE embedding_jobs
-			SET state = 'retry', updated_at = ?, scheduled_at = ?, error = ?
-			WHERE id = ?
-		`, nowStr, scheduledAt, errMsg, jobID)
-	} else {
-		// Max retries exceeded
-		_, err = s.db.ExecContext(ctx, `
-			UPDATE embedding_jobs
-			SET state = 'error', updated_at = ?, completed_at = ?, error = ?
-			WHERE id = ?
-		`, nowStr, nowStr, errMsg, jobID)
-	}
-
-	return err
+	return s.queue.Fail(ctx, jobID, errMsg)
 }
 
-// GetJob retrieves a job by ID.
+// GetJob fetches a job by ID.
 func (s *Store) GetJob(ctx context.Context, id string) (*EmbeddingJob, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, workspace_id, symbol_id, file_path, symbol_name, content,
-		       content_digest, state, priority, attempts, max_attempts, error,
-		       created_at, updated_at, scheduled_at, completed_at
-		FROM embedding_jobs WHERE id = ?
-	`, id)
+	job, err := s.queue.GetJob(ctx, id)
+	if err != nil {
+		if errors.Is(err, queue.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
 
-	return scanJob(row)
+	payload, err := decodeEmbeddingPayload(job.Payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildEmbeddingJob(job, payload), nil
 }
 
-// GetEmbedding retrieves a stored embedding by symbol ID.
+// GetEmbedding retrieves a stored embedding.
 func (s *Store) GetEmbedding(ctx context.Context, workspaceID, symbolID string) (*EmbeddingResult, error) {
 	var result EmbeddingResult
 	var embeddingBytes []byte
@@ -336,7 +378,7 @@ func (s *Store) GetEmbedding(ctx context.Context, workspaceID, symbolID string) 
 	return &result, nil
 }
 
-// GetEmbeddingsByFile retrieves all embeddings for a file.
+// GetEmbeddingsByFile retrieves embeddings for a given file.
 func (s *Store) GetEmbeddingsByFile(ctx context.Context, workspaceID, filePath string) ([]*EmbeddingResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT symbol_id, workspace_id, file_path, embedding, content_digest, model, dimensions, created_at
@@ -347,7 +389,7 @@ func (s *Store) GetEmbeddingsByFile(ctx context.Context, workspaceID, filePath s
 	}
 	defer rows.Close()
 
-	results := make([]*EmbeddingResult, 0) // Initialize as empty slice for JSON serialization
+	results := make([]*EmbeddingResult, 0)
 	for rows.Next() {
 		var result EmbeddingResult
 		var embeddingBytes []byte
@@ -371,70 +413,35 @@ func (s *Store) GetEmbeddingsByFile(ctx context.Context, workspaceID, filePath s
 	return results, rows.Err()
 }
 
-// Stats returns queue statistics.
+// Stats summarizes the queue state.
 func (s *Store) Stats(ctx context.Context) (*QueueStats, error) {
 	stats := &QueueStats{}
 
-	// Count jobs by state
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT state, COUNT(*) FROM embedding_jobs GROUP BY state
-	`)
+	queueStats, err := s.queue.Stats(ctx, "")
 	if err != nil {
-		return nil, fmt.Errorf("count jobs: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var state string
-		var count int
-		if err := rows.Scan(&state, &count); err != nil {
-			return nil, fmt.Errorf("scan: %w", err)
-		}
-		switch JobState(state) {
-		case StateQueued, StateRetry:
-			stats.QueuedCount += count
-		case StateRunning:
-			stats.RunningCount = count
-		case StateOK:
-			stats.CompletedCount = count
-		case StateError:
-			stats.FailedCount = count
-		}
+		return nil, err
 	}
 
-	// Count embeddings
+	stats.QueuedCount = queueStats.QueuedCount
+	stats.RunningCount = queueStats.RunningCount
+	stats.CompletedCount = queueStats.CompletedCount
+	stats.FailedCount = queueStats.FailedCount
+	stats.OldestQueuedAt = queueStats.OldestQueuedAt
+
 	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM symbol_embeddings`).Scan(&stats.EmbeddingsCount)
 	if err != nil {
 		return nil, fmt.Errorf("count embeddings: %w", err)
 	}
 
-	// Get oldest queued job
-	var oldestStr sql.NullString
-	err = s.db.QueryRowContext(ctx, `
-		SELECT MIN(created_at) FROM embedding_jobs WHERE state IN ('queued', 'retry')
-	`).Scan(&oldestStr)
-	if err == nil && oldestStr.Valid {
-		t, _ := time.Parse(time.RFC3339Nano, oldestStr.String)
-		stats.OldestQueuedAt = &t
-	}
-
 	return stats, nil
 }
 
-// Cleanup removes old completed/failed jobs.
+// Cleanup deletes completed jobs older than the provided duration.
 func (s *Store) Cleanup(ctx context.Context, olderThan time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-olderThan).Format(time.RFC3339Nano)
-	result, err := s.db.ExecContext(ctx, `
-		DELETE FROM embedding_jobs
-		WHERE state IN ('ok', 'error') AND completed_at < ?
-	`, cutoff)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+	return s.queue.Cleanup(ctx, olderThan)
 }
 
-// DeleteEmbedding removes an embedding.
+// DeleteEmbedding removes a single embedding.
 func (s *Store) DeleteEmbedding(ctx context.Context, workspaceID, symbolID string) error {
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM symbol_embeddings WHERE workspace_id = ? AND symbol_id = ?
@@ -442,7 +449,7 @@ func (s *Store) DeleteEmbedding(ctx context.Context, workspaceID, symbolID strin
 	return err
 }
 
-// DeleteEmbeddingsByFile removes all embeddings for a file.
+// DeleteEmbeddingsByFile removes embeddings for a file.
 func (s *Store) DeleteEmbeddingsByFile(ctx context.Context, workspaceID, filePath string) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM symbol_embeddings WHERE workspace_id = ? AND file_path = ?
@@ -453,7 +460,7 @@ func (s *Store) DeleteEmbeddingsByFile(ctx context.Context, workspaceID, filePat
 	return result.RowsAffected()
 }
 
-// GetAllEmbeddings retrieves all embeddings for a workspace.
+// GetAllEmbeddings returns all embeddings for a workspace.
 func (s *Store) GetAllEmbeddings(ctx context.Context, workspaceID string) ([]EmbeddingResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT symbol_id, workspace_id, file_path, embedding, content_digest, model, dimensions, created_at
@@ -464,7 +471,7 @@ func (s *Store) GetAllEmbeddings(ctx context.Context, workspaceID string) ([]Emb
 	}
 	defer rows.Close()
 
-	results := make([]EmbeddingResult, 0) // Initialize as empty slice for JSON serialization
+	results := make([]EmbeddingResult, 0)
 	for rows.Next() {
 		var result EmbeddingResult
 		var embeddingBytes []byte
@@ -488,35 +495,47 @@ func (s *Store) GetAllEmbeddings(ctx context.Context, workspaceID string) ([]Emb
 	return results, rows.Err()
 }
 
-func scanJob(row *sql.Row) (*EmbeddingJob, error) {
-	var job EmbeddingJob
-	var createdStr, updatedStr string
-	var scheduledStr, completedStr, errStr sql.NullString
+func buildEmbeddingJob(job *queue.Job, payload embeddingPayload) *EmbeddingJob {
+	return &EmbeddingJob{
+		ID:            job.ID,
+		WorkspaceID:   payload.WorkspaceID,
+		SymbolID:      payload.SymbolID,
+		FilePath:      payload.FilePath,
+		SymbolName:    payload.SymbolName,
+		Content:       payload.Content,
+		ContentDigest: payload.ContentDigest,
+		State:         job.State,
+		Priority:      job.Priority,
+		Attempts:      job.Attempts,
+		MaxAttempts:   job.MaxAttempts,
+		Error:         job.Error,
+		CreatedAt:     job.CreatedAt,
+		UpdatedAt:     job.UpdatedAt,
+		ScheduledAt:   job.ScheduledAt,
+		CompletedAt:   job.CompletedAt,
+	}
+}
 
-	err := row.Scan(
-		&job.ID, &job.WorkspaceID, &job.SymbolID, &job.FilePath, &job.SymbolName,
-		&job.Content, &job.ContentDigest, &job.State, &job.Priority, &job.Attempts,
-		&job.MaxAttempts, &errStr, &createdStr, &updatedStr, &scheduledStr, &completedStr,
-	)
-	if err != nil {
-		return nil, err
+func decodeEmbeddingPayload(data []byte) (embeddingPayload, error) {
+	var payload embeddingPayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return embeddingPayload{}, err
 	}
+	if payload.ContentDigest == "" && payload.Content != "" {
+		payload.ContentDigest = computeDigest(payload.Content)
+	}
+	return payload, nil
+}
 
-	job.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
-	job.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)
-	if scheduledStr.Valid {
-		t, _ := time.Parse(time.RFC3339Nano, scheduledStr.String)
-		job.ScheduledAt = t
-	}
-	if completedStr.Valid {
-		t, _ := time.Parse(time.RFC3339Nano, completedStr.String)
-		job.CompletedAt = &t
-	}
-	if errStr.Valid {
-		job.Error = errStr.String
-	}
+func dedupeKeyForSymbol(workspaceID, symbolID, contentDigest string) string {
+	return computeDigest(fmt.Sprintf("%s:%s:%s", workspaceID, symbolID, contentDigest))
+}
 
-	return &job, nil
+func nullStringValue(value sql.NullString) any {
+	if value.Valid {
+		return value.String
+	}
+	return nil
 }
 
 func computeDigest(content string) string {

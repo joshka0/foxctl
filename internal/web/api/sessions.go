@@ -34,6 +34,7 @@ type SessionResponse struct {
 	TotalTokens     int      `json:"total_tokens"`
 	Status          string   `json:"status"`
 	AgentID         string   `json:"agent_id"`
+	AgentType       string   `json:"agent_type,omitempty"`
 	ParentSessionID string   `json:"parent_session_id,omitempty"`
 }
 
@@ -322,11 +323,11 @@ func handleSessionContextWindows(w http.ResponseWriter, r *http.Request, cfg con
 	resp := make([]map[string]any, 0, len(windows))
 	for _, cw := range windows {
 		w := map[string]any{
-			"id":           cw.ID,
-			"window_index": cw.WindowIndex,
+			"id":            cw.ID,
+			"window_index":  cw.WindowIndex,
 			"message_count": cw.MessageCount,
-			"summary":      cw.Summary,
-			"trigger":      cw.Trigger,
+			"summary":       cw.Summary,
+			"trigger":       cw.Trigger,
 		}
 		if !cw.StartedAt.IsZero() {
 			w["started_at"] = cw.StartedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -364,6 +365,7 @@ func sessionToResponse(s storage.Session) SessionResponse {
 		TotalTokens:     s.TotalTokens,
 		Status:          s.Status,
 		AgentID:         s.AgentID,
+		AgentType:       s.AgentType,
 		ParentSessionID: s.ParentSessionID,
 	}
 	if !s.StartedAt.IsZero() {

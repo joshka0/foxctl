@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/platform/env"
 	"github.com/jkatigb/agentctl/internal/verification"
 )
 
@@ -206,13 +206,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	if rc.ShouldTruncate(len(payload)) {
-		artifact, err := skillmain.PersistBuffer(ctx, rc, bytes.NewBuffer(payload), "application/json", "cove_verify")
+		artifact, hint, err := skillout.PersistBufferWithHint(ctx, rc, bytes.NewBuffer(payload), "application/json", "cove_verify", 200)
 		if err != nil {
 			return err
 		}
 		out.Artifact = artifact.Digest
-		hint := skillout.BuildCASHint(artifact, 200)
-		out.CASHint = &hint
+		out.CASHint = hint
 		preview := buildPreview(res, rc.MaxPreview)
 		out.Preview = &preview
 	} else {
@@ -233,19 +232,19 @@ func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
 	}
 
 	if provider == "" {
-		provider = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_PROVIDER"))
+		provider = env.GetString("AGENTCTL_LLM_PROVIDER")
 	}
 	if provider == "" {
 		switch {
-		case os.Getenv("GROQ_API_KEY") != "":
+		case env.GetString("GROQ_API_KEY") != "":
 			provider = "groq"
-		case os.Getenv("OPENROUTER_API_KEY") != "":
+		case env.GetString("OPENROUTER_API_KEY") != "":
 			provider = "openrouter"
-		case os.Getenv("GEMINI_API_KEY") != "":
+		case env.GetString("GEMINI_API_KEY") != "":
 			provider = "gemini"
-		case os.Getenv("OPENAI_API_KEY") != "":
+		case env.GetString("OPENAI_API_KEY") != "":
 			provider = "openai"
-		case os.Getenv("ANTHROPIC_API_KEY") != "":
+		case env.GetString("ANTHROPIC_API_KEY") != "":
 			provider = "anthropic"
 		default:
 			return nil, "", "", fmt.Errorf("no LLM provider configured (set AGENTCTL_LLM_PROVIDER+AGENTCTL_LLM_API_KEY or provider-specific *_API_KEY)")
@@ -253,7 +252,7 @@ func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
 	}
 
 	if model == "" {
-		model = strings.TrimSpace(os.Getenv("AGENTCTL_LLM_MODEL"))
+		model = env.GetString("AGENTCTL_LLM_MODEL")
 	}
 	if model == "" {
 		switch provider {
@@ -272,19 +271,19 @@ func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
 		}
 	}
 
-	apiKey := strings.TrimSpace(os.Getenv("AGENTCTL_LLM_API_KEY"))
+	apiKey := env.GetString("AGENTCTL_LLM_API_KEY")
 	if apiKey == "" {
 		switch provider {
 		case "gemini":
-			apiKey = os.Getenv("GEMINI_API_KEY")
+			apiKey = env.GetString("GEMINI_API_KEY")
 		case "groq":
-			apiKey = os.Getenv("GROQ_API_KEY")
+			apiKey = env.GetString("GROQ_API_KEY")
 		case "openrouter":
-			apiKey = os.Getenv("OPENROUTER_API_KEY")
+			apiKey = env.GetString("OPENROUTER_API_KEY")
 		case "openai":
-			apiKey = os.Getenv("OPENAI_API_KEY")
+			apiKey = env.GetString("OPENAI_API_KEY")
 		case "anthropic":
-			apiKey = os.Getenv("ANTHROPIC_API_KEY")
+			apiKey = env.GetString("ANTHROPIC_API_KEY")
 		}
 	}
 	if apiKey == "" {
@@ -389,4 +388,3 @@ func buildPreview(res result, maxItems int) resultPreview {
 		Results:     resultsPreview,
 	}
 }
-

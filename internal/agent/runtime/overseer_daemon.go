@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
@@ -23,29 +24,6 @@ type OverseerDaemonOptions struct {
 	StorageRoot  string
 	PollInterval time.Duration
 	DryRun       bool // If true, validate decisions without executing them
-}
-
-// SpawnRequestPayload matches the JSON payload in the envelope data for a spawn request.
-type SpawnRequestPayload struct {
-	CmdID       string           `json:"cmd_id"`
-	Action      string           `json:"action"` // "spawn"
-	ChildConfig ChildAgentConfig `json:"child_config"`
-}
-
-// ChildAgentConfig defines the configuration for a child agent.
-type ChildAgentConfig struct {
-	Role        string   `json:"role"`         // e.g., "coder", "reviewer"
-	Prompt      string   `json:"prompt"`       // system prompt
-	SkillsAllow []string `json:"skills_allow"` // tool allowlist
-	ParentNS    string   `json:"parent_ns"`    // for reply routing
-}
-
-// SpawnResponsePayload matches the JSON payload in the envelope data for a spawn response.
-type SpawnResponsePayload struct {
-	ChildID string `json:"child_id"`
-	ChildNS string `json:"child_ns"`
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
 }
 
 // RunOverseer runs the overseer daemon loop.
@@ -81,7 +59,7 @@ func RunOverseer(ctx context.Context, opts OverseerDaemonOptions) error {
 			}
 			for _, msg := range messages {
 				if msg.Type == agent.MessageTypeCmd {
-					handleOverseerCmd(ctx, msg, agentManager, mailboxStore)
+					handleOverseerCmd(ctx, msg, agentManager, mailboxStore, agentStore)
 				}
 				// Always ack message after processing attempts
 				errspkg.Ignore(mailboxStore.Ack(ctx, msg.ID), "ack overseer message")
@@ -90,7 +68,7 @@ func RunOverseer(ctx context.Context, opts OverseerDaemonOptions) error {
 	}
 }
 
-func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager.Manager, store mailbox.Store) {
+func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager.Manager, store mailbox.Store, agentStore agents.Store) {
 	var reqEnv envelope.Envelope
 	if err := json.Unmarshal(msg.Payload, &reqEnv); err != nil {
 		// Malformed payload
@@ -102,57 +80,119 @@ func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager
 	if reqEnv.Status != envelope.StatusOK {
 		return
 	}
-	if reqEnv.Command != "agent.cmd" {
+	if reqEnv.Command != "agent.spawn" {
 		return
 	}
 
-	var cmd SpawnRequestPayload
-	cmdBytes, err := json.Marshal(reqEnv.Data)
+	var req types.SpawnRequest
+	reqBytes, err := json.Marshal(reqEnv.Data)
 	if err != nil {
 		return
 	}
-	if err := json.Unmarshal(cmdBytes, &cmd); err != nil {
+	if err := json.Unmarshal(reqBytes, &req); err != nil {
 		return
 	}
 	if strings.TrimSpace(msg.FromNS) == "" {
 		return
 	}
-	if strings.TrimSpace(cmd.CmdID) == "" {
+	if strings.TrimSpace(req.SpawnReason) == "" {
+		resp := types.SpawnResponse{
+			Accepted:   false,
+			Reason:     "invalid_request: spawn_reason is required",
+			Suggestion: "Provide spawn_reason and requested_subagents before retrying.",
+		}
+		sendSpawnResponse(ctx, store, msg, resp)
 		return
 	}
-	if cmd.Action != "spawn" {
-		return // ignore unknown actions
-	}
-	if strings.TrimSpace(cmd.ChildConfig.Role) == "" {
-		return
-	}
-	if strings.TrimSpace(cmd.ChildConfig.Prompt) == "" {
+	if len(req.RequestedSubagents) == 0 {
+		resp := types.SpawnResponse{
+			Accepted:   false,
+			Reason:     "invalid_request: requested_subagents is required",
+			Suggestion: "Provide at least one requested_subagents entry.",
+		}
+		sendSpawnResponse(ctx, store, msg, resp)
 		return
 	}
 
-	// Spawn child agent
-	spawnResp, err := mgr.Spawn(ctx, agentmanager.SpawnRequest{
-		Role:        cmd.ChildConfig.Role,
-		Prompt:      cmd.ChildConfig.Prompt,
-		SkillsAllow: cmd.ChildConfig.SkillsAllow,
-		ParentNS:    msg.FromNS,
-		ShareBB:     "scoped", // Default to scoped for now
-	})
-
-	// Send response to parent
-	response := SpawnResponsePayload{
-		ChildID: spawnResp.AgentID,
-		ChildNS: spawnResp.NS,
-		Success: err == nil,
-	}
-	if err != nil {
-		response.Error = err.Error()
+	var parentAgent agent.Agent
+	parent, err := agentStore.GetByNamespace(ctx, msg.FromNS)
+	if err == nil {
+		parentAgent = parent
 	}
 
-	replyEnv := envelope.OK("agent.reply", response)
+	resp := types.SpawnResponse{
+		SpawnedAgents: []types.SpawnedAgent{},
+		DeniedAgents:  []types.DeniedAgent{},
+	}
+
+	for _, sub := range req.RequestedSubagents {
+		if strings.TrimSpace(string(sub.Role)) == "" {
+			resp.DeniedAgents = append(resp.DeniedAgents, types.DeniedAgent{
+				Role:   sub.Role,
+				Task:   sub.Task,
+				Reason: "invalid role",
+			})
+			continue
+		}
+		prompt := buildSpawnPrompt(req, sub)
+		spawnResp, err := mgr.Spawn(ctx, agentmanager.SpawnRequest{
+			ParentNS:    msg.FromNS,
+			Role:        string(sub.Role),
+			Prompt:      prompt,
+			SkillsAllow: parentAgent.SkillsAllow,
+			Policy:      parentAgent.Policy,
+			ShareBB:     "scoped",
+			LLMProvider: parentAgent.LLMProvider,
+			LLMModel:    parentAgent.LLMModel,
+			LLMAPIKey:   parentAgent.LLMAPIKey,
+		})
+		if err != nil {
+			resp.DeniedAgents = append(resp.DeniedAgents, types.DeniedAgent{
+				Role:   sub.Role,
+				Task:   sub.Task,
+				Reason: err.Error(),
+			})
+			continue
+		}
+
+		resp.SpawnedAgents = append(resp.SpawnedAgents, types.SpawnedAgent{
+			ActorID:   spawnResp.NS,
+			SessionID: spawnResp.AgentID,
+			Depth:     strings.Count(spawnResp.NS, "/child-"),
+		})
+	}
+
+	resp.Accepted = len(resp.SpawnedAgents) > 0
+	if len(resp.DeniedAgents) > 0 && len(resp.SpawnedAgents) == 0 {
+		resp.Reason = "all requested agents were denied"
+	} else if len(resp.DeniedAgents) > 0 {
+		resp.Reason = "some agents were denied"
+	}
+
+	sendSpawnResponse(ctx, store, msg, resp)
+}
+
+func buildSpawnPrompt(req types.SpawnRequest, sub types.SubagentRequest) string {
+	prompt := strings.TrimSpace(sub.Task)
+	if prompt == "" {
+		prompt = "Task not specified."
+	}
+	if strings.TrimSpace(req.SpawnReason) == "" {
+		return prompt
+	}
+	return fmt.Sprintf("%s\n\nSpawn reason: %s", prompt, strings.TrimSpace(req.SpawnReason))
+}
+
+func sendSpawnResponse(ctx context.Context, store mailbox.Store, msg agent.Message, resp types.SpawnResponse) {
+	replyEnv := envelope.OK("agent.spawn", resp)
 	replyPayload, err := json.Marshal(replyEnv)
 	if err != nil {
 		return
+	}
+
+	headers := map[string]string{}
+	if corr := strings.TrimSpace(msg.Headers["correlation"]); corr != "" {
+		headers["correlation"] = corr
 	}
 
 	if err := store.Send(ctx, agent.Message{
@@ -160,11 +200,11 @@ func handleOverseerCmd(ctx context.Context, msg agent.Message, mgr *agentmanager
 		FromNS:    "actor:system:overseer",
 		ToNS:      msg.FromNS,
 		Type:      agent.MessageTypeReply,
-		Headers:   map[string]string{"correlation": cmd.CmdID},
+		Headers:   headers,
 		Payload:   replyPayload,
 		VisibleAt: time.Now().Unix(),
 		Timestamp: time.Now().Unix(),
 	}); err != nil {
-		log.Error().Err(err).Str("cmd_id", cmd.CmdID).Str("to_ns", msg.FromNS).Msg("overseer failed to send spawn response")
+		log.Error().Err(err).Str("to_ns", msg.FromNS).Msg("overseer failed to send spawn response")
 	}
 }

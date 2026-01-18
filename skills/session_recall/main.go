@@ -2,20 +2,17 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -27,6 +24,7 @@ type Input struct {
 	Workspace         string  `json:"workspace,omitempty"`
 	Project           string  `json:"project,omitempty"`
 	WindowGranularity bool    `json:"window_granularity,omitempty"` // Search at context window level instead of session
+	ChunkGranularity  bool    `json:"chunk_granularity,omitempty"`  // Search at chunk level (requires embeddings)
 }
 
 // Output defines the skill output.
@@ -34,6 +32,7 @@ type Output struct {
 	Query               string         `json:"query"`
 	Matches             []SessionMatch `json:"matches,omitempty"`
 	WindowMatches       []WindowMatch  `json:"window_matches,omitempty"` // Populated when window_granularity is true
+	ChunkMatches        []ChunkMatch   `json:"chunk_matches,omitempty"`  // Populated when chunk_granularity is true
 	TotalWithEmbeddings int            `json:"total_with_embeddings"`
 	Status              string         `json:"status"`
 	Message             string         `json:"message"`
@@ -68,40 +67,25 @@ type WindowMatch struct {
 	Similarity       float64 `json:"similarity"`
 }
 
+// ChunkMatch represents a matched chunk with similarity score.
+type ChunkMatch struct {
+	SessionID      string  `json:"session_id"`
+	WindowIndex    int     `json:"window_index"`
+	ChunkIndex     int     `json:"chunk_index"`
+	ChunkType      string  `json:"chunk_type,omitempty"`
+	ContentPreview string  `json:"content_preview,omitempty"`
+	SummaryID      string  `json:"summary_id,omitempty"`
+	Summary        string  `json:"summary,omitempty"`
+	SummaryModel   string  `json:"summary_model,omitempty"`
+	ChunkIndexMin  int     `json:"chunk_index_min,omitempty"`
+	ChunkIndexMax  int     `json:"chunk_index_max,omitempty"`
+	Similarity     float64 `json:"similarity"`
+}
+
 const (
-	geminiModel   = "gemini-embedding-001"
-	geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultLimit  = 5
 	defaultMinSim = 0.3
 )
-
-// geminiEmbedRequest is the request body for the Gemini embed API.
-type geminiEmbedRequest struct {
-	Model   string            `json:"model"`
-	Content geminiContentPart `json:"content"`
-}
-
-type geminiContentPart struct {
-	Parts []geminiTextPart `json:"parts"`
-}
-
-type geminiTextPart struct {
-	Text string `json:"text"`
-}
-
-// geminiEmbedResponse is the response from the Gemini embed API.
-type geminiEmbedResponse struct {
-	Embedding struct {
-		Values []float32 `json:"values"`
-	} `json:"embedding"`
-	Error *geminiError `json:"error,omitempty"`
-}
-
-type geminiError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Status  string `json:"status"`
-}
 
 func main() {
 	skillmain.Main("session/recall", run)
@@ -110,61 +94,182 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	normalizeInput(&in, rc)
+	if in.WindowGranularity && in.ChunkGranularity {
+		return skillerr.Arg("window_granularity and chunk_granularity are mutually exclusive")
+	}
 
 	// Check for embedding API key - prefer Voyage, fall back to Gemini, then FTS
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	useFTSFallback := voyageKey == "" && geminiKey == ""
 
-	// Get agentctl home
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		homeDir, _ := os.UserHomeDir()
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
-	}
-
 	// Open sessions store
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	sessionStore, err := sessions.Open(ctx, storageRoot)
+	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open sessions store: %w", err)
+		return skillerr.WrapIO("open sessions store", err)
 	}
-	defer func() { errs.Ignore(sessionStore.Close(), "close sessions store") }()
+	defer cleanup()
 
 	// Generate embedding for the query - prefer Voyage, fall back to Gemini, then FTS
 	var queryEmbedding []float32
 	if !useFTSFallback {
-		if voyageKey != "" {
-			// Get model from scope-based recommendation (supports env var override)
-			model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSessions)
-			vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-				APIKey:        voyageKey,
-				Model:         model, // Must match session_summarize for compatible embeddings
-				RateLimitWait: boolPtr(true),
-			})
-			if err != nil {
-				return fmt.Errorf("voyage provider: %w", err)
-			}
-			queryEmbedding, err = vp.EmbedQuery(ctx, in.Query)
-			if err != nil {
-				return fmt.Errorf("generate query embedding: %w", err)
-			}
+		provider, err := semantic.NewProviderForScope(
+			semantic.ScopeSessions,
+			rc.Config,
+			semantic.WithVoyageKey(voyageKey),
+			semantic.WithGeminiKey(geminiKey),
+			semantic.WithRateLimitWait(true),
+		)
+		if err != nil {
+			return skillerr.WrapRuntime("embedding provider", err)
+		}
+
+		enrichedQuery := semantic.EnrichQuery(in.Query)
+		if queryProvider, ok := provider.(semantic.QueryEmbeddingProvider); ok {
+			queryEmbedding, err = queryProvider.EmbedQuery(ctx, enrichedQuery)
 		} else {
-			queryEmbedding, err = generateGeminiEmbedding(ctx, geminiKey, in.Query)
-			if err != nil {
-				return fmt.Errorf("generate query embedding: %w", err)
-			}
+			queryEmbedding, err = provider.Embed(ctx, enrichedQuery)
+		}
+		if err != nil {
+			return skillerr.WrapRuntime("generate query embedding", err)
 		}
 	}
 
 	var output Output
 	output.Query = in.Query
 
-	if in.WindowGranularity {
+	if in.ChunkGranularity {
+		if useFTSFallback {
+			return skillerr.Arg("chunk_granularity requires embeddings (set VOYAGE_API_KEY or GEMINI_API_KEY)")
+		}
+
+		chunkResults, err := sessionStore.SearchChunks(ctx, queryEmbedding, in.Limit*3)
+		if err != nil {
+			return skillerr.WrapIO("search chunks", err)
+		}
+
+		sessionCache := make(map[string]*sessions.Session)
+		windowCache := make(map[string][]sessions.ContextWindow)
+		summaryCache := make(map[string][]sessions.SessionChunkSummary)
+
+		resolveWindowIndex := func(sessionID string, chunk sessions.SessionChunk) int {
+			if chunk.ContextWindowIndex != 0 {
+				return chunk.ContextWindowIndex
+			}
+			if windows, ok := windowCache[sessionID]; ok {
+				for _, win := range windows {
+					if chunk.ChunkIndex >= win.ChunkStart && chunk.ChunkIndex <= win.ChunkEnd {
+						return win.WindowIndex
+					}
+				}
+				return chunk.ContextWindowIndex
+			}
+			windows, err := sessionStore.GetContextWindows(ctx, sessionID)
+			if err != nil {
+				return chunk.ContextWindowIndex
+			}
+			windowCache[sessionID] = windows
+			for _, win := range windows {
+				if chunk.ChunkIndex >= win.ChunkStart && chunk.ChunkIndex <= win.ChunkEnd {
+					return win.WindowIndex
+				}
+			}
+			return chunk.ContextWindowIndex
+		}
+
+		loadSummaries := func(sessionID string, windowIndex int) []sessions.SessionChunkSummary {
+			cacheKey := fmt.Sprintf("%s:%d", sessionID, windowIndex)
+			if summaries, ok := summaryCache[cacheKey]; ok {
+				return summaries
+			}
+			summaries, err := sessionStore.GetChunkSummaries(ctx, sessionID, windowIndex)
+			if err != nil {
+				return nil
+			}
+			summaryCache[cacheKey] = summaries
+			return summaries
+		}
+
+		findSummary := func(summaries []sessions.SessionChunkSummary, chunkIndex int) *sessions.SessionChunkSummary {
+			for _, summary := range summaries {
+				if summary.ChunkIndexMin <= chunkIndex && summary.ChunkIndexMax >= chunkIndex {
+					return &summary
+				}
+			}
+			for _, summary := range summaries {
+				for _, idx := range summary.ChunkIndices {
+					if idx == chunkIndex {
+						return &summary
+					}
+				}
+			}
+			return nil
+		}
+
+		chunkMatches := make([]ChunkMatch, 0)
+		for _, r := range chunkResults {
+			if r.Similarity < in.MinSimilarity {
+				continue
+			}
+
+			sess, ok := sessionCache[r.Chunk.SessionID]
+			if !ok {
+				s, err := sessionStore.Get(ctx, r.Chunk.SessionID)
+				if err == nil {
+					sess = &s
+					sessionCache[r.Chunk.SessionID] = sess
+				}
+			}
+			if sess == nil {
+				continue
+			}
+			if in.Workspace != "" && sess.WorkspacePath != in.Workspace {
+				continue
+			}
+			if in.Project != "" && sess.ProjectName != in.Project {
+				continue
+			}
+
+			windowIndex := resolveWindowIndex(r.Chunk.SessionID, r.Chunk)
+			summaries := loadSummaries(r.Chunk.SessionID, windowIndex)
+			summary := findSummary(summaries, r.Chunk.ChunkIndex)
+
+			match := ChunkMatch{
+				SessionID:      r.Chunk.SessionID,
+				WindowIndex:    windowIndex,
+				ChunkIndex:     r.Chunk.ChunkIndex,
+				ChunkType:      r.Chunk.ChunkType,
+				ContentPreview: r.Chunk.ContentPreview,
+				Similarity:     r.Similarity,
+			}
+			if summary != nil {
+				match.SummaryID = summary.ID
+				match.Summary = summary.Summary
+				match.SummaryModel = summary.SummaryModel
+				match.ChunkIndexMin = summary.ChunkIndexMin
+				match.ChunkIndexMax = summary.ChunkIndexMax
+			}
+
+			chunkMatches = append(chunkMatches, match)
+			if len(chunkMatches) >= in.Limit {
+				break
+			}
+		}
+
+		output.ChunkMatches = chunkMatches
+		output.TotalWithEmbeddings = len(chunkResults)
+		output.Status = "ok"
+		output.Message = fmt.Sprintf("Found %d relevant chunks for query", len(chunkMatches))
+
+		if len(chunkMatches) == 0 {
+			output.Status = "no_matches"
+			output.Message = "No chunks matched the query above the similarity threshold"
+		}
+	} else if in.WindowGranularity {
 		// Search at context window level for more granular retrieval
 		windowResults, err := sessionStore.SearchContextWindows(ctx, queryEmbedding, in.Limit*2)
 		if err != nil {
-			return fmt.Errorf("search context windows: %w", err)
+			return skillerr.WrapIO("search context windows", err)
 		}
 
 		windowMatches := make([]WindowMatch, 0)
@@ -215,7 +320,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			// Full-text search fallback when no embedding API available
 			ftsResults, err := sessionStore.Search(ctx, in.Query, in.Limit*2)
 			if err != nil {
-				return fmt.Errorf("text search: %w", err)
+				return skillerr.WrapIO("text search", err)
 			}
 			totalSearched = len(ftsResults)
 
@@ -255,9 +360,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			output.Message = fmt.Sprintf("Found %d sessions via full-text search (no API key for semantic)", len(matches))
 		} else {
 			// Semantic search with embeddings
-			results, err := sessionStore.SearchSimilar(ctx, queryEmbedding, in.Limit*2)
+			results, err := sessionStore.SearchSimilar(ctx, in.Workspace, queryEmbedding, in.Limit*2)
 			if err != nil {
-				return fmt.Errorf("search similar sessions: %w", err)
+				return skillerr.WrapIO("search similar sessions", err)
 			}
 			totalSearched = len(results)
 
@@ -320,75 +425,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 func normalizeInput(in *Input, rc *skillmain.RunContext) {
-	if in.Limit <= 0 {
-		in.Limit = defaultLimit
-	}
-	if in.MinSimilarity <= 0 {
-		in.MinSimilarity = defaultMinSim
-	}
+	in.Limit = mathutil.DefaultPositiveInt(in.Limit, defaultLimit)
+	in.MinSimilarity = mathutil.DefaultPositiveFloat(in.MinSimilarity, defaultMinSim)
 	if in.Workspace == "" {
 		in.Workspace = rc.Workspace
 	}
-}
-
-// boolPtr returns a pointer to a bool value.
-func boolPtr(b bool) *bool {
-	return &b
-}
-
-// generateGeminiEmbedding calls the Gemini embedding API.
-func generateGeminiEmbedding(ctx context.Context, apiKey, text string) ([]float32, error) {
-	url := fmt.Sprintf("%s/models/%s:embedContent?key=%s", geminiBaseURL, geminiModel, apiKey)
-
-	reqBody := geminiEmbedRequest{
-		Model: fmt.Sprintf("models/%s", geminiModel),
-		Content: geminiContentPart{
-			Parts: []geminiTextPart{{Text: text}},
-		},
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp geminiEmbedResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
-			return nil, fmt.Errorf("API error %d: %s", errResp.Error.Code, errResp.Error.Message)
-		}
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var embedResp geminiEmbedResponse
-	if err := json.Unmarshal(respBody, &embedResp); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	if len(embedResp.Embedding.Values) == 0 {
-		return nil, fmt.Errorf("empty embedding returned")
-	}
-
-	return embedResp.Embedding.Values, nil
 }

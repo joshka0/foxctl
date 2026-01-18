@@ -47,8 +47,11 @@ func newTestWatchListCommand() *cobra.Command {
 				}
 			}
 
-			// Check if config exists
-			if !testwatch.ConfigExists(workspaceDir) {
+			cfg, exists, err := loadTestWatchConfig(workspaceDir)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if !exists {
 				data := map[string]any{
 					"watchers":      []any{},
 					"config_exists": false,
@@ -57,12 +60,6 @@ func newTestWatchListCommand() *cobra.Command {
 				}
 				env := envelope.OK("test-watch/list", data, envelope.WithMeta(envelope.Meta{Source: "cli"}))
 				return envelope.Write(cmd.OutOrStdout(), env)
-			}
-
-			// Load config
-			cfg, err := testwatch.LoadConfig(workspaceDir)
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
 			}
 
 			// Build watcher list for output
@@ -136,14 +133,11 @@ Examples:
 				}
 			}
 
-			// Load or create config
-			var cfg *testwatch.Config
-			if testwatch.ConfigExists(workspaceDir) {
-				cfg, err = testwatch.LoadConfig(workspaceDir)
-				if err != nil {
-					return fmt.Errorf("load config: %w", err)
-				}
-			} else {
+			cfg, exists, err := loadTestWatchConfig(workspaceDir)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			if !exists {
 				cfg = testwatch.NewConfig()
 			}
 
@@ -243,15 +237,12 @@ func newTestWatchRemoveCommand() *cobra.Command {
 				}
 			}
 
-			// Check if config exists
-			if !testwatch.ConfigExists(workspaceDir) {
-				return fmt.Errorf("no test-watch configuration found at %s", testwatch.ConfigPath(workspaceDir))
-			}
-
-			// Load config
-			cfg, err := testwatch.LoadConfig(workspaceDir)
+			cfg, exists, err := loadTestWatchConfig(workspaceDir)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("no test-watch configuration found at %s", testwatch.ConfigPath(workspaceDir))
 			}
 
 			// Remove watcher

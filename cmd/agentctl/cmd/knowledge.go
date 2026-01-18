@@ -7,7 +7,6 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/knowledge/builtin"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/knowledge"
 	"github.com/spf13/cobra"
 )
@@ -53,7 +52,7 @@ Triggers are extracted from:
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
@@ -133,7 +132,7 @@ func newKnowledgeListCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
@@ -215,7 +214,7 @@ Examples:
 				return fmt.Errorf("either --query or --path is required")
 			}
 
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}

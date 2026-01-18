@@ -348,18 +348,6 @@ func TestGenerateSummary(t *testing.T) {
 	}
 }
 
-func TestBridgeError(t *testing.T) {
-	err := &bridgeError{
-		code:    "EBRIDGE_UNAVAILABLE",
-		message: "cannot connect",
-		hint:    "check plugin",
-	}
-
-	if err.Error() != "cannot connect" {
-		t.Errorf("expected error message 'cannot connect', got %q", err.Error())
-	}
-}
-
 func TestPluginRequestJSON(t *testing.T) {
 	req := PluginRequest{
 		WorkspaceRoot: "/path/to/workspace",

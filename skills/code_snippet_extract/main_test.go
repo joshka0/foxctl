@@ -12,7 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeedit"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 )
 
@@ -27,20 +31,20 @@ func parseInput(r io.Reader) (Input, error) {
 	// Read all input first to detect empty input
 	data, _ := io.ReadAll(r)
 	if len(bytes.TrimSpace(data)) == 0 {
-		return Input{}, &ValidationError{Code: ErrCodeArg, Message: "decode input: EOF"}
+		return Input{}, newSkillError(ErrCodeArg, "decode input: EOF")
 	}
 
 	in, err := skilltest.ParseInput[Input](bytes.NewReader(data))
 	if err != nil {
-		return in, &ValidationError{Code: ErrCodeArg, Message: fmt.Sprintf("decode input: %v", err)}
+		return in, newSkillError(ErrCodeArg, fmt.Sprintf("decode input: %v", err))
 	}
 
 	// Validate required fields
 	if in.WorkspaceID == "" {
-		return in, &ValidationError{Code: ErrCodeArg, Message: "workspace_id is required"}
+		return in, newSkillError(ErrCodeArg, "workspace_id is required")
 	}
 	if in.Question == "" {
-		return in, &ValidationError{Code: ErrCodeArg, Message: "question is required"}
+		return in, newSkillError(ErrCodeArg, "question is required")
 	}
 
 	// Validate candidates have usable paths (spec §5.4)
@@ -51,10 +55,7 @@ func parseInput(r io.Reader) (Input, error) {
 		}
 	}
 	if usable == 0 {
-		return in, &ValidationError{
-			Code:    ErrCodeNoCandidates,
-			Message: "no usable candidates (all paths empty)",
-		}
+		return in, newSkillError(ErrCodeNoCandidates, "no usable candidates (all paths empty)")
 	}
 
 	// Normalize negative limits to 0
@@ -294,13 +295,13 @@ func TestValidationErrorCode(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 
-	ve, ok := err.(*ValidationError)
+	ve, ok := err.(*skillerr.Error)
 	if !ok {
-		t.Fatalf("expected *ValidationError, got %T", err)
+		t.Fatalf("expected *skillerr.Error, got %T", err)
 	}
 
 	if ve.Code != ErrCodeNoCandidates {
-		t.Errorf("ValidationError.Code = %q, want %q", ve.Code, ErrCodeNoCandidates)
+		t.Errorf("skillerr.Error.Code = %q, want %q", ve.Code, ErrCodeNoCandidates)
 	}
 }
 
@@ -565,9 +566,9 @@ func TestCountLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := countLines(tt.content)
+			got := textutil.CountLinesBytes(tt.content)
 			if got != tt.want {
-				t.Errorf("countLines(%q) = %d, want %d", tt.content, got, tt.want)
+				t.Errorf("CountLinesBytes(%q) = %d, want %d", tt.content, got, tt.want)
 			}
 		})
 	}
@@ -586,9 +587,9 @@ func TestFindLastNewline(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := findLastNewline(tt.s)
+		got := textutil.FindLastNewline(tt.s)
 		if got != tt.want {
-			t.Errorf("findLastNewline(%q) = %d, want %d", tt.s, got, tt.want)
+			t.Errorf("FindLastNewline(%q) = %d, want %d", tt.s, got, tt.want)
 		}
 	}
 }
@@ -776,7 +777,7 @@ func TestSplitLines(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := splitLines(tt.content)
+			got := textutil.SplitLinesBytes(tt.content)
 			if len(got) != len(tt.want) {
 				t.Errorf("splitLines(%q) = %v (len %d), want %v (len %d)", tt.content, got, len(got), tt.want, len(tt.want))
 				return
@@ -1107,7 +1108,7 @@ func TestDetectLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			got := detectLanguage(tt.path)
+			got := langutil.DetectAllowed(tt.path, langutil.SnippetLanguages)
 			if got != tt.want {
 				t.Errorf("detectLanguage(%q) = %q, want %q", tt.path, got, tt.want)
 			}
@@ -1238,7 +1239,7 @@ func TestFindBraceEnd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findBraceEnd(tt.lines, tt.startLine)
+			got := codeedit.FindBraceEnd(tt.lines, tt.startLine)
 			if got != tt.wantLine {
 				t.Errorf("findBraceEnd() = %d, want %d", got, tt.wantLine)
 			}
@@ -1592,7 +1593,7 @@ type Config struct {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := splitLines(tt.fr.Content)
+			lines := textutil.SplitLinesBytes(tt.fr.Content)
 			got := extractGoSymbolBody(tt.fr, lines, tt.symbolName)
 
 			if tt.wantNil {
@@ -1747,7 +1748,7 @@ fn other() {}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := splitLines(tt.fr.Content)
+			lines := textutil.SplitLinesBytes(tt.fr.Content)
 			got := extractSymbolBody(tt.fr, lines)
 
 			if tt.wantNil {

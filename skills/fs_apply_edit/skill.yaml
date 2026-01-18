@@ -40,6 +40,9 @@ signature:
     - name: backup_digest
       type: string
       description: "CAS digest of original content (for undo)"
+    - name: backup_cas_hint
+      type: object
+      description: "CAS retrieval hint for the backup artifact"
     - name: edits_applied
       type: integer
       description: "Number of edit operations successfully applied"

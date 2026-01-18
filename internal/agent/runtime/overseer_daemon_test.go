@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/storage/agents"
@@ -65,19 +66,23 @@ func TestRunOverseer_Spawn(t *testing.T) {
 
 	// Send spawn request
 	cmdID := ulid.Make().String()
-	spawnReq := SpawnRequestPayload{
-		CmdID:  cmdID,
-		Action: "spawn",
-		ChildConfig: ChildAgentConfig{
-			Role:        "coder",
-			Prompt:      "You are a coder.",
-			SkillsAllow: []string{"fs.read_file"},
-			ParentNS:    "actor:agent:parent",
+	spawnReq := types.SpawnRequest{
+		EpicID:      "epic-1",
+		SpawnReason: "Need parallel coding",
+		RequestedSubagents: []types.SubagentRequest{
+			{
+				Role: types.RoleCoder,
+				Task: "Implement helper logic",
+			},
 		},
+		CallerActorID:       "actor:agent:parent",
+		CallerDepth:         1,
+		CallerMaxDepth:      3,
+		CallerLocalMaxDepth: 3,
 	}
 
 	// Create proper envelope payload
-	env := envelope.OK("agent.cmd", spawnReq)
+	env := envelope.OK("agent.spawn", spawnReq)
 	payload, err := json.Marshal(env)
 	require.NoError(t, err)
 
@@ -86,7 +91,7 @@ func TestRunOverseer_Spawn(t *testing.T) {
 		FromNS:    "actor:agent:parent",
 		ToNS:      "actor:system:overseer",
 		Type:      agent.MessageTypeCmd,
-		Headers:   map[string]string{},
+		Headers:   map[string]string{"correlation": cmdID},
 		Payload:   payload,
 		VisibleAt: time.Now().Unix(),
 		Timestamp: time.Now().Unix(),
@@ -119,20 +124,21 @@ func TestRunOverseer_Spawn(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, envelope.Validate(replyEnv))
 
-	// Unmarshal data into SpawnResponsePayload
+	// Unmarshal data into SpawnResponse
 	respBytes, err := json.Marshal(replyEnv.Data)
 	require.NoError(t, err)
 
-	var spawnResp SpawnResponsePayload
+	var spawnResp types.SpawnResponse
 	err = json.Unmarshal(respBytes, &spawnResp)
 	require.NoError(t, err)
 
-	if !spawnResp.Success {
-		t.Logf("Spawn error: %s", spawnResp.Error)
+	if !spawnResp.Accepted {
+		t.Logf("Spawn error: %s", spawnResp.Reason)
 	}
-	require.True(t, spawnResp.Success)
-	require.NotEmpty(t, spawnResp.ChildID)
-	require.NotEmpty(t, spawnResp.ChildNS)
+	require.True(t, spawnResp.Accepted)
+	require.NotEmpty(t, spawnResp.SpawnedAgents)
+	require.NotEmpty(t, spawnResp.SpawnedAgents[0].ActorID)
+	require.NotEmpty(t, spawnResp.SpawnedAgents[0].SessionID)
 
 	cancel()
 	err = <-errCh

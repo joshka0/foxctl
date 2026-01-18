@@ -1,0 +1,417 @@
+{
+  "schemaVersion": 1,
+  "id": "Envelope_Structure__Meta_Error_Rules__and_Protocol_Validation_System_20260115_004427",
+  "stableId": "9c282ff2-bca8-4fca-801f-41aa16064562",
+  "metadata": {
+    "cascadeId": "b0c0a07a-e7dc-4feb-a1ab-d84867107654",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T00:44:27+02:00",
+    "mode": "SMART",
+    "originalPrompt": "Explore: envelope structure, meta/error rules, and protocol validation. Start from: internal/domain/envelope/envelope.go, internal/protocol/protocol.go"
+  },
+  "title": "Envelope Structure, Meta/Error Rules, and Protocol Validation System",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Base Envelope Creation and Core Validation",
+      "description": "Core envelope package - shows how OK envelopes are constructed with metadata defaults and validated against Core Profile v1 invariants",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 144,
+          "lineContent": "func OK(command string, data any, opts ...Option) Envelope {",
+          "title": "OK Envelope Constructor",
+          "description": "Entry point for creating success envelopes with command and data payload"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 151,
+          "lineContent": "TS: now().Format(time.RFC3339),",
+          "title": "Timestamp Initialization",
+          "description": "Sets RFC3339 UTC timestamp in meta block - required field"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 190,
+          "lineContent": "func Validate(env Envelope) error {",
+          "title": "Base Validation Entry",
+          "description": "Core Profile v1 validation - checks version, status, command, timestamps, error fields"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 197,
+          "lineContent": "switch env.Status {",
+          "title": "Status-Based Validation",
+          "description": "Enforces status-specific rules: ok status must not have error fields, error status requires code and message"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 199,
+          "lineContent": "if env.Error.Code != \"\" || env.Error.Message != \"\" {",
+          "title": "OK Status Error Field Check",
+          "description": "Validates that success envelopes don't contain error fields - Core Profile invariant"
+        },
+        {
+          "id": "1f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 216,
+          "lineContent": "parsed, err := time.Parse(time.RFC3339, ts)",
+          "title": "Timestamp Format Validation",
+          "description": "Ensures timestamp is valid RFC3339 format and UTC timezone"
+        }
+      ],
+      "traceTextDiagram": "Base Envelope Creation \u0026 Validation Flow\n├── envelope.OK() constructor \u003c-- 1a\n│   ├── Build Envelope struct \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:145\n│   │   ├── Version = 1 \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:146\n│   │   ├── Status = \"ok\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:147\n│   │   ├── Command = command param \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:148\n│   │   ├── Data = data param \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:149\n│   │   └── Meta initialization \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:150\n│   │       └── TS = RFC3339 UTC \u003c-- 1b\n│   ├── Apply options (opts...) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:154\n│   └── applyMetaDefaults() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:157\n│\n└── envelope.Validate() \u003c-- 1c\n    ├── Check version == 1 \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:191\n    ├── Check command non-empty \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:194\n    ├── Status-based validation \u003c-- 1d\n    │   ├── if status == \"ok\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:198\n    │   │   └── Error fields must be empty \u003c-- 1e\n    │   └── if status == \"error\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:202\n    │       ├── Error.Code required \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:203\n    │       └── Error.Message required \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:206\n    └── Timestamp validation \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:212\n        ├── Parse RFC3339 format \u003c-- 1f\n        └── Verify UTC timezone \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:220",
+      "traceGuide": "## Motivation\n\nEvery command in agentctl returns a **JSON envelope** - a standardized wrapper that ensures consistent, machine-parseable output across all operations. Without this structure, LLMs and automation tools would struggle to reliably parse command results, distinguish success from failure, or extract metadata like timestamps and execution sources. The envelope system solves this by enforcing **Core Profile v1** invariants: every response must have a version, status, command name, timestamp, and proper error fields when things fail [1c].\n\n## Details\n\n### Envelope Construction\n\nCreating a success envelope starts with `envelope.OK()` [1a], which builds an `Envelope` struct with:\n- **Version 1** (the only supported version)\n- **Status \"ok\"** to indicate success\n- The **command name** (e.g., \"agentctl.run\")\n- A **data payload** (arbitrary JSON-compatible data)\n- **Meta block** with an RFC3339 UTC timestamp [1b]\n\nThe constructor applies any provided options and ensures metadata defaults are set before returning the envelope.\n\n### Validation Rules\n\nThe `envelope.Validate()` function [1c] enforces Core Profile v1 rules:\n\n1. **Version must be 1** - rejects any other version number\n2. **Command must be non-empty** - every envelope needs a command identifier\n3. **Status-specific rules** [1d]:\n   - **OK envelopes** must have empty error fields [1e] - you can't have both success and error information\n   - **Error envelopes** must have both `error.code` and `error.message` populated\n4. **Timestamp requirements**:\n   - Must be valid RFC3339 format [1f]\n   - Must be in UTC timezone (not local time)\n\nThese validation rules ensure that **every envelope is unambiguous**: you can always tell if an operation succeeded or failed, when it happened, and what went wrong if it failed. This deterministic structure is what makes agentctl suitable as a \"bash for LLMs.\""
+    },
+    {
+      "id": "2",
+      "title": "Protocol-Level Validation Extensions",
+      "description": "Protocol package - extends base validation with CAS digest, cache metadata, memory metadata, and error status code checks",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 135,
+          "lineContent": "func Validate(env envelope.Envelope) error {",
+          "title": "Protocol Validation Entry",
+          "description": "Top-level validation that wraps base validation and adds protocol-level checks"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 137,
+          "lineContent": "if err := envelope.Validate(env); err != nil {",
+          "title": "Base Validation Invocation",
+          "description": "Calls core envelope validation first before protocol extensions"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 142,
+          "lineContent": "if err := validateCASDigest(env); err != nil {",
+          "title": "CAS Digest Validation",
+          "description": "Ensures meta.cas_digest matches data.artifact field when present"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 146,
+          "lineContent": "if err := validateCacheMetadata(env); err != nil {",
+          "title": "Cache Metadata Validation",
+          "description": "Validates cache source requires cache_key in meta"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 150,
+          "lineContent": "if err := validateMemoryMetadata(env); err != nil {",
+          "title": "Memory Metadata Validation",
+          "description": "Validates memory source requires memory reference with name and type"
+        },
+        {
+          "id": "2f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 154,
+          "lineContent": "if err := validateErrorStatusCode(env); err != nil {",
+          "title": "Error Status Code Validation",
+          "description": "Ensures error envelopes with status_code have values in 400-599 range"
+        }
+      ],
+      "traceTextDiagram": "Protocol Validation System (Trace 2)\n└── protocol.Validate() entry \u003c-- 2a\n    ├── envelope.Validate() base checks \u003c-- 2b\n    │   ├── Version check (must be 1) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:191\n    │   ├── Status check (ok|error) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:197\n    │   ├── Command non-empty check \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:194\n    │   ├── Timestamp RFC3339 UTC check \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:216\n    │   └── Error fields consistency check \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:198\n    └── Protocol-level extensions\n        ├── validateCASDigest() \u003c-- 2c\n        │   ├── extractArtifactValue() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:164\n        │   └── Compare meta.cas_digest to data.artifact \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:184\n        ├── validateCacheMetadata() \u003c-- 2d\n        │   └── Check cache source has cache_key \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:195\n        ├── validateMemoryMetadata() \u003c-- 2e\n        │   └── Check memory source has name \u0026 type \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:211\n        └── validateErrorStatusCode() \u003c-- 2f\n            ├── extractStatusCode() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:311\n            └── Verify 400-599 range for errors \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:317",
+      "traceGuide": "## Motivation\n\nEvery skill execution in agentctl produces a **JSON envelope** as output—a standardized wrapper containing the result, metadata, and error information. The problem: skills can produce malformed envelopes (missing timestamps, wrong status codes, inconsistent error fields), and downstream consumers need to trust this data for caching, persistence, and observability. **Protocol validation** [2a] ensures that every envelope conforms to the Core Profile v1 specification before it's written to output, stored in the job database, or returned to users.\n\nWithout validation, a skill could return `status: \"ok\"` with error fields populated, or set `meta.source = \"cache\"` without providing a cache key—breaking assumptions throughout the system and causing silent failures in caching, memory retrieval, and artifact management.\n\n## Details\n\n**Two-layer validation architecture**: The system has a base layer (`internal/domain/envelope`) that validates Core Profile v1 invariants [2b], and a protocol layer (`internal/protocol`) that adds domain-specific consistency checks [2a].\n\n**Base envelope validation** [2b] enforces the fundamental contract:\n- Version must be 1\n- Status must be \"ok\" or \"error\" \n- Command must be non-empty\n- Timestamp must be RFC3339 UTC format\n- **Status-specific rules**: OK envelopes cannot have error fields; error envelopes must have both error.code and error.message\n\n**Protocol-level extensions** add four consistency checks:\n\n1. **CAS digest matching** [2c]: If `data.artifact` exists (pointing to content-addressable storage), and `meta.cas_digest` is set, they must match exactly. The artifact field must use the `sha256:` prefix. This prevents cache corruption and ensures artifact references are valid.\n\n2. **Cache metadata consistency** [2d]: If `meta.source = \"cache\"`, then `meta.cache_key` must be present. This ensures cache hits are traceable and debuggable.\n\n3. **Memory metadata consistency** [2e]: If `meta.source = \"memory\"`, then `meta.memory` must contain both `name` and `type` fields. This ensures memory retrievals can be properly attributed.\n\n4. **Error status code validation** [2f]: Error envelopes with `data.summary.status_code` must have codes in the 400-599 range. This catches bugs where skills return HTTP 200 status codes in error envelopes.\n\n**Enforcement points**: Validation runs at every boundary—when writing envelopes to output [5a], when persisting job results [6c], and when receiving daemon responses [8b]. Invalid envelopes are rejected before they can corrupt the system state."
+    },
+    {
+      "id": "3",
+      "title": "CAS Digest Validation with Reflection-Based Extraction",
+      "description": "Protocol package - deep dive into artifact field extraction using reflection to handle various data types",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 163,
+          "lineContent": "func validateCASDigest(env envelope.Envelope) error {",
+          "title": "CAS Digest Validator",
+          "description": "Validates consistency between meta.cas_digest and data.artifact fields"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 164,
+          "lineContent": "artifactStr, ok, err := extractArtifactValue(env.Data)",
+          "title": "Artifact Extraction Call",
+          "description": "Extracts artifact field from polymorphic data payload"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 222,
+          "lineContent": "func extractArtifactValue(data any) (string, bool, error) {",
+          "title": "Artifact Extractor Entry",
+          "description": "Handles multiple data types: maps, structs, json.RawMessage using reflection"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 266,
+          "lineContent": "case reflect.Map:",
+          "title": "Map-Based Extraction",
+          "description": "Iterates map keys to find 'artifact' field using reflection"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 176,
+          "lineContent": "if !strings.HasPrefix(artifactStr, \"sha256:\") {",
+          "title": "Digest Prefix Validation",
+          "description": "Enforces sha256: prefix requirement for artifact digests"
+        },
+        {
+          "id": "3f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 184,
+          "lineContent": "if env.Meta.CASDigest != artifactStr {",
+          "title": "Digest Mismatch Check",
+          "description": "Returns error if meta.cas_digest doesn't match data.artifact"
+        }
+      ],
+      "traceTextDiagram": "CAS Digest Validation Flow\n├── validateCASDigest() entry \u003c-- 3a\n│   ├── extractArtifactValue(env.Data) \u003c-- 3b\n│   │   └── extractArtifactValue() dispatcher \u003c-- 3c\n│   │       ├── Handle json.RawMessage \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:227\n│   │       ├── Handle map[string]string \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:240\n│   │       ├── Handle map[string]any\n│   │       └── Reflection fallback \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:252\n│   │           ├── reflect.Map case \u003c-- 3d\n│   │           │   └── Iterate keys for \"artifact\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:267\n│   │           └── reflect.Struct case \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:291\n│   │               └── FieldByName(\"Artifact\") \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:292\n│   ├── Check sha256: prefix \u003c-- 3e\n│   └── Compare digests \u003c-- 3f\n│       └── Return error if mismatch \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:185\n└── Called from protocol.Validate() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:142\n    └── Part of protocol validation chain",
+      "traceGuide": "## Motivation\n\nThe agentctl system uses a **canonical JSON envelope format** to wrap all I/O, ensuring structured and validated communication between skills, agents, and the CLI. A critical requirement is that when large outputs are stored in the **Content-Addressable Storage (CAS)**, the envelope must maintain consistency: if `data.artifact` contains a digest like `\"sha256:abc123\"`, and `meta.cas_digest` is also set, they **must match exactly** [3a]. This prevents silent data corruption where metadata points to the wrong artifact.\n\nThe challenge is that `data` can be **any JSON-compatible type**: a map, a struct, raw JSON bytes, or deeply nested objects. The validation system needs to **extract the artifact field** from this polymorphic payload and verify digest consistency, regardless of how the data is structured.\n\n## Details\n\n**Validation Entry Point** [3a]\n\nThe `validateCASDigest()` function is called as part of the protocol-level validation chain. It enforces the rule: if both `data.artifact` and `meta.cas_digest` exist, they must be identical. If only `data.artifact` exists, that's valid (digest is optional). If `meta.cas_digest` is set but no artifact exists, that's an error.\n\n**Polymorphic Extraction** [3b, 3c]\n\nThe `extractArtifactValue()` function handles the polymorphism problem. It accepts `data any` and returns `(string, bool, error)` where the bool indicates whether an artifact field was found. The function uses a **cascading type check strategy**:\n\n1. **Fast paths for common types**: Checks `json.RawMessage`, `map[string]string`, and `map[string]any` first using type assertions\n2. **Reflection fallback** [3d]: For unknown types, uses Go's `reflect` package to introspect the value at runtime\n\n**Reflection-Based Map Handling** [3d]\n\nWhen the data is a map type (detected via `reflect.Map`), the code iterates through all map keys looking for one named `\"artifact\"`. This handles cases where the map's concrete type isn't known at compile time. The iteration extracts the value and recursively calls `extractArtifactValue()` if needed (e.g., if the value is itself a `json.RawMessage`).\n\n**Digest Format Validation** [3e]\n\nOnce an artifact string is extracted, the code enforces that it **must start with `\"sha256:\"`**. This is a Core Profile v1 requirement—all CAS digests use SHA-256 with the explicit prefix.\n\n**Consistency Check** [3f]\n\nFinally, if `meta.cas_digest` is non-empty, it's compared against the extracted artifact value. A mismatch returns a descriptive error like `\"meta.cas_digest (sha256:abc) does not match data.artifact (sha256:xyz)\"`, preventing the envelope from being written or processed further.\n\nThis validation runs **before every envelope write** [5a, 5b] and at critical boundaries like skill execution results [6c] and daemon responses [8b], ensuring the system never emits or accepts inconsistent envelopes."
+    },
+    {
+      "id": "4",
+      "title": "Error Envelope Creation with Typed Error Codes",
+      "description": "Protocol package - shows how error envelopes are constructed with canonical error codes from Core Profile v1",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 125,
+          "lineContent": "func Error(command string, code ErrorCode, message string, data any, opts ...Option) envelope.Envelope {",
+          "title": "Protocol Error Constructor",
+          "description": "Builds error envelope with typed error code and options"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 126,
+          "lineContent": "env := envelope.Error(command, string(code), message, data)",
+          "title": "Base Error Envelope Creation",
+          "description": "Delegates to base envelope.Error with string code conversion"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 162,
+          "lineContent": "func Error(command, code, message string, data any, opts ...Option) Envelope {",
+          "title": "Base Error Constructor",
+          "description": "Core envelope error constructor with status, error fields, and timestamp"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 171,
+          "lineContent": "Error: ErrorFields{",
+          "title": "Error Fields Assignment",
+          "description": "Sets error.code and error.message in envelope structure"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/errors.go",
+          "lineNumber": 7,
+          "lineContent": "ErrorCodeEARG ErrorCode = \"EARG\"",
+          "title": "Error Code Constants",
+          "description": "Canonical error codes defined as typed constants (EARG, EAUTH, ERUNTIME, etc.)"
+        }
+      ],
+      "traceTextDiagram": "Error Envelope Creation Flow\n├── Protocol Layer Entry\n│   └── protocol.Error() \u003c-- 4a\n│       └── envelope.Error() call \u003c-- 4b\n│\n├── Base Envelope Layer\n│   └── envelope.Error() constructor \u003c-- 4c\n│       ├── Version = 1 \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:164\n│       ├── Status = \"error\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:165\n│       ├── Command = command \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:166\n│       ├── Data = data \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:167\n│       ├── Meta.TS = RFC3339 UTC \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:169\n│       └── ErrorFields assignment \u003c-- 4d\n│           ├── Code = code (string) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:172\n│           └── Message = message \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:173\n│\n└── Error Code Constants\n    └── Typed ErrorCode definitions \u003c-- 4e\n        ├── EARG = \"EARG\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/errors.go:8\n        ├── EAUTH = \"EAUTH\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/errors.go:12\n        ├── ERUNTIME = \"ERUNTIME\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/errors.go:18\n        └── [other canonical codes...]",
+      "traceGuide": "## Motivation\n\nagentctl uses a **canonical JSON envelope format** for all I/O to ensure structured, predictable communication between skills, agents, and the CLI. Every operation—whether successful or failed—must return a valid envelope with specific required fields. The problem: skills are written by different authors, run in different isolation modes (WASI, exec, OCI), and need to communicate errors in a **standardized way** that LLMs and automation can reliably parse. Without typed error codes and strict validation, the system would have no way to distinguish between \"invalid argument\" (retry won't help) and \"rate limit exceeded\" (retry after delay).\n\n## Details\n\n### Error Envelope Structure\n\nError envelopes follow the Core Profile v1 specification with three critical components:\n\n1. **Status field** must be `\"error\"` [4c]\n2. **Error fields** with `code` and `message` [4d]\n3. **Metadata** with RFC3339 UTC timestamp [4c]\n\n### Two-Layer Construction\n\nThe protocol package provides a **typed wrapper** around the base envelope package [4a]. When creating an error:\n\n- `protocol.Error()` accepts a typed `ErrorCode` constant [4a]\n- It converts the typed code to a string and delegates to `envelope.Error()` [4b]\n- The base constructor builds the envelope structure with all required fields [4c]\n\nThis two-layer design separates **domain types** (base envelope package) from **protocol-level helpers** (typed error codes, validation extensions).\n\n### Canonical Error Codes\n\nThe system defines **15+ canonical error codes** as typed constants [4e], including:\n\n- **EARG** - Invalid arguments or validation errors [4e]\n- **EAUTH** - Authentication failures\n- **ERUNTIME** - Execution failures, crashes, 5xx errors\n- **ETIMEOUT** - Operation timeouts\n- **ENOTFOUND** - Resource not found\n\nThese codes map to HTTP status ranges and enable **automated retry logic**—the `IsRetryable()` function knows that ERUNTIME and ETIMEOUT warrant retries, while EARG does not.\n\n### Why Typed Constants Matter\n\nUsing `ErrorCode` types instead of raw strings provides:\n\n1. **Compile-time safety** - typos caught at build time\n2. **IDE autocomplete** - developers discover valid codes\n3. **Centralized definitions** - single source of truth in `errors.go` [4e]\n\nThe envelope itself stores codes as strings for JSON compatibility, but the protocol layer enforces type safety at construction boundaries."
+    },
+    {
+      "id": "5",
+      "title": "Envelope Writing with Validation Enforcement",
+      "description": "Protocol package - shows how envelopes are validated before being written to output streams",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 424,
+          "lineContent": "func Write(w io.Writer, env envelope.Envelope) error {",
+          "title": "Protocol Write Entry",
+          "description": "Validates envelope before writing - ensures all protocol rules are met"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 425,
+          "lineContent": "if err := Validate(env); err != nil {",
+          "title": "Pre-Write Validation",
+          "description": "Blocks invalid envelopes from being written to output"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go",
+          "lineNumber": 428,
+          "lineContent": "return envelope.NewWriter(w).Write(env)",
+          "title": "Envelope Writer Invocation",
+          "description": "Creates JSON encoder and writes validated envelope"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 237,
+          "lineContent": "func NewWriter(w io.Writer) *Writer {",
+          "title": "Writer Constructor",
+          "description": "Creates JSON encoder with HTML escaping disabled for canonical output"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go",
+          "lineNumber": 244,
+          "lineContent": "return w.enc.Encode(env)",
+          "title": "JSON Encoding",
+          "description": "Serializes envelope to JSON with newline delimiter"
+        }
+      ],
+      "traceTextDiagram": "Envelope Writing with Validation Enforcement\n├── protocol.Write() entry \u003c-- 5a\n│   ├── protocol.Validate() call \u003c-- 5b\n│   │   ├── envelope.Validate() (base checks) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:137\n│   │   ├── validateCASDigest() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:142\n│   │   ├── validateCacheMetadata() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:146\n│   │   ├── validateMemoryMetadata() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:150\n│   │   └── validateErrorStatusCode() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:154\n│   └── envelope.NewWriter() creation \u003c-- 5c\n│       └── NewWriter() constructor \u003c-- 5d\n│           ├── json.NewEncoder(w) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:238\n│           └── SetEscapeHTML(false) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/envelope/envelope.go:239\n└── Writer.Write() invocation\n    └── enc.Encode(env) \u003c-- 5e\n        └── JSON serialization to io.Writer",
+      "traceGuide": "## Motivation\n\nEvery skill execution in agentctl produces a **JSON envelope** as output—a standardized wrapper containing the result, metadata, and error information. Before these envelopes reach stdout or get persisted to disk, they must be **validated** to ensure they conform to the Core Profile v1 specification. Invalid envelopes could break downstream consumers, corrupt job history, or violate protocol contracts. The `protocol.Write()` function [5a] serves as the **validation gate**: it blocks any envelope that doesn't meet the spec from being written.\n\nThis matters because:\n- **Skills can be buggy** and produce malformed output\n- **Protocol extensions** (CAS digests, cache metadata) have consistency rules beyond basic JSON validity\n- **Multiple execution paths** (daemon, ephemeral, plugins) all need the same validation guarantees\n\n## Details\n\n### Two-Layer Validation\n\nThe system has **two validation layers**:\n\n1. **Base envelope validation** (`envelope.Validate()`) checks Core Profile v1 invariants: version must be 1, status must be \"ok\" or \"error\", timestamps must be RFC3339 UTC, error envelopes must have both code and message [1c-1f]\n\n2. **Protocol-level validation** (`protocol.Validate()`) [5b] extends base validation with four additional checks:\n   - **CAS digest consistency**: if `meta.cas_digest` is set, it must match `data.artifact` and use the `sha256:` prefix\n   - **Cache metadata**: if `meta.source` is \"cache\", then `meta.cache_key` must be present\n   - **Memory metadata**: if `meta.source` is \"memory\", then `meta.memory` must have name and type\n   - **Error status codes**: error envelopes with `data.summary.status_code` must have codes in the 400-599 range\n\n### Write-Time Enforcement\n\nThe `protocol.Write()` function [5a] enforces validation **before any I/O occurs**. The flow is:\n\n1. Call `protocol.Validate()` [5b] which runs all validation layers\n2. If validation fails, return error immediately—**nothing gets written**\n3. If validation passes, create a JSON encoder with `envelope.NewWriter()` [5c, 5d]\n4. The encoder is configured with `SetEscapeHTML(false)` for canonical output [5d]\n5. Finally, `enc.Encode(env)` [5e] serializes the envelope to JSON with a trailing newline\n\nThis **fail-fast approach** prevents invalid envelopes from polluting the system. The validation error includes the command name and status for debugging.\n\n### Real-World Usage\n\nEvery execution path uses this validation gate:\n- Job executor validates skill output before persisting results [6c]\n- Ephemeral execution validates before annotation [7c]\n- CLI validates daemon responses before trusting them [8b]\n- Plugin manager validates plugin responses before processing [from openapi/plugin/manager.go:360]\n\nThe consistency is critical: **one validation function, enforced everywhere**."
+    },
+    {
+      "id": "6",
+      "title": "Real-World Usage: Skill Execution Result Validation",
+      "description": "Storage/jobs executor - shows validation enforcement at skill execution boundaries",
+      "locations": [
+        {
+          "id": "6a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 189,
+          "lineContent": "func (e *Executor) executeSkill(ctx context.Context, opts executeOptions) ([]byte, error) {",
+          "title": "Skill Execution Entry",
+          "description": "Orchestrates skill execution with job state management"
+        },
+        {
+          "id": "6b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 200,
+          "lineContent": "ctx, traceID := observability.EnsureTraceID(ctx)",
+          "title": "Observability Setup",
+          "description": "Ensures trace ID exists for distributed tracing"
+        },
+        {
+          "id": "6c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 376,
+          "lineContent": "if validationErr := envelope.Validate(resultEnv); validationErr != nil {",
+          "title": "Result Envelope Validation",
+          "description": "Validates skill output envelope before persisting - catches malformed skill output"
+        },
+        {
+          "id": "6d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 377,
+          "lineContent": "wrapped := fmt.Errorf(\"envelope validation failed: %w\", validationErr)",
+          "title": "Validation Error Wrapping",
+          "description": "Wraps validation errors with context for debugging"
+        }
+      ],
+      "traceTextDiagram": "Skill Execution Pipeline (storage/jobs/executor)\n└── executeSkill() entry \u003c-- 6a\n    ├── Execution setup\n    │   ├── startExecution() - prep job dir/progress \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:190\n    │   └── observability.EnsureTraceID() \u003c-- 6b\n    ├── Skill runner invocation\n    │   └── skillExecutor.Execute() - runs skill \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:59\n    ├── Result processing\n    │   ├── json.Unmarshal(stdout, \u0026resultEnv) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:370\n    │   └── envelope.Validate(resultEnv) \u003c-- 6c\n    │       └── validation failure handling \u003c-- 6d\n    │           ├── recordProgressFailure() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:378\n    │           └── persist.UpdateState(StateError) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:379\n    └── Success path\n        ├── persist.UpdateState(StateOK) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:390\n        └── writeResultFile() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:395",
+      "traceGuide": "## Motivation\n\nSkills in agentctl are isolated executables that process JSON input and emit JSON output. The **executor** must ensure that skills produce **valid envelopes** conforming to Core Profile v1 before persisting results to the job store. Invalid output from a skill could corrupt the job database, break downstream consumers, or hide execution failures. The validation at [6c] acts as a **critical boundary check** that catches malformed skill output before it propagates through the system.\n\n## Details\n\n### Execution Flow\n\nThe `executeSkill` function [6a] orchestrates the complete lifecycle of running a skill with persistent job state. It first sets up observability context [6b] to enable distributed tracing across the skill execution boundary. The skill binary runs in isolation (WASI or exec), producing stdout that should contain a valid JSON envelope.\n\n### Validation Checkpoint\n\nAfter the skill completes, the executor unmarshals the stdout into an envelope structure and **immediately validates it** [6c]. This validation enforces all Core Profile v1 invariants: version must be 1, status must be \"ok\" or \"error\", timestamps must be RFC3339 UTC, error envelopes must have both code and message, and success envelopes must not have error fields.\n\n### Failure Handling\n\nWhen validation fails [6d], the executor treats this as a **skill malfunction** rather than a normal error result. It records a progress failure event, updates the job state to `StateError` with the validation error message, and prevents the invalid envelope from being persisted. This protects the system from propagating corrupt data while preserving debugging information about what went wrong.\n\n### Success Path\n\nValid envelopes proceed to state updates (`StateOK`) and result file persistence, making them available for retrieval via `jobs result` commands and enabling cache hits for future identical requests."
+    },
+    {
+      "id": "7",
+      "title": "Real-World Usage: Ephemeral Execution with Validation",
+      "description": "Runservice ephemeral - shows validation in fast-path ephemeral execution mode",
+      "locations": [
+        {
+          "id": "7a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 24,
+          "lineContent": "func (e *Executor) ExecuteEphemeral(input []byte) error {",
+          "title": "Ephemeral Execution Entry",
+          "description": "Fast-path execution without job persistence for hooks and transient operations"
+        },
+        {
+          "id": "7b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 120,
+          "lineContent": "func (e *Executor) handleEphemeralSuccess(stdout []byte) error {",
+          "title": "Success Handler",
+          "description": "Processes successful ephemeral execution output"
+        },
+        {
+          "id": "7c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 127,
+          "lineContent": "if err := envelope.Validate(resultEnv); err != nil {",
+          "title": "Ephemeral Result Validation",
+          "description": "Validates envelope from ephemeral skill execution before annotation"
+        },
+        {
+          "id": "7d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 132,
+          "lineContent": "annotated := annotateCorrelationAndJob(stdout, \"\", e.options.CorrelationID)",
+          "title": "Metadata Annotation",
+          "description": "Adds correlation ID and ephemeral markers to envelope metadata"
+        },
+        {
+          "id": "7e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 166,
+          "lineContent": "meta[\"source\"] = \"ephemeral\"",
+          "title": "Source Annotation",
+          "description": "Marks envelope as coming from ephemeral execution path"
+        }
+      ],
+      "traceTextDiagram": "Ephemeral Execution Flow (Runservice)\n├── ExecuteEphemeral() entry \u003c-- 7a\n│   ├── TryServeCache() (cache read attempt) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:26\n│   ├── skillExecutor.Execute() (run skill) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:59\n│   └── handleEphemeralSuccess() \u003c-- 7b\n│       ├── json.Unmarshal(stdout, \u0026resultEnv) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:124\n│       ├── envelope.Validate(resultEnv) \u003c-- 7c\n│       ├── annotateCorrelationAndJob() \u003c-- 7d\n│       │   └── annotateEphemeral() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:133\n│       │       ├── meta[\"source\"] = \"ephemeral\" \u003c-- 7e\n│       │       └── meta[\"ephemeral\"] = true \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:167\n│       └── writeEnvelope(stdout, annotated) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:136\n└── handleEphemeralError() (error path) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:74\n    └── protocol.Write(stdout, errorEnv) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:112",
+      "traceGuide": "## Motivation\n\n**Ephemeral execution** is a fast-path mode for running skills without the overhead of job persistence. The problem: normal skill execution involves creating job records, opening SQLite stores, writing state updates, and capturing trajectories—adding ~150ms of latency. For transient operations like **git hooks** or **test watchers** that run frequently and don't need history, this overhead is wasteful. Ephemeral mode skips all persistence infrastructure, achieving **60% latency reduction** while still validating output and maintaining observability [7a].\n\n## Details\n\n### Execution Flow\n\nThe entry point `ExecuteEphemeral()` [7a] first attempts a **cache read** for deduplication (line 26), then executes the skill directly via `skillExecutor.Execute()` (line 59) without opening job stores. The skill runs in an isolated process with trace context propagated for observability.\n\n### Success Path Validation\n\nWhen execution succeeds, `handleEphemeralSuccess()` [7b] unmarshals the skill's stdout into an envelope structure (line 124), then **validates it** using `envelope.Validate()` [7c] to ensure the skill produced valid Core Profile v1 output. This validation is critical—it catches malformed skill output before it reaches the user.\n\n### Metadata Annotation\n\nAfter validation passes, the system annotates the envelope with execution context [7d]. The `annotateEphemeral()` function (line 133) adds **`meta.source = \"ephemeral\"`** [7e] and **`meta.ephemeral = true`** (line 167) to mark the result as coming from the fast path. This metadata helps distinguish ephemeral results from persisted job results in logs and debugging.\n\n### Output Emission\n\nFinally, `writeEnvelope()` (line 136) writes the annotated, validated envelope to stdout. Note that **cache writes are intentionally skipped**—this is where the latency savings come from. The result is ephemeral by design.\n\n### Error Handling\n\nIf execution fails, `handleEphemeralError()` (line 74) checks if the skill already returned an error envelope. If so, it passes it through. Otherwise, it constructs an error envelope with `protocol.Error()` using `ErrorCodeERuntime` and writes it via `protocol.Write()` (line 112), which performs validation before emission."
+    },
+    {
+      "id": "8",
+      "title": "CLI Integration: Validation at Command Boundaries",
+      "description": "CLI run command - shows validation enforcement when receiving daemon responses with fallback to ephemeral mode",
+      "locations": [
+        {
+          "id": "8a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 243,
+          "lineContent": "if unmarshalErr := json.Unmarshal(result.Output, \u0026env); unmarshalErr != nil {",
+          "title": "Daemon Response Parsing",
+          "description": "Attempts to parse daemon response as envelope"
+        },
+        {
+          "id": "8b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 255,
+          "lineContent": "if validateErr := protocol.Validate(env); validateErr != nil {",
+          "title": "Daemon Response Validation",
+          "description": "Validates daemon-returned envelope before trusting it"
+        },
+        {
+          "id": "8c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 256,
+          "lineContent": "fmt.Fprintf(cmd.ErrOrStderr(), \"daemon returned invalid envelope, falling back to ephemeral mode\\n\")",
+          "title": "Validation Failure Fallback",
+          "description": "Falls back to ephemeral execution if daemon returns invalid envelope"
+        },
+        {
+          "id": "8d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 268,
+          "lineContent": "_, err = stdout.Write(result.Output)",
+          "title": "Validated Output Write",
+          "description": "Writes validated envelope to stdout after all checks pass"
+        }
+      ],
+      "traceTextDiagram": "CLI Run Command (agentctl run)\n└── runSkillCmd execution\n    ├── Daemon invocation attempt\n    │   └── Daemon returns result.Output\n    │       ├── JSON unmarshal attempt \u003c-- 8a\n    │       │   └── Parse to envelope struct \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:242\n    │       ├── Protocol validation \u003c-- 8b\n    │       │   ├── protocol.Validate(env)\n    │       │   │   ├── Base envelope.Validate() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:137\n    │       │   │   └── Protocol extensions\n    │       │   │       ├── validateCASDigest() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:142\n    │       │   │       ├── validateCacheMetadata() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:146\n    │       │   │       ├── validateMemoryMetadata() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:150\n    │       │   │       └── validateErrorStatusCode() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:154\n    │       │   └── Validation failure detected\n    │       │       └── Fallback to ephemeral \u003c-- 8c\n    │       │           └── executor.ExecuteEphemeral() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:253\n    │       └── Validation success\n    │           └── Write to stdout \u003c-- 8d\n    └── Direct ephemeral mode (if daemon unavailable)\n        └── executor.ExecuteEphemeral() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:253",
+      "traceGuide": "## Motivation\n\nWhen `agentctl run` executes a skill, it needs to ensure the output is a **valid envelope** before trusting it. Skills can be arbitrary executables (WASI or native), and they might crash, produce malformed JSON, or violate Core Profile v1 invariants. The CLI must **validate daemon responses** before passing them to users, with a fallback to direct execution if validation fails [8b, 8c].\n\nThis validation layer prevents corrupted or malicious envelopes from propagating through the system, ensuring that all downstream consumers (caching, memory storage, trajectory capture) can rely on envelope structure guarantees.\n\n## Details\n\n### Validation Entry Point\n\nThe `run` command receives output from either a daemon or direct execution [8a]. It first attempts to **unmarshal the JSON** into an `envelope.Envelope` struct. If unmarshaling fails, it falls back to ephemeral execution mode.\n\n### Two-Layer Validation\n\nAfter successful unmarshaling, the CLI invokes `protocol.Validate(env)` [8b], which performs:\n\n1. **Base validation** via `envelope.Validate()` - checks Core Profile v1 invariants: version=1, valid status (ok/error), required timestamps, error field consistency\n2. **Protocol extensions** - four additional checks:\n   - `validateCASDigest()` ensures `meta.cas_digest` matches `data.artifact` when present\n   - `validateCacheMetadata()` requires `meta.cache_key` when `meta.source=\"cache\"`\n   - `validateMemoryMetadata()` requires `meta.memory` reference when `meta.source=\"memory\"`\n   - `validateErrorStatusCode()` ensures error envelopes have status codes in 400-599 range\n\n### Fallback Strategy\n\nIf validation fails, the CLI **prints a warning** and switches to ephemeral execution mode [8c], bypassing the daemon entirely. This ensures users always get valid output, even if the daemon is misbehaving. The fallback calls `executor.ExecuteEphemeral(input)` which runs the skill directly in-process.\n\n### Success Path\n\nWhen validation passes, the CLI writes the envelope directly to stdout [8d]. At this point, the envelope is guaranteed to be valid and can be safely consumed by other `agentctl` commands via piping or stored in the job/cache/memory systems."
+    }
+  ],
+  "description": "Maps the canonical JSON envelope format (Core Profile v1) from base types through protocol-level validation extensions to real-world usage. The system has two layers: base envelope validation in domain/envelope and protocol-level extensions in internal/protocol. Key validation entry points include [2a] for protocol validation and [5a] for write-time validation, with real usage shown in [6c] and [7c].",
+  "mermaidDiagram": "graph TB\n    subgraph BaseEnv[\"Base Envelope System\"]\n        style BaseEnv fill:#eebefa\n        1a[\"1a: OK Constructor\"]\n        1b[\"1b: Timestamp Init\"]\n        1c[\"1c: Base Validate\"]\n        1e[\"1e: Status Check\"]\n        1f[\"1f: Timestamp Parse\"]\n    end\n\n    subgraph ProtocolVal[\"Protocol Validation Hub\"]\n        style ProtocolVal fill:#d0bfff\n        2a[\"2a: Protocol Validate\"]\n        2b[\"2b: Call Base\"]\n        2c[\"2c: CAS Validate\"]\n        2d[\"2d: Cache Meta\"]\n        2e[\"2e: Memory Meta\"]\n        2f[\"2f: Error Code\"]\n    end\n\n    subgraph CASVal[\"CAS Digest Validation\"]\n        style CASVal fill:#b2f2bb\n        3a[\"3a: validateCASDigest\"]\n        3b[\"3b: Extract Artifact\"]\n        3c[\"3c: Extractor Entry\"]\n        3e[\"3e: Prefix Check\"]\n        3f[\"3f: Digest Match\"]\n    end\n\n    subgraph ErrorHandling[\"Error Envelope Creation\"]\n        style ErrorHandling fill:#ffec99\n        4a[\"4a: Protocol Error\"]\n        4c[\"4c: Base Error\"]\n        4d[\"4d: Error Fields\"]\n        4e[\"4e: Error Codes\"]\n    end\n\n    subgraph Writing[\"Output \u0026 Writing\"]\n        style Writing fill:#ffd8a8\n        5a[\"5a: Protocol Write\"]\n        5b[\"5b: Pre-Write Validate\"]\n        5d[\"5d: Writer Create\"]\n        5e[\"5e: JSON Encode\"]\n    end\n\n    subgraph SkillExec[\"Skill Execution\"]\n        style SkillExec fill:#99e9f2\n        6a[\"6a: Execute Skill\"]\n        6c[\"6c: Result Validate\"]\n        6d[\"6d: Error Wrap\"]\n    end\n\n    subgraph EphemeralExec[\"Ephemeral Execution\"]\n        style EphemeralExec fill:#a5d8ff\n        7a[\"7a: Execute Ephemeral\"]\n        7b[\"7b: Success Handler\"]\n        7c[\"7c: Result Validate\"]\n        7e[\"7e: Source Annotate\"]\n    end\n\n    subgraph CLIInteg[\"CLI Integration\"]\n        style CLIInteg fill:#fcc2d7\n        8a[\"8a: Parse Response\"]\n        8b[\"8b: Validate Response\"]\n        8c[\"8c: Fallback\"]\n        8d[\"8d: Write Output\"]\n    end\n\n    1a --\u003e|sets timestamp| 1b\n    1b --\u003e|feeds into| 1c\n    1c --\u003e|checks status| 1e\n    1c --\u003e|parses ts| 1f\n\n    2a --\u003e|calls first| 2b\n    2b --\u003e|delegates to| 1c\n    2a --\u003e|validates| 2c\n    2a --\u003e|validates| 2d\n    2a --\u003e|validates| 2e\n    2a --\u003e|validates| 2f\n\n    2c --\u003e|calls| 3a\n    3a --\u003e|extracts| 3b\n    3b --\u003e|uses| 3c\n    3a --\u003e|checks prefix| 3e\n    3a --\u003e|compares| 3f\n\n    4a --\u003e|creates| 4c\n    4c --\u003e|sets| 4d\n    4a --\u003e|uses| 4e\n\n    5a --\u003e|validates via| 2a\n    5a --\u003e|writes via| 5d\n    5b --\u003e|enforces| 2a\n    5d --\u003e|encodes| 5e\n\n    6a --\u003e|produces| 6c\n    6c --\u003e|validates with| 1c\n    6c --\u003e|wraps errors| 6d\n\n    7a --\u003e|calls| 7b\n    7b --\u003e|validates| 7c\n    7c --\u003e|validates with| 1c\n    7c --\u003e|annotates| 7e\n\n    8a --\u003e|parses to| 8b\n    8b --\u003e|validates with| 2a\n    8b --\u003e|fails to| 8c\n    8b --\u003e|succeeds to| 8d\n\n    2a -.-\u003e|hub for| 5a\n    2a -.-\u003e|hub for| 6c\n    2a -.-\u003e|hub for| 7c\n    2a -.-\u003e|hub for| 8b"
+}

@@ -6,6 +6,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
+	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/skillrun"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 )
 
@@ -561,80 +564,32 @@ func (r *Registry) runSkill(ctx context.Context, skillName string, input map[str
 		return nil, fmt.Errorf("skill resolver not available")
 	}
 
-	// Resolve skill
-	handle, err := r.skillResolver.Resolve(skillName)
+	var payload map[string]any
+	result, err := skillrun.RunAndDecodeInto(ctx, r.skillResolver, skillName, input, skillrun.Options{
+		PreferCGO: buildinfo.IsCGO(),
+	}, &payload)
 	if err != nil {
-		return nil, fmt.Errorf("resolve skill %s: %w", skillName, err)
-	}
-
-	// Load manifest
-	manifest, err := skill.LoadManifest(handle.ManifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("load manifest: %w", err)
-	}
-
-	// Marshal input
-	inputBytes, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("marshal input: %w", err)
-	}
-
-	// Determine artifact path - look for bin or bin-cgo like the main CLI does
-	artifactPath := ""
-	if manifest.Distribution.Type == "exec" {
-		// Check candidates in priority order (same as skill_helpers.go)
-		candidates := []string{
-			filepath.Join(handle.ArtifactPath, "bin-cgo"),
-			filepath.Join(handle.ArtifactPath, "bin"),
+		var runErr skillrun.RunError
+		if errors.As(err, &runErr) {
+			return nil, runErr
 		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				artifactPath = c
-				break
+		var statusErr protocol.EnvelopeStatusError
+		if errors.As(err, &statusErr) {
+			return nil, statusErr
+		}
+		if errors.Is(err, skill.ErrArtifactsMissing) {
+			if result.Handle.ManifestPath == "" {
+				return nil, fmt.Errorf("skill binary not found for %s; run 'make skills-install'", skillName)
 			}
+			return nil, fmt.Errorf("skill binary not found in %s; run 'make skills-install'", filepath.Dir(result.Handle.ManifestPath))
 		}
-		if artifactPath == "" {
-			return nil, fmt.Errorf("skill binary not found in %s; run 'make skills-install'", handle.ArtifactPath)
-		}
-	} else if manifest.Distribution.Type == "wasi" {
-		artifactPath = filepath.Join(handle.ArtifactPath, "module.wasm")
-		if _, err := os.Stat(artifactPath); err != nil {
-			return nil, fmt.Errorf("wasi module not found: %s", artifactPath)
-		}
-	} else {
-		return nil, fmt.Errorf("unsupported distribution type: %s", manifest.Distribution.Type)
+		return nil, err
 	}
 
-	// Execute skill
-	stdout, _, err := runner.RunWithOptions(ctx, runner.RunOptions{
-		Manifest:     manifest,
-		ArtifactPath: artifactPath,
-		Input:        inputBytes,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("run skill: %w", err)
+	if payload == nil {
+		payload = map[string]any{}
 	}
-
-	// Parse envelope response
-	var envelope map[string]any
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		return nil, fmt.Errorf("parse response: %w", err)
-	}
-
-	// Check status
-	if status, ok := envelope["status"].(string); ok && status == "error" {
-		errObj, _ := envelope["error"].(map[string]any)
-		errMsg, _ := errObj["message"].(string)
-		return nil, fmt.Errorf("skill error: %s", errMsg)
-	}
-
-	// Extract data
-	data, ok := envelope["data"].(map[string]any)
-	if !ok {
-		return map[string]any{}, nil
-	}
-
-	return data, nil
+	return payload, nil
 }
 
 // Helper functions

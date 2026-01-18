@@ -1,0 +1,61 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: setup/install
+  version: 1.0.0
+  description: Programmatic agentctl installation and configuration
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+signature:
+  command: setup/install
+  parameters:
+    - name: provider
+      type: string
+      required: false
+      description: Provider to configure (claude-code, opencode, codex, all)
+      default: "claude-code"
+    - name: skip_hooks
+      type: boolean
+      required: false
+      description: Skip hooks installation
+      default: false
+    - name: skip_skills
+      type: boolean
+      required: false
+      description: Skip skills installation
+      default: false
+    - name: repo_root
+      type: string
+      required: false
+      description: Path to agentctl repository (for source installations)
+    - name: validate_only
+      type: boolean
+      required: false
+      description: Only validate installation, don't install
+      default: false
+  help:
+    short: "Install and configure agentctl"
+    long: |
+      Programmatic installation of agentctl with hooks and skills.
+
+      Example commands:
+        agentctl run setup/install --input '{"provider":"claude-code"}'
+        agentctl run setup/install --input '{"validate_only":true}'
+        agentctl run setup/install --input '{"provider":"all","skip_skills":true}'
+    workflows:
+      - id: install-claude-code
+        description: "Install agentctl for Claude Code"
+        example_input:
+          provider: "claude-code"
+      - id: validate-installation
+        description: "Validate current installation"
+        example_input:
+          validate_only: true

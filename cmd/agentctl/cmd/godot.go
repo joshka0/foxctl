@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 )
@@ -1132,7 +1131,7 @@ func newGodotErrorsCommand() *cobra.Command {
 }
 
 func runGodotSkill(cmd *cobra.Command, payload map[string]any, skipCache, dataOnly bool) error {
-	cfg, err := config.Load(cmd.Context())
+	cfg, err := loadConfig(cmd.Context())
 	if err != nil {
 		return err
 	}

@@ -12,15 +12,15 @@ import (
 
 // SkillResponse represents a skill in API responses.
 type SkillResponse struct {
-	Name        string           `json:"name"`
-	Version     string           `json:"version"`
-	Description string           `json:"description"`
-	Tags        []string         `json:"tags"`
-	Command     string           `json:"command"`
+	Name        string            `json:"name"`
+	Version     string            `json:"version"`
+	Description string            `json:"description"`
+	Tags        []string          `json:"tags"`
+	Command     string            `json:"command"`
 	Parameters  []skill.Parameter `json:"parameters"`
 	Returns     []skill.Parameter `json:"returns,omitempty"`
-	Help        *skill.Help      `json:"help,omitempty"`
-	JSONSchema  map[string]any   `json:"json_schema,omitempty"`
+	Help        *skill.Help       `json:"help,omitempty"`
+	JSONSchema  map[string]any    `json:"json_schema,omitempty"`
 }
 
 // SkillsListHandler returns a handler for GET /api/skills.

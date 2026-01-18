@@ -4,40 +4,42 @@ package embedding
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/jkatigb/agentctl/internal/queue"
 )
 
 // JobState represents the state of an embedding job.
-type JobState string
+type JobState = queue.JobState
 
 const (
 	// StateQueued indicates the job is waiting to be processed.
-	StateQueued JobState = "queued"
+	StateQueued = queue.StateQueued
 
 	// StateRunning indicates the job is currently being processed.
-	StateRunning JobState = "running"
+	StateRunning = queue.StateRunning
 
 	// StateOK indicates the job completed successfully.
-	StateOK JobState = "ok"
+	StateOK = queue.StateOK
 
 	// StateError indicates the job failed.
-	StateError JobState = "error"
+	StateError = queue.StateError
 
 	// StateRetry indicates the job will be retried.
-	StateRetry JobState = "retry"
+	StateRetry = queue.StateRetry
 )
 
 // JobPriority determines processing order.
-type JobPriority int
+type JobPriority = queue.JobPriority
 
 const (
 	// PriorityLow for background batch processing.
-	PriorityLow JobPriority = 0
+	PriorityLow = queue.PriorityLow
 
 	// PriorityNormal for standard requests.
-	PriorityNormal JobPriority = 50
+	PriorityNormal = queue.PriorityNormal
 
 	// PriorityHigh for user-initiated requests.
-	PriorityHigh JobPriority = 100
+	PriorityHigh = queue.PriorityHigh
 )
 
 // EmbeddingJob represents a single embedding generation request.

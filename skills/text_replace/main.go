@@ -2,30 +2,31 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	fsutil "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textmatch"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textreplace"
 )
 
 const command = "text/replace"
 
-type lineRange struct {
-	Start        int    `json:"start"`
-	End          int    `json:"end"`
-	StartPattern string `json:"start_pattern"`
-	EndPattern   string `json:"end_pattern"`
-}
+type (
+	lineRange  = textreplace.LineRange
+	fileChange = textreplace.FileChange
+	replacer   = textreplace.Replacer
+)
 
 type operation struct {
 	Pattern     string `json:"pattern"`
@@ -54,32 +55,6 @@ type input struct {
 	SkipBinary          *bool       `json:"skip_binary"`
 	PreserveLineEndings *bool       `json:"preserve_line_endings"`
 	ShowDiff            bool        `json:"show_diff"`
-}
-
-type change struct {
-	File             string `json:"file"`
-	LineNumber       int    `json:"line_number"`
-	OriginalLine     string `json:"original_line"`
-	ModifiedLine     string `json:"modified_line"`
-	ReplacementsMade int    `json:"replacements_in_line"`
-	Diff             string `json:"diff,omitempty"`
-}
-
-type fileChange struct {
-	File         string   `json:"file"`
-	Replacements int      `json:"replacements"`
-	Changes      []change `json:"changes,omitempty"`
-	BackupPath   string   `json:"backup_path,omitempty"`
-	CASDigest    string   `json:"cas_digest,omitempty"`
-	Skipped      bool     `json:"skipped,omitempty"`
-	SkipReason   string   `json:"skip_reason,omitempty"`
-	Validated    bool     `json:"validated,omitempty"`
-	ValidationOK bool     `json:"validation_ok,omitempty"`
-}
-
-type replacer interface {
-	Match(content string) bool
-	Replace(content string) (string, int)
 }
 
 type literalReplacer struct {
@@ -139,16 +114,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	hasMain := strings.TrimSpace(in.Pattern) != ""
 	hasOps := len(in.Operations) > 0
 	if !hasMain && !hasOps {
-		return fmt.Errorf("either pattern/replacement or operations must be specified")
+		return skillerr.Arg(
+			"either pattern/replacement or operations must be specified",
+			skillerr.WithHint("Provide pattern+replacement, or a list of operations."),
+		)
 	}
 	if hasMain && hasOps {
-		return fmt.Errorf("cannot specify both pattern/replacement and operations")
+		return skillerr.Arg(
+			"cannot specify both pattern/replacement and operations",
+			skillerr.WithHint("Use either pattern+replacement or operations, not both."),
+		)
 	}
 
 	// Build list of operations
 	ops := buildOperations(in)
 	if len(ops) == 0 {
-		return fmt.Errorf("no operations specified")
+		return skillerr.Arg("no operations specified", skillerr.WithHint("Provide at least one operation."))
 	}
 
 	// Build replacers for all operations
@@ -156,7 +137,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	for i, op := range ops {
 		r, err := buildReplacer(op, in.CaseInsensitive, in.WordBoundary, in.Multiline)
 		if err != nil {
-			return fmt.Errorf("operation %d: %w", i+1, err)
+			return skillerr.Validation(fmt.Sprintf("operation %d failed", i+1), skillerr.WithCause(err))
 		}
 		replacers[i] = r
 	}
@@ -167,23 +148,31 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if in.LineRange.StartPattern != "" {
 			re, err := regexp.Compile(in.LineRange.StartPattern)
 			if err != nil {
-				return fmt.Errorf("invalid start_pattern: %w", err)
+				return skillerr.Validationf("invalid start_pattern: %v", err)
 			}
 			rangeStartRe = re
 		}
 		if in.LineRange.EndPattern != "" {
 			re, err := regexp.Compile(in.LineRange.EndPattern)
 			if err != nil {
-				return fmt.Errorf("invalid end_pattern: %w", err)
+				return skillerr.Validationf("invalid end_pattern: %v", err)
 			}
 			rangeEndRe = re
 		}
 	}
 
 	// Collect files to process
-	entries, err := collectEntries(rc, in.Paths, in.IncludeHidden, in.Extensions)
+	entries, err := fsutil.CollectEntries(fsutil.CollectOptions{
+		Paths:         in.Paths,
+		Exclude:       fsutil.CommonExcludeGlobs(),
+		IncludeHidden: in.IncludeHidden,
+		Extensions:    in.Extensions,
+		ValidatePath: func(path string) (string, error) {
+			return skillmain.ValidatePath(rc, path)
+		},
+	})
 	if err != nil {
-		return err
+		return skillerr.WrapIO("collect entries", err)
 	}
 
 	if len(entries) > in.MaxFiles {
@@ -202,7 +191,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	for _, entry := range entries {
 		if entry.Info != nil && entry.Info.Size() > maxFileBytes {
 			allChanges = append(allChanges, fileChange{
-				File:       relativeTo(workspace, entry.Path),
+				File:       pathutil.RelTo(workspace, entry.Path),
 				Skipped:    true,
 				SkipReason: "file too large",
 			})
@@ -212,13 +201,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 		// Check if binary file
 		if *in.SkipBinary {
-			isBinary, err := isBinaryFile(entry.Path)
+			isBinary, err := textreplace.IsBinaryFile(entry.Path)
 			if err != nil {
 				return err
 			}
 			if isBinary {
 				allChanges = append(allChanges, fileChange{
-					File:       relativeTo(workspace, entry.Path),
+					File:       pathutil.RelTo(workspace, entry.Path),
 					Skipped:    true,
 					SkipReason: "binary file",
 				})
@@ -227,7 +216,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			}
 		}
 
-		fileChanges, err := processFile(
+		fileChanges, err := textreplace.ProcessFile(
 			ctx,
 			rc,
 			entry.Path,
@@ -236,12 +225,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			in.LineRange,
 			rangeStartRe,
 			rangeEndRe,
-			in.DryRun,
-			in.Backup,
-			in.BackupSuffix,
-			in.CASBackup,
-			*in.PreserveLineEndings,
-			in.ShowDiff,
+			textreplace.Options{
+				DryRun:              in.DryRun,
+				Backup:              in.Backup,
+				BackupSuffix:        in.BackupSuffix,
+				CASBackup:           in.CASBackup,
+				PreserveLineEndings: *in.PreserveLineEndings,
+				ShowDiff:            in.ShowDiff,
+			},
 		)
 		if err != nil {
 			return err
@@ -260,17 +251,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 				}
 			}
 
-			rel := relativeTo(workspace, entry.Path)
+			rel := pathutil.RelTo(workspace, entry.Path)
 			fileChanges.File = rel
 			allChanges = append(allChanges, fileChanges)
 		}
 	}
 
-	// Prepare preview
-	preview, truncated := preparePreview(allChanges, rc.MaxPreview)
-
-	// Persist full results if truncated
-	artifact, err := persistChangesArtifact(ctx, rc, allChanges, truncated)
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, allChanges, rc.MaxPreview, "text_replace", true)
 	if err != nil {
 		return err
 	}
@@ -286,7 +273,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"files_modified":     filesModified,
 		"files_skipped":      filesSkipped,
 		"replacements_made":  totalReplacements,
-		"preview":            preview,
+		"preview":            previewResult.Preview,
 		"files_processed":    len(entries),
 		"operations_count":   len(ops),
 		"backup_enabled":     in.Backup,
@@ -298,9 +285,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		data["line_range"] = in.LineRange
 	}
 
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, command, data)
 }
@@ -324,34 +309,13 @@ func buildReplacer(op operation, caseInsensitive, wordBoundary, multiline bool) 
 		}, nil
 	}
 
-	// Build regex pattern with flags
-	pattern := op.Pattern
-
-	// Add word boundaries if requested
-	if wordBoundary && !strings.HasPrefix(pattern, `\b`) {
-		pattern = `\b` + pattern
-	}
-	if wordBoundary && !strings.HasSuffix(pattern, `\b`) {
-		pattern = pattern + `\b`
-	}
-
-	// Add case-insensitive flag
-	if caseInsensitive && !strings.HasPrefix(pattern, "(?i)") {
-		pattern = "(?i)" + pattern
-	}
-
-	// Add multiline/dotall flags
-	if multiline {
-		if !strings.HasPrefix(pattern, "(?s)") && !strings.HasPrefix(pattern, "(?i)") {
-			pattern = "(?s)" + pattern
-		} else if strings.HasPrefix(pattern, "(?i)") && !strings.Contains(pattern, "(?s)") {
-			pattern = strings.Replace(pattern, "(?i)", "(?is)", 1)
-		}
-	}
-
-	re, err := regexp.Compile(pattern)
+	re, err := textmatch.CompileRegex(op.Pattern, textmatch.RegexOptions{
+		CaseInsensitive: caseInsensitive,
+		WordBoundary:    wordBoundary,
+		Multiline:       multiline,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %w", err)
+		return nil, err
 	}
 
 	return &regexReplacer{
@@ -360,325 +324,13 @@ func buildReplacer(op operation, caseInsensitive, wordBoundary, multiline bool) 
 	}, nil
 }
 
-func collectEntries(rc *skillmain.RunContext, paths []string, includeHidden bool, extensions []string) ([]fsutil.FileEntry, error) {
-	var allEntries []fsutil.FileEntry
-	seen := make(map[string]bool)
-
-	for _, p := range paths {
-		// Validate path
-		resolved, err := rc.PathValidator.ValidatePath(p)
-		if err != nil {
-			return nil, fmt.Errorf("path validation failed for %s: %w", p, err)
-		}
-
-		// Check if single file or directory
-		info, err := os.Stat(resolved)
-		if err != nil {
-			return nil, fmt.Errorf("stat %s: %w", p, err)
-		}
-
-		if !info.IsDir() {
-			// Single file
-			if !seen[resolved] && matchesExtension(resolved, extensions) {
-				allEntries = append(allEntries, fsutil.FileEntry{Path: resolved, Info: info})
-				seen[resolved] = true
-			}
-			continue
-		}
-
-		// Directory - walk it
-		exclude := []string{".git", "node_modules"}
-		if !includeHidden {
-			exclude = append(exclude, ".*")
-		}
-
-		opts := fsutil.ListOptions{
-			BasePath: resolved,
-			Include:  []string{},
-			Exclude:  exclude,
-		}
-
-		entries, err := fsutil.WalkFiles(opts)
-		if err != nil {
-			return nil, fmt.Errorf("walk %s: %w", p, err)
-		}
-
-		for _, entry := range entries {
-			if !seen[entry.Path] && matchesExtension(entry.Path, extensions) {
-				allEntries = append(allEntries, entry)
-				seen[entry.Path] = true
-			}
-		}
-	}
-
-	return allEntries, nil
-}
-
-func matchesExtension(path string, extensions []string) bool {
-	if len(extensions) == 0 {
-		return true
-	}
-	ext := filepath.Ext(path)
-	for _, e := range extensions {
-		if ext == e || ext == "."+e {
-			return true
-		}
-	}
-	return false
-}
-
-func isBinaryFile(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	// Read first 512 bytes
-	buf := make([]byte, 512)
-	n, err := f.Read(buf)
-	if err != nil && err != io.EOF {
-		return false, err
-	}
-	buf = buf[:n]
-
-	// Check for null bytes (common in binary files)
-	for _, b := range buf {
-		if b == 0 {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-func detectLineEnding(content string) string {
-	if strings.Contains(content, "\r\n") {
-		return "\r\n"
-	}
-	return "\n"
-}
-
-func processFile(
-	ctx context.Context,
-	rc *skillmain.RunContext,
-	path, workspace string,
-	replacers []replacer,
-	lineRange *lineRange,
-	rangeStartRe, rangeEndRe *regexp.Regexp,
-	dryRun, backup bool,
-	backupSuffix string,
-	casBackup bool,
-	preserveLineEndings, showDiff bool,
-) (fileChange, error) {
-	// Read file
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return fileChange{}, fmt.Errorf("read %s: %w", path, err)
-	}
-
-	// Detect line ending
-	lineEnding := "\n"
-	if preserveLineEndings {
-		lineEnding = detectLineEnding(string(content))
-	}
-
-	// Split into lines (normalize to \n for processing)
-	normalizedContent := strings.ReplaceAll(string(content), "\r\n", "\n")
-	lines := strings.Split(normalizedContent, "\n")
-
-	// Determine which lines to process
-	inRange := determineLineRange(lines, lineRange, rangeStartRe, rangeEndRe)
-
-	var (
-		changes       []change
-		modifiedLines []string
-		modified      bool
-	)
-
-	for lineNo, line := range lines {
-		lineNum := lineNo + 1
-		processLine := inRange == nil || inRange[lineNo]
-
-		if !processLine {
-			modifiedLines = append(modifiedLines, line)
-			continue
-		}
-
-		// Apply all replacers to this line
-		newLine := line
-		lineReplacements := 0
-
-		for _, r := range replacers {
-			if r.Match(newLine) {
-				var count int
-				newLine, count = r.Replace(newLine)
-				lineReplacements += count
-			}
-		}
-
-		if lineReplacements > 0 {
-			modified = true
-			diff := ""
-			if showDiff {
-				diff = fmt.Sprintf("- %s\n+ %s", truncateLine(line, 200), truncateLine(newLine, 200))
-			}
-
-			changes = append(changes, change{
-				LineNumber:       lineNum,
-				OriginalLine:     truncateLine(line, 200),
-				ModifiedLine:     truncateLine(newLine, 200),
-				ReplacementsMade: lineReplacements,
-				Diff:             diff,
-			})
-		}
-
-		modifiedLines = append(modifiedLines, newLine)
-	}
-
-	// Calculate total replacements across all changes
-	totalReplacements := 0
-	for _, c := range changes {
-		totalReplacements += c.ReplacementsMade
-	}
-
-	result := fileChange{
-		Replacements: totalReplacements,
-		Changes:      changes,
-	}
-
-	// Write back if not dry run and changes were made
-	if !dryRun && modified {
-		// Create file backup if requested
-		if backup {
-			backupPath := path + backupSuffix
-			if err := os.WriteFile(backupPath, content, 0o644); err != nil {
-				return fileChange{}, fmt.Errorf("create backup %s: %w", backupPath, err)
-			}
-			result.BackupPath = relativeTo(workspace, backupPath)
-		}
-
-		// Store in CAS for undo if requested
-		if casBackup && rc.CASStore != nil {
-			obj, err := rc.CASStore.Put(ctx, bytes.NewReader(content), "text/plain", []string{
-				"backup", "text/replace", fmt.Sprintf("path:%s", relativeTo(workspace, path)),
-			})
-			if err != nil {
-				return fileChange{}, fmt.Errorf("CAS backup %s: %w", path, err)
-			}
-			result.CASDigest = obj.Digest
-		}
-
-		// Write modified content with original line endings
-		newContent := strings.Join(modifiedLines, lineEnding)
-		if err := writeFileAtomic(path, []byte(newContent)); err != nil {
-			return fileChange{}, fmt.Errorf("write %s: %w", path, err)
-		}
-	}
-
-	return result, nil
-}
-
-func determineLineRange(lines []string, lr *lineRange, startRe, endRe *regexp.Regexp) map[int]bool {
-	if lr == nil {
-		return nil // Process all lines
-	}
-
-	inRange := make(map[int]bool)
-
-	// Line number based range
-	if lr.Start > 0 || lr.End > 0 {
-		start := lr.Start
-		if start <= 0 {
-			start = 1
-		}
-		end := lr.End
-		if end <= 0 {
-			end = len(lines)
-		}
-
-		for i := start - 1; i < end && i < len(lines); i++ {
-			inRange[i] = true
-		}
-		return inRange
-	}
-
-	// Pattern-based range
-	if startRe != nil || endRe != nil {
-		insideRange := startRe == nil // If no start pattern, start from beginning
-
-		for i, line := range lines {
-			if startRe != nil && startRe.MatchString(line) {
-				insideRange = true
-			}
-
-			if insideRange {
-				inRange[i] = true
-			}
-
-			if endRe != nil && endRe.MatchString(line) {
-				insideRange = false
-			}
-		}
-		return inRange
-	}
-
-	return nil
-}
-
-func writeFileAtomic(path string, data []byte) error {
-	// Read file info to preserve permissions
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-
-	// Create temp file in same directory
-	dir := filepath.Dir(path)
-	tmpFile, err := os.CreateTemp(dir, ".text_replace_tmp_*")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-
-	// Write data
-	if _, err := tmpFile.Write(data); err != nil {
-		// Cleanup on error path; errors are not actionable.
-		_ = tmpFile.Close()    //nolint:errcheck
-		_ = os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("write temp file: %w", err)
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		// Cleanup on error path; errors are not actionable.
-		_ = os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	// Preserve permissions
-	if err := os.Chmod(tmpPath, info.Mode()); err != nil {
-		// Cleanup on error path; errors are not actionable.
-		_ = os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("chmod: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tmpPath, path); err != nil {
-		// Cleanup on error path; errors are not actionable.
-		_ = os.Remove(tmpPath) //nolint:errcheck
-		return fmt.Errorf("rename: %w", err)
-	}
-
-	return nil
-}
-
 func validateFileSyntax(path string) (bool, error) {
 	ext := filepath.Ext(path)
 
 	switch ext {
 	case ".go":
-		cmd := exec.Command("gofmt", "-e", path)
-		if err := cmd.Run(); err != nil {
+		result := executil.Run(context.Background(), "", "gofmt", "-e", path)
+		if result.Err != nil {
 			return false, nil
 		}
 		return true, nil
@@ -702,52 +354,4 @@ func validateFileSyntax(path string) (bool, error) {
 		// Unknown file type, skip validation
 		return true, nil
 	}
-}
-
-func relativeTo(base, target string) string {
-	if base == "" {
-		if rel, err := filepath.Rel(".", target); err == nil {
-			return filepath.ToSlash(rel)
-		}
-		return filepath.ToSlash(target)
-	}
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
-func truncateLine(line string, maxLen int) string {
-	if len(line) <= maxLen {
-		return line
-	}
-	return line[:maxLen] + "..."
-}
-
-func preparePreview(changes []fileChange, maxItems int) ([]fileChange, bool) {
-	preview, truncated := skillout.PreparePreview(changes, maxItems)
-	if truncated {
-		dup := make([]fileChange, len(preview))
-		copy(dup, preview)
-		preview = dup
-	}
-	return preview, truncated
-}
-
-func persistChangesArtifact(ctx context.Context, rc *skillmain.RunContext, changes []fileChange, truncated bool) (skillmain.Artifact, error) {
-	if !truncated {
-		return skillmain.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, c := range changes {
-		if err := enc.Encode(c); err != nil {
-			return skillmain.Artifact{}, fmt.Errorf("encode change: %w", err)
-		}
-	}
-	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_replace")
 }

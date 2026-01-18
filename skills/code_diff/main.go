@@ -2,15 +2,17 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 )
 
 type input struct {
@@ -62,25 +64,25 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Resolve and validate paths
 	workspace := rc.PathValidator.Workspace()
 
-	oldPath, err := rc.PathValidator.ValidatePath(in.OldPath)
+	oldPath, err := skillmain.ValidatePath(rc, in.OldPath, skillmain.WithPathMessage("old_path validation failed"))
 	if err != nil {
-		return fmt.Errorf("old_path validation failed: %w", err)
+		return err
 	}
 
-	newPath, err := rc.PathValidator.ValidatePath(in.NewPath)
+	newPath, err := skillmain.ValidatePath(rc, in.NewPath, skillmain.WithPathMessage("new_path validation failed"))
 	if err != nil {
-		return fmt.Errorf("new_path validation failed: %w", err)
+		return err
 	}
 
 	// Read files
 	oldContent, err := os.ReadFile(oldPath)
 	if err != nil {
-		return fmt.Errorf("read old file: %w", err)
+		return skillerr.WrapIO("read old file", err)
 	}
 
 	newContent, err := os.ReadFile(newPath)
 	if err != nil {
-		return fmt.Errorf("read new file: %w", err)
+		return skillerr.WrapIO("read new file", err)
 	}
 
 	// Process whitespace if needed
@@ -90,8 +92,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Split into lines
-	oldLines := splitLines(string(oldContent))
-	newLines := splitLines(string(newContent))
+	oldLines := textutil.SplitLines(string(oldContent))
+	newLines := textutil.SplitLines(string(newContent))
 
 	// Compute diff
 	hunks := computeDiff(oldLines, newLines, in.ContextLines)
@@ -99,8 +101,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	// Build result
 	result := diffResult{
-		OldFile:    relativeTo(workspace, oldPath),
-		NewFile:    relativeTo(workspace, newPath),
+		OldFile:    pathutil.RelTo(workspace, oldPath),
+		NewFile:    pathutil.RelTo(workspace, newPath),
 		Statistics: stats,
 		Hunks:      hunks,
 	}
@@ -116,7 +118,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		buf := bytes.NewBufferString(result.Unified)
 		artifact, err = skillmain.PersistBuffer(ctx, rc, buf, "text/plain", "code_diff")
 		if err != nil {
-			return err
+			return skillerr.WrapIO("persist diff artifact", err)
 		}
 		// Keep a preview
 		lines := strings.Split(result.Unified, "\n")
@@ -147,20 +149,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 	}
 
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
-	}
+	skillout.AddArtifact(data, &artifact)
 
 	return skillout.Emit(rc, "code/diff", data)
-}
-
-func splitLines(text string) []string {
-	scanner := bufio.NewScanner(strings.NewReader(text))
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	return lines
 }
 
 func normalizeWhitespace(content []byte) []byte {
@@ -343,14 +334,3 @@ func generateUnifiedDiff(oldFile, newFile string, hunks []diffHunk) string {
 
 	return builder.String()
 }
-
-func relativeTo(base, target string) string {
-	// Simple relative path helper
-	if strings.HasPrefix(target, base) {
-		rel := strings.TrimPrefix(target, base)
-		rel = strings.TrimPrefix(rel, "/")
-		return rel
-	}
-	return target
-}
-

@@ -1,0 +1,69 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: ci/checks
+  version: 0.1.0
+  description: "Summarize GitHub CI check runs for a PR"
+  tags: ["github", "ci", "checks"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/ci_github_checks/ci_github_checks
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: ci/checks
+  parameters:
+    - name: pr
+      type: string
+      required: true
+      description: "Pull request number or branch name"
+    - name: owner
+      type: string
+      required: false
+      description: "GitHub repository owner (default auto-detected or from env)"
+    - name: repo
+      type: string
+      required: false
+      description: "GitHub repository name (or owner/repo shorthand; default auto-detected or from env)"
+    - name: mode
+      type: string
+      required: false
+      enum: ["summary", "detailed"]
+      default: "summary"
+      description: "Level of detail in check information and logs"
+    - name: errors_only
+      type: boolean
+      required: false
+      default: false
+      description: "Only include failing/errored/cancelled checks in the output"
+  help:
+    short: "Summarize CI check runs for a PR."
+    long: |
+      Use ci/checks to fetch CI check results for a pull request.
+      Example commands:
+        agentctl run ci/checks --input '{"pr":"123","mode":"summary"}'
+        agentctl skills run ci/checks --pr 123 --mode summary
+        agentctl run ci/checks --input '{"pr":"123","mode":"detailed","errors_only":true}'
+        agentctl skills run ci/checks --pr 123 --mode detailed --errors_only
+    workflows:
+      - id: checks-summary
+        description: "Fetch a summary of check runs."
+        example_input:
+          pr: "123"
+          mode: "summary"
+      - id: checks-errors
+        description: "Fetch only failing checks."
+        example_input:
+          pr: "123"
+          mode: "detailed"
+          errors_only: true
+returns:
+  - name: checks
+    type: object
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

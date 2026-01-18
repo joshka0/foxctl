@@ -92,33 +92,27 @@ func TestParseResponse_EmptyTasks(t *testing.T) {
 	}
 }
 
-func TestAutoPlanner_NoAPIKey(t *testing.T) {
-	// Temporarily clear env
-	groqKey := os.Getenv("GROQ_API_KEY")
-	openaiKey := os.Getenv("OPENAI_API_KEY")
-	openrouterKey := os.Getenv("OPENROUTER_API_KEY")
-	// Test env manipulation; errors are not actionable.
-	_ = os.Unsetenv("GROQ_API_KEY")       //nolint:errcheck
-	_ = os.Unsetenv("OPENAI_API_KEY")     //nolint:errcheck
-	_ = os.Unsetenv("OPENROUTER_API_KEY") //nolint:errcheck
-	defer func() {
-		if groqKey != "" {
-			_ = os.Setenv("GROQ_API_KEY", groqKey) //nolint:errcheck
-		}
-		if openaiKey != "" {
-			_ = os.Setenv("OPENAI_API_KEY", openaiKey) //nolint:errcheck
-		}
-		if openrouterKey != "" {
-			_ = os.Setenv("OPENROUTER_API_KEY", openrouterKey) //nolint:errcheck
-		}
-	}()
+// configFromEnv builds a ProviderConfig from environment variables.
+// This is only used in tests - the imperative shell.
+func configFromEnv() ProviderConfig {
+	return ProviderConfig{
+		OpenRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
+		OpenRouterModel:  os.Getenv("OPENROUTER_MODEL"),
+		GroqAPIKey:       os.Getenv("GROQ_API_KEY"),
+		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
+	}
+}
 
-	planner := AutoPlanner()
+func TestAutoPlanner_NoAPIKey(t *testing.T) {
+	// Test with empty config - no API keys set
+	cfg := ProviderConfig{}
+
+	planner := AutoPlannerFromConfig(cfg)
 	if planner != nil {
 		t.Error("expected nil planner when no API keys are set")
 	}
 
-	if IsLLMPlanningAvailable() {
+	if IsLLMPlanningAvailableFromConfig(cfg) {
 		t.Error("expected LLM planning to be unavailable")
 	}
 }
@@ -133,11 +127,12 @@ func TestOpenAIPlanner_Integration(t *testing.T) {
 		t.Skip("Skipping LLM integration test: set AGENTCTL_ENABLE_LIVE_LLM_TESTS=1 to enable")
 	}
 
-	if !IsLLMPlanningAvailable() {
+	cfg := configFromEnv()
+	if !IsLLMPlanningAvailableFromConfig(cfg) {
 		t.Skip("Skipping LLM integration test: no API key configured (set GROQ_API_KEY or OPENAI_API_KEY)")
 	}
 
-	planner := AutoPlanner()
+	planner := AutoPlannerFromConfig(cfg)
 	if planner == nil {
 		t.Fatal("expected planner to be available")
 	}

@@ -155,6 +155,7 @@ func (e *Executor) prepareSkillJob(ctx context.Context, name string, input []byt
 		State:     types.StateQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
+		ExpiresAt: now.Add(types.DefaultMaxJobAge),
 	}
 
 	var duplicate bool

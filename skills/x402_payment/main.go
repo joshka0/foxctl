@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"golang.org/x/crypto/sha3"
@@ -56,6 +58,8 @@ const (
 	RPCBaseMainnet = "https://mainnet.base.org"
 	RPCBaseSepolia = "https://sepolia.base.org"
 )
+
+var allowedOps = []string{OpWalletInit, OpWalletStatus, OpFetch, OpPay}
 
 // Input defines the skill input parameters.
 type Input struct {
@@ -173,6 +177,15 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
+
 	// Set defaults
 	if in.Method == "" {
 		in.Method = "GET"
@@ -190,7 +203,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.Asset = "USDC"
 	}
 
-	switch in.Operation {
+	switch op {
 	case OpWalletInit:
 		return handleWalletInit(ctx, rc, in)
 	case OpWalletStatus:
@@ -200,7 +213,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	case OpPay:
 		return handlePay(ctx, rc, in)
 	default:
-		return fmt.Errorf("unknown operation: %s (valid: wallet/init, wallet/status, fetch, pay)", in.Operation)
+		return skillerr.Arg("invalid operation", skillerr.WithHint(opHint))
 	}
 }
 
@@ -214,7 +227,7 @@ func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) e
 	case WalletTypeLocal:
 		wallet, err = initLocalWallet(ctx, rc, in.Network, in.KeyPath)
 	default:
-		return fmt.Errorf("unknown wallet type: %s (valid: cdp, local)", in.WalletType)
+		return skillerr.Arg("unknown wallet type", skillerr.WithHint("Use wallet_type \"cdp\" or \"local\"."))
 	}
 
 	if err != nil {
@@ -231,12 +244,12 @@ func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) e
 			}
 			return skillout.Emit(rc, commandName, output)
 		}
-		return fmt.Errorf("init wallet: %w", err)
+		return skillerr.Runtime("init wallet", skillerr.WithCause(err))
 	}
 
 	// Save wallet config
 	if err := saveWalletConfig(rc, wallet, in.KeyPath); err != nil {
-		return fmt.Errorf("save wallet config: %w", err)
+		return skillerr.IO("save wallet config", skillerr.WithCause(err))
 	}
 
 	output := Output{
@@ -251,7 +264,11 @@ func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input)
 	// Load wallet config or use provided address
 	walletCfg, err := loadWalletConfig(rc)
 	if err != nil && in.Address == "" {
-		return fmt.Errorf("no wallet configured and no address provided: %w", err)
+		return skillerr.Arg(
+			"no wallet configured and no address provided",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Run operation wallet/init or provide address."),
+		)
 	}
 
 	address := in.Address
@@ -265,7 +282,7 @@ func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input)
 	}
 
 	if address == "" {
-		return fmt.Errorf("no wallet address available")
+		return skillerr.Arg("no wallet address available", skillerr.WithHint("Provide address or run wallet/init."))
 	}
 
 	// Get balances
@@ -293,7 +310,7 @@ func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input)
 
 func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.URL == "" {
-		return fmt.Errorf("url is required for fetch operation")
+		return skillerr.Arg("url is required for fetch operation", skillerr.WithHint("Provide url for fetch (e.g., https://example.com)."))
 	}
 
 	// Create HTTP request
@@ -304,7 +321,7 @@ func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error 
 
 	req, err := http.NewRequestWithContext(ctx, in.Method, in.URL, bodyReader)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return skillerr.Arg("create request", skillerr.WithCause(err))
 	}
 
 	// Add headers
@@ -316,14 +333,14 @@ func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("execute request: %w", err)
+		return skillerr.Integration("execute request", skillerr.WithCause(err))
 	}
 	defer resp.Body.Close()
 
 	// Read response body (limited to prevent memory exhaustion)
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
-		return fmt.Errorf("read response: %w", err)
+		return skillerr.IO("read response", skillerr.WithCause(err))
 	}
 
 	// Check for 402 Payment Required
@@ -383,31 +400,31 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 	if err := json.Unmarshal([]byte(paymentHeader), &requirements); err != nil {
 		decoded, decErr := decodeBase64(paymentHeader)
 		if decErr != nil {
-			return fmt.Errorf("parse payment requirements: %w", err)
+			return skillerr.Parse("parse payment requirements", skillerr.WithCause(err))
 		}
 		if err := json.Unmarshal(decoded, &requirements); err != nil {
-			return fmt.Errorf("parse decoded payment requirements: %w", err)
+			return skillerr.Parse("parse decoded payment requirements", skillerr.WithCause(err))
 		}
 	}
 
 	if len(requirements) == 0 {
-		return fmt.Errorf("no payment requirements in response")
+		return skillerr.Validation("no payment requirements in response")
 	}
 
 	// Select a payment requirement we can fulfill
 	selectedReq := selectPaymentRequirement(requirements, in.Network)
 	if selectedReq == nil {
-		return fmt.Errorf("no compatible payment requirement found for network %s", in.Network)
+		return skillerr.Validation(fmt.Sprintf("no compatible payment requirement found for network %s", in.Network))
 	}
 
 	// Check max payment limit
 	maxPayment, err := parseAmount(in.MaxPayment)
 	if err != nil {
-		return fmt.Errorf("parse max_payment: %w", err)
+		return skillerr.Arg("parse max_payment", skillerr.WithCause(err))
 	}
 	reqAmount, err := parseAmount(selectedReq.MaxAmountRequired)
 	if err != nil {
-		return fmt.Errorf("parse payment requirement amount: %w", err)
+		return skillerr.Parse("parse payment requirement amount", skillerr.WithCause(err))
 	}
 	if reqAmount != nil && maxPayment != nil && reqAmount.Cmp(maxPayment) > 0 {
 		output := Output{
@@ -424,12 +441,12 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 	// Load wallet and execute payment
 	walletCfg, err := loadWalletConfig(rc)
 	if err != nil {
-		return fmt.Errorf("load wallet for payment: %w", err)
+		return skillerr.NotFound("load wallet for payment", skillerr.WithCause(err))
 	}
 
 	paymentPayload, err := createPaymentPayload(ctx, walletCfg, selectedReq)
 	if err != nil {
-		return fmt.Errorf("create payment payload: %w", err)
+		return skillerr.Runtime("create payment payload", skillerr.WithCause(err))
 	}
 
 	// Retry request with payment signature
@@ -440,7 +457,7 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 
 	retryReq, err := http.NewRequestWithContext(ctx, in.Method, in.URL, bodyReader)
 	if err != nil {
-		return fmt.Errorf("create retry request: %w", err)
+		return skillerr.Runtime("create retry request", skillerr.WithCause(err))
 	}
 
 	for k, v := range in.Headers {
@@ -451,13 +468,13 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 	client := &http.Client{Timeout: 30 * time.Second}
 	retryResp, err := client.Do(retryReq)
 	if err != nil {
-		return fmt.Errorf("execute payment request: %w", err)
+		return skillerr.Integration("execute payment request", skillerr.WithCause(err))
 	}
 	defer retryResp.Body.Close()
 
 	retryBody, err := io.ReadAll(io.LimitReader(retryResp.Body, maxResponseSize))
 	if err != nil {
-		return fmt.Errorf("read payment response: %w", err)
+		return skillerr.IO("read payment response", skillerr.WithCause(err))
 	}
 
 	var retryBodyJSON any
@@ -488,15 +505,15 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 
 func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.To == "" {
-		return fmt.Errorf("to address is required for pay operation")
+		return skillerr.Arg("to is required for pay operation", skillerr.WithHint("Provide recipient address in to."))
 	}
 	if in.Amount == "" {
-		return fmt.Errorf("amount is required for pay operation")
+		return skillerr.Arg("amount is required for pay operation", skillerr.WithHint("Provide amount for pay (e.g., 1.00)."))
 	}
 
 	walletCfg, err := loadWalletConfig(rc)
 	if err != nil {
-		return fmt.Errorf("load wallet: %w", err)
+		return skillerr.NotFound("load wallet", skillerr.WithCause(err))
 	}
 
 	payment := &PaymentInfo{
@@ -511,8 +528,8 @@ func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Execute payment based on wallet type
 	switch walletCfg.Type {
 	case WalletTypeCDP:
-		txHash, err := executeCDPPayment(ctx, walletCfg, in.To, in.Amount, in.Asset)
-		if err != nil {
+		txHash, err := executeCDPPayment(ctx, walletCfg, in.To, in.Amount, in.Asset) //nolint:staticcheck // SA4023: Stub returns error
+		if err != nil {                                                              //nolint:staticcheck // SA4023: Intentional
 			payment.Status = "failed"
 			output := Output{
 				Operation: OpPay,
@@ -525,8 +542,8 @@ func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		payment.Status = "submitted"
 
 	case WalletTypeLocal:
-		txHash, err := executeLocalPayment(ctx, walletCfg, in.To, in.Amount, in.Asset)
-		if err != nil {
+		txHash, err := executeLocalPayment(ctx, walletCfg, in.To, in.Amount, in.Asset) //nolint:staticcheck // SA4023: Stub returns error
+		if err != nil {                                                                //nolint:staticcheck // SA4023: Intentional
 			payment.Status = "failed"
 			output := Output{
 				Operation: OpPay,
@@ -539,7 +556,7 @@ func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		payment.Status = "submitted"
 
 	default:
-		return fmt.Errorf("unsupported wallet type: %s", walletCfg.Type)
+		return skillerr.Arg("unsupported wallet type", skillerr.WithHint("Use wallet/init to configure a supported wallet type."))
 	}
 
 	output := Output{
@@ -557,12 +574,14 @@ func initCDPWallet(ctx context.Context, network string) (*WalletInfo, error) {
 	keySecret := os.Getenv("CDP_API_KEY_SECRET")
 
 	if keyID == "" || keySecret == "" {
-		return nil, fmt.Errorf("CDP wallet requires CDP_API_KEY_ID and CDP_API_KEY_SECRET environment variables. Get credentials at https://portal.cdp.coinbase.com/projects/api-keys")
+		return nil, skillerr.Auth("CDP wallet requires CDP_API_KEY_ID and CDP_API_KEY_SECRET environment variables",
+			skillerr.WithHint("Get credentials at https://portal.cdp.coinbase.com/projects/api-keys"))
 	}
 
 	// CDP wallet creation would use the coinbase-sdk-go here
 	// For now, return setup instructions
-	return nil, fmt.Errorf("CDP wallet integration pending. Set up credentials and use 'go get github.com/coinbase/coinbase-sdk-go' for full support")
+	return nil, skillerr.Capability("CDP wallet integration pending",
+		skillerr.WithHint("Set up credentials and use 'go get github.com/coinbase/coinbase-sdk-go' for full support"))
 }
 
 func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, keyPath string) (*WalletInfo, error) {
@@ -573,31 +592,31 @@ func initLocalWallet(ctx context.Context, rc *skillmain.RunContext, network, key
 		// Load from file
 		keyBytes, err := os.ReadFile(keyPath)
 		if err != nil {
-			return nil, fmt.Errorf("read key file: %w", err)
+			return nil, skillerr.IO("read key file", skillerr.WithCause(err))
 		}
 		keyHex := strings.TrimSpace(string(keyBytes))
 		keyHex = strings.TrimPrefix(keyHex, "0x")
-		privateKey, err = hexToECDSA(keyHex)
-		if err != nil {
-			return nil, fmt.Errorf("parse private key: %w", err)
+		privateKey, err = hexToECDSA(keyHex) //nolint:staticcheck // SA4023: Stub returns error
+		if err != nil {                      //nolint:staticcheck // SA4023: Intentional
+			return nil, skillerr.Parse("parse private key", skillerr.WithCause(err))
 		}
 	} else {
 		// Generate new key
-		privateKey, err = generateKey()
-		if err != nil {
-			return nil, fmt.Errorf("generate key: %w", err)
+		privateKey, err = generateKey() //nolint:staticcheck // SA4023: Stub returns error
+		if err != nil {                 //nolint:staticcheck // SA4023: Intentional
+			return nil, skillerr.Runtime("generate key", skillerr.WithCause(err))
 		}
 
 		// Save generated key
 		keyDir := filepath.Join(os.Getenv("HOME"), ".agentctl", "keys")
 		if err := os.MkdirAll(keyDir, 0o700); err != nil {
-			return nil, fmt.Errorf("create key directory: %w", err)
+			return nil, skillerr.IO("create key directory", skillerr.WithCause(err))
 		}
 
 		keyPath = filepath.Join(keyDir, fmt.Sprintf("x402_%s.key", network))
 		keyHex := hex.EncodeToString(privateKey.D.Bytes())
 		if err := os.WriteFile(keyPath, []byte(keyHex), 0o600); err != nil {
-			return nil, fmt.Errorf("save key file: %w", err)
+			return nil, skillerr.IO("save key file", skillerr.WithCause(err))
 		}
 	}
 
@@ -660,12 +679,12 @@ func loadWalletConfig(rc *skillmain.RunContext) (*WalletConfig, error) {
 	configPath := walletConfigPath(rc)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("read wallet config: %w", err)
+		return nil, skillerr.IO("read wallet config", skillerr.WithCause(err))
 	}
 
 	var cfg WalletConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse wallet config: %w", err)
+		return nil, skillerr.Parse("parse wallet config", skillerr.WithCause(err))
 	}
 
 	return &cfg, nil
@@ -676,7 +695,7 @@ func loadWalletConfig(rc *skillmain.RunContext) (*WalletConfig, error) {
 func getBalances(ctx context.Context, address, network string) (map[string]string, error) {
 	rpcURL := networkToRPC(network)
 	if rpcURL == "" {
-		return nil, fmt.Errorf("no RPC URL for network: %s", network)
+		return nil, skillerr.Arg(fmt.Sprintf("no RPC URL for network: %s", network))
 	}
 
 	balances := make(map[string]string)
@@ -698,6 +717,8 @@ func getBalances(ctx context.Context, address, network string) (map[string]strin
 
 	return balances, nil
 }
+
+var rpcHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 func rpcGetBalance(ctx context.Context, rpcURL, address string) (string, error) {
 	req := JSONRPCRequest{
@@ -776,7 +797,10 @@ func rpcCall(ctx context.Context, rpcURL string, req JSONRPCRequest) (json.RawMe
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := rpcHTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return nil, err
@@ -794,7 +818,7 @@ func rpcCall(ctx context.Context, rpcURL string, req JSONRPCRequest) (json.RawMe
 	}
 
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("RPC error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		return nil, skillerr.Integrationf("RPC error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
 	}
 
 	return rpcResp.Result, nil
@@ -802,13 +826,16 @@ func rpcCall(ctx context.Context, rpcURL string, req JSONRPCRequest) (json.RawMe
 
 // Payment execution
 
-func executeCDPPayment(ctx context.Context, wallet *WalletConfig, to, amount, asset string) (string, error) {
-	return "", fmt.Errorf("CDP payment requires coinbase-sdk-go integration. See https://github.com/coinbase/coinbase-sdk-go")
+//nolint:staticcheck // SA4023: Stub implementation always returns error
+func executeCDPPayment(_ context.Context, _ *WalletConfig, _, _, _ string) (string, error) {
+	return "", skillerr.Capability("CDP payment requires coinbase-sdk-go integration",
+		skillerr.WithHint("See https://github.com/coinbase/coinbase-sdk-go"))
 }
 
-func executeLocalPayment(ctx context.Context, wallet *WalletConfig, to, amount, asset string) (string, error) {
+//nolint:staticcheck // SA4023: Stub implementation always returns error
+func executeLocalPayment(_ context.Context, wallet *WalletConfig, _, _, _ string) (string, error) {
 	if wallet.KeyPath == "" {
-		return "", fmt.Errorf("local wallet requires key_path")
+		return "", skillerr.Arg("local wallet requires key_path")
 	}
 
 	// For full transaction signing, we'd need to:
@@ -817,7 +844,8 @@ func executeLocalPayment(ctx context.Context, wallet *WalletConfig, to, amount, 
 	// 3. Build and sign transaction
 	// 4. Send via eth_sendRawTransaction
 
-	return "", fmt.Errorf("local payment execution requires full transaction signing implementation. Consider using CDP wallet for managed signing")
+	return "", skillerr.Capability("local payment execution requires full transaction signing implementation",
+		skillerr.WithHint("Consider using CDP wallet for managed signing"))
 }
 
 func createPaymentPayload(ctx context.Context, wallet *WalletConfig, req *PaymentRequirement) (string, error) {
@@ -825,7 +853,7 @@ func createPaymentPayload(ctx context.Context, wallet *WalletConfig, req *Paymen
 	// For EVM, this uses ERC-3009 transferWithAuthorization
 	nonce, err := generateNonce()
 	if err != nil {
-		return "", fmt.Errorf("generate nonce for payment: %w", err)
+		return "", skillerr.Runtime("generate nonce for payment", skillerr.WithCause(err))
 	}
 
 	payload := map[string]any{
@@ -880,6 +908,7 @@ func selectPaymentRequirement(reqs []PaymentRequirement, preferredNetwork string
 
 // Crypto utilities (minimal implementation without go-ethereum dependency)
 
+//nolint:staticcheck // SA4023: Stub implementation always returns error
 func generateKey() (*ecdsa.PrivateKey, error) {
 	// Generate 32 random bytes for private key
 	keyBytes := make([]byte, 32)
@@ -889,9 +918,11 @@ func generateKey() (*ecdsa.PrivateKey, error) {
 
 	// This is a simplified implementation
 	// Production should use proper secp256k1 curve
-	return nil, fmt.Errorf("key generation requires crypto library - use 'go get github.com/ethereum/go-ethereum/crypto' or provide existing key via key_path")
+	return nil, skillerr.Capability("key generation requires crypto library",
+		skillerr.WithHint("Use 'go get github.com/ethereum/go-ethereum/crypto' or provide existing key via key_path"))
 }
 
+//nolint:staticcheck // SA4023: Stub implementation always returns error
 func hexToECDSA(hexkey string) (*ecdsa.PrivateKey, error) {
 	// Parse hex private key
 	_, err := hex.DecodeString(hexkey)
@@ -900,7 +931,8 @@ func hexToECDSA(hexkey string) (*ecdsa.PrivateKey, error) {
 	}
 
 	// This is a simplified implementation
-	return nil, fmt.Errorf("ECDSA key parsing requires crypto library - use 'go get github.com/ethereum/go-ethereum/crypto'")
+	return nil, skillerr.Capability("ECDSA key parsing requires crypto library",
+		skillerr.WithHint("Use 'go get github.com/ethereum/go-ethereum/crypto'"))
 }
 
 func pubkeyToAddress(pub *ecdsa.PublicKey) string {
@@ -980,4 +1012,3 @@ func decodeBase64(s string) ([]byte, error) {
 	}
 	return base64.URLEncoding.DecodeString(s)
 }
-

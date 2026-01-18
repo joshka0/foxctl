@@ -12,7 +12,6 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/testwatch"
 	testwatchrunner "github.com/jkatigb/agentctl/internal/testwatch"
 	"github.com/rs/zerolog"
@@ -75,7 +74,7 @@ Modes:
 			workspaceID := deriveWorkspaceID(workspaceDir)
 
 			// Load config
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return fmt.Errorf("load agentctl config: %w", err)
 			}
@@ -95,15 +94,12 @@ Modes:
 				return handleStatusOnly(ctx, cmd, store, workspaceID)
 			}
 
-			// Check if test-watch config exists
-			if !testwatch.ConfigExists(workspaceDir) {
-				return fmt.Errorf("no test-watch configuration found at %s\n\nUse 'agentctl test-watch add' to configure watchers", testwatch.ConfigPath(workspaceDir))
-			}
-
-			// Load test-watch config
-			twCfg, err := testwatch.LoadConfig(workspaceDir)
+			twCfg, exists, err := loadTestWatchConfig(workspaceDir)
 			if err != nil {
 				return fmt.Errorf("load test-watch config: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("no test-watch configuration found at %s\n\nUse 'agentctl test-watch add' to configure watchers", testwatch.ConfigPath(workspaceDir))
 			}
 
 			if len(twCfg.Watchers) == 0 {

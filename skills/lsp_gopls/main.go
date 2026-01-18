@@ -9,14 +9,16 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
 )
 
@@ -135,8 +137,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Validate file path if provided to prevent path traversal attacks
 	if in.File != "" {
-		if _, err := rc.PathValidator.ValidatePath(in.File); err != nil {
-			return fmt.Errorf("invalid file path: %w", err)
+		if _, err := skillmain.ValidatePath(rc, in.File, skillmain.WithPathMessage("invalid file path")); err != nil {
+			return err
 		}
 	}
 
@@ -252,9 +254,13 @@ func runWithDaemon(ctx context.Context, rc *skillmain.RunContext, workspace stri
 // runWithCLI uses the traditional gopls CLI (slower but supports all operations).
 func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	// Check gopls availability
-	goplsPath, err := exec.LookPath("gopls")
+	goplsPath, err := executil.RequireTool("gopls", "install gopls (go install golang.org/x/tools/gopls@latest)")
 	if err != nil {
-		return fmt.Errorf("gopls not found in PATH: %w", err)
+		return skillerr.Runtime(
+			"gopls not found in PATH",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Install gopls (go install golang.org/x/tools/gopls@latest)."),
+		)
 	}
 
 	out := output{Operation: in.Operation}
@@ -273,9 +279,7 @@ func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string,
 		if err != nil {
 			return err
 		}
-		if len(refs) > in.MaxResults {
-			refs = refs[:in.MaxResults]
-		}
+		refs = sliceutil.Limit(refs, in.MaxResults)
 		out.References = refs
 		out.Count = len(refs)
 
@@ -284,9 +288,7 @@ func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string,
 		if err != nil {
 			return err
 		}
-		if len(syms) > in.MaxResults {
-			syms = syms[:in.MaxResults]
-		}
+		syms = sliceutil.Limit(syms, in.MaxResults)
 		out.Symbols = syms
 		out.Count = len(syms)
 
@@ -295,9 +297,7 @@ func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string,
 		if err != nil {
 			return err
 		}
-		if len(syms) > in.MaxResults {
-			syms = syms[:in.MaxResults]
-		}
+		syms = sliceutil.Limit(syms, in.MaxResults)
 		out.Symbols = syms
 		out.Count = len(syms)
 
@@ -314,9 +314,7 @@ func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string,
 		if err != nil {
 			return err
 		}
-		if len(refs) > in.MaxResults {
-			refs = refs[:in.MaxResults]
-		}
+		refs = sliceutil.Limit(refs, in.MaxResults)
 		out.References = refs
 		out.Count = len(refs)
 
@@ -334,120 +332,106 @@ func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string,
 
 func runDefinition(ctx context.Context, goplsPath, workspace string, in Input) (*Definition, error) {
 	if in.File == "" || in.Line <= 0 {
-		return nil, fmt.Errorf("definition requires file and line")
+		return nil, skillerr.Arg("definition requires file and line")
 	}
 
 	filePath := resolvePath(workspace, in.File)
 	pos := fmt.Sprintf("%s:%d:%d", filePath, in.Line, in.Column)
 
-	cmd := exec.CommandContext(ctx, goplsPath, "definition", pos)
-	cmd.Dir = workspace
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gopls definition failed: %w", err)
+	result := executil.Run(ctx, workspace, goplsPath, "definition", pos)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("gopls definition failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseDefinition(string(out))
+	return parseDefinition(string(result.Stdout))
 }
 
 func runReferences(ctx context.Context, goplsPath, workspace string, in Input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
-		return nil, fmt.Errorf("references requires file and line")
+		return nil, skillerr.Arg("references requires file and line")
 	}
 
 	filePath := resolvePath(workspace, in.File)
 	pos := fmt.Sprintf("%s:%d:%d", filePath, in.Line, in.Column)
 
-	cmd := exec.CommandContext(ctx, goplsPath, "references", pos)
-	cmd.Dir = workspace
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gopls references failed: %w", err)
+	result := executil.Run(ctx, workspace, goplsPath, "references", pos)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("gopls references failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseReferences(string(out), workspace)
+	return parseReferences(string(result.Stdout), workspace)
 }
 
 func runSymbols(ctx context.Context, goplsPath, workspace string, in Input) ([]Symbol, error) {
 	if in.File == "" {
-		return nil, fmt.Errorf("symbols requires file")
+		return nil, skillerr.Arg("symbols requires file")
 	}
 
 	filePath := resolvePath(workspace, in.File)
 
-	cmd := exec.CommandContext(ctx, goplsPath, "symbols", filePath)
-	cmd.Dir = workspace
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gopls symbols failed: %w", err)
+	result := executil.Run(ctx, workspace, goplsPath, "symbols", filePath)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("gopls symbols failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseSymbols(string(out), workspace)
+	return parseSymbols(string(result.Stdout), workspace)
 }
 
 func runWorkspaceSymbol(ctx context.Context, goplsPath, workspace string, in Input) ([]Symbol, error) {
 	if in.Query == "" {
-		return nil, fmt.Errorf("workspace_symbol requires query")
+		return nil, skillerr.Arg("workspace_symbol requires query")
 	}
 
-	cmd := exec.CommandContext(ctx, goplsPath, "workspace_symbol", in.Query)
-	cmd.Dir = workspace
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gopls workspace_symbol failed: %w", err)
+	result := executil.Run(ctx, workspace, goplsPath, "workspace_symbol", in.Query)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("gopls workspace_symbol failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseWorkspaceSymbols(string(out), workspace)
+	return parseWorkspaceSymbols(string(result.Stdout), workspace)
 }
 
 func runCallHierarchy(ctx context.Context, goplsPath, workspace string, in Input) (*CallHierarchy, error) {
 	if in.File == "" || in.Line <= 0 {
-		return nil, fmt.Errorf("call_hierarchy requires file and line")
+		return nil, skillerr.Arg("call_hierarchy requires file and line")
 	}
 
 	filePath := resolvePath(workspace, in.File)
 	pos := fmt.Sprintf("%s:%d:%d", filePath, in.Line, in.Column)
 
-	cmd := exec.CommandContext(ctx, goplsPath, "call_hierarchy", pos)
-	cmd.Dir = workspace
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gopls call_hierarchy failed: %w", err)
+	result := executil.Run(ctx, workspace, goplsPath, "call_hierarchy", pos)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("gopls call_hierarchy failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseCallHierarchy(string(out), workspace)
+	return parseCallHierarchy(string(result.Stdout), workspace)
 }
 
 func runImplementation(ctx context.Context, goplsPath, workspace string, in Input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
-		return nil, fmt.Errorf("implementation requires file and line")
+		return nil, skillerr.Arg("implementation requires file and line")
 	}
 
 	filePath := resolvePath(workspace, in.File)
 	pos := fmt.Sprintf("%s:%d:%d", filePath, in.Line, in.Column)
 
-	cmd := exec.CommandContext(ctx, goplsPath, "implementation", pos)
-	cmd.Dir = workspace
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("gopls implementation failed: %w", err)
+	result := executil.Run(ctx, workspace, goplsPath, "implementation", pos)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("gopls implementation failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseReferences(string(out), workspace)
+	return parseReferences(string(result.Stdout), workspace)
 }
 
 func runCheck(ctx context.Context, goplsPath, workspace string, in Input) ([]Diagnostic, error) {
 	if in.File == "" {
-		return nil, fmt.Errorf("check requires file")
+		return nil, skillerr.Arg("check requires file")
 	}
 
 	filePath := resolvePath(workspace, in.File)
 
-	cmd := exec.CommandContext(ctx, goplsPath, "check", filePath)
-	cmd.Dir = workspace
-	out, _ := cmd.Output() // gopls check may exit non-zero on errors
+	result := executil.Run(ctx, workspace, goplsPath, "check", filePath) // gopls check may exit non-zero on errors
 
-	return parseDiagnostics(string(out), workspace)
+	return parseDiagnostics(string(result.Stdout), workspace)
 }
 
 // Parsing functions
@@ -455,7 +439,7 @@ func runCheck(ctx context.Context, goplsPath, workspace string, in Input) ([]Dia
 func parseDefinition(out string) (*Definition, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) == 0 {
-		return nil, fmt.Errorf("no definition found")
+		return nil, skillerr.NotFound("no definition found")
 	}
 
 	// Format: /path/to/file.go:line:col-col: defined here as <text>
@@ -631,7 +615,7 @@ func parseDiagnosticLine(line, workspace string) (Diagnostic, error) {
 	}
 
 	if msgStart < 0 {
-		return diag, fmt.Errorf("malformed diagnostic")
+		return diag, skillerr.Parse("malformed diagnostic")
 	}
 
 	locPart := line[:msgStart-2]
@@ -658,7 +642,7 @@ func parseLocation(s string) (Location, error) {
 	// Find last colon-separated numbers
 	parts := strings.Split(s, ":")
 	if len(parts) < 3 {
-		return loc, fmt.Errorf("invalid location format: %s", s)
+		return loc, skillerr.Parsef("invalid location format: %s", s)
 	}
 
 	// Reconstruct file path (may contain colons on Windows)
@@ -666,7 +650,7 @@ func parseLocation(s string) (Location, error) {
 
 	line, err := strconv.Atoi(parts[len(parts)-2])
 	if err != nil {
-		return loc, fmt.Errorf("invalid line number: %s", parts[len(parts)-2])
+		return loc, skillerr.Parsef("invalid line number: %s", parts[len(parts)-2])
 	}
 	loc.Line = line
 
@@ -678,7 +662,7 @@ func parseLocation(s string) (Location, error) {
 
 	col, err := strconv.Atoi(colPart)
 	if err != nil {
-		return loc, fmt.Errorf("invalid column number: %s", colPart)
+		return loc, skillerr.Parsef("invalid column number: %s", colPart)
 	}
 	loc.Column = col
 
@@ -692,7 +676,7 @@ func parseSymbolLine(line, workspace string) (Symbol, error) {
 	// Example: Resolver Struct 12:6-12:14
 	parts := strings.Fields(line)
 	if len(parts) < 3 {
-		return sym, fmt.Errorf("invalid symbol line: %s", line)
+		return sym, skillerr.Parsef("invalid symbol line: %s", line)
 	}
 
 	sym.Name = parts[0]
@@ -725,7 +709,7 @@ func parseWorkspaceSymbolLine(line, workspace string) (Symbol, error) {
 	// Find the last space-separated parts for name and kind
 	parts := strings.Fields(line)
 	if len(parts) < 3 {
-		return sym, fmt.Errorf("invalid workspace symbol line: %s", line)
+		return sym, skillerr.Parsef("invalid workspace symbol line: %s", line)
 	}
 
 	sym.Kind = parts[len(parts)-1]

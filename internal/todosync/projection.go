@@ -12,6 +12,7 @@ const (
 	GlyphPending    = "□"
 	GlyphCompleted  = "✓"
 	GlyphBlocked    = "⛔"
+	GlyphCanceled   = "✕"
 )
 
 // Status constants matching agentctl task status values
@@ -20,6 +21,7 @@ const (
 	StatusInProgress = "in_progress"
 	StatusCompleted  = "completed"
 	StatusBlocked    = "blocked"
+	StatusCanceled   = "canceled"
 )
 
 // ProjectionConfig controls how todos are formatted for output
@@ -47,6 +49,8 @@ func StatusGlyph(status string) string {
 		return GlyphCompleted
 	case StatusBlocked:
 		return GlyphBlocked
+	case StatusCanceled:
+		return GlyphCanceled
 	case StatusPending:
 		return GlyphPending
 	default:
@@ -92,7 +96,7 @@ func ParseProjectedContent(content string) string {
 	content = depHintRe.ReplaceAllString(content, "")
 
 	// Remove status glyphs
-	for _, glyph := range []string{GlyphInProgress, GlyphPending, GlyphCompleted, GlyphBlocked} {
+	for _, glyph := range []string{GlyphInProgress, GlyphPending, GlyphCompleted, GlyphBlocked, GlyphCanceled} {
 		content = strings.TrimPrefix(content, glyph+" ")
 		content = strings.TrimPrefix(content, glyph)
 	}
@@ -130,6 +134,8 @@ func MapAgentctlStatus(agentctlStatus string) string {
 		return "completed"
 	case StatusBlocked:
 		return "pending" // Claude doesn't have blocked, map to pending
+	case StatusCanceled:
+		return "completed" // Claude doesn't have canceled, map to completed (task is done)
 	case StatusPending:
 		return "pending"
 	default:

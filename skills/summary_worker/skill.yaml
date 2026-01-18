@@ -1,0 +1,116 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: summary/worker
+  description: Background worker that processes queued window summary jobs
+  version: 0.1.0
+  author: agentctl
+  tags: [summary, worker, background, async, sessions]
+distribution:
+  type: exec
+  exec:
+    entry: skills/summary_worker/summary_worker
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: summary/worker
+  parameters:
+    - name: batch_size
+      type: integer
+      required: false
+      default: 10
+      description: Number of jobs to process per invocation
+    - name: max_duration
+      type: integer
+      required: false
+      default: 300
+      description: Maximum processing time in seconds
+    - name: process_all
+      type: boolean
+      required: false
+      default: false
+      description: Loop until queue is empty or timeout reached
+    - name: dry_run
+      type: boolean
+      required: false
+      default: false
+      description: Claim jobs but skip actual LLM calls
+    - name: session_id
+      type: string
+      required: false
+      description: Filter processing to only jobs for this session
+  returns:
+    - name: processed
+      type: integer
+      description: Number of summaries successfully generated
+    - name: errors
+      type: integer
+      description: Number of jobs that failed
+    - name: skipped
+      type: integer
+      description: Number of jobs skipped (already summarized or no content)
+    - name: remaining
+      type: integer
+      description: Jobs still in queue after processing
+    - name: status
+      type: string
+      description: "Result status: completed, timeout, no_jobs, error"
+    - name: duration_ms
+      type: integer
+      description: Total processing time in milliseconds
+    - name: last_error
+      type: string
+      description: Last error message if any failures occurred
+    - name: stats
+      type: object
+      description: Queue snapshot after processing (queued, running, completed, failed)
+    - name: message
+      type: string
+      description: Human-readable summary
+  help:
+    short: "Process queued window summary jobs using LLM API"
+    long: |
+      summary/worker processes jobs from the summary queue, generating
+      summaries for session context windows using LLM providers.
+
+      The worker:
+      - Claims pending jobs atomically
+      - Generates summaries via LLM API (Cerebras, Groq, OpenRouter)
+      - Stores results in the session store
+      - Handles retries with exponential backoff
+      - Skips windows with no content preview (reduces noise)
+      - Skips windows that already have summaries (unless force=true)
+
+      Requires one of: CEREBRAS_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY.
+
+      Jobs are queued by the session_summarize skill during PreCompact hook.
+    workflows:
+      - id: process-batch
+        description: "Process a batch of queued summaries"
+        example_input:
+          batch_size: 20
+          max_duration: 120
+      - id: drain-queue
+        description: "Process all remaining jobs (large batch, long timeout)"
+        example_input:
+          batch_size: 100
+          max_duration: 600
+          process_all: true
+      - id: dry-run
+        description: "Test job claiming without calling API"
+        example_input:
+          batch_size: 5
+          dry_run: true
+      - id: session-specific
+        description: "Process only jobs for a specific session"
+        example_input:
+          session_id: "01ABC123..."
+          process_all: true
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false
+memory:
+  recommend: false

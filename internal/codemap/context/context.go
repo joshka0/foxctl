@@ -8,13 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
+	"sort"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
+	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 )
 
@@ -273,9 +275,12 @@ func (g *Gatherer) gatherSymbolContext(ctx context.Context, workspace string, te
 		return nil, fmt.Errorf("resolve code/symbols: %w", err)
 	}
 
-	manifest, err := skill.LoadManifest(handle.ManifestPath)
+	manifest, artifactPath, err := skill.LoadManifestAndArtifact(handle.ManifestPath, skill.ArtifactOptions{
+		PreferCGO: buildinfo.IsCGO(),
+		EntryRoot: workspace,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("load manifest: %w", err)
+		return nil, fmt.Errorf("resolve code/symbols artifact: %w", err)
 	}
 
 	// Build input for symbols skill
@@ -292,12 +297,6 @@ func (g *Gatherer) gatherSymbolContext(ctx context.Context, workspace string, te
 		return nil, fmt.Errorf("marshal input: %w", err)
 	}
 
-	// Determine artifact path
-	artifactPath := handle.ArtifactPath
-	if manifest.Distribution.Exec != nil && manifest.Distribution.Exec.Entry != "" {
-		artifactPath = filepath.Join(handle.ArtifactPath, manifest.Distribution.Exec.Entry)
-	}
-
 	// Execute skill
 	stdout, _, err := runner.RunWithOptions(ctx, runner.RunOptions{
 		Manifest:     manifest,
@@ -308,40 +307,14 @@ func (g *Gatherer) gatherSymbolContext(ctx context.Context, workspace string, te
 		return nil, fmt.Errorf("run code/symbols: %w", err)
 	}
 
-	// Parse envelope response
-	var envelope map[string]any
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
+	var payload struct {
+		Preview []Symbol `json:"preview"`
+	}
+	if err := protocol.DecodeEnvelopeInto(stdout, &payload); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
 
-	// Extract symbols from response
-	data, ok := envelope["data"].(map[string]any)
-	if !ok {
-		return result, nil
-	}
-
-	// Process preview symbols
-	preview, ok := data["preview"].([]any)
-	if !ok {
-		return result, nil
-	}
-
-	for _, item := range preview {
-		symMap, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		sym := Symbol{
-			Name:      getString(symMap, "name"),
-			Type:      getString(symMap, "type"),
-			File:      getString(symMap, "file"),
-			Line:      getInt(symMap, "line"),
-			Signature: getString(symMap, "signature"),
-			Exported:  getBool(symMap, "exported"),
-			Doc:       getString(symMap, "doc"),
-		}
-
+	for _, sym := range payload.Preview {
 		// Group by file
 		result.SymbolsByFile[sym.File] = append(result.SymbolsByFile[sym.File], sym)
 
@@ -371,15 +344,12 @@ func (g *Gatherer) gatherPatternContext(ctx context.Context, workspace string, t
 		return nil, fmt.Errorf("resolve code/context_ripgrep: %w", err)
 	}
 
-	manifest, err := skill.LoadManifest(handle.ManifestPath)
+	manifest, artifactPath, err := skill.LoadManifestAndArtifact(handle.ManifestPath, skill.ArtifactOptions{
+		PreferCGO: buildinfo.IsCGO(),
+		EntryRoot: workspace,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("load manifest: %w", err)
-	}
-
-	// Determine artifact path
-	artifactPath := handle.ArtifactPath
-	if manifest.Distribution.Exec != nil && manifest.Distribution.Exec.Entry != "" {
-		artifactPath = filepath.Join(handle.ArtifactPath, manifest.Distribution.Exec.Entry)
+		return nil, fmt.Errorf("resolve code/context_ripgrep artifact: %w", err)
 	}
 
 	// Search for each term
@@ -415,54 +385,18 @@ func (g *Gatherer) gatherPatternContext(ctx context.Context, workspace string, t
 			continue
 		}
 
-		// Parse envelope response
-		var envelope map[string]any
-		if err := json.Unmarshal(stdout, &envelope); err != nil {
+		var payload struct {
+			Preview []Block `json:"preview"`
+		}
+		if err := protocol.DecodeEnvelopeInto(stdout, &payload); err != nil {
 			continue
 		}
 
-		// Extract blocks from response
-		data, ok := envelope["data"].(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Process preview blocks
-		preview, ok := data["preview"].([]any)
-		if !ok {
-			continue
-		}
-
-		var blocks []Block
-		for _, item := range preview {
-			blockMap, ok := item.(map[string]any)
-			if !ok {
-				continue
+		blocks := payload.Preview
+		for i := range blocks {
+			if blocks[i].MatchLines == nil {
+				blocks[i].MatchLines = []int{}
 			}
-
-			block := Block{
-				File:       getString(blockMap, "file"),
-				Language:   getString(blockMap, "language"),
-				StartLine:  getInt(blockMap, "start_line"),
-				EndLine:    getInt(blockMap, "end_line"),
-				HeaderLine: getString(blockMap, "header_line"),
-				SymbolName: getString(blockMap, "symbol_name"),
-				SymbolKind: getString(blockMap, "symbol_kind"),
-				Source:     getString(blockMap, "source"),
-				MatchCount: getInt(blockMap, "match_count"),
-				MatchLines: []int{}, // Initialize to empty slice for consistent JSON output
-			}
-
-			// Parse match_lines if present
-			if matchLines, ok := blockMap["match_lines"].([]any); ok {
-				for _, line := range matchLines {
-					if lineNum, ok := line.(float64); ok {
-						block.MatchLines = append(block.MatchLines, int(lineNum))
-					}
-				}
-			}
-
-			blocks = append(blocks, block)
 		}
 
 		if len(blocks) > 0 {
@@ -555,10 +489,12 @@ func buildCrossReferences(matchesByTerm map[string][]Block) []CrossRef {
 	}
 
 	// Find references between files
+	// Collect and sort file keys for deterministic output ordering
 	files := make([]string, 0, len(fileBlocks))
 	for f := range fileBlocks {
 		files = append(files, f)
 	}
+	sort.Strings(files)
 
 	// Simple heuristic: if the same symbol name appears in multiple files,
 	// create a cross-reference
@@ -588,23 +524,3 @@ func buildCrossReferences(matchesByTerm map[string][]Block) []CrossRef {
 }
 
 // Helper functions for safe type assertions
-func getString(m map[string]any, key string) string {
-	if v, ok := m[key].(string); ok {
-		return v
-	}
-	return ""
-}
-
-func getInt(m map[string]any, key string) int {
-	if v, ok := m[key].(float64); ok {
-		return int(v)
-	}
-	return 0
-}
-
-func getBool(m map[string]any, key string) bool {
-	if v, ok := m[key].(bool); ok {
-		return v
-	}
-	return false
-}

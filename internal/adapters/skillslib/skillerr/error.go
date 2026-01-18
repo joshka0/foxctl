@@ -146,6 +146,26 @@ func NotFoundf(format string, args ...any) *Error {
 	return newError(CodeNotFound, fmt.Sprintf(format, args...))
 }
 
+// Integration creates an external integration error (EINTEGRATION).
+func Integration(msg string, opts ...Option) *Error {
+	return newError(CodeIntegration, msg, opts...)
+}
+
+// Integrationf creates a formatted integration error.
+func Integrationf(format string, args ...any) *Error {
+	return newError(CodeIntegration, fmt.Sprintf(format, args...))
+}
+
+// Capability creates a capability/feature not supported error (ECAPABILITY).
+func Capability(msg string, opts ...Option) *Error {
+	return newError(CodeCapability, msg, opts...)
+}
+
+// Capabilityf creates a formatted capability error.
+func Capabilityf(format string, args ...any) *Error {
+	return newError(CodeCapability, fmt.Sprintf(format, args...))
+}
+
 // Wrap wraps an existing error with a skill error code.
 func Wrap(code, msg string, err error, opts ...Option) *Error {
 	allOpts := append([]Option{WithCause(err)}, opts...)

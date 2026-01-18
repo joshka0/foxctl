@@ -28,6 +28,11 @@ const (
 	StateCanceled State = "canceled"
 )
 
+const (
+	// DefaultMaxJobAge caps how long a job can remain running before being recovered.
+	DefaultMaxJobAge = time.Hour
+)
+
 // Job captures the persisted metadata for a job.
 type Job struct {
 	ID         string    `json:"id"`
@@ -39,6 +44,7 @@ type Job struct {
 	Error      string    `json:"error,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+	ExpiresAt  time.Time `json:"expires_at,omitempty"`
 }
 
 var (

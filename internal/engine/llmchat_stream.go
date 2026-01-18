@@ -380,9 +380,9 @@ type oaiStreamChunk struct {
 
 // oaiDelta is the delta content in a streaming chunk.
 type oaiDelta struct {
-	Role      string                 `json:"role,omitempty"`
-	Content   string                 `json:"content,omitempty"`
-	ToolCalls []oaiToolCallDelta     `json:"tool_calls,omitempty"`
+	Role      string             `json:"role,omitempty"`
+	Content   string             `json:"content,omitempty"`
+	ToolCalls []oaiToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 // oaiToolCallDelta is a tool call delta in streaming.

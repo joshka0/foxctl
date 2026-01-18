@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"testing"
 	"text/template"
@@ -169,8 +168,8 @@ func TestGeminiSummarizer_NoAPIKey(t *testing.T) {
 }
 
 func TestGeminiSummarizer_SummarizeTurns_Integration(t *testing.T) {
-	// Create a mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create a mock handler
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -189,15 +188,14 @@ func TestGeminiSummarizer_SummarizeTurns_Integration(t *testing.T) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
-	// Create summarizer with test client that redirects to mock server
+	// Create summarizer with test client that uses the mock handler
 	summarizer := &GeminiSummarizer{
 		apiKey: "test-key",
 		model:  "test-model",
 		httpClient: &http.Client{
-			Transport: &mockTransport{serverURL: server.URL},
+			Transport: &mockTransport{handler: handler},
 		},
 	}
 
@@ -228,7 +226,7 @@ func TestGeminiSummarizer_SummarizeTurns_Integration(t *testing.T) {
 }
 
 func TestGeminiSummarizer_DistillSummaries_Integration(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"candidates": []map[string]any{
 				{
@@ -241,14 +239,13 @@ func TestGeminiSummarizer_DistillSummaries_Integration(t *testing.T) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	summarizer := &GeminiSummarizer{
 		apiKey: "test-key",
 		model:  "test-model",
 		httpClient: &http.Client{
-			Transport: &mockTransport{serverURL: server.URL},
+			Transport: &mockTransport{handler: handler},
 		},
 	}
 
@@ -275,7 +272,7 @@ func TestGeminiSummarizer_DistillSummaries_Integration(t *testing.T) {
 }
 
 func TestGeminiSummarizer_FilterByRelevance_Integration(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"candidates": []map[string]any{
 				{
@@ -288,14 +285,13 @@ func TestGeminiSummarizer_FilterByRelevance_Integration(t *testing.T) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	summarizer := &GeminiSummarizer{
 		apiKey: "test-key",
 		model:  "test-model",
 		httpClient: &http.Client{
-			Transport: &mockTransport{serverURL: server.URL},
+			Transport: &mockTransport{handler: handler},
 		},
 	}
 
@@ -320,17 +316,16 @@ func TestGeminiSummarizer_FilterByRelevance_Integration(t *testing.T) {
 }
 
 func TestGeminiSummarizer_APIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("Internal Server Error"))
-	}))
-	defer server.Close()
+	})
 
 	summarizer := &GeminiSummarizer{
 		apiKey: "test-key",
 		model:  "test-model",
 		httpClient: &http.Client{
-			Transport: &mockTransport{serverURL: server.URL},
+			Transport: &mockTransport{handler: handler},
 		},
 	}
 
@@ -348,8 +343,8 @@ func TestGeminiSummarizer_APIError(t *testing.T) {
 }
 
 func TestGeminiSummarizer_ContextCancellation(t *testing.T) {
-	// Create a server that delays its response
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Create a handler that delays its response
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Delay to allow context cancellation to take effect
 		time.Sleep(500 * time.Millisecond)
 		resp := map[string]any{
@@ -364,14 +359,13 @@ func TestGeminiSummarizer_ContextCancellation(t *testing.T) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	summarizer := &GeminiSummarizer{
 		apiKey: "test-key",
 		model:  "test-model",
 		httpClient: &http.Client{
-			Transport: &mockTransport{serverURL: server.URL},
+			Transport: &mockTransport{handler: handler},
 		},
 	}
 
@@ -400,19 +394,18 @@ func TestGeminiSummarizer_ContextCancellation(t *testing.T) {
 }
 
 func TestGeminiSummarizer_EmptyResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"candidates": []map[string]any{},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	summarizer := &GeminiSummarizer{
 		apiKey: "test-key",
 		model:  "test-model",
 		httpClient: &http.Client{
-			Transport: &mockTransport{serverURL: server.URL},
+			Transport: &mockTransport{handler: handler},
 		},
 	}
 
@@ -430,18 +423,17 @@ func TestGeminiSummarizer_EmptyResponse(t *testing.T) {
 }
 
 func TestGeminiSummarizer_Timeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
+	})
 
 	summarizer := &GeminiSummarizer{
 		apiKey: "test-key",
 		model:  "test-model",
 		httpClient: &http.Client{
 			Timeout:   50 * time.Millisecond,
-			Transport: &mockTransport{serverURL: server.URL},
+			Transport: &mockTransport{handler: handler},
 		},
 	}
 
@@ -492,18 +484,19 @@ func TestMockSummarizer_EmptyInputs(t *testing.T) {
 
 // mockTransport redirects all requests to the test server.
 type mockTransport struct {
-	serverURL string
+	handler http.Handler
 }
 
 func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// Parse the server URL to extract scheme and host
-	parsed, err := url.Parse(t.serverURL)
-	if err != nil {
+	if err := req.Context().Err(); err != nil {
 		return nil, err
 	}
-	req.URL.Scheme = parsed.Scheme
-	req.URL.Host = parsed.Host
-	return http.DefaultTransport.RoundTrip(req)
+	recorder := httptest.NewRecorder()
+	t.handler.ServeHTTP(recorder, req)
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return recorder.Result(), nil
 }
 
 // parseTemplate is a helper for tests.

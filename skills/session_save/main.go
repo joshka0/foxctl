@@ -5,13 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"sort"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
@@ -73,7 +74,6 @@ type Output struct {
 	Message       string         `json:"message"`
 }
 
-
 const command = "session/save"
 
 func main() {
@@ -82,7 +82,7 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
-	in.Workspace = sessionkit.WorkspaceOrDefault(in.Workspace, rc.Workspace)
+	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
 
 	// Default trigger
 	if in.Trigger == "" {
@@ -293,6 +293,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.Trigger == "pre_compact" && sessionID != "" {
 		triggerArchiveAndSummarize(sessionID, in.Workspace)
 		output.Message += " (archiving in background)"
+
+		// Set pending_restore_at flag for post-compact context injection
+		// The UserPromptSubmit hook will check this flag and run session/restore
+		sessStore, sessCleanup, sessErr := sessionkit.OpenSessions(ctx, rc.Config)
+		if sessErr == nil {
+			defer sessCleanup()
+			if setErr := sessStore.SetPendingRestore(ctx, sessionID); setErr == nil {
+				output.Message += " (pending restore set)"
+			}
+		}
 	}
 
 	return skillout.Emit(rc, command, output)
@@ -328,6 +338,5 @@ agentctl run session/summarize --input '\''{"session_id":"%s","mode":"windows"}'
 ' >/dev/null 2>&1 &
 `, string(archiveJSON), sessionID)
 
-	cmd := exec.Command("sh", "-c", script)
-	_ = cmd.Start() // Start and don't wait
+	_, _ = executil.Start(context.Background(), "", "sh", "-c", script) // Start and don't wait
 }

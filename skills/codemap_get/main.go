@@ -4,12 +4,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/codemap"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -96,9 +98,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Found: false,
 	}
 
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
+		return skillerr.WrapIO("open memory store", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
@@ -113,7 +115,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// List all codemaps and find matching one
 	entries, err := memStore.List(ctx, rc.Workspace, 500)
 	if err != nil {
-		return fmt.Errorf("list memories: %w", err)
+		return skillerr.WrapIO("list memories", err)
 	}
 
 	var foundEntry *storage.NamedEntry
@@ -151,22 +153,55 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	if foundEntry.Result != nil {
-		var stored StoredCodemap
-		if err := json.Unmarshal(foundEntry.Result, &stored); err == nil {
-			out.Codemap.Title = stored.Title
-			out.Codemap.Description = stored.Description
-			out.Codemap.Files = stored.Files
+		if ws, ok, err := codemap.ParseWindsurfCodemap(foundEntry.Result); err == nil && ok {
+			out.Codemap.Title = ws.Title
+			out.Codemap.Description = ws.Description
+			out.Codemap.Files = extractWindsurfFiles(ws)
 
 			if *in.IncludeTraces {
-				for _, st := range stored.Traces {
+				for _, t := range ws.Traces {
+					content := t.TraceTextDiagram
+					if content == "" {
+						content = t.TraceGuide
+					}
+
+					file := ""
+					startLine := 0
+					endLine := 0
+					if len(t.Locations) > 0 {
+						file = t.Locations[0].Path
+						startLine = t.Locations[0].LineNumber
+						endLine = t.Locations[0].LineNumber
+					}
+
 					out.Codemap.Traces = append(out.Codemap.Traces, Trace{
-						Name:        st.Name,
-						Description: st.Description,
-						Content:     truncate(st.Content, in.MaxTraceContent),
-						File:        st.File,
-						StartLine:   st.StartLine,
-						EndLine:     st.EndLine,
+						Name:        t.Title,
+						Description: t.Description,
+						Content:     skillout.TruncateRunes(content, in.MaxTraceContent),
+						File:        file,
+						StartLine:   startLine,
+						EndLine:     endLine,
 					})
+				}
+			}
+		} else {
+			var stored StoredCodemap
+			if err := json.Unmarshal(foundEntry.Result, &stored); err == nil {
+				out.Codemap.Title = stored.Title
+				out.Codemap.Description = stored.Description
+				out.Codemap.Files = stored.Files
+
+				if *in.IncludeTraces {
+					for _, st := range stored.Traces {
+						out.Codemap.Traces = append(out.Codemap.Traces, Trace{
+							Name:        st.Name,
+							Description: st.Description,
+							Content:     skillout.TruncateRunes(st.Content, in.MaxTraceContent),
+							File:        st.File,
+							StartLine:   st.StartLine,
+							EndLine:     st.EndLine,
+						})
+					}
 				}
 			}
 		}
@@ -184,13 +219,27 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
-func truncate(s string, maxLen int) string {
-	if maxLen <= 3 {
-		return s
+func extractWindsurfFiles(ws *codemap.WindsurfCodemap) []string {
+	if ws == nil {
+		return []string{}
 	}
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
+	pathSet := make(map[string]struct{})
+	for _, trace := range ws.Traces {
+		for _, loc := range trace.Locations {
+			if loc.Path == "" {
+				continue
+			}
+			path := strings.TrimPrefix(loc.Path, "./")
+			pathSet[path] = struct{}{}
+		}
 	}
-	return string(runes[:maxLen-3]) + "..."
+	if len(pathSet) == 0 {
+		return []string{}
+	}
+	paths := make([]string, 0, len(pathSet))
+	for p := range pathSet {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	return paths
 }

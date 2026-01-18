@@ -3,9 +3,9 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
@@ -13,9 +13,11 @@ import (
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/execution/runner"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
+	"github.com/jkatigb/agentctl/internal/skillrun"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -748,7 +750,7 @@ func (r *Registry) codeSnippetExtract(ctx context.Context, args map[string]any) 
 	// Parse candidates
 	candidates := make([]SweGrepCandidate, 0, len(candidatesRaw))
 	for i, c := range candidatesRaw {
-		cMap, ok := c.(map[string]any)
+		cMap, ok := maputil.AsStringMap(c)
 		if !ok {
 			return errorResult(fmt.Sprintf("candidate_files[%d] must be an object", i)), nil
 		}
@@ -778,115 +780,79 @@ func (r *Registry) codeSnippetExtract(ctx context.Context, args map[string]any) 
 		return errorResult(fmt.Sprintf("marshal input: %v", err)), nil
 	}
 
-	// Resolve the code/snippet_extract skill
 	resolver := skill.NewResolver(skill.WithSearchPaths(
 		r.config.WorkspaceRoot+"/dist/skills",
 		r.config.WorkspaceRoot+"/skills",
 	))
-	handle, err := resolver.Resolve("code/snippet_extract")
-	if err != nil {
-		// Skill not found - return helpful error
-		return errorResult(fmt.Sprintf("skill code/snippet_extract not found: %v (ensure skill is installed)", err)), nil
-	}
-
-	// Load manifest
-	manifest, err := skill.LoadManifest(handle.ManifestPath)
-	if err != nil {
-		return errorResult(fmt.Sprintf("load manifest: %v", err)), nil
-	}
 
 	// Set workspace in context for the skill
 	ctx = workspace.WithContext(ctx, r.config.WorkspaceRoot)
 
-	// Determine artifact path: use manifest's exec entry if specified, otherwise use ArtifactPath as-is
-	artifactPath := handle.ArtifactPath
-	if manifest.Distribution.Exec != nil && manifest.Distribution.Exec.Entry != "" {
-		artifactPath = filepath.Join(handle.ArtifactPath, manifest.Distribution.Exec.Entry)
+	var payload struct {
+		Summary struct {
+			FilesConsidered int `json:"files_considered"`
+			FilesRelevant   int `json:"files_relevant"`
+			SnippetsEmitted int `json:"snippets_emitted"`
+		} `json:"summary"`
+		SnippetsInline []struct {
+			File      string `json:"file"`
+			SymbolID  string `json:"symbol_id"`
+			StartLine int    `json:"start_line"`
+			EndLine   int    `json:"end_line"`
+			Preview   string `json:"preview"`
+		} `json:"snippets_inline"`
+		Artifact string `json:"artifact"`
 	}
 
-	// Execute the skill
-	stdout, stderr, err := runner.RunWithOptions(ctx, runner.RunOptions{
-		Manifest:     manifest,
-		ArtifactPath: artifactPath,
-		Input:        inputBytes,
-	})
+	_, err = skillrun.RunAndDecodeInto(ctx, resolver, "code/snippet_extract", inputBytes, skillrun.Options{
+		PreferCGO: buildinfo.IsCGO(),
+		EntryRoot: r.config.WorkspaceRoot,
+	}, &payload)
 	if err != nil {
-		// Include stderr in error message for debugging
-		errMsg := fmt.Sprintf("skill execution failed: %v", err)
-		if len(stderr) > 0 {
-			errMsg += fmt.Sprintf(" (stderr: %s)", string(stderr))
+		if errors.Is(err, skill.ErrArtifactsMissing) {
+			return errorResult(fmt.Sprintf("skill code/snippet_extract not found: %v (ensure skill is installed)", err)), nil
 		}
-		return errorResult(errMsg), nil
+		var runErr skillrun.RunError
+		if errors.As(err, &runErr) {
+			errMsg := fmt.Sprintf("skill execution failed: %v", runErr.Err)
+			if len(runErr.Stderr) > 0 {
+				errMsg += fmt.Sprintf(" (stderr: %s)", string(runErr.Stderr))
+			}
+			return errorResult(errMsg), nil
+		}
+		return errorResult(fmt.Sprintf("skill response error: %v", err)), nil
 	}
-
-	// Parse the envelope response
-	var envelope map[string]any
-	if err := json.Unmarshal(stdout, &envelope); err != nil {
-		return errorResult(fmt.Sprintf("parse skill response: %v", err)), nil
-	}
-
-	// Check envelope status
-	status, _ := envelope["status"].(string)
-	if status == "error" {
-		errObj, _ := envelope["error"].(map[string]any)
-		errCode, _ := errObj["code"].(string)
-		errMsg, _ := errObj["message"].(string)
-		return errorResult(fmt.Sprintf("skill error [%s]: %s", errCode, errMsg)), nil
-	}
-
-	// Extract data from envelope
-	data, ok := envelope["data"].(map[string]any)
-	if !ok {
-		return errorResult("invalid skill response: missing data"), nil
-	}
-
 	// Build tool result
-	result := map[string]any{
+	toolResult := map[string]any{
 		"snippets": []SweGrepSnippet{},
 		"count":    0,
 	}
 
 	// Extract summary
-	if summary, ok := data["summary"].(map[string]any); ok {
-		result["files_considered"] = summary["files_considered"]
-		result["files_relevant"] = summary["files_relevant"]
-		result["snippets_emitted"] = summary["snippets_emitted"]
-	}
+	toolResult["files_considered"] = payload.Summary.FilesConsidered
+	toolResult["files_relevant"] = payload.Summary.FilesRelevant
+	toolResult["snippets_emitted"] = payload.Summary.SnippetsEmitted
 
 	// Extract inline snippets
-	if snippetsInline, ok := data["snippets_inline"].([]any); ok {
-		snippets := make([]SweGrepSnippet, 0, len(snippetsInline))
-		for _, s := range snippetsInline {
-			sMap, ok := s.(map[string]any)
-			if !ok {
-				continue
-			}
-			snippet := SweGrepSnippet{}
-			if f, ok := sMap["file"].(string); ok {
-				snippet.File = f
-			}
-			if sym, ok := sMap["symbol_id"].(string); ok {
-				snippet.SymbolID = sym
-			}
-			if sl, ok := sMap["start_line"].(float64); ok {
-				snippet.StartLine = int(sl)
-			}
-			if el, ok := sMap["end_line"].(float64); ok {
-				snippet.EndLine = int(el)
-			}
-			if p, ok := sMap["preview"].(string); ok {
-				snippet.Preview = p
-			}
-			snippets = append(snippets, snippet)
+	if len(payload.SnippetsInline) > 0 {
+		snippets := make([]SweGrepSnippet, 0, len(payload.SnippetsInline))
+		for _, s := range payload.SnippetsInline {
+			snippets = append(snippets, SweGrepSnippet{
+				File:      s.File,
+				SymbolID:  s.SymbolID,
+				StartLine: s.StartLine,
+				EndLine:   s.EndLine,
+				Preview:   s.Preview,
+			})
 		}
-		result["snippets"] = snippets
-		result["count"] = len(snippets)
+		toolResult["snippets"] = snippets
+		toolResult["count"] = len(snippets)
 	}
 
 	// Include CAS artifact reference if present
-	if artifact, ok := data["artifact"].(string); ok {
-		result["cas_artifact"] = artifact
+	if payload.Artifact != "" {
+		toolResult["cas_artifact"] = payload.Artifact
 	}
 
-	return successResult(result), nil
+	return successResult(toolResult), nil
 }

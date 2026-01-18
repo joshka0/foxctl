@@ -2,11 +2,11 @@ package actor
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/actor/memory"
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/agentprompt"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/engine"
@@ -82,6 +83,9 @@ type AgentActor struct {
 	cancelMu sync.Mutex
 	// cancelFuncs maps askID to cancel function for in-flight console asks
 	cancelFuncs map[string]context.CancelFunc
+
+	// clock provides current time (injectable for testing/determinism)
+	clock func() time.Time
 }
 
 // AgentActorConfig holds configuration for creating a AgentActor.
@@ -108,8 +112,9 @@ type AgentActorConfig struct {
 	// WorkspaceRoot is the workspace directory
 	WorkspaceRoot string
 
-	// DB is the database connection for memory
-	DB *sql.DB
+	// ShortTermMemory provides progressive context management (optional)
+	// FC/IS: Caller constructs memory at boundary, actor uses abstraction.
+	ShortTermMemory *memory.ShortTermMemory
 
 	// OpenMemoryStore provides access to named memory for retrieval tools
 	OpenMemoryStore func(context.Context) (storage.MemoryStore, error)
@@ -134,6 +139,13 @@ func WithAgentLogger(logger zerolog.Logger) AgentActorOption {
 	}
 }
 
+// WithAgentClock sets the clock function for the AgentActor (for testing/determinism).
+func WithAgentClock(clock func() time.Time) AgentActorOption {
+	return func(a *AgentActor) {
+		a.clock = clock
+	}
+}
+
 // NewAgentActor creates a new AgentActor with the given configuration.
 func NewAgentActor(cfg AgentActorConfig, opts ...AgentActorOption) (*AgentActor, error) {
 	// Create base actor with lifecycle hooks
@@ -153,6 +165,7 @@ func NewAgentActor(cfg AgentActorConfig, opts ...AgentActorOption) (*AgentActor,
 		workspaceRoot: cfg.WorkspaceRoot,
 		logger:        cfg.Logger,
 		cancelFuncs:   make(map[string]context.CancelFunc),
+		clock:         func() time.Time { return time.Now() },
 	}
 
 	// Apply options
@@ -184,11 +197,9 @@ func NewAgentActor(cfg AgentActorConfig, opts ...AgentActorOption) (*AgentActor,
 		}
 	}
 
-	// Initialize short-term memory if DB provided
-	if cfg.DB != nil {
-		if err := actor.initializeMemory(cfg); err != nil {
-			return nil, fmt.Errorf("initialize memory: %w", err)
-		}
+	// Use pre-constructed short-term memory if provided
+	if cfg.ShortTermMemory != nil {
+		actor.shortTermMem = cfg.ShortTermMemory
 	}
 
 	// Register message handlers
@@ -270,8 +281,12 @@ func (a *AgentActor) initializeTools(cfg AgentActorConfig) error {
 		ActorID:               cfg.AgentConfig.ActorID,
 		TaskID:                cfg.AgentConfig.TaskID,
 		EpicID:                cfg.AgentConfig.EpicID,
+		Depth:                 cfg.AgentConfig.Depth,
+		MaxDepth:              cfg.AgentConfig.MaxDepth,
+		LocalMaxDepth:         cfg.AgentConfig.LocalMaxDepth,
 		AgentRole:             string(cfg.AgentConfig.Role),
 		TrajectoryStorageRoot: cfg.TrajectoryStorageRoot,
+		HookDispatcher:        cfg.Hooks,
 	}
 
 	if cfg.OpenMemoryStore != nil {
@@ -361,9 +376,10 @@ func (a *AgentActor) initializeLLMChatEngine(cfg AgentActorConfig) error {
 	// Create tool runner with hook integration
 	// SessionID is set in onStart when the session is generated
 	toolRunner := engine.NewToolRunner(toolExecutor, cfg.Hooks, engine.ToolRunnerConfig{
-		Workspace: cfg.WorkspaceRoot,
-		SessionID: "", // Set in onStart when sessionID is generated
-		ActorID:   cfg.ActorConfig.ID,
+		Workspace:   cfg.WorkspaceRoot,
+		WorkspaceID: cfg.AgentConfig.WorkspaceID,
+		SessionID:   "", // Set in onStart when sessionID is generated
+		ActorID:     cfg.ActorConfig.ID,
 	})
 
 	// Store tool runner for later SessionID update
@@ -408,6 +424,7 @@ func (r *registryToolExecutor) Execute(ctx context.Context, name string, args js
 	}
 
 	// Call tool - returns (*mcpmodels.CallToolResult, error)
+	ctx = agenttools.WithHookDispatch(ctx)
 	result, err := funcTool.Call(ctx, argsMap)
 	if err != nil {
 		return "", err
@@ -448,87 +465,9 @@ func (r *registryToolExecutor) List() []engine.ToolDef {
 	return defs
 }
 
-// initializeMemory sets up short-term memory.
-func (a *AgentActor) initializeMemory(cfg AgentActorConfig) error {
-	mem, err := memory.New(context.Background(), cfg.DB)
-	if err != nil {
-		return fmt.Errorf("create short-term memory: %w", err)
-	}
-
-	a.shortTermMem = mem
-	return nil
-}
-
 // buildAgentSignature creates the signature for the agent based on its role.
 func buildAgentSignature(role agenttypes.AgentRole) *core.Signature {
-	var instruction string
-	switch role {
-	case agenttypes.RoleCoder:
-		instruction = `You are a coding agent. You have access to file system tools to read and write code.
-
-Code Search & Retrieval Tools:
-- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
-- code.swe_grep: Extract high-signal code snippets from candidate files (use after symbol_search)
-- code.search: Search code using ripgrep patterns
-
-File Operations:
-- fs.read_file: Read file contents
-- fs.list_dir: List directory contents
-
-Edit Tools:
-- edit.create_file: Create new files
-- edit.apply_patch: Modify existing files with simple text replacement
-
-Testing:
-- tests.run: Run tests
-
-Workflow: Use code.symbol_search to find relevant symbols, then code.swe_grep to get detailed context.
-Apply changes with edit.apply_patch for simple edits.`
-	case agenttypes.RolePlanner:
-		instruction = `You are a planning agent. You analyze tasks and create structured plans.
-Available tools:
-- todo.add: Add new tasks
-- todo.query: Query existing tasks
-- todo.graph_insights: Get task graph analysis
-- mail.send: Send messages to other agents
-
-Use these tools to plan and coordinate work.`
-	case agenttypes.RoleReviewer:
-		instruction = `You are a code review agent. Your job is to understand proposed changes,
-evaluate their impact, and suggest improvements. You do not directly apply edits yourself.
-
-Code Search & Retrieval Tools (read/inspect):
-- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
-- code.swe_grep: Extract high-signal code snippets from candidate files
-- code.search: Search code using ripgrep patterns
-
-File Operations (read-only):
-- fs.read_file: Read file contents for review
-- fs.list_dir: Inspect project structure
-
-Validation:
-- tests.run: Run tests to validate changes
-
-Coordination:
-- mail.send: Communicate findings and requests to other agents
-- todo.add: Create follow-up tasks from review findings`
-	case agenttypes.RoleFixer:
-		instruction = `You are a fixing agent. Apply targeted code changes to address bugs, review feedback, and failing tests.`
-	case agenttypes.RoleVerifier:
-		instruction = `You are a verification agent. Validate claims and results. Prefer evidence (tests, logs, and direct code inspection). Do not apply edits; propose fixes and next steps.`
-	default:
-		instruction = `You are a helpful agent. Complete the given task using available tools.`
-	}
-
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("task", core.WithDescription("The task to be completed by the agent"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("result", core.WithDescription("The final result or answer from completing the task"))},
-		},
-	).WithInstruction(instruction)
-	return &sig
+	return agentprompt.BuildSignature(role)
 }
 
 // defaultModelForProvider returns the default model for a given LLM provider.
@@ -557,6 +496,9 @@ func (a *AgentActor) onStart(ctx context.Context) error {
 	// Update tool runner with session ID (if using llmchat engine)
 	if a.toolRunner != nil {
 		a.toolRunner.SetSessionID(a.sessionID)
+	}
+	if a.toolsRegistry != nil {
+		a.toolsRegistry.SetSessionID(a.sessionID)
 	}
 
 	// Initialize memory state for this actor
@@ -627,6 +569,7 @@ func (a *AgentActor) handleAsk(ctx context.Context, msg *Message) (*Message, err
 			prompt = memContext + "\n\n---\n\n" + prompt
 		}
 	}
+	basePrompt := prompt
 
 	// Apply timeout
 	timeout := 10 * time.Minute
@@ -636,88 +579,114 @@ func (a *AgentActor) handleAsk(ctx context.Context, msg *Message) (*Message, err
 	turnCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Generate turn ID for correlation
-	turnID := ulid.Make().String()
-
-	// Dispatch LLMRequest hook
-	llmReqResult := a.dispatchHook(ctx, hooks.EventLLMRequest, map[string]any{
-		"turn_id":        turnID,
-		"correlation_id": askData.AskID,
-		"prompt":         prompt,
-	})
-	if llmReqResult.Blocked {
-		return nil, fmt.Errorf("blocked by LLMRequest hook: %s", llmReqResult.Output.Reason)
-	}
-
-	// Execute turn using configured engine
 	var result string
-	var execErr error
+	continuation := ""
 
-	if a.engineType == "llmchat" && a.agentEngine != nil {
-		// Use LLMChatEngine
-		engineInput := engine.EngineInput{
-			Messages:     []engine.Message{engine.NewUserMessage(prompt)},
-			Tools:        a.getEngineTools(),
-			SystemPrompt: buildSystemPromptString(a.agentConfig.Role),
-			Workspace:    a.workspaceRoot,
-			SessionID:    a.sessionID,
-			ActorID:      a.ID(),
-			TurnID:       turnID,
+	for {
+		prompt := basePrompt
+		if continuation != "" {
+			prompt += "\n\n---\n\n" + continuation
 		}
-		output, err := a.agentEngine.Run(turnCtx, engineInput)
-		if err != nil {
-			execErr = err
-		} else if output.StopReason == engine.StopReasonError {
-			execErr = fmt.Errorf("engine error: %s", output.Error)
+
+		// Generate turn ID for correlation
+		turnID := ulid.Make().String()
+
+		// Dispatch LLMRequest hook
+		llmReqResult := a.dispatchHook(ctx, hooks.EventLLMRequest, map[string]any{
+			"turn_id":        turnID,
+			"correlation_id": askData.AskID,
+			"prompt":         prompt,
+		})
+		if llmReqResult.Blocked {
+			return nil, fmt.Errorf("blocked by LLMRequest hook: %s", llmReqResult.Output.Reason)
+		}
+
+		// Execute turn using configured engine
+		var execErr error
+		result = ""
+
+		if a.engineType == "llmchat" && a.agentEngine != nil {
+			// Use LLMChatEngine
+			engineInput := engine.EngineInput{
+				Messages:     []engine.Message{engine.NewUserMessage(prompt)},
+				Tools:        a.getEngineTools(),
+				SystemPrompt: buildSystemPromptString(a.agentConfig.Role),
+				Workspace:    a.workspaceRoot,
+				SessionID:    a.sessionID,
+				ActorID:      a.ID(),
+				TurnID:       turnID,
+			}
+			output, err := a.agentEngine.Run(turnCtx, engineInput)
+			if err != nil {
+				execErr = err
+			} else if output.StopReason == engine.StopReasonError {
+				execErr = fmt.Errorf("engine error: %s", output.Error)
+			} else {
+				result = output.AssistantText
+			}
 		} else {
-			result = output.AssistantText
+			// Use dspy-go
+			input := map[string]any{
+				"task": prompt,
+			}
+			resultMap, err := a.dspyAgent.Execute(turnCtx, input)
+			if err != nil {
+				execErr = err
+			} else {
+				result = extractResult(resultMap)
+			}
 		}
-	} else {
-		// Use dspy-go
-		input := map[string]any{
-			"task": prompt,
-		}
-		resultMap, err := a.dspyAgent.Execute(turnCtx, input)
-		if err != nil {
-			execErr = err
-		} else {
-			result = extractResult(resultMap)
-		}
-	}
 
-	// Dispatch LLMResponse hook (even on error)
-	a.dispatchHook(ctx, hooks.EventLLMResponse, map[string]any{
-		"turn_id":        turnID,
-		"correlation_id": askData.AskID,
-		"prompt":         prompt,
-		"assistant_text": result,
-	})
+		// Dispatch LLMResponse hook (even on error)
+		a.dispatchHook(ctx, hooks.EventLLMResponse, map[string]any{
+			"turn_id":        turnID,
+			"correlation_id": askData.AskID,
+			"prompt":         prompt,
+			"assistant_text": result,
+		})
 
-	if execErr != nil {
-		return nil, fmt.Errorf("execution failed: %w", execErr)
-	}
-
-	// Record turn in memory
-	if a.shortTermMem != nil {
-		turn := memory.Turn{
-			Role:      "assistant",
-			Content:   result,
-			Timestamp: time.Now(),
+		if execErr != nil {
+			return nil, fmt.Errorf("execution failed: %w", execErr)
 		}
-		if err := a.shortTermMem.AppendTurn(ctx, a.ID(), turn); err != nil {
-			a.logger.Warn().Err(err).Msg("failed to append turn to memory")
-		}
-	}
 
-	// Dispatch PostAgentTurn hook
-	turnResult := a.dispatchHook(ctx, hooks.EventPostAgentTurn, map[string]any{
-		"turn_id":        turnID,
-		"correlation_id": askData.AskID,
-		"assistant_text": result,
-	})
-	// Apply updated assistant text if hook modified it
-	if turnResult.Output.UpdatedAssistantText != "" {
-		result = turnResult.Output.UpdatedAssistantText
+		stopResult := a.dispatchHook(ctx, hooks.EventStopRequested, map[string]any{
+			"turn_id":        turnID,
+			"correlation_id": askData.AskID,
+			"prompt":         prompt,
+			"assistant_text": result,
+		})
+		if stopResult.Blocked {
+			continuation = buildStopContinuation(result, stopResult.Output.Context)
+			if continuation == "" {
+				return nil, fmt.Errorf("stop blocked without continuation context: %s", stopResult.Output.Reason)
+			}
+			continue
+		}
+
+		// Record turn in memory
+		if a.shortTermMem != nil {
+			turn := memory.Turn{
+				Role:      "assistant",
+				Content:   result,
+				Timestamp: time.Now(),
+			}
+			if err := a.shortTermMem.AppendTurn(ctx, a.ID(), turn); err != nil {
+				a.logger.Warn().Err(err).Msg("failed to append turn to memory")
+			}
+		}
+
+		// Dispatch PostAgentTurn hook
+		turnResult := a.dispatchHook(ctx, hooks.EventPostAgentTurn, map[string]any{
+			"turn_id":        turnID,
+			"correlation_id": askData.AskID,
+			"assistant_text": result,
+		})
+		// Apply updated assistant text if hook modified it
+		if turnResult.Output.UpdatedAssistantText != "" {
+			result = turnResult.Output.UpdatedAssistantText
+		}
+
+		break
 	}
 
 	// Build reply
@@ -735,7 +704,7 @@ func (a *AgentActor) handleAsk(ctx context.Context, msg *Message) (*Message, err
 		ID:        ulid.Make().String(),
 		Subject:   "agent.reply",
 		Body:      replyPayload,
-		CreatedAt: time.Now(),
+		CreatedAt: a.clock(),
 	}, nil
 }
 
@@ -1091,6 +1060,22 @@ func extractResult(resultMap map[string]any) string {
 	return "Task completed"
 }
 
+func buildStopContinuation(result string, context string) string {
+	result = strings.TrimSpace(result)
+	context = strings.TrimSpace(context)
+
+	if result == "" && context == "" {
+		return ""
+	}
+	if result == "" {
+		return context
+	}
+	if context == "" {
+		return fmt.Sprintf("Previous response:\n%s", result)
+	}
+	return fmt.Sprintf("Previous response:\n%s\n\n%s", result, context)
+}
+
 // SetReplySender sets the function used to send reply messages.
 // Called by the supervisor when registering the actor.
 func (a *AgentActor) SetReplySender(fn func(ctx context.Context, msg *Message) error) {
@@ -1216,63 +1201,7 @@ func (a *AgentActor) getEngineTools() []engine.ToolDef {
 // buildSystemPromptString returns the system prompt for a given role as a plain string.
 // This is used by the LLMChatEngine path.
 func buildSystemPromptString(role agenttypes.AgentRole) string {
-	switch role {
-	case agenttypes.RoleCoder:
-		return `You are a coding agent. You have access to file system tools to read and write code.
-
-Code Search & Retrieval Tools:
-- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
-- code.swe_grep: Extract high-signal code snippets from candidate files (use after symbol_search)
-- code.search: Search code using ripgrep patterns
-
-File Operations:
-- fs.read_file: Read file contents
-- fs.list_dir: List directory contents
-
-Edit Tools:
-- edit.create_file: Create new files
-- edit.apply_patch: Modify existing files with simple text replacement
-
-Testing:
-- tests.run: Run tests
-
-Workflow: Use code.symbol_search to find relevant symbols, then code.swe_grep to get detailed context.
-Apply changes with edit.apply_patch for simple edits.`
-	case agenttypes.RolePlanner:
-		return `You are a planning agent. You analyze tasks and create structured plans.
-Available tools:
-- todo.add: Add new tasks
-- todo.query: Query existing tasks
-- todo.graph_insights: Get task graph analysis
-- mail.send: Send messages to other agents
-
-Use these tools to plan and coordinate work.`
-	case agenttypes.RoleReviewer:
-		return `You are a code review agent. Your job is to understand proposed changes,
-evaluate their impact, and suggest improvements. You do not directly apply edits yourself.
-
-Code Search & Retrieval Tools (read/inspect):
-- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
-- code.swe_grep: Extract high-signal code snippets from candidate files
-- code.search: Search code using ripgrep patterns
-
-File Operations (read-only):
-- fs.read_file: Read file contents for review
-- fs.list_dir: Inspect project structure
-
-Validation:
-- tests.run: Run tests to validate changes
-
-Coordination:
-- mail.send: Communicate findings and requests to other agents
-- todo.add: Create follow-up tasks from review findings`
-	case agenttypes.RoleFixer:
-		return `You are a fixing agent. Apply targeted code changes to address bugs, review feedback, and failing tests.`
-	case agenttypes.RoleVerifier:
-		return `You are a verification agent. Validate claims and results. Prefer evidence (tests, logs, and direct code inspection). Do not apply edits; propose fixes and next steps.`
-	default:
-		return `You are a helpful agent. Complete the given task using available tools.`
-	}
+	return agentprompt.Instruction(role)
 }
 
 // Engine returns the underlying AgentEngine for testing (nil if using dspy-go).

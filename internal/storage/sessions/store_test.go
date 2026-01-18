@@ -578,7 +578,7 @@ func TestSession_SearchSimilar(t *testing.T) {
 	// Search with query similar to session 3
 	queryVec := normalizeVector([]float32{0.4, 0.6, 0, 0})
 
-	results, err := store.SearchSimilar(ctx, queryVec, 10)
+	results, err := store.SearchSimilar(ctx, "/workspace", queryVec, 10)
 	if err != nil {
 		t.Fatalf("search similar: %v", err)
 	}
@@ -631,7 +631,7 @@ func TestSearchWithNoEmbeddings(t *testing.T) {
 	// Search should return empty (no matching embeddings)
 	queryVec := []float32{0.5, 0.5, 0, 0}
 
-	sessionResults, err := store.SearchSimilar(ctx, queryVec, 10)
+	sessionResults, err := store.SearchSimilar(ctx, "/workspace", queryVec, 10)
 	if err != nil {
 		t.Fatalf("search sessions: %v", err)
 	}
@@ -788,7 +788,7 @@ func TestListReturnsEmptyResults(t *testing.T) {
 
 	// Search similar should also work with no embeddings
 	queryVec := []float32{0.5, 0.5, 0, 0}
-	results, err := store.SearchSimilar(ctx, queryVec, 10)
+	results, err := store.SearchSimilar(ctx, "/workspace", queryVec, 10)
 	if err != nil {
 		t.Fatalf("search similar: %v", err)
 	}

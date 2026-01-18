@@ -159,7 +159,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Write to file or return inline
 	if in.OutputFile != "" {
 		if err := writeExamples(in.OutputFile, examples, in.Format); err != nil {
-			return skillerr.IO("write output", skillerr.WithCause(err))
+			return err
 		}
 		output.OutputFile = in.OutputFile
 	} else {
@@ -238,7 +238,7 @@ func extractExamples(sess sessions.Session, turns []sessions.SessionTurn, input 
 func writeExamples(path string, examples []DSPyExample, format string) error {
 	file, err := os.Create(path)
 	if err != nil {
-		return err
+		return skillerr.WrapIO("create output file", err)
 	}
 	defer file.Close()
 
@@ -248,25 +248,25 @@ func writeExamples(path string, examples []DSPyExample, format string) error {
 	case "jsonl":
 		for _, ex := range examples {
 			if err := encoder.Encode(ex); err != nil {
-				return err
+				return skillerr.WrapRuntime("encode jsonl", err)
 			}
 		}
 	case "csv":
 		// Simple CSV with request/response
 		if _, err := file.WriteString("user_request,response\n"); err != nil {
-			return fmt.Errorf("writing CSV header: %w", err)
+			return skillerr.WrapIO("write CSV header", err)
 		}
 		for i, ex := range examples {
 			req := escapeCSV(ex.Input.UserRequest)
 			resp := escapeCSV(ex.Output.Response)
 			if _, err := fmt.Fprintf(file, "%s,%s\n", req, resp); err != nil {
-				return fmt.Errorf("writing CSV row %d: %w", i, err)
+				return skillerr.WrapIO(fmt.Sprintf("write CSV row %d", i), err)
 			}
 		}
 	default: // "dspy" - single JSON array
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(examples); err != nil {
-			return err
+			return skillerr.WrapRuntime("encode output", err)
 		}
 	}
 

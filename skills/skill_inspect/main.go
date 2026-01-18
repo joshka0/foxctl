@@ -16,6 +16,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 )
 
 const command = "skill/inspect"
@@ -79,7 +80,6 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 
 	return skillout.Emit(rc, command, data)
 }
-
 
 func findSkill(name string) (*skillInfo, error) {
 	// Convert skill name to directory (e.g., "fs/ls" -> "fs_ls")
@@ -214,7 +214,7 @@ func showFull(info *skillInfo) (map[string]any, error) {
 		"source":     string(content),
 		"path":       info.MainGoPath,
 		"size":       len(content),
-		"lines":      strings.Count(string(content), "\n") + 1,
+		"lines":      textutil.CountLinesString(string(content)),
 	}, nil
 }
 
@@ -265,7 +265,7 @@ func showAll(info *skillInfo) (map[string]any, error) {
 		"parameters":   params,
 		"examples":     examples,
 		"source_size":  len(content),
-		"source_lines": strings.Count(string(content), "\n") + 1,
+		"source_lines": textutil.CountLinesString(string(content)),
 	}, nil
 }
 
@@ -525,4 +525,3 @@ func generateExampleValue(param map[string]string) any {
 		return "value"
 	}
 }
-

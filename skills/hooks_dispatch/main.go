@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/hooks"
@@ -38,26 +39,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	// Resolve workspace root
-	workspaceRoot := in.WorkspaceRoot
+	workspaceRoot := hookutil.ResolveWorkspaceRoot(in, "")
 	if workspaceRoot == "" {
-		// Try CLAUDE_PROJECT_DIR, then cwd
-		if dir := os.Getenv("CLAUDE_PROJECT_DIR"); dir != "" {
-			workspaceRoot = dir
-		} else {
-			var wdErr error
-			workspaceRoot, wdErr = os.Getwd()
-			if wdErr != nil {
-				return fmt.Errorf("failed to determine workspace: %w", wdErr)
-			}
-		}
-		in.WorkspaceRoot = workspaceRoot
+		return fmt.Errorf("failed to determine workspace")
 	}
+	in.WorkspaceRoot = workspaceRoot
 
 	// Auto-populate workspace_id if not provided
-	workspaceID := in.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = workspaceRoot
-	}
+	workspaceID := hookutil.ResolveWorkspaceID(in, workspaceRoot)
 
 	// Auto-populate tool_kind if not provided
 	if in.ToolKind == "" && (in.ToolName != "" || in.ToolCanonical != "") {

@@ -23,9 +23,10 @@ type Server struct {
 }
 
 // NewServer creates a new web server.
-func NewServer(opts Options, cfg config.Config, log zerolog.Logger) (*Server, error) {
+// The ctx is used for console hub persistence goroutines - pass the application lifecycle context.
+func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog.Logger) (*Server, error) {
 	sseHub := sse.NewHub(log.With().Str("component", "sse").Logger())
-	consoleHub := consolews.NewHub(log.With().Str("component", "console").Logger())
+	consoleHub := consolews.NewHub(ctx, log.With().Str("component", "console").Logger())
 
 	// Set up persistence adapter for console sessions
 	persistence := consolews.NewPersistenceAdapter(cfg.Storage.Root, log)

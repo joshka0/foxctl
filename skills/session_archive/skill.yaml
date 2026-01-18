@@ -23,6 +23,10 @@ signature:
       type: string
       required: false
       description: "Path to the JSONL file (auto-detected if not specified)"
+    - name: source
+      type: string
+      required: false
+      description: "Session source: claude (default) or codex"
     - name: max_chunk_size
       type: integer
       required: false
@@ -94,3 +98,8 @@ examples:
       session_id: "01HXYZ..."
       dry_run: true
     description: "Preview chunks without creating the archive"
+  - name: "Archive Codex session"
+    input:
+      session_id: "019bbeb5-21f6-7952-8bc5-f53019ea035f"
+      source: "codex"
+    description: "Archive a Codex session using its JSONL file"

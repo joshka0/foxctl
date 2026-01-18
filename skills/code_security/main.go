@@ -2,10 +2,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,8 +10,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
 const command = "code/security"
@@ -358,19 +359,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		in.MaxResults = 100
 	}
 
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	info, err := os.Stat(searchPath)
 	if err != nil {
-		return fmt.Errorf("stat path: %w", err)
+		return skillerr.WrapIO("stat path", err)
 	}
 
 	var vulns []vulnerability
@@ -392,16 +388,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	})
 
 	// Limit results
-	if len(vulns) > in.MaxResults {
-		vulns = vulns[:in.MaxResults]
-	}
+	vulns = sliceutil.Limit(vulns, in.MaxResults)
 
 	// Calculate statistics
 	stats := calculateStats(vulns)
 
-	// Prepare preview and artifact
-	preview, truncated := preparePreview(vulns, rc.MaxPreview)
-	artifact, err := persistResultsArtifact(ctx, rc, vulns, truncated)
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, vulns, rc.MaxPreview, "code_security", true)
 	if err != nil {
 		return err
 	}
@@ -410,16 +402,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"scan_mode":           in.ScanMode,
 		"severity_threshold":  in.SeverityThreshold,
 		"vulnerability_count": len(vulns),
-		"vulnerabilities":     preview,
+		"vulnerabilities":     previewResult.Preview,
 		"statistics":          stats,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, command, data)
 }
-
 
 func scanDirectory(dir, workspace string, in input) ([]vulnerability, error) {
 	var vulns []vulnerability
@@ -429,7 +418,7 @@ func scanDirectory(dir, workspace string, in input) ([]vulnerability, error) {
 			return nil
 		}
 
-		if strings.HasPrefix(d.Name(), ".") || isCommonExclude(d.Name()) {
+		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -440,7 +429,7 @@ func scanDirectory(dir, workspace string, in input) ([]vulnerability, error) {
 			return nil
 		}
 
-		if in.ExcludeTests && isTestFile(d.Name()) {
+		if in.ExcludeTests && fsutil.IsTestFile(d.Name()) {
 			return nil
 		}
 
@@ -463,11 +452,11 @@ func scanFile(path, workspace string, in input) ([]vulnerability, error) {
 	}
 
 	// Skip binary files
-	if isBinary(content) {
+	if fsutil.IsBinaryContent(content) {
 		return nil, nil
 	}
 
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 	lines := strings.Split(string(content), "\n")
 
 	var vulns []vulnerability
@@ -601,67 +590,3 @@ func calculateStats(vulns []vulnerability) map[string]any {
 
 	return stats
 }
-
-func isBinary(content []byte) bool {
-	// Simple binary detection: check for null bytes
-	for _, b := range content {
-		if b == 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func isTestFile(name string) bool {
-	name = strings.ToLower(name)
-	return strings.HasSuffix(name, "_test.go") ||
-		strings.HasSuffix(name, "_test.py") ||
-		strings.Contains(name, ".test.") ||
-		strings.Contains(name, ".spec.")
-}
-
-func isCommonExclude(name string) bool {
-	excludes := []string{
-		".git", ".svn", "node_modules", "vendor", "__pycache__",
-		".venv", "venv", "dist", "build", "target",
-	}
-	for _, exclude := range excludes {
-		if name == exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
-func preparePreview(vulns []vulnerability, limit int) ([]vulnerability, bool) {
-	if len(vulns) <= limit {
-		return vulns, false
-	}
-	return vulns[:limit], true
-}
-
-func persistResultsArtifact(ctx context.Context, rc *skillmain.RunContext, vulns []vulnerability, truncated bool) (skillmain.Artifact, error) {
-	if !truncated {
-		return skillmain.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, v := range vulns {
-		if err := enc.Encode(v); err != nil {
-			return skillmain.Artifact{}, fmt.Errorf("encode vulnerability: %w", err)
-		}
-	}
-	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_security")
-}
-

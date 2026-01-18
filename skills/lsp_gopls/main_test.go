@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -20,7 +20,7 @@ import (
 
 func skipIfNoGopls(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("gopls"); err != nil {
+	if !executil.HasTool("gopls") {
 		t.Skip("gopls not available, skipping LSP test")
 	}
 }

@@ -2,13 +2,8 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"time"
 
@@ -17,12 +12,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 )
 
 const (
 	command       = "embedding/worker"
-	geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultBatch  = 10
 	defaultMaxDur = 300 // 5 minutes
 )
@@ -65,34 +58,6 @@ type QueueSnapshot struct {
 	Embeddings int `json:"embeddings"`
 }
 
-// geminiEmbedRequest is the request body for the Gemini embed API.
-type geminiEmbedRequest struct {
-	Model   string            `json:"model"`
-	Content geminiContentPart `json:"content"`
-}
-
-type geminiContentPart struct {
-	Parts []geminiTextPart `json:"parts"`
-}
-
-type geminiTextPart struct {
-	Text string `json:"text"`
-}
-
-// geminiEmbedResponse is the response from the Gemini embed API.
-type geminiEmbedResponse struct {
-	Embedding struct {
-		Values []float32 `json:"values"`
-	} `json:"embedding"`
-	Error *geminiError `json:"error,omitempty"`
-}
-
-type geminiError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Status  string `json:"status"`
-}
-
 func main() {
 	skillmain.Main(command, run)
 }
@@ -108,53 +73,62 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.MaxDuration = defaultMaxDur
 	}
 
-	// Determine embedding provider: prefer Voyage (rate-limited), fall back to Gemini
-	var voyageProvider *semantic.VoyageProvider
-	var geminiKey string
+	// Determine embedding provider (prefer Voyage, fall back to Gemini).
 	var embeddingModel string
 	var expectedDims int
 
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	if voyageKey != "" {
-		// Use Voyage with built-in rate limiting (3 RPM for free tier)
-		// Use ScopeSymbols for file embeddings (code content)
-		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
-		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			Model:         model,
-			RateLimitWait: boolPtr(true), // Wait when rate limited
-		})
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	model := semantic.ResolveModelForScope(semantic.ScopeSymbols, rc.Config)
+
+	var embedder *semantic.Embedder
+	if !in.DryRun {
+		var err error
+		embedder, err = semantic.NewEmbedderFromConfig(
+			semantic.ScopeSymbols,
+			rc.Config,
+			semantic.WithVoyageKey(voyageKey),
+			semantic.WithGeminiKey(geminiKey),
+		)
 		if err != nil {
-			return skillerr.Auth("voyage provider failed", skillerr.WithCause(err))
+			return skillerr.Auth(
+				"VOYAGE_API_KEY or GEMINI_API_KEY required",
+				skillerr.WithCause(err),
+				skillerr.WithHint("set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable"),
+			)
 		}
-		voyageProvider = vp
-		embeddingModel = vp.Model()
-		expectedDims = vp.Dimensions()
-		log.Info().Str("provider", "voyage").Str("model", embeddingModel).Int("dims", expectedDims).Msg("using Voyage embeddings")
 	} else {
-		// Fall back to Gemini
-		geminiKey = os.Getenv("GEMINI_API_KEY")
-		if geminiKey == "" && !in.DryRun {
-			return skillerr.Auth("VOYAGE_API_KEY or GEMINI_API_KEY required",
-				skillerr.WithHint("set VOYAGE_API_KEY (preferred) or GEMINI_API_KEY environment variable"))
-		}
-		embeddingModel = rc.Config.Embedding.Model
+		embedder, _ = semantic.NewEmbedderFromConfig(
+			semantic.ScopeSymbols,
+			rc.Config,
+			semantic.WithVoyageKey(voyageKey),
+			semantic.WithGeminiKey(geminiKey),
+		)
+	}
+
+	if embedder != nil {
+		embeddingModel = embedder.Model()
+		expectedDims = embedder.Dimensions()
+		log.Info().
+			Str("provider", embedder.Provider()).
+			Str("model", embeddingModel).
+			Int("dims", expectedDims).
+			Msg("using embeddings")
+	} else {
+		embeddingModel = model
 		if embeddingModel == "" {
 			embeddingModel = "gemini-embedding-001"
 		}
+		expectedDims = semantic.DimensionsForModel(embeddingModel)
+		log.Info().
+			Str("provider", "dry-run").
+			Str("model", embeddingModel).
+			Int("dims", expectedDims).
+			Msg("using embeddings")
+	}
+
+	if rc.Config.Embedding.Dimensions > 0 {
 		expectedDims = rc.Config.Embedding.Dimensions
-		if expectedDims == 0 {
-			// Model-specific dimension defaults for Gemini
-			switch embeddingModel {
-			case "gemini-embedding-001":
-				expectedDims = 3072
-			case "text-embedding-004":
-				expectedDims = 768
-			default:
-				expectedDims = dbdriver.GetDefaultVectorDimensions()
-			}
-		}
-		log.Info().Str("provider", "gemini").Str("model", embeddingModel).Int("dims", expectedDims).Msg("using Gemini embeddings")
 	}
 
 	// Open store using cache path from config
@@ -227,17 +201,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				}
 				log.Info().Str("job_id", job.ID).Str("status", "dry-run").Int("dims", expectedDims).Msg("job completed")
 			} else {
-				var embed []float32
-				var err error
-
-				if voyageProvider != nil {
-					// Use Voyage with built-in rate limiting and 429 retry
-					embed, err = voyageProvider.Embed(ctx, job.Content)
-				} else {
-					// Fall back to Gemini
-					embed, err = generateGeminiEmbedding(ctx, geminiKey, embeddingModel, job.Content)
+				if embedder == nil {
+					output.LastError = "embedding provider not available"
+					output.Errors++
+					log.Error().Str("job_id", job.ID).Msg("embedding provider not available")
+					continue
 				}
 
+				result, err := embedder.Embed(ctx, job.Content)
 				if err != nil {
 					log.Error().Err(err).Str("job_id", job.ID).Msg("embedding generation failed")
 					// Rate limit or API error - fail with retry
@@ -247,14 +218,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 						output.LastError = err.Error()
 					}
 					output.Errors++
-
-					// If rate limited (Gemini only - Voyage handles this internally)
-					if voyageProvider == nil && isRateLimited(err) {
-						log.Warn().Str("job_id", job.ID).Msg("rate limited, backing off")
-						time.Sleep(2 * time.Second)
-					}
 					continue
 				}
+
+				embed := result.Vec
+				model := result.Model
 
 				// Validate embedding dimensions match config
 				if len(embed) != expectedDims {
@@ -274,14 +242,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					Int("embedding_dim", len(embed)).
 					Msg("embedding generated")
 
-				// Store the embedding with model from config
-				if err := store.Complete(ctx, job.ID, embed, embeddingModel); err != nil {
+				// Store the embedding with the model used for generation.
+				if err := store.Complete(ctx, job.ID, embed, model); err != nil {
 					log.Error().Err(err).Str("job_id", job.ID).Msg("failed to store embedding")
 					output.LastError = err.Error()
 					output.Errors++
 					continue
 				}
-				log.Info().Str("job_id", job.ID).Str("status", "completed").Str("model", embeddingModel).Msg("job completed")
+				log.Info().Str("job_id", job.ID).Str("status", "completed").Str("model", model).Msg("job completed")
 			}
 
 			output.Processed++
@@ -339,90 +307,4 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	return skillout.Emit(rc, command, output)
-}
-
-// boolPtr returns a pointer to a bool value.
-func boolPtr(b bool) *bool {
-	return &b
-}
-
-// generateGeminiEmbedding calls the Gemini embedding API with the specified model.
-func generateGeminiEmbedding(ctx context.Context, apiKey, model, text string) ([]float32, error) {
-	// Use header-based authentication to prevent API key leakage in logs
-	url := fmt.Sprintf("%s/models/%s:embedContent", geminiBaseURL, model)
-
-	reqBody := geminiEmbedRequest{
-		Model: fmt.Sprintf("models/%s", model),
-		Content: geminiContentPart{
-			Parts: []geminiTextPart{{Text: text}},
-		},
-	}
-
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", apiKey)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		var errResp geminiEmbedResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
-			return nil, &apiError{
-				code:    errResp.Error.Code,
-				message: errResp.Error.Message,
-				status:  errResp.Error.Status,
-			}
-		}
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var embedResp geminiEmbedResponse
-	if err := json.Unmarshal(respBody, &embedResp); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	if len(embedResp.Embedding.Values) == 0 {
-		return nil, errors.New("empty embedding returned")
-	}
-
-	return embedResp.Embedding.Values, nil
-}
-
-type apiError struct {
-	code    int
-	message string
-	status  string
-}
-
-func (e *apiError) Error() string {
-	return fmt.Sprintf("API error %d (%s): %s", e.code, e.status, e.message)
-}
-
-func isRateLimited(err error) bool {
-	var ae *apiError
-	if errors.As(err, &ae) {
-		return ae.code == 429 || ae.status == "RESOURCE_EXHAUSTED"
-	}
-	return false
 }

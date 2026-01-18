@@ -66,6 +66,13 @@ make test-cgo-short
 On CI (Debian/Ubuntu) this requires `libsqlite3-dev`. On macOS, install Homebrew
 SQLite so the expected headers/libs exist under `/opt/homebrew/opt/sqlite`.
 
+If you hit linker errors like `duplicate symbol '_sqlite3_*'` when running
+`go test` against a specific package, rerun with CGO + the build tag:
+
+```bash
+CGO_ENABLED=1 go test -tags=libsqlite3 ./internal/agent/runtime -run TestRunOverseer_Spawn
+```
+
 ---
 
 ## Race Tests and the Vector Package
@@ -199,5 +206,5 @@ Agents proposing CI changes should:
   jobs, memory, OpenAPI skill).
 - `docs/impl_plan/universal_swe_grep_and_agents_testing.md` – phase-by-phase
   test plan for the SWE Grep, symbol/semantic index, and agents work.
-- `docs/ci/github_checks.md`, `docs/ci/prcomments.md` – CI-related skills and
+- `docs/ci/checks.md`, `docs/ci/prcomments.md` – CI-related skills and
   workflows.

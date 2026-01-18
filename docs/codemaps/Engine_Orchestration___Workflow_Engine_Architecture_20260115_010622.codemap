@@ -1,0 +1,537 @@
+{
+  "schemaVersion": 1,
+  "id": "Engine_Orchestration___Workflow_Engine_Architecture_20260115_010622",
+  "stableId": "4e6ce55c-7d54-4365-8962-21fff5777f52",
+  "metadata": {
+    "cascadeId": "979a45ad-1b27-4b97-b704-3f9169b1fef6",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T01:06:22+02:00",
+    "mode": "SMART",
+    "originalPrompt": "Explore: engine orchestration and workflow engine. Start from: internal/engine/engine.go, internal/engine/llmchat_engine.go, internal/workflow/engine.go"
+  },
+  "title": "Engine Orchestration \u0026 Workflow Engine Architecture",
+  "traces": [
+    {
+      "id": "1",
+      "title": "LLMChatEngine: Tool-Calling Loop Execution",
+      "description": "Agent engine system - core LLM execution loop that iteratively calls tools until completion",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go",
+          "lineNumber": 116,
+          "lineContent": "func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {",
+          "title": "Engine entry point",
+          "description": "Main execution method implementing AgentEngine interface"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go",
+          "lineNumber": 141,
+          "lineContent": "\t\tresp, err := e.callLLM(ctx, messages, tools)",
+          "title": "LLM API call",
+          "description": "Sends messages and tool definitions to OpenAI-compatible API"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go",
+          "lineNumber": 161,
+          "lineContent": "\t\tif len(choice.Message.ToolCalls) \u003e 0 {",
+          "title": "Tool call detection",
+          "description": "Checks if LLM requested tool execution instead of final response"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go",
+          "lineNumber": 177,
+          "lineContent": "\t\t\t\tresult, _ = e.toolRunner.Execute(ctx, toolCall)",
+          "title": "Tool execution",
+          "description": "Delegates to ToolRunner which handles hooks and actual tool invocation"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go",
+          "lineNumber": 188,
+          "lineContent": "\t\t\t\tmessages = append(messages, oaiMessage{",
+          "title": "Result appending",
+          "description": "Adds tool result to conversation history for next iteration"
+        },
+        {
+          "id": "1f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go",
+          "lineNumber": 196,
+          "lineContent": "\t\t\tcontinue",
+          "title": "Loop continuation",
+          "description": "Returns to top of loop for next LLM call with tool results"
+        },
+        {
+          "id": "1g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go",
+          "lineNumber": 200,
+          "lineContent": "\t\toutput.AssistantText = choice.Message.Content",
+          "title": "Final response",
+          "description": "No tool calls means LLM provided final answer, exit loop"
+        }
+      ],
+      "traceTextDiagram": "LLMChatEngine Tool-Calling Loop \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:17\n├── Run() entry point \u003c-- 1a\n│   └── Main execution loop (for iteration) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:124\n│       ├── callLLM() API request \u003c-- 1b\n│       │   └── HTTP POST to OpenAI-compatible \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:285\n│       ├── Response processing \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:152\n│       │   └── Check for tool calls \u003c-- 1c\n│       ├── Tool execution branch (if tool calls) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:161\n│       │   ├── toolRunner.Execute() \u003c-- 1d\n│       │   │   └── Delegates to ToolRunner w/ hooks\n│       │   ├── Append tool result to messages \u003c-- 1e\n│       │   └── Loop continuation \u003c-- 1f\n│       └── Final response branch (no tool calls) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:199\n│           └── Extract assistant text \u003c-- 1g\n└── Return EngineOutput \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:202",
+      "traceGuide": "## Motivation\n\nLLM agents need to **iteratively call tools** until they complete a task. When you ask an LLM to \"read file X and summarize it,\" the LLM can't directly access files—instead, it must request a `read_file` tool call, receive the result, then generate a summary. Complex tasks require **multiple rounds** of tool calls, where each result informs the next action. The `LLMChatEngine` implements this **agentic loop** using OpenAI-compatible APIs (OpenRouter, Groq, OpenAI, etc.).\n\n## Details\n\n### Core Loop Structure\n\nThe engine runs a **for loop** [1a] that continues until the LLM provides a final text response instead of requesting more tools. Each iteration:\n\n1. **Calls the LLM API** [1b] with the conversation history (user messages, assistant responses, tool results)\n2. **Checks the response** [1c] for tool calls in the message\n3. If tool calls exist, **executes each tool** [1d] via `ToolRunner` (which handles hook integration)\n4. **Appends tool results** [1e] to the conversation as new messages\n5. **Continues the loop** [1f] to call the LLM again with the updated context\n\n### Termination\n\nThe loop exits when the LLM returns a message **without tool calls** [1c], indicating it has enough information to provide a final answer. The engine then **extracts the assistant text** [1g] and returns it as the final output.\n\n### Tool Execution\n\nTool execution [1d] is delegated to `ToolRunner`, which wraps the actual tool call with **pre/post hooks** for observability, blocking, and input/output mutation. This separation allows the engine to focus on the LLM loop while hooks handle cross-cutting concerns like logging, security policies, and context injection.\n\n### API Compatibility\n\nThe engine uses **OpenAI's chat completions format** [1b], making it compatible with multiple providers. It constructs requests with messages, tool definitions, temperature, and max tokens, then parses responses to extract tool calls or final text."
+    },
+    {
+      "id": "2",
+      "title": "AgentActor: Console Message to Engine Execution",
+      "description": "Agent engine system - reactive actor handling console requests by routing to appropriate engine (LLMChat or DSPy)",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go",
+          "lineNumber": 773,
+          "lineContent": "func (a *AgentActor) handleConsoleAsk(ctx context.Context, msg *Message) (*Message, error) {",
+          "title": "Message handler entry",
+          "description": "Actor receives console.ask message from TUI/API"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go",
+          "lineNumber": 790,
+          "lineContent": "\tmsgResult := a.dispatchHook(ctx, hooks.EventMessageReceived, map[string]any{",
+          "title": "Pre-execution hook",
+          "description": "Dispatches MessageReceived hook for observability/control"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go",
+          "lineNumber": 854,
+          "lineContent": "\tif a.engineType == \"llmchat\" \u0026\u0026 a.agentEngine != nil {",
+          "title": "Engine selection",
+          "description": "Routes to LLMChatEngine or falls back to DSPy agent"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go",
+          "lineNumber": 865,
+          "lineContent": "\t\toutput, err := a.agentEngine.Run(execCtx, engineInput)",
+          "title": "Engine execution",
+          "description": "Invokes AgentEngine.Run with messages, tools, and system prompt"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go",
+          "lineNumber": 901,
+          "lineContent": "\ta.dispatchHook(ctx, hooks.EventLLMResponse, map[string]any{",
+          "title": "Post-execution hook",
+          "description": "Dispatches LLMResponse hook with assistant text"
+        },
+        {
+          "id": "2f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go",
+          "lineNumber": 934,
+          "lineContent": "\treplyData := agentdomain.ConsoleReplyData{",
+          "title": "Reply construction",
+          "description": "Builds console.reply message with response and metrics"
+        },
+        {
+          "id": "2g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go",
+          "lineNumber": 948,
+          "lineContent": "\treturn \u0026Message{",
+          "title": "Reply message",
+          "description": "Returns reply message to be sent back to caller"
+        }
+      ],
+      "traceTextDiagram": "AgentActor Console Message Handling\n├── handleConsoleAsk() entry \u003c-- 2a\n│   ├── Parse console.ask message \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:776\n│   ├── dispatchHook(MessageReceived) \u003c-- 2b\n│   │   └── Hook can block/observe message \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:800\n│   ├── Build prompt with memory context \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:826\n│   ├── Create cancellable execution context \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:809\n│   ├── dispatchHook(LLMRequest) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:840\n│   ├── Engine selection branch \u003c-- 2c\n│   │   ├── if engineType == \"llmchat\"\n│   │   │   ├── Build EngineInput \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:856\n│   │   │   │   ├── Messages \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:857\n│   │   │   │   ├── getEngineTools() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:858\n│   │   │   │   └── SystemPrompt \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:859\n│   │   │   └── agentEngine.Run() \u003c-- 2d\n│   │   │       └── [LLMChatEngine execution]\n│   │   └── else (dspy) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:876\n│   │       └── dspyAgent.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:877\n│   ├── dispatchHook(LLMResponse) \u003c-- 2e\n│   ├── Record turn in memory \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:915\n│   ├── dispatchHook(PostAgentTurn) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:922\n│   ├── Build ConsoleReplyData \u003c-- 2f\n│   │   ├── Response text \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:936\n│   │   ├── Status (ok/error/cancelled) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:937\n│   │   └── Metrics \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:938\n│   └── Return Message \u003c-- 2g\n│       └── Subject: \"console.reply\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:950",
+      "traceGuide": "## Motivation\n\nAgentActor is a **reactive actor** that wraps LLM-powered agents to handle console requests from users (via TUI or API). When a user submits a prompt through the console, the system needs to:\n\n1. **Route the message** to the appropriate agent actor\n2. **Select the right execution engine** (LLMChat or DSPy)\n3. **Execute the LLM turn** with tool-calling capabilities\n4. **Integrate hooks** for observability and control at key lifecycle points\n5. **Return a structured reply** with the assistant's response\n\nThe actor pattern transforms what could be a blocking request-response into an **event-driven message handler** that can be supervised, cancelled, and monitored.\n\n## Details\n\n### Message Reception and Validation\n\nThe `handleConsoleAsk` method [2a] is the entry point when a `console.ask` message arrives. It immediately **dispatches a MessageReceived hook** [2b] which allows external observers to block, log, or modify the incoming request before any processing begins.\n\n### Context Preparation\n\nThe actor builds the execution context by:\n- **Retrieving memory context** from short-term memory to maintain conversation continuity\n- **Creating a cancellable context** with timeout to prevent runaway executions\n- **Dispatching an LLMRequest hook** for pre-execution observability\n\n### Engine Selection and Execution\n\nThe critical routing decision happens at [2c]: the actor checks `engineType` to determine whether to use:\n\n- **LLMChatEngine**: OpenAI-compatible API with explicit tool-calling loop control\n- **DSPy agent**: dspy-go ReActAgent with its own internal loop\n\nFor LLMChatEngine, the actor constructs an `EngineInput` with messages, tools (via `getEngineTools()`), and system prompt, then invokes `agentEngine.Run()` [2d]. This triggers the full tool-calling loop described in trace 1.\n\n### Post-Execution Processing\n\nAfter the engine completes:\n1. **LLMResponse hook** [2e] fires with the assistant's text\n2. The turn is **recorded in short-term memory** for future context\n3. **PostAgentTurn hook** fires, allowing hooks to mutate the final response text\n\n### Reply Construction\n\nThe actor builds a `ConsoleReplyData` structure [2f] containing:\n- The assistant's response text\n- Status indicator (ok/error/cancelled)\n- Execution metrics (duration, token counts)\n\nThis is wrapped in an envelope and returned as a `Message` [2g] with subject `\"console.reply\"`, which the supervisor routes back to the caller.\n\n### Hook Integration Points\n\nThe system dispatches hooks at **five canonical events** during this flow:\n- MessageReceived: Can block malicious requests\n- LLMRequest: Can observe/log prompts before LLM call\n- LLMResponse: Can capture assistant responses\n- PostAgentTurn: Can mutate final response text\n- (Plus PreToolUse/PostToolUse during engine execution)\n\nThis hook architecture enables **policy enforcement, logging, and dynamic behavior modification** without coupling the core execution logic to specific observability tools."
+    },
+    {
+      "id": "3",
+      "title": "ToolRunner: Hook-Integrated Tool Execution",
+      "description": "Agent engine system - tool execution with pre/post hooks for observability and input/output mutation",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go",
+          "lineNumber": 76,
+          "lineContent": "func (r *ToolRunner) Execute(ctx context.Context, call ToolCall) (ToolResult, error) {",
+          "title": "Tool execution entry",
+          "description": "Called by LLMChatEngine for each tool call"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go",
+          "lineNumber": 80,
+          "lineContent": "\tpreOutput, err := r.dispatchPreToolUse(ctx, call)",
+          "title": "Pre-tool hook dispatch",
+          "description": "Allows hooks to inspect, block, or mutate tool input"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go",
+          "lineNumber": 90,
+          "lineContent": "\tif preOutput.Decision.IsBlocking() {",
+          "title": "Block check",
+          "description": "Stops execution if hook returned block decision"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go",
+          "lineNumber": 105,
+          "lineContent": "\tresult, execErr := r.executor.Execute(ctx, call.Name, args)",
+          "title": "Actual tool execution",
+          "description": "Delegates to ToolExecutor (registry adapter) for real execution"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go",
+          "lineNumber": 127,
+          "lineContent": "\t_ = r.dispatchPostToolUse(ctx, call, toolResult, durationMS)",
+          "title": "Post-tool hook dispatch",
+          "description": "Allows hooks to observe result and duration for logging/metrics"
+        },
+        {
+          "id": "3f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go",
+          "lineNumber": 129,
+          "lineContent": "\treturn toolResult, nil",
+          "title": "Result return",
+          "description": "Returns tool result to engine for appending to conversation"
+        }
+      ],
+      "traceTextDiagram": "ToolRunner: Hook-Integrated Tool Execution\n├── Execute() entry point \u003c-- 3a\n│   ├── Pre-execution phase\n│   │   ├── dispatchPreToolUse() \u003c-- 3b\n│   │   │   └── hooks.Dispatcher.Dispatch() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go:150\n│   │   │       └── Hook skills execute\n│   │   └── Check if blocked \u003c-- 3c\n│   │       └── Return error if blocked \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go:92\n│   ├── Core execution phase\n│   │   └── executor.Execute() \u003c-- 3d\n│   │       └── registryToolExecutor.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:396\n│   │           └── FuncTool.Call() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/agent_actor.go:419\n│   └── Post-execution phase\n│       ├── dispatchPostToolUse() \u003c-- 3e\n│       │   └── hooks.Dispatcher.Dispatch() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/tool_runner.go:185\n│       │       └── Hook skills observe result\n│       └── Return ToolResult \u003c-- 3f\n└── Called by LLMChatEngine.Run() loop \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/llmchat_engine.go:177",
+      "traceGuide": "## Motivation\n\nWhen an LLM agent needs to execute a tool (like reading a file or running a command), the system must provide **observability and control** over these operations. The ToolRunner solves this by wrapping tool execution with **hooks** - allowing external code to inspect, block, or modify tool calls before they run, and observe results after completion [3a]. This enables features like security policies (blocking dangerous operations), logging/metrics, input sanitization, and result transformation without modifying the core tool execution logic.\n\n## Details\n\n### Execution Flow\n\nThe ToolRunner orchestrates a three-phase execution pipeline:\n\n1. **Pre-execution hooks** [3b]: Before the tool runs, `dispatchPreToolUse()` invokes registered hook skills that receive the tool name and input arguments. Hooks can return a `block` decision to prevent execution [3c], or provide `updated_tool_input` to modify the arguments.\n\n2. **Tool execution** [3d]: If not blocked, the ToolRunner delegates to a `ToolExecutor` interface (typically `registryToolExecutor` which adapts the agent's tool registry). The actual tool implementation is called and returns a result string.\n\n3. **Post-execution hooks** [3e]: After execution, `dispatchPostToolUse()` invokes hooks with the tool result and execution duration. This enables logging, metrics collection, and result observation. The final `ToolResult` is returned to the engine [3f].\n\n### Integration\n\nThe ToolRunner is called by `LLMChatEngine` during its tool-calling loop [1d]. Each tool call from the LLM passes through this hook-integrated execution pipeline before the result is appended back to the conversation history. This design keeps the engine focused on LLM interaction while delegating tool execution concerns to a composable, hook-aware layer.\n\n### Hook Contract\n\nHooks are external skills that receive a JSON `Input` with event type, tool metadata, and context. They return an `Output` with a `Decision` (approve/block/none), optional context to inject, and actions to enqueue. The dispatcher merges outputs from multiple hooks using last-wins semantics for mutations."
+    },
+    {
+      "id": "4",
+      "title": "DSPyAdapter: Bridge to dspy-go Agent",
+      "description": "Agent engine system - adapter implementing AgentEngine interface by wrapping dspy-go ReActAgent",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go",
+          "lineNumber": 83,
+          "lineContent": "func NewDSPyAdapter(cfg DSPyAdapterConfig) (*DSPyAdapter, error) {",
+          "title": "Adapter creation",
+          "description": "Initializes LLM and creates dspy-go ReActAgent"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go",
+          "lineNumber": 151,
+          "lineContent": "\tagent := react.NewReActAgent(a.config.AgentID, a.config.AgentName, opts...)",
+          "title": "ReActAgent instantiation",
+          "description": "Creates dspy-go agent with max iterations and timeout"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go",
+          "lineNumber": 168,
+          "lineContent": "\tif err := agent.Initialize(a.llm, sig); err != nil {",
+          "title": "Agent initialization",
+          "description": "Initializes agent with LLM and signature (system prompt)"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go",
+          "lineNumber": 197,
+          "lineContent": "func (a *DSPyAdapter) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {",
+          "title": "AgentEngine.Run implementation",
+          "description": "Implements same interface as LLMChatEngine for polymorphism"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go",
+          "lineNumber": 207,
+          "lineContent": "\tprompt := a.buildPrompt(input)",
+          "title": "Prompt construction",
+          "description": "Converts EngineInput messages to single prompt string"
+        },
+        {
+          "id": "4f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go",
+          "lineNumber": 216,
+          "lineContent": "\tresultMap, err := a.reactAgent.Execute(ctx, inputMap)",
+          "title": "DSPy execution",
+          "description": "Delegates to dspy-go agent which handles its own tool loop"
+        },
+        {
+          "id": "4g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go",
+          "lineNumber": 235,
+          "lineContent": "\tresult := extractResultFromMap(resultMap)",
+          "title": "Result extraction",
+          "description": "Extracts text response from dspy-go result map"
+        }
+      ],
+      "traceTextDiagram": "DSPyAdapter: AgentEngine Implementation\n├── Adapter Creation \u003c-- 4a\n│   ├── createLLM() - initialize provider \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go:88\n│   └── initializeAgent() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go:102\n│       ├── NewReActAgent() \u003c-- 4b\n│       └── agent.Initialize(llm, sig) \u003c-- 4c\n│\n└── AgentEngine.Run() interface \u003c-- 4d\n    ├── buildPrompt() - convert messages \u003c-- 4e\n    ├── reactAgent.Execute() \u003c-- 4f\n    │   └── [dspy-go internal tool loop]\n    └── extractResultFromMap() \u003c-- 4g\n        └── return EngineOutput \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/engine/dspy_adapter.go:249",
+      "traceGuide": "## Motivation\n\nagentctl supports **two different LLM execution engines**: a native `LLMChatEngine` that directly calls OpenAI-compatible APIs, and a legacy path using the `dspy-go` library's ReActAgent. The **DSPyAdapter** exists to make the dspy-go agent conform to the same `AgentEngine` interface [4d] as `LLMChatEngine`, enabling **polymorphic engine selection** at runtime. This allows the `AgentActor` to switch between engines via configuration without changing its message handling logic.\n\nThe problem: dspy-go provides a complete agent implementation with its own tool loop, but it doesn't match agentctl's `AgentEngine` interface. Without an adapter, you'd need duplicate actor code for each engine type.\n\n## Details\n\n**Adapter Creation** happens in two phases [4a]. First, it creates an LLM client based on the provider configuration (Gemini, OpenAI, Anthropic, etc.) [4a]. Then it initializes a dspy-go `ReActAgent` [4b] with max iterations and timeout settings, and calls `Initialize()` with the LLM and a signature (system prompt structure) [4c].\n\n**Execution Flow** starts when `AgentActor` calls `Run()` [4d] with an `EngineInput` containing messages, tools, and system prompt. The adapter converts these messages into a single prompt string [4e] because dspy-go expects a simpler input format. It then delegates to `reactAgent.Execute()` [4f], which runs its own internal tool-calling loop (not visible to agentctl). Finally, it extracts the result string from dspy-go's result map [4g] and wraps it in an `EngineOutput` to return.\n\n**Key Difference**: Unlike `LLMChatEngine` which exposes each tool call iteration, the DSPy adapter treats the entire agent execution as a **black box**—you call `Execute()` once and get back the final result after all tool calls complete internally."
+    },
+    {
+      "id": "5",
+      "title": "Workflow Engine: Load and Execute DAG Pipeline",
+      "description": "Workflow engine system - orchestrates multi-step skill pipelines from YAML definitions with dependency resolution",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/workflow.go",
+          "lineNumber": 134,
+          "lineContent": "\tresult, err := engine.Run(cmd.Context(), nameOrPath, inputs)",
+          "title": "CLI workflow execution",
+          "description": "User invokes 'agentctl workflow run' command"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go",
+          "lineNumber": 63,
+          "lineContent": "func (e *Engine) Run(ctx context.Context, nameOrPath string, inputs map[string]any) (*WorkflowResult, error) {",
+          "title": "Engine run entry",
+          "description": "Workflow engine main execution method"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go",
+          "lineNumber": 65,
+          "lineContent": "\thandle, err := e.loader.Load(nameOrPath)",
+          "title": "Workflow loading",
+          "description": "Loads YAML workflow from search paths or file"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go",
+          "lineNumber": 82,
+          "lineContent": "\tdag, err := NewDAG(wf.Steps)",
+          "title": "DAG construction",
+          "description": "Builds dependency graph with topological sort and batches"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go",
+          "lineNumber": 96,
+          "lineContent": "\tscheduler := NewScheduler(dag, executor, WithMaxWorkers(e.maxWorkers))",
+          "title": "Scheduler creation",
+          "description": "Creates scheduler with DAG and skill executor"
+        },
+        {
+          "id": "5f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go",
+          "lineNumber": 97,
+          "lineContent": "\tresult, err := scheduler.Run(ctx, execCtx)",
+          "title": "Scheduler execution",
+          "description": "Executes workflow steps respecting dependencies and parallelism"
+        },
+        {
+          "id": "5g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go",
+          "lineNumber": 107,
+          "lineContent": "\t\toutputs, err := e.extractOutputs(wf.Outputs, execCtx)",
+          "title": "Output extraction",
+          "description": "Renders output templates from step results"
+        }
+      ],
+      "traceTextDiagram": "Workflow Engine: Load and Execute DAG Pipeline\n├── CLI Command Entry\n│   └── agentctl workflow run \u003cname\u003e \u003c-- 5a\n│       └── engine.Run(ctx, nameOrPath, inputs) \u003c-- 5b\n│           ├── loader.Load(nameOrPath) \u003c-- 5c\n│           │   └── Parse YAML \u0026 Validate \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/loader.go:99\n│           ├── NewDAG(wf.Steps) \u003c-- 5d\n│           │   ├── Build dependency graph \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:26\n│           │   ├── Topological sort \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:56\n│           │   └── Compute parallel batches \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:63\n│           ├── NewScheduler(dag, executor) \u003c-- 5e\n│           ├── scheduler.Run(ctx, execCtx) \u003c-- 5f\n│           │   └── Execute steps in batches \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:63\n│           └── extractOutputs(wf.Outputs) \u003c-- 5g\n│               └── Render output templates \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go:161\n└── Return WorkflowResult \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go:112",
+      "traceGuide": "## Motivation\n\nAgentctl needs to orchestrate **multi-step automated pipelines** where skills are chained together with data flowing between them. For example: find all Go files, then analyze each one, then aggregate results. The workflow engine solves this by allowing users to define **DAG-based workflows in YAML** that specify steps, dependencies, and data transformations [5c].\n\nWithout this system, users would need to manually chain `agentctl run` commands and pass outputs between them—error-prone and not parallelizable.\n\n## Details\n\n### Workflow Definition\n\nWorkflows are YAML files with **metadata, inputs, steps, and outputs**. Each step specifies a skill to run and its input (which can reference previous step results via templates like `{{.stepId.data}}`). Steps declare dependencies explicitly via `depends_on` or implicitly through template references [5c, 5d].\n\n### Execution Flow\n\nThe engine loads the workflow YAML [5c], builds a **directed acyclic graph (DAG)** from step dependencies [5d], and creates a scheduler with the DAG and a skill executor [5e]. The scheduler runs steps in **topologically-sorted batches** [5f]—steps within a batch execute in parallel (up to `maxWorkers`), while batches execute sequentially to respect dependencies.\n\n### Skill Execution\n\nEach step executes by invoking `agentctl run \u003cskill\u003e --input \u003cjson\u003e` as a subprocess. The executor parses the JSON envelope output and stores results in the execution context, making them available to dependent steps via template rendering [5g].\n\n### Key Features\n\n- **Parallel execution**: Independent steps in the same batch run concurrently\n- **Template-based data flow**: Steps access previous results via Go templates\n- **Loop support**: Steps can iterate over arrays with configurable parallelism\n- **Conditional execution**: Steps can be skipped based on template conditions\n- **Retry logic**: Failed steps can retry with configurable delays"
+    },
+    {
+      "id": "6",
+      "title": "Workflow Scheduler: Parallel Batch Execution",
+      "description": "Workflow engine system - executes workflow steps in parallel batches based on DAG topology",
+      "locations": [
+        {
+          "id": "6a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 51,
+          "lineContent": "func (s *Scheduler) Run(ctx context.Context, execCtx *ExecutionContext) (*WorkflowResult, error) {",
+          "title": "Scheduler run entry",
+          "description": "Main scheduler execution loop over DAG batches"
+        },
+        {
+          "id": "6b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 63,
+          "lineContent": "\tfor _, batch := range s.dag.Batches() {",
+          "title": "Batch iteration",
+          "description": "Processes each level of DAG in topological order"
+        },
+        {
+          "id": "6c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 64,
+          "lineContent": "\t\tif err := s.executeBatch(ctx, batch, execCtx, completed, \u0026completedMu, result); err != nil {",
+          "title": "Batch execution",
+          "description": "Executes all steps in batch concurrently up to maxWorkers"
+        },
+        {
+          "id": "6d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 120,
+          "lineContent": "\t\t\t\texecResult := s.executeStep(ctx, stepID, execCtx)",
+          "title": "Worker step execution",
+          "description": "Worker goroutine executes individual step with condition/loop handling"
+        },
+        {
+          "id": "6e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 222,
+          "lineContent": "\trenderedInput, err := s.renderStepInput(step, execCtx)",
+          "title": "Template rendering",
+          "description": "Renders step input using template engine with previous results"
+        },
+        {
+          "id": "6f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 238,
+          "lineContent": "\tresult, err := s.executeWithRetry(ctx, step, renderedInput)",
+          "title": "Step execution with retry",
+          "description": "Executes skill via agentctl subprocess with retry logic"
+        },
+        {
+          "id": "6g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 144,
+          "lineContent": "\t\texecCtx.Set(execResult.stepID, execResult.result)",
+          "title": "Result storage",
+          "description": "Stores step result in execution context for dependent steps"
+        }
+      ],
+      "traceTextDiagram": "Workflow Scheduler Execution Flow\n└── Scheduler.Run() entry \u003c-- 6a\n    ├── for each DAG batch (topological order) \u003c-- 6b\n    │   └── executeBatch() \u003c-- 6c\n    │       ├── create worker pool (up to maxWorkers) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:104\n    │       ├── spawn worker goroutines \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:117\n    │       │   └── worker: executeStep() \u003c-- 6d\n    │       │       ├── renderStepInput() \u003c-- 6e\n    │       │       │   └── template.Render() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/template.go:114\n    │       │       └── executeWithRetry() \u003c-- 6f\n    │       │           └── executor.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:433\n    │       │               └── exec agentctl skill \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/engine.go:201\n    │       └── collect results \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:140\n    │           └── execCtx.Set() \u003c-- 6g\n    └── return WorkflowResult \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:76",
+      "traceGuide": "## Motivation\n\nWorkflows in agentctl are **multi-step pipelines** that chain together skills (like file operations, code analysis, or test execution). The challenge: steps have **dependencies** - you can't analyze files before you've found them, and some steps can run in parallel while others must wait. The Scheduler solves this by executing workflow steps in **dependency order** while **maximizing parallelism** within each level of the dependency graph.\n\n## Details\n\n### Execution Model\n\nThe Scheduler operates on a **DAG (Directed Acyclic Graph)** that has already computed which steps can run in parallel. It processes the workflow in **batches** [6b], where each batch contains steps at the same dependency level - all their dependencies are satisfied, so they can execute concurrently.\n\n### Worker Pool Architecture\n\nFor each batch, the Scheduler creates a **worker pool** limited by `maxWorkers` (default 10). Workers pull step IDs from a channel and execute them concurrently [6d]. This prevents overwhelming the system when a workflow has many parallel steps.\n\n### Step Execution Pipeline\n\nEach step goes through:\n1. **Template rendering** [6e] - Step inputs like `{{.previous_step.data.files}}` are evaluated using results from completed steps\n2. **Retry logic** [6f] - Steps can fail and retry with configurable delays\n3. **Skill invocation** - The actual work happens by spawning `agentctl run \u003cskill\u003e` as a subprocess, passing rendered inputs as JSON\n\n### Result Flow\n\nAs workers complete steps, results are **immediately stored** in the execution context [6g]. This makes data available to dependent steps in the next batch. The context acts as a shared memory space where `step_id → result` mappings accumulate throughout execution.\n\n### Synchronization\n\nThe Scheduler uses a mutex-protected `completed` map to track which steps have finished. After all workers in a batch complete, it moves to the next batch. If any step fails (and error strategy is \"fail\"), the entire workflow stops."
+    },
+    {
+      "id": "7",
+      "title": "Workflow Step Loop Execution",
+      "description": "Workflow engine system - handles loop iteration over arrays with parallel or sequential execution",
+      "locations": [
+        {
+          "id": "7a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 209,
+          "lineContent": "\tif step.Loop != nil {",
+          "title": "Loop detection",
+          "description": "Checks if step has loop configuration"
+        },
+        {
+          "id": "7b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 283,
+          "lineContent": "\toverValue, err := s.template.RenderString(step.Loop.Over, execCtx)",
+          "title": "Loop array rendering",
+          "description": "Evaluates loop.over template expression to get array"
+        },
+        {
+          "id": "7c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 299,
+          "lineContent": "\titems, err := parseAsArray(overValue)",
+          "title": "Array parsing",
+          "description": "Converts rendered value to array of items"
+        },
+        {
+          "id": "7d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 316,
+          "lineContent": "\tif step.Parallel != nil \u0026\u0026 *step.Parallel \u003e 0 {",
+          "title": "Parallelism check",
+          "description": "Determines if iterations run sequentially or in parallel"
+        },
+        {
+          "id": "7e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 350,
+          "lineContent": "\t\t\t\titerCtx := execCtx.Clone()",
+          "title": "Iteration context clone",
+          "description": "Creates isolated context for each parallel iteration"
+        },
+        {
+          "id": "7f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 351,
+          "lineContent": "\t\t\t\titerCtx.SetVar(step.Loop.As, itm)",
+          "title": "Loop variable binding",
+          "description": "Sets loop variable (e.g., 'item') in iteration context"
+        },
+        {
+          "id": "7g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 354,
+          "lineContent": "\t\t\t\titerResult := s.executeSingleStep(ctx, step, iterCtx)",
+          "title": "Iteration execution",
+          "description": "Executes step for this iteration with bound variables"
+        },
+        {
+          "id": "7h",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go",
+          "lineNumber": 380,
+          "lineContent": "\t\tData:       allData,",
+          "title": "Result aggregation",
+          "description": "Aggregates all iteration results into single step result"
+        }
+      ],
+      "traceTextDiagram": "Workflow Step Execution Flow\n└── executeStep() - step orchestration \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:163\n    ├── Condition evaluation (if present) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:180\n    └── Loop detection \u003c-- 7a\n        └── executeLoopStep() - loop handler \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:279\n            ├── Render loop.over template \u003c-- 7b\n            ├── Parse as array \u003c-- 7c\n            ├── Check parallelism config \u003c-- 7d\n            ├── Parallel execution branch \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:337\n            │   ├── Spawn goroutines (semaphore-limited) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:343\n            │   │   ├── Clone execution context \u003c-- 7e\n            │   │   ├── Bind loop variable \u003c-- 7f\n            │   │   └── Execute step iteration \u003c-- 7g\n            │   └── Wait for completion \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:364\n            ├── Sequential execution branch \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:326\n            │   └── For each: clone, bind, execute \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/scheduler.go:327\n            └── Aggregate iteration results \u003c-- 7h",
+      "traceGuide": "## Motivation\n\nWorkflows in agentctl often need to **process arrays of items** - for example, analyzing multiple files, running tests on several modules, or processing a list of API endpoints. The loop execution system [7a] allows workflow steps to **iterate over arrays** while supporting both **sequential and parallel execution** modes, enabling efficient batch processing without requiring separate workflow definitions for each item.\n\n## Details\n\n### Loop Configuration\n\nA workflow step declares a loop using `loop.over` (a template expression that evaluates to an array) and `loop.as` (the variable name for each item) [7b]. The system renders the template expression [7b] and parses it into an array [7c], supporting JSON arrays, string arrays, or template expressions like `{{.previous_step.data.files}}`.\n\n### Execution Modes\n\nThe scheduler checks the `parallel` configuration [7d] to determine execution strategy. **Sequential mode** (parallel=1 or unset) processes items one at a time [7e-7g], while **parallel mode** spawns goroutines with a semaphore to limit concurrency. For each iteration, the system **clones the execution context** [7e] to provide isolation, **binds the loop variable** [7f] (e.g., setting `item` to the current array element), and executes the step [7g].\n\n### Result Aggregation\n\nAfter all iterations complete, the scheduler **aggregates results** [7h] into a single step result containing an array of outputs. This allows downstream steps to reference either the complete array (`{{.step.data}}`) or individual iteration results (`{{.step.iterations}}`), enabling flexible data flow through the workflow pipeline."
+    },
+    {
+      "id": "8",
+      "title": "DAG Construction: Dependency Resolution",
+      "description": "Workflow engine system - builds directed acyclic graph from workflow steps with explicit and implicit dependencies",
+      "locations": [
+        {
+          "id": "8a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go",
+          "lineNumber": 18,
+          "lineContent": "func NewDAG(steps []Step) (*DAG, error) {",
+          "title": "DAG creation entry",
+          "description": "Builds dependency graph from workflow step definitions"
+        },
+        {
+          "id": "8b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go",
+          "lineNumber": 40,
+          "lineContent": "\tfor _, step := range steps {",
+          "title": "Explicit dependency processing",
+          "description": "Processes depends_on declarations from YAML"
+        },
+        {
+          "id": "8c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go",
+          "lineNumber": 51,
+          "lineContent": "\tif err := d.inferDependencies(steps); err != nil {",
+          "title": "Implicit dependency inference",
+          "description": "Infers dependencies from template references like {{.stepId.data}}"
+        },
+        {
+          "id": "8d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go",
+          "lineNumber": 71,
+          "lineContent": "\t\trefs := extractStepReferences(step)",
+          "title": "Template reference extraction",
+          "description": "Parses step input templates to find step ID references"
+        },
+        {
+          "id": "8e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go",
+          "lineNumber": 56,
+          "lineContent": "\torder, err := d.topologicalSort()",
+          "title": "Topological sort",
+          "description": "Computes execution order using Kahn's algorithm"
+        },
+        {
+          "id": "8f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go",
+          "lineNumber": 63,
+          "lineContent": "\td.batches = d.computeBatches()",
+          "title": "Batch computation",
+          "description": "Groups steps by level for parallel execution within levels"
+        },
+        {
+          "id": "8g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go",
+          "lineNumber": 232,
+          "lineContent": "\tif len(order) != len(d.nodes) {",
+          "title": "Cycle detection",
+          "description": "Detects circular dependencies by checking if all nodes were sorted"
+        }
+      ],
+      "traceTextDiagram": "Workflow DAG Construction Pipeline\n├── NewDAG(steps) entry \u003c-- 8a\n│   ├── Index all steps into nodes map \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:26\n│   ├── Build explicit dependency edges\n│   │   └── for each step.DependsOn \u003c-- 8b\n│   │       └── add edge: step → dependency \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:45\n│   ├── Infer implicit dependencies \u003c-- 8c\n│   │   └── extractStepReferences(step) \u003c-- 8d\n│   │       └── parse templates for {{.stepId}} \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:155\n│   │           └── add inferred edges \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:77\n│   ├── Compute execution order\n│   │   └── topologicalSort() (Kahn's) \u003c-- 8e\n│   │       └── cycle detection check \u003c-- 8g\n│   └── Group into parallel batches\n│       └── computeBatches() by level \u003c-- 8f\n│           └── return DAG with batches \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/workflow/dag.go:65",
+      "traceGuide": "## Motivation\n\nWorkflows in agentctl are defined as YAML files with multiple steps that can reference each other's outputs. For example, a step might use `{{.find_files.data.results}}` to access data from a previous `find_files` step. The **DAG construction system** solves the problem of determining the correct execution order: which steps can run in parallel, which must wait for dependencies, and detecting impossible circular dependencies.\n\nWithout this system, the workflow engine wouldn't know that a step referencing `{{.analyze.data}}` must wait for the `analyze` step to complete first, or that steps with no dependencies can safely run concurrently.\n\n## Details\n\n### Dependency Graph Building\n\nThe `NewDAG` function [8a] constructs a directed acyclic graph from workflow steps in three phases:\n\n1. **Explicit dependencies**: Processes `depends_on` declarations from the YAML [8b], creating edges like `step → dependency` [dag.go:45]\n\n2. **Implicit dependencies**: Infers dependencies by parsing template expressions [8c]. The `extractStepReferences` function [8d] scans step inputs for patterns like `{{.stepId.data}}` [dag.go:155], automatically adding edges when one step references another's output [dag.go:77]\n\n3. **Validation**: Runs topological sort using Kahn's algorithm [8e] to compute execution order and detect cycles [8g]\n\n### Parallel Execution Batches\n\nAfter building the dependency graph, `computeBatches` [8f] groups steps into **levels** where all steps in a level have no dependencies on each other. This enables the scheduler to execute entire batches in parallel while respecting dependencies between batches. The final DAG contains both the topological order and these parallel execution batches [dag.go:65].\n\n### Key Insight\n\nThe system makes workflow authoring easier by **automatically inferring dependencies from template references**—users don't need to manually declare `depends_on` for every step relationship, only when the dependency isn't expressed through data flow."
+    }
+  ],
+  "description": "Two distinct orchestration systems: (1) Agent Engine for LLM-driven tool-calling loops within reactive actors, and (2) Workflow Engine for DAG-based skill pipeline execution. Agent system handles real-time LLM interactions [2c, 3d], while workflow system orchestrates multi-step batch processes [5c, 6d].",
+  "mermaidDiagram": "graph TB\n    subgraph AgentEngine[\"Agent Engine System\"]\n        direction TB\n        2a[\"2a: handleConsoleAsk\u003cbr/\u003ereceives message\"]\n        2b[\"2b: dispatchHook\u003cbr/\u003eMessageReceived\"]\n        2c[\"2c: engine selection\u003cbr/\u003ellmchat vs dspy\"]\n        2d[\"2d: agentEngine.Run\u003cbr/\u003eexecutes turn\"]\n        2e[\"2e: dispatchHook\u003cbr/\u003eLLMResponse\"]\n        2f[\"2f: ConsoleReplyData\u003cbr/\u003ebuilds reply\"]\n        \n        1a[\"1a: LLMChatEngine.Run\u003cbr/\u003eentry point\"]\n        1b[\"1b: callLLM\u003cbr/\u003esends to API\"]\n        1c[\"1c: tool call detection\u003cbr/\u003echecks response\"]\n        1d[\"1d: toolRunner.Execute\u003cbr/\u003eruns tool\"]\n        1e[\"1e: result appending\u003cbr/\u003eto history\"]\n        1f[\"1f: continue loop\u003cbr/\u003enext iteration\"]\n        1g[\"1g: final response\u003cbr/\u003eexit loop\"]\n        \n        3a[\"3a: ToolRunner.Execute\u003cbr/\u003eentry point\"]\n        3b[\"3b: dispatchPreToolUse\u003cbr/\u003epre-hook\"]\n        3c[\"3c: block check\u003cbr/\u003edecision\"]\n        3d[\"3d: executor.Execute\u003cbr/\u003eactual tool\"]\n        3e[\"3e: dispatchPostToolUse\u003cbr/\u003epost-hook\"]\n        3f[\"3f: result return\u003cbr/\u003eto engine\"]\n        \n        4a[\"4a: NewDSPyAdapter\u003cbr/\u003ecreation\"]\n        4b[\"4b: ReActAgent\u003cbr/\u003einstantiation\"]\n        4c[\"4c: agent.Initialize\u003cbr/\u003ewith LLM\"]\n        4d[\"4d: DSPyAdapter.Run\u003cbr/\u003eentry point\"]\n        4e[\"4e: buildPrompt\u003cbr/\u003econverts messages\"]\n        4f[\"4f: reactAgent.Execute\u003cbr/\u003edspy loop\"]\n        4g[\"4g: result extraction\u003cbr/\u003efrom map\"]\n    end\n    \n    subgraph WorkflowEngine[\"Workflow Engine System\"]\n        direction TB\n        5a[\"5a: CLI workflow run\u003cbr/\u003euser invokes\"]\n        5b[\"5b: Engine.Run\u003cbr/\u003eentry point\"]\n        5c[\"5c: loader.Load\u003cbr/\u003eYAML parsing\"]\n        5d[\"5d: NewDAG\u003cbr/\u003ebuilds graph\"]\n        5e[\"5e: NewScheduler\u003cbr/\u003ecreates scheduler\"]\n        5f[\"5f: scheduler.Run\u003cbr/\u003eexecutes pipeline\"]\n        5g[\"5g: extractOutputs\u003cbr/\u003erenders templates\"]\n        \n        6a[\"6a: Scheduler.Run\u003cbr/\u003eentry point\"]\n        6b[\"6b: batch iteration\u003cbr/\u003etopological order\"]\n        6c[\"6c: executeBatch\u003cbr/\u003eparallel workers\"]\n        6d[\"6d: executeStep\u003cbr/\u003eworker goroutine\"]\n        6e[\"6e: renderStepInput\u003cbr/\u003etemplate rendering\"]\n        6f[\"6f: executeWithRetry\u003cbr/\u003eskill subprocess\"]\n        6g[\"6g: result storage\u003cbr/\u003ein context\"]\n        \n        7a[\"7a: loop detection\u003cbr/\u003echecks config\"]\n        7b[\"7b: renderString\u003cbr/\u003eloop.over expr\"]\n        7c[\"7c: parseAsArray\u003cbr/\u003econverts value\"]\n        7d[\"7d: parallelism check\u003cbr/\u003esequential vs parallel\"]\n        7e[\"7e: context clone\u003cbr/\u003eisolated iteration\"]\n        7f[\"7f: SetVar\u003cbr/\u003ebinds loop var\"]\n        7g[\"7g: executeSingleStep\u003cbr/\u003eiteration exec\"]\n        7h[\"7h: result aggregation\u003cbr/\u003ecollects results\"]\n        \n        8a[\"8a: NewDAG\u003cbr/\u003eentry point\"]\n        8b[\"8b: explicit deps\u003cbr/\u003edepends_on\"]\n        8c[\"8c: inferDependencies\u003cbr/\u003etemplate refs\"]\n        8d[\"8d: extractStepReferences\u003cbr/\u003eparses templates\"]\n        8e[\"8e: topologicalSort\u003cbr/\u003eKahn algorithm\"]\n        8f[\"8f: computeBatches\u003cbr/\u003egroups by level\"]\n        8g[\"8g: cycle detection\u003cbr/\u003evalidates DAG\"]\n    end\n    \n    subgraph Hooks[\"Hook System\"]\n        direction LR\n        hook1[\"Hook Dispatcher\u003cbr/\u003eobservability\"]\n    end\n    \n    2a --\u003e|receives| 2b\n    2b --\u003e|checks| 2c\n    2c --\u003e|llmchat path| 1a\n    2c --\u003e|dspy path| 4d\n    1a --\u003e|calls LLM| 1b\n    1b --\u003e|checks response| 1c\n    1c --\u003e|has tools| 1d\n    1c --\u003e|no tools| 1g\n    1d --\u003e|delegates| 3a\n    3a --\u003e|pre-execution| 3b\n    3b --\u003e|checks| 3c\n    3c --\u003e|approved| 3d\n    3d --\u003e|executes| 3e\n    3e --\u003e|post-execution| 3f\n    3f --\u003e|returns| 1d\n    1d --\u003e|appends| 1e\n    1e --\u003e|continues| 1f\n    1f --\u003e|loops back| 1b\n    1g --\u003e|final response| 2d\n    \n    4d --\u003e|builds prompt| 4e\n    4e --\u003e|delegates| 4f\n    4f --\u003e|dspy handles tools| 4g\n    4g --\u003e|returns| 2d\n    \n    2d --\u003e|post-execution| 2e\n    2e --\u003e|builds reply| 2f\n    2f --\u003e|returns message| 2a\n    \n    5a --\u003e|invokes| 5b\n    5b --\u003e|loads| 5c\n    5c --\u003e|builds| 5d\n    5d --\u003e|creates| 5e\n    5e --\u003e|executes| 5f\n    5f --\u003e|delegates| 6a\n    6a --\u003e|iterates| 6b\n    6b --\u003e|executes| 6c\n    6c --\u003e|spawns workers| 6d\n    6d --\u003e|checks| 7a\n    7a --\u003e|has loop| 7b\n    7a --\u003e|no loop| 6e\n    7b --\u003e|evaluates| 7c\n    7c --\u003e|determines| 7d\n    7d --\u003e|parallel| 7e\n    7d --\u003e|sequential| 7f\n    7e --\u003e|binds| 7f\n    7f --\u003e|executes| 7g\n    7g --\u003e|aggregates| 7h\n    7h --\u003e|stores| 6g\n    6e --\u003e|renders| 6f\n    6f --\u003e|executes skill| 6g\n    6g --\u003e|next batch| 6b\n    5f --\u003e|extracts| 5g\n    \n    8a --\u003e|builds| 8b\n    8b --\u003e|adds edges| 8c\n    8c --\u003e|extracts| 8d\n    8d --\u003e|sorts| 8e\n    8e --\u003e|groups| 8f\n    8f --\u003e|validates| 8g\n    5d --\u003e|uses| 8a\n    \n    2b -.-\u003e|dispatches| hook1\n    2e -.-\u003e|dispatches| hook1\n    3b -.-\u003e|dispatches| hook1\n    3e -.-\u003e|dispatches| hook1\n    \n    style AgentEngine fill:#a5d8ff\n    style WorkflowEngine fill:#b2f2bb\n    style Hooks fill:#ffec99"
+}

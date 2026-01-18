@@ -75,6 +75,19 @@ type LibSQLConfig struct {
 	// VectorDimensions specifies the dimension of vector embeddings.
 	// If 0, uses GetDefaultVectorDimensions() (configurable via AGENTCTL_VECTOR_DIMS).
 	VectorDimensions int `json:"vector_dimensions" yaml:"vector_dimensions"`
+
+	// SyncURL is the remote sqld URL for sync (optional).
+	// When set, enables embedded replica mode with automatic sync.
+	// Example: "http://localhost:8080" or "libsql://your-db.turso.io"
+	SyncURL string `json:"sync_url,omitempty" yaml:"sync_url,omitempty"`
+
+	// AuthToken for remote sync authentication (optional, required for Turso cloud)
+	AuthToken string `json:"auth_token,omitempty" yaml:"auth_token,omitempty"`
+
+	// SyncInterval in seconds for periodic background sync (optional).
+	// When 0 (default), sync happens on-demand via Sync() calls.
+	// When > 0, a background goroutine syncs every N seconds.
+	SyncInterval int `json:"sync_interval,omitempty" yaml:"sync_interval,omitempty"`
 }
 
 // TursoConfig holds Turso-specific configuration

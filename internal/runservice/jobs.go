@@ -19,14 +19,10 @@ func (e *Executor) ensureJobStore() error {
 	if err != nil {
 		return err
 	}
-	// NOTE: We intentionally do NOT call RecoverOrphanedJobs here because it
-	// causes race conditions when multiple agentctl processes run concurrently
-	// (e.g., parallel Claude Code hooks). A concurrent process would mark another
-	// process's "running" job as "error", then the original process would fail
-	// trying to transition error→ok.
-	//
-	// Orphaned job recovery should happen on explicit command only:
-	//   agentctl jobs recover
+	// NOTE: We avoid full orphan recovery here to prevent races when multiple
+	// agentctl processes run concurrently (e.g., parallel hooks). jobs.Open
+	// handles stale-job recovery using DefaultMaxJobAge, which is safe for
+	// concurrent runs and avoids erroring active jobs.
 	e.jobStore = store
 	return nil
 }

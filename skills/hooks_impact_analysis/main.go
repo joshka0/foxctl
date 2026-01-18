@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,12 +21,13 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	wsutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -37,43 +37,15 @@ const (
 	debounceCooldown  = 10 * time.Second
 )
 
-// agentctlBin holds the resolved path to the agentctl binary.
-var agentctlBin string
-
-func init() {
-	// Try environment variable first
-	if bin := os.Getenv("AGENTCTL_BIN"); bin != "" {
-		agentctlBin = bin
-		return
-	}
-
-	// Try CLAUDE_PROJECT_DIR/bin/agentctl
-	if projDir := os.Getenv("CLAUDE_PROJECT_DIR"); projDir != "" {
-		candidate := filepath.Join(projDir, "bin", "agentctl")
-		if _, err := os.Stat(candidate); err == nil {
-			agentctlBin = candidate
-			return
-		}
-	}
-
-	// Try relative to working directory
-	if cwd, err := os.Getwd(); err == nil {
-		candidate := filepath.Join(cwd, "bin", "agentctl")
-		if _, err := os.Stat(candidate); err == nil {
-			agentctlBin = candidate
-			return
-		}
-	}
-
-	// Fall back to PATH
-	if path, err := exec.LookPath("agentctl"); err == nil {
-		agentctlBin = path
-		return
-	}
-
-	// Last resort
-	agentctlBin = "agentctl"
-}
+// Environment variable names for impact analysis configuration.
+// FC/IS: Constants ensure consistency between LoadConfig and ConfigFromMap.
+const (
+	EnvImpactDisabled   = "AGENTCTL_IMPACT_DISABLED"
+	EnvImpactMaxSymbols = "AGENTCTL_IMPACT_MAX_SYMBOLS"
+	EnvImpactMaxRefs    = "AGENTCTL_IMPACT_MAX_REFS"
+	EnvImpactTimeout    = "AGENTCTL_IMPACT_TIMEOUT"
+	EnvAgentctlBin      = "AGENTCTL_BIN"
+)
 
 // Config holds impact analysis configuration.
 type Config struct {
@@ -84,25 +56,39 @@ type Config struct {
 }
 
 // LoadConfig loads configuration from environment.
+// FC/IS: Collects env values at boundary, delegates parsing to ConfigFromMap.
 func LoadConfig() Config {
+	envMap := map[string]string{
+		EnvImpactDisabled:   os.Getenv(EnvImpactDisabled),
+		EnvImpactMaxSymbols: os.Getenv(EnvImpactMaxSymbols),
+		EnvImpactMaxRefs:    os.Getenv(EnvImpactMaxRefs),
+		EnvImpactTimeout:    os.Getenv(EnvImpactTimeout),
+	}
+	return ConfigFromMap(envMap)
+}
+
+// ConfigFromMap creates a Config from a string map.
+// FC/IS: Pure function for parsing - no os.Getenv calls.
+// Tests can call this directly with controlled values.
+func ConfigFromMap(envMap map[string]string) Config {
 	cfg := Config{
 		MaxSymbols: defaultMaxSymbols,
 		MaxRefs:    defaultMaxRefs,
 		Timeout:    defaultTimeout,
-		Disabled:   os.Getenv("AGENTCTL_IMPACT_DISABLED") == "1",
+		Disabled:   envMap[EnvImpactDisabled] == "1",
 	}
 
-	if v := os.Getenv("AGENTCTL_IMPACT_MAX_SYMBOLS"); v != "" {
+	if v := envMap[EnvImpactMaxSymbols]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.MaxSymbols = n
 		}
 	}
-	if v := os.Getenv("AGENTCTL_IMPACT_MAX_REFS"); v != "" {
+	if v := envMap[EnvImpactMaxRefs]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.MaxRefs = n
 		}
 	}
-	if v := os.Getenv("AGENTCTL_IMPACT_TIMEOUT"); v != "" {
+	if v := envMap[EnvImpactTimeout]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Timeout = time.Duration(n) * time.Second
 		}
@@ -192,8 +178,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	cfg := LoadConfig()
 
 	// Debug: print resolved binary path
+	// FC/IS: Read env at boundary for debug logging
+	agentctlBinEnv := os.Getenv(EnvAgentctlBin)
 	cwd, _ := os.Getwd()
-	fmt.Fprintf(os.Stderr, "impact_analysis: agentctlBin=%s AGENTCTL_BIN=%s cwd=%s\n", agentctlBin, os.Getenv("AGENTCTL_BIN"), cwd)
+	rc.Logger.Debug().
+		Str("agentctl_bin", executil.AgentctlBin()).
+		Str("agentctl_bin_env", agentctlBinEnv).
+		Str("cwd", cwd).
+		Msg("impact analysis setup")
 
 	// Check if disabled
 	if cfg.Disabled {
@@ -234,26 +226,23 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	// Get workspace root using detection chain (hook input takes priority)
-	workspace := in.WorkspaceRoot
-	if workspace == "" {
-		workspace = wsutil.Detect(absPath)
-	}
-	fmt.Fprintf(os.Stderr, "impact_analysis: workspace=%s\n", workspace)
+	workspace := hookutil.ResolveWorkspaceRoot(in, absPath)
+	rc.Logger.Debug().Str("workspace", workspace).Msg("impact analysis workspace")
 
 	// For Go files, skip if gopls isn't warm (avoid 30-40s cold start).
 	// Users get impact analysis "for free" after using any LSP feature.
 	if lang.Name == "go" && !gopls.IsDaemonReady(workspace) {
-		fmt.Fprintf(os.Stderr, "impact_analysis: gopls not ready for workspace %s, skipping\n", workspace)
+		rc.Logger.Debug().Str("workspace", workspace).Msg("gopls not ready, skipping")
 		return emitNone(rc, "gopls not warm")
 	}
 
 	// Get symbols from file
-	symbols, err := getSymbols(ctx, absPath, cfg.MaxSymbols, workspace)
+	symbols, err := getSymbols(ctx, absPath, cfg.MaxSymbols, workspace, rc.Logger)
 	if err != nil || len(symbols) == 0 {
-		fmt.Fprintf(os.Stderr, "impact_analysis: no symbols (err=%v)\n", err)
+		rc.Logger.Debug().Err(err).Msg("no symbols found")
 		return emitNone(rc, "no symbols found")
 	}
-	fmt.Fprintf(os.Stderr, "impact_analysis: got %d symbols\n", len(symbols))
+	rc.Logger.Debug().Int("symbol_count", len(symbols)).Msg("symbols extracted")
 
 	// Filter to public symbols of analyzable types
 	var publicSymbols []Symbol
@@ -277,7 +266,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	// Analyze impacts in parallel
-	impacts := analyzeImpacts(ctx, absPath, publicSymbols, lang, cfg, workspace)
+	impacts := analyzeImpacts(ctx, absPath, publicSymbols, lang, cfg, workspace, rc.Logger)
 
 	// Filter to symbols with external references
 	var significantImpacts []Impact
@@ -301,7 +290,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	return emitApprove(rc, contextMsg, significantImpacts)
 }
 
-func getSymbols(ctx context.Context, filePath string, maxResults int, workspace string) ([]Symbol, error) {
+func getSymbols(ctx context.Context, filePath string, maxResults int, workspace string, logger zerolog.Logger) ([]Symbol, error) {
 	// Use agentctl run code/symbols
 	input := map[string]any{
 		"path":            filePath,
@@ -314,40 +303,33 @@ func getSymbols(ctx context.Context, filePath string, maxResults int, workspace 
 		return nil, err
 	}
 
-	// Build args with workspace if provided
-	args := []string{"run", "code/symbols", "--input", string(inputJSON)}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
+	extraArgs := workspaceArgs(workspace)
+	logger.Debug().Str("binary", executil.AgentctlBin()).Strs("args", extraArgs).Msg("running code/symbols")
+	var data struct {
+		Preview []Symbol `json:"preview"`
 	}
-	cmd := exec.CommandContext(ctx, agentctlBin, args...)
-	fmt.Fprintf(os.Stderr, "impact_analysis: running %s %v\n", agentctlBin, args)
-	out, err := cmd.Output()
+	result, err := executil.RunAgentctlSkillDecodeWithArgs(ctx, workspace, "code/symbols", inputJSON, extraArgs, &data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "impact_analysis: code/symbols error: %v\n", err)
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			fmt.Fprintf(os.Stderr, "impact_analysis: stderr: %s\n", string(exitErr.Stderr))
+		logger.Warn().Err(err).Msg("code/symbols error")
+		if len(result.Stderr) > 0 {
+			logger.Debug().Str("stderr", string(result.Stderr)).Msg("code/symbols stderr")
 		}
 		return nil, err
 	}
-	fmt.Fprintf(os.Stderr, "impact_analysis: code/symbols output length=%d\n", len(out))
+	logger.Debug().Int("bytes", len(result.Stdout)).Msg("code/symbols output size")
 
-	var result struct {
-		Data struct {
-			Preview []Symbol `json:"preview"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, err
-	}
-
-	return result.Data.Preview, nil
+	return data.Preview, nil
 }
 
-func analyzeImpacts(ctx context.Context, filePath string, symbols []Symbol, lang Language, cfg Config, workspace string) []Impact {
+func analyzeImpacts(ctx context.Context, filePath string, symbols []Symbol, lang Language, cfg Config, workspace string, logger ...zerolog.Logger) []Impact {
 	var wg sync.WaitGroup
 	results := make(chan Impact, len(symbols))
 
-	fmt.Fprintf(os.Stderr, "impact_analysis: analyzing %d symbols, workspace=%s\n", len(symbols), workspace)
+	log := zerolog.Nop()
+	if len(logger) > 0 {
+		log = logger[0]
+	}
+	log.Debug().Int("symbol_count", len(symbols)).Str("workspace", workspace).Msg("analyzing impacts")
 
 	for _, sym := range symbols {
 		wg.Add(1)
@@ -361,11 +343,16 @@ func analyzeImpacts(ctx context.Context, filePath string, symbols []Symbol, lang
 
 			// Find column position for the symbol
 			col := findSymbolColumn(filePath, s.Line, s.Name)
-			fmt.Fprintf(os.Stderr, "impact_analysis: symbol %s at %s:%d:%d\n", s.Name, filePath, s.Line, col)
+			log.Debug().
+				Str("symbol", s.Name).
+				Str("file", filePath).
+				Int("line", s.Line).
+				Int("col", col).
+				Msg("symbol location")
 
 			// Get references
-			refs := getLSPReferences(ctx, lang.Skill, filePath, s.Line, col, cfg.Timeout, workspace)
-			fmt.Fprintf(os.Stderr, "impact_analysis: symbol %s got %d raw refs\n", s.Name, len(refs))
+			refs := getLSPReferences(ctx, lang.Skill, filePath, s.Line, col, cfg.Timeout, workspace, log)
+			log.Debug().Str("symbol", s.Name).Int("ref_count", len(refs)).Msg("raw refs")
 
 			// Filter to external references
 			for _, ref := range refs {
@@ -406,7 +393,7 @@ func analyzeImpacts(ctx context.Context, filePath string, symbols []Symbol, lang
 
 			// For interfaces (Go), also get implementations
 			if lang.Name == "go" && s.Type == "interface" {
-				impls := getLSPImplementations(ctx, lang.Skill, filePath, s.Line, col, cfg.Timeout, workspace)
+				impls := getLSPImplementations(ctx, lang.Skill, filePath, s.Line, col, cfg.Timeout, workspace, log)
 				for _, impl := range impls {
 					if impl != filePath {
 						relPath := impl
@@ -462,34 +449,34 @@ func findSymbolColumn(filePath string, line int, symbolName string) int {
 	return 1
 }
 
-func getLSPReferences(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
+func getLSPReferences(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string, logger zerolog.Logger) []string {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// For Go files, use the gopls daemon directly (bypasses agentctl run overhead)
 	if skill == "lsp/gopls" {
-		return getGoplsReferences(ctx, filePath, line, col, workspace)
+		return getGoplsReferences(ctx, filePath, line, col, workspace, logger)
 	}
 
 	// For other languages, fall back to agentctl run
-	return getLSPReferencesViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace)
+	return getLSPReferencesViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace, logger)
 }
 
 // getGoplsReferences uses the gopls daemon directly for ~100x faster response times.
-func getGoplsReferences(ctx context.Context, filePath string, line, col int, workspace string) []string {
+func getGoplsReferences(ctx context.Context, filePath string, line, col int, workspace string, logger zerolog.Logger) []string {
 	daemon, err := gopls.GetDaemon(ctx, workspace)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "impact_analysis: gopls daemon error: %v\n", err)
+		logger.Debug().Err(err).Msg("gopls daemon error")
 		return []string{}
 	}
 
 	locs, err := daemon.References(ctx, filePath, line, col)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "impact_analysis: gopls references error: %v\n", err)
+		logger.Debug().Err(err).Msg("gopls references error")
 		return []string{}
 	}
 
-	fmt.Fprintf(os.Stderr, "impact_analysis: gopls daemon returned %d refs\n", len(locs))
+	logger.Debug().Int("ref_count", len(locs)).Msg("gopls daemon returned refs")
 
 	var refs []string
 	for _, loc := range locs {
@@ -499,7 +486,7 @@ func getGoplsReferences(ctx context.Context, filePath string, line, col int, wor
 }
 
 // getLSPReferencesViaAgentctl falls back to spawning agentctl run for non-Go languages.
-func getLSPReferencesViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
+func getLSPReferencesViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string, logger zerolog.Logger) []string {
 	// Pass timeout to skill (in seconds)
 	timeoutSec := int(timeout.Seconds())
 	if timeoutSec < 30 {
@@ -516,76 +503,65 @@ func getLSPReferencesViaAgentctl(ctx context.Context, skill, filePath string, li
 
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "impact_analysis: getLSPReferences marshal error: %v\n", err)
+		logger.Warn().Err(err).Msg("getLSPReferences marshal error")
 		return []string{}
 	}
 
-	// Build args with workspace if provided
-	args := []string{"run", skill, "--input", string(inputJSON)}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
+	extraArgs := workspaceArgs(workspace)
+	logger.Debug().Str("binary", executil.AgentctlBin()).Strs("args", extraArgs).Msg("running lsp references")
+	var data struct {
+		References []struct {
+			Location struct {
+				File string `json:"file"`
+				Line int    `json:"line"`
+			} `json:"location"`
+		} `json:"references"`
 	}
-	fmt.Fprintf(os.Stderr, "impact_analysis: running %s %v\n", agentctlBin, args)
-	cmd := exec.CommandContext(ctx, agentctlBin, args...)
-	out, err := cmd.Output()
+	result, err := executil.RunAgentctlSkillDecodeWithArgs(ctx, workspace, skill, inputJSON, extraArgs, &data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "impact_analysis: getLSPReferences error: %v\n", err)
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			fmt.Fprintf(os.Stderr, "impact_analysis: getLSPReferences stderr: %s\n", string(exitErr.Stderr))
+		logger.Warn().Err(err).Msg("getLSPReferences error")
+		if len(result.Stderr) > 0 {
+			logger.Debug().Str("stderr", string(result.Stderr)).Msg("getLSPReferences stderr")
 		}
 		return []string{}
 	}
-	fmt.Fprintf(os.Stderr, "impact_analysis: getLSPReferences output length=%d\n", len(out))
+	logger.Debug().Int("bytes", len(result.Stdout)).Msg("getLSPReferences output size")
 
-	var result struct {
-		Data struct {
-			References []struct {
-				Location struct {
-					File string `json:"file"`
-					Line int    `json:"line"`
-				} `json:"location"`
-			} `json:"references"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return []string{}
-	}
-
-	refs := make([]string, 0, len(result.Data.References))
-	for _, ref := range result.Data.References {
+	refs := make([]string, 0, len(data.References))
+	for _, ref := range data.References {
 		refs = append(refs, fmt.Sprintf("%s:%d", ref.Location.File, ref.Location.Line))
 	}
 	return refs
 }
 
-func getLSPImplementations(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
+func getLSPImplementations(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string, logger zerolog.Logger) []string {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// For Go files, use the gopls daemon directly (bypasses agentctl run overhead)
 	if skill == "lsp/gopls" {
-		return getGoplsImplementations(ctx, filePath, line, col, workspace)
+		return getGoplsImplementations(ctx, filePath, line, col, workspace, logger)
 	}
 
 	// For other languages, fall back to agentctl run
-	return getLSPImplementationsViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace)
+	return getLSPImplementationsViaAgentctl(ctx, skill, filePath, line, col, timeout, workspace, logger)
 }
 
 // getGoplsImplementations uses the gopls daemon directly for ~100x faster response times.
-func getGoplsImplementations(ctx context.Context, filePath string, line, col int, workspace string) []string {
+func getGoplsImplementations(ctx context.Context, filePath string, line, col int, workspace string, logger zerolog.Logger) []string {
 	daemon, err := gopls.GetDaemon(ctx, workspace)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "impact_analysis: gopls daemon error: %v\n", err)
+		logger.Debug().Err(err).Msg("gopls daemon error")
 		return []string{}
 	}
 
 	locs, err := daemon.Implementation(ctx, filePath, line, col)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "impact_analysis: gopls implementation error: %v\n", err)
+		logger.Debug().Err(err).Msg("gopls implementation error")
 		return []string{}
 	}
 
-	fmt.Fprintf(os.Stderr, "impact_analysis: gopls daemon returned %d impls\n", len(locs))
+	logger.Debug().Int("impl_count", len(locs)).Msg("gopls daemon returned impls")
 
 	var impls []string
 	for _, loc := range locs {
@@ -595,7 +571,7 @@ func getGoplsImplementations(ctx context.Context, filePath string, line, col int
 }
 
 // getLSPImplementationsViaAgentctl falls back to spawning agentctl run for non-Go languages.
-func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
+func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string, logger zerolog.Logger) []string {
 	// Pass timeout to skill (in seconds)
 	timeoutSec := int(timeout.Seconds())
 	if timeoutSec < 30 {
@@ -612,39 +588,42 @@ func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath strin
 
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
+		logger.Warn().Err(err).Msg("getLSPImplementations marshal error")
 		return []string{}
 	}
 
-	// Build args with workspace if provided
-	args := []string{"run", skill, "--input", string(inputJSON)}
-	if workspace != "" {
-		args = append(args, "--workspace", workspace)
+	extraArgs := workspaceArgs(workspace)
+	logger.Debug().Str("binary", executil.AgentctlBin()).Strs("args", extraArgs).Msg("running lsp implementations")
+	var data struct {
+		Implementations []struct {
+			Location struct {
+				File string `json:"file"`
+				Line int    `json:"line"`
+			} `json:"location"`
+		} `json:"implementations"`
 	}
-	cmd := exec.CommandContext(ctx, agentctlBin, args...)
-	out, err := cmd.Output()
+	result, err := executil.RunAgentctlSkillDecodeWithArgs(ctx, workspace, skill, inputJSON, extraArgs, &data)
 	if err != nil {
+		logger.Warn().Err(err).Msg("getLSPImplementations error")
+		if len(result.Stderr) > 0 {
+			logger.Debug().Str("stderr", string(result.Stderr)).Msg("getLSPImplementations stderr")
+		}
 		return []string{}
 	}
+	logger.Debug().Int("bytes", len(result.Stdout)).Msg("getLSPImplementations output size")
 
-	var result struct {
-		Data struct {
-			Implementations []struct {
-				Location struct {
-					File string `json:"file"`
-					Line int    `json:"line"`
-				} `json:"location"`
-			} `json:"implementations"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return []string{}
-	}
-
-	impls := make([]string, 0, len(result.Data.Implementations))
-	for _, impl := range result.Data.Implementations {
+	impls := make([]string, 0, len(data.Implementations))
+	for _, impl := range data.Implementations {
 		impls = append(impls, fmt.Sprintf("%s:%d", impl.Location.File, impl.Location.Line))
 	}
 	return impls
+}
+
+func workspaceArgs(workspace string) []string {
+	if workspace == "" {
+		return nil
+	}
+	return []string{"--workspace", workspace}
 }
 
 // Debounce support using temp file timestamps.
@@ -745,8 +724,5 @@ func emitApprove(rc *skillmain.RunContext, contextMsg string, impacts []Impact) 
 }
 
 func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
-	return skillout.Emit(rc, "hooks/impact_analysis", data)
+	return hookutil.EmitOutput(rc, "hooks/impact_analysis", output, nil)
 }

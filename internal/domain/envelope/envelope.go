@@ -140,6 +140,13 @@ func WithData(data any) Option {
 	}
 }
 
+// WithTimestamp sets the envelope timestamp explicitly (for testing/determinism).
+func WithTimestamp(t time.Time) Option {
+	return func(env *Envelope) {
+		env.Meta.TS = t.Format(time.RFC3339)
+	}
+}
+
 // OK returns a success envelope with the provided data payload.
 func OK(command string, data any, opts ...Option) Envelope {
 	env := Envelope{

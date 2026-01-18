@@ -284,7 +284,7 @@ func TestNormalizeSkillName(t *testing.T) {
 }
 
 func TestDefaultSearchPaths(t *testing.T) {
-	paths := defaultSearchPaths()
+	paths := DefaultSearchPaths()
 
 	// Should return at least some paths
 	assert.NotEmpty(t, paths)

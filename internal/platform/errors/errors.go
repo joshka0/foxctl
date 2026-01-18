@@ -51,20 +51,6 @@ func CloseOnErr(c Closer, errPtr *error) {
 	}
 }
 
-// Must panics if err is non-nil. This is intended for initialization-time
-// operations where failure is unrecoverable and should prevent the program
-// from starting.
-//
-// Example:
-//
-//	config := errors.Must(loadConfig())
-func Must[T any](value T, err error) T {
-	if err != nil {
-		panic(fmt.Sprintf("unrecoverable error: %v", err))
-	}
-	return value
-}
-
 // Ignore explicitly acknowledges that an error is being ignored and documents
 // the reason. This function does nothing but serves as documentation.
 //

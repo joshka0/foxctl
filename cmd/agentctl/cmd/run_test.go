@@ -14,8 +14,10 @@ import (
 
 var skillBinaryCache sync.Map
 
-var stableGoModCache string
-var stableGoBuildCache string
+var (
+	stableGoModCache   string
+	stableGoBuildCache string
+)
 
 func init() {
 	stableGoModCache = strings.TrimSpace(goEnv("GOMODCACHE"))

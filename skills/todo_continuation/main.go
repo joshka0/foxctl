@@ -11,9 +11,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/stringutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -62,7 +66,7 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Default workspace
-	in.WorkspaceID = sessionkit.WorkspaceOrDefault(in.WorkspaceID, rc.Workspace)
+	in.WorkspaceID = workspaceutil.Resolve(in.WorkspaceID, "", rc.Workspace)
 
 	// Resolve session ID
 	in.SessionID = sessionkit.ResolveSessionID(in.WorkspaceID, in.SessionID)
@@ -98,7 +102,6 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 }
 
 func runContinuation(ctx context.Context, cachePath string, store tasks.Store, in input, includeExecutionOrder bool) (output, error) {
-
 	allTasks, err := store.ListByWorkspace(ctx, in.WorkspaceID)
 	if err != nil {
 		return output{}, err
@@ -112,12 +115,12 @@ func runContinuation(ctx context.Context, cachePath string, store tasks.Store, i
 	unscopedIncompleteCount := 0
 	for _, t := range allTasks {
 		idToTitle[t.ID] = t.Title
-		if t.Status == "completed" {
+		if t.Status == tasks.StatusCompleted {
 			completed[t.ID] = true
 			continue
 		}
 
-		isOpen := t.Status == "pending" || t.Status == "in_progress" || t.Status == "blocked"
+		isOpen := t.Status == tasks.StatusPending || t.Status == tasks.StatusInProgress || t.Status == tasks.StatusBlocked
 		if !isOpen {
 			continue
 		}
@@ -141,11 +144,11 @@ func runContinuation(ctx context.Context, cachePath string, store tasks.Store, i
 	blockedStatus := make([]tasks.Task, 0, len(incomplete))
 	for _, t := range incomplete {
 		switch t.Status {
-		case "pending":
+		case tasks.StatusPending:
 			pending = append(pending, t)
-		case "in_progress":
+		case tasks.StatusInProgress:
 			inProgress = append(inProgress, t)
-		case "blocked":
+		case tasks.StatusBlocked:
 			blockedStatus = append(blockedStatus, t)
 		}
 	}
@@ -274,7 +277,7 @@ func runContinuation(ctx context.Context, cachePath string, store tasks.Store, i
 		InProgressCount:         len(inProgress),
 		CycleCount:              len(insights.Cycles),
 		Cycles:                  ensure2D(insights.Cycles),
-		TopologicalOrder:        ensureSlice(insights.TopologicalOrder),
+		TopologicalOrder:        sliceutil.Clone(insights.TopologicalOrder),
 		Summary:                 fmt.Sprintf("incomplete=%d ready=%d blocked=%d in_progress=%d unscoped=%d", len(incomplete), len(ready), len(blockedTasks), len(inProgress), unscopedIncompleteCount),
 	}
 	return out, nil
@@ -351,11 +354,11 @@ func buildPrompt(in promptInput) string {
 			m := in.MetricsByID[b.Task.ID]
 			g := groups[key]
 			if g == nil {
-				groups[key] = &blockedGroup{Task: b.Task, Count: 1, PageRank: m.PageRank, Blockers: normalizeStrings(b.Blockers)}
+				groups[key] = &blockedGroup{Task: b.Task, Count: 1, PageRank: m.PageRank, Blockers: stringutil.NormalizeStrings(b.Blockers)}
 				continue
 			}
 			g.Count++
-			g.Blockers = append(g.Blockers, normalizeStrings(b.Blockers)...)
+			g.Blockers = append(g.Blockers, stringutil.NormalizeStrings(b.Blockers)...)
 			if m.PageRank > g.PageRank {
 				g.Task = b.Task
 				g.PageRank = m.PageRank
@@ -421,7 +424,7 @@ func buildPrompt(in promptInput) string {
 	}
 
 	if len(readyGroups) > 0 {
-		limit := minInt(in.TopN, len(readyGroups))
+		limit := mathutil.MinInt(in.TopN, len(readyGroups))
 		lines := make([]string, 0, limit)
 		for i := 0; i < limit; i++ {
 			g := readyGroups[i]
@@ -507,46 +510,15 @@ func buildPrompt(in promptInput) string {
 	return prompt
 }
 
-func normalizeStrings(in []string) []string {
-	if in == nil {
-		return []string{}
-	}
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out
-}
-
-func ensureSlice(in []string) []string {
-	if in == nil {
-		return []string{}
-	}
-	out := make([]string, len(in))
-	copy(out, in)
-	return out
-}
-
 func ensure2D(in [][]string) [][]string {
 	if in == nil {
 		return [][]string{}
 	}
 	out := make([][]string, 0, len(in))
 	for _, row := range in {
-		out = append(out, ensureSlice(row))
+		out = append(out, sliceutil.Clone(row))
 	}
 	return out
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func loadOrComputeInsights(cacheDir string, workspaceID, sessionID string, taskList []tasks.Task) (tasksgraph.Insights, error) {

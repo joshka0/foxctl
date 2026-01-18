@@ -58,13 +58,31 @@ agentctl run codemap/generate --input '{"query": "trace the full auth flow", "de
 
 ## Embedding Storage
 
-Codemaps are automatically stored with voyage-3.5 embeddings for semantic search:
+Codemaps are stored with chunked embeddings (overview + per-trace) for semantic search:
 
 ```bash
 # Search codemaps by semantic similarity
 agentctl run code/semantic_search --input '{
   "query": "authentication",
   "scope": ["codemaps"]
+}'
+```
+
+## Import Codemaps
+
+Import existing `.codemap` files (including Windsurf-style codemaps) into the memory store:
+
+```bash
+# Import a single codemap file
+agentctl run codemap/import --input '{
+  "path": "docs/codemaps/Skill_Resolution__Input_Loading__and_Run_Execution_Flow_20260115_003130.codemap"
+}'
+
+# Import all codemaps in a directory
+agentctl run codemap/import --input '{
+  "path": "docs/codemaps",
+  "recursive": false,
+  "skip_existing": true
 }'
 ```
 

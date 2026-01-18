@@ -18,8 +18,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agentpolicy"
 	"github.com/jkatigb/agentctl/internal/hooks"
 )
@@ -151,8 +151,5 @@ func emitBlock(rc *skillmain.RunContext, result agentpolicy.AuthorizationResult,
 
 // emitOutput writes the hook output to the skill output.
 func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
-	return skillout.Emit(rc, command, data)
+	return hookutil.EmitOutput(rc, command, output, nil)
 }

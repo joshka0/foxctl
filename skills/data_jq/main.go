@@ -6,9 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -38,65 +38,54 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return fmt.Errorf("input is required")
 	}
 	// Check if jq is available
-	jqPath, err := exec.LookPath("jq")
+	jqPath, err := executil.RequireTool("jq", "install jq")
 	if err != nil {
 		return fmt.Errorf("jq command not found (install jq to use this skill): %w", err)
 	}
 
 	// Build jq command
 	args := buildJQArgs(in)
-	cmd := exec.CommandContext(ctx, jqPath, args...)
-
-	// Provide input via stdin
-	cmd.Stdin = strings.NewReader(in.Input)
-
-	// Capture output
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	// Execute jq
-	execErr := cmd.Run()
+	cmdResult := executil.RunWithInput(ctx, "", jqPath, []byte(in.Input), args...)
 
 	// Parse result
-	result := map[string]any{
+	payload := map[string]any{
 		"query":      in.Query,
 		"input_size": len(in.Input),
 	}
 
-	if execErr != nil {
-		result["success"] = false
-		result["error"] = execErr.Error()
-		if stderr.Len() > 0 {
-			result["stderr"] = strings.TrimSpace(stderr.String())
+	if cmdResult.Err != nil {
+		payload["success"] = false
+		payload["error"] = cmdResult.Err.Error()
+		if len(cmdResult.Stderr) > 0 {
+			payload["stderr"] = strings.TrimSpace(string(cmdResult.Stderr))
 		}
 	} else {
-		result["success"] = true
-		outputStr := stdout.String()
+		payload["success"] = true
+		outputStr := string(cmdResult.Stdout)
 
 		// Parse output based on raw_output flag
 		if in.RawOutput {
-			result["output"] = strings.TrimSpace(outputStr)
-			result["output_type"] = "string"
+			payload["output"] = strings.TrimSpace(outputStr)
+			payload["output_type"] = "string"
 		} else {
 			// Try to parse as JSON
 			var parsed any
 			if err := json.Unmarshal([]byte(outputStr), &parsed); err == nil {
-				result["output"] = parsed
-				result["output_type"] = "json"
+				payload["output"] = parsed
+				payload["output_type"] = "json"
 			} else {
 				// If parsing fails, return as string
-				result["output"] = strings.TrimSpace(outputStr)
-				result["output_type"] = "string"
+				payload["output"] = strings.TrimSpace(outputStr)
+				payload["output_type"] = "string"
 			}
 		}
 
-		result["output_size"] = len(outputStr)
+		payload["output_size"] = len(outputStr)
 
 		// Store as artifact if large (use InlineKB threshold, not MaxPreview)
 		inlineThreshold := rc.InlineKB * 1024
 		if len(outputStr) > inlineThreshold {
-			result["output_preview"] = outputStr[:rc.MaxPreview] + "\n... (truncated)"
+			payload["output_preview"] = skillout.TruncateStringWithSuffix(outputStr, rc.MaxPreview, "\n... (truncated)")
 
 			// Determine content type based on output format
 			contentType := "application/json"
@@ -107,12 +96,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			buf := bytes.NewBufferString(outputStr)
 			artifact, err := skillmain.PersistBuffer(ctx, rc, buf, contentType, "jq_output")
 			if err == nil && artifact.Digest != "" {
-				result["artifact"] = artifact.Digest
+				payload["artifact"] = artifact.Digest
 			}
 		}
 	}
 
-	return skillout.Emit(rc, command, result)
+	return skillout.Emit(rc, command, payload)
 }
 
 func buildJQArgs(in input) []string {
@@ -144,4 +133,3 @@ func buildJQArgs(in input) []string {
 
 	return args
 }
-

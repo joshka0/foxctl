@@ -156,61 +156,6 @@ func TestBuildCrossReferences(t *testing.T) {
 	}
 }
 
-func TestHelperFunctions(t *testing.T) {
-	t.Run("getString", func(t *testing.T) {
-		m := map[string]any{
-			"key":     "value",
-			"number":  42.0,
-			"missing": nil,
-		}
-
-		if got := getString(m, "key"); got != "value" {
-			t.Errorf("getString(m, 'key') = %q, want 'value'", got)
-		}
-		if got := getString(m, "number"); got != "" {
-			t.Errorf("getString(m, 'number') = %q, want ''", got)
-		}
-		if got := getString(m, "nonexistent"); got != "" {
-			t.Errorf("getString(m, 'nonexistent') = %q, want ''", got)
-		}
-	})
-
-	t.Run("getInt", func(t *testing.T) {
-		m := map[string]any{
-			"number": 42.0,
-			"string": "not a number",
-		}
-
-		if got := getInt(m, "number"); got != 42 {
-			t.Errorf("getInt(m, 'number') = %d, want 42", got)
-		}
-		if got := getInt(m, "string"); got != 0 {
-			t.Errorf("getInt(m, 'string') = %d, want 0", got)
-		}
-		if got := getInt(m, "nonexistent"); got != 0 {
-			t.Errorf("getInt(m, 'nonexistent') = %d, want 0", got)
-		}
-	})
-
-	t.Run("getBool", func(t *testing.T) {
-		m := map[string]any{
-			"true":   true,
-			"false":  false,
-			"string": "true",
-		}
-
-		if got := getBool(m, "true"); !got {
-			t.Errorf("getBool(m, 'true') = %v, want true", got)
-		}
-		if got := getBool(m, "false"); got {
-			t.Errorf("getBool(m, 'false') = %v, want false", got)
-		}
-		if got := getBool(m, "string"); got {
-			t.Errorf("getBool(m, 'string') = %v, want false", got)
-		}
-	})
-}
-
 func TestNewGatherer(t *testing.T) {
 	t.Run("default options", func(t *testing.T) {
 		g := NewGatherer()

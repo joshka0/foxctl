@@ -29,6 +29,7 @@ type input struct {
 	IncludeRawTraces bool   `json:"include_raw_traces,omitempty"`
 	Pin              bool   `json:"pin,omitempty"`
 	DryRun           bool   `json:"dry_run,omitempty"`
+	CLICommand       string `json:"cli_command,omitempty"`
 }
 
 type trajectoryEpisode struct {
@@ -396,4 +397,3 @@ func writeEpisodesToCAS(ctx context.Context, exp exporter, filter trajectory.Lis
 	}
 	return res.count, obj.Digest, nil
 }
-

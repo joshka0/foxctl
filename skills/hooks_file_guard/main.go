@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
@@ -59,27 +59,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 		mode = ModeStrict
 	}
 
-	// Get workspace ID
-	workspaceID := in.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = in.WorkspaceRoot
-	}
-	if workspaceID == "" {
-		// Fallback to current directory; error is not actionable.
-		workspaceID, _ = os.Getwd() //nolint:errcheck
-	}
-
-	// Get actor ID from environment
-	actorID := in.ActorID
-	if actorID == "" {
-		actorID = os.Getenv("AGENTCTL_AGENT_ID")
-	}
-	if actorID == "" {
-		actorID = os.Getenv("AGENTCTL_AGENT_NAME")
-	}
-	if actorID == "" {
-		actorID = fmt.Sprintf("actor:agent:%s", in.SessionID)
-	}
+	workspaceRoot := hookutil.ResolveWorkspaceRoot(in, "")
+	workspaceID := hookutil.ResolveWorkspaceID(in, workspaceRoot)
+	actorID := hookutil.ResolveActorID(in)
 
 	// Extract file path from tool input using cross-platform path extraction
 	// Checks file_path, path, file, current_path fields
@@ -92,7 +74,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 
 	// Make path relative to workspace using pathutil
-	relPath := pathutil.RelativePath(filePath, in.WorkspaceRoot)
+	relPath := pathutil.RelativePath(filePath, workspaceRoot)
 
 	// Open board store
 	boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)
@@ -148,8 +130,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 		})
 	}
 
+	var taskStore tasks.Store
+	if store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config); err == nil {
+		taskStore = store
+		defer cleanup()
+	}
+
 	// Get active task context for the reservation reason
-	taskID, reason := getTaskContext(ctx, paths.StorageRoot, workspaceID, in.ToolName, relPath)
+	taskID, reason := getTaskContext(ctx, taskStore, workspaceID, in.ToolName, relPath)
 
 	// No conflicts - create a reservation for this actor
 	reservation := agent.FileReservation{
@@ -191,13 +179,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 }
 
 // getTaskContext retrieves active task info to provide context for the reservation.
-func getTaskContext(ctx context.Context, storagePath, workspaceID, toolName, filePath string) (taskID, reason string) {
-	taskStore, err := tasks.Open(ctx, storagePath)
-	if err != nil {
+func getTaskContext(ctx context.Context, taskStore tasks.Store, workspaceID, toolName, filePath string) (taskID, reason string) {
+	if taskStore == nil {
 		// Fallback to tool-based reason
 		return "", fmt.Sprintf("%s on %s", toolName, filepath.Base(filePath))
 	}
-	defer taskStore.Close()
 
 	task, found, err := taskStore.GetActive(ctx, workspaceID)
 	if err != nil || !found {
@@ -243,8 +229,5 @@ func formatConflicts(conflicts []agent.ReservationConflict) string {
 }
 
 func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
-	return skillout.Emit(rc, "hooks/file_guard", data)
+	return hookutil.EmitOutput(rc, "hooks/file_guard", output, nil)
 }

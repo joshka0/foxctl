@@ -1,0 +1,67 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: hooks/stop_guard
+  version: 0.1.0
+  description: "Stop hook that blocks completion until tests pass and review approval is present"
+  tags: ["hook", "stop", "guard", "review", "tests"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/hooks_stop_guard/hooks_stop_guard
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: hooks/stop_guard
+  parameters:
+    - name: event
+      type: string
+      required: true
+      description: "Hook event type (StopRequested)"
+    - name: workspace_root
+      type: string
+      required: false
+      description: "Absolute path to workspace root"
+    - name: workspace_id
+      type: string
+      required: false
+      description: "Stable workspace ID (optional)"
+    - name: session_id
+      type: string
+      required: false
+      description: "Session identifier"
+    - name: actor_id
+      type: string
+      required: false
+      description: "Actor identifier"
+    - name: prompt
+      type: string
+      required: false
+      description: "Prompt text for the stop request"
+    - name: assistant_text
+      type: string
+      required: false
+      description: "Assistant text returned by the engine"
+  help:
+    short: "Block StopRequested until tests pass and review approval is present."
+    long: |
+      The stop guard enforces completion criteria for agent runs.
+      It blocks stop if any test watchers are failing or if no review
+      approval message is present in the mailbox.
+    workflows:
+      - id: stop-guard
+        description: "Enforce stop gating on StopRequested."
+        example_input:
+          event: "StopRequested"
+          workspace_root: "/workspace/project"
+          actor_id: "actor:agent:coder-1"
+  returns:
+    - name: hook_output
+      type: object
+      description: "Hook output with decision, reason, and optional context"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

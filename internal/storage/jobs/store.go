@@ -41,7 +41,13 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 	}
 	defer errs.CloseOnErr(p, &err)
 	exec := executor.New(root, p, executor.WithLogger(logger))
-	return New(root, p, exec), nil
+	jobStore := New(root, p, exec)
+	if recovered, recErr := jobStore.RecoverStaleJobs(ctx, types.DefaultMaxJobAge); recErr != nil {
+		logger.Warn().Err(recErr).Msg("jobs: stale recovery failed")
+	} else if recovered > 0 {
+		logger.Warn().Int64("recovered", recovered).Msg("jobs: recovered stale running jobs")
+	}
+	return jobStore, nil
 }
 
 // New constructs a Store instance from the provided dependencies.
@@ -74,6 +80,7 @@ func (s *Store) SubmitEcho(ctx context.Context, message string) (Job, error) {
 		State:     StateQueued,
 		CreatedAt: now,
 		UpdatedAt: now,
+		ExpiresAt: now.Add(types.DefaultMaxJobAge),
 	}
 
 	if err := s.persist.InsertJob(ctx, job); err != nil {
@@ -200,6 +207,20 @@ func (s *Store) FindOrPrepareSkillJob(ctx context.Context, name string, input []
 
 // RecoverOrphanedJobs marks any running jobs as error (crash recovery).
 func (s *Store) RecoverOrphanedJobs(ctx context.Context) (int64, error) {
+	return s.persist.RecoverOrphanedJobs(ctx)
+}
+
+func (s *Store) RecoverStaleJobs(ctx context.Context, maxAge time.Duration) (int64, error) {
+	if maxAge <= 0 {
+		return 0, nil
+	}
+	before := time.Now().UTC().Add(-maxAge)
+	type staleRecoverer interface {
+		RecoverOrphanedJobsBefore(ctx context.Context, before time.Time) (int64, error)
+	}
+	if recoverer, ok := s.persist.(staleRecoverer); ok {
+		return recoverer.RecoverOrphanedJobsBefore(ctx, before)
+	}
 	return s.persist.RecoverOrphanedJobs(ctx)
 }
 

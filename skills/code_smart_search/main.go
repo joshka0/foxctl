@@ -6,16 +6,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -111,7 +111,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	candidateStart := time.Now()
 	candidates, err := generateCandidates(ctx, rc, in)
 	if err != nil {
-		return fmt.Errorf("generate candidates: %w", err)
+		return skillerr.WrapRuntime("generate candidates", err)
 	}
 	candidateDuration := time.Since(candidateStart)
 
@@ -141,7 +141,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	snippetStart := time.Now()
 	extractResult, err := invokeSnippetExtract(ctx, rc, in, candidates)
 	if err != nil {
-		return fmt.Errorf("invoke snippet_extract: %w", err)
+		return skillerr.WrapRuntime("invoke snippet_extract", err)
 	}
 	snippetDuration := time.Since(snippetStart)
 
@@ -177,9 +177,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 // generateCandidates uses the retrieval package to generate candidates.
 func generateCandidates(ctx context.Context, rc *skillmain.RunContext, in Input) ([]retrieval.Candidate, error) {
 	// Open memory store (uses Storage.Root for persistent data)
-	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	store, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer func() { errs.Ignore(store.Close(), "close memory store") }()
 
@@ -210,7 +210,7 @@ func generateCandidates(ctx context.Context, rc *skillmain.RunContext, in Input)
 	// Generate candidates
 	result, err := generator.Generate(ctx, in.WorkspaceID, in.Question, opts)
 	if err != nil {
-		return nil, err
+		return nil, skillerr.WrapRuntime("generate candidates", err)
 	}
 	return result.Candidates, nil
 }
@@ -249,11 +249,8 @@ func invokeSnippetExtract(ctx context.Context, rc *skillmain.RunContext, in Inpu
 
 	inputJSON, err := json.Marshal(extractInput)
 	if err != nil {
-		return nil, fmt.Errorf("marshal snippet_extract input: %w", err)
+		return nil, skillerr.WrapRuntime("marshal snippet_extract input", err)
 	}
-
-	// Find agentctl binary
-	agentctlBin := findAgentctlBin()
 
 	// Get workspace root for subprocess working directory
 	// This ensures snippet_extract resolves relative paths correctly
@@ -262,70 +259,28 @@ func invokeSnippetExtract(ctx context.Context, rc *skillmain.RunContext, in Inpu
 	// Execute snippet_extract skill with JSON input via stdin to avoid command-line length limits
 	// (some systems limit argv to ~128KB, but JSON input can be much larger with many candidates)
 	// NOTE: --input-file - is required to read JSON from stdin; without it, agentctl run ignores stdin
-	cmd := exec.CommandContext(ctx, agentctlBin, "run", "code/snippet_extract", "--input-file", "-")
-	cmd.Dir = workspace // Run from workspace root so relative paths resolve correctly
-	cmd.Stdin = bytes.NewReader(inputJSON)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("snippet_extract execution failed: %w\nstderr: %s", err, stderr.String())
+	var data struct {
+		Summary struct {
+			FilesRelevant   int `json:"files_relevant"`
+			SnippetsEmitted int `json:"snippets_emitted"`
+		} `json:"summary"`
+		SnippetsInline []json.RawMessage `json:"snippets_inline"`
+		Artifact       string            `json:"artifact"`
 	}
 
-	// Parse envelope
-	var env struct {
-		Status string `json:"status"`
-		Data   struct {
-			Summary struct {
-				FilesRelevant   int `json:"files_relevant"`
-				SnippetsEmitted int `json:"snippets_emitted"`
-			} `json:"summary"`
-			SnippetsInline []json.RawMessage `json:"snippets_inline"`
-			Artifact       string            `json:"artifact"`
-		} `json:"data"`
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-
-	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
-		return nil, fmt.Errorf("parse snippet_extract output: %w", err)
-	}
-
-	if env.Status == "error" {
-		return nil, fmt.Errorf("snippet_extract error: %s: %s", env.Error.Code, env.Error.Message)
+	result, err := executil.RunAgentctlSkillDecode(ctx, workspace, "code/snippet_extract", inputJSON, &data)
+	if err != nil {
+		var decodeErr executil.DecodeError
+		if errors.As(err, &decodeErr) {
+			return nil, skillerr.WrapParse("parse snippet_extract output", decodeErr)
+		}
+		return nil, skillerr.Runtimef("snippet_extract execution failed: %v\nstderr: %s", err, string(result.Stderr))
 	}
 
 	return &ExtractResult{
-		FilesRelevant:   env.Data.Summary.FilesRelevant,
-		SnippetsEmitted: env.Data.Summary.SnippetsEmitted,
-		SnippetsInline:  env.Data.SnippetsInline,
-		Artifact:        env.Data.Artifact,
+		FilesRelevant:   data.Summary.FilesRelevant,
+		SnippetsEmitted: data.Summary.SnippetsEmitted,
+		SnippetsInline:  data.SnippetsInline,
+		Artifact:        data.Artifact,
 	}, nil
-}
-
-// findAgentctlBin returns the path to the agentctl binary.
-func findAgentctlBin() string {
-	// Check environment variable
-	if bin := os.Getenv("AGENTCTL_BIN"); bin != "" {
-		return bin
-	}
-
-	// Check common locations
-	locations := []string{
-		"./bin/agentctl",
-		"bin/agentctl",
-		"agentctl",
-	}
-
-	for _, loc := range locations {
-		if _, err := exec.LookPath(loc); err == nil {
-			return loc
-		}
-	}
-
-	return "agentctl"
 }

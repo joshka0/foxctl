@@ -33,71 +33,92 @@ import (
 // to ensure consistent message handling semantics.
 const messageLeaseDuration = 30 * time.Second
 
+type daemonStores struct {
+	agentStore   storagents.Store
+	mailboxStore mailbox.Store
+	tasksStore   tasks.Store
+	boardStore   blackboard.BoardStore
+	bbStore      blackboard.Store
+}
+
+func openDaemonStores(ctx context.Context, root string) (*daemonStores, error) {
+	stores := &daemonStores{}
+
+	agentStore, err := storagents.Open(ctx, root)
+	if err != nil {
+		return nil, fmt.Errorf("open agent store: %w", err)
+	}
+	stores.agentStore = agentStore
+
+	mailboxStore, err := mailbox.Open(ctx, root)
+	if err != nil {
+		stores.Close()
+		return nil, fmt.Errorf("open mailbox store: %w", err)
+	}
+	stores.mailboxStore = mailboxStore
+
+	tasksStore, err := tasks.Open(ctx, root)
+	if err != nil {
+		stores.Close()
+		return nil, fmt.Errorf("open tasks store: %w", err)
+	}
+	stores.tasksStore = tasksStore
+
+	boardStore, err := blackboard.OpenBoardStore(ctx, root)
+	if err != nil {
+		stores.Close()
+		return nil, fmt.Errorf("open board store: %w", err)
+	}
+	stores.boardStore = boardStore
+
+	bbStore, err := blackboard.Open(ctx, root)
+	if err != nil {
+		stores.Close()
+		return nil, fmt.Errorf("open blackboard store: %w", err)
+	}
+	stores.bbStore = bbStore
+
+	return stores, nil
+}
+
+func (s *daemonStores) Close() {
+	if s == nil {
+		return
+	}
+	if s.bbStore != nil {
+		_ = s.bbStore.Close()
+	}
+	if s.boardStore != nil {
+		_ = s.boardStore.Close()
+	}
+	if s.tasksStore != nil {
+		_ = s.tasksStore.Close()
+	}
+	if s.mailboxStore != nil {
+		_ = s.mailboxStore.Close()
+	}
+	if s.agentStore != nil {
+		_ = s.agentStore.Close()
+	}
+}
+
 // Run starts the agent daemon.
 func Run(ctx context.Context, opts Options) error {
 	// 1. Open stores
-	agentStore, err := storagents.Open(ctx, opts.StorageRoot)
+	stores, err := openDaemonStores(ctx, opts.StorageRoot)
 	if err != nil {
-		return fmt.Errorf("open agent store: %w", err)
+		return err
 	}
-	defer agentStore.Close()
-
-	mailboxStore, err := mailbox.Open(ctx, opts.StorageRoot)
-	if err != nil {
-		return fmt.Errorf("open mailbox store: %w", err)
-	}
-	defer mailboxStore.Close()
-
-	tasksStore, err := tasks.Open(ctx, opts.StorageRoot)
-	if err != nil {
-		return fmt.Errorf("open tasks store: %w", err)
-	}
-	defer tasksStore.Close()
-
-	boardStore, err := blackboard.OpenBoardStore(ctx, opts.StorageRoot)
-	if err != nil {
-		return fmt.Errorf("open board store: %w", err)
-	}
-	defer boardStore.Close()
-
-	bbStore, err := blackboard.Open(ctx, opts.StorageRoot)
-	if err != nil {
-		return fmt.Errorf("open blackboard store: %w", err)
-	}
-	defer bbStore.Close()
+	defer stores.Close()
 
 	// Open optimization stores if enabled
-	var optCtx *OptimizationContext
-	if opts.EnableOptimization {
-		trajStore, err := trajectory.Open(ctx, opts.StorageRoot)
-		if err != nil {
-			log.Warn().Err(err).Msg("failed to open trajectory store for optimization, disabling")
-		} else {
-			defer trajStore.Close()
-
-			patternStore, err := optimization.OpenPatternStore(ctx, opts.StorageRoot)
-			if err != nil {
-				log.Warn().Err(err).Msg("failed to open pattern store for optimization, disabling")
-			} else {
-				defer patternStore.Close()
-
-				collector := optimization.NewMCPPatternCollector(patternStore, trajStore)
-				optCtx = &OptimizationContext{
-					Collector: collector,
-					Enabled:   true,
-				}
-				log.Info().Msg("optimization enabled: pattern learning active")
-			}
-		}
-	}
+	optCtx, optCleanup := initOptimization(ctx, opts)
+	defer optCleanup()
 
 	// 2. Load and validate agent
-	agentRecord, err := agentStore.Get(ctx, opts.AgentID)
+	agentRecord, err := loadAgentRecord(ctx, stores.agentStore, opts.AgentID)
 	if err != nil {
-		return fmt.Errorf("get agent %s: %w", opts.AgentID, err)
-	}
-	if agentRecord.State == agent.StateStopped {
-		return errors.New("agent is stopped")
+		return err
 	}
 
 	// Populate optimization context with agent info
@@ -107,7 +128,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	// 3. Transition to running
-	if err := agentStore.UpdateState(ctx, opts.AgentID, agent.StateRunning); err != nil {
+	if err := stores.agentStore.UpdateState(ctx, opts.AgentID, agent.StateRunning); err != nil {
 		return fmt.Errorf("update agent state: %w", err)
 	}
 
@@ -115,45 +136,8 @@ func Run(ctx context.Context, opts Options) error {
 	traceID := ulid.Make().String()
 	recorder := &noopRecorder{}
 
-	toolsCfg := tools.Config{
-		WorkspaceRoot: ".", // Default to current directory
-		WorkspaceID:   agentRecord.Namespace,
-		ActorID:       "actor:agent:" + opts.AgentID,
-		TraceID:       traceID,
-		Allowlist:     agentRecord.SkillsAllow,
-		MaxOutputSize: agentRecord.Policy.MaxOutputKB * 1024,
-		OpenTasksStore: func(ctx context.Context) (tasks.Store, error) {
-			return tasksStore, nil
-		},
-		OpenBoardStore: func(ctx context.Context) (blackboard.BoardStore, error) {
-			return boardStore, nil
-		},
-		OpenBlackboardStore: func(ctx context.Context) (blackboard.Store, error) {
-			return bbStore, nil
-		},
-		OpenCASStore: func(ctx context.Context) (storage.CASStore, error) {
-			return cas.OpenDefault(ctx, opts.StorageRoot)
-		},
-	}
-
-	// Map filesystem policy
-	toolsCfg.FilesystemPolicy = "workspace"
-	for _, fs := range agentRecord.Policy.Filesystem {
-		switch fs.Type {
-		case "home":
-			if toolsCfg.FilesystemPolicy == "tmp" {
-				toolsCfg.FilesystemPolicy = "all"
-			} else if toolsCfg.FilesystemPolicy != "all" {
-				toolsCfg.FilesystemPolicy = "home"
-			}
-		case "tmp":
-			if toolsCfg.FilesystemPolicy == "home" {
-				toolsCfg.FilesystemPolicy = "all"
-			} else if toolsCfg.FilesystemPolicy != "all" {
-				toolsCfg.FilesystemPolicy = "tmp"
-			}
-		}
-	}
+	toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores)
+	toolsCfg.FilesystemPolicy = mapFilesystemPolicy(agentRecord.Policy)
 
 	registry, err := tools.NewRegistry(toolsCfg, recorder)
 	if err != nil {
@@ -165,55 +149,25 @@ func Run(ctx context.Context, opts Options) error {
 	if opts.AgentFactory != nil {
 		dspyAgent, err = opts.AgentFactory(ctx, agentRecord, registry)
 	} else {
-		dspyAgent, err = createAgent(ctx, agentRecord, registry)
+		dspyAgent, err = createAgent(ctx, agentRecord, registry, opts)
 	}
 	if err != nil {
 		return fmt.Errorf("create dspy agent: %w", err)
 	}
 
 	// 5. Start heartbeat ticker
-	heartbeatTicker := time.NewTicker(opts.HeartbeatInterval)
-	defer heartbeatTicker.Stop()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-heartbeatTicker.C:
-				if err := agentStore.UpdateHeartbeat(ctx, opts.AgentID); err != nil {
-					log.Error().Err(err).Msg("heartbeat update failed")
-				}
-			}
-		}
-	}()
+	stopHeartbeat := startHeartbeat(ctx, stores.agentStore, opts.AgentID, opts.HeartbeatInterval)
+	defer stopHeartbeat()
 
 	// Dedupe store
-	var dedupeStore DedupeStore
-	if opts.UseMemoryDedupe {
-		dedupeStore = NewMemoryDedupeStore()
-	} else {
-		sqliteStore, err := OpenSQLiteDedupeStore(ctx, opts.StorageRoot)
-		if err != nil {
-			return fmt.Errorf("open dedupe store: %w", err)
-		}
-		defer sqliteStore.Close()
-		dedupeStore = sqliteStore
-
-		// Cleanup records older than 7 days on startup
-		if cleaned, err := sqliteStore.Cleanup(ctx, 7*24*time.Hour); err != nil {
-			log.Warn().Err(err).Msg("dedupe cleanup failed")
-		} else if cleaned > 0 {
-			log.Info().Int64("cleaned", cleaned).Msg("dedupe cleanup completed")
-		}
+	dedupeStore, dedupeCleanup, err := initDedupeStore(ctx, opts)
+	if err != nil {
+		return err
 	}
+	defer dedupeCleanup()
 
 	// 6. Initialize cancel context for console message handling
 	cancelCtx := NewCancelContext()
-
-	// 7. Enter poll loop
-	pollTicker := time.NewTicker(opts.PollInterval)
-	defer pollTicker.Stop()
 
 	// Logging setup
 	logger := zerolog.New(os.Stderr).With().
@@ -221,99 +175,266 @@ func Run(ctx context.Context, opts Options) error {
 		Str("trace_id", traceID).
 		Logger()
 
-	logger.Info().Msg("daemon started")
+	// 7. Enter poll loop
+	return runPollLoop(ctx, pollDeps{
+		opts:         opts,
+		logger:       logger,
+		agentRecord:  agentRecord,
+		agentStore:   stores.agentStore,
+		mailboxStore: stores.mailboxStore,
+		dedupeStore:  dedupeStore,
+		dspyAgent:    dspyAgent,
+		cancelCtx:    cancelCtx,
+		optCtx:       optCtx,
+	})
+}
+
+type pollDeps struct {
+	opts         Options
+	logger       zerolog.Logger
+	agentRecord  agent.Agent
+	agentStore   storagents.Store
+	mailboxStore mailbox.Store
+	dedupeStore  DedupeStore
+	dspyAgent    agents.Agent
+	cancelCtx    *CancelContext
+	optCtx       *OptimizationContext
+}
+
+func initOptimization(ctx context.Context, opts Options) (*OptimizationContext, func()) {
+	if !opts.EnableOptimization {
+		return nil, func() {}
+	}
+
+	trajStore, err := trajectory.Open(ctx, opts.StorageRoot)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to open trajectory store for optimization, disabling")
+		return nil, func() {}
+	}
+
+	patternStore, err := optimization.OpenPatternStore(ctx, opts.StorageRoot)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to open pattern store for optimization, disabling")
+		_ = trajStore.Close()
+		return nil, func() {}
+	}
+
+	collector := optimization.NewMCPPatternCollector(patternStore, trajStore)
+	optCtx := &OptimizationContext{
+		Collector: collector,
+		Enabled:   true,
+	}
+	log.Info().Msg("optimization enabled: pattern learning active")
+
+	cleanup := func() {
+		_ = patternStore.Close()
+		_ = trajStore.Close()
+	}
+	return optCtx, cleanup
+}
+
+func loadAgentRecord(ctx context.Context, store storagents.Store, agentID string) (agent.Agent, error) {
+	agentRecord, err := store.Get(ctx, agentID)
+	if err != nil {
+		return agent.Agent{}, fmt.Errorf("get agent %s: %w", agentID, err)
+	}
+	if agentRecord.State == agent.StateStopped {
+		return agent.Agent{}, errors.New("agent is stopped")
+	}
+	return agentRecord, nil
+}
+
+func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, stores *daemonStores) tools.Config {
+	return tools.Config{
+		WorkspaceRoot: ".", // Default to current directory
+		WorkspaceID:   agentRecord.Namespace,
+		ActorID:       "actor:agent:" + opts.AgentID,
+		TraceID:       traceID,
+		Allowlist:     agentRecord.SkillsAllow,
+		MaxOutputSize: agentRecord.Policy.MaxOutputKB * 1024,
+		OpenTasksStore: func(ctx context.Context) (tasks.Store, error) {
+			return stores.tasksStore, nil
+		},
+		OpenBoardStore: func(ctx context.Context) (blackboard.BoardStore, error) {
+			return stores.boardStore, nil
+		},
+		OpenBlackboardStore: func(ctx context.Context) (blackboard.Store, error) {
+			return stores.bbStore, nil
+		},
+		OpenCASStore: func(ctx context.Context) (storage.CASStore, error) {
+			return cas.OpenDefault(ctx, opts.StorageRoot)
+		},
+	}
+}
+
+func mapFilesystemPolicy(policy agent.Policy) string {
+	fsPolicy := "workspace"
+	for _, fs := range policy.Filesystem {
+		switch fs.Type {
+		case "home":
+			if fsPolicy == "tmp" {
+				fsPolicy = "all"
+			} else if fsPolicy != "all" {
+				fsPolicy = "home"
+			}
+		case "tmp":
+			if fsPolicy == "home" {
+				fsPolicy = "all"
+			} else if fsPolicy != "all" {
+				fsPolicy = "tmp"
+			}
+		}
+	}
+	return fsPolicy
+}
+
+func startHeartbeat(ctx context.Context, store storagents.Store, agentID string, interval time.Duration) func() {
+	heartbeatTicker := time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-heartbeatTicker.C:
+				if err := store.UpdateHeartbeat(ctx, agentID); err != nil {
+					log.Error().Err(err).Msg("heartbeat update failed")
+				}
+			}
+		}
+	}()
+	return heartbeatTicker.Stop
+}
+
+func initDedupeStore(ctx context.Context, opts Options) (DedupeStore, func(), error) {
+	if opts.UseMemoryDedupe {
+		return NewMemoryDedupeStore(), func() {}, nil
+	}
+
+	sqliteStore, err := OpenSQLiteDedupeStore(ctx, opts.StorageRoot)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open dedupe store: %w", err)
+	}
+
+	cleanup := func() {
+		_ = sqliteStore.Close()
+	}
+
+	if cleaned, err := sqliteStore.Cleanup(ctx, 7*24*time.Hour); err != nil {
+		log.Warn().Err(err).Msg("dedupe cleanup failed")
+	} else if cleaned > 0 {
+		log.Info().Int64("cleaned", cleaned).Msg("dedupe cleanup completed")
+	}
+
+	return sqliteStore, cleanup, nil
+}
+
+func runPollLoop(ctx context.Context, deps pollDeps) error {
+	pollTicker := time.NewTicker(deps.opts.PollInterval)
+	defer pollTicker.Stop()
+
+	deps.logger.Info().Msg("daemon started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Update state on exit
-			// Use background context for cleanup
-			_ = agentStore.UpdateState(context.Background(), opts.AgentID, agent.StateStopped) //nolint:errcheck
+			_ = deps.agentStore.UpdateState(context.Background(), deps.opts.AgentID, agent.StateStopped) //nolint:errcheck
 			return ctx.Err()
 
 		case <-pollTicker.C:
-			// Check if stopped
-			currentAgent, err := agentStore.Get(ctx, opts.AgentID)
+			currentAgent, err := deps.agentStore.Get(ctx, deps.opts.AgentID)
 			if err != nil {
-				logger.Error().Err(err).Msg("failed to get agent state")
+				deps.logger.Error().Err(err).Msg("failed to get agent state")
 				continue
 			}
 			if currentAgent.State == agent.StateStopped {
-				logger.Info().Msg("agent state is stopped, exiting daemon")
+				deps.logger.Info().Msg("agent state is stopped, exiting daemon")
 				return nil
 			}
 
-			messages, err := mailboxStore.Poll(ctx, agentRecord.Namespace, messageLeaseDuration, opts.MaxPollMessages)
+			messages, err := deps.mailboxStore.Poll(ctx, deps.agentRecord.Namespace, messageLeaseDuration, deps.opts.MaxPollMessages)
 			if err != nil {
-				logger.Error().Err(err).Msg("poll failed")
+				deps.logger.Error().Err(err).Msg("poll failed")
 				continue
 			}
 
 			for _, msg := range messages {
-				// Dedupe - on error, Nack so message can be retried rather than dropped
-				processed, err := dedupeStore.IsProcessed(ctx, opts.AgentID, msg.ID)
+				processed, err := deps.dedupeStore.IsProcessed(ctx, deps.opts.AgentID, msg.ID)
 				if err != nil {
-					logger.Warn().Err(err).Str("msg_id", msg.ID).Msg("dedupe check failed, nacking for retry")
-					if nackErr := mailboxStore.Nack(ctx, msg.ID, messageLeaseDuration); nackErr != nil {
-						logger.Error().Err(nackErr).Str("msg_id", msg.ID).Msg("failed to nack message")
+					deps.logger.Warn().Err(err).Str("msg_id", msg.ID).Msg("dedupe check failed, nacking for retry")
+					if nackErr := deps.mailboxStore.Nack(ctx, msg.ID, messageLeaseDuration); nackErr != nil {
+						deps.logger.Error().Err(nackErr).Str("msg_id", msg.ID).Msg("failed to nack message")
 					}
 					continue
 				}
 				if processed {
-					logger.Debug().Str("msg_id", msg.ID).Msg("duplicate message, acking")
-					_ = mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
+					deps.logger.Debug().Str("msg_id", msg.ID).Msg("duplicate message, acking")
+					_ = deps.mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
 					continue
 				}
 
-				// TTL check
-				if msg.TTLMS > 0 {
-					expiresAtMS := msg.Timestamp*1000 + msg.TTLMS
-					if time.Now().UnixMilli() > expiresAtMS {
-						logger.Warn().Str("msg_id", msg.ID).Msg("message expired, acking without processing")
-						_ = mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
-						continue
-					}
+				if isMessageExpired(msg) {
+					deps.logger.Warn().Str("msg_id", msg.ID).Msg("message expired, acking without processing")
+					_ = deps.mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
+					continue
 				}
 
-				// Process
-				var procErr error
-				switch msg.Type {
-				case agent.MessageTypeAsk:
-					procErr = handleAsk(ctx, logger, msg, dspyAgent, mailboxStore, currentAgent.Policy, optCtx)
-				case agent.MessageTypeCmd:
-					procErr = handleCmd(ctx, logger, msg, dspyAgent, currentAgent.Policy, optCtx)
-				case agent.MessageTypeEvent:
-					procErr = handleEvent(ctx, logger, msg)
-				case agent.MessageTypeReply:
-					logger.Info().Str("msg_id", msg.ID).Msg("received reply")
-				case agent.MessageTypeConsoleAsk:
-					procErr = handleConsoleAsk(ctx, logger, msg, dspyAgent, mailboxStore, currentAgent.Policy, optCtx, cancelCtx)
-				case agent.MessageTypeConsoleCmd:
-					procErr = handleConsoleCmd(ctx, logger, msg, cancelCtx)
-				case agent.MessageTypeConsoleReply, agent.MessageTypeConsoleEvent:
-					// These are outbound messages, should not be received
-					logger.Debug().Str("msg_id", msg.ID).Str("type", string(msg.Type)).Msg("received console response message")
-				default:
-					logger.Warn().Str("type", string(msg.Type)).Msg("unknown message type")
-				}
-
+				procErr := processMessage(ctx, deps.logger, msg, deps.dspyAgent, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx)
 				if procErr != nil {
-					logger.Error().Err(procErr).Str("msg_id", msg.ID).Msg("processing failed")
-					_ = mailboxStore.Nack(ctx, msg.ID, backoffDuration(msg.Attempt)) //nolint:errcheck
+					deps.logger.Error().Err(procErr).Str("msg_id", msg.ID).Msg("processing failed")
+					_ = deps.mailboxStore.Nack(ctx, msg.ID, backoffDuration(msg.Attempt)) //nolint:errcheck
 				} else {
-					_ = dedupeStore.MarkProcessed(ctx, opts.AgentID, msg.ID) //nolint:errcheck
-					_ = mailboxStore.Ack(ctx, msg.ID)                        //nolint:errcheck
+					_ = deps.dedupeStore.MarkProcessed(ctx, deps.opts.AgentID, msg.ID) //nolint:errcheck
+					_ = deps.mailboxStore.Ack(ctx, msg.ID)                             //nolint:errcheck
 				}
 			}
 		}
 	}
 }
 
+func processMessage(
+	ctx context.Context,
+	logger zerolog.Logger,
+	msg agent.Message,
+	dspyAgent agents.Agent,
+	mailboxStore mailbox.Store,
+	policy agent.Policy,
+	optCtx *OptimizationContext,
+	cancelCtx *CancelContext,
+) error {
+	switch msg.Type {
+	case agent.MessageTypeAsk:
+		return handleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx)
+	case agent.MessageTypeCmd:
+		return handleCmd(ctx, logger, msg, dspyAgent, policy, optCtx)
+	case agent.MessageTypeEvent:
+		return handleEvent(ctx, logger, msg)
+	case agent.MessageTypeReply:
+		logger.Info().Str("msg_id", msg.ID).Msg("received reply")
+	case agent.MessageTypeConsoleAsk:
+		return handleConsoleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx, cancelCtx)
+	case agent.MessageTypeConsoleCmd:
+		return handleConsoleCmd(ctx, logger, msg, cancelCtx)
+	case agent.MessageTypeConsoleReply, agent.MessageTypeConsoleEvent:
+		logger.Debug().Str("msg_id", msg.ID).Str("type", string(msg.Type)).Msg("received console response message")
+	default:
+		logger.Warn().Str("type", string(msg.Type)).Msg("unknown message type")
+	}
+	return nil
+}
+
+func isMessageExpired(msg agent.Message) bool {
+	if msg.TTLMS <= 0 {
+		return false
+	}
+	expiresAtMS := msg.Timestamp*1000 + msg.TTLMS
+	return time.Now().UnixMilli() > expiresAtMS
+}
+
 type noopRecorder struct{}
 
 func (r *noopRecorder) RecordToolCall(call types.ToolCall) {}
 
-func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.Registry) (agents.Agent, error) {
+func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.Registry, daemonOpts Options) (agents.Agent, error) {
 	// Create options
 	opts := []react.Option{
 		react.WithMaxIterations(10),
@@ -326,10 +447,10 @@ func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.R
 	// Initialize LLM
 	llms.EnsureFactory()
 
-	// Resolve LLM configuration: per-agent settings override environment defaults
+	// Resolve LLM configuration: per-agent settings override daemon config defaults
 	provider := agentRecord.LLMProvider
 	if provider == "" {
-		provider = os.Getenv("AGENTCTL_LLM_PROVIDER")
+		provider = daemonOpts.LLMProvider
 	}
 	if provider == "" {
 		provider = "gemini"
@@ -337,7 +458,7 @@ func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.R
 
 	model := agentRecord.LLMModel
 	if model == "" {
-		model = os.Getenv("AGENTCTL_LLM_MODEL")
+		model = daemonOpts.LLMModel
 	}
 	if model == "" {
 		switch provider {
@@ -356,7 +477,7 @@ func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.R
 
 	apiKey := agentRecord.LLMAPIKey
 	if apiKey == "" {
-		apiKey = os.Getenv("AGENTCTL_LLM_API_KEY")
+		apiKey = daemonOpts.LLMAPIKey
 	}
 
 	if apiKey == "" {

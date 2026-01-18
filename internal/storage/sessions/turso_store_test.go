@@ -84,7 +84,7 @@ func TestTursoStoreIntegration(t *testing.T) {
 			testEmbedding[i] = 0.01
 		}
 
-		results, err := store.SearchSimilar(ctx, testEmbedding, 5)
+		results, err := store.SearchSimilar(ctx, "", testEmbedding, 5)
 		if err != nil {
 			t.Fatalf("SearchSimilar failed: %v", err)
 		}
@@ -96,6 +96,9 @@ func TestTursoStoreIntegration(t *testing.T) {
 }
 
 func TestTursoConnectionFailure(t *testing.T) {
+	if os.Getenv("TURSO_DATABASE_URL") == "" || os.Getenv("TURSO_AUTH_TOKEN") == "" {
+		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set, skipping Turso connection failure test")
+	}
 	ctx := context.Background()
 
 	// Invalid URL should fail to connect

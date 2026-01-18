@@ -30,6 +30,12 @@ agentctl run codemap/generate --input '{"query": "how does auth work", "depth": 
 agentctl run code/semantic_search --input '{"query": "authentication", "scope": ["codemaps"]}'
 ```
 
+## Import Codemaps
+
+```bash
+agentctl run codemap/import --input '{"path": "docs/codemaps", "recursive": false}'
+```
+
 ## Output
 
 - Traces with numbered sections

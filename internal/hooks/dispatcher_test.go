@@ -172,7 +172,6 @@ func TestDispatcher_FailOpen(t *testing.T) {
 
 	input := Input{Event: EventPreToolUse, ToolName: "fs.read_file"}
 	result, err := d.Dispatch(context.Background(), input)
-
 	// Should NOT return error because fail_open=true
 	if err != nil {
 		t.Fatalf("expected no error with fail_open, got: %v", err)
@@ -399,7 +398,6 @@ func TestDispatcher_Timeout(t *testing.T) {
 
 	input := Input{Event: EventPreToolUse, ToolName: "fs.read_file"}
 	result, err := d.Dispatch(context.Background(), input)
-
 	// Should not error because fail_open=true
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

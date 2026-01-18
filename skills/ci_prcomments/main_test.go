@@ -104,7 +104,7 @@ func TestBuildTasksList_ClassifiesCodeRabbitComments(t *testing.T) {
 		{
 			User: User{Login: "coderabbitai[bot]"},
 			Body: "coderabbitai[bot] commented:\n\n_⚠️ Potential issue_ | _🔴 Critical_\n\n**Fix undocumented \"error\" conclusion and add missing \"action_required\"/\"stale\" handling**\nMore details here...\n",
-			Path: "skills/ci_github_checks/main.go",
+			Path: "skills/ci_checks/main.go",
 			Line: &line,
 		},
 	}
@@ -126,7 +126,7 @@ func TestBuildTasksList_ClassifiesCodeRabbitComments(t *testing.T) {
 	if !strings.Contains(task.Summary, "Fix undocumented \"error\" conclusion") {
 		t.Fatalf("expected summary to reflect core fix, got %q", task.Summary)
 	}
-	if task.File != "skills/ci_github_checks/main.go" {
+	if task.File != "skills/ci_checks/main.go" {
 		t.Fatalf("expected file path to be propagated, got %s", task.File)
 	}
 	if task.Line == nil || *task.Line != line {

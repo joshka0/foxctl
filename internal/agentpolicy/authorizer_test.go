@@ -6,11 +6,11 @@ import (
 
 func TestParseCommand(t *testing.T) {
 	tests := []struct {
-		name          string
-		command       string
-		wantAgentctl  bool
-		wantSkill     string
-		wantEnvVars   map[string]string
+		name         string
+		command      string
+		wantAgentctl bool
+		wantSkill    string
+		wantEnvVars  map[string]string
 	}{
 		{
 			name:         "simple agentctl run",

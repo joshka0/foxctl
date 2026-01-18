@@ -204,10 +204,10 @@ func RequireIntForOp(op string, value int, fieldName string, requiredOps ...stri
 //	    Default("list").
 //	    Run()
 type Switch struct {
-	op          string
-	cases       map[string]Handler
-	defaultOp   string
-	aliases     map[string]string
+	op        string
+	cases     map[string]Handler
+	defaultOp string
+	aliases   map[string]string
 }
 
 // NewSwitch creates a new switch for the given operation.

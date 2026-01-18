@@ -4,8 +4,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -13,6 +16,18 @@ import (
 )
 
 const command = "graph"
+
+var allowedOps = []string{
+	"add_node",
+	"add_edge",
+	"query",
+	"neighbors",
+	"top_nodes",
+	"delete_node",
+	"delete_edge",
+	"stats",
+	"cleanup",
+}
 
 type input struct {
 	Operation  string          `json:"operation"`
@@ -84,6 +99,15 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
+
 	// Use workspace from input or from runner context
 	workspace := in.Workspace
 	if workspace == "" {
@@ -97,7 +121,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	defer func() { errs.Ignore(store.Close(), "close graph store") }()
 
-	switch in.Operation {
+	switch op {
 	case "add_node":
 		return handleAddNode(ctx, rc, store, workspace, in.AddNode)
 	case "add_edge":
@@ -117,13 +141,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "cleanup":
 		return handleCleanup(ctx, rc, store, workspace, in.Cleanup)
 	default:
-		return fmt.Errorf("unknown operation: %s", in.Operation)
+		return skillerr.Arg("invalid operation", skillerr.WithHint(opHint))
 	}
 }
 
 func handleAddNode(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *addNodeRequest) error {
 	if req == nil {
-		return fmt.Errorf("add_node request required")
+		return skillerr.Arg("add_node request required", skillerr.WithHint("Provide add_node payload."))
 	}
 
 	node := graph.Node{
@@ -151,7 +175,7 @@ func handleAddNode(ctx context.Context, rc *skillmain.RunContext, store *graph.S
 
 func handleAddEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *addEdgeRequest) error {
 	if req == nil {
-		return fmt.Errorf("add_edge request required")
+		return skillerr.Arg("add_edge request required", skillerr.WithHint("Provide add_edge payload."))
 	}
 
 	weight := req.Weight
@@ -188,7 +212,7 @@ func handleAddEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.S
 
 func handleQuery(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *queryRequest) error {
 	if req == nil {
-		return fmt.Errorf("query request required")
+		return skillerr.Arg("query request required", skillerr.WithHint("Provide query payload."))
 	}
 
 	var edgeTypes []graph.EdgeType
@@ -261,7 +285,7 @@ func handleQuery(ctx context.Context, rc *skillmain.RunContext, store *graph.SQL
 
 func handleNeighbors(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *neighborsReq) error {
 	if req == nil {
-		return fmt.Errorf("neighbors request required")
+		return skillerr.Arg("neighbors request required", skillerr.WithHint("Provide neighbors payload."))
 	}
 
 	var edgeTypes []graph.EdgeType
@@ -380,7 +404,7 @@ func handleTopNodes(ctx context.Context, rc *skillmain.RunContext, store *graph.
 
 func handleDeleteNode(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *deleteNodeReq) error {
 	if req == nil {
-		return fmt.Errorf("delete_node request required")
+		return skillerr.Arg("delete_node request required", skillerr.WithHint("Provide delete_node payload."))
 	}
 
 	if err := store.DeleteNode(ctx, workspace, req.NodeID); err != nil {
@@ -397,7 +421,7 @@ func handleDeleteNode(ctx context.Context, rc *skillmain.RunContext, store *grap
 
 func handleDeleteEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, req *deleteEdgeReq) error {
 	if req == nil {
-		return fmt.Errorf("delete_edge request required")
+		return skillerr.Arg("delete_edge request required", skillerr.WithHint("Provide delete_edge payload."))
 	}
 
 	if err := store.DeleteEdge(ctx, req.EdgeID); err != nil {

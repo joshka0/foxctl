@@ -144,3 +144,78 @@ func TestHasMarkerAgentctlMustBeDirectory(t *testing.T) {
 		t.Error("hasMarker should return true for .agentctl directory")
 	}
 }
+
+func TestNormalizeGitURL(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		// SSH format
+		{"git@github.com:owner/repo.git", "github.com/owner/repo"},
+		{"git@github.com:owner/repo", "github.com/owner/repo"},
+		{"git@gitlab.com:group/subgroup/repo.git", "gitlab.com/group/subgroup/repo"},
+		// HTTPS format
+		{"https://github.com/owner/repo.git", "github.com/owner/repo"},
+		{"https://github.com/owner/repo", "github.com/owner/repo"},
+		{"http://github.com/owner/repo.git", "github.com/owner/repo"},
+		// Edge cases
+		{"file:///local/repo", "file:///local/repo"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := normalizeGitURL(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeGitURL(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestNormalizeGitURLConsistency(t *testing.T) {
+	// SSH and HTTPS URLs for the same repo should normalize to the same value
+	sshURL := "git@github.com:owner/repo.git"
+	httpsURL := "https://github.com/owner/repo.git"
+	httpsNoSuffix := "https://github.com/owner/repo"
+
+	sshNorm := normalizeGitURL(sshURL)
+	httpsNorm := normalizeGitURL(httpsURL)
+	httpsNoSuffixNorm := normalizeGitURL(httpsNoSuffix)
+
+	if sshNorm != httpsNorm {
+		t.Errorf("SSH and HTTPS URLs should normalize to same value: %q vs %q", sshNorm, httpsNorm)
+	}
+	if httpsNorm != httpsNoSuffixNorm {
+		t.Errorf("HTTPS with/without .git should normalize to same value: %q vs %q", httpsNorm, httpsNoSuffixNorm)
+	}
+}
+
+func TestRepoIdentityEmptyWorkspace(t *testing.T) {
+	// Empty workspace should return empty identity
+	if got := RepoIdentity(""); got != "" {
+		t.Errorf("RepoIdentity(\"\") = %q, want empty string", got)
+	}
+}
+
+func TestRepoIdentityNonGitDir(t *testing.T) {
+	// Non-git directory should return empty identity
+	root := t.TempDir()
+	if got := RepoIdentity(root); got != "" {
+		t.Errorf("RepoIdentity(non-git-dir) = %q, want empty string", got)
+	}
+}
+
+func TestDetectWithIdentityStructure(t *testing.T) {
+	// Test that DetectWithIdentity returns proper structure
+	root := t.TempDir()
+	gitDir := filepath.Join(root, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("failed to create .git directory: %v", err)
+	}
+
+	info := DetectWithIdentity(root)
+	if info.Path != root {
+		t.Errorf("DetectWithIdentity().Path = %q, want %q", info.Path, root)
+	}
+	// RepoIdentity will be empty since there's no git remote configured
+	// but the structure should be valid
+	_ = info.RepoIdentity
+}

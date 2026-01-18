@@ -19,7 +19,7 @@ cat <<'EOF'
 {"decision":"approve","reason":"test approved","context":"additional context"}
 EOF
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -56,7 +56,7 @@ cat <<'EOF'
 {"hookSpecificOutput":{"additionalContext":"legacy context data"}}
 EOF
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestShellRunner_EmptyOutput(t *testing.T) {
 	script := `#!/bin/sh
 # No output
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -117,7 +117,7 @@ func TestShellRunner_PlainTextOutput(t *testing.T) {
 	script := `#!/bin/sh
 echo "This is plain text context"
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -150,7 +150,7 @@ cat <<'EOF'
 {"decision":"block","reason":"operation not allowed"}
 EOF
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestShellRunner_ScriptFailure(t *testing.T) {
 	script := `#!/bin/sh
 exit 1
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestShellRunner_Timeout(t *testing.T) {
 sleep 10
 echo '{"decision":"approve"}'
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -237,7 +237,7 @@ cat <<EOF
 {"decision":"approve","context":"received tool: $TOOL_NAME"}
 EOF
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -267,7 +267,7 @@ cat <<EOF
 {"decision":"approve","context":"event=$AGENTCTL_HOOK_EVENT tool=$AGENTCTL_TOOL_NAME"}
 EOF
 `
-	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 

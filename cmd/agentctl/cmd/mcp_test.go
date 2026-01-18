@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/jkatigb/agentctl/internal/domain/skill"
 )
 
 func TestGetArgs(t *testing.T) {
@@ -113,5 +117,35 @@ func TestInitBackendConfigs(t *testing.T) {
 	// context7 should always be configured (no API key needed)
 	if _, ok := backends.configs["context7"]; !ok {
 		t.Error("context7 config not set")
+	}
+}
+
+func TestRegisterSkillAsTool_ArrayItemsSchema(t *testing.T) {
+	manifestPath := filepath.Join(repoRoot(t), "skills", "code_context_ripgrep", "skill.yaml")
+	manifest, err := skill.LoadManifest(manifestPath)
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+
+	srv := server.NewMCPServer("agentctl", "test")
+	registerSkillAsTool(srv, manifest, "unused")
+
+	tools := srv.ListTools()
+	tool, ok := tools["code_context_ripgrep"]
+	if !ok || tool == nil {
+		t.Fatalf("expected code_context_ripgrep tool")
+	}
+
+	for _, name := range []string{"glob", "glob_not"} {
+		prop, ok := tool.Tool.InputSchema.Properties[name].(map[string]any)
+		if !ok {
+			t.Fatalf("expected schema map for %s", name)
+		}
+		if prop["type"] != "array" {
+			t.Fatalf("expected %s type array, got %v", name, prop["type"])
+		}
+		if items, ok := prop["items"]; !ok || items == nil {
+			t.Fatalf("expected %s items schema", name)
+		}
 	}
 }

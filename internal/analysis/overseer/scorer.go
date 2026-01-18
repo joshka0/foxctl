@@ -51,6 +51,7 @@ type Recommendation struct {
 type Scorer struct {
 	taskStore  tasks.Store
 	boardStore blackboard.BoardStore
+	clock      func() time.Time
 }
 
 // NewScorer creates a new overseer scorer.
@@ -58,6 +59,17 @@ func NewScorer(taskStore tasks.Store, boardStore blackboard.BoardStore) *Scorer 
 	return &Scorer{
 		taskStore:  taskStore,
 		boardStore: boardStore,
+		clock:      func() time.Time { return time.Now().UTC() },
+	}
+}
+
+// ScorerOption configures a Scorer.
+type ScorerOption func(*Scorer)
+
+// WithClock sets the clock function for the scorer (for testing/determinism).
+func WithClock(clock func() time.Time) ScorerOption {
+	return func(s *Scorer) {
+		s.clock = clock
 	}
 }
 
@@ -79,7 +91,7 @@ func (s *Scorer) Recommend(ctx context.Context, workspaceID string, limit int) (
 
 	if len(pending) == 0 {
 		return &Recommendation{
-			GeneratedAt:  time.Now().UTC(),
+			GeneratedAt:  s.clock(),
 			WorkspaceID:  workspaceID,
 			TotalPending: 0,
 			Tasks:        []TaskScore{},
@@ -127,7 +139,7 @@ func (s *Scorer) Recommend(ctx context.Context, workspaceID string, limit int) (
 
 	// Compute scores for each task
 	scores := make([]TaskScore, 0, len(pending))
-	now := time.Now().UTC()
+	now := s.clock()
 
 	for _, t := range pending {
 		node, hasNode := nodeByID[t.ID]

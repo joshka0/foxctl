@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +33,7 @@ func newGraphStatsCommand() *cobra.Command {
 		Short: "Show graph statistics",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return err
 			}
@@ -106,7 +105,7 @@ func newGraphTopCommand() *cobra.Command {
 		Short: "Show top nodes by PageRank",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return err
 			}
@@ -191,7 +190,7 @@ func newGraphRepairCommand() *cobra.Command {
 		Short: "Repair graph by cleaning expired/dangling edges and recalculating degrees",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return err
 			}
@@ -298,7 +297,7 @@ func newGraphEdgesCommand() *cobra.Command {
 			}
 
 			ctx := cmd.Context()
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return err
 			}

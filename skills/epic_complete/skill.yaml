@@ -1,0 +1,45 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: epic/complete
+  version: 0.1.0
+  description: "Complete an epic with learnings extraction, gotcha capture, and closure flow"
+  tags: ["epic", "completion", "memory", "learning", "gotcha", "decision"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/epic_complete/epic_complete
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: epic/complete
+  parameters:
+    - name: epic_id
+      type: string
+      required: false
+      description: "Specific epic to complete (default: active epic)"
+    - name: force
+      type: boolean
+      required: false
+      description: "Complete even with pending tasks"
+    - name: skip_learnings
+      type: boolean
+      required: false
+      description: "Skip learnings extraction"
+    - name: dry_run
+      type: boolean
+      required: false
+      description: "Skip writes and LLM calls"
+  help:
+    short: "Complete an epic and surface related learnings."
+    long: |
+      Example commands:
+        agentctl run epic/complete --input '{"epic_id":"01HEPIC..."}'
+        agentctl run epic/complete --input '{"epic_id":"01HEPIC...","force":true}'
+        agentctl run epic/complete --input '{"epic_id":"01HEPIC...","dry_run":true}'
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

@@ -13,6 +13,7 @@ type SyncResult struct {
 	Created   int      `json:"created"`
 	Updated   int      `json:"updated"`
 	Completed int      `json:"completed"`
+	Removed   int      `json:"removed"` // Tasks canceled because they were removed from provider
 	Mapped    int      `json:"mapped"`
 	Unmapped  int      `json:"unmapped"`
 	DepsAdded int      `json:"deps_added"`
@@ -58,6 +59,13 @@ type Service struct {
 	taskStore tasks.Store
 }
 
+type inboundSyncState struct {
+	existingTasks []tasks.Task
+	taskByID      map[string]tasks.Task
+	taskByTitle   map[string]tasks.Task
+	createdTasks  map[string]tasks.Task
+}
+
 // NewService creates a new sync service
 func NewService(taskStore tasks.Store) *Service {
 	return &Service{taskStore: taskStore}
@@ -69,6 +77,28 @@ func (s *Service) SyncFromProvider(ctx context.Context, in InboundSyncInput) (*I
 	result := &InboundSyncResult{}
 
 	// Get existing tasks for mapping
+	state, err := s.newInboundSyncState(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	// Process each todo
+	for i, todo := range in.Todos {
+		task, ok := s.syncInboundTodo(ctx, in, state, result, todo, i)
+		if !ok {
+			continue
+		}
+		result.Tasks = append(result.Tasks, task)
+	}
+
+	// Removal detection: find tasks that were in agentctl but not in incoming list
+	// Skip if incoming list is empty (conservative approach - empty doesn't mean "clear all")
+	s.cancelRemovedInboundTasks(ctx, in, state.existingTasks, result)
+
+	return result, nil
+}
+
+func (s *Service) newInboundSyncState(ctx context.Context, in InboundSyncInput) (*inboundSyncState, error) {
 	existingTasks, err := s.taskStore.ListWithOptions(ctx, in.WorkspaceID, tasks.ListOptions{
 		SessionID: in.SessionID,
 	})
@@ -76,121 +106,216 @@ func (s *Service) SyncFromProvider(ctx context.Context, in InboundSyncInput) (*I
 		return nil, err
 	}
 
-	// Build maps for existing tasks
-	taskByID := make(map[string]tasks.Task)
-	taskByTitle := make(map[string]tasks.Task)
+	taskByID := make(map[string]tasks.Task, len(existingTasks))
+	taskByTitle := make(map[string]tasks.Task, len(existingTasks))
 	for _, t := range existingTasks {
 		taskByID[t.ID] = t
 		taskByTitle[normalizeTitle(t.Title)] = t
 	}
 
-	// Track created tasks for dependency resolution
-	createdTasks := make(map[string]tasks.Task)
+	return &inboundSyncState{
+		existingTasks: existingTasks,
+		taskByID:      taskByID,
+		taskByTitle:   taskByTitle,
+		createdTasks:  make(map[string]tasks.Task),
+	}, nil
+}
 
-	// Process each todo
-	for i, todo := range in.Todos {
-		taskID := ParseTaskID(todo.Content)
-		title := StripTaskID(todo.Content)
-		title = ParseProjectedContent(title) // Remove glyphs too
-		agentctlStatus := MapClaudeStatus(todo.Status)
+func (s *Service) syncInboundTodo(
+	ctx context.Context,
+	in InboundSyncInput,
+	state *inboundSyncState,
+	result *InboundSyncResult,
+	todo ClaudeTodo,
+	index int,
+) (tasks.Task, bool) {
+	taskID, title, agentctlStatus := parseInboundTodo(todo)
+	task, isNew := resolveInboundTask(taskID, title, state, result)
+	if isNew {
+		dependsOn, depsAdded := inferInboundDependencies(in.Todos, index, state.createdTasks)
+		result.DepsAdded += depsAdded
 
-		var task tasks.Task
-		var isNew bool
-
-		if taskID != "" {
-			// Has tag - use ID as primary key
-			if existing, ok := taskByID[taskID]; ok {
-				task = existing
-				result.Mapped++
-			} else {
-				// Tag references non-existent task - create with that ID
-				isNew = true
-				result.Warnings = append(result.Warnings, "Tag references unknown task ID: "+taskID)
+		task = buildInboundTask(in, title, agentctlStatus, dependsOn)
+		if !in.DryRun {
+			created, err := s.taskStore.Add(ctx, task)
+			if err != nil {
+				result.Warnings = append(result.Warnings, "Failed to create task: "+err.Error())
+				return tasks.Task{}, false
 			}
-		} else {
-			// No tag - try to match by title
-			if existing, ok := taskByTitle[normalizeTitle(title)]; ok {
-				task = existing
-				result.Mapped++
-			} else {
-				// No match - create new
-				isNew = true
-				result.Unmapped++
-			}
+			task = created
+			state.taskByID[task.ID] = task
+			state.taskByTitle[normalizeTitle(task.Title)] = task
 		}
-
-		if isNew {
-			// Infer dependencies from earlier pending todos in the list
-			var dependsOn []string
-			for j := 0; j < i; j++ {
-				prevID := ParseTaskID(in.Todos[j].Content)
-				if prevID == "" {
-					// Check if we just created it
-					prevTitle := ParseProjectedContent(StripTaskID(in.Todos[j].Content))
-					if created, ok := createdTasks[normalizeTitle(prevTitle)]; ok {
-						prevID = created.ID
-					}
-				}
-				if prevID != "" && in.Todos[j].Status != "completed" {
-					dependsOn = append(dependsOn, prevID)
-					result.DepsAdded++
-				}
-			}
-
-			task = tasks.Task{
-				WorkspaceID: in.WorkspaceID,
-				Title:       title,
-				Description: "Synced from Claude Code TodoWrite",
-				Status:      agentctlStatus,
-				DependsOn:   dependsOn,
-				SessionID:   in.SessionID,
-				CreatedAt:   time.Now(),
-			}
-
-			if !in.DryRun {
-				created, err := s.taskStore.Add(ctx, task)
-				if err != nil {
-					result.Warnings = append(result.Warnings, "Failed to create task: "+err.Error())
-					continue
-				}
-				task = created
-				taskByID[task.ID] = task
-				taskByTitle[normalizeTitle(task.Title)] = task
-			}
-			createdTasks[normalizeTitle(title)] = task
-			result.Created++
-		} else {
-			// Update existing task status if changed
-			if task.Status != agentctlStatus {
-				if agentctlStatus == StatusCompleted {
-					if !in.DryRun {
-						now := time.Now()
-						task.CompletedAt = &now
-						task.Status = agentctlStatus
-						_, err := s.taskStore.Update(ctx, task)
-						if err != nil {
-							result.Warnings = append(result.Warnings, "Failed to complete task: "+err.Error())
-							continue
-						}
-					}
-					result.Completed++
-				} else if agentctlStatus == StatusInProgress {
-					if !in.DryRun {
-						_, err := s.taskStore.SetActive(ctx, in.WorkspaceID, task.ID)
-						if err != nil {
-							result.Warnings = append(result.Warnings, "Failed to set active: "+err.Error())
-							continue
-						}
-					}
-					result.Updated++
-				}
-			}
-		}
-
-		result.Tasks = append(result.Tasks, task)
+		state.createdTasks[normalizeTitle(title)] = task
+		result.Created++
+		return task, true
 	}
 
-	return result, nil
+	if task.Status != agentctlStatus {
+		if !s.applyInboundStatusUpdate(ctx, in, result, &task, agentctlStatus) {
+			return tasks.Task{}, false
+		}
+	}
+
+	return task, true
+}
+
+func parseInboundTodo(todo ClaudeTodo) (string, string, string) {
+	taskID := ParseTaskID(todo.Content)
+	title := StripTaskID(todo.Content)
+	title = ParseProjectedContent(title) // Remove glyphs too
+	agentctlStatus := MapClaudeStatus(todo.Status)
+	return taskID, title, agentctlStatus
+}
+
+func resolveInboundTask(
+	taskID string,
+	title string,
+	state *inboundSyncState,
+	result *InboundSyncResult,
+) (tasks.Task, bool) {
+	if taskID != "" {
+		// Has tag - use ID as primary key
+		if existing, ok := state.taskByID[taskID]; ok {
+			result.Mapped++
+			return existing, false
+		}
+		// Tag references non-existent task - create with that ID
+		result.Warnings = append(result.Warnings, "Tag references unknown task ID: "+taskID)
+		return tasks.Task{}, true
+	}
+
+	// No tag - try to match by title
+	if existing, ok := state.taskByTitle[normalizeTitle(title)]; ok {
+		result.Mapped++
+		return existing, false
+	}
+
+	// No match - create new
+	result.Unmapped++
+	return tasks.Task{}, true
+}
+
+func inferInboundDependencies(
+	todos []ClaudeTodo,
+	index int,
+	createdTasks map[string]tasks.Task,
+) ([]string, int) {
+	var dependsOn []string
+	depsAdded := 0
+	for j := 0; j < index; j++ {
+		prevID := ParseTaskID(todos[j].Content)
+		if prevID == "" {
+			// Check if we just created it
+			prevTitle := ParseProjectedContent(StripTaskID(todos[j].Content))
+			if created, ok := createdTasks[normalizeTitle(prevTitle)]; ok {
+				prevID = created.ID
+			}
+		}
+		if prevID != "" && todos[j].Status != "completed" {
+			dependsOn = append(dependsOn, prevID)
+			depsAdded++
+		}
+	}
+	return dependsOn, depsAdded
+}
+
+func buildInboundTask(
+	in InboundSyncInput,
+	title string,
+	status string,
+	dependsOn []string,
+) tasks.Task {
+	return tasks.Task{
+		WorkspaceID: in.WorkspaceID,
+		Title:       title,
+		Description: "Synced from Claude Code TodoWrite",
+		Status:      status,
+		DependsOn:   dependsOn,
+		SessionID:   in.SessionID,
+		CreatedAt:   time.Now(),
+	}
+}
+
+func (s *Service) applyInboundStatusUpdate(
+	ctx context.Context,
+	in InboundSyncInput,
+	result *InboundSyncResult,
+	task *tasks.Task,
+	agentctlStatus string,
+) bool {
+	switch agentctlStatus {
+	case StatusCompleted:
+		if !in.DryRun {
+			now := time.Now()
+			task.CompletedAt = &now
+			task.Status = agentctlStatus
+			_, err := s.taskStore.Update(ctx, *task)
+			if err != nil {
+				result.Warnings = append(result.Warnings, "Failed to complete task: "+err.Error())
+				return false
+			}
+		}
+		result.Completed++
+	case StatusInProgress:
+		if !in.DryRun {
+			_, err := s.taskStore.SetActive(ctx, in.WorkspaceID, task.ID)
+			if err != nil {
+				result.Warnings = append(result.Warnings, "Failed to set active: "+err.Error())
+				return false
+			}
+		}
+		result.Updated++
+	}
+	return true
+}
+
+func (s *Service) cancelRemovedInboundTasks(
+	ctx context.Context,
+	in InboundSyncInput,
+	existingTasks []tasks.Task,
+	result *InboundSyncResult,
+) {
+	if len(in.Todos) == 0 {
+		return
+	}
+
+	seenTaskIDs := collectSeenTaskIDs(result.Tasks)
+	for _, existingTask := range existingTasks {
+		if seenTaskIDs[existingTask.ID] {
+			continue // Still in list
+		}
+		// Skip already completed/canceled tasks
+		if existingTask.Status == StatusCompleted || existingTask.Status == StatusCanceled {
+			continue
+		}
+		// Task was removed from Claude's list - cancel it
+		if !in.DryRun {
+			existingTask.Status = StatusCanceled
+			note := "Removed from Claude TodoWrite list"
+			if existingTask.Notes == "" {
+				existingTask.Notes = note
+			} else {
+				existingTask.Notes = existingTask.Notes + "\n" + note
+			}
+			_, err := s.taskStore.Update(ctx, existingTask)
+			if err != nil {
+				result.Warnings = append(result.Warnings, "Failed to cancel removed task: "+err.Error())
+				continue
+			}
+		}
+		result.Removed++
+	}
+}
+
+func collectSeenTaskIDs(tasks []tasks.Task) map[string]bool {
+	seenTaskIDs := make(map[string]bool, len(tasks))
+	for _, task := range tasks {
+		if task.ID != "" {
+			seenTaskIDs[task.ID] = true
+		}
+	}
+	return seenTaskIDs
 }
 
 // SyncToProvider exports agentctl tasks to Claude Code todo file.

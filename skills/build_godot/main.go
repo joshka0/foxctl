@@ -3,15 +3,15 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -61,7 +61,10 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate
 	if strings.TrimSpace(in.Action) == "" {
-		return fmt.Errorf("action is required")
+		return skillerr.Arg(
+			"action is required",
+			skillerr.WithHint("Provide action=list_presets, export, validate, build, restore, or clean."),
+		)
 	}
 	// Apply defaults
 	if in.GodotPath == "" {
@@ -84,7 +87,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	case ActionClean:
 		return cleanCSharp(ctx, rc, workspace, in)
 	default:
-		return fmt.Errorf("unknown action: %q (valid: list_presets, export, validate, build, restore, clean)", in.Action)
+		return skillerr.Arg(
+			fmt.Sprintf("unknown action: %q", in.Action),
+			skillerr.WithHint("Valid actions: list_presets, export, validate, build, restore, clean."),
+		)
 	}
 }
 
@@ -112,7 +118,10 @@ func listPresets(ctx context.Context, rc *skillmain.RunContext, workspace string
 func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input, dryRun bool) error {
 	// Validate preset is provided
 	if strings.TrimSpace(in.Preset) == "" {
-		return fmt.Errorf("preset is required for action %q", in.Action)
+		return skillerr.Arg(
+			fmt.Sprintf("preset is required for action %q", in.Action),
+			skillerr.WithHint("Run action=list_presets to see available presets."),
+		)
 	}
 
 	// Parse presets to validate the requested one exists
@@ -131,7 +140,10 @@ func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace stri
 	}
 
 	if matchedPreset == nil {
-		return fmt.Errorf("preset %q not found (available: %s)", in.Preset, strings.Join(presetNames, ", "))
+		return skillerr.NotFound(
+			fmt.Sprintf("preset %q not found", in.Preset),
+			skillerr.WithHint("Available presets: "+strings.Join(presetNames, ", ")),
+		)
 	}
 
 	// Determine output path
@@ -140,7 +152,9 @@ func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace stri
 		outputPath = matchedPreset.ExportPath
 	}
 	if outputPath == "" {
-		return fmt.Errorf("output_path is required (preset %q has no default export path)", in.Preset)
+		return skillerr.Arg(
+			fmt.Sprintf("output_path is required (preset %q has no default export path)", in.Preset),
+		)
 	}
 
 	// Make output path absolute if relative
@@ -151,7 +165,7 @@ func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace stri
 	// Ensure output directory exists
 	outputDir := filepath.Dir(outputPath)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return fmt.Errorf("create output directory: %w", err)
+		return skillerr.WrapIO("create output directory", err)
 	}
 
 	// Dry run - just return what would happen
@@ -184,26 +198,17 @@ func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace stri
 	args = append(args, exportFlag, in.Preset, outputPath)
 
 	// Execute godot
-	cmd := exec.CommandContext(ctx, in.GodotPath, args...)
-	cmd.Dir = workspace
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	startTime := time.Now()
-	err = cmd.Run()
-	duration := time.Since(startTime)
-
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			// Command failed to run (e.g., godot not found)
-			return fmt.Errorf("failed to run godot: %w (is godot installed and in PATH?)", err)
-		}
+	cmdResult := executil.Run(ctx, workspace, in.GodotPath, args...)
+	if cmdResult.Err != nil && cmdResult.ExitCode == -1 {
+		// Command failed to run (e.g., godot not found)
+		return skillerr.Runtime(
+			"failed to run godot",
+			skillerr.WithCause(cmdResult.Err),
+			skillerr.WithHint("Ensure godot is installed and available in PATH."),
+		)
 	}
+	exitCode := cmdResult.ExitCode
+	duration := cmdResult.Duration
 
 	// Check if output file was created
 	outputExists := false
@@ -221,8 +226,8 @@ func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace stri
 		"output_exists": outputExists,
 		"exit_code":     exitCode,
 		"duration_ms":   duration.Milliseconds(),
-		"stdout":        stdout.String(),
-		"stderr":        stderr.String(),
+		"stdout":        string(cmdResult.Stdout),
+		"stderr":        string(cmdResult.Stderr),
 	}
 
 	if outputExists {
@@ -242,10 +247,13 @@ func parseExportPresets(workspace string) ([]ExportPreset, error) {
 
 	file, err := os.Open(cfgPath)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("no export_presets.cfg found in %s (create export presets in Project > Export...)", workspace)
+		return nil, skillerr.NotFound(
+			fmt.Sprintf("no export_presets.cfg found in %s", workspace),
+			skillerr.WithHint("Create export presets in Project > Export..."),
+		)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("open export_presets.cfg: %w", err)
+		return nil, skillerr.WrapIO("open export_presets.cfg", err)
 	}
 	defer func() {
 		errs.Ignore(file.Close(), "close export_presets.cfg")
@@ -305,7 +313,7 @@ func parseExportPresets(workspace string) ([]ExportPreset, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read export_presets.cfg: %w", err)
+		return nil, skillerr.WrapIO("read export_presets.cfg", err)
 	}
 
 	return presets, nil
@@ -358,33 +366,24 @@ func runDotnet(ctx context.Context, rc *skillmain.RunContext, workspace string, 
 	}
 
 	// Execute dotnet
-	cmd := exec.CommandContext(ctx, dotnetPath, args...)
-	cmd.Dir = workspace
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	startTime := time.Now()
-	err = cmd.Run()
-	duration := time.Since(startTime)
-
-	exitCode := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			return fmt.Errorf("failed to run dotnet: %w (is dotnet SDK installed?)", err)
-		}
+	cmdResult := executil.Run(ctx, workspace, dotnetPath, args...)
+	if cmdResult.Err != nil && cmdResult.ExitCode == -1 {
+		return skillerr.Runtime(
+			"failed to run dotnet",
+			skillerr.WithCause(cmdResult.Err),
+			skillerr.WithHint("Ensure the .NET SDK is installed and available in PATH."),
+		)
 	}
+	exitCode := cmdResult.ExitCode
+	duration := cmdResult.Duration
 
 	result := map[string]any{
 		"action":      command,
 		"csproj":      csprojPath,
 		"exit_code":   exitCode,
 		"duration_ms": duration.Milliseconds(),
-		"stdout":      stdout.String(),
-		"stderr":      stderr.String(),
+		"stdout":      string(cmdResult.Stdout),
+		"stderr":      string(cmdResult.Stderr),
 	}
 
 	if command != "restore" {
@@ -407,7 +406,7 @@ func findCsproj(workspace string) (string, error) {
 	// Look for .csproj files in workspace
 	entries, err := os.ReadDir(workspace)
 	if err != nil {
-		return "", fmt.Errorf("read workspace directory: %w", err)
+		return "", skillerr.WrapIO("read workspace directory", err)
 	}
 
 	for _, entry := range entries {
@@ -416,7 +415,10 @@ func findCsproj(workspace string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("no .csproj file found in %s (is this a C# Godot project?)", workspace)
+	return "", skillerr.NotFound(
+		fmt.Sprintf("no .csproj file found in %s", workspace),
+		skillerr.WithHint("Ensure this is a C# Godot project with a .csproj file."),
+	)
 }
 
 func emitSuccess(rc *skillmain.RunContext, result map[string]any) error {

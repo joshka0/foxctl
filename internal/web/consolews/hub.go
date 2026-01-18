@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oklog/ulid/v2"
-	"github.com/rs/zerolog"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/oklog/ulid/v2"
+	"github.com/rs/zerolog"
 )
 
 // getAllowedOrigins returns the list of allowed WebSocket origins.
@@ -37,14 +37,26 @@ type Hub struct {
 	sessions    map[string]*Session
 	log         zerolog.Logger
 	persistence *PersistenceAdapter
+
+	// ctx is the hub's lifecycle context - cancelled on shutdown.
+	ctx context.Context
+	// wg tracks outstanding persistence goroutines for graceful shutdown.
+	wg sync.WaitGroup
 }
 
 // NewHub creates a new console WebSocket hub.
-func NewHub(log zerolog.Logger) *Hub {
+func NewHub(ctx context.Context, log zerolog.Logger) *Hub {
 	return &Hub{
+		ctx:      ctx,
 		sessions: make(map[string]*Session),
 		log:      log,
 	}
+}
+
+// Wait blocks until all outstanding persistence goroutines complete.
+// Call this during graceful shutdown after cancelling the hub's context.
+func (h *Hub) Wait() {
+	h.wg.Wait()
 }
 
 // SetPersistence sets the persistence adapter for saving sessions.
@@ -86,7 +98,7 @@ func (h *Hub) CreateSession(cfg SessionConfig) *Session {
 
 	// Persist session if adapter is configured
 	if h.persistence != nil {
-		persistAsync(h.log, "create_session", func(ctx context.Context) error {
+		persistAsync(h.ctx, &h.wg, h.log, "create_session", func(ctx context.Context) error {
 			return h.persistence.CreateSession(ctx, session)
 		})
 	}
@@ -106,7 +118,7 @@ func (h *Hub) RemoveSession(id string) {
 
 		// End persistent session if adapter is configured
 		if h.persistence != nil {
-			persistAsync(h.log, "end_session", func(ctx context.Context) error {
+			persistAsync(h.ctx, &h.wg, h.log, "end_session", func(ctx context.Context) error {
 				return h.persistence.EndSession(ctx, id, "ok")
 			})
 		}

@@ -119,8 +119,20 @@ Extracts:
 Search past sessions:
 
 ```bash
+# Semantic search
 agentctl run session/recall --input '{"query": "authentication bug"}'
+
+# Date-based search
+agentctl run session/recall --input '{"query": "January debugging sessions"}'
+agentctl run session/recall --input '{"query": "last week feature implementation"}'
+agentctl run session/recall --input '{"query": "recent refactoring work"}'
+
+# Activity-based search
+agentctl run session/recall --input '{"query": "bug-fix sessions"}'
+agentctl run session/recall --input '{"query": "code review sessions"}'
 ```
+
+**Temporal patterns:** Sessions are indexed with `[Jan 2, 2026] [debugging]` prefixes for date-aware search.
 
 ---
 

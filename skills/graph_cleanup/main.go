@@ -5,7 +5,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -13,6 +16,8 @@ import (
 )
 
 const command = "graph/cleanup"
+
+var allowedOps = []string{"cleanup", "stats", "repair"}
 
 type input struct {
 	Workspace string `json:"workspace"`
@@ -34,16 +39,16 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	op := oputil.Op(oputil.DefaultOp(in.Operation, "cleanup"))
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
+
 	// Use workspace from input or from runner context
 	workspace := in.Workspace
 	if workspace == "" {
 		workspace = rc.Workspace
-	}
-
-	// Default operation is cleanup
-	operation := in.Operation
-	if operation == "" {
-		operation = "cleanup"
 	}
 
 	// Open graph store
@@ -55,7 +60,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	var data map[string]any
 
-	switch operation {
+	switch op {
 	case "cleanup":
 		result, err := handleCleanup(ctx, store, workspace, in)
 		if err != nil {
@@ -90,7 +95,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 
 	default:
-		return fmt.Errorf("unknown operation: %s (expected cleanup, stats, repair)", operation)
+		return skillerr.Arg("invalid operation", skillerr.WithHint(opHint))
 	}
 
 	return skillout.Emit(rc, command, data)

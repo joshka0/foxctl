@@ -55,10 +55,13 @@ var skillGroups = map[string][]string{
 	// code-intel: Code analysis and search tools
 	"code-intel": {
 		"code/semantic_search",
+		"code/smart_search",
 		"code/symbols",
-		"code/complexity",
 		"code/snippet_extract",
+		"code/context_grep",
 		"code/context_ripgrep",
+		"codemap/get",
+		"codemap/generate",
 	},
 	// code-write: Code modification tools
 	"code-write": {
@@ -72,7 +75,7 @@ var skillGroups = map[string][]string{
 	},
 	// agentctl-ci: CI/CD integration tools
 	"agentctl-ci": {
-		"ci/github_checks",
+		"ci/checks",
 		"ci/prcomments",
 	},
 }
@@ -262,10 +265,10 @@ Use --skills to expose all agentctl skills via generic agentctl_run/agentctl_ski
 Use --groups to expose specific skill groups as first-class MCP tools.
 
 Available skill groups:
-  code-intel  - Code analysis: semantic_search, symbols, complexity, swe_grep, context_ripgrep
+  code-intel  - Code analysis: semantic_search, smart_search, symbols, snippet_extract, context_grep, codemap_get, codemap_generate
   code-write  - Code modification: smart_write
   project     - Project management: todo/manage, memory/query, session/recall
-  agentctl-ci - CI/CD integration: github_checks, prcomments
+  agentctl-ci - CI/CD integration: checks, prcomments
 
 Configure backend MCP servers via --config or environment variables:
   TAVILY_API_KEY     - Tavily API key (web search, extract, crawl, map)
@@ -1501,7 +1504,7 @@ func registerAgentctlTools(s *server.MCPServer) {
 // registerSkillGroups registers skills from specified groups as first-class MCP tools.
 // This provides better UX than agentctl_run by exposing proper parameter schemas.
 func registerSkillGroups(ctx context.Context, s *server.MCPServer, groups []string) error {
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -1564,10 +1567,26 @@ func registerSkillAsTool(s *server.MCPServer, manifest skill.Manifest, artifactP
 				toolOpts = append(toolOpts, mcp.WithBoolean(param.Name, mcp.Description(param.Description)))
 			}
 		case "array":
-			if param.Required {
-				toolOpts = append(toolOpts, mcp.WithArray(param.Name, mcp.Required(), mcp.Description(param.Description)))
+			// Arrays need items schema - determine item type from param.Items or default to string
+			var itemsOpt mcp.PropertyOption
+			if param.Items != nil && param.Items.Type != "" {
+				switch param.Items.Type {
+				case "number", "integer", "float":
+					itemsOpt = mcp.WithNumberItems()
+				case "boolean", "bool":
+					itemsOpt = mcp.WithBooleanItems()
+				case "object":
+					itemsOpt = mcp.Items(map[string]any{"type": "object"})
+				default:
+					itemsOpt = mcp.WithStringItems()
+				}
 			} else {
-				toolOpts = append(toolOpts, mcp.WithArray(param.Name, mcp.Description(param.Description)))
+				itemsOpt = mcp.WithStringItems() // default to string items
+			}
+			if param.Required {
+				toolOpts = append(toolOpts, mcp.WithArray(param.Name, mcp.Required(), mcp.Description(param.Description), itemsOpt))
+			} else {
+				toolOpts = append(toolOpts, mcp.WithArray(param.Name, mcp.Description(param.Description), itemsOpt))
 			}
 		case "object":
 			if param.Required {
@@ -1587,11 +1606,33 @@ func registerSkillAsTool(s *server.MCPServer, manifest skill.Manifest, artifactP
 
 	// Create the MCP tool
 	tool := mcp.NewTool(toolName, toolOpts...)
+	ensureArrayItems(tool.InputSchema.Properties)
 
 	// Create handler that captures manifest and artifactPath
 	handler := makeSkillHandler(manifest, artifactPath)
 
 	s.AddTool(tool, handler)
+}
+
+func ensureArrayItems(properties map[string]any) {
+	for _, prop := range properties {
+		propSchema, ok := prop.(map[string]any)
+		if !ok {
+			continue
+		}
+		propType, _ := propSchema["type"].(string)
+		switch propType {
+		case "array":
+			if items, ok := propSchema["items"]; !ok || items == nil {
+				propSchema["items"] = map[string]any{"type": "string"}
+			}
+		case "object":
+			nested, ok := propSchema["properties"].(map[string]any)
+			if ok {
+				ensureArrayItems(nested)
+			}
+		}
+	}
 }
 
 // makeSkillHandler creates a tool handler for a specific skill.
@@ -1664,7 +1705,7 @@ func handleAgentctlRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 	}
 
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return mcp.NewToolResultError("load config: " + err.Error()), nil
 	}
@@ -1730,7 +1771,7 @@ func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	verbose, _ := args["verbose"].(bool)
 
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return mcp.NewToolResultError("load config: " + err.Error()), nil
 	}
@@ -1746,6 +1787,7 @@ func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 		Name        string            `json:"name"`
 		Description string            `json:"description"`
 		Parameters  []skill.Parameter `json:"parameters,omitempty"`
+		InputSchema map[string]any    `json:"input_schema,omitempty"`
 	}
 
 	var skills []skillInfo
@@ -1761,6 +1803,7 @@ func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 		}
 		if verbose {
 			info.Parameters = m.Signature.Parameters
+			info.InputSchema = buildSkillInputSchema(m.Signature.Parameters)
 		}
 		skills = append(skills, info)
 	}
@@ -1780,6 +1823,85 @@ func handleAgentctlSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 
 	output, _ := json.MarshalIndent(result, "", "  ")
 	return mcp.NewToolResultText(string(output)), nil
+}
+
+func buildSkillInputSchema(params []skill.Parameter) map[string]any {
+	properties := make(map[string]any, len(params))
+	var required []string
+	for _, param := range params {
+		properties[param.Name] = buildSkillParamSchema(param)
+		if param.Required {
+			required = append(required, param.Name)
+		}
+	}
+	schema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+func buildSkillParamSchema(param skill.Parameter) map[string]any {
+	schema := map[string]any{
+		"type": normalizeSchemaType(param.Type),
+	}
+	if param.Description != "" {
+		schema["description"] = param.Description
+	}
+	if param.Default != nil {
+		schema["default"] = param.Default
+	}
+	if len(param.Enum) > 0 {
+		schema["enum"] = param.Enum
+	}
+
+	switch schema["type"] {
+	case "array":
+		if param.Items != nil {
+			schema["items"] = buildSkillParamSchema(*param.Items)
+		} else {
+			schema["items"] = map[string]any{"type": "string"}
+		}
+	case "object":
+		if len(param.Properties) > 0 {
+			props := make(map[string]any, len(param.Properties))
+			var required []string
+			for name, prop := range param.Properties {
+				props[name] = buildSkillParamSchema(prop)
+				if prop.Required {
+					required = append(required, name)
+				}
+			}
+			schema["properties"] = props
+			if len(required) > 0 {
+				schema["required"] = required
+			}
+		}
+	}
+
+	return schema
+}
+
+func normalizeSchemaType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "string":
+		return "string"
+	case "number", "float":
+		return "number"
+	case "integer":
+		return "integer"
+	case "boolean", "bool":
+		return "boolean"
+	case "array":
+		return "array"
+	case "object":
+		return "object"
+	default:
+		return "string"
+	}
 }
 
 // Local skill handlers (HTML)
@@ -1894,7 +2016,7 @@ func handleHTMLSetAttr(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallT
 // callLocalSkill executes a local agentctl skill and returns the result.
 func callLocalSkill(ctx context.Context, skillName string, input map[string]any) (*mcp.CallToolResult, error) {
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return mcp.NewToolResultError("load config: " + err.Error()), nil
 	}

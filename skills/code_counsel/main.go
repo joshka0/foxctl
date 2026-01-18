@@ -19,6 +19,8 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/secretutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codecontext"
@@ -95,13 +97,7 @@ type Output struct {
 }
 
 // SecretWarning represents a detected secret.
-type SecretWarning struct {
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-	Pattern  string `json:"pattern"`
-	Severity string `json:"severity"`
-	Masked   string `json:"masked"`
-}
+type SecretWarning = secretutil.Finding
 
 // PerspectiveAnalysis contains the analysis from a single perspective.
 type PerspectiveAnalysis struct {
@@ -190,7 +186,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		// Gather evidence
 		gathered, err := gatherEvidence(ctx, rc, in, logger)
 		if err != nil {
-			return fmt.Errorf("gather evidence: %w", err)
+			return skillerr.WrapRuntime("gather evidence", err)
 		}
 		evidence = gathered
 	}
@@ -199,7 +195,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	out.Stats.SnippetsUsed = evidence.Stats.SnippetsExtracted
 
 	// Scan evidence for secrets
-	secretWarnings, hasHighSeverity := scanForSecrets(ctx, evidence, logger)
+	secretWarnings, hasHighSeverity := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeWarn)
 	out.SecretWarnings = secretWarnings
 
 	// Warn but don't block on secrets - the analysis may be about security review
@@ -274,7 +270,7 @@ func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, log
 		// Auto-select files
 		selected, err := autoSelectFiles(ctx, rc, in.Query, in.MaxFiles, logger)
 		if err != nil {
-			return nil, fmt.Errorf("auto-select files: %w", err)
+			return nil, skillerr.WrapRuntime("auto-select files", err)
 		}
 		candidates = selected
 	}
@@ -298,7 +294,7 @@ func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, log
 		Mode:            codecontext.ModeSnippets,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("collect evidence: %w", err)
+		return nil, skillerr.WrapRuntime("collect evidence", err)
 	}
 
 	return evidence, nil
@@ -306,15 +302,15 @@ func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, log
 
 // autoSelectFiles uses retrieval.Generator to find relevant files.
 func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, logger zerolog.Logger) ([]codecontext.Candidate, error) {
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	// Create embedding provider (optional)
 	var embedProvider semantic.EmbeddingProvider
-	embedder, err := semantic.NewEmbedder(semantic.ScopeSymbols)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config)
 	if err == nil {
 		embedProvider = &embedderAdapter{embedder: embedder}
 	}
@@ -334,7 +330,7 @@ func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string
 		MinTotalCandidates:    3,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("generate candidates: %w", err)
+		return nil, skillerr.WrapRuntime("generate candidates", err)
 	}
 
 	candidates := make([]codecontext.Candidate, 0, len(result.Candidates))
@@ -392,7 +388,7 @@ func runPerspectiveAnalysis(ctx context.Context, provider, perspective, query, c
 
 	response, err := callLLM(ctx, provider, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("call LLM: %w", err)
+		return nil, skillerr.WrapRuntime("call LLM", err)
 	}
 
 	analysis, err := parseAnalysisResponse(perspective, response)
@@ -464,7 +460,7 @@ func callLLM(ctx context.Context, provider, prompt string) (string, error) {
 func callCerebras(ctx context.Context, prompt string) (string, error) {
 	apiKey := os.Getenv("CEREBRAS_API_KEY")
 	if apiKey == "" {
-		return "", fmt.Errorf("CEREBRAS_API_KEY not set")
+		return "", skillerr.Auth("CEREBRAS_API_KEY not set", skillerr.WithHint("Set CEREBRAS_API_KEY to use the Cerebras provider."))
 	}
 
 	model := os.Getenv("CEREBRAS_MODEL")
@@ -482,12 +478,12 @@ func callCerebras(ctx context.Context, prompt string) (string, error) {
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", skillerr.WrapRuntime("marshal request", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.cerebras.ai/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return "", skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -496,13 +492,13 @@ func callCerebras(ctx context.Context, prompt string) (string, error) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return "", skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return "", skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -514,11 +510,11 @@ func callCerebras(ctx context.Context, prompt string) (string, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return "", skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response")
+		return "", skillerr.Runtime("empty response")
 	}
 
 	return result.Choices[0].Message.Content, nil
@@ -527,7 +523,7 @@ func callCerebras(ctx context.Context, prompt string) (string, error) {
 func callAnthropic(ctx context.Context, prompt string) (string, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
+		return "", skillerr.Auth("ANTHROPIC_API_KEY not set", skillerr.WithHint("Set ANTHROPIC_API_KEY to use the Anthropic provider."))
 	}
 
 	reqBody := map[string]any{
@@ -540,12 +536,12 @@ func callAnthropic(ctx context.Context, prompt string) (string, error) {
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", skillerr.WrapRuntime("marshal request", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return "", skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -555,13 +551,13 @@ func callAnthropic(ctx context.Context, prompt string) (string, error) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return "", skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return "", skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -571,11 +567,11 @@ func callAnthropic(ctx context.Context, prompt string) (string, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return "", skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Content) == 0 {
-		return "", fmt.Errorf("empty response")
+		return "", skillerr.Runtime("empty response")
 	}
 
 	return result.Content[0].Text, nil
@@ -584,7 +580,7 @@ func callAnthropic(ctx context.Context, prompt string) (string, error) {
 func callOpenAI(ctx context.Context, prompt string) (string, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return "", fmt.Errorf("OPENAI_API_KEY not set")
+		return "", skillerr.Auth("OPENAI_API_KEY not set", skillerr.WithHint("Set OPENAI_API_KEY to use the OpenAI provider."))
 	}
 
 	reqBody := map[string]any{
@@ -597,12 +593,12 @@ func callOpenAI(ctx context.Context, prompt string) (string, error) {
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", skillerr.WrapRuntime("marshal request", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
+		return "", skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -611,13 +607,13 @@ func callOpenAI(ctx context.Context, prompt string) (string, error) {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return "", skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return "", skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -629,11 +625,11 @@ func callOpenAI(ctx context.Context, prompt string) (string, error) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return "", skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response")
+		return "", skillerr.Runtime("empty response")
 	}
 
 	return result.Choices[0].Message.Content, nil
@@ -666,7 +662,7 @@ func parseAnalysisResponse(perspective, response string) (*PerspectiveAnalysis, 
 	}
 
 	if err := json.Unmarshal([]byte(response), &parsed); err != nil {
-		return nil, fmt.Errorf("parse JSON: %w", err)
+		return nil, skillerr.WrapParse("parse JSON", err)
 	}
 
 	return &PerspectiveAnalysis{
@@ -745,42 +741,4 @@ func (a *embedderAdapter) Model() string {
 
 func (a *embedderAdapter) Dimensions() int {
 	return a.embedder.Dimensions()
-}
-
-// scanForSecrets scans all evidence snippets for secrets.
-// Returns the warnings and whether any high-severity secrets were detected.
-func scanForSecrets(ctx context.Context, evidence *codecontext.Evidence, logger zerolog.Logger) ([]SecretWarning, bool) {
-	if evidence == nil || len(evidence.Snippets) == 0 {
-		return nil, false
-	}
-
-	scanner := guard.New(guard.Opts{Mode: guard.ModeWarn})
-	var warnings []SecretWarning
-	hasHighSeverity := false
-
-	for _, snippet := range evidence.Snippets {
-		result := scanner.ScanString(ctx, snippet.File, snippet.Text)
-
-		if result.HasFindings() {
-			for _, f := range result.Findings {
-				warnings = append(warnings, SecretWarning{
-					File:     snippet.File,
-					Line:     snippet.StartLine + f.Line - 1, // Adjust to absolute line number
-					Pattern:  f.Pattern,
-					Severity: string(f.Severity),
-					Masked:   f.Masked,
-				})
-
-				if f.Severity == guard.SeverityHigh {
-					hasHighSeverity = true
-				}
-			}
-		}
-	}
-
-	if len(warnings) > 0 {
-		logger.Debug().Int("count", len(warnings)).Bool("high_severity", hasHighSeverity).Msg("secrets detected in evidence")
-	}
-
-	return warnings, hasHighSeverity
 }

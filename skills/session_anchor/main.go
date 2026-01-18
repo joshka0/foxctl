@@ -9,9 +9,12 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/stringutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -65,18 +68,28 @@ const (
 	anchorType = "session_anchor"
 )
 
+var allowedOps = []string{
+	"get",
+	"set",
+	"append_learnings",
+	"bump_compaction",
+	"set_question",
+	"clear_question",
+	"clear",
+}
+
 func main() {
 	skillmain.Main(command, run)
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
-	in.Workspace = sessionkit.WorkspaceOrDefault(in.Workspace, rc.Workspace)
+	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
 
-	// Default operation
-	in.Operation = strings.TrimSpace(in.Operation)
-	if in.Operation == "" {
-		in.Operation = "get"
+	op := oputil.Op(oputil.DefaultOp(in.Operation, "get"))
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 
 	// Resolve session ID
@@ -95,23 +108,26 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 	defer cleanup()
 
-	switch in.Operation {
+	switch op {
 	case "get":
 		anchor, found, err := loadAnchor(ctx, store, key, in.Workspace)
 		if err != nil {
-			return skillerr.IO("load anchor", skillerr.WithCause(err))
+			return err
 		}
 		return skillout.Emit(rc, command, Output{Found: found, Anchor: anchor, Message: messageForGet(found)})
 
 	case "set":
 		mainPrompt := strings.TrimSpace(in.MainPrompt)
 		if mainPrompt == "" {
-			return skillerr.Arg("main_prompt is required for operation=set")
+			return skillerr.Arg(
+				"main_prompt is required for operation=set",
+				skillerr.WithHint("Provide main_prompt when operation is set."),
+			)
 		}
 
 		anchor, found, err := loadAnchor(ctx, store, key, in.Workspace)
 		if err != nil {
-			return skillerr.IO("load anchor", skillerr.WithCause(err))
+			return err
 		}
 		now := timeutil.NowUTC()
 		if !found || anchor == nil {
@@ -129,7 +145,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		anchor.LastSessionID = sessionID
 
 		if err := saveAnchor(ctx, store, key, in.Workspace, anchor, sessionID); err != nil {
-			return skillerr.IO("save anchor", skillerr.WithCause(err))
+			return err
 		}
 
 		return skillout.Emit(rc, command, Output{Found: true, Anchor: anchor, Message: "anchor set"})
@@ -137,7 +153,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	case "append_learnings":
 		anchor, found, err := loadAnchor(ctx, store, key, in.Workspace)
 		if err != nil {
-			return skillerr.IO("load anchor", skillerr.WithCause(err))
+			return err
 		}
 		if !found || anchor == nil {
 			return skillout.Emit(rc, command, Output{Found: false, Anchor: nil, Message: "no anchor set"})
@@ -152,9 +168,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			At:           now,
 			Trigger:      strings.TrimSpace(in.Trigger),
 			Summary:      strings.TrimSpace(in.Summary),
-			Decisions:    normalizeStrings(in.Decisions),
-			Gotchas:      normalizeStrings(in.Gotchas),
-			Progress:     normalizeStrings(in.Progress),
+			Decisions:    stringutil.NormalizeStrings(in.Decisions),
+			Gotchas:      stringutil.NormalizeStrings(in.Gotchas),
+			Progress:     stringutil.NormalizeStrings(in.Progress),
 			CompactionNo: anchor.CompactionCount,
 		}
 		anchor.RecentLearnings = append(anchor.RecentLearnings, entry)
@@ -163,7 +179,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		anchor.LastSessionID = sessionID
 
 		if err := saveAnchor(ctx, store, key, in.Workspace, anchor, sessionID); err != nil {
-			return skillerr.IO("save anchor", skillerr.WithCause(err))
+			return err
 		}
 
 		return skillout.Emit(rc, command, Output{Found: true, Anchor: anchor, Message: "learnings appended"})
@@ -171,7 +187,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	case "bump_compaction":
 		anchor, found, err := loadAnchor(ctx, store, key, in.Workspace)
 		if err != nil {
-			return skillerr.IO("load anchor", skillerr.WithCause(err))
+			return err
 		}
 		if !found || anchor == nil {
 			return skillout.Emit(rc, command, Output{Found: false, Anchor: nil, Message: "no anchor set"})
@@ -183,7 +199,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		anchor.LastSessionID = sessionID
 
 		if err := saveAnchor(ctx, store, key, in.Workspace, anchor, sessionID); err != nil {
-			return skillerr.IO("save anchor", skillerr.WithCause(err))
+			return err
 		}
 
 		return skillout.Emit(rc, command, Output{Found: true, Anchor: anchor, Message: "compaction count incremented"})
@@ -191,14 +207,17 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	case "set_question":
 		anchor, found, err := loadAnchor(ctx, store, key, in.Workspace)
 		if err != nil {
-			return skillerr.IO("load anchor", skillerr.WithCause(err))
+			return err
 		}
 		if !found || anchor == nil {
 			return skillout.Emit(rc, command, Output{Found: false, Anchor: nil, Message: "no anchor set"})
 		}
 		q := strings.TrimSpace(in.Question)
 		if q == "" {
-			return skillerr.Arg("question is required for operation=set_question")
+			return skillerr.Arg(
+				"question is required for operation=set_question",
+				skillerr.WithHint("Provide question when operation is set_question."),
+			)
 		}
 
 		now := timeutil.NowUTC()
@@ -207,14 +226,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		anchor.LastSessionID = sessionID
 
 		if err := saveAnchor(ctx, store, key, in.Workspace, anchor, sessionID); err != nil {
-			return skillerr.IO("save anchor", skillerr.WithCause(err))
+			return err
 		}
 		return skillout.Emit(rc, command, Output{Found: true, Anchor: anchor, Message: "question set"})
 
 	case "clear_question":
 		anchor, found, err := loadAnchor(ctx, store, key, in.Workspace)
 		if err != nil {
-			return skillerr.IO("load anchor", skillerr.WithCause(err))
+			return err
 		}
 		if !found || anchor == nil {
 			return skillout.Emit(rc, command, Output{Found: false, Anchor: nil, Message: "no anchor set"})
@@ -226,7 +245,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		anchor.LastSessionID = sessionID
 
 		if err := saveAnchor(ctx, store, key, in.Workspace, anchor, sessionID); err != nil {
-			return skillerr.IO("save anchor", skillerr.WithCause(err))
+			return err
 		}
 		return skillout.Emit(rc, command, Output{Found: true, Anchor: anchor, Message: "question cleared"})
 
@@ -238,7 +257,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillout.Emit(rc, command, Output{Found: false, Anchor: nil, Message: "anchor cleared"})
 
 	default:
-		return skillerr.Arg(fmt.Sprintf("unknown operation: %q", in.Operation))
+		return skillerr.Arg("invalid operation", skillerr.WithHint(opHint))
 	}
 }
 
@@ -255,29 +274,29 @@ func loadAnchor(ctx context.Context, store *memory.Store, name, workspace string
 		if err == memory.ErrNotFound {
 			return nil, false, nil
 		}
-		return nil, false, fmt.Errorf("get anchor: %w", err)
+		return nil, false, skillerr.WrapIO("get anchor", err)
 	}
 	var a Anchor
 	if err := json.Unmarshal(entry.Result, &a); err != nil {
-		return nil, false, fmt.Errorf("parse anchor: %w", err)
+		return nil, false, skillerr.WrapParse("parse anchor", err)
 	}
-	a.Requirements = normalizeStrings(a.Requirements)
+	a.Requirements = stringutil.NormalizeStrings(a.Requirements)
 	a.RecentLearnings = normalizeLearnings(a.RecentLearnings)
 	return &a, true, nil
 }
 
 func saveAnchor(ctx context.Context, store *memory.Store, name, workspace string, anchor *Anchor, sessionID string) error {
 	if anchor == nil {
-		return fmt.Errorf("save anchor: nil anchor")
+		return skillerr.Validation("save anchor: nil anchor")
 	}
 
 	anchor.Workspace = workspace
-	anchor.Requirements = normalizeStrings(anchor.Requirements)
+	anchor.Requirements = stringutil.NormalizeStrings(anchor.Requirements)
 	anchor.RecentLearnings = normalizeLearnings(anchor.RecentLearnings)
 
 	result, err := json.Marshal(anchor)
 	if err != nil {
-		return fmt.Errorf("marshal anchor: %w", err)
+		return skillerr.WrapRuntime("marshal anchor", err)
 	}
 
 	summary := "session anchor"
@@ -294,7 +313,7 @@ func saveAnchor(ctx context.Context, store *memory.Store, name, workspace string
 		SessionID: sessionID,
 	})
 	if err != nil {
-		return fmt.Errorf("save anchor: %w", err)
+		return skillerr.WrapIO("save anchor", err)
 	}
 	return nil
 }
@@ -327,25 +346,10 @@ func normalizeLearnings(in []Learning) []Learning {
 	}
 	out := make([]Learning, 0, len(in))
 	for _, l := range in {
-		l.Decisions = normalizeStrings(l.Decisions)
-		l.Gotchas = normalizeStrings(l.Gotchas)
-		l.Progress = normalizeStrings(l.Progress)
+		l.Decisions = stringutil.NormalizeStrings(l.Decisions)
+		l.Gotchas = stringutil.NormalizeStrings(l.Gotchas)
+		l.Progress = stringutil.NormalizeStrings(l.Progress)
 		out = append(out, l)
-	}
-	return out
-}
-
-func normalizeStrings(in []string) []string {
-	if in == nil {
-		return []string{}
-	}
-	out := make([]string, 0, len(in))
-	for _, s := range in {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		out = append(out, s)
 	}
 	return out
 }

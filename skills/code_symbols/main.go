@@ -2,9 +2,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -14,8 +12,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
 // Input defines the input parameters for code/symbols.
@@ -60,20 +63,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Resolve workspace and search path
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	// Check if path is a file or directory
 	info, err := os.Stat(searchPath)
 	if err != nil {
-		return fmt.Errorf("stat path: %w", err)
+		return skillerr.WrapIO("stat path", err)
 	}
 
 	var symbols []symbol
@@ -109,27 +107,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Limit results
-	if len(symbols) > in.MaxResults {
-		symbols = symbols[:in.MaxResults]
-	}
+	symbols = sliceutil.Limit(symbols, in.MaxResults)
 
-	// Prepare preview and artifact
-	preview, truncated := skillout.PreparePreview(symbols, rc.MaxPreview)
-
-	var artifactDigest string
-	if truncated {
-		buf := &bytes.Buffer{}
-		enc := json.NewEncoder(buf)
-		for _, s := range symbols {
-			if err := enc.Encode(s); err != nil {
-				return fmt.Errorf("encode symbol: %w", err)
-			}
-		}
-		artifact, err := skillout.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_symbols")
-		if err != nil {
-			return err
-		}
-		artifactDigest = artifact.Digest
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, symbols, rc.MaxPreview, "code_symbols", true)
+	if err != nil {
+		return err
 	}
 
 	// Count by type
@@ -141,14 +123,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Build response
 	data := map[string]any{
 		"symbol_count": len(symbols),
-		"preview":      preview,
+		"preview":      previewResult.Preview,
 		"type_counts":  typeCounts,
 		"symbol_type":  in.SymbolType,
 		"language":     in.Language,
 	}
-	if artifactDigest != "" {
-		data["artifact"] = artifactDigest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, "code/symbols", data)
 }
@@ -162,7 +142,7 @@ func extractFromDirectory(dir, workspace string, in Input) ([]symbol, error) {
 		}
 
 		// Skip hidden and common excludes
-		if strings.HasPrefix(d.Name(), ".") || isCommonExclude(d.Name()) {
+		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -175,7 +155,7 @@ func extractFromDirectory(dir, workspace string, in Input) ([]symbol, error) {
 		}
 
 		// Check language
-		lang := detectLanguage(in.Language, filepath.Ext(path))
+		lang := langutil.DetectAllowedWithHint(in.Language, path, langutil.CommonCodeLanguages)
 		if lang == "" {
 			return nil
 		}
@@ -195,9 +175,9 @@ func extractFromDirectory(dir, workspace string, in Input) ([]symbol, error) {
 
 func extractFromFile(path, workspace string, in Input) ([]symbol, error) {
 	// Detect language
-	lang := detectLanguage(in.Language, filepath.Ext(path))
+	lang := langutil.DetectAllowedWithHint(in.Language, path, langutil.CommonCodeLanguages)
 	if lang == "" {
-		return nil, fmt.Errorf("unsupported file type")
+		return nil, skillerr.Validation("unsupported file type")
 	}
 
 	switch lang {
@@ -208,7 +188,7 @@ func extractFromFile(path, workspace string, in Input) ([]symbol, error) {
 	case "javascript", "typescript":
 		return extractJSSymbols(path, workspace, in)
 	default:
-		return nil, fmt.Errorf("language not supported: %s", lang)
+		return nil, skillerr.Validationf("language not supported: %s", lang)
 	}
 }
 
@@ -216,11 +196,11 @@ func extractGoSymbols(path, workspace string, in Input) ([]symbol, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("parse go file: %w", err)
+		return nil, skillerr.WrapParse("parse go file", err)
 	}
 
 	var symbols []symbol
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 
 	// Extract declarations
 	for _, decl := range file.Decls {
@@ -432,7 +412,7 @@ func extractPythonSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	}
 
 	var symbols []symbol
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 	lines := strings.Split(string(content), "\n")
 
 	for i, line := range lines {
@@ -485,7 +465,7 @@ func extractJSSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	}
 
 	var symbols []symbol
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 	lines := strings.Split(string(content), "\n")
 
 	for i, line := range lines {
@@ -546,47 +526,4 @@ func extractJSSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	}
 
 	return symbols, nil
-}
-
-func detectLanguage(requested, ext string) string {
-	if requested != "auto" {
-		return requested
-	}
-
-	langMap := map[string]string{
-		".go":  "go",
-		".py":  "python",
-		".js":  "javascript",
-		".ts":  "typescript",
-		".jsx": "javascript",
-		".tsx": "typescript",
-	}
-
-	return langMap[ext]
-}
-
-func isCommonExclude(name string) bool {
-	excludes := []string{
-		".git", ".svn", ".hg",
-		"node_modules", "vendor", "__pycache__",
-		".venv", "venv", ".tox",
-		"dist", "build", "target",
-	}
-	for _, exclude := range excludes {
-		if name == exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
 }

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
@@ -35,7 +36,7 @@ type agentStats struct {
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate required fields
 	if in.Role == "" {
-		return fmt.Errorf("role is required")
+		return skillerr.Arg("role is required", skillerr.WithHint("Provide the agent role to analyze."))
 	}
 
 	// Resolve workspace
@@ -45,13 +46,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
+		return skillerr.WrapIO("resolve workspace", err)
 	}
 
 	// Open trajectory store
 	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open trajectory store: %w", err)
+		return skillerr.WrapIO("open trajectory store", err)
 	}
 	defer trajStore.Close()
 
@@ -70,7 +71,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	trajs, err := trajStore.ListByOutcome(ctx, filter)
 	if err != nil {
-		return fmt.Errorf("list trajectories: %w", err)
+		return skillerr.WrapIO("list trajectories", err)
 	}
 
 	// Compute stats from trajectories
@@ -193,4 +194,3 @@ func generateRecommendations(stats agentStats, toolUsage []map[string]any) []str
 
 	return recommendations
 }
-

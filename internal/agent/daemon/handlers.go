@@ -198,7 +198,7 @@ func handleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 	}
 }
 
-func handleEvent(ctx context.Context, logger zerolog.Logger, msg agent.Message) error {
+func handleEvent(_ context.Context, logger zerolog.Logger, msg agent.Message) error {
 	var env struct {
 		Data agent.EventData `json:"data"`
 	}
@@ -358,7 +358,7 @@ func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Mess
 }
 
 // handleConsoleCmd handles console.cmd messages (cancel, pause, etc.).
-func handleConsoleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, cancelCtx *CancelContext) error {
+func handleConsoleCmd(_ context.Context, logger zerolog.Logger, msg agent.Message, cancelCtx *CancelContext) error {
 	var env struct {
 		Data agent.ConsoleCmdData `json:"data"`
 	}

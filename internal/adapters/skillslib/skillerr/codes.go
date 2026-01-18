@@ -42,6 +42,18 @@ const (
 	// CodeInternal indicates an internal error (EINTERNAL).
 	// Use for unexpected internal failures that shouldn't happen.
 	CodeInternal = "EINTERNAL"
+
+	// CodeRuntimeRestart indicates a recoverable runtime error requiring restart (ERUNTIME_RESTART).
+	// Use when the skill needs to be restarted (e.g., daemon connection lost).
+	CodeRuntimeRestart = "ERUNTIME_RESTART"
+
+	// CodeCapability indicates a capability error (ECAPABILITY).
+	// Use for unsupported features, missing capabilities, or platform limitations.
+	CodeCapability = "ECAPABILITY"
+
+	// CodeIntegration indicates an external integration error (EINTEGRATION).
+	// Use for external service failures, API errors, or third-party integration issues.
+	CodeIntegration = "EINTEGRATION"
 )
 
 // CodeDescription returns a human-readable description of an error code.
@@ -67,6 +79,12 @@ func CodeDescription(code string) string {
 		return "Conflict error"
 	case CodeInternal:
 		return "Internal error"
+	case CodeRuntimeRestart:
+		return "Recoverable runtime error requiring restart"
+	case CodeCapability:
+		return "Capability or feature not supported"
+	case CodeIntegration:
+		return "External integration error"
 	default:
 		return "Unknown error"
 	}

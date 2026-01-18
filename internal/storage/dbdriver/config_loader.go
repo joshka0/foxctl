@@ -113,9 +113,10 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 		dbPath = filepath.Join(cl.rootDir, strings.Replace(defaultPath, ".db", ".libsql", 1))
 	}
 
-	// Check if vector search should be enabled
+	// Check if vector search should be enabled (default: true for MEMORY, false for others)
 	vectorEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
-	enableVector := false
+	// Default to true for memory database since it benefits most from vector search
+	enableVector := strings.ToUpper(prefix) == "MEMORY"
 	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
 		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
 	}
@@ -129,12 +130,40 @@ func (cl *ConfigLoader) loadLibSQLConfig(prefix, defaultPath string) Config {
 		}
 	}
 
+	// Check for remote sync URL (enables embedded replica mode)
+	// Format: AGENTCTL_<PREFIX>_SYNC_URL or AGENTCTL_LIBSQL_SYNC_URL (fallback)
+	syncURLEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_URL", strings.ToUpper(prefix))
+	syncURL := os.Getenv(syncURLEnv)
+	if syncURL == "" {
+		syncURL = os.Getenv("AGENTCTL_LIBSQL_SYNC_URL")
+	}
+
+	// Check for sync auth token
+	// Format: AGENTCTL_<PREFIX>_SYNC_TOKEN or AGENTCTL_LIBSQL_SYNC_TOKEN (fallback)
+	syncTokenEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_TOKEN", strings.ToUpper(prefix))
+	syncToken := os.Getenv(syncTokenEnv)
+	if syncToken == "" {
+		syncToken = os.Getenv("AGENTCTL_LIBSQL_SYNC_TOKEN")
+	}
+
+	// Check for sync interval (seconds, 0 = sync on demand)
+	syncIntervalEnv := fmt.Sprintf("AGENTCTL_%s_SYNC_INTERVAL", strings.ToUpper(prefix))
+	syncInterval := 0
+	if intervalStr := os.Getenv(syncIntervalEnv); intervalStr != "" {
+		if interval, err := strconv.Atoi(intervalStr); err == nil && interval > 0 {
+			syncInterval = interval
+		}
+	}
+
 	return Config{
 		Driver: DriverLibSQL,
 		LibSQL: LibSQLConfig{
 			Path:               dbPath,
 			EnableVectorSearch: enableVector,
 			VectorDimensions:   vectorDims,
+			SyncURL:            syncURL,
+			AuthToken:          syncToken,
+			SyncInterval:       syncInterval,
 		},
 	}
 }
@@ -157,9 +186,10 @@ func (cl *ConfigLoader) loadTursoConfig(prefix, dbName string) Config {
 		token = os.Getenv("AGENTCTL_TURSO_TOKEN")
 	}
 
-	// Check if vector search should be enabled (only relevant for memory database)
+	// Check if vector search should be enabled (default: true for MEMORY, false for others)
 	vectorEnv := fmt.Sprintf("AGENTCTL_%s_VECTOR_SEARCH", strings.ToUpper(prefix))
-	enableVector := false
+	// Default to true for memory database since it benefits most from vector search
+	enableVector := strings.ToUpper(prefix) == "MEMORY"
 	if vectorStr := os.Getenv(vectorEnv); vectorStr != "" {
 		enableVector = strings.ToLower(vectorStr) == "true" || vectorStr == "1"
 	}
@@ -190,6 +220,11 @@ func GetConfigSummary(cfg Config) string {
 	switch cfg.Driver {
 	case DriverSQLite:
 		return fmt.Sprintf("SQLite: %s", cfg.SQLite.Path)
+	case DriverLibSQL:
+		if cfg.LibSQL.SyncURL != "" {
+			return fmt.Sprintf("LibSQL: %s (sync: %s, vector: %v)", cfg.LibSQL.Path, cfg.LibSQL.SyncURL, cfg.LibSQL.EnableVectorSearch)
+		}
+		return fmt.Sprintf("LibSQL: %s (local-only, vector: %v)", cfg.LibSQL.Path, cfg.LibSQL.EnableVectorSearch)
 	case DriverTurso:
 		return fmt.Sprintf("Turso: %s (vector: %v)", cfg.Turso.URL, cfg.Turso.EnableVectorSearch)
 	default:
@@ -256,12 +291,21 @@ func (cl *ConfigLoader) ConfigFromPlatformSettings(settings PlatformDatabaseSett
 // Environment variable documentation:
 //
 // For SQLite databases:
-//   AGENTCTL_<DB>_DB_DRIVER=sqlite       # Database driver (sqlite or turso)
+//   AGENTCTL_<DB>_DB_DRIVER=sqlite       # Database driver (sqlite, libsql, or turso)
 //   AGENTCTL_<DB>_DB_PATH=/path/to/db    # Path to SQLite database file
 //   AGENTCTL_<DB>_DB_WAL=true            # Enable WAL mode (default: true)
 //   AGENTCTL_<DB>_DB_TIMEOUT=5000        # Busy timeout in milliseconds
 //
-// For Turso databases:
+// For libSQL databases (local-first with optional sync):
+//   AGENTCTL_<DB>_DB_DRIVER=libsql       # Database driver
+//   AGENTCTL_<DB>_DB_PATH=/path/to/db    # Path to libSQL database file
+//   AGENTCTL_<DB>_SYNC_URL=http://...    # Remote sqld URL for sync (optional)
+//   AGENTCTL_<DB>_SYNC_TOKEN=...         # Auth token for sync (optional)
+//   AGENTCTL_<DB>_SYNC_INTERVAL=60       # Background sync interval in seconds (optional, 0=on-demand)
+//   AGENTCTL_LIBSQL_SYNC_URL=http://...  # Fallback sync URL for all libSQL databases
+//   AGENTCTL_LIBSQL_SYNC_TOKEN=...       # Fallback sync token for all libSQL databases
+//
+// For Turso databases (cloud-native):
 //   AGENTCTL_<DB>_DB_DRIVER=turso        # Database driver
 //   AGENTCTL_<DB>_DB_URL=libsql://...    # Turso database URL
 //   AGENTCTL_<DB>_DB_TOKEN=...           # Turso auth token

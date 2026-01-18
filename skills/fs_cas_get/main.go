@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -28,25 +29,25 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate digest format
 	if strings.TrimSpace(in.Digest) == "" {
-		return fmt.Errorf("digest is required")
+		return skillerr.Arg("digest is required")
 	}
 	if !strings.HasPrefix(in.Digest, "sha256:") {
-		return fmt.Errorf("digest must start with 'sha256:'")
+		return skillerr.Validation("digest must start with 'sha256:'")
 	}
 	if len(in.Digest) != 71 { // "sha256:" (7) + hex (64)
-		return fmt.Errorf("invalid digest length")
+		return skillerr.Validation("invalid digest length")
 	}
 
 	// Get object metadata first
 	obj, err := rc.CASStore.Head(ctx, in.Digest)
 	if err != nil {
-		return fmt.Errorf("cas head %s: %w", in.Digest, err)
+		return skillerr.WrapIO("cas head "+in.Digest, err)
 	}
 
 	// Get the content
 	reader, meta, err := rc.CASStore.Get(ctx, in.Digest)
 	if err != nil {
-		return fmt.Errorf("cas get %s: %w", in.Digest, err)
+		return skillerr.WrapIO("cas get "+in.Digest, err)
 	}
 	defer func() {
 		errs.Ignore(reader.Close(), "close cas reader")
@@ -59,7 +60,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		ext := extensionFromKind(meta.Kind)
 		tmpFile, err := os.CreateTemp("", "cas-*"+ext)
 		if err != nil {
-			return fmt.Errorf("create temp file: %w", err)
+			return skillerr.WrapIO("create temp file", err)
 		}
 		outputPath = tmpFile.Name()
 		defer func() {
@@ -68,32 +69,32 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 		// Copy content to temp file
 		if _, err := io.Copy(tmpFile, reader); err != nil {
-			return fmt.Errorf("write temp file: %w", err)
+			return skillerr.WrapIO("write temp file", err)
 		}
 	} else {
 		// Validate output path
-		validPath, err := rc.PathValidator.ValidatePath(outputPath)
+		validPath, err := skillmain.ValidatePath(rc, outputPath)
 		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
+			return err
 		}
 		outputPath = validPath
 
 		// Ensure parent directory exists
 		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-			return fmt.Errorf("create parent dir: %w", err)
+			return skillerr.WrapIO("create parent dir", err)
 		}
 
 		// Write content to output file
 		outFile, err := os.Create(outputPath)
 		if err != nil {
-			return fmt.Errorf("create output file: %w", err)
+			return skillerr.WrapIO("create output file", err)
 		}
 		defer func() {
 			errs.Ignore(outFile.Close(), "close output file")
 		}()
 
 		if _, err := io.Copy(outFile, reader); err != nil {
-			return fmt.Errorf("write output file: %w", err)
+			return skillerr.WrapIO("write output file", err)
 		}
 	}
 

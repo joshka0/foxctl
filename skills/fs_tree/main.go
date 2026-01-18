@@ -10,6 +10,10 @@ import (
 	"sort"
 	"strings"
 
+	fshelpers "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -62,14 +66,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Resolve workspace and search path
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	// Build tree
@@ -94,14 +93,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Prepare artifact for tree text (can be large)
-	var artifactDigest string
+	var artifact *skillmain.Artifact
 	if in.Format == "tree" && len(output.TreeText) > 1024 {
 		buf := bytes.NewBufferString(output.TreeText)
-		artifact, err := skillout.PersistBuffer(ctx, rc, buf, "text/plain", "fs_tree")
+		persisted, err := skillout.PersistBuffer(ctx, rc, buf, "text/plain", "fs_tree")
 		if err != nil {
 			return err
 		}
-		artifactDigest = artifact.Digest
+		artifact = &persisted
 		// Keep a preview of the tree
 		lines := strings.Split(output.TreeText, "\n")
 		if len(lines) > 50 {
@@ -114,9 +113,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		"tree":   output,
 		"format": in.Format,
 	}
-	if artifactDigest != "" {
-		data["artifact"] = artifactDigest
-	}
+	skillout.AddArtifact(data, artifact)
 
 	return skillout.Emit(rc, "fs/tree", data)
 }
@@ -124,10 +121,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 func buildTree(path, workspace string, in Input, level int) (*treeNode, treeStats, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, treeStats{}, fmt.Errorf("stat path: %w", err)
+		return nil, treeStats{}, skillerr.WrapIO("stat "+path, err)
 	}
 
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 	node := &treeNode{
 		Name:  filepath.Base(path),
 		Path:  relPath,
@@ -168,13 +165,17 @@ func buildTree(path, workspace string, in Input, level int) (*treeNode, treeStat
 	})
 
 	for _, entry := range entries {
+		if fsutil.IsSymlinkMode(entry.Type()) {
+			continue
+		}
+
 		// Skip hidden files/directories
-		if !in.IncludeHidden && strings.HasPrefix(entry.Name(), ".") {
+		if fshelpers.ShouldSkipHidden(entry.Name(), in.IncludeHidden) {
 			continue
 		}
 
 		// Skip common excludes
-		if isCommonExclude(entry.Name()) {
+		if fsutil.IsCommonExclude(entry.Name()) {
 			continue
 		}
 
@@ -314,30 +315,4 @@ func formatSize(bytes int64) string {
 	default:
 		return fmt.Sprintf("%d B", bytes)
 	}
-}
-
-func isCommonExclude(name string) bool {
-	excludes := []string{
-		".git", ".svn", ".hg",
-		"node_modules", "vendor", "__pycache__",
-		".venv", "venv", ".tox",
-		"dist", "build", "target",
-	}
-	for _, exclude := range excludes {
-		if name == exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
 }

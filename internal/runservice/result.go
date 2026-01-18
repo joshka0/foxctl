@@ -9,6 +9,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 )
@@ -171,7 +172,7 @@ func buildOutputWrapperWithPolicy(original []byte, digest string, size, limitKB 
 }
 
 func extractSummary(env map[string]any, limitKB, size int) string {
-	data, ok := env["data"].(map[string]any)
+	data, ok := maputil.AsStringMap(env["data"])
 	if !ok {
 		return fmt.Sprintf("Output exceeded %dKB inline limit (%d bytes)", limitKB, size)
 	}
@@ -198,7 +199,7 @@ func extractSummary(env map[string]any, limitKB, size int) string {
 func mergeMeta(existing any, additions map[string]any) map[string]any {
 	result := make(map[string]any)
 
-	if m, ok := existing.(map[string]any); ok {
+	if m, ok := maputil.AsStringMap(existing); ok {
 		for k, v := range m {
 			result[k] = v
 		}
@@ -216,7 +217,7 @@ func normalizeError(errField any) map[string]any {
 	if errField == nil {
 		return map[string]any{}
 	}
-	if m, ok := errField.(map[string]any); ok {
+	if m, ok := maputil.AsStringMap(errField); ok {
 		return m
 	}
 	return map[string]any{}

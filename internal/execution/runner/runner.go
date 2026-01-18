@@ -10,6 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	execrunner "github.com/jkatigb/agentctl/internal/execution/exec"
 	wasirunner "github.com/jkatigb/agentctl/internal/execution/wasi"
+	"github.com/jkatigb/agentctl/internal/platform/env"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
@@ -30,23 +31,23 @@ var sessionEnvVars = []string{
 // For WASI runners, baseEnv is nil and propagateSessionVars must be true to explicitly
 // propagate session-related vars since WASI starts with an empty environment.
 func buildSkillEnv(baseEnv []string, workspace string, propagateSessionVars bool) []string {
-	env := baseEnv
+	envVars := baseEnv
 
 	// Add workspace if provided
 	if workspace != "" {
-		env = append(env, fmt.Sprintf("AGENTCTL_WORKSPACE=%s", workspace))
+		envVars = append(envVars, fmt.Sprintf("AGENTCTL_WORKSPACE=%s", workspace))
 	}
 
 	// For WASI or other isolated runtimes, explicitly propagate session vars from parent
 	if propagateSessionVars {
 		for _, key := range sessionEnvVars {
-			if val := os.Getenv(key); val != "" {
-				env = append(env, fmt.Sprintf("%s=%s", key, val))
+			if val := env.GetString(key); val != "" {
+				envVars = append(envVars, fmt.Sprintf("%s=%s", key, val))
 			}
 		}
 	}
 
-	return env
+	return envVars
 }
 
 // RunOptions contains parameters for executing a skill.
@@ -54,6 +55,9 @@ type RunOptions struct {
 	Manifest     skill.Manifest
 	ArtifactPath string
 	Input        []byte
+	// WorkDir overrides the default working directory when running the skill.
+	// If empty, the detected workspace is used.
+	WorkDir string
 	// ExtraEnv contains additional environment variables to pass to the skill.
 	// Format: []string{"KEY=value", "KEY2=value2"}
 	ExtraEnv []string
@@ -63,12 +67,19 @@ type RunOptions struct {
 func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error) {
 	ws, _ := workspace.FromContext(ctx)
 	if strings.TrimSpace(ws) == "" {
-		if envWS := strings.TrimSpace(os.Getenv("AGENTCTL_WORKSPACE")); envWS != "" {
+		if envWS := env.GetString("AGENTCTL_WORKSPACE"); envWS != "" {
 			ws = workspace.Normalize(envWS)
 		}
 		if ws == "" {
 			ws = workspace.Detect("")
 		}
+	}
+	workDir := strings.TrimSpace(opts.WorkDir)
+	if workDir == "" {
+		workDir = ws
+	} else {
+		workDir = workspace.Normalize(workDir)
+		ws = workDir
 	}
 
 	switch opts.Manifest.Distribution.Type {
@@ -79,7 +90,7 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 		// Append extra env vars (these override any existing values)
 		r.Options.Env = append(r.Options.Env, opts.ExtraEnv...)
 		// Set working directory to workspace so skills can detect git repo, etc.
-		r.Options.WorkDir = ws
+		r.Options.WorkDir = workDir
 		return r.Run(ctx, opts.Input)
 	case "wasi":
 		r := wasirunner.Runner{Manifest: opts.Manifest, ModulePath: opts.ArtifactPath}
@@ -88,7 +99,7 @@ func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error
 		// Append extra env vars
 		r.Options.Env = append(r.Options.Env, opts.ExtraEnv...)
 		// Set working directory to workspace so skills can detect git repo, etc.
-		r.Options.WorkDir = ws
+		r.Options.WorkDir = workDir
 		return r.Run(ctx, opts.Input)
 	default:
 		return nil, nil, fmt.Errorf("unsupported distribution type %q", opts.Manifest.Distribution.Type)

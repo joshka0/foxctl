@@ -2,18 +2,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/gitutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -34,13 +32,13 @@ func validateGitAuthor(author string) error {
 		return nil // Empty is allowed, means no filter
 	}
 	if len(author) > 100 {
-		return errors.New("author name too long (max 100 characters)")
+		return skillerr.Validation("author name too long (max 100 characters)")
 	}
 	if strings.ContainsAny(author, "\n\r\t") {
-		return errors.New("author name contains invalid control characters")
+		return skillerr.Validation("author name contains invalid control characters")
 	}
 	if !gitAuthorPattern.MatchString(author) {
-		return errors.New("author name contains invalid characters (only letters, numbers, spaces, dots, hyphens, underscores, and apostrophes allowed)")
+		return skillerr.Validation("author name contains invalid characters (only letters, numbers, spaces, dots, hyphens, underscores, and apostrophes allowed)")
 	}
 	return nil
 }
@@ -48,10 +46,10 @@ func validateGitAuthor(author string) error {
 // validateGitSince validates the since input to prevent command injection
 func validateGitSince(since string) error {
 	if since == "" {
-		return errors.New("since parameter cannot be empty")
+		return skillerr.Validation("since parameter cannot be empty")
 	}
 	if len(since) > 20 {
-		return errors.New("since parameter too long")
+		return skillerr.Validation("since parameter too long")
 	}
 	// Check if it matches our shorthand pattern (e.g., "7d", "2w")
 	if gitSincePattern.MatchString(since) {
@@ -59,7 +57,7 @@ func validateGitSince(since string) error {
 	}
 	// If not shorthand, check if it's a safe ISO date or git-compatible format
 	// For now, we'll only allow the shorthand format to be safe
-	return errors.New("since parameter must be in format like '7d', '2w', '3m', or '1y'")
+	return skillerr.Validation("since parameter must be in format like '7d', '2w', '3m', or '1y'")
 }
 
 type input struct {
@@ -100,52 +98,45 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Check if git is available
-	if _, err := exec.LookPath("git"); err != nil {
-		return fmt.Errorf("git not found in PATH: %w", err)
+	gitPath, err := gitutil.RequireGit()
+	if err != nil {
+		return err
 	}
 
 	// Resolve workspace
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	// Check if we're in a git repository
-	if err := checkGitRepo(ctx, workspace); err != nil {
+	if err := gitutil.CheckRepo(ctx, gitPath, workspace); err != nil {
 		return err
 	}
 
 	// Execute appropriate git query
 	var results []gitResult
-	var err error
 
 	switch in.QueryType {
 	case "recent":
-		results, err = queryRecent(ctx, workspace, searchPath, in)
+		results, err = queryRecent(ctx, gitPath, workspace, searchPath, in)
 	case "hotspots":
-		results, err = queryHotspots(ctx, workspace, searchPath, in)
+		results, err = queryHotspots(ctx, gitPath, workspace, searchPath, in)
 	case "cochanged":
-		results, err = queryCochanged(ctx, workspace, searchPath, in)
+		results, err = queryCochanged(ctx, gitPath, workspace, searchPath, in)
 	case "blame":
-		results, err = queryBlame(ctx, workspace, searchPath, in)
+		results, err = queryBlame(ctx, gitPath, workspace, searchPath, in)
 	case "authors":
-		results, err = queryAuthors(ctx, workspace, searchPath, in)
+		results, err = queryAuthors(ctx, gitPath, workspace, searchPath, in)
 	default:
-		return fmt.Errorf("unknown query_type: %s (expected: recent, hotspots, cochanged, blame, authors)", in.QueryType)
+		return skillerr.Validationf("unknown query_type: %s (expected: recent, hotspots, cochanged, blame, authors)", in.QueryType)
 	}
 
 	if err != nil {
 		return err
 	}
 
-	// Prepare preview and artifact
-	preview, truncated := preparePreview(results, rc.MaxPreview)
-	artifact, err := persistResultsArtifact(ctx, rc, results, truncated)
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, results, rc.MaxPreview, "code_git", true)
 	if err != nil {
 		return err
 	}
@@ -154,37 +145,26 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	data := map[string]any{
 		"query_type":   in.QueryType,
 		"result_count": len(results),
-		"preview":      preview,
+		"preview":      previewResult.Preview,
 		"since":        in.Since,
 	}
 	if in.Path != "" {
-		data["path"] = relativeTo(workspace, searchPath)
+		data["path"] = pathutil.RelTo(workspace, searchPath)
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, "code/git", data)
 }
 
-func checkGitRepo(ctx context.Context, workspace string) error {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
-	cmd.Dir = workspace
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("not a git repository")
-	}
-	return nil
-}
-
-func queryRecent(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
+func queryRecent(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	// git log --since="..." --name-only --pretty=format:"%H|%an|%ae|%ad|%s"
 
 	// Validate inputs to prevent command injection
 	if err := validateGitSince(in.Since); err != nil {
-		return nil, fmt.Errorf("invalid since parameter: %w", err)
+		return nil, skillerr.WrapValidation("invalid since parameter", err)
 	}
 	if err := validateGitAuthor(in.Author); err != nil {
-		return nil, fmt.Errorf("invalid author parameter: %w", err)
+		return nil, skillerr.WrapValidation("invalid author parameter", err)
 	}
 
 	sinceArg := parseSinceArg(in.Since)
@@ -204,26 +184,23 @@ func queryRecent(ctx context.Context, workspace, path string, in input) ([]gitRe
 		args = append(args, "--", path)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = workspace
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git log failed: %w", err)
+	result := executil.Run(ctx, workspace, gitPath, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git log failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseRecentChanges(output, workspace, in.MaxResults), nil
+	return parseRecentChanges(result.Stdout, workspace, in.MaxResults), nil
 }
 
-func queryHotspots(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
+func queryHotspots(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	// git log --since="..." --pretty=format: --name-only | sort | uniq -c | sort -rn
 
 	// Validate inputs to prevent command injection
 	if err := validateGitSince(in.Since); err != nil {
-		return nil, fmt.Errorf("invalid since parameter: %w", err)
+		return nil, skillerr.WrapValidation("invalid since parameter", err)
 	}
 	if err := validateGitAuthor(in.Author); err != nil {
-		return nil, fmt.Errorf("invalid author parameter: %w", err)
+		return nil, skillerr.WrapValidation("invalid author parameter", err)
 	}
 
 	sinceArg := parseSinceArg(in.Since)
@@ -243,34 +220,28 @@ func queryHotspots(ctx context.Context, workspace, path string, in input) ([]git
 		args = append(args, "--", path)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = workspace
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git log failed: %w", err)
+	result := executil.Run(ctx, workspace, gitPath, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git log failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseHotspots(output, workspace, in.MaxResults), nil
+	return parseHotspots(result.Stdout, workspace, in.MaxResults), nil
 }
 
-func queryCochanged(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
+func queryCochanged(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	if path == workspace {
-		return nil, fmt.Errorf("cochanged query requires a specific file path")
+		return nil, skillerr.Validation("cochanged query requires a specific file path")
 	}
 
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 
 	// Get commits that touched this file
-	cmd := exec.CommandContext(ctx, "git", "log", "--all", "--format=%H", "--", relPath)
-	cmd.Dir = workspace
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git log failed: %w", err)
+	result := executil.Run(ctx, workspace, gitPath, "log", "--all", "--format=%H", "--", relPath)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git log failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	commits := strings.Split(strings.TrimSpace(string(output)), "\n")
+	commits := strings.Split(strings.TrimSpace(string(result.Stdout)), "\n")
 	if len(commits) == 0 || commits[0] == "" {
 		return []gitResult{}, nil
 	}
@@ -278,15 +249,12 @@ func queryCochanged(ctx context.Context, workspace, path string, in input) ([]gi
 	// For each commit, get other files changed
 	cochangeMap := make(map[string]int)
 	for _, commit := range commits {
-		cmd := exec.CommandContext(ctx, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit)
-		cmd.Dir = workspace
-
-		output, err := cmd.Output()
-		if err != nil {
+		result := executil.Run(ctx, workspace, gitPath, "diff-tree", "--no-commit-id", "--name-only", "-r", commit)
+		if result.Err != nil {
 			continue
 		}
 
-		files := strings.Split(strings.TrimSpace(string(output)), "\n")
+		files := strings.Split(strings.TrimSpace(string(result.Stdout)), "\n")
 		for _, file := range files {
 			if file != "" && file != relPath {
 				cochangeMap[file]++
@@ -316,29 +284,26 @@ func queryCochanged(ctx context.Context, workspace, path string, in input) ([]gi
 	return results, nil
 }
 
-func queryBlame(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
+func queryBlame(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	if path == workspace {
-		return nil, fmt.Errorf("blame query requires a specific file path")
+		return nil, skillerr.Validation("blame query requires a specific file path")
 	}
 
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 
 	// git blame -e --line-porcelain
-	cmd := exec.CommandContext(ctx, "git", "blame", "-e", "--line-porcelain", "--", relPath)
-	cmd.Dir = workspace
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git blame failed: %w", err)
+	result := executil.Run(ctx, workspace, gitPath, "blame", "-e", "--line-porcelain", "--", relPath)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git blame failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseBlame(output, relPath, in.MaxResults), nil
+	return parseBlame(result.Stdout, relPath, in.MaxResults), nil
 }
 
-func queryAuthors(ctx context.Context, workspace, path string, in input) ([]gitResult, error) {
+func queryAuthors(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	// Validate inputs to prevent command injection
 	if err := validateGitSince(in.Since); err != nil {
-		return nil, fmt.Errorf("invalid since parameter: %w", err)
+		return nil, skillerr.WrapValidation("invalid since parameter", err)
 	}
 
 	sinceArg := parseSinceArg(in.Since)
@@ -353,15 +318,12 @@ func queryAuthors(ctx context.Context, workspace, path string, in input) ([]gitR
 		args = append(args, "--", path)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = workspace
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git log failed: %w", err)
+	result := executil.Run(ctx, workspace, gitPath, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git log failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	return parseAuthors(output, in.MaxResults), nil
+	return parseAuthors(result.Stdout, in.MaxResults), nil
 }
 
 func parseRecentChanges(output []byte, _ string, maxResults int) []gitResult {
@@ -569,45 +531,3 @@ func parseSinceArg(since string) string {
 	}
 	return since
 }
-
-func preparePreview(results []gitResult, limit int) ([]gitResult, bool) {
-	preview, truncated := skillout.PreparePreview(results, limit)
-	if truncated {
-		dup := make([]gitResult, len(preview))
-		copy(dup, preview)
-		preview = dup
-	}
-	return preview, truncated
-}
-
-func persistResultsArtifact(ctx context.Context, rc *skillmain.RunContext, results []gitResult, truncated bool) (skillmain.Artifact, error) {
-	if !truncated {
-		return skillmain.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, r := range results {
-		if err := enc.Encode(r); err != nil {
-			return skillmain.Artifact{}, fmt.Errorf("encode result: %w", err)
-		}
-	}
-	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_git")
-}
-
-func relativeTo(base, target string) string {
-	if base == "" {
-		if rel, err := filepath.Rel(".", target); err == nil {
-			return filepath.ToSlash(rel)
-		}
-		return filepath.ToSlash(target)
-	}
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-

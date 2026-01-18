@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # todo-sync.sh - Sync Claude Code's TodoWrite with agentctl todo skill
+# Last tested: 2026-01-14
 #
 # This hook triggers on PostToolUse for TodoWrite and syncs the todo list
 # with agentctl's task management system using the todo/sync_from_provider skill.
@@ -61,11 +62,16 @@ fi
 # Workspace from environment
 workspace="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 
-# Session ID detection
-SESSION_ID="${AGENTCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-${OPENCODE_SESSION_ID:-}}}"
+# Session ID detection - PRIORITIZE payload over cached files
+# Claude Code sends sessionID in PostToolUse payload
+SESSION_ID="$(printf '%s' "$payload" | jq -r '.sessionID // .session_id // ""' 2>/dev/null || true)"
+
+# Fall back to env vars
 if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
-  SESSION_ID="$(printf '%s' "$payload" | jq -r '.sessionID // .session_id // ""' 2>/dev/null || true)"
+  SESSION_ID="${AGENTCTL_SESSION_ID:-${CLAUDE_SESSION_ID:-${OPENCODE_SESSION_ID:-}}}"
 fi
+
+# Last resort: check identity files (may be stale)
 if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
   agentctl_home="${AGENTCTL_HOME:-$HOME/.agentctl}"
   workspace_hash="$(printf '%s' "$workspace" | shasum -a 256 | cut -c1-16)"
@@ -77,6 +83,26 @@ if [[ -z "$SESSION_ID" || "$SESSION_ID" == "null" ]]; then
       break
     fi
   done
+fi
+
+# Update identity file if we got session from payload (keeps cache fresh)
+if [[ -n "$SESSION_ID" && "$SESSION_ID" != "null" ]]; then
+  agentctl_home="${AGENTCTL_HOME:-$HOME/.agentctl}"
+  workspace_hash="$(printf '%s' "$workspace" | shasum -a 256 | cut -c1-16)"
+  identity_dir="$agentctl_home/sessions/active"
+  identity_file="$identity_dir/${workspace_hash}-claude.json"
+  mkdir -p "$identity_dir"
+  # Update if file doesn't exist or has different session_id
+  current_sid="$(jq -r '.session_id // ""' "$identity_file" 2>/dev/null || echo '')"
+  if [[ "$current_sid" != "$SESSION_ID" ]]; then
+    jq -nc \
+      --arg sid "$SESSION_ID" \
+      --arg ws "$workspace" \
+      --arg wsh "$workspace_hash" \
+      '{session_id: $sid, agent_id: "claude", provider: "claude", workspace: $ws, workspace_hash: $wsh, started_at: (now | todate), last_activity: (now | todate), detected_from: "hook_payload"}' \
+      > "$identity_file"
+    [[ -n "$DEBUG" ]] && echo "DEBUG: updated identity file with session $SESSION_ID" >&2
+  fi
 fi
 
 [[ -n "$DEBUG" ]] && echo "DEBUG: session_id=$SESSION_ID, workspace=$workspace" >&2
@@ -120,19 +146,28 @@ rm -f "$sync_stderr"
 created=$(printf '%s' "$result" | jq -r '.data.created // 0')
 updated=$(printf '%s' "$result" | jq -r '.data.updated // 0')
 completed=$(printf '%s' "$result" | jq -r '.data.completed // 0')
+removed=$(printf '%s' "$result" | jq -r '.data.removed // 0')
 mapped=$(printf '%s' "$result" | jq -r '.data.mapped // 0')
 deps_added=$(printf '%s' "$result" | jq -r '.data.deps_added // 0')
 warnings=$(printf '%s' "$result" | jq -r '.data.warnings // [] | join("; ")')
 
+# Queue task embeddings in background if any tasks were created/updated
+if ((created > 0 || updated > 0)); then
+  embed_input=$(jq -nc --arg ws "$workspace" '{scope: "workspace", workspace_id: $ws}')
+  ("$AGENTCTL_BIN" run embedding/tasks --input "$embed_input" 2>/dev/null &) || true
+  [[ -n "$DEBUG" ]] && echo "DEBUG: queued task embeddings for workspace" >&2
+fi
+
 # Build response
 context_parts=()
 
-total=$((created + updated + completed))
+total=$((created + updated + completed + removed))
 if ((total > 0 || mapped > 0)); then
   summary="Synced $((mapped + created)) todos"
   [[ $created -gt 0 ]] && summary="$summary, created $created"
   [[ $updated -gt 0 ]] && summary="$summary, updated $updated"
   [[ $completed -gt 0 ]] && summary="$summary, completed $completed"
+  [[ $removed -gt 0 ]] && summary="$summary, removed $removed"
   [[ $deps_added -gt 0 ]] && summary="$summary, $deps_added deps inferred"
   context_parts+=("**Todo Sync:** $summary")
 fi
@@ -140,6 +175,40 @@ fi
 # Add warnings if any
 if [[ -n "$warnings" && "$warnings" != "null" ]]; then
   context_parts+=("**Warnings:** $warnings")
+fi
+
+# Link newly created tasks to active epic (if any)
+# Validate created is a positive integer (defense in depth)
+if [[ "$created" =~ ^[0-9]+$ ]] && ((created > 0)); then
+  db_path="${AGENTCTL_HOME:-$HOME/.agentctl}/storage/tasks.db"
+  if [[ -f "$db_path" ]] && [[ -n "$SESSION_ID" && "$SESSION_ID" != "null" ]]; then
+    # Escape single quotes for SQL safety
+    workspace_safe="${workspace//\'/\'\'}"
+    session_id_safe="${SESSION_ID//\'/\'\'}"
+    # Check for active epic in this workspace+session
+    active_epic=$(sqlite3 "$db_path" "SELECT epic_id FROM active_epics WHERE workspace_id = '$workspace_safe' AND session_id = '$session_id_safe'" 2>/dev/null || true)
+    if [[ -n "$active_epic" && "$active_epic" != "" ]]; then
+      # Escape epic_id for SQL safety
+      active_epic_safe="${active_epic//\'/\'\'}"
+      # Link all tasks without an epic_id in this workspace to the active epic
+      linked=$(sqlite3 "$db_path" "
+        UPDATE tasks SET epic_id = '$active_epic_safe'
+        WHERE workspace_id = '$workspace_safe'
+          AND (epic_id IS NULL OR epic_id = '')
+          AND id IN (
+            SELECT id FROM tasks
+            WHERE workspace_id = '$workspace_safe'
+            ORDER BY created_at DESC
+            LIMIT $created
+          );
+        SELECT changes();
+      " 2>/dev/null || echo "0")
+      if [[ "$linked" -gt 0 ]]; then
+        context_parts+=("**Epic:** Linked $linked tasks to active epic")
+        [[ -n "$DEBUG" ]] && echo "DEBUG: linked $linked tasks to epic $active_epic" >&2
+      fi
+    fi
+  fi
 fi
 
 # Phase 2: Outbound sync (when enabled)

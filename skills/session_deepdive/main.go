@@ -2,17 +2,15 @@
 package main
 
 import (
-	"bufio"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
+	"github.com/jkatigb/agentctl/internal/sessionkit/archive"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -126,10 +124,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Read raw content from archive
-	rawContents, err := readChunksFromArchive(archivePath, targetIndices)
+	rawContents, err := archive.ReadChunksFromArchive(archivePath, targetIndices)
 	if err != nil {
-		return skillerr.IO("read archive", skillerr.WithCause(err),
-			skillerr.WithHint("Failed to read archive file; check file exists and is accessible"))
+		return skillerr.WrapIO(
+			"read archive",
+			err,
+			skillerr.WithHint("Failed to read archive file; check file exists and is accessible."),
+		)
 	}
 
 	// Build output
@@ -151,7 +152,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 
 		if raw, ok := rawContents[idx]; ok {
-			detail.RawContent = raw
+			detail.RawContent = json.RawMessage(raw)
 		}
 
 		details = append(details, detail)
@@ -167,53 +168,4 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	return skillout.Emit(rc, command, output)
-}
-
-// readChunksFromArchive reads specific lines from a gzipped JSONL file.
-func readChunksFromArchive(archivePath string, indices []int) (map[int]json.RawMessage, error) {
-	// Create a set of target indices for fast lookup
-	targetSet := make(map[int]bool)
-	for _, idx := range indices {
-		targetSet[idx] = true
-	}
-
-	// Open gzipped file
-	file, err := os.Open(archivePath)
-	if err != nil {
-		return nil, fmt.Errorf("open archive: %w", err)
-	}
-	defer file.Close()
-
-	gzReader, err := gzip.NewReader(file)
-	if err != nil {
-		return nil, fmt.Errorf("create gzip reader: %w", err)
-	}
-	defer gzReader.Close()
-
-	// Read line by line
-	results := make(map[int]json.RawMessage)
-	scanner := bufio.NewScanner(gzReader)
-	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024) // 10MB max line
-
-	lineNum := 0
-	for scanner.Scan() {
-		if targetSet[lineNum] {
-			// Make a copy of the line data
-			line := make([]byte, len(scanner.Bytes()))
-			copy(line, scanner.Bytes())
-			results[lineNum] = json.RawMessage(line)
-
-			// Check if we have all we need
-			if len(results) == len(targetSet) {
-				break
-			}
-		}
-		lineNum++
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan archive: %w", err)
-	}
-
-	return results, nil
 }

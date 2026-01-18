@@ -3,17 +3,15 @@
 package runner
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"reflect"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
@@ -75,53 +73,7 @@ func ResolveSessionIDWithFallback(workspace, agentctlHome string) string {
 // NewRunnerContext initializes a RunContext from configuration.
 // Deprecated: Use skillmain.BuildRunContext directly.
 func NewRunnerContext(cfg config.Config, stdout io.Writer) (*RunnerContext, error) {
-	store, err := cas.NewStore(cfg.Paths.CAS)
-	if err != nil {
-		return nil, fmt.Errorf("skillslib: cas store: %w", err)
-	}
-
-	workspace := strings.TrimSpace(os.Getenv("AGENTCTL_WORKSPACE"))
-	if workspace == "" {
-		var err error
-		workspace, err = os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("skillslib: resolve workspace: %w", err)
-		}
-	}
-
-	var allowedRoots []string
-	if cfg.Home != "" {
-		allowedRoots = append(allowedRoots, cfg.Home)
-	}
-	if tmp := os.TempDir(); tmp != "" {
-		allowedRoots = append(allowedRoots, tmp)
-	}
-
-	pathValidator, err := policy.NewPathValidator(workspace, allowedRoots)
-	if err != nil {
-		return nil, fmt.Errorf("skillslib: path validator: %w", err)
-	}
-
-	agentID := os.Getenv("AGENTCTL_AGENT_ID")
-	if agentID == "" {
-		agentID = "agentctl"
-	}
-
-	// Check for no-CAS mode (disables truncation)
-	noCAS := os.Getenv("AGENTCTL_NO_CAS") == "1"
-
-	return &RunnerContext{
-		Config:        cfg,
-		CASStore:      store,
-		PathValidator: pathValidator,
-		InlineKB:      cfg.InlineOutputKB,
-		Stdout:        stdout,
-		MaxPreview:    5,
-		SessionID:     ResolveSessionIDWithFallback(workspace, cfg.Home),
-		AgentID:       agentID,
-		Workspace:     workspace,
-		NoCAS:         noCAS,
-	}, nil
+	return skillmain.BuildRunContext(cfg, stdout)
 }
 
 // Emit writes an OK envelope with the given command and data.
@@ -183,30 +135,5 @@ func extractArtifact(m map[string]any) string {
 // The function converts linesPerPage to bytes (~80 bytes per line heuristic) for the
 // --page-size flag. Pagination uses --page and --page-size (bytes), not line-based limits.
 func BuildCASHint(artifact Artifact, linesPerPage int) envelope.CASHint {
-	hint := envelope.CASHint{
-		Digest:      artifact.Digest,
-		TotalBytes:  artifact.Size,
-		ContentType: artifact.Kind,
-		ReadCommand: fmt.Sprintf("agentctl cas read %s", artifact.Digest),
-		GetCommand:  fmt.Sprintf("agentctl cas get %s", artifact.Digest),
-	}
-
-	// Calculate pagination if applicable
-	// Convert linesPerPage to bytes (~80 bytes per line for typical text/JSON)
-	if linesPerPage > 0 && artifact.Size > 0 {
-		bytesPerPage := linesPerPage * 80 // ~80 bytes per line heuristic
-		if int(artifact.Size) > bytesPerPage {
-			hint.PageCount = (int(artifact.Size) + bytesPerPage - 1) / bytesPerPage
-			hint.PageSize = bytesPerPage
-			// Use --page-size (bytes) for pagination; user can add --page N to navigate
-			hint.ReadCommand = fmt.Sprintf("agentctl cas read %s --page-size %d", artifact.Digest, bytesPerPage)
-		}
-	}
-
-	// Detect binary content
-	if artifact.Kind != "" && !strings.HasPrefix(artifact.Kind, "text/") && artifact.Kind != "application/json" {
-		hint.IsBinary = true
-	}
-
-	return hint
+	return skillout.BuildCASHint(artifact, linesPerPage)
 }

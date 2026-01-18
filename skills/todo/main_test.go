@@ -282,7 +282,7 @@ func TestTodoChildAndComplete(t *testing.T) {
 		Gotchas: "remember config",
 	})
 	task := taskFromData(t, result)
-	if task["status"].(string) != statusDone {
+	if task["status"].(string) != tasks.StatusCompleted {
 		t.Fatalf("expected child complete, got %s", task["status"])
 	}
 	if task["gotchas"].(string) != "remember config" {
@@ -422,8 +422,8 @@ func TestTodoComplete_WithReviewGate_AllowsReviewedTask(t *testing.T) {
 
 	data := env.completeTask(t, completeRequest{ID: id})
 	task := taskFromData(t, data)
-	if task["status"].(string) != statusDone {
-		t.Fatalf("expected status %q, got %q", statusDone, task["status"])
+	if task["status"].(string) != tasks.StatusCompleted {
+		t.Fatalf("expected status %q, got %q", tasks.StatusCompleted, task["status"])
 	}
 }
 

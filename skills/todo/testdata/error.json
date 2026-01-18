@@ -2,6 +2,9 @@
   "version": 1,
   "status": "error",
   "command": "todo/manage",
+  "data": {
+    "hint": "For examples, run: agentctl run todo/manage --examples"
+  },
   "meta": {
     "ts": "2025-01-01T12:00:00Z",
     "duration_ms": 123,
@@ -9,7 +12,7 @@
     "runner": "exec"
   },
   "error": {
-    "code": "ERUNTIME",
+    "code": "EARG",
     "message": "title is required"
   }
 }

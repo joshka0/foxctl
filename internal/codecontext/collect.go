@@ -297,8 +297,8 @@ func containsDefinition(line, symbolName string) bool {
 		"type " + symbolName,
 		"const " + symbolName,
 		"var " + symbolName,
-		"def " + symbolName,    // Python
-		"class " + symbolName,  // Python/JS
+		"def " + symbolName,      // Python
+		"class " + symbolName,    // Python/JS
 		"function " + symbolName, // JS
 	}
 

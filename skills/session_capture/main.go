@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,34 +15,46 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
+	platformpath "github.com/jkatigb/agentctl/internal/platform/pathutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
+	"github.com/jkatigb/agentctl/internal/sessionkit/codexjsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
 
 // Input defines the skill input parameters.
 type Input struct {
 	Workspace  string `json:"workspace"`
 	SessionID  string `json:"session_id,omitempty"`
+	Source     string `json:"source,omitempty"` // "claude" (default) or "codex"
 	ClaudeHome string `json:"claude_home,omitempty"`
+	CodexHome  string `json:"codex_home,omitempty"`
+	Scan       bool   `json:"scan,omitempty"`
+	ScanLimit  int    `json:"scan_limit,omitempty"`
 	Summarize  bool   `json:"summarize,omitempty"`
 	Force      bool   `json:"force,omitempty"`
 }
 
 // Output defines the skill output.
 type Output struct {
-	SessionID       string   `json:"session_id"`
-	WorkspacePath   string   `json:"workspace_path"`
-	ProjectName     string   `json:"project_name"`
-	GitBranch       string   `json:"git_branch"`
-	MessageCount    int      `json:"message_count"`
-	UserTurns       int      `json:"user_turns"`
-	ToolInvocations int      `json:"tool_invocations"`
-	TotalTokens     int      `json:"total_tokens"`
-	Status          string   `json:"status"`
-	RawJSONLPath    string   `json:"raw_jsonl_path"`
-	HighSignal      []string `json:"high_signal,omitempty"` // Preview of extracted content
-	Message         string   `json:"message"`
+	SessionID        string   `json:"session_id"`
+	WorkspacePath    string   `json:"workspace_path"`
+	ProjectName      string   `json:"project_name"`
+	GitBranch        string   `json:"git_branch"`
+	MessageCount     int      `json:"message_count"`
+	UserTurns        int      `json:"user_turns"`
+	ToolInvocations  int      `json:"tool_invocations"`
+	TotalTokens      int      `json:"total_tokens"`
+	Status           string   `json:"status"`
+	RawJSONLPath     string   `json:"raw_jsonl_path"`
+	HighSignal       []string `json:"high_signal,omitempty"` // Preview of extracted content
+	SessionsScanned  int      `json:"sessions_scanned,omitempty"`
+	SessionsMatched  int      `json:"sessions_matched,omitempty"`
+	SessionsCaptured int      `json:"sessions_captured,omitempty"`
+	SessionsSkipped  int      `json:"sessions_skipped,omitempty"`
+	Message          string   `json:"message"`
 }
 
 const command = "session/capture"
@@ -52,12 +65,26 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
-	in.Workspace = sessionkit.WorkspaceOrDefault(in.Workspace, rc.Workspace)
+	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
+
+	source := strings.ToLower(strings.TrimSpace(in.Source))
+	if source == "" {
+		source = "claude"
+	}
+	if source != "claude" && source != "codex" {
+		return skillerr.Arg("source must be \"claude\" or \"codex\"")
+	}
 
 	// Default Claude home
-	if in.ClaudeHome == "" {
+	if source == "claude" && in.ClaudeHome == "" {
 		homeDir, _ := os.UserHomeDir()
 		in.ClaudeHome = filepath.Join(homeDir, ".claude")
+	}
+
+	// Default Codex home
+	if source == "codex" && in.CodexHome == "" {
+		homeDir, _ := os.UserHomeDir()
+		in.CodexHome = filepath.Join(homeDir, ".codex")
 	}
 
 	// Open sessions store
@@ -67,18 +94,45 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 	defer cleanup()
 
-	// Find the project directory in Claude's storage
-	projectDir := claudejsonl.ClaudeProjectDir(in.Workspace)
-	if projectDir == "" {
-		return skillerr.Arg(fmt.Sprintf("no Claude Code project found for workspace: %s", in.Workspace),
-			skillerr.WithHint("Ensure Claude Code has been used in this workspace"))
+	if source == "codex" && in.Scan {
+		if strings.TrimSpace(in.SessionID) != "" {
+			return skillerr.Arg("session_id must be empty when scan=true")
+		}
+		return scanCodexSessions(ctx, rc, in, sessionStore)
 	}
 
-	// Find session file(s)
-	sessionFile, sessionID := findSessionFile(projectDir, in.SessionID)
-	if sessionFile == "" {
-		return skillerr.Arg("no session file found in project directory",
-			skillerr.WithHint("Check that session_id is correct or omit to use most recent session"))
+	var sessionFile string
+	sessionID := in.SessionID
+
+	switch source {
+	case "claude":
+		// Find the project directory in Claude's storage
+		projectDir := claudejsonl.ClaudeProjectDir(in.Workspace)
+		if projectDir == "" {
+			return skillerr.Arg(fmt.Sprintf("no Claude Code project found for workspace: %s", in.Workspace),
+				skillerr.WithHint("Ensure Claude Code has been used in this workspace"))
+		}
+
+		// Debug: log the project dir
+		fmt.Fprintf(os.Stderr, "DEBUG: workspace=%s projectDir=%s\n", in.Workspace, projectDir)
+
+		// Find session file(s)
+		sessionFile, sessionID = findSessionFile(projectDir, in.SessionID)
+		if sessionFile == "" {
+			return skillerr.Arg(fmt.Sprintf("no session file found in project directory: %s (workspace: %s)", projectDir, in.Workspace),
+				skillerr.WithHint("Check that session_id is correct or omit to use most recent session"))
+		}
+	case "codex":
+		if in.SessionID != "" {
+			sessionFile = codexjsonl.LocateSessionJSONL(in.SessionID)
+			sessionID = in.SessionID
+		} else {
+			sessionFile, sessionID = codexjsonl.LocateMostRecentSessionJSONL()
+		}
+		if sessionFile == "" {
+			return skillerr.Arg("no Codex session file found",
+				skillerr.WithHint("Check that session_id is correct or omit to use most recent session"))
+		}
 	}
 
 	// Check if session already exists
@@ -102,24 +156,39 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 	}
 
-	// Parse the JSONL file using claudejsonl Reader
-	reader, err := claudejsonl.OpenReader(sessionFile)
-	if err != nil {
-		return skillerr.IO("open session file", skillerr.WithCause(err))
+	var session storage.Session
+	var highSignal []string
+
+	switch source {
+	case "claude":
+		// Parse the JSONL file using claudejsonl Reader
+		reader, err := claudejsonl.OpenReader(sessionFile)
+		if err != nil {
+			return skillerr.IO("open session file", skillerr.WithCause(err))
+		}
+		defer reader.Close()
+
+		messages, err := reader.ReadAll()
+		if err != nil {
+			return skillerr.IO("parse session file", skillerr.WithCause(err),
+				skillerr.WithHint("Ensure JSONL file is valid and not corrupted"))
+		}
+
+		// Extract session metadata and stats
+		session = extractSession(sessionID, sessionFile, in.Workspace, messages)
+
+		// Extract high-signal content for preview
+		highSignal = extractHighSignal(messages, 5)
+	case "codex":
+		messages, err := readCodexMessages(sessionFile)
+		if err != nil {
+			return skillerr.IO("parse session file", skillerr.WithCause(err),
+				skillerr.WithHint("Ensure JSONL file is valid and not corrupted"))
+		}
+
+		session = extractCodexSession(sessionID, sessionFile, in.Workspace, messages)
+		highSignal = extractCodexHighSignal(messages, 5)
 	}
-	defer reader.Close()
-
-	messages, err := reader.ReadAll()
-	if err != nil {
-		return skillerr.IO("parse session file", skillerr.WithCause(err),
-			skillerr.WithHint("Ensure JSONL file is valid and not corrupted"))
-	}
-
-	// Extract session metadata and stats
-	session := extractSession(sessionID, sessionFile, in.Workspace, messages)
-
-	// Extract high-signal content for preview
-	highSignal := extractHighSignal(messages, 5)
 
 	// Save to store
 	saved, err := sessionStore.Save(ctx, session)
@@ -215,6 +284,7 @@ func extractSession(sessionID, rawPath, workspace string, messages []*claudejson
 		ID:            sessionID,
 		WorkspacePath: workspace,
 		RawJSONLPath:  rawPath,
+		AgentType:     "claude",
 	}
 
 	var minTime, maxTime time.Time
@@ -313,19 +383,256 @@ func extractHighSignal(messages []*claudejsonl.ReadMessage, limit int) []string 
 
 		// Check for compact summary messages
 		if summary, ok := claudejsonl.MaybeCompactSummary(msg); ok && summary != "" {
-			signals = append(signals, fmt.Sprintf("[Summary] %s", truncate(summary, 100)))
+			signals = append(signals, fmt.Sprintf("[Summary] %s", skillout.TruncateSingleLine(summary, 100)))
 		}
 	}
 
 	return signals
 }
 
-func truncate(s string, maxLen int) string {
-	// Remove newlines for cleaner output
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.TrimSpace(s)
-	if len(s) <= maxLen {
-		return s
+func readCodexMessages(path string) ([]*codexjsonl.ReadMessage, error) {
+	reader, err := codexjsonl.OpenReader(path)
+	if err != nil {
+		return nil, err
 	}
-	return s[:maxLen-3] + "..."
+	defer reader.Close()
+
+	return reader.ReadAll()
+}
+
+func extractCodexSession(sessionID, rawPath, workspace string, messages []*codexjsonl.ReadMessage) storage.Session {
+	session := storage.Session{
+		ID:            sessionID,
+		WorkspacePath: workspace,
+		RawJSONLPath:  rawPath,
+		AgentType:     "codex",
+	}
+
+	var minTime, maxTime time.Time
+	toolSet := make(map[string]bool)
+
+	for _, rm := range messages {
+		if rm == nil || rm.Message == nil {
+			continue
+		}
+		msg := rm.Message
+		if msg.Type != "response_item" {
+			continue
+		}
+
+		session.MessageCount++
+
+		if !rm.Timestamp.IsZero() {
+			if minTime.IsZero() || rm.Timestamp.Before(minTime) {
+				minTime = rm.Timestamp
+			}
+			if maxTime.IsZero() || rm.Timestamp.After(maxTime) {
+				maxTime = rm.Timestamp
+			}
+		}
+
+		switch codexjsonl.Classify(msg) {
+		case codexjsonl.ChunkTypeUserRequest:
+			session.UserTurns++
+		case codexjsonl.ChunkTypeToolUse:
+			session.ToolInvocations++
+			tools := codexjsonl.ExtractTools(msg)
+			for _, tool := range tools {
+				toolSet[tool] = true
+			}
+		}
+	}
+
+	if !minTime.IsZero() {
+		session.StartedAt = minTime
+	}
+	if !maxTime.IsZero() {
+		session.EndedAt = maxTime
+	}
+
+	if session.WorkspacePath != "" {
+		session.ProjectName = filepath.Base(session.WorkspacePath)
+	}
+
+	if len(toolSet) > 0 {
+		tools := make([]string, 0, len(toolSet))
+		for tool := range toolSet {
+			tools = append(tools, tool)
+		}
+		sort.Strings(tools)
+		session.ToolsPattern = strings.Join(tools, ", ")
+	}
+
+	return session
+}
+
+func extractCodexHighSignal(messages []*codexjsonl.ReadMessage, limit int) []string {
+	var signals []string
+
+	for _, rm := range messages {
+		if len(signals) >= limit {
+			break
+		}
+		if rm == nil || rm.Message == nil {
+			continue
+		}
+		msg := rm.Message
+		if msg.Type != "response_item" {
+			continue
+		}
+
+		if codexjsonl.Classify(msg) == codexjsonl.ChunkTypeUserRequest {
+			preview := codexjsonl.ExtractPreview(msg, 100)
+			if preview != "" {
+				signals = append(signals, fmt.Sprintf("[User] %s", preview))
+			}
+		}
+	}
+
+	return signals
+}
+
+func scanCodexSessions(ctx context.Context, rc *skillmain.RunContext, in Input, sessionStore *sessions.Store) error {
+	files, err := codexjsonl.ListSessionFiles(in.CodexHome)
+	if err != nil {
+		return skillerr.IO("list codex sessions", skillerr.WithCause(err))
+	}
+	if len(files) == 0 {
+		return skillout.Emit(rc, command, Output{
+			Status:          "scanned",
+			SessionsScanned: 0,
+			Message:         "No Codex session files found",
+		})
+	}
+
+	workspacePaths := resolveWorkspaceCandidates(in.Workspace)
+	repoURL := normalizeGitURL(gitRemoteURL(ctx, in.Workspace))
+
+	var scanned, matched, captured, skipped int
+	for _, file := range files {
+		if in.ScanLimit > 0 && scanned >= in.ScanLimit {
+			break
+		}
+		scanned++
+		if strings.TrimSpace(file.ID) == "" {
+			skipped++
+			continue
+		}
+
+		if !in.Force {
+			existing, err := sessionStore.Get(ctx, file.ID)
+			if err == nil && existing.ID != "" {
+				skipped++
+				continue
+			}
+		}
+
+		meta, err := codexjsonl.ExtractMetadata(file.Path)
+		if err != nil {
+			skipped++
+			continue
+		}
+		if !matchesCodexWorkspace(meta, workspacePaths, repoURL) {
+			continue
+		}
+		matched++
+
+		messages, err := readCodexMessages(file.Path)
+		if err != nil {
+			skipped++
+			continue
+		}
+		session := extractCodexSession(file.ID, file.Path, in.Workspace, messages)
+
+		if _, err := sessionStore.Save(ctx, session); err != nil {
+			skipped++
+			continue
+		}
+		captured++
+	}
+
+	output := Output{
+		Status:           "scanned",
+		SessionsScanned:  scanned,
+		SessionsMatched:  matched,
+		SessionsCaptured: captured,
+		SessionsSkipped:  skipped,
+		Message:          fmt.Sprintf("Scanned %d Codex sessions, matched %d, captured %d, skipped %d", scanned, matched, captured, skipped),
+	}
+
+	return skillout.Emit(rc, command, output)
+}
+
+func resolveWorkspaceCandidates(path string) []string {
+	cleaned := filepath.Clean(path)
+	if cleaned == "" {
+		return nil
+	}
+
+	candidates := []string{cleaned}
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil && resolved != "" && resolved != cleaned {
+		candidates = append(candidates, resolved)
+	}
+	return candidates
+}
+
+func matchesCodexWorkspace(meta codexjsonl.SessionMetadata, workspacePaths []string, repoURL string) bool {
+	if meta.CWD != "" {
+		cleaned := filepath.Clean(meta.CWD)
+		for _, ws := range workspacePaths {
+			if ws == "" {
+				continue
+			}
+			if platformpath.IsUnderWorkspace(cleaned, ws) || platformpath.IsUnderWorkspace(ws, cleaned) {
+				return true
+			}
+		}
+	}
+
+	if repoURL != "" && meta.RepositoryURL != "" {
+		return normalizeGitURL(meta.RepositoryURL) == repoURL
+	}
+
+	return false
+}
+
+func gitRemoteURL(ctx context.Context, workspace string) string {
+	if strings.TrimSpace(workspace) == "" {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	cmd.Dir = workspace
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(out))
+}
+
+func normalizeGitURL(url string) string {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return ""
+	}
+	url = strings.TrimSuffix(url, ".git")
+
+	if strings.HasPrefix(url, "git@") {
+		url = strings.TrimPrefix(url, "git@")
+		url = strings.Replace(url, ":", "/", 1)
+		return url
+	}
+
+	if strings.HasPrefix(url, "https://") {
+		return strings.TrimPrefix(url, "https://")
+	}
+	if strings.HasPrefix(url, "http://") {
+		return strings.TrimPrefix(url, "http://")
+	}
+
+	return url
 }

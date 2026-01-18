@@ -66,6 +66,24 @@ type DB interface {
 	GetDriverType() DriverType
 }
 
+// Syncer is an optional interface for databases that support remote sync.
+// Use type assertion to check if a DB supports sync:
+//
+//	if syncer, ok := db.(Syncer); ok && syncer.IsSyncEnabled() {
+//	    err := syncer.Sync()
+//	}
+type Syncer interface {
+	// Sync triggers a manual sync with the remote server.
+	// Returns nil immediately if sync is not configured (local-only mode).
+	Sync() error
+
+	// IsSyncEnabled returns true if remote sync is configured.
+	IsSyncEnabled() bool
+
+	// GetSyncURL returns the configured sync URL (empty if local-only).
+	GetSyncURL() string
+}
+
 // MigrationFunc is a function that performs database migrations
 type MigrationFunc func(ctx context.Context, db *sql.DB) error
 

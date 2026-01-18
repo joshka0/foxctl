@@ -279,10 +279,10 @@ func TestIsTestFile(t *testing.T) {
 		path     string
 		expected bool
 	}{
-		{"/src/main_test.go", true},  // Go
-		{"/src/main.test.js", true},  // JS
-		{"/src/main.spec.ts", true},  // TS
-		{"/src/test_main.py", true},  // Python
+		{"/src/main_test.go", true}, // Go
+		{"/src/main.test.js", true}, // JS
+		{"/src/main.spec.ts", true}, // TS
+		{"/src/test_main.py", true}, // Python
 		{"/src/main.go", false},
 		{"/src/testing.go", false}, // Not a test file pattern
 	}

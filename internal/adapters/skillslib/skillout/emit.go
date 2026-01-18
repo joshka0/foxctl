@@ -6,14 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
-	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 // Emit writes a success envelope to stdout with standard metadata.
@@ -27,12 +25,10 @@ func EmitWithMeta(rc *skillmain.RunContext, command string, data any, meta envel
 	return envelope.Write(rc.Stdout, env)
 }
 
-// Fatal emits an error envelope and exits with code 1.
-// Use this for skills with custom main() that can't use skillmain.Main.
-func Fatal(w io.Writer, command string, err *skillerr.Error) {
+// Fatal emits an error envelope. Use this for skills with custom main().
+func Fatal(w io.Writer, command string, err *skillerr.Error) error {
 	env := envelope.Error(command, err.Code, err.Message, err.ToEnvelopeData())
-	errs.Ignore(envelope.Write(w, env), "emit error envelope")
-	os.Exit(1)
+	return envelope.Write(w, env)
 }
 
 // Artifact is an alias for skillmain.Artifact.
@@ -104,13 +100,13 @@ func EmitWithCAS(ctx context.Context, rc *skillmain.RunContext, command string, 
 	}
 
 	// Build result based on expose policy
-	result := buildCASResult(artifact, rc.ExposePolicy())
+	result := BuildCASResult(artifact, rc.ExposePolicy())
 
 	return Emit(rc, command, result)
 }
 
-// buildCASResult builds the result payload based on CAS expose policy.
-func buildCASResult(artifact Artifact, expose config.ExposePolicy) map[string]any {
+// BuildCASResult builds the result payload based on CAS expose policy.
+func BuildCASResult(artifact Artifact, expose config.ExposePolicy) map[string]any {
 	result := map[string]any{
 		"size":      artifact.Size,
 		"truncated": true,

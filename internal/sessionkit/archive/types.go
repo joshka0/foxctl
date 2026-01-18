@@ -13,6 +13,18 @@ import (
 type ChunkResult struct {
 	Chunks  []storage.SessionChunk
 	Windows []storage.ContextWindow
+
+	// HasMore indicates if MaxChunks limit was reached and more chunks exist.
+	// When true, call Chunk again with SkipToChunk=NextChunkIndex.
+	HasMore bool
+
+	// NextChunkIndex is the index to use for SkipToChunk in the next batch.
+	// Only valid when HasMore is true.
+	NextChunkIndex int
+
+	// NextWindowIndex is the window index to use for StartWindowIndex in the next batch.
+	// Only valid when HasMore is true.
+	NextWindowIndex int
 }
 
 // ChunkOptions configures the chunking process.
@@ -20,7 +32,7 @@ type ChunkOptions struct {
 	// SessionID is the session identifier for the chunks.
 	SessionID string
 
-	// MaxChunkSize is reserved for future splitting of large messages.
+	// MaxChunkSize controls Codex window sizing and is reserved for future splitting of large messages.
 	MaxChunkSize int
 
 	// SkipToChunk skips processing until reaching this chunk index (for incremental archival).
@@ -28,6 +40,13 @@ type ChunkOptions struct {
 
 	// StartWindowIndex is the starting window index (for incremental archival).
 	StartWindowIndex int
+
+	// MaxChunks limits how many chunks to return per call (0 = unlimited).
+	// Use with SkipToChunk for batched processing of large sessions:
+	//   batch1: SkipToChunk=0, MaxChunks=1000
+	//   batch2: SkipToChunk=1000, MaxChunks=1000
+	// This bounds memory usage for sessions with thousands of messages.
+	MaxChunks int
 }
 
 // WindowInfo provides information about a context window.

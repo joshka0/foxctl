@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/embedding"
@@ -73,9 +75,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	// Resolve file path
 	workspace := rc.PathValidator.Workspace()
-	absPath, err := rc.PathValidator.ValidatePath(in.File)
+	absPath, err := skillmain.ValidatePath(rc, in.File)
 	if err != nil {
-		return fmt.Errorf("path validation: %w", err)
+		return err
 	}
 
 	// Get relative path for storage
@@ -86,7 +88,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	relPath = filepath.ToSlash(relPath)
 
 	// Detect language
-	lang := detectLanguage(absPath)
+	lang := langutil.DetectAllowed(absPath, langutil.CommonCodeLanguages)
 	if lang == "" {
 		return emit(rc, output{
 			File:       relPath,
@@ -99,7 +101,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Read file content
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return fmt.Errorf("read file: %w", err)
+		return skillerr.WrapIO("read file", err)
 	}
 
 	// Skip large files (>512KB)
@@ -124,16 +126,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Open memory store (uses Storage.Root for persistent data)
-	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	store, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
+		return skillerr.WrapIO("open memory store", err)
 	}
 	defer func() { errs.Ignore(store.Close(), "close memory store") }()
 
 	// Upsert symbols and delete stale ones
 	updated, deleted, err := upsertSymbols(ctx, store, in.WorkspaceID, relPath, rc.SessionID, symbols)
 	if err != nil {
-		return fmt.Errorf("upsert symbols: %w", err)
+		return skillerr.WrapIO("upsert symbols", err)
 	}
 
 	// Queue embeddings for updated symbols
@@ -173,7 +175,7 @@ func extractSymbols(ctx context.Context, lang, filePath string, content []byte) 
 	case "javascript", "typescript":
 		return extractJSSymbols(filePath, content, lang)
 	default:
-		return nil, fmt.Errorf("unsupported language: %s", lang)
+		return nil, skillerr.Validationf("unsupported language: %s", lang)
 	}
 }
 
@@ -319,7 +321,7 @@ func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, 
 	// Find existing symbols to detect stale ones
 	existingEntries, err := store.List(ctx, workspaceID, 1000)
 	if err != nil {
-		return 0, 0, fmt.Errorf("list entries: %w", err)
+		return 0, 0, skillerr.WrapIO("list entries", err)
 	}
 
 	// Collect stale symbols to delete
@@ -380,22 +382,6 @@ func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, 
 }
 
 // detectLanguage returns the language based on file extension.
-func detectLanguage(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".py":
-		return "python"
-	case ".js", ".jsx":
-		return "javascript"
-	case ".ts", ".tsx":
-		return "typescript"
-	default:
-		return ""
-	}
-}
-
 // queueEmbeddings enqueues symbols for background embedding generation.
 // Returns (queued count, skipped count).
 func queueEmbeddings(ctx context.Context, storageRoot, workspaceID string, symbols []symbol.Symbol, fileContent []byte) (int, int) {

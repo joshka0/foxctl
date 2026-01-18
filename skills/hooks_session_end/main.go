@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
@@ -51,24 +51,18 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	// Only process Stop events
 	if in.Event != hooks.EventSessionEnd && string(in.Event) != "Stop" {
-		return emitOutput(rc, hooks.NewNone())
+		return hookutil.EmitOutput(rc, command, hooks.NewNone(), nil)
 	}
 
 	// Check if feedback is enabled
 	if os.Getenv("AGENTCTL_SESSION_FEEDBACK_ENABLED") == "false" {
-		return emitOutput(rc, hooks.NewNone())
+		return hookutil.EmitOutput(rc, command, hooks.NewNone(), nil)
 	}
 
-	workspaceID := in.WorkspaceID
+	workspaceRoot := hookutil.ResolveWorkspaceRoot(in.Input, "")
+	workspaceID := hookutil.ResolveWorkspaceID(in.Input, workspaceRoot)
 	if workspaceID == "" {
-		workspaceID = in.WorkspaceRoot
-	}
-	if workspaceID == "" {
-		var wdErr error
-		workspaceID, wdErr = os.Getwd()
-		if wdErr != nil {
-			return fmt.Errorf("failed to determine workspace directory: %w", wdErr)
-		}
+		return fmt.Errorf("failed to determine workspace directory")
 	}
 
 	// Collect session metrics
@@ -87,9 +81,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	// Get task stats for this workspace
 	var taskStore tasks.Store
 	var err error
-	taskStore, err = tasks.Open(ctx, paths.StorageRoot)
+	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err == nil {
-		defer taskStore.Close()
+		defer cleanup()
 
 		allTasks, listErr := taskStore.ListByWorkspace(ctx, workspaceID)
 		if listErr == nil {
@@ -123,7 +117,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	}
 
 	// Save metrics to memory store (uses Storage.Root for persistent data)
-	memStore, err := memory.Open(ctx, paths.StorageRoot, paths.CASPath)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err == nil {
 		defer memStore.Close()
 
@@ -166,7 +160,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 		},
 	}
 
-	return emitOutput(rc, output)
+	return hookutil.EmitOutput(rc, command, output, nil)
 }
 
 func buildFeedbackPrompt(metrics SessionMetrics) string {
@@ -191,13 +185,6 @@ func buildFeedbackPrompt(metrics SessionMetrics) string {
 
 	sb.WriteString("---\n")
 	return sb.String()
-}
-
-func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
-	return skillout.Emit(rc, command, data)
 }
 
 func fileExists(path string) bool {

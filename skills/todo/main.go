@@ -7,41 +7,62 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/analysis/overseer"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/planning/llm"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/env"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/rs/zerolog"
 )
 
 const command = "todo/manage"
 
-const (
-	statusPending    = "pending"
-	statusInProgress = "in_progress"
-	statusBlocked    = "blocked"
-	statusDone       = "completed"
-)
+// maxTasksForSyncPageRank is the threshold above which PageRank recomputation
+// is skipped during mutations. For large workspaces, compute PageRank on-demand
+// via list with ranked=true instead of synchronously after every mutation.
+const maxTasksForSyncPageRank = 500
+
+var allowedOps = []string{
+	"add",
+	"update",
+	"complete",
+	"list",
+	"get_active",
+	"set_active",
+	"clear_active",
+	"ensure_active",
+	"graph_insights",
+	"recommend",
+	"plan",
+	"review_request",
+	"review_status",
+	"search",
+	"dedupe",
+}
 
 // isReviewGateEnabled reports whether the review gate is enabled for this
 // process. For v1 this is controlled by an environment variable and applies to
 // all workspaces.
 func isReviewGateEnabled() bool {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv("AGENTCTL_TODO_REVIEW_GATE")))
+	mode := strings.ToLower(env.GetString("AGENTCTL_TODO_REVIEW_GATE"))
 	switch mode {
 	case "1", "true", "on", "enabled":
 		return true
@@ -66,6 +87,10 @@ type input struct {
 	Search        *searchReq        `json:"search"`
 	List          *listReq          `json:"list"`
 	Dedupe        *dedupeReq        `json:"dedupe"`
+
+	// CLI metadata (added by agentctl todo subcommands)
+	CLICommand    string `json:"cli_command,omitempty"`
+	CorrelationID string `json:"correlation_id,omitempty"`
 }
 
 // listReq defines the input for the list operation.
@@ -230,27 +255,22 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	cfg := rc.Config
 	// Open SQLite-backed task store
-	store, err := tasks.Open(ctx, cfg.Storage.Root)
+	store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open task store: %w", err)
+		return skillerr.WrapIO("open task store", err)
 	}
-	defer store.Close()
+	defer cleanup()
 
-	op := strings.ToLower(strings.TrimSpace(in.Operation))
+	op := oputil.Op(in.Operation)
 	if op == "" {
 		op = "list"
 	}
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
 
-	workspaceID := in.WorkspaceID
-	if workspaceID == "" {
-		// Check AGENTCTL_WORKSPACE env var (set by runner when executing skills)
-		workspaceID = os.Getenv("AGENTCTL_WORKSPACE")
-	}
-	if workspaceID == "" {
-		// Default to current working directory as workspace ID.
-		// Fallback to current directory; error is not actionable.
-		workspaceID, _ = os.Getwd() //nolint:errcheck
-	}
+	workspaceID := workspaceutil.ResolveID(in.WorkspaceID, rc.Workspace)
 
 	var data map[string]any
 
@@ -266,7 +286,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			return err
 		}
 		// Recompute and persist PageRank after adding task
-		persistPageRanks(ctx, store, workspaceID)
+		persistPageRanks(ctx, store, workspaceID, rc.Logger)
 		data = map[string]any{
 			"task":          task,
 			"total_tasks":   len(allTasks),
@@ -280,7 +300,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			return err
 		}
 		// Recompute and persist PageRank after updating task (dependencies may have changed)
-		persistPageRanks(ctx, store, workspaceID)
+		persistPageRanks(ctx, store, workspaceID, rc.Logger)
 		data = map[string]any{
 			"task":          task,
 			"total_tasks":   len(allTasks),
@@ -294,7 +314,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 			return err
 		}
 		// Recompute and persist PageRank after completing task (graph structure changed)
-		persistPageRanks(ctx, store, workspaceID)
+		persistPageRanks(ctx, store, workspaceID, rc.Logger)
 		data = map[string]any{
 			"task":          task,
 			"pending_tasks": countPending(allTasks),
@@ -304,7 +324,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "list":
 		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 		if err != nil {
-			return err
+			return skillerr.WrapIO("list tasks", err)
 		}
 
 		if in.List != nil {
@@ -369,7 +389,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "get_active":
 		task, found, err := store.GetActive(ctx, workspaceID)
 		if err != nil {
-			return err
+			return skillerr.WrapIO("get active task", err)
 		}
 		if !found {
 			data = map[string]any{
@@ -385,11 +405,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	case "set_active":
 		if in.SetActive == nil || in.SetActive.TaskID == "" {
-			return fmt.Errorf("set_active.task_id is required")
+			return skillerr.Arg("set_active.task_id is required")
 		}
 		task, err := store.SetActive(ctx, workspaceID, in.SetActive.TaskID)
 		if err != nil {
-			return err
+			return skillerr.WrapIO("set active task", err)
 		}
 		data = map[string]any{
 			"task":    toOutput(task),
@@ -398,7 +418,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	case "clear_active":
 		if err := store.ClearActive(ctx, workspaceID); err != nil {
-			return err
+			return skillerr.WrapIO("clear active task", err)
 		}
 		data = map[string]any{
 			"summary": "cleared active task",
@@ -415,7 +435,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 		task, created, err := store.EnsureActive(ctx, workspaceID, title, scopePath)
 		if err != nil {
-			return err
+			return skillerr.WrapIO("ensure active task", err)
 		}
 		data = map[string]any{
 			"task":    toOutput(task),
@@ -426,7 +446,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "graph_insights":
 		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 		if err != nil {
-			return err
+			return skillerr.WrapIO("list tasks", err)
 		}
 		// Filter completed tasks if not requested
 		if in.GraphInsights == nil || !in.GraphInsights.IncludeCompleted {
@@ -434,7 +454,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 		insights, err := tasksgraph.NewAnalyzer().Analyze(allTasks, workspaceID)
 		if err != nil {
-			return err
+			return skillerr.WrapRuntime("analyze task graph", err)
 		}
 		// Apply limit if specified
 		if in.GraphInsights != nil && in.GraphInsights.Limit > 0 && len(insights.Nodes) > in.GraphInsights.Limit {
@@ -466,7 +486,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		scorer := overseer.NewScorer(store, boardStore)
 		rec, err := scorer.Recommend(ctx, workspaceID, limit)
 		if err != nil {
-			return err
+			return skillerr.WrapRuntime("recommend tasks", err)
 		}
 		summary := fmt.Sprintf("recommended %d of %d pending tasks", len(rec.Tasks), rec.TotalPending)
 		if rec.TopRecommended != nil {
@@ -484,7 +504,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if boardStore != nil {
 			defer boardStore.Close()
 		}
-		planResult, err := handlePlan(ctx, store, boardStore, cfg, workspaceID, rc.SessionID, in.Plan)
+		planResult, err := handlePlan(ctx, store, boardStore, cfg, workspaceID, rc.SessionID, in.Plan, rc.Logger)
 		if err != nil {
 			return err
 		}
@@ -497,7 +517,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if planResult.Applied {
 			summary += " (applied)"
 			// Recompute and persist PageRank after applying plan (new tasks created)
-			persistPageRanks(ctx, store, workspaceID)
+			persistPageRanks(ctx, store, workspaceID, rc.Logger)
 		} else {
 			summary += " (draft)"
 		}
@@ -530,7 +550,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 
 	case "search":
-		results, err := handleSearch(ctx, store, cfg, workspaceID, in.Search)
+		results, err := handleSearch(ctx, store, cfg, workspaceID, in.Search, rc.Logger)
 		if err != nil {
 			return err
 		}
@@ -549,7 +569,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		data = out
 
 	default:
-		return fmt.Errorf("unknown operation %q (expected add|update|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status|search|dedupe)", op)
+		return skillerr.Argf("unknown operation %q (expected add|update|complete|list|get_active|set_active|clear_active|ensure_active|graph_insights|recommend|plan|review_request|review_status|search|dedupe)", op)
 	}
 
 	return skillout.Emit(rc, command, data)
@@ -557,7 +577,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID, sessionID string, req *addRequest) (*taskOutput, []tasks.Task, error) {
 	if req == nil {
-		return nil, nil, fmt.Errorf("add payload is required")
+		return nil, nil, skillerr.Arg("add payload is required")
 	}
 	if err := validateText("title", req.Title); err != nil {
 		return nil, nil, err
@@ -566,23 +586,23 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 		return nil, nil, err
 	}
 	if req.Title == "" {
-		return nil, nil, fmt.Errorf("title is required")
+		return nil, nil, skillerr.Arg("title is required")
 	}
 
 	// Validate parent and dependencies exist
 	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("list tasks", err)
 	}
 	index := buildIndex(allTasks)
 
 	if req.ParentID != "" {
 		parent, ok := index[req.ParentID]
 		if !ok {
-			return nil, nil, fmt.Errorf("parent task %s not found", req.ParentID)
+			return nil, nil, skillerr.NotFoundf("parent task %s not found", req.ParentID)
 		}
-		if parent.Status == statusDone {
-			return nil, nil, fmt.Errorf("cannot add child to completed task %s", req.ParentID)
+		if parent.Status == tasks.StatusCompleted {
+			return nil, nil, skillerr.Validationf("cannot add child to completed task %s", req.ParentID)
 		}
 	}
 	if err := validateDependencies(req.DependsOn, index); err != nil {
@@ -617,25 +637,25 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 			var err error
 			updated, err = store.Update(ctx, updated)
 			if err != nil {
-				return nil, nil, fmt.Errorf("update existing task: %w", err)
+				return nil, nil, skillerr.WrapIO("update existing task", err)
 			}
 		}
 
-		createTaskDependencyEdges(ctx, cfg, workspaceID, updated)
+		createTaskDependencyEdges(ctx, cfg, workspaceID, updated, nil)
 
 		if req.ParentID != "" {
 			parent := index[req.ParentID]
 			if !containsString(parent.Children, updated.ID) {
 				parent.Children = append(parent.Children, updated.ID)
 				if _, err := store.Update(ctx, *parent); err != nil {
-					return nil, nil, fmt.Errorf("update parent children: %w", err)
+					return nil, nil, skillerr.WrapIO("update parent children", err)
 				}
 			}
 		}
 
 		allTasks, err = store.ListByWorkspace(ctx, workspaceID)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, skillerr.WrapIO("list tasks", err)
 		}
 
 		return toOutput(updated), allTasks, nil
@@ -648,30 +668,30 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 		ScopePath:   req.ScopePath,
 		ParentID:    req.ParentID,
 		DependsOn:   dedupe(req.DependsOn),
-		Status:      statusPending,
+		Status:      tasks.StatusPending,
 		SessionID:   sessionID,
 	}
 
 	added, err := store.Add(ctx, newTask)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("add task", err)
 	}
 
-	createTaskDependencyEdges(ctx, cfg, workspaceID, added)
+	createTaskDependencyEdges(ctx, cfg, workspaceID, added, nil)
 
 	if req.ParentID != "" {
 		parent := index[req.ParentID]
 		if !containsString(parent.Children, added.ID) {
 			parent.Children = append(parent.Children, added.ID)
 			if _, err := store.Update(ctx, *parent); err != nil {
-				return nil, nil, fmt.Errorf("update parent children: %w", err)
+				return nil, nil, skillerr.WrapIO("update parent children", err)
 			}
 		}
 	}
 
 	allTasks, err = store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("list tasks", err)
 	}
 
 	return toOutput(added), allTasks, nil
@@ -679,10 +699,10 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 
 func handleUpdate(ctx context.Context, store tasks.Store, workspaceID string, req *updateRequest) (*taskOutput, []tasks.Task, error) {
 	if req == nil {
-		return nil, nil, fmt.Errorf("update payload is required")
+		return nil, nil, skillerr.Arg("update payload is required")
 	}
 	if req.ID == "" {
-		return nil, nil, fmt.Errorf("update.id is required")
+		return nil, nil, skillerr.Arg("update.id is required")
 	}
 	if err := validateText("title", req.Title); err != nil {
 		return nil, nil, err
@@ -700,19 +720,19 @@ func handleUpdate(ctx context.Context, store tasks.Store, workspaceID string, re
 	task, err := store.Get(ctx, req.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, fmt.Errorf("task %s not found", req.ID)
+			return nil, nil, skillerr.NotFoundf("task %s not found", req.ID)
 		}
-		return nil, nil, fmt.Errorf("get task %s: %w", req.ID, err)
+		return nil, nil, skillerr.WrapIO("get task "+req.ID, err)
 	}
 
 	// Verify workspace ownership
 	if task.WorkspaceID != workspaceID {
-		return nil, nil, fmt.Errorf("task %s belongs to a different workspace", req.ID)
+		return nil, nil, skillerr.Validationf("task %s belongs to a different workspace", req.ID)
 	}
 
 	// Don't allow updating completed tasks
-	if task.Status == statusDone {
-		return nil, nil, fmt.Errorf("cannot update completed task %s", req.ID)
+	if task.Status == tasks.StatusCompleted {
+		return nil, nil, skillerr.Validationf("cannot update completed task %s", req.ID)
 	}
 
 	// Apply updates (only if non-empty)
@@ -731,21 +751,21 @@ func handleUpdate(ctx context.Context, store tasks.Store, workspaceID string, re
 	if req.Status != "" {
 		// Only allow certain status transitions
 		switch req.Status {
-		case statusPending, statusInProgress, statusBlocked:
+		case tasks.StatusPending, tasks.StatusInProgress, tasks.StatusBlocked:
 			task.Status = req.Status
 		default:
-			return nil, nil, fmt.Errorf("invalid status %q (use complete action for completing tasks)", req.Status)
+			return nil, nil, skillerr.Validationf("invalid status %q (use complete action for completing tasks)", req.Status)
 		}
 	}
 
 	updated, err := store.Update(ctx, task)
 	if err != nil {
-		return nil, nil, fmt.Errorf("update task: %w", err)
+		return nil, nil, skillerr.WrapIO("update task", err)
 	}
 
 	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("list tasks", err)
 	}
 
 	return toOutput(updated), allTasks, nil
@@ -753,10 +773,10 @@ func handleUpdate(ctx context.Context, store tasks.Store, workspaceID string, re
 
 func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, req *completeRequest) (*taskOutput, []tasks.Task, error) {
 	if req == nil {
-		return nil, nil, fmt.Errorf("complete payload is required")
+		return nil, nil, skillerr.Arg("complete payload is required")
 	}
 	if req.ID == "" {
-		return nil, nil, fmt.Errorf("complete.id is required")
+		return nil, nil, skillerr.Arg("complete.id is required")
 	}
 	if err := validateText("notes", req.Notes); err != nil {
 		return nil, nil, err
@@ -768,62 +788,62 @@ func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, 
 	task, err := store.Get(ctx, req.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, fmt.Errorf("task %s not found", req.ID)
+			return nil, nil, skillerr.NotFoundf("task %s not found", req.ID)
 		}
-		return nil, nil, fmt.Errorf("get task %s: %w", req.ID, err)
+		return nil, nil, skillerr.WrapIO("get task "+req.ID, err)
 	}
 
 	// Verify workspace ownership
 	if task.WorkspaceID != workspaceID {
-		return nil, nil, fmt.Errorf("task %s belongs to a different workspace", req.ID)
+		return nil, nil, skillerr.Validationf("task %s belongs to a different workspace", req.ID)
 	}
 
-	if task.Status == statusDone {
-		return nil, nil, fmt.Errorf("task %s already completed", req.ID)
+	if task.Status == tasks.StatusCompleted {
+		return nil, nil, skillerr.Validationf("task %s already completed", req.ID)
 	}
 
 	// Check dependencies
 	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("list tasks", err)
 	}
 	index := buildIndex(allTasks)
 
 	for _, dep := range task.DependsOn {
 		if depTask, ok := index[dep]; ok {
-			if depTask.Status != statusDone {
-				return nil, nil, fmt.Errorf("task %s depends on incomplete task %s", req.ID, dep)
+			if depTask.Status != tasks.StatusCompleted {
+				return nil, nil, skillerr.Validationf("task %s depends on incomplete task %s", req.ID, dep)
 			}
 		} else {
-			return nil, nil, fmt.Errorf("dependency %s for task %s not found", dep, req.ID)
+			return nil, nil, skillerr.NotFoundf("dependency %s for task %s not found", dep, req.ID)
 		}
 	}
 
 	// Enforce review gate semantics when enabled.
 	if isReviewGateEnabled() {
 		if task.Status != tasks.StatusReadyForReview {
-			return nil, nil, fmt.Errorf("task %s must be ready_for_review before completion", req.ID)
+			return nil, nil, skillerr.Validationf("task %s must be ready_for_review before completion", req.ID)
 		}
 		if task.LastReviewStatus != tasks.ReviewStatusOK || task.LastReviewID == "" {
-			return nil, nil, fmt.Errorf("task %s requires an 'ok' review before completion", req.ID)
+			return nil, nil, skillerr.Validationf("task %s requires an 'ok' review before completion", req.ID)
 		}
 	}
 
 	now := time.Now().UTC()
-	task.Status = statusDone
+	task.Status = tasks.StatusCompleted
 	task.CompletedAt = &now
 	task.Notes = strings.TrimSpace(req.Notes)
 	task.Gotchas = strings.TrimSpace(req.Gotchas)
 
 	updated, err := store.Update(ctx, task)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("update task", err)
 	}
 
 	// Refresh task list
 	allTasks, err = store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("list tasks", err)
 	}
 
 	return toOutput(updated), allTasks, nil
@@ -834,23 +854,23 @@ func handleComplete(ctx context.Context, store tasks.Store, workspaceID string, 
 // then sets status to ready_for_review and LastReviewStatus to pending.
 func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID string, cfg config.Config, req *reviewRequestReq) (*taskOutput, error) {
 	if req == nil {
-		return nil, fmt.Errorf("review_request payload is required")
+		return nil, skillerr.Arg("review_request payload is required")
 	}
 	if req.TaskID == "" {
-		return nil, fmt.Errorf("review_request.task_id is required")
+		return nil, skillerr.Arg("review_request.task_id is required")
 	}
 
 	task, err := store.Get(ctx, req.TaskID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("task %s not found", req.TaskID)
+			return nil, skillerr.NotFoundf("task %s not found", req.TaskID)
 		}
-		return nil, fmt.Errorf("get task %s: %w", req.TaskID, err)
+		return nil, skillerr.WrapIO("get task "+req.TaskID, err)
 	}
 
 	// Verify workspace ownership
 	if task.WorkspaceID != workspaceID {
-		return nil, fmt.Errorf("task %s belongs to a different workspace", req.TaskID)
+		return nil, skillerr.Validationf("task %s belongs to a different workspace", req.TaskID)
 	}
 
 	// Validate task state: only in_progress or ready_for_review can be reviewed
@@ -858,15 +878,15 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 	case tasks.StatusInProgress, tasks.StatusReadyForReview:
 		// OK
 	case tasks.StatusPending:
-		return nil, fmt.Errorf("task %s is pending; start work before requesting review", req.TaskID)
+		return nil, skillerr.Validationf("task %s is pending; start work before requesting review", req.TaskID)
 	case tasks.StatusCompleted:
-		return nil, fmt.Errorf("task %s is already completed", req.TaskID)
+		return nil, skillerr.Validationf("task %s is already completed", req.TaskID)
 	case tasks.StatusBlocked:
-		return nil, fmt.Errorf("task %s is blocked; resolve blockers before requesting review", req.TaskID)
+		return nil, skillerr.Validationf("task %s is blocked; resolve blockers before requesting review", req.TaskID)
 	case tasks.StatusCanceled:
-		return nil, fmt.Errorf("task %s is canceled", req.TaskID)
+		return nil, skillerr.Validationf("task %s is canceled", req.TaskID)
 	default:
-		return nil, fmt.Errorf("task %s has unknown status %q", req.TaskID, task.Status)
+		return nil, skillerr.Validationf("task %s has unknown status %q", req.TaskID, task.Status)
 	}
 
 	// Persist a minimal review artifact via CAS so downstream components have a
@@ -885,7 +905,7 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 	}
 	review, err = artifacts.StoreReviewArtifact(ctx, cfg, review, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store review artifact: %w", err)
+		return nil, skillerr.WrapIO("store review artifact", err)
 	}
 
 	// Transition to ready_for_review and mark review as pending
@@ -897,7 +917,7 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 
 	updated, err := store.Update(ctx, task)
 	if err != nil {
-		return nil, fmt.Errorf("update task: %w", err)
+		return nil, skillerr.WrapIO("update task", err)
 	}
 
 	return toOutput(updated), nil
@@ -907,23 +927,23 @@ func handleReviewRequest(ctx context.Context, store tasks.Store, workspaceID str
 // This is a cheap status probe that does not touch CAS or jobs.
 func handleReviewStatus(ctx context.Context, store tasks.Store, workspaceID string, req *reviewStatusReq) (tasks.Task, error) {
 	if req == nil {
-		return tasks.Task{}, fmt.Errorf("review_status payload is required")
+		return tasks.Task{}, skillerr.Arg("review_status payload is required")
 	}
 	if req.TaskID == "" {
-		return tasks.Task{}, fmt.Errorf("review_status.task_id is required")
+		return tasks.Task{}, skillerr.Arg("review_status.task_id is required")
 	}
 
 	task, err := store.Get(ctx, req.TaskID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return tasks.Task{}, fmt.Errorf("task %s not found", req.TaskID)
+			return tasks.Task{}, skillerr.NotFoundf("task %s not found", req.TaskID)
 		}
-		return tasks.Task{}, fmt.Errorf("get task %s: %w", req.TaskID, err)
+		return tasks.Task{}, skillerr.WrapIO("get task "+req.TaskID, err)
 	}
 
 	// Verify workspace ownership
 	if task.WorkspaceID != workspaceID {
-		return tasks.Task{}, fmt.Errorf("task %s belongs to a different workspace", req.TaskID)
+		return tasks.Task{}, skillerr.Validationf("task %s belongs to a different workspace", req.TaskID)
 	}
 
 	return task, nil
@@ -943,12 +963,12 @@ type searchTaskResult struct {
 }
 
 // handleSearch performs semantic search over task embeddings.
-func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID string, req *searchReq) (*searchOutput, error) {
+func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID string, req *searchReq, logger zerolog.Logger) (*searchOutput, error) {
 	if req == nil {
-		return nil, fmt.Errorf("search payload is required")
+		return nil, skillerr.Arg("search payload is required")
 	}
 	if req.Query == "" {
-		return nil, fmt.Errorf("search.query is required")
+		return nil, skillerr.Arg("search.query is required")
 	}
 
 	limit := req.Limit
@@ -968,49 +988,30 @@ func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, wor
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	if geminiKey == "" && voyageKey == "" {
-		return nil, fmt.Errorf("no embedding API key set (GEMINI_API_KEY or VOYAGE_API_KEY)")
+		return nil, skillerr.Auth("no embedding API key set", skillerr.WithHint("Set GEMINI_API_KEY or VOYAGE_API_KEY."))
 	}
 
-	// Initialize embedding provider (prefer Voyage for consistency with standardized embeddings)
-	// Use ScopeModelRecommendation for consistent model selection across all skills
-	var provider interface {
-		Embed(ctx context.Context, text string) ([]float32, error)
-	}
-
-	if voyageKey != "" {
-		// Get model from scope-based recommendation (supports env var override)
-		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeTasks)
-		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			Model:         model,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("voyage provider: %w", err)
-		}
-		provider = vp
-	} else {
-		// Gemini fallback (not recommended - dimension mismatch with Voyage)
-		gp, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey:        geminiKey,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("gemini provider: %w", err)
-		}
-		provider = gp
+	embedder, err := semantic.NewEmbedderFromConfig(
+		semantic.ScopeTasks,
+		cfg,
+		semantic.WithVoyageKey(voyageKey),
+		semantic.WithGeminiKey(geminiKey),
+	)
+	if err != nil {
+		return nil, skillerr.WrapRuntime("embedding provider", err)
 	}
 
 	// Generate query embedding
-	queryEmbedding, err := provider.Embed(ctx, req.Query)
+	embedResult, err := embedder.Embed(ctx, req.Query)
 	if err != nil {
-		return nil, fmt.Errorf("embed query: %w", err)
+		return nil, skillerr.WrapRuntime("embed query", err)
 	}
+	queryEmbedding := embedResult.Vec
 
 	// Open memory store for vector search
-	memStore, err := memory.Open(ctx, cfg.Storage.Root, filepath.Join(cfg.Storage.Root, "cas"))
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer memStore.Close() //nolint:errcheck
 
@@ -1019,13 +1020,12 @@ func handleSearch(ctx context.Context, store tasks.Store, cfg config.Config, wor
 	entries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2) // Fetch more to allow filtering
 	if err != nil {
 		// Fall back to listing all tasks if similarity search fails
-		// Warning output to stderr; error is not actionable.
-		fmt.Fprintf(os.Stderr, "warning: similarity search failed, falling back to text match: %v\n", err)
+		logger.Warn().Err(err).Msg("similarity search failed, falling back to text match")
 
 		// Simple fallback: text-based search over all tasks
 		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 		if err != nil {
-			return nil, fmt.Errorf("list tasks: %w", err)
+			return nil, skillerr.WrapIO("list tasks", err)
 		}
 
 		queryLower := strings.ToLower(req.Query)
@@ -1124,12 +1124,12 @@ func handleDedupe(ctx context.Context, store tasks.Store, workspaceID string, re
 		}
 	}
 	if keep != "newest" && keep != "oldest" {
-		return nil, fmt.Errorf("dedupe.keep must be newest or oldest, got %q", keep)
+		return nil, skillerr.Validationf("dedupe.keep must be newest or oldest, got %q", keep)
 	}
 
 	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil, fmt.Errorf("list tasks: %w", err)
+		return nil, skillerr.WrapIO("list tasks", err)
 	}
 
 	type groupInfo struct {
@@ -1246,7 +1246,7 @@ func handleDedupe(ctx context.Context, store tasks.Store, workspaceID string, re
 				t.DependsOn = []string{}
 			}
 			if _, err := store.Update(ctx, t); err != nil {
-				return nil, fmt.Errorf("update dependencies for %s: %w", t.ID, err)
+				return nil, skillerr.WrapIO("update dependencies for "+t.ID, err)
 			}
 			updatedCount++
 		}
@@ -1275,7 +1275,7 @@ func handleDedupe(ctx context.Context, store tasks.Store, workspaceID string, re
 			}
 			parent.Children = mergeStringIDs([]string{}, childSet)
 			if _, err := store.Update(ctx, parent); err != nil {
-				return nil, fmt.Errorf("update parent children %s: %w", parent.ID, err)
+				return nil, skillerr.WrapIO("update parent children "+parent.ID, err)
 			}
 		}
 
@@ -1301,7 +1301,7 @@ func handleDedupe(ctx context.Context, store tasks.Store, workspaceID string, re
 				t.DependsOn = []string{}
 			}
 			if _, err := store.Update(ctx, t); err != nil {
-				return nil, fmt.Errorf("cancel duplicate %s: %w", dupID, err)
+				return nil, skillerr.WrapIO("cancel duplicate "+dupID, err)
 			}
 			canceledCount++
 		}
@@ -1334,11 +1334,6 @@ func countOpenTasks(taskList []tasks.Task) int {
 	return count
 }
 
-// boolPtr returns a pointer to a bool value.
-func boolPtr(b bool) *bool {
-	return &b
-}
-
 // formatTime safely formats a *time.Time for JSON output.
 func formatTime(t *time.Time) string {
 	if t == nil {
@@ -1350,12 +1345,12 @@ func formatTime(t *time.Time) string {
 // handlePlan creates or refines a task graph based on the plan request.
 // If mode="draft", it returns a proposed plan without persisting.
 // If mode="apply", it creates the tasks and emits plan events via mailbox.
-func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.BoardStore, cfg config.Config, workspaceID, sessionID string, req *planReq) (*planOutput, error) {
+func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.BoardStore, cfg config.Config, workspaceID, sessionID string, req *planReq, logger zerolog.Logger) (*planOutput, error) {
 	if req == nil {
-		return nil, fmt.Errorf("plan payload is required")
+		return nil, skillerr.Arg("plan payload is required")
 	}
 	if req.Goal == "" {
-		return nil, fmt.Errorf("plan.goal is required")
+		return nil, skillerr.Arg("plan.goal is required")
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(req.Mode))
@@ -1363,7 +1358,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 		mode = "draft"
 	}
 	if mode != "draft" && mode != "apply" {
-		return nil, fmt.Errorf("plan.mode must be 'draft' or 'apply', got %q", mode)
+		return nil, skillerr.Validationf("plan.mode must be 'draft' or 'apply', got %q", mode)
 	}
 
 	// Determine the root task (epic)
@@ -1374,7 +1369,10 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 		// Refining an existing epic
 		existing, err := store.Get(ctx, req.AttachToTaskID)
 		if err != nil {
-			return nil, fmt.Errorf("attach_to_task_id %s not found: %w", req.AttachToTaskID, err)
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, skillerr.NotFoundf("attach_to_task_id %s not found", req.AttachToTaskID)
+			}
+			return nil, skillerr.WrapIO("attach_to_task_id "+req.AttachToTaskID, err)
 		}
 		rootTaskID = existing.ID
 		epicTask = &existing
@@ -1402,7 +1400,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Title:       pt.Title,
 				Description: pt.Description,
 				ScopePath:   scopePath,
-				Status:      statusPending,
+				Status:      tasks.StatusPending,
 				SessionID:   sessionID,
 			}
 
@@ -1440,7 +1438,15 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 		}
 	} else {
 		// No explicit tasks: try LLM planning or fall back to single epic
-		planner := llm.AutoPlanner()
+		planner := llm.AutoPlannerFromConfig(llm.ProviderConfig{
+			Provider:         cfg.LLM.Provider,
+			Model:            cfg.LLM.Model,
+			APIKey:           cfg.LLM.APIKey,
+			OpenRouterAPIKey: cfg.LLM.OpenRouterAPIKey,
+			OpenRouterModel:  cfg.LLM.OpenRouterModel,
+			GroqAPIKey:       cfg.LLM.GroqAPIKey,
+			OpenAIAPIKey:     cfg.LLM.OpenAIAPIKey,
+		})
 		if planner != nil && planner.Available() {
 			// Use LLM to generate task decomposition
 			maxTasks := req.MaxTasks
@@ -1461,12 +1467,13 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Strategy:    req.Strategy,
 			})
 			if err != nil {
-				// Warning output to stderr; error is not actionable.
-				fmt.Fprintf(os.Stderr, "warning: LLM planning failed, falling back to simple epic: %v\n", err)
+				logger.Warn().Err(err).Msg("llm planning failed, falling back to simple epic")
 			} else {
 				// Convert LLM tasks to internal tasks
-				// Info output to stderr; error is not actionable.
-				fmt.Fprintf(os.Stderr, "info: LLM planning generated %d tasks using %s\n", len(llmResult.Tasks), llmResult.ModelUsed)
+				logger.Info().
+					Int("task_count", len(llmResult.Tasks)).
+					Str("model", llmResult.ModelUsed).
+					Msg("llm planning generated tasks")
 				titleToID := make(map[string]string)
 				for i, pt := range llmResult.Tasks {
 					scopePath := pt.ScopePath
@@ -1478,7 +1485,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 						Title:       pt.Title,
 						Description: pt.Description,
 						ScopePath:   scopePath,
-						Status:      statusPending,
+						Status:      tasks.StatusPending,
 						DependsOn:   pt.DependsOn, // Titles for now
 						SessionID:   sessionID,
 					}
@@ -1502,7 +1509,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				WorkspaceID: workspaceID,
 				Title:       epicTitle,
 				Description: req.Description,
-				Status:      statusPending,
+				Status:      tasks.StatusPending,
 				SessionID:   sessionID,
 			}
 			if len(req.ScopePaths) > 0 {
@@ -1522,7 +1529,13 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 	if mode == "apply" {
 		allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 		if err != nil {
-			return nil, fmt.Errorf("list tasks: %w", err)
+			return nil, skillerr.WrapIO("list tasks", err)
+		}
+
+		// Open graph store once for all tasks in this batch (fail silently - graph is optional)
+		graphStore, _ := graph.Open(ctx, cfg.Storage.Root)
+		if graphStore != nil {
+			defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
 		}
 
 		for i := range plannedTasks {
@@ -1563,11 +1576,11 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 					var err error
 					updated, err = store.Update(ctx, updated)
 					if err != nil {
-						return nil, fmt.Errorf("update existing task %q: %w", plannedTasks[i].Title, err)
+						return nil, skillerr.WrapIO("update existing task "+plannedTasks[i].Title, err)
 					}
 				}
 
-				createTaskDependencyEdges(ctx, cfg, workspaceID, updated)
+				createTaskDependencyEdges(ctx, cfg, workspaceID, updated, graphStore)
 				if err := ensureParentHasChild(ctx, store, updated.ParentID, updated.ID); err != nil {
 					return nil, err
 				}
@@ -1582,11 +1595,11 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 
 			created, err := store.Add(ctx, plannedTasks[i])
 			if err != nil {
-				return nil, fmt.Errorf("create task %q: %w", plannedTasks[i].Title, err)
+				return nil, skillerr.WrapIO("create task "+plannedTasks[i].Title, err)
 			}
 			allTasks = append(allTasks, created)
 
-			createTaskDependencyEdges(ctx, cfg, workspaceID, created)
+			createTaskDependencyEdges(ctx, cfg, workspaceID, created, graphStore)
 			if err := ensureParentHasChild(ctx, store, created.ParentID, created.ID); err != nil {
 				return nil, err
 			}
@@ -1617,9 +1630,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				Body:        fmt.Sprintf("Plan for %q: created %d tasks", req.Goal, len(createdTasks)),
 			}
 			if err := boardStore.SendMessage(ctx, &msg); err != nil {
-				// Log but don't fail the operation.
-				// Warning output to stderr; error is not actionable.
-				fmt.Fprintf(os.Stderr, "warning: failed to send plan event: %v\n", err)
+				logger.Warn().Err(err).Msg("failed to send plan event")
 			}
 		}
 	} else {
@@ -1632,7 +1643,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 				ScopePath:   t.ScopePath,
 				ParentID:    t.ParentID,
 				DependsOn:   t.DependsOn,
-				Status:      statusPending,
+				Status:      tasks.StatusPending,
 				CreatedAt:   time.Now().Format(time.RFC3339),
 			}
 			createdTasks = append(createdTasks, out)
@@ -1679,7 +1690,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 
 func validateText(field, value string) error {
 	if strings.ContainsRune(value, '`') {
-		return fmt.Errorf("%s cannot contain backticks (`)", field)
+		return skillerr.Validationf("%s cannot contain backticks (`)", field)
 	}
 	return nil
 }
@@ -1688,13 +1699,13 @@ func validateDependencies(depends []string, index map[string]*tasks.Task) error 
 	seen := make(map[string]struct{})
 	for _, dep := range depends {
 		if dep == "" {
-			return errors.New("dependency ids cannot be empty")
+			return skillerr.Validation("dependency ids cannot be empty")
 		}
 		if _, ok := index[dep]; !ok {
-			return fmt.Errorf("dependency %s not found", dep)
+			return skillerr.NotFoundf("dependency %s not found", dep)
 		}
 		if _, ok := seen[dep]; ok {
-			return fmt.Errorf("duplicate dependency %s", dep)
+			return skillerr.Validationf("duplicate dependency %s", dep)
 		}
 		seen[dep] = struct{}{}
 	}
@@ -1741,7 +1752,7 @@ func isOpenForDedupe(status string) bool {
 	if s == "" {
 		return false
 	}
-	if s == statusDone || s == tasks.StatusCanceled {
+	if s == tasks.StatusCompleted || s == tasks.StatusCanceled {
 		return false
 	}
 	return true
@@ -1846,7 +1857,10 @@ func ensureParentHasChild(ctx context.Context, store tasks.Store, parentID, chil
 	}
 	parent, err := store.Get(ctx, parentID)
 	if err != nil {
-		return fmt.Errorf("get parent %s: %w", parentID, err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return skillerr.NotFoundf("parent %s not found", parentID)
+		}
+		return skillerr.WrapIO("get parent "+parentID, err)
 	}
 	if parent.Children == nil {
 		parent.Children = []string{}
@@ -1856,7 +1870,7 @@ func ensureParentHasChild(ctx context.Context, store tasks.Store, parentID, chil
 	}
 	parent.Children = append(parent.Children, childID)
 	if _, err := store.Update(ctx, parent); err != nil {
-		return fmt.Errorf("update parent children: %w", err)
+		return skillerr.WrapIO("update parent children", err)
 	}
 	return nil
 }
@@ -1864,7 +1878,7 @@ func ensureParentHasChild(ctx context.Context, store tasks.Store, parentID, chil
 func countPending(taskList []tasks.Task) int {
 	count := 0
 	for _, t := range taskList {
-		if t.Status == statusPending {
+		if t.Status == tasks.StatusPending {
 			count++
 		}
 	}
@@ -1874,7 +1888,7 @@ func countPending(taskList []tasks.Task) int {
 func filterPending(taskList []tasks.Task) []tasks.Task {
 	var out []tasks.Task
 	for _, t := range taskList {
-		if t.Status == statusPending {
+		if t.Status == tasks.StatusPending {
 			out = append(out, t)
 		}
 	}
@@ -1966,7 +1980,7 @@ func toOutputListWithMetrics(taskList []tasks.Task, metrics map[string]tasksgrap
 
 // persistPageRanks recomputes PageRank for all tasks in a workspace and persists the scores.
 // This should be called after any mutation that changes the task graph (add, complete, update with deps).
-func persistPageRanks(ctx context.Context, store tasks.Store, workspaceID string) {
+func persistPageRanks(ctx context.Context, store tasks.Store, workspaceID string, logger zerolog.Logger) {
 	// List all tasks in the workspace
 	allTasks, err := store.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -1974,6 +1988,16 @@ func persistPageRanks(ctx context.Context, store tasks.Store, workspaceID string
 	}
 
 	if len(allTasks) == 0 {
+		return
+	}
+
+	// Skip synchronous PageRank for large workspaces to avoid hangs.
+	// PageRank will be computed on-demand when list is called with ranked=true.
+	if len(allTasks) > maxTasksForSyncPageRank {
+		logger.Debug().
+			Int("task_count", len(allTasks)).
+			Int("threshold", maxTasksForSyncPageRank).
+			Msg("skipping synchronous PageRank recomputation for large workspace")
 		return
 	}
 
@@ -1991,8 +2015,7 @@ func persistPageRanks(ctx context.Context, store tasks.Store, workspaceID string
 
 	// Persist to database
 	if err := store.SetPageRanks(ctx, ranks); err != nil {
-		// Log but don't fail
-		fmt.Fprintf(os.Stderr, "warning: failed to persist PageRank scores: %v\n", err)
+		logger.Warn().Err(err).Msg("failed to persist PageRank scores")
 	}
 }
 
@@ -2000,13 +2023,27 @@ func persistPageRanks(ctx context.Context, store tasks.Store, workspaceID string
 // Edge types:
 // - parent_of: parent task → child task
 // - depends_on: dependent task → dependency task
-func createTaskDependencyEdges(ctx context.Context, cfg config.Config, workspaceID string, task tasks.Task) {
-	// Open graph store (fail silently - graph is optional)
-	graphStore, err := graph.Open(ctx, cfg.Storage.Root)
-	if err != nil {
-		return
+//
+// If gs is nil, a new graph store is opened and closed internally.
+// For batch operations, pass a pre-opened store to avoid repeated open/close overhead.
+func createTaskDependencyEdges(ctx context.Context, cfg config.Config, workspaceID string, task tasks.Task, gs graph.Store) {
+	var graphStore graph.Store
+	var closeStore bool
+
+	if gs != nil {
+		graphStore = gs
+	} else {
+		// Open graph store (fail silently - graph is optional)
+		var err error
+		graphStore, err = graph.Open(ctx, cfg.Storage.Root)
+		if err != nil {
+			return
+		}
+		closeStore = true
 	}
-	defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
+	if closeStore {
+		defer func() { errs.Ignore(graphStore.Close(), "close graph store") }()
+	}
 
 	now := time.Now().UTC()
 

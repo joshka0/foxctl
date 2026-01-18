@@ -2,9 +2,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -16,9 +14,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
 // Input defines the input parameters for code/complexity.
@@ -76,19 +76,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.MaxResults = 100
 	}
 
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	info, err := os.Stat(searchPath)
 	if err != nil {
-		return fmt.Errorf("stat path: %w", err)
+		return skillerr.WrapIO("stat path", err)
 	}
 
 	var results []complexityResult
@@ -129,30 +124,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Limit results
-	if len(results) > in.MaxResults {
-		results = results[:in.MaxResults]
-	}
+	results = sliceutil.Limit(results, in.MaxResults)
 
 	// Calculate aggregate statistics
 	stats := calculateStats(results)
 
-	// Prepare preview and artifact
-	preview, truncated := skillout.PreparePreview(results, rc.MaxPreview)
-
-	var artifactDigest string
-	if truncated {
-		buf := &bytes.Buffer{}
-		enc := json.NewEncoder(buf)
-		for _, r := range results {
-			if err := enc.Encode(r); err != nil {
-				return fmt.Errorf("encode result: %w", err)
-			}
-		}
-		artifact, err := skillout.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "code_complexity")
-		if err != nil {
-			return err
-		}
-		artifactDigest = artifact.Digest
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, results, rc.MaxPreview, "code_complexity", true)
+	if err != nil {
+		return err
 	}
 
 	data := map[string]any{
@@ -160,12 +139,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		"metric":        in.Metric,
 		"threshold":     in.Threshold,
 		"result_count":  len(results),
-		"results":       preview,
+		"results":       previewResult.Preview,
 		"statistics":    stats,
 	}
-	if artifactDigest != "" {
-		data["artifact"] = artifactDigest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, "code/complexity", data)
 }
@@ -178,7 +155,7 @@ func analyzeDirectory(dir, workspace string, in Input) ([]complexityResult, erro
 			return nil
 		}
 
-		if strings.HasPrefix(d.Name(), ".") || fsutil.IsCommonExclude(d.Name()) {
+		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -213,7 +190,7 @@ func analyzeDirectory(dir, workspace string, in Input) ([]complexityResult, erro
 func analyzeFile(path, workspace string, in Input) ([]complexityResult, error) {
 	lang := fsutil.DetectLanguageWithHint(in.Language, path)
 	if lang == "" {
-		return nil, fmt.Errorf("unsupported file type")
+		return nil, skillerr.Validation("unsupported file type")
 	}
 
 	switch lang {
@@ -224,7 +201,7 @@ func analyzeFile(path, workspace string, in Input) ([]complexityResult, error) {
 	case "javascript", "typescript":
 		return analyzeJSFile(path, workspace, in)
 	default:
-		return nil, fmt.Errorf("language not supported: %s", lang)
+		return nil, skillerr.Validationf("language not supported: %s", lang)
 	}
 }
 
@@ -232,7 +209,7 @@ func analyzeGoFile(path, workspace string, _ Input) ([]complexityResult, error) 
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
-		return nil, fmt.Errorf("parse go file: %w", err)
+		return nil, skillerr.WrapParse("parse go file", err)
 	}
 
 	var results []complexityResult

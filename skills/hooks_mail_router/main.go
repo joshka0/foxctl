@@ -6,16 +6,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 const (
@@ -30,33 +29,15 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 
-	// Get workspace ID
-	workspaceID := in.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = in.WorkspaceRoot
-	}
-	if workspaceID == "" {
-		// Fallback to current directory; error is not actionable.
-		workspaceID, _ = os.Getwd() //nolint:errcheck
-	}
-
-	// Get actor ID from environment or derive from session
-	actorID := in.ActorID
-	if actorID == "" {
-		actorID = os.Getenv("AGENTCTL_AGENT_ID")
-	}
-	if actorID == "" {
-		actorID = os.Getenv("AGENTCTL_AGENT_NAME")
-	}
-	if actorID == "" {
-		actorID = fmt.Sprintf("actor:agent:%s", in.SessionID)
-	}
+	workspaceRoot := hookutil.ResolveWorkspaceRoot(in, "")
+	workspaceID := hookutil.ResolveWorkspaceID(in, workspaceRoot)
+	actorID := hookutil.ResolveActorID(in)
 
 	// Get active task ID if available
 	taskID := ""
-	taskStore, err := tasks.Open(ctx, paths.StorageRoot)
+	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err == nil {
-		defer taskStore.Close()
+		defer cleanup()
 		// Best-effort active task lookup; errors are ignored.
 		if task, found, _ := taskStore.GetActive(ctx, workspaceID); found { //nolint:errcheck
 			taskID = task.ID
@@ -67,10 +48,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)
 	if err != nil {
 		// If we can't open the store, just emit no-op output
-		return emitOutput(rc, hooks.Output{
+		return hookutil.EmitOutput(rc, "hooks/mail_router", hooks.Output{
 			Decision: hooks.DecisionNone,
 			Reason:   "mail_router: could not open board store",
-		})
+		}, nil)
 	}
 	defer boardStore.Close()
 
@@ -86,17 +67,17 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 	messages, err := boardStore.Inbox(ctx, filter)
 	if err != nil {
-		return emitOutput(rc, hooks.Output{
+		return hookutil.EmitOutput(rc, "hooks/mail_router", hooks.Output{
 			Decision: hooks.DecisionNone,
 			Reason:   "mail_router: inbox query failed",
-		})
+		}, nil)
 	}
 
 	if len(messages) == 0 {
-		return emitOutput(rc, hooks.Output{
+		return hookutil.EmitOutput(rc, "hooks/mail_router", hooks.Output{
 			Decision: hooks.DecisionNone,
 			Reason:   "no unread messages",
-		})
+		}, nil)
 	}
 
 	// Build context string with priority messages
@@ -105,7 +86,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Mark surfaced messages as surfaced (NOT read).
 	// We mark all plan events (since they are always rendered), plus up to MaxMessagesInContext other messages.
 	if len(messages) > 0 {
-		ids := make([]string, 0, minInt(len(messages), MaxMessagesInContext))
+		ids := make([]string, 0, mathutil.MinInt(len(messages), MaxMessagesInContext))
 
 		// Plan events: always included in context, so mark all of them as surfaced
 		for _, m := range messages {
@@ -131,9 +112,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 		_, _ = boardStore.MarkSurfaced(ctx, workspaceID, actorID, ids) //nolint:errcheck
 	}
 
-	return emitOutput(rc, hooks.Output{
+	return hookutil.EmitOutput(rc, "hooks/mail_router", hooks.Output{
 		Decision: hooks.DecisionNone, // Advisory only
-		Reason:   fmt.Sprintf("surfaced %d messages", minInt(len(messages), MaxMessagesInContext)),
+		Reason:   fmt.Sprintf("surfaced %d messages", mathutil.MinInt(len(messages), MaxMessagesInContext)),
 		Context:  contextStr,
 		Meta: map[string]any{
 			"message_count": len(messages),
@@ -141,7 +122,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 			"actor_id":      actorID,
 			"task_id":       taskID,
 		},
-	})
+	}, nil)
 }
 
 // buildMailContext creates a formatted context string from messages.
@@ -268,18 +249,4 @@ func formatSender(sender string) string {
 		return fmt.Sprintf("OVERSEER (%s)", sender)
 	}
 	return sender
-}
-
-func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
-	return skillout.Emit(rc, "hooks/mail_router", data)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

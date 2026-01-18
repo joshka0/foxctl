@@ -46,8 +46,16 @@ signature:
 returns:
   - name: preview
     type: string
+  - name: preview_numbered
+    type: string
+    description: "Preview with 1-based line numbers."
+  - name: preview_line_count
+    type: integer
+    description: "Number of lines in the preview."
   - name: artifact
     type: string
+  - name: cas_hint
+    type: object
   - name: binary
     type: boolean
 capabilities:

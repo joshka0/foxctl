@@ -9,6 +9,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,8 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
@@ -29,13 +32,14 @@ import (
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/retrieval"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 // Command is the envelope command for this skill.
@@ -102,6 +106,11 @@ type Input struct {
 	RerankEnabled bool   `json:"rerank_enabled,omitempty"` // Enable reranking (default: from env)
 	RerankTopK    int    `json:"rerank_top_k,omitempty"`   // Candidates to rerank (default: 50)
 	RerankModel   string `json:"rerank_model,omitempty"`   // Override model (default: rerank-2.5)
+
+	// Timeline options (enriches session results with chunk summaries and learnings)
+	Timeline      bool     `json:"timeline,omitempty"`       // Enrich session results with timeline data
+	TimelineLimit int      `json:"timeline_limit,omitempty"` // Max sessions to fetch timeline for (default: 3)
+	TimelineTypes []string `json:"timeline_types,omitempty"` // Learning types to include (default: all)
 }
 
 // Output is the JSON output.
@@ -109,8 +118,9 @@ type Output struct {
 	Query        string            `json:"query"`
 	Results      []Result          `json:"results"`
 	ContextHints []ContextHint     `json:"context_hints,omitempty"`
+	Timelines    []SessionTimeline `json:"timelines,omitempty"` // Present when timeline=true
 	Stats        SearchStats       `json:"stats"`
-	Summary      *SynthesisSummary `json:"summary,omitempty"` // Present when summarize=true
+	Summary      *SynthesisSummary `json:"summary,omitempty"`   // Present when summarize=true
 	TreeText     string            `json:"tree_text,omitempty"` // Present when format=tree
 }
 
@@ -126,20 +136,21 @@ type SynthesisSummary struct {
 
 // Result represents a single search result.
 type Result struct {
-	Source      string  `json:"source"`                 // "symbol", "session", "memory"
-	ID          string  `json:"id"`                     // Unique identifier (normalized)
-	Name        string  `json:"name"`                   // Display name
-	Path        string  `json:"path,omitempty"`         // File path (for symbols)
-	Line        int     `json:"line,omitempty"`         // Line number (for symbols)
-	Snippet     string  `json:"snippet,omitempty"`      // Code snippet (for symbols)
-	Summary     string  `json:"summary,omitempty"`      // Summary text (for sessions/memories)
-	Similarity  float64 `json:"similarity"`             // Similarity score (0-1)
-	Rank        int     `json:"rank"`                   // Final rank after fusion
-	RRFScore    float64 `json:"rrf_score,omitempty"`    // RRF score used for ranking
-	PageRank    float64 `json:"pagerank,omitempty"`     // PageRank authority score (0-1 normalized)
-	FinalScore  float64 `json:"final_score,omitempty"`  // Combined score with PageRank boost
-	RerankScore float64 `json:"rerank_score,omitempty"` // Reranker relevance score (0-1)
-	SourceRank  int     `json:"source_rank,omitempty"`  // Rank within source
+	Source      string           `json:"source"`                 // "symbol", "session", "memory"
+	ID          string           `json:"id"`                     // Unique identifier (normalized)
+	Name        string           `json:"name"`                   // Display name
+	Path        string           `json:"path,omitempty"`         // File path (for symbols)
+	Line        int              `json:"line,omitempty"`         // Line number (for symbols)
+	Snippet     string           `json:"snippet,omitempty"`      // Code snippet (for symbols)
+	Summary     string           `json:"summary,omitempty"`      // Summary text (for sessions/memories)
+	Similarity  float64          `json:"similarity"`             // Similarity score (0-1)
+	Rank        int              `json:"rank"`                   // Final rank after fusion
+	RRFScore    float64          `json:"rrf_score,omitempty"`    // RRF score used for ranking
+	PageRank    float64          `json:"pagerank,omitempty"`     // PageRank authority score (0-1 normalized)
+	FinalScore  float64          `json:"final_score,omitempty"`  // Combined score with PageRank boost
+	RerankScore float64          `json:"rerank_score,omitempty"` // Reranker relevance score (0-1)
+	SourceRank  int              `json:"source_rank,omitempty"`  // Rank within source
+	Timeline    *SessionTimeline `json:"timeline,omitempty"`     // Timeline data (for sessions when timeline=true)
 }
 
 // ContextHint represents a hint from related sessions.
@@ -167,6 +178,47 @@ type SearchStats struct {
 	RerankCount     int    `json:"rerank_count,omitempty"` // Number of candidates reranked
 }
 
+// SessionTimeline contains timeline data for a session.
+type SessionTimeline struct {
+	SessionID      string             `json:"session_id"`
+	SessionName    string             `json:"session_name,omitempty"`
+	Similarity     float64            `json:"similarity"`
+	ChunkSummaries []TimelineChunk    `json:"chunk_summaries,omitempty"`
+	Learnings      []TimelineLearning `json:"learnings,omitempty"`
+	Rollup         *TimelineRollup    `json:"rollup,omitempty"`
+	Status         string             `json:"status"`
+	Message        string             `json:"message,omitempty"`
+}
+
+// TimelineChunk represents a summarized chunk in the timeline.
+type TimelineChunk struct {
+	SummaryID     string   `json:"summary_id"`
+	WindowIndex   int      `json:"window_index"`
+	ChunkIndexMin int      `json:"chunk_index_min"`
+	ChunkIndexMax int      `json:"chunk_index_max"`
+	Summary       string   `json:"summary"`
+	Tools         []string `json:"tools,omitempty"`
+	Files         []string `json:"files,omitempty"`
+	Errors        []string `json:"errors,omitempty"`
+}
+
+// TimelineLearning represents extracted learning in the timeline.
+type TimelineLearning struct {
+	Type        string `json:"type"`
+	Summary     string `json:"summary"`
+	WindowIndex int    `json:"window_index"`
+}
+
+// TimelineRollup aggregates timeline metadata.
+type TimelineRollup struct {
+	SummaryLines []string `json:"summary_lines,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
+	Files        []string `json:"files,omitempty"`
+	Errors       []string `json:"errors,omitempty"`
+	Decisions    []string `json:"decisions,omitempty"`
+	Gotchas      []string `json:"gotchas,omitempty"`
+}
+
 func main() {
 	skillmain.Main(Command, run)
 }
@@ -176,12 +228,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if len(in.Scope) == 0 {
 		in.Scope = []string{ScopeSymbols, ScopeSessions, ScopeMemories, ScopeTasks, ScopeCodemaps}
 	}
-	if in.Limit <= 0 {
-		in.Limit = DefaultLimit
-	}
-	if in.MinSimilarity <= 0 {
-		in.MinSimilarity = DefaultMinSimilarity
-	}
+	in.Limit = mathutil.DefaultPositiveInt(in.Limit, DefaultLimit)
+	in.MinSimilarity = mathutil.DefaultPositiveFloat(in.MinSimilarity, DefaultMinSimilarity)
 	if in.Workspace == "" {
 		in.Workspace = rc.PathValidator.Workspace()
 	}
@@ -194,11 +242,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true}
 	for _, s := range in.Scope {
 		if !validScopes[s] {
-			return fmt.Errorf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps)", s)
+			return skillerr.Validationf("invalid scope: %s (valid: symbols, sessions, memories, tasks, codemaps)", s)
 		}
 	}
 
-	out, err := search(ctx, rc.Config, &in)
+	// FC/IS: Read API keys at boundary and pass through
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+
+	out, err := search(ctx, rc.Logger, rc.Config, &in, voyageKey, geminiKey)
 	if err != nil {
 		return err
 	}
@@ -206,7 +258,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, Command, out)
 }
 
-func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) {
+func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *Input, voyageKey, geminiKey string) (*Output, error) {
 	// Apply total timeout
 	searchCtx, cancel := context.WithTimeout(ctx, DefaultTotalTimeout)
 	defer cancel()
@@ -221,16 +273,8 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	}
 
 	// Validate workspace path with PathValidator
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("determine home directory: %w", err)
-		}
-		agentctlHome = filepath.Join(home, ".agentctl")
-	}
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	casRoot := filepath.Join(agentctlHome, "cas")
+	// FC/IS: Use cfg.Home from boundary instead of os.Getenv
+	agentctlHome := cfg.Home
 
 	// Workspace is already resolved in parseInput (prefers AGENTCTL_WORKSPACE over cwd)
 	workspacePath := in.Workspace
@@ -242,7 +286,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	// Create PathValidator to ensure workspace is valid (for path validation, not workspace ID)
 	validator, err := policy.NewPathValidator(workspacePath, []string{agentctlHome})
 	if err != nil {
-		return nil, fmt.Errorf("invalid workspace path: %w", err)
+		return nil, skillerr.WrapArg("invalid workspace path", err)
 	}
 	_ = validator // PathValidator available for path validation if needed
 
@@ -257,9 +301,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	}
 
 	// Detect provider and get scope-specific model configuration
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-
+	// FC/IS: API keys passed from boundary (run function)
 	var providerName string
 	if voyageKey != "" {
 		providerName = "voyage"
@@ -274,11 +316,11 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	var codeModel, memoryModel, textModel string
 
 	if providerName != "" {
-		codeModel, memoryModel, textModel = embeddingModelConfig(providerName)
+		codeModel, memoryModel, textModel = embeddingModelConfig(providerName, cfg)
 
 		start := time.Now()
 		var embErr error
-		scopedEmb, embErr = generateScopedEmbeddings(searchCtx, in.Query, scopeSet, codeModel, memoryModel, textModel)
+		scopedEmb, embErr = generateScopedEmbeddings(searchCtx, cfg, in.Query, scopeSet, codeModel, memoryModel, textModel, voyageKey, geminiKey)
 		if embErr != nil {
 			out.Stats.Hint = fmt.Sprintf("embedding failed: %v; using BM25-only", embErr)
 		} else {
@@ -292,7 +334,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 
 			// Create a code provider for backward compat with searchSymbolsWithRetrieval
 			if len(scopedEmb.code) > 0 {
-				embedProvider, _ = createProviderWithModel(codeModel)
+				embedProvider, _ = createProviderWithModel(codeModel, cfg, voyageKey, geminiKey)
 			}
 		}
 	} else {
@@ -300,9 +342,9 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	}
 
 	// Use appropriate embedding per scope
-	queryEmbedding := scopedEmb.code   // For symbols scope
+	queryEmbedding := scopedEmb.code    // For symbols scope
 	memoryEmbedding := scopedEmb.memory // For memories scope (voyage-3-large)
-	textEmbedding := scopedEmb.text    // For tasks, sessions, codemaps scopes (voyage-3.5)
+	textEmbedding := scopedEmb.text     // For tasks, sessions, codemaps scopes (voyage-3.5)
 
 	// Parallel search across enabled scopes
 	var wg sync.WaitGroup
@@ -319,8 +361,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 
 			results, err := searchSymbolsWithRetrieval(
 				sourceCtx,
-				storageRoot,
-				casRoot,
+				cfg,
 				workspaceID,
 				validator.Workspace(),
 				in.Query,
@@ -359,7 +400,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 				return
 			}
 
-			results, err := searchSessions(sourceCtx, cfg, storageRoot, textEmbedding, in.Limit*2, in)
+			results, err := searchSessions(sourceCtx, cfg, textEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeSessions,
 				results: results,
@@ -390,7 +431,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 				return
 			}
 
-			results, hint, err := searchMemories(sourceCtx, cfg, storageRoot, casRoot, workspacePath, in.Query, memoryEmbedding, in.Limit*2, in)
+			results, hint, err := searchMemories(sourceCtx, cfg, workspacePath, in.Query, memoryEmbedding, in.Limit*2, in)
 			resultsCh <- sourceResults{
 				source:  ScopeMemories,
 				results: results,
@@ -422,7 +463,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 				return
 			}
 
-			results, err := searchTasks(sourceCtx, cfg, storageRoot, casRoot, workspacePath, textEmbedding, in.Limit*2)
+			results, err := searchTasks(sourceCtx, cfg, workspacePath, textEmbedding, in.Limit*2)
 			resultsCh <- sourceResults{
 				source:  ScopeTasks,
 				results: results,
@@ -453,7 +494,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 				return
 			}
 
-			results, err := searchCodemaps(sourceCtx, storageRoot, casRoot, workspacePath, textEmbedding, in.Limit*2)
+			results, err := searchCodemaps(sourceCtx, cfg, workspacePath, textEmbedding, in.Limit*2)
 			resultsCh <- sourceResults{
 				source:  ScopeCodemaps,
 				results: results,
@@ -502,7 +543,7 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	fusedResults = applyPageRankBoost(searchCtx, cfg, workspacePath, fusedResults)
 
 	// Apply reranking if enabled
-	fusedResults, rerankStats := applyReranking(searchCtx, *in, fusedResults)
+	fusedResults, rerankStats := applyReranking(searchCtx, logger, *in, fusedResults)
 	if rerankStats.enabled {
 		out.Stats.RerankEnabled = true
 		out.Stats.RerankModel = rerankStats.model
@@ -526,6 +567,33 @@ func search(ctx context.Context, cfg config.Config, in *Input) (*Output, error) 
 	// Extract context hints from session results
 	if *in.IncludeContext {
 		out.ContextHints = extractContextHints(allResults[ScopeSessions], DefaultMaxContextHints)
+	}
+
+	// Fetch timelines for session results if requested
+	// Use fresh context to avoid issues with searchCtx timeout/cancellation
+	if in.Timeline && len(allResults[ScopeSessions]) > 0 {
+		timelineLimit := in.TimelineLimit
+		if timelineLimit <= 0 {
+			timelineLimit = 3 // default
+		}
+		timelineCtx, timelineCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		out.Timelines = fetchTimelines(timelineCtx, cfg, allResults[ScopeSessions], timelineLimit, in.TimelineTypes, workspaceID)
+		timelineCancel()
+
+		// Attach timeline data to matching session results for grouped output
+		timelineMap := make(map[string]*SessionTimeline)
+		for i := range out.Timelines {
+			timelineMap[out.Timelines[i].SessionID] = &out.Timelines[i]
+		}
+		for i := range out.Results {
+			if out.Results[i].Source == "session" {
+				// Result.ID is "session:<id>", timeline uses raw "<id>"
+				rawID := strings.TrimPrefix(out.Results[i].ID, "session:")
+				if tl, ok := timelineMap[rawID]; ok {
+					out.Results[i].Timeline = tl
+				}
+			}
+		}
 	}
 
 	// Add hint if no results
@@ -575,68 +643,26 @@ type scopedEmbeddings struct {
 }
 
 // embeddingModelConfig returns the models to use for different scope categories.
-// Uses semantic.ScopeModelRecommendation for consistent defaults with indexing.
-//
-// Configuration priority: env vars > ScopeModelRecommendation defaults
-//
-// Environment variables (optional overrides):
-//   - EMBEDDING_MODEL_CODE: Model for symbols scope
-//   - EMBEDDING_MODEL_MEMORY: Model for memories scope
-//   - EMBEDDING_MODEL_TEXT: Model for tasks, sessions, codemaps
-//   - EMBEDDING_MODEL: Fallback for all if scope-specific not set
-//
-// Default models (via ScopeModelRecommendation):
-//   - symbols: voyage-code-3
-//   - memories: voyage-3-large
-//   - tasks/sessions/codemaps: voyage-3.5
-func embeddingModelConfig(providerName string) (codeModel, memoryModel, textModel string) {
-	// Check for scope-specific overrides first
-	codeModel = os.Getenv("EMBEDDING_MODEL_CODE")
-	memoryModel = os.Getenv("EMBEDDING_MODEL_MEMORY")
-	textModel = os.Getenv("EMBEDDING_MODEL_TEXT")
+// Configuration priority: config overrides > embedding.model fallback.
+func embeddingModelConfig(providerName string, cfg config.Config) (codeModel, memoryModel, textModel string) {
+	codeModel = semantic.ResolveModelForScope(semantic.ScopeSymbols, cfg)
+	memoryModel = semantic.ResolveModelForScope(semantic.ScopeMemory, cfg)
+	textModel = semantic.ResolveModelForScope(semantic.ScopeTasks, cfg)
 
-	// Fall back to generic EMBEDDING_MODEL
-	fallback := os.Getenv("EMBEDDING_MODEL")
-
-	// Apply provider-specific defaults using ScopeModelRecommendation
-	switch providerName {
-	case "voyage":
-		if codeModel == "" {
-			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
-				codeModel = fallback
-			} else {
-				codeModel, _ = semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
-			}
-		}
-		if memoryModel == "" {
-			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
-				memoryModel = fallback
-			} else {
-				memoryModel, _ = semantic.ScopeModelRecommendation(semantic.ScopeMemory)
-			}
-		}
-		if textModel == "" {
-			if fallback != "" && !strings.HasPrefix(fallback, "gemini-") {
-				textModel = fallback
-			} else {
-				textModel, _ = semantic.ScopeModelRecommendation(semantic.ScopeTasks)
-			}
-		}
-	case "gemini":
-		// Gemini uses same model for all scopes
+	if providerName == "gemini" {
 		model := "gemini-embedding-001"
-		if fallback != "" && strings.HasPrefix(fallback, "gemini-") {
-			model = fallback
+		if strings.HasPrefix(codeModel, "gemini-") {
+			model = codeModel
 		}
-		if codeModel == "" {
-			codeModel = model
+		if strings.HasPrefix(memoryModel, "gemini-") {
+			model = memoryModel
 		}
-		if memoryModel == "" {
-			memoryModel = model
+		if strings.HasPrefix(textModel, "gemini-") {
+			model = textModel
 		}
-		if textModel == "" {
-			textModel = model
-		}
+		codeModel = model
+		memoryModel = model
+		textModel = model
 	}
 
 	return codeModel, memoryModel, textModel
@@ -644,51 +670,18 @@ func embeddingModelConfig(providerName string) (codeModel, memoryModel, textMode
 
 // createProviderWithModel creates an embedding provider with a specific model.
 // Supports both Voyage and Gemini based on available API keys.
-func createProviderWithModel(model string) (semantic.EmbeddingProvider, error) {
-	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-
-	// Determine provider from model name or API key availability
-	if strings.HasPrefix(model, "voyage-") {
-		if voyageKey == "" {
-			return nil, fmt.Errorf("VOYAGE_API_KEY not set for model %s", model)
-		}
-		return semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: voyageKey,
-			Model:  model,
-		})
-	} else if strings.HasPrefix(model, "gemini-") {
-		if geminiKey == "" {
-			return nil, fmt.Errorf("GEMINI_API_KEY not set for model %s", model)
-		}
-		return semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey: geminiKey,
-			Model:  model,
-		})
+// FC/IS: API keys passed from boundary instead of os.Getenv.
+func createProviderWithModel(model string, cfg config.Config, voyageKey, geminiKey string) (semantic.EmbeddingProvider, error) {
+	provider, err := semantic.NewProviderForModel(
+		model,
+		cfg,
+		semantic.WithVoyageKey(voyageKey),
+		semantic.WithGeminiKey(geminiKey),
+	)
+	if err != nil {
+		return nil, skillerr.Auth("no embedding API key available", skillerr.WithHint("Set VOYAGE_API_KEY or GEMINI_API_KEY."))
 	}
-
-	// Auto-detect provider from API keys with scope-based model selection
-	if voyageKey != "" {
-		// Use scope-based default when model is empty
-		if model == "" {
-			model, _ = semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
-		}
-		return semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: voyageKey,
-			Model:  model,
-		})
-	} else if geminiKey != "" {
-		// Gemini fallback (not recommended - dimension mismatch with Voyage)
-		if model == "" {
-			model = "gemini-embedding-001"
-		}
-		return semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey: geminiKey,
-			Model:  model,
-		})
-	}
-
-	return nil, fmt.Errorf("no embedding API key available")
+	return provider, nil
 }
 
 // generateScopedEmbeddings creates query embeddings for the requested scopes.
@@ -697,7 +690,7 @@ func createProviderWithModel(model string) (semantic.EmbeddingProvider, error) {
 //   - code model for symbols (voyage-code-3)
 //   - memory model for memories (voyage-3-large)
 //   - text model for tasks, sessions, codemaps (voyage-3.5)
-func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[string]bool, codeModel, memoryModel, textModel string) (scopedEmbeddings, error) {
+func generateScopedEmbeddings(ctx context.Context, cfg config.Config, query string, scopeSet map[string]bool, codeModel, memoryModel, textModel, voyageKey, geminiKey string) (scopedEmbeddings, error) {
 	var emb scopedEmbeddings
 	var wg sync.WaitGroup
 	var codeErr, memoryErr, textErr error
@@ -729,7 +722,7 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 	}
 
 	if allSameModel && baseModel != "" {
-		provider, err := createProviderWithModel(baseModel)
+		provider, err := createProviderWithModel(baseModel, cfg, voyageKey, geminiKey)
 		if err != nil {
 			return emb, err
 		}
@@ -754,7 +747,7 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			provider, err := createProviderWithModel(codeModel)
+			provider, err := createProviderWithModel(codeModel, cfg, voyageKey, geminiKey)
 			if err != nil {
 				codeErr = err
 				return
@@ -768,7 +761,7 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			provider, err := createProviderWithModel(memoryModel)
+			provider, err := createProviderWithModel(memoryModel, cfg, voyageKey, geminiKey)
 			if err != nil {
 				memoryErr = err
 				return
@@ -782,7 +775,7 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			provider, err := createProviderWithModel(textModel)
+			provider, err := createProviderWithModel(textModel, cfg, voyageKey, geminiKey)
 			if err != nil {
 				textErr = err
 				return
@@ -795,7 +788,7 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 
 	// Return first error encountered (if any)
 	if codeErr != nil && memoryErr != nil && textErr != nil {
-		return emb, fmt.Errorf("code: %v; memory: %v; text: %v", codeErr, memoryErr, textErr)
+		return emb, skillerr.Runtimef("code: %v; memory: %v; text: %v", codeErr, memoryErr, textErr)
 	}
 	if codeErr != nil {
 		return emb, codeErr
@@ -813,15 +806,15 @@ func generateScopedEmbeddings(ctx context.Context, query string, scopeSet map[st
 // This provides hybrid search (BM25 + vector when available) with ripgrep fallback.
 func searchSymbolsWithRetrieval(
 	ctx context.Context,
-	storageRoot, casRoot, workspaceID, workspacePath, query string,
+	cfg config.Config, workspaceID, workspacePath, query string,
 	embedProvider semantic.EmbeddingProvider,
 	queryEmbedding []float32,
 	limit int,
 ) ([]Result, error) {
 	// Open memory store for symbol index access
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer memStore.Close()
 
@@ -834,13 +827,16 @@ func searchSymbolsWithRetrieval(
 
 	// Wire up SearchableStore for vector search when embeddings are available
 	if embedProvider != nil && queryEmbedding != nil {
-		wrappedDB := dbdriver.WrapSQLDB(memStore.DB(), dbdriver.DriverSQLite)
-		searchStore, searchErr := memStore.EnableSearch(wrappedDB, workspaceID)
-		if searchErr == nil {
-			gen = gen.WithSearchableStore(searchStore)
-			logger.Debug().Msg("enabled SearchableStore for hybrid search")
+		// Only available on concrete *memory.Store, not the interface
+		if concreteStore, ok := memStore.(*memory.Store); ok {
+			wrappedDB := dbdriver.WrapSQLDB(concreteStore.DB(), dbdriver.DriverSQLite)
+			searchStore, searchErr := concreteStore.EnableSearch(wrappedDB, workspaceID)
+			if searchErr == nil {
+				gen = gen.WithSearchableStore(searchStore)
+				logger.Debug().Msg("enabled SearchableStore for hybrid search")
+			}
 		}
-		// If EnableSearch fails, we fall back to BM25 (no error returned)
+		// If type assertion or EnableSearch fails, we fall back to BM25 (no error returned)
 	}
 
 	// Configure options for symbol search
@@ -857,7 +853,7 @@ func searchSymbolsWithRetrieval(
 	// Generate candidates
 	genResult, err := gen.Generate(ctx, workspaceID, query, opts)
 	if err != nil {
-		return nil, fmt.Errorf("generate candidates: %w", err)
+		return nil, skillerr.WrapRuntime("generate candidates", err)
 	}
 
 	// Convert candidates to results with normalized IDs
@@ -896,7 +892,7 @@ func searchSymbolsWithRetrieval(
 
 // sessionSearcher abstracts the session search interface for both local and Turso stores.
 type sessionSearcher interface {
-	SearchSimilar(ctx context.Context, embedding []float32, limit int) ([]storage.SimilarSession, error)
+	SearchSimilar(ctx context.Context, workspace string, embedding []float32, limit int) ([]storage.SimilarSession, error)
 	Close() error
 }
 
@@ -910,7 +906,7 @@ type globalSessionSearcher interface {
 // searchSessions searches sessions using vector similarity.
 // When Turso is configured with vector enabled, it uses TursoStore for cloud-native vector search.
 // When in.Remote is true, it uses cross-workspace search capabilities.
-func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, queryEmbedding []float32, limit int, in *Input) ([]Result, error) {
+func searchSessions(ctx context.Context, cfg config.Config, queryEmbedding []float32, limit int, in *Input) ([]Result, error) {
 	var store sessionSearcher
 	var err error
 
@@ -939,19 +935,19 @@ func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, 
 		if err != nil {
 			if in.Remote {
 				// Remote mode requires Turso - fail if unavailable
-				return nil, fmt.Errorf("open turso sessions store (remote mode): %w", err)
+				return nil, skillerr.WrapIO("open turso sessions store (remote mode)", err)
 			}
 			// Fallback to local store if Turso fails
-			store, err = sessions.Open(ctx, storageRoot)
+			store, _, err = sessionkit.OpenSessions(ctx, cfg)
 			if err != nil {
-				return nil, fmt.Errorf("open sessions store (turso fallback): %w", err)
+				return nil, skillerr.WrapIO("open sessions store (turso fallback)", err)
 			}
 		}
 	} else {
 		// Use local SQLite store
-		store, err = sessions.Open(ctx, storageRoot)
+		store, _, err = sessionkit.OpenSessions(ctx, cfg)
 		if err != nil {
-			return nil, fmt.Errorf("open sessions store: %w", err)
+			return nil, skillerr.WrapIO("open sessions store", err)
 		}
 	}
 	defer func() { errs.Ignore(store.Close(), "close session store") }()
@@ -963,7 +959,7 @@ func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, 
 		// Check if store supports global search
 		globalStore, ok := store.(globalSessionSearcher)
 		if !ok {
-			return nil, fmt.Errorf("session store does not support cross-workspace search; Turso required")
+			return nil, skillerr.Validation("session store does not support cross-workspace search; Turso required")
 		}
 
 		if in.Global {
@@ -972,21 +968,27 @@ func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, 
 			similar, err = globalStore.SearchSimilarMultiWorkspace(ctx, in.Workspaces, queryEmbedding, limit)
 		}
 	} else {
-		similar, err = store.SearchSimilar(ctx, queryEmbedding, limit)
+		similar, err = store.SearchSimilar(ctx, in.Workspace, queryEmbedding, limit)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("search sessions: %w", err)
+		return nil, skillerr.WrapIO("search sessions", err)
 	}
 
 	results := make([]Result, 0, len(similar))
-	for i, s := range similar {
+	rank := 0
+	for _, s := range similar {
+		// Skip sessions with empty or placeholder summaries
+		if isEmptySessionSummary(s.Session.Summary) {
+			continue
+		}
+		rank++
 		result := Result{
 			Source:     "session",
 			ID:         normalizeSessionID(s.Session.ID),
 			Name:       getSessionName(s.Session),
-			Summary:    truncate(s.Session.Summary, 200),
+			Summary:    skillout.TruncateString(s.Session.Summary, 200),
 			Similarity: s.Similarity,
-			SourceRank: i + 1,
+			SourceRank: rank,
 		}
 		results = append(results, result)
 	}
@@ -1000,8 +1002,7 @@ func searchSessions(ctx context.Context, cfg config.Config, storageRoot string, 
 // Returns results, optional hint (when vector search was skipped), and error.
 func searchMemories(
 	ctx context.Context,
-	cfg config.Config,
-	storageRoot, casRoot, workspaceID, query string,
+	cfg config.Config, workspaceID, query string,
 	queryEmbedding []float32,
 	limit int,
 	in *Input,
@@ -1037,11 +1038,11 @@ func searchMemories(
 		if err != nil {
 			if in.Remote {
 				// Remote mode requires Turso - fail if unavailable
-				return nil, "", fmt.Errorf("open turso memory store (remote mode): %w", err)
+				return nil, "", skillerr.WrapIO("open turso memory store (remote mode)", err)
 			}
 			// Fallback to BM25 if Turso fails, with hint about the failure
 			hint := fmt.Sprintf("memory vector search unavailable: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
+			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
 			return results, hint, bm25Err
 		}
 		defer func() { errs.Ignore(tursoStore.Close(), "close turso memory store") }()
@@ -1057,11 +1058,11 @@ func searchMemories(
 		if err != nil {
 			if in.Remote {
 				// Remote mode - don't fallback to BM25
-				return nil, "", fmt.Errorf("memory remote search failed: %w", err)
+				return nil, "", skillerr.WrapRuntime("memory remote search failed", err)
 			}
 			// Fallback to BM25 on error, with hint about the failure
 			hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-			results, bm25Err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
+			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
 			return results, hint, bm25Err
 		}
 
@@ -1069,7 +1070,7 @@ func searchMemories(
 		// Skip fallback for remote mode - empty results are valid
 		if len(scoredEntries) == 0 && !in.Remote {
 			hint := "memory vector search returned no results; trying BM25 fallback"
-			results, bm25Err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
+			results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
 			if bm25Err != nil {
 				return nil, hint, bm25Err
 			}
@@ -1084,19 +1085,19 @@ func searchMemories(
 		// SQLite store - use vector search if embeddings available, otherwise BM25
 		if queryEmbedding != nil {
 			// Use in-memory cosine similarity search
-			results, err := searchMemoriesVector(ctx, storageRoot, casRoot, workspaceID, queryEmbedding, limit)
+			results, err := searchMemoriesVector(ctx, cfg, workspaceID, queryEmbedding, limit)
 			if err == nil && len(results) > 0 {
 				return results, "", nil
 			}
 			// Fall back to BM25 if vector search fails or returns empty
 			if err != nil {
 				hint := fmt.Sprintf("memory vector search failed: %v; using BM25 fallback", err)
-				results, bm25Err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
+				results, bm25Err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
 				return results, hint, bm25Err
 			}
 		}
 		// Use SQLite BM25 search (no hint needed - this is expected behavior)
-		results, err := searchMemoriesBM25(ctx, storageRoot, casRoot, workspaceID, query, limit)
+		results, err := searchMemoriesBM25(ctx, cfg, workspaceID, query, limit)
 		return results, "", err
 	}
 
@@ -1115,7 +1116,7 @@ func searchMemories(
 			Source:     "memory",
 			ID:         normalizeMemoryID(entry.Name),
 			Name:       entry.Name,
-			Summary:    truncate(entry.Summary, 200),
+			Summary:    skillout.TruncateString(entry.Summary, 200),
 			Similarity: scored.Score,
 			SourceRank: rank,
 		}
@@ -1133,13 +1134,13 @@ func searchMemories(
 // searchMemoriesBM25 uses SQLite BM25-like text search for memories.
 func searchMemoriesBM25(
 	ctx context.Context,
-	storageRoot, casRoot, workspaceID, query string,
+	cfg config.Config, workspaceID, query string,
 	limit int,
 ) ([]Result, error) {
 	// Open memory store
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer memStore.Close()
 
@@ -1150,7 +1151,7 @@ func searchMemoriesBM25(
 	// Use basic text search on memories (BM25-like)
 	scoredEntries, err := memStore.Search(ctx, workspaceID, query, fetchLimit)
 	if err != nil {
-		return nil, fmt.Errorf("search memories: %w", err)
+		return nil, skillerr.WrapIO("search memories", err)
 	}
 
 	// Filter out symbol-type entries (they're handled by symbol search)
@@ -1176,7 +1177,7 @@ func searchMemoriesBM25(
 			Source:     "memory",
 			ID:         normalizeMemoryID(entry.Name),
 			Name:       entry.Name,
-			Summary:    truncate(entry.Summary, 200),
+			Summary:    skillout.TruncateString(entry.Summary, 200),
 			Similarity: normalizedScore,
 			SourceRank: rank,
 		}
@@ -1194,14 +1195,14 @@ func searchMemoriesBM25(
 // searchMemoriesVector uses SQLite in-memory cosine similarity search.
 func searchMemoriesVector(
 	ctx context.Context,
-	storageRoot, casRoot, workspaceID string,
+	cfg config.Config, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
 ) ([]Result, error) {
 	// Open memory store
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer memStore.Close()
 
@@ -1212,7 +1213,7 @@ func searchMemoriesVector(
 	// Use vector similarity search
 	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, fetchLimit)
 	if err != nil {
-		return nil, fmt.Errorf("vector search memories: %w", err)
+		return nil, skillerr.WrapIO("vector search memories", err)
 	}
 
 	// Filter out symbol-type entries (they're handled by symbol search)
@@ -1230,7 +1231,7 @@ func searchMemoriesVector(
 			Source:     "memory",
 			ID:         normalizeMemoryID(entry.Name),
 			Name:       entry.Name,
-			Summary:    truncate(entry.Summary, 200),
+			Summary:    skillout.TruncateString(entry.Summary, 200),
 			Similarity: scored.Score,
 			SourceRank: rank,
 		}
@@ -1279,36 +1280,36 @@ func normalizeCodemapID(codemapID string) string {
 // searchTasks searches task embeddings using vector similarity.
 func searchTasks(
 	ctx context.Context,
-	cfg config.Config,
-	storageRoot, casRoot, workspaceID string,
+	cfg config.Config, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
 ) ([]Result, error) {
 	// Open memory store (task embeddings are stored in named_memory)
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer memStore.Close()
 
 	// Search for similar entries
 	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2)
 	if err != nil {
-		return nil, fmt.Errorf("vector search tasks: %w", err)
+		return nil, skillerr.WrapIO("vector search tasks", err)
 	}
 
-	// Debug: if no entries found, report workspace for investigation
+	// No task embeddings indexed yet - return empty results (not an error)
+	// This matches the behavior of other scopes (memories, codemaps) for consistency
 	if len(scoredEntries) == 0 {
-		return nil, fmt.Errorf("no embeddings found for workspace=%q (expected task embeddings)", workspaceID)
+		return nil, nil
 	}
 
 	// Open tasks store to get full task details
 	// Note: tasks.Open expects root directory, it appends "tasks.db" internally
-	taskStore, err := tasks.Open(ctx, storageRoot)
+	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open tasks store: %w", err)
+		return nil, skillerr.WrapIO("open tasks store", err)
 	}
-	defer taskStore.Close()
+	defer cleanup()
 
 	// Filter to only task_embedding entries and fetch task details
 	results := make([]Result, 0, len(scoredEntries))
@@ -1338,10 +1339,10 @@ func searchTasks(
 		var snippetParts []string
 		snippetParts = append(snippetParts, task.Title)
 		if task.Notes != "" {
-			snippetParts = append(snippetParts, "Notes: "+truncate(task.Notes, 100))
+			snippetParts = append(snippetParts, "Notes: "+skillout.TruncateString(task.Notes, 100))
 		}
 		if task.Gotchas != "" {
-			snippetParts = append(snippetParts, "Gotchas: "+truncate(task.Gotchas, 100))
+			snippetParts = append(snippetParts, "Gotchas: "+skillout.TruncateString(task.Gotchas, 100))
 		}
 		snippet := strings.Join(snippetParts, " | ")
 
@@ -1349,8 +1350,8 @@ func searchTasks(
 			Source:     "task",
 			ID:         normalizeTaskID(taskID),
 			Name:       task.Title,
-			Summary:    truncate(task.Description, 200),
-			Snippet:    truncate(snippet, 300),
+			Summary:    skillout.TruncateString(task.Description, 200),
+			Snippet:    skillout.TruncateString(snippet, 300),
 			Similarity: scored.Score,
 			SourceRank: rank,
 		}
@@ -1369,43 +1370,48 @@ func searchTasks(
 // Codemaps are stored in named_memory with type="codemap".
 func searchCodemaps(
 	ctx context.Context,
-	storageRoot, casRoot, workspaceID string,
+	cfg config.Config, workspaceID string,
 	queryEmbedding []float32,
 	limit int,
 ) ([]Result, error) {
 	// Open memory store (codemap embeddings are stored in named_memory)
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer memStore.Close()
 
 	// Search for similar entries
 	scoredEntries, err := memStore.SearchSimilar(ctx, workspaceID, queryEmbedding, limit*2)
 	if err != nil {
-		return nil, fmt.Errorf("vector search codemaps: %w", err)
+		return nil, skillerr.WrapIO("vector search codemaps", err)
 	}
 
-	// Filter to only codemap entries
+	// Filter to only codemap entries (including codemap chunks)
 	results := make([]Result, 0, len(scoredEntries))
+	seen := make(map[string]int)
 	rank := 1
 	for _, scored := range scoredEntries {
 		entry := scored.Entry
 
 		// Only process codemap entries
-		if entry.Type != "codemap" {
+		if entry.Type != "codemap" && entry.Type != "codemap_chunk" {
 			continue
 		}
 
-		// Extract codemap ID from name: "codemap://<id>" or just use name
-		codemapID := entry.Name
-		if strings.HasPrefix(entry.Name, "codemap://") {
-			codemapID = strings.TrimPrefix(entry.Name, "codemap://")
+		// Extract codemap ID from name: "codemap://<id>" or "codemap://<id>#chunk:<id>"
+		codemapID := strings.TrimPrefix(entry.Name, "codemap://")
+		codemapID = strings.TrimPrefix(codemapID, "codemap:")
+		if idx := strings.Index(codemapID, "#chunk:"); idx >= 0 {
+			codemapID = codemapID[:idx]
+		}
+		if codemapID == "" {
+			continue
 		}
 
 		// Build snippet from codemap data
 		snippet := entry.Summary
-		if snippet == "" && entry.Result != nil {
+		if entry.Type == "codemap" && snippet == "" && entry.Result != nil {
 			// Try to extract title and description from result JSON
 			var data map[string]any
 			if json.Unmarshal(entry.Result, &data) == nil {
@@ -1422,16 +1428,42 @@ func searchCodemaps(
 			}
 		}
 
+		if snippet == "" {
+			snippet = entry.Name
+		}
+
+		displayName := entry.Name
+		if entry.Type == "codemap_chunk" {
+			displayName = "codemap://" + codemapID
+		}
+
+		summary := entry.Summary
+		if summary == "" {
+			summary = snippet
+		}
+
 		result := Result{
 			Source:     "codemap",
 			ID:         normalizeCodemapID(codemapID),
-			Name:       entry.Name,
-			Summary:    truncate(entry.Summary, 200),
-			Snippet:    truncate(snippet, 300),
+			Name:       displayName,
+			Summary:    skillout.TruncateString(summary, 200),
+			Snippet:    skillout.TruncateString(snippet, 300),
 			Similarity: scored.Score,
 			SourceRank: rank,
 		}
+		if idx, exists := seen[codemapID]; exists {
+			if scored.Score > results[idx].Similarity {
+				results[idx].Similarity = scored.Score
+				results[idx].Snippet = skillout.TruncateString(snippet, 300)
+				if entry.Summary != "" {
+					results[idx].Summary = skillout.TruncateString(entry.Summary, 200)
+				}
+			}
+			continue
+		}
+
 		results = append(results, result)
+		seen[codemapID] = len(results) - 1
 		rank++
 
 		if rank > limit {
@@ -1440,6 +1472,27 @@ func searchCodemaps(
 	}
 
 	return results, nil
+}
+
+// isEmptySessionSummary returns true if the session summary is empty or a placeholder.
+func isEmptySessionSummary(summary string) bool {
+	s := strings.TrimSpace(strings.ToLower(summary))
+	if s == "" {
+		return true
+	}
+	// Filter common placeholder summaries from failed summarization
+	placeholders := []string{
+		"no coding session",
+		"no conversation",
+		"no session was provided",
+		"empty conversation",
+	}
+	for _, p := range placeholders {
+		if strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func getSessionName(s storage.Session) string {
@@ -1621,7 +1674,7 @@ type rerankStatsResult struct {
 // applyReranking applies Voyage rerank-2.5 to improve result relevance.
 // Reranking uses cross-attention between query and documents for better precision.
 // Returns original results unchanged if reranking is disabled or fails.
-func applyReranking(ctx context.Context, in Input, results []Result) ([]Result, rerankStatsResult) {
+func applyReranking(ctx context.Context, logger zerolog.Logger, in Input, results []Result) ([]Result, rerankStatsResult) {
 	stats := rerankStatsResult{}
 
 	// Check if reranking is enabled
@@ -1690,16 +1743,25 @@ func applyReranking(ctx context.Context, in Input, results []Result) ([]Result, 
 	for _, rr := range reranked {
 		val, ok := rr.Metadata["index"]
 		if !ok {
-			_, _ = fmt.Fprintf(os.Stderr, "rerank: missing index in metadata for id=%s, skipping\n", rr.ID)
+			logger.Warn().
+				Str("rerank_id", rr.ID).
+				Msg("rerank: missing index in metadata; skipping")
 			continue
 		}
 		idx, ok := val.(int)
 		if !ok {
-			_, _ = fmt.Fprintf(os.Stderr, "rerank: index is not int for id=%s (got %T), skipping\n", rr.ID, val)
+			logger.Warn().
+				Str("rerank_id", rr.ID).
+				Interface("index_value", val).
+				Msg("rerank: index is not int; skipping")
 			continue
 		}
 		if idx < 0 || idx >= len(results) {
-			_, _ = fmt.Fprintf(os.Stderr, "rerank: index %d out of bounds (len=%d) for id=%s, skipping\n", idx, len(results), rr.ID)
+			logger.Warn().
+				Str("rerank_id", rr.ID).
+				Int("index", idx).
+				Int("results_len", len(results)).
+				Msg("rerank: index out of bounds; skipping")
 			continue
 		}
 		r := results[idx]
@@ -1798,80 +1860,14 @@ func extractSnippet(filePath string, targetLine, contextLines int) string {
 	return snippet
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}
-
-
 // LLMProvider represents an LLM provider for synthesis.
-type LLMProvider struct {
-	Name     string
-	Endpoint string
-	APIKey   string
-	Model    string
-}
-
-// getLLMProviders returns available LLM providers in priority order.
-// Priority: OpenRouter (devstral free) → Groq → Cerebras
-func getLLMProviders(modelOverride string) []LLMProvider {
-	var providers []LLMProvider
-
-	// OpenRouter - devstral is the preferred free model
-	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
-		model := modelOverride
-		if model == "" {
-			model = os.Getenv("OPENROUTER_MODELS")
-		}
-		if model == "" {
-			model = "mistralai/devstral-2512:free"
-		}
-		providers = append(providers, LLMProvider{
-			Name:     "openrouter:" + model,
-			Endpoint: "https://openrouter.ai/api/v1/chat/completions",
-			APIKey:   key,
-			Model:    model,
-		})
-	}
-
-	// Groq - fast and cheap
-	if key := os.Getenv("GROQ_API_KEY"); key != "" {
-		model := "llama-3.3-70b-versatile"
-		if modelOverride != "" {
-			model = modelOverride
-		}
-		providers = append(providers, LLMProvider{
-			Name:     "groq",
-			Endpoint: "https://api.groq.com/openai/v1/chat/completions",
-			APIKey:   key,
-			Model:    model,
-		})
-	}
-
-	// Cerebras - fastest inference
-	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
-		model := "llama-3.3-70b"
-		if modelOverride != "" {
-			model = modelOverride
-		}
-		providers = append(providers, LLMProvider{
-			Name:     "cerebras",
-			Endpoint: "https://api.cerebras.ai/v1/chat/completions",
-			APIKey:   key,
-			Model:    model,
-		})
-	}
-
-	return providers
-}
+type LLMProvider = llmproviders.Provider
 
 // synthesizeResults sends search results to an LLM for intelligent synthesis.
 func synthesizeResults(ctx context.Context, query string, results []Result, modelOverride string) (*SynthesisSummary, error) {
-	providers := getLLMProviders(modelOverride)
+	providers := llmproviders.SynthesisProviders(modelOverride)
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("no LLM provider available (set OPENROUTER_API_KEY, GROQ_API_KEY, or CEREBRAS_API_KEY)")
+		return nil, skillerr.Auth("no LLM provider available", skillerr.WithHint("Set OPENROUTER_API_KEY, GROQ_API_KEY, or CEREBRAS_API_KEY."))
 	}
 
 	prompt := buildSynthesisPrompt(query, results)
@@ -1888,7 +1884,7 @@ func synthesizeResults(ctx context.Context, query string, results []Result, mode
 		return summary, nil
 	}
 
-	return nil, fmt.Errorf("all LLM providers failed: %w", lastErr)
+	return nil, skillerr.WrapRuntime("all LLM providers failed", lastErr)
 }
 
 // callLLMProvider calls an OpenAI-compatible API endpoint.
@@ -1903,7 +1899,7 @@ func callLLMProvider(ctx context.Context, provider LLMProvider, prompt string) (
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, skillerr.WrapRuntime("marshal request", err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -1911,7 +1907,7 @@ func callLLMProvider(ctx context.Context, provider LLMProvider, prompt string) (
 
 	req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, skillerr.WrapRuntime("create request", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -1926,13 +1922,13 @@ func callLLMProvider(ctx context.Context, provider LLMProvider, prompt string) (
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, skillerr.WrapRuntime("send request", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
+		return nil, skillerr.Runtimef("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result struct {
@@ -1947,11 +1943,11 @@ func callLLMProvider(ctx context.Context, provider LLMProvider, prompt string) (
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, skillerr.WrapParse("decode response", err)
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("empty response from %s", provider.Name)
+		return nil, skillerr.Runtimef("empty response from %s", provider.Name)
 	}
 
 	// Parse the JSON response
@@ -2118,4 +2114,258 @@ func renderResultsAsTree(results []Result) string {
 	sb.WriteString(fmt.Sprintf("\n📂 %d related files", len(paths)))
 
 	return sb.String()
+}
+
+// fetchTimelines retrieves timeline data for the top N session results.
+func fetchTimelines(ctx context.Context, cfg config.Config, sessionResults []Result, limit int, types []string, workspace string) []SessionTimeline {
+	if len(sessionResults) == 0 {
+		return nil
+	}
+
+	// Limit sessions to process
+	if len(sessionResults) > limit {
+		sessionResults = sessionResults[:limit]
+	}
+
+	storeCtx := context.Background()
+
+	// Open session store for chunk summaries only
+	sessionStore, cleanup, err := sessionkit.OpenSessions(storeCtx, cfg)
+	if err != nil {
+		return nil
+	}
+	defer cleanup()
+
+	// Open memory store for learnings
+	memStore, memCleanup, err := sessionkit.OpenMemory(storeCtx, cfg)
+	if err != nil {
+		memStore = nil
+	}
+	if memStore != nil {
+		defer memCleanup()
+	}
+
+	// Open a SEPARATE db connection for context windows queries
+	// This bypasses the sessionStore entirely to test if the issue is there
+	dbPath := filepath.Join(cfg.Storage.Root, "sessions.db")
+	windowsDB, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return []SessionTimeline{{
+			SessionID: "debug",
+			Status:    "error",
+			Message:   fmt.Sprintf("open windows db: %v", err),
+		}}
+	}
+	defer windowsDB.Close()
+
+	timelines := make([]SessionTimeline, 0, len(sessionResults))
+
+	for _, result := range sessionResults {
+		// Strip normalized prefix if present
+		sessionID := strings.TrimPrefix(result.ID, "session:")
+
+		timeline := SessionTimeline{
+			SessionID:   sessionID,
+			SessionName: result.Name,
+			Similarity:  result.Similarity,
+			Status:      "ok",
+		}
+
+		// Fetch context windows using SEPARATE db connection
+		windows, err := queryContextWindowsDirect(storeCtx, windowsDB, sessionID)
+		if err != nil {
+			timeline.Status = "error"
+			timeline.Message = fmt.Sprintf("get context windows: %v", err)
+			timelines = append(timelines, timeline)
+			continue
+		}
+
+		// Check if session has context windows (required for chunk summaries)
+		if len(windows) == 0 {
+			timeline.Status = "no_windows"
+			timeline.Message = "session has no context windows"
+			timelines = append(timelines, timeline)
+			continue
+		}
+
+		// Collect chunk summaries from all windows
+		chunks := collectChunkSummaries(storeCtx, sessionStore, sessionID, windows)
+		timeline.ChunkSummaries = chunks
+
+		// Fetch learnings from memory store
+		learnings := fetchTimelineLearnings(storeCtx, memStore, sessionID, workspace, types)
+		timeline.Learnings = learnings
+
+		// Build rollup
+		timeline.Rollup = buildTimelineRollup(chunks, learnings)
+
+		timelines = append(timelines, timeline)
+	}
+
+	return timelines
+}
+
+// queryContextWindowsDirect queries context windows using a direct db connection.
+func queryContextWindowsDirect(ctx context.Context, db *sql.DB, sessionID string) ([]storage.ContextWindow, error) {
+	rows, err := db.QueryContext(ctx, `
+SELECT id, session_id, window_index, started_at, ended_at, pre_compact_tokens,
+       trigger, chunk_start, chunk_end, message_count, summary, embedding, embedding_model, created_at
+FROM session_context_windows
+WHERE session_id = ?
+ORDER BY window_index ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("query context windows: %w", err)
+	}
+	defer rows.Close()
+
+	var windows []storage.ContextWindow
+	for rows.Next() {
+		var w storage.ContextWindow
+		var embedding []byte
+		var startedAt, endedAt, createdAt string
+		err := rows.Scan(
+			&w.ID, &w.SessionID, &w.WindowIndex, &startedAt, &endedAt,
+			&w.PreCompactTokens, &w.Trigger, &w.ChunkStart, &w.ChunkEnd,
+			&w.MessageCount, &w.Summary, &embedding, &w.EmbeddingModel, &createdAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan context window: %w", err)
+		}
+		// Parse timestamps
+		if startedAt != "" {
+			w.StartedAt, _ = time.Parse(time.RFC3339Nano, startedAt)
+		}
+		if endedAt != "" {
+			w.EndedAt, _ = time.Parse(time.RFC3339Nano, endedAt)
+		}
+		if createdAt != "" {
+			w.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+		}
+		windows = append(windows, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return windows, nil
+}
+
+// collectChunkSummaries extracts chunk summaries from session context windows.
+func collectChunkSummaries(ctx context.Context, sessionStore *sessions.Store, sessionID string, windows []storage.ContextWindow) []TimelineChunk {
+	var chunks []TimelineChunk
+
+	for _, window := range windows {
+		// Fetch chunk summaries for this window
+		summaries, err := sessionStore.GetChunkSummaries(ctx, sessionID, window.WindowIndex)
+		if err != nil {
+			continue
+		}
+
+		for _, cs := range summaries {
+			chunk := TimelineChunk{
+				SummaryID:     cs.ID,
+				WindowIndex:   window.WindowIndex,
+				ChunkIndexMin: cs.ChunkIndexMin,
+				ChunkIndexMax: cs.ChunkIndexMax,
+				Summary:       cs.Summary,
+				Tools:         cs.Tools,
+				Files:         cs.Files,
+				Errors:        cs.Errors,
+			}
+			chunks = append(chunks, chunk)
+		}
+	}
+
+	return chunks
+}
+
+// fetchTimelineLearnings retrieves learnings for a session from the memory store.
+func fetchTimelineLearnings(ctx context.Context, store *memory.Store, sessionID, workspace string, types []string) []TimelineLearning {
+	// Default learning types
+	if len(types) == 0 {
+		types = []string{"decision", "gotcha", "preference", "anti_pattern", "learning"}
+	}
+
+	var learnings []TimelineLearning
+
+	for _, memType := range types {
+		entries, err := store.ListByType(ctx, memType, workspace, 50)
+		if err != nil {
+			continue
+		}
+
+		for _, scored := range entries {
+			entry := scored.Entry
+
+			// Filter by session ID if stored
+			if entry.SessionID != "" && entry.SessionID != sessionID {
+				continue
+			}
+
+			learning := TimelineLearning{
+				Type:    memType,
+				Summary: entry.Summary,
+			}
+
+			// Try to parse Result as JSON to get window_index
+			if len(entry.Result) > 0 {
+				var payload map[string]any
+				if json.Unmarshal(entry.Result, &payload) == nil {
+					if wi, ok := payload["window_index"].(float64); ok {
+						learning.WindowIndex = int(wi)
+					}
+				}
+			}
+
+			learnings = append(learnings, learning)
+		}
+	}
+
+	return learnings
+}
+
+// buildTimelineRollup aggregates timeline metadata.
+func buildTimelineRollup(chunks []TimelineChunk, learnings []TimelineLearning) *TimelineRollup {
+	if len(chunks) == 0 && len(learnings) == 0 {
+		return nil
+	}
+
+	rollup := &TimelineRollup{}
+
+	// Dedupe helpers
+	toolSet := make(map[string]bool)
+	fileSet := make(map[string]bool)
+	errorSet := make(map[string]bool)
+
+	for _, chunk := range chunks {
+		rollup.SummaryLines = append(rollup.SummaryLines, chunk.Summary)
+		for _, t := range chunk.Tools {
+			if !toolSet[t] {
+				toolSet[t] = true
+				rollup.Tools = append(rollup.Tools, t)
+			}
+		}
+		for _, f := range chunk.Files {
+			if !fileSet[f] {
+				fileSet[f] = true
+				rollup.Files = append(rollup.Files, f)
+			}
+		}
+		for _, e := range chunk.Errors {
+			if !errorSet[e] {
+				errorSet[e] = true
+				rollup.Errors = append(rollup.Errors, e)
+			}
+		}
+	}
+
+	for _, learning := range learnings {
+		switch learning.Type {
+		case "decision":
+			rollup.Decisions = append(rollup.Decisions, learning.Summary)
+		case "gotcha":
+			rollup.Gotchas = append(rollup.Gotchas, learning.Summary)
+		}
+	}
+
+	return rollup
 }

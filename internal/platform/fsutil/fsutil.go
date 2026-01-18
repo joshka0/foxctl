@@ -7,100 +7,167 @@ import (
 	"strings"
 )
 
+var extensionLanguages = map[string]string{
+	".go":         "go",
+	".py":         "python",
+	".pyw":        "python",
+	".pyi":        "python",
+	".js":         "javascript",
+	".mjs":        "javascript",
+	".cjs":        "javascript",
+	".ts":         "typescript",
+	".mts":        "typescript",
+	".cts":        "typescript",
+	".jsx":        "javascript",
+	".tsx":        "typescript",
+	".rs":         "rust",
+	".java":       "java",
+	".c":          "c",
+	".h":          "c",
+	".cpp":        "cpp",
+	".cc":         "cpp",
+	".hpp":        "cpp",
+	".cxx":        "cpp",
+	".rb":         "ruby",
+	".php":        "php",
+	".swift":      "swift",
+	".kt":         "kotlin",
+	".kts":        "kotlin",
+	".cs":         "csharp",
+	".scala":      "scala",
+	".md":         "markdown",
+	".markdown":   "markdown",
+	".json":       "json",
+	".yaml":       "yaml",
+	".yml":        "yaml",
+	".toml":       "toml",
+	".xml":        "xml",
+	".html":       "html",
+	".htm":        "html",
+	".css":        "css",
+	".scss":       "scss",
+	".sass":       "scss",
+	".sql":        "sql",
+	".sh":         "shell",
+	".bash":       "shell",
+	".zsh":        "shell",
+	".ps1":        "powershell",
+	".lua":        "lua",
+	".gd":         "gdscript",
+	".r":          "r",
+	".ex":         "elixir",
+	".exs":        "elixir",
+	".erl":        "erlang",
+	".hrl":        "erlang",
+	".hs":         "haskell",
+	".ml":         "ocaml",
+	".mli":        "ocaml",
+	".clj":        "clojure",
+	".cljs":       "clojure",
+	".vim":        "vim",
+	".proto":      "protobuf",
+	".graphql":    "graphql",
+	".gql":        "graphql",
+	".tf":         "terraform",
+	".tfvars":     "terraform",
+	".dockerfile": "dockerfile",
+}
+
+var specialFilenameLanguages = map[string]string{
+	"dockerfile":  "dockerfile",
+	"makefile":    "makefile",
+	"gnumakefile": "makefile",
+}
+
+var commonExcludeNames = map[string]struct{}{
+	".git":         {},
+	".svn":         {},
+	".hg":          {},
+	"node_modules": {},
+	"vendor":       {},
+	"__pycache__":  {},
+	".venv":        {},
+	"venv":         {},
+	"dist":         {},
+	"build":        {},
+	"target":       {},
+	".idea":        {},
+	".vscode":      {},
+	".cache":       {},
+	"coverage":     {},
+	".next":        {},
+	".nuxt":        {},
+	"out":          {},
+	".terraform":   {},
+	".gradle":      {},
+	"bin":          {},
+	"obj":          {},
+}
+
+var binaryExtensions = map[string]struct{}{
+	".exe":    {},
+	".dll":    {},
+	".so":     {},
+	".dylib":  {},
+	".a":      {},
+	".o":      {},
+	".obj":    {},
+	".bin":    {},
+	".png":    {},
+	".jpg":    {},
+	".jpeg":   {},
+	".gif":    {},
+	".ico":    {},
+	".webp":   {},
+	".bmp":    {},
+	".tiff":   {},
+	".svg":    {},
+	".zip":    {},
+	".tar":    {},
+	".gz":     {},
+	".bz2":    {},
+	".xz":     {},
+	".rar":    {},
+	".7z":     {},
+	".pdf":    {},
+	".doc":    {},
+	".docx":   {},
+	".xls":    {},
+	".xlsx":   {},
+	".ppt":    {},
+	".pptx":   {},
+	".mp3":    {},
+	".mp4":    {},
+	".avi":    {},
+	".mov":    {},
+	".wav":    {},
+	".woff":   {},
+	".woff2":  {},
+	".ttf":    {},
+	".otf":    {},
+	".eot":    {},
+	".sqlite": {},
+	".db":     {},
+	".pyc":    {},
+	".class":  {},
+}
+
 // DetectLanguage returns the language identifier based on file extension.
 // Returns "text" for unknown extensions.
 func DetectLanguage(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".py":
-		return "python"
-	case ".js":
-		return "javascript"
-	case ".ts":
-		return "typescript"
-	case ".jsx":
-		return "javascript"
-	case ".tsx":
-		return "typescript"
-	case ".rs":
-		return "rust"
-	case ".java":
-		return "java"
-	case ".c", ".h":
-		return "c"
-	case ".cpp", ".cc", ".hpp", ".cxx":
-		return "cpp"
-	case ".rb":
-		return "ruby"
-	case ".php":
-		return "php"
-	case ".swift":
-		return "swift"
-	case ".kt", ".kts":
-		return "kotlin"
-	case ".cs":
-		return "csharp"
-	case ".scala":
-		return "scala"
-	case ".md", ".markdown":
-		return "markdown"
-	case ".json":
-		return "json"
-	case ".yaml", ".yml":
-		return "yaml"
-	case ".toml":
-		return "toml"
-	case ".xml":
-		return "xml"
-	case ".html", ".htm":
-		return "html"
-	case ".css":
-		return "css"
-	case ".scss", ".sass":
-		return "scss"
-	case ".sql":
-		return "sql"
-	case ".sh", ".bash", ".zsh":
-		return "shell"
-	case ".ps1":
-		return "powershell"
-	case ".lua":
-		return "lua"
-	case ".r":
-		return "r"
-	case ".ex", ".exs":
-		return "elixir"
-	case ".erl", ".hrl":
-		return "erlang"
-	case ".hs":
-		return "haskell"
-	case ".ml", ".mli":
-		return "ocaml"
-	case ".clj", ".cljs":
-		return "clojure"
-	case ".vim":
-		return "vim"
-	case ".proto":
-		return "protobuf"
-	case ".graphql", ".gql":
-		return "graphql"
-	case ".tf", ".tfvars":
-		return "terraform"
-	case ".dockerfile":
-		return "dockerfile"
-	default:
-		// Check for special filenames
-		name := strings.ToLower(filepath.Base(path))
-		if name == "dockerfile" || strings.HasPrefix(name, "dockerfile.") {
-			return "dockerfile"
-		}
-		if name == "makefile" || name == "gnumakefile" {
-			return "makefile"
-		}
-		return "text"
+	if lang, ok := extensionLanguages[ext]; ok {
+		return lang
 	}
+
+	name := strings.ToLower(filepath.Base(path))
+	if lang, ok := specialFilenameLanguages[name]; ok {
+		return lang
+	}
+	if strings.HasPrefix(name, "dockerfile.") {
+		return "dockerfile"
+	}
+	return "text"
 }
 
 // DetectLanguageWithHint returns the language based on hint or extension.
@@ -127,31 +194,8 @@ func RelativeTo(base, path string) string {
 // IsCommonExclude returns true if the directory name should be excluded
 // from file traversal (e.g., .git, node_modules, vendor).
 func IsCommonExclude(name string) bool {
-	excludes := map[string]bool{
-		".git":         true,
-		".svn":         true,
-		".hg":          true,
-		"node_modules": true,
-		"vendor":       true,
-		"__pycache__":  true,
-		".venv":        true,
-		"venv":         true,
-		"dist":         true,
-		"build":        true,
-		"target":       true,
-		".idea":        true,
-		".vscode":      true,
-		".cache":       true,
-		"coverage":     true,
-		".next":        true,
-		".nuxt":        true,
-		"out":          true,
-		".terraform":   true,
-		".gradle":      true,
-		"bin":          true,
-		"obj":          true,
-	}
-	return excludes[name]
+	_, ok := commonExcludeNames[name]
+	return ok
 }
 
 // IsTestFile returns true if the filename indicates a test file.
@@ -159,6 +203,7 @@ func IsTestFile(name string) bool {
 	lower := strings.ToLower(name)
 	return strings.HasSuffix(lower, "_test.go") ||
 		strings.HasSuffix(lower, "_test.py") ||
+		(strings.HasPrefix(lower, "test_") && strings.HasSuffix(lower, ".py")) ||
 		strings.HasSuffix(lower, ".test.js") ||
 		strings.HasSuffix(lower, ".test.ts") ||
 		strings.HasSuffix(lower, ".test.jsx") ||
@@ -175,19 +220,6 @@ func IsTestFile(name string) bool {
 // IsBinaryFile returns true if the file extension suggests binary content.
 func IsBinaryFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	binaries := map[string]bool{
-		".exe": true, ".dll": true, ".so": true, ".dylib": true, ".a": true,
-		".o": true, ".obj": true, ".bin": true,
-		".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".ico": true,
-		".webp": true, ".bmp": true, ".tiff": true, ".svg": true,
-		".zip": true, ".tar": true, ".gz": true, ".bz2": true, ".xz": true,
-		".rar": true, ".7z": true,
-		".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
-		".ppt": true, ".pptx": true,
-		".mp3": true, ".mp4": true, ".avi": true, ".mov": true, ".wav": true,
-		".woff": true, ".woff2": true, ".ttf": true, ".otf": true, ".eot": true,
-		".sqlite": true, ".db": true,
-		".pyc": true, ".class": true,
-	}
-	return binaries[ext]
+	_, ok := binaryExtensions[ext]
+	return ok
 }

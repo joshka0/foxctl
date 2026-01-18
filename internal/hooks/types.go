@@ -204,6 +204,9 @@ type Input struct {
 	ToolError       string          `json:"tool_error,omitempty"`
 	ToolDurationMS  int64           `json:"tool_duration_ms,omitempty"`
 
+	// Adapter-specific metadata (e.g. provider/platform info).
+	Meta map[string]any `json:"meta,omitempty"`
+
 	// Hook-specific config from hooks.yaml
 	HookConfig map[string]any `json:"hook_config,omitempty"`
 }

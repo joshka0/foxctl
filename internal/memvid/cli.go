@@ -53,7 +53,7 @@ func (c *CLI) Version(ctx context.Context) (string, error) {
 func (c *CLI) Create(ctx context.Context, path string) error {
 	// Ensure parent directory exists
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 

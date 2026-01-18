@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,8 +10,12 @@ import (
 	"strings"
 	"time"
 
+	fshelpers "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
 // Input defines the input parameters for fs/ls.
@@ -46,9 +49,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.MaxEntries = 200
 	}
 
-	validDir, err := rc.PathValidator.ValidatePath(in.Path)
+	_, validDir, err := skillmain.ResolvePath(rc, in.Path)
 	if err != nil {
-		return fmt.Errorf("path validation failed: %w", err)
+		return err
 	}
 
 	allEntries, err := readDir(validDir, in)
@@ -57,18 +60,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	totalEntries := len(allEntries)
-	limitedEntries, limited := limitEntries(allEntries, in.MaxEntries)
+	limitedEntries, limited := sliceutil.LimitWithTruncated(allEntries, in.MaxEntries)
 
-	preview, previewTruncated := skillout.PreparePreview(limitedEntries, rc.MaxPreview)
-
-	// Persist artifact if truncated
-	var artifactDigest string
-	if previewTruncated {
-		artifact, err := skillout.PersistJSON(ctx, rc, limitedEntries, "fs_ls")
-		if err != nil {
-			return err
-		}
-		artifactDigest = artifact.Digest
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, limitedEntries, rc.MaxPreview, "fs_ls", true)
+	if err != nil {
+		return err
 	}
 
 	// Calculate stats
@@ -90,44 +86,39 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		"files":       files,
 		"directories": dirs,
 		"total_size":  totalSize,
-		"preview":     preview,
+		"preview":     previewResult.Preview,
 	}
 	if limited {
 		data["truncated"] = true
 		data["limited_entries"] = len(limitedEntries)
 	}
-	if artifactDigest != "" {
-		data["artifact"] = artifactDigest
+	if previewResult.Truncated {
+		data["preview_truncated"] = true
 	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, "fs/ls", data)
-}
-
-func limitEntries(entries []entry, limit int) ([]entry, bool) {
-	if limit <= 0 || len(entries) <= limit {
-		return entries, false
-	}
-	clipped := make([]entry, limit)
-	copy(clipped, entries[:limit])
-	return clipped, true
 }
 
 func readDir(path string, in Input) ([]entry, error) {
 	ents, err := os.ReadDir(path)
 	if err != nil {
-		return nil, fmt.Errorf("read dir %s: %w", path, err)
+		return nil, skillerr.WrapIO("read dir "+path, err)
 	}
 	var out []entry
 	for _, e := range ents {
 		name := e.Name()
-		if !in.ShowHidden && strings.HasPrefix(name, ".") {
+		if fshelpers.ShouldSkipHidden(name, in.ShowHidden) {
+			continue
+		}
+		if fsutil.IsSymlinkMode(e.Type()) {
 			continue
 		}
 		full := filepath.Join(path, name)
-		if len(in.Include) > 0 && !matches(full, in.Include) {
+		if len(in.Include) > 0 && !fshelpers.Matches(full, in.Include) {
 			continue
 		}
-		if matches(full, append([]string{".git", "node_modules"}, in.Exclude...)) {
+		if fshelpers.Matches(full, fshelpers.AppendCommonExcludes(in.Exclude)) {
 			continue
 		}
 		info, err := e.Info()
@@ -152,19 +143,4 @@ func fileSize(info fs.FileInfo) int64 {
 		return 0
 	}
 	return info.Size()
-}
-
-func matches(path string, globs []string) bool {
-	if len(globs) == 0 {
-		return false
-	}
-	for _, g := range globs {
-		if ok, err := filepath.Match(g, filepath.Base(path)); err == nil && ok {
-			return true
-		}
-		if ok, err := filepath.Match(g, filepath.ToSlash(path)); err == nil && ok {
-			return true
-		}
-	}
-	return false
 }

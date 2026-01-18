@@ -8,6 +8,7 @@ import (
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/spf13/cobra"
 )
@@ -17,6 +18,7 @@ func newSkillsRunCommand() *cobra.Command {
 	var inputFile string
 	var workspaceFlag string
 	var showParamHelp bool
+	var debugSkill bool
 
 	cmd := &cobra.Command{
 		Use:   "run <skill-name> [--param value ...]",
@@ -54,6 +56,9 @@ Examples:
 			handle, err := findSkill(cfg, args[0])
 			if err != nil {
 				return err
+			}
+			if debugSkill {
+				fmt.Fprintf(cmd.ErrOrStderr(), "skill=%s manifest=%s artifact=%s cgo=%v\n", handle.Manifest.Metadata.Name, handle.ManifestPath, handle.ArtifactPath, buildinfo.IsCGO())
 			}
 
 			// If --params-help was requested, show parameter help and exit
@@ -111,6 +116,7 @@ Examples:
 	cmd.Flags().StringVar(&inputFile, "input-file", "", "Path to JSON input file ('-' for stdin)")
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace override (default: auto-detect)")
 	cmd.Flags().BoolVar(&showParamHelp, "params-help", false, "Show available parameter flags for the skill")
+	cmd.Flags().BoolVar(&debugSkill, "debug-skill", false, "Print resolved skill paths to stderr")
 
 	return cmd
 }
@@ -124,6 +130,7 @@ func getRemainingArgs(osArgs []string, skillName string) []string {
 		"--input-file":  true,
 		"--workspace":   true,
 		"--params-help": true,
+		"--debug-skill": true,
 		"--help":        true,
 		"-h":            true,
 	}

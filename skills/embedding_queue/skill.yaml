@@ -23,8 +23,7 @@ signature:
     - name: workspace_id
       type: string
       required: false
-      default: "default"
-      description: Workspace identifier
+      description: Workspace identifier (defaults to detected workspace)
     - name: symbols
       type: array
       required: false

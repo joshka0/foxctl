@@ -13,9 +13,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mathutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	wsutil "github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
@@ -37,14 +37,8 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 
-	// Get workspace ID using detection chain (hook input takes priority)
-	workspaceID := in.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = in.WorkspaceRoot
-	}
-	if workspaceID == "" {
-		workspaceID = wsutil.Detect("")
-	}
+	workspaceRoot := hookutil.ResolveWorkspaceRoot(in, "")
+	workspaceID := hookutil.ResolveWorkspaceID(in, workspaceRoot)
 
 	// Get recipient to monitor from env, default to "overseer"
 	recipient := os.Getenv("AGENTCTL_OVERSEER_RECIPIENT")
@@ -58,10 +52,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Open board store
 	boardStore, err := blackboard.OpenBoardStore(ctx, paths.StorageRoot)
 	if err != nil {
-		return emitOutput(rc, hooks.Output{
+		return hookutil.EmitOutput(rc, "hooks/overseer_inbox", hooks.Output{
 			Decision: hooks.DecisionNone,
 			Reason:   "overseer_inbox: could not open board store",
-		})
+		}, nil)
 	}
 	defer boardStore.Close()
 
@@ -78,21 +72,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 	messages, err := boardStore.Inbox(ctx, filter)
 	if err != nil {
-		return emitOutput(rc, hooks.Output{
+		return hookutil.EmitOutput(rc, "hooks/overseer_inbox", hooks.Output{
 			Decision: hooks.DecisionNone,
 			Reason:   "overseer_inbox: inbox query failed",
-		})
+		}, nil)
 	}
 
 	if len(messages) == 0 {
-		return emitOutput(rc, hooks.Output{
+		return hookutil.EmitOutput(rc, "hooks/overseer_inbox", hooks.Output{
 			Decision: hooks.DecisionNone,
 			Reason:   "no overseer messages",
 			Meta: map[string]any{
 				"workspace_id": workspaceID,
 				"recipient":    recipient,
 			},
-		})
+		}, nil)
 	}
 
 	// Build context string with messages
@@ -100,7 +94,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 
 	// Auto-mark displayed messages as "surfaced" if enabled
 	if autoAck && len(messages) > 0 {
-		ids := make([]string, 0, minInt(len(messages), MaxMessagesInContext))
+		ids := make([]string, 0, mathutil.MinInt(len(messages), MaxMessagesInContext))
 		for i, m := range messages {
 			if i >= MaxMessagesInContext {
 				break
@@ -111,9 +105,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 		_, _ = boardStore.MarkSurfaced(ctx, workspaceID, recipient, ids) //nolint:errcheck
 	}
 
-	return emitOutput(rc, hooks.Output{
+	return hookutil.EmitOutput(rc, "hooks/overseer_inbox", hooks.Output{
 		Decision: hooks.DecisionNone, // Advisory only - never block
-		Reason:   fmt.Sprintf("surfaced %d overseer messages", minInt(len(messages), MaxMessagesInContext)),
+		Reason:   fmt.Sprintf("surfaced %d overseer messages", mathutil.MinInt(len(messages), MaxMessagesInContext)),
 		Context:  contextStr,
 		Meta: map[string]any{
 			"message_count": len(messages),
@@ -121,7 +115,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 			"recipient":     recipient,
 			"auto_ack":      autoAck,
 		},
-	})
+	}, nil)
 }
 
 // buildOverseerContext creates a formatted context string from overseer messages.
@@ -207,18 +201,4 @@ func kindToLabel(kind agent.BoardMessageKind) string {
 	default:
 		return string(kind)
 	}
-}
-
-func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
-	return skillout.Emit(rc, "hooks/overseer_inbox", data)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

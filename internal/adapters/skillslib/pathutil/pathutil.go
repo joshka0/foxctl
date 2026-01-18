@@ -7,38 +7,38 @@ import (
 	"path/filepath"
 	"strings"
 
-	hookspathutil "github.com/jkatigb/agentctl/internal/hooks/pathutil"
+	platformpath "github.com/jkatigb/agentctl/internal/platform/pathutil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
 
 // Re-export commonly used functions from hooks/pathutil
 var (
 	// ExtractPath extracts the file path from tool input JSON.
-	ExtractPath = hookspathutil.ExtractPath
+	ExtractPath = platformpath.ExtractPath
 
 	// ExtractPathFromMap extracts the file path from a map.
-	ExtractPathFromMap = hookspathutil.ExtractPathFromMap
+	ExtractPathFromMap = platformpath.ExtractPathFromMap
 
 	// ExtractPaths extracts all file paths from tool input JSON.
-	ExtractPaths = hookspathutil.ExtractPaths
+	ExtractPaths = platformpath.ExtractPaths
 
 	// NormalizePath normalizes a file path relative to workspace.
-	NormalizePath = hookspathutil.NormalizePath
+	NormalizePath = platformpath.NormalizePath
 
 	// RelativePath returns the path relative to workspace.
-	RelativePath = hookspathutil.RelativePath
+	RelativePath = platformpath.RelativePath
 
 	// IsUnderWorkspace checks if a path is under the workspace root.
-	IsUnderWorkspace = hookspathutil.IsUnderWorkspace
+	IsUnderWorkspace = platformpath.IsUnderWorkspace
 
 	// Extension returns the file extension without the dot.
-	Extension = hookspathutil.Extension
+	Extension = platformpath.Extension
 
 	// IsTestFile returns true if the path appears to be a test file.
-	IsTestFile = hookspathutil.IsTestFile
+	IsTestFile = platformpath.IsTestFile
 
 	// PathFields are the field names to check for file paths.
-	PathFields = hookspathutil.PathFields
+	PathFields = platformpath.PathFields
 )
 
 // ResolveSearchPath resolves a search path candidate to an absolute path.
@@ -116,16 +116,6 @@ func ToSlash(path string) string {
 // JoinAndClean joins path elements and cleans the result.
 func JoinAndClean(elem ...string) string {
 	return filepath.Clean(filepath.Join(elem...))
-}
-
-// MustAbs returns the absolute path, panicking on error.
-// Only use when the path is known to be valid.
-func MustAbs(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		panic("pathutil.MustAbs: " + err.Error())
-	}
-	return abs
 }
 
 // IsHidden returns true if the path or any of its components is hidden (starts with .).

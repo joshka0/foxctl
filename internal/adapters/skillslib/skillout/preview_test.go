@@ -17,7 +17,6 @@ func TestEmitPreview(t *testing.T) {
 		buf := &bytes.Buffer{}
 		opts := PreviewOpts{MaxItems: 10}
 		written, truncated, err := EmitPreview(buf, items, opts)
-
 		if err != nil {
 			t.Fatalf("EmitPreview error: %v", err)
 		}
@@ -38,7 +37,6 @@ func TestEmitPreview(t *testing.T) {
 		buf := &bytes.Buffer{}
 		opts := PreviewOpts{MaxItems: 2, TruncateMsg: "truncated"}
 		written, truncated, err := EmitPreview(buf, items, opts)
-
 		if err != nil {
 			t.Fatalf("EmitPreview error: %v", err)
 		}
@@ -59,7 +57,6 @@ func TestEmitPreview(t *testing.T) {
 		buf := &bytes.Buffer{}
 		opts := PreviewOpts{MaxBytes: 30} // Very small
 		_, truncated, err := EmitPreview(buf, items, opts)
-
 		if err != nil {
 			t.Fatalf("EmitPreview error: %v", err)
 		}

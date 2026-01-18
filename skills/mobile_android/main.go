@@ -5,21 +5,50 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mobileutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
 const command = "mobile/android"
+
+var allowedOps = []string{
+	"list_devices",
+	"device_info",
+	"install",
+	"launch",
+	"terminate",
+	"screenshot",
+	"tap",
+	"swipe",
+	"type_text",
+	"press_key",
+	"ui_tree",
+	"logs",
+	"logcat_filter",
+	"logcat_app",
+	"logcat_crash",
+	"logcat_clear",
+	"open_url",
+	"grant_permission",
+	"record_screen",
+	"record_stop",
+	"dumpsys",
+	"pull_file",
+	"push_file",
+}
 
 type input struct {
 	Operation  string `json:"operation"`
@@ -45,17 +74,6 @@ type input struct {
 	Count   int    `json:"count,omitempty"`   // Number of log lines to fetch
 	Pattern string `json:"pattern,omitempty"` // Grep pattern to filter logs
 	Since   string `json:"since,omitempty"`   // Time filter (e.g., "1h", "30m", "2024-01-01 12:00:00")
-}
-
-// ADBDevice represents an Android device from adb devices.
-type ADBDevice struct {
-	Serial      string            `json:"serial"`
-	State       string            `json:"state"`
-	Product     string            `json:"product,omitempty"`
-	Model       string            `json:"model,omitempty"`
-	Device      string            `json:"device,omitempty"`
-	TransportID string            `json:"transport_id,omitempty"`
-	Properties  map[string]string `json:"properties,omitempty"`
 }
 
 // UINode represents a node in the UI hierarchy.
@@ -87,15 +105,27 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
-	if in.Operation == "" {
-		return errors.New("operation is required")
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg(
+			"operation is required",
+			skillerr.WithHint(opHint),
+		)
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 	// Check ADB availability
-	if _, err := exec.LookPath("adb"); err != nil {
-		return errors.New("adb not found: install Android SDK or 'brew install android-platform-tools'")
+	if _, err := executil.RequireTool("adb", "install Android SDK or android-platform-tools"); err != nil {
+		return skillerr.Runtime(
+			"adb not found",
+			skillerr.WithCause(err),
+			skillerr.WithHint("Install Android platform-tools (adb) and ensure it is available in PATH."),
+		)
 	}
 
-	switch in.Operation {
+	switch op {
 	case "list_devices":
 		return listDevices(ctx, rc)
 	case "device_info":
@@ -143,76 +173,33 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "push_file":
 		return pushFile(ctx, rc, in.Serial, in.LocalPath, in.RemotePath)
 	default:
-		return fmt.Errorf("unknown operation: %s", in.Operation)
+		return skillerr.Arg(fmt.Sprintf("unknown operation: %s", in.Operation), skillerr.WithHint(opHint))
 	}
-}
-
-// adbCommand builds an adb command with optional device serial.
-func adbCommand(ctx context.Context, serial string, args ...string) *exec.Cmd {
-	if serial != "" {
-		args = append([]string{"-s", serial}, args...)
-	}
-	return exec.CommandContext(ctx, "adb", args...)
 }
 
 // listDevices lists all connected Android devices/emulators.
 func listDevices(ctx context.Context, rc *skillmain.RunContext) error {
-	cmd := exec.CommandContext(ctx, "adb", "devices", "-l")
-	output, err := cmd.Output()
+	devices, err := mobileutil.ListADBDevices(ctx)
 	if err != nil {
-		return fmt.Errorf("adb devices: %w", err)
+		return skillerr.WrapRuntime("adb devices", err)
 	}
 
-	var devices []ADBDevice
-	lines := strings.Split(string(output), "\n")
-
-	// Skip header line
-	for i := 1; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if line == "" {
-			continue
-		}
-
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-
-		dev := ADBDevice{
-			Serial: parts[0],
-			State:  parts[1],
-		}
-
-		// Parse extended info (product:xxx model:xxx device:xxx transport_id:xxx)
-		for _, part := range parts[2:] {
-			if strings.HasPrefix(part, "product:") {
-				dev.Product = strings.TrimPrefix(part, "product:")
-			} else if strings.HasPrefix(part, "model:") {
-				dev.Model = strings.TrimPrefix(part, "model:")
-			} else if strings.HasPrefix(part, "device:") {
-				dev.Device = strings.TrimPrefix(part, "device:")
-			} else if strings.HasPrefix(part, "transport_id:") {
-				dev.TransportID = strings.TrimPrefix(part, "transport_id:")
-			}
-		}
-
-		// Only include emulators (serial starts with "emulator-")
+	emulators := make([]mobileutil.ADBDevice, 0, len(devices))
+	for _, dev := range devices {
 		if strings.HasPrefix(dev.Serial, "emulator-") {
-			devices = append(devices, dev)
+			emulators = append(emulators, dev)
 		}
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "list_devices",
-		"devices":   devices,
-		"count":     len(devices),
+		"devices":   emulators,
+		"count":     len(emulators),
 	})
 }
 
 // deviceInfo gets detailed info about a device.
 func deviceInfo(ctx context.Context, rc *skillmain.RunContext, serial string) error {
-	properties := make(map[string]string)
-
 	// Key properties to fetch
 	props := []string{
 		"ro.product.model",
@@ -224,30 +211,7 @@ func deviceInfo(ctx context.Context, rc *skillmain.RunContext, serial string) er
 		"ro.product.cpu.abi",
 		"ro.hardware",
 	}
-
-	for _, prop := range props {
-		cmd := adbCommand(ctx, serial, "shell", "getprop", prop)
-		output, err := cmd.Output()
-		if err == nil {
-			properties[prop] = strings.TrimSpace(string(output))
-		}
-	}
-
-	// Get screen size
-	cmd := adbCommand(ctx, serial, "shell", "wm", "size")
-	if output, err := cmd.Output(); err == nil {
-		if matches := regexp.MustCompile(`(\d+x\d+)`).FindString(string(output)); matches != "" {
-			properties["screen_size"] = matches
-		}
-	}
-
-	// Get density
-	cmd = adbCommand(ctx, serial, "shell", "wm", "density")
-	if output, err := cmd.Output(); err == nil {
-		if matches := regexp.MustCompile(`(\d+)`).FindString(string(output)); matches != "" {
-			properties["density"] = matches
-		}
-	}
+	properties := mobileutil.CollectADBProperties(ctx, serial, props, true, true)
 
 	return emit(rc, map[string]any{
 		"operation":  "device_info",
@@ -259,52 +223,41 @@ func deviceInfo(ctx context.Context, rc *skillmain.RunContext, serial string) er
 // install installs an APK.
 func install(ctx context.Context, rc *skillmain.RunContext, serial, apkPath string) error {
 	if apkPath == "" {
-		return errors.New("app (APK path) is required for install operation")
+		return skillerr.Arg(
+			"app (APK path) is required for install operation",
+			skillerr.WithHint("Provide the APK path in app."),
+		)
 	}
 
-	cmd := adbCommand(ctx, serial, "install", "-r", apkPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("adb install: %w (%s)", err, string(output))
+	result := mobileutil.RunADB(ctx, serial, "install", "-r", apkPath)
+	combined := append(append([]byte{}, result.Stdout...), result.Stderr...)
+	if result.Err != nil {
+		return skillerr.Runtimef("adb install: %v (%s)", result.Err, string(combined))
 	}
 
 	return emit(rc, map[string]any{
 		"operation": "install",
 		"app":       apkPath,
 		"success":   true,
-		"message":   strings.TrimSpace(string(output)),
+		"message":   strings.TrimSpace(string(combined)),
 	})
 }
 
 // launch starts an app.
 func launch(ctx context.Context, rc *skillmain.RunContext, serial, pkg, activity string) error {
 	if pkg == "" {
-		return errors.New("app (package name) is required for launch operation")
+		return skillerr.Arg(
+			"app (package name) is required for launch operation",
+			skillerr.WithHint("Provide the app package name in app."),
+		)
 	}
 
-	var component string
-	if activity != "" {
-		component = pkg + "/" + activity
-	} else {
-		// Try to find the main activity
-		cmd := adbCommand(ctx, serial, "shell", "cmd", "package", "resolve-activity",
-			"--brief", pkg)
-		output, err := cmd.Output()
-		if err == nil {
-			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-			if len(lines) > 0 {
-				component = lines[len(lines)-1]
-			}
-		}
-		if component == "" {
-			component = pkg + "/.MainActivity"
-		}
-	}
+	component := mobileutil.ResolveAndroidLaunchComponent(ctx, serial, pkg, activity)
 
-	cmd := adbCommand(ctx, serial, "shell", "am", "start", "-n", component)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("adb am start: %w (%s)", err, string(output))
+	result := mobileutil.RunADB(ctx, serial, "shell", "am", "start", "-n", component)
+	combined := append(append([]byte{}, result.Stdout...), result.Stderr...)
+	if result.Err != nil {
+		return skillerr.Runtimef("adb am start: %v (%s)", result.Err, string(combined))
 	}
 
 	return emit(rc, map[string]any{
@@ -318,12 +271,15 @@ func launch(ctx context.Context, rc *skillmain.RunContext, serial, pkg, activity
 // terminate stops an app.
 func terminate(ctx context.Context, rc *skillmain.RunContext, serial, pkg string) error {
 	if pkg == "" {
-		return errors.New("app (package name) is required for terminate operation")
+		return skillerr.Arg(
+			"app (package name) is required for terminate operation",
+			skillerr.WithHint("Provide the app package name in app."),
+		)
 	}
 
-	cmd := adbCommand(ctx, serial, "shell", "am", "force-stop", pkg)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adb am force-stop: %w", err)
+	result := mobileutil.RunADB(ctx, serial, "shell", "am", "force-stop", pkg)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb am force-stop", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -340,38 +296,37 @@ func screenshot(ctx context.Context, rc *skillmain.RunContext, serial, outputPat
 	}
 
 	// Capture directly using exec-out (faster than screencap + pull)
-	cmd := adbCommand(ctx, serial, "exec-out", "screencap", "-p")
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("adb screencap: %w", err)
+	result := mobileutil.RunADB(ctx, serial, "exec-out", "screencap", "-p")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb screencap", result.Err)
 	}
 
 	// Write to local file
-	if err := os.WriteFile(outputPath, output, 0o644); err != nil {
-		return fmt.Errorf("write screenshot: %w", err)
+	if err := os.WriteFile(outputPath, result.Stdout, 0o644); err != nil {
+		return skillerr.WrapIO("write screenshot", err)
 	}
 
 	// Store in CAS
-	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "image/png", "android_screenshot")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(result.Stdout), "image/png", "android_screenshot")
 	if err != nil {
-		return fmt.Errorf("persist screenshot: %w", err)
+		return skillerr.WrapIO("persist screenshot", err)
 	}
 
 	return emit(rc, map[string]any{
 		"operation":  "screenshot",
 		"screenshot": artifact.Digest,
 		"path":       outputPath,
-		"size_bytes": len(output),
+		"size_bytes": len(result.Stdout),
 		"success":    true,
 	})
 }
 
 // tap performs a tap.
 func tap(ctx context.Context, rc *skillmain.RunContext, serial string, x, y int) error {
-	cmd := adbCommand(ctx, serial, "shell", "input", "tap",
+	result := mobileutil.RunADB(ctx, serial, "shell", "input", "tap",
 		strconv.Itoa(x), strconv.Itoa(y))
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adb input tap: %w", err)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb input tap", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -388,12 +343,12 @@ func swipe(ctx context.Context, rc *skillmain.RunContext, serial string, x1, y1,
 		duration = 300 // Default 300ms
 	}
 
-	cmd := adbCommand(ctx, serial, "shell", "input", "swipe",
+	result := mobileutil.RunADB(ctx, serial, "shell", "input", "swipe",
 		strconv.Itoa(x1), strconv.Itoa(y1),
 		strconv.Itoa(x2), strconv.Itoa(y2),
 		strconv.Itoa(duration))
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adb input swipe: %w", err)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb input swipe", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -408,27 +363,16 @@ func swipe(ctx context.Context, rc *skillmain.RunContext, serial string, x1, y1,
 // typeText types text.
 func typeText(ctx context.Context, rc *skillmain.RunContext, serial, text string) error {
 	if text == "" {
-		return errors.New("text is required for type_text operation")
+		return skillerr.Arg(
+			"text is required for type_text operation",
+			skillerr.WithHint("Provide text to type."),
+		)
 	}
 
-	// ADB input text requires spaces as %s and special chars escaped
-	// See: https://developer.android.com/studio/command-line/adb#shellcommands
-	var escaped strings.Builder
-	for _, r := range text {
-		switch r {
-		case ' ':
-			escaped.WriteString("%s")
-		case '\'', '"', '`', '$', '\\', '&', '|', ';', '(', ')', '<', '>', '*', '?', '[', ']', '{', '}', '~', '!', '#':
-			escaped.WriteRune('\\')
-			escaped.WriteRune(r)
-		default:
-			escaped.WriteRune(r)
-		}
-	}
-
-	cmd := adbCommand(ctx, serial, "shell", "input", "text", escaped.String())
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adb input text: %w", err)
+	// ADB input text requires spaces as %s and special chars escaped.
+	result := mobileutil.RunADB(ctx, serial, "shell", "input", "text", mobileutil.EscapeADBInputText(text))
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb input text", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -441,7 +385,10 @@ func typeText(ctx context.Context, rc *skillmain.RunContext, serial, text string
 // pressKey presses a key.
 func pressKey(ctx context.Context, rc *skillmain.RunContext, serial, keycode string) error {
 	if keycode == "" {
-		return errors.New("keycode is required for press_key operation")
+		return skillerr.Arg(
+			"keycode is required for press_key operation",
+			skillerr.WithHint("Provide the Android keycode (e.g., KEYCODE_HOME)."),
+		)
 	}
 
 	// Ensure KEYCODE_ prefix
@@ -449,9 +396,9 @@ func pressKey(ctx context.Context, rc *skillmain.RunContext, serial, keycode str
 		keycode = "KEYCODE_" + keycode
 	}
 
-	cmd := adbCommand(ctx, serial, "shell", "input", "keyevent", keycode)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adb input keyevent: %w", err)
+	result := mobileutil.RunADB(ctx, serial, "shell", "input", "keyevent", keycode)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb input keyevent", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -465,24 +412,23 @@ func pressKey(ctx context.Context, rc *skillmain.RunContext, serial, keycode str
 func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	// Dump UI hierarchy to device
 	remotePath := "/sdcard/window_dump.xml"
-	cmd := adbCommand(ctx, serial, "shell", "uiautomator", "dump", remotePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("uiautomator dump: %w (%s)", err, string(output))
+	cmdResult := mobileutil.RunADB(ctx, serial, "shell", "uiautomator", "dump", remotePath)
+	combined := append(append([]byte{}, cmdResult.Stdout...), cmdResult.Stderr...)
+	if cmdResult.Err != nil {
+		return skillerr.Runtimef("uiautomator dump: %v (%s)", cmdResult.Err, string(combined))
 	}
 
 	// Read the dump
-	cmd = adbCommand(ctx, serial, "shell", "cat", remotePath)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("read ui dump: %w", err)
+	cmdResult = mobileutil.RunADB(ctx, serial, "shell", "cat", remotePath)
+	if cmdResult.Err != nil {
+		return skillerr.WrapRuntime("read ui dump", cmdResult.Err)
 	}
 
 	// Clean up
-	cleanupCmd := adbCommand(ctx, serial, "shell", "rm", remotePath)
-	_ = cleanupCmd.Run()
+	_ = mobileutil.RunADB(ctx, serial, "shell", "rm", remotePath).Err
 
 	// Parse XML to extract elements
-	elements := parseUIHierarchy(output)
+	elements := parseUIHierarchy(cmdResult.Stdout)
 
 	// Prepare preview
 	const maxPreview = 30
@@ -493,7 +439,7 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string) error 
 		truncated = true
 	}
 
-	result := map[string]any{
+	payload := map[string]any{
 		"operation": "ui_tree",
 		"elements":  preview,
 		"count":     len(elements),
@@ -502,15 +448,15 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string) error 
 
 	// Store full tree in CAS if truncated
 	if truncated {
-		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "application/xml", "android_ui_tree")
+		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(cmdResult.Stdout), "application/xml", "android_ui_tree")
 		if err != nil {
-			return fmt.Errorf("persist ui tree: %w", err)
+			return skillerr.WrapIO("persist ui tree", err)
 		}
-		result["artifact"] = artifact.Digest
-		result["hint"] = "Full UI tree stored in CAS; fetch via: agentctl cas get " + artifact.Digest
+		payload["artifact"] = artifact.Digest
+		payload["hint"] = skillout.FormatCASHint("UI tree", artifact.Digest)
 	}
 
-	return emit(rc, result)
+	return emit(rc, payload)
 }
 
 // parseUIHierarchy parses the UI hierarchy XML into a flat list of elements.
@@ -564,43 +510,39 @@ func logs(ctx context.Context, rc *skillmain.RunContext, serial string, count in
 	}
 
 	// Get recent logs (dump and exit)
-	cmd := adbCommand(ctx, serial, "logcat", "-d", "-t", strconv.Itoa(count))
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("adb logcat: %w", err)
+	cmdResult := mobileutil.RunADB(ctx, serial, "logcat", "-d", "-t", strconv.Itoa(count))
+	if cmdResult.Err != nil {
+		return skillerr.WrapRuntime("adb logcat", cmdResult.Err)
 	}
 
 	// Apply pattern filter if specified
-	filteredOutput := output
+	filteredOutput := cmdResult.Stdout
 	if pattern != "" {
-		filteredOutput = filterLogsByPattern(output, pattern)
+		filteredOutput = filterLogsByPattern(cmdResult.Stdout, pattern)
 	}
 
 	// Store in CAS
 	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_logs")
 	if err != nil {
-		return fmt.Errorf("persist logs: %w", err)
+		return skillerr.WrapIO("persist logs", err)
 	}
 
 	// Get preview
 	lines := strings.Split(string(filteredOutput), "\n")
-	previewLines := lines
-	if len(lines) > 50 {
-		previewLines = lines[len(lines)-50:]
-	}
+	preview := textutil.JoinTail(lines, 50, "\n")
 
-	result := map[string]any{
+	payload := map[string]any{
 		"operation":    "logs",
 		"artifact":     artifact.Digest,
-		"preview":      strings.Join(previewLines, "\n"),
+		"preview":      preview,
 		"total_lines":  len(lines),
 		"preview_from": "last_50",
 	}
 	if pattern != "" {
-		result["pattern"] = pattern
+		payload["pattern"] = pattern
 	}
 
-	return emit(rc, result)
+	return emit(rc, payload)
 }
 
 // logcatFilter gets filtered logcat output by tag and level.
@@ -625,22 +567,21 @@ func logcatFilter(ctx context.Context, rc *skillmain.RunContext, serial, tag, le
 		args = append(args, "*:"+level)
 	}
 
-	cmd := adbCommand(ctx, serial, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("adb logcat filter: %w", err)
+	cmdResult := mobileutil.RunADB(ctx, serial, args...)
+	if cmdResult.Err != nil {
+		return skillerr.WrapRuntime("adb logcat filter", cmdResult.Err)
 	}
 
 	// Apply pattern filter if specified
-	filteredOutput := output
+	filteredOutput := cmdResult.Stdout
 	if pattern != "" {
-		filteredOutput = filterLogsByPattern(output, pattern)
+		filteredOutput = filterLogsByPattern(cmdResult.Stdout, pattern)
 	}
 
 	lines := strings.Split(string(filteredOutput), "\n")
 
 	// Store in CAS for large outputs
-	result := map[string]any{
+	payload := map[string]any{
 		"operation": "logcat_filter",
 		"tag":       tag,
 		"level":     level,
@@ -648,48 +589,46 @@ func logcatFilter(ctx context.Context, rc *skillmain.RunContext, serial, tag, le
 	}
 
 	if pattern != "" {
-		result["pattern"] = pattern
+		payload["pattern"] = pattern
 	}
 
 	// Store in CAS if large, otherwise return inline
 	if len(filteredOutput) > 10000 {
 		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_logs_filtered")
 		if err != nil {
-			return fmt.Errorf("persist filtered logs: %w", err)
+			return skillerr.WrapIO("persist filtered logs", err)
 		}
-		result["artifact"] = artifact.Digest
+		payload["artifact"] = artifact.Digest
 		// Show preview
-		previewLines := lines
-		if len(lines) > 50 {
-			previewLines = lines[len(lines)-50:]
-		}
-		result["preview"] = strings.Join(previewLines, "\n")
-		result["hint"] = "Full logs stored in CAS; fetch via: agentctl cas get " + artifact.Digest
+		payload["preview"] = textutil.JoinTail(lines, 50, "\n")
+		payload["hint"] = skillout.FormatCASHint("logs", artifact.Digest)
 	} else {
-		result["logs"] = string(filteredOutput)
+		payload["logs"] = string(filteredOutput)
 	}
 
-	return emit(rc, result)
+	return emit(rc, payload)
 }
 
 // logcatApp gets logs filtered by app package name.
 func logcatApp(ctx context.Context, rc *skillmain.RunContext, serial, pkg, level string, count int, pattern string) error {
 	if pkg == "" {
-		return errors.New("app (package name) is required for logcat_app operation")
+		return skillerr.Arg(
+			"app (package name) is required for logcat_app operation",
+			skillerr.WithHint("Provide the app package name in app."),
+		)
 	}
 	if count <= 0 {
 		count = 500
 	}
 
 	// Get the PID of the app
-	pidCmd := adbCommand(ctx, serial, "shell", "pidof", "-s", pkg)
-	pidOutput, err := pidCmd.Output()
-	if err != nil {
+	pidResult := mobileutil.RunADB(ctx, serial, "shell", "pidof", "-s", pkg)
+	if pidResult.Err != nil {
 		// App might not be running, try to get logs anyway with grep
 		return logcatAppByGrep(ctx, rc, serial, pkg, level, count, pattern)
 	}
 
-	pid := strings.TrimSpace(string(pidOutput))
+	pid := strings.TrimSpace(string(pidResult.Stdout))
 	if pid == "" {
 		return logcatAppByGrep(ctx, rc, serial, pkg, level, count, pattern)
 	}
@@ -700,16 +639,15 @@ func logcatApp(ctx context.Context, rc *skillmain.RunContext, serial, pkg, level
 		args = append(args, "*:"+level)
 	}
 
-	cmd := adbCommand(ctx, serial, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("adb logcat --pid: %w", err)
+	result := mobileutil.RunADB(ctx, serial, args...)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb logcat --pid", result.Err)
 	}
 
 	// Apply pattern filter if specified
-	filteredOutput := output
+	filteredOutput := result.Stdout
 	if pattern != "" {
-		filteredOutput = filterLogsByPattern(output, pattern)
+		filteredOutput = filterLogsByPattern(result.Stdout, pattern)
 	}
 
 	return emitLogcatResult(ctx, rc, "logcat_app", filteredOutput, map[string]any{
@@ -726,14 +664,13 @@ func logcatAppByGrep(ctx context.Context, rc *skillmain.RunContext, serial, pkg,
 		args = append(args, "*:"+level)
 	}
 
-	cmd := adbCommand(ctx, serial, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("adb logcat: %w", err)
+	result := mobileutil.RunADB(ctx, serial, args...)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb logcat", result.Err)
 	}
 
 	// Filter lines containing the package name
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(string(result.Stdout), "\n")
 	var filtered []string
 	for _, line := range lines {
 		if strings.Contains(line, pkg) {
@@ -765,16 +702,15 @@ func logcatCrash(ctx context.Context, rc *skillmain.RunContext, serial, pkg stri
 
 	// Get crash buffer logs
 	args := []string{"logcat", "-d", "-b", "crash", "-t", strconv.Itoa(count)}
-	cmd := adbCommand(ctx, serial, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("adb logcat -b crash: %w", err)
+	cmdResult := mobileutil.RunADB(ctx, serial, args...)
+	if cmdResult.Err != nil {
+		return skillerr.WrapRuntime("adb logcat -b crash", cmdResult.Err)
 	}
 
 	// Filter by package if specified
-	filteredOutput := output
+	filteredOutput := cmdResult.Stdout
 	if pkg != "" {
-		lines := strings.Split(string(output), "\n")
+		lines := strings.Split(string(cmdResult.Stdout), "\n")
 		var filtered []string
 		for _, line := range lines {
 			if strings.Contains(line, pkg) {
@@ -787,41 +723,37 @@ func logcatCrash(ctx context.Context, rc *skillmain.RunContext, serial, pkg stri
 	lines := strings.Split(string(filteredOutput), "\n")
 	hasCrashes := len(lines) > 1 || (len(lines) == 1 && lines[0] != "")
 
-	result := map[string]any{
+	payload := map[string]any{
 		"operation":   "logcat_crash",
 		"has_crashes": hasCrashes,
 		"lines":       len(lines),
 	}
 
 	if pkg != "" {
-		result["app"] = pkg
+		payload["app"] = pkg
 	}
 
 	if len(filteredOutput) > 10000 {
 		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(filteredOutput), "text/plain", "android_crash_logs")
 		if err != nil {
-			return fmt.Errorf("persist crash logs: %w", err)
+			return skillerr.WrapIO("persist crash logs", err)
 		}
-		result["artifact"] = artifact.Digest
+		payload["artifact"] = artifact.Digest
 		// Show preview
-		previewLines := lines
-		if len(lines) > 30 {
-			previewLines = lines[len(lines)-30:]
-		}
-		result["preview"] = strings.Join(previewLines, "\n")
+		payload["preview"] = textutil.JoinTail(lines, 30, "\n")
 	} else {
-		result["logs"] = string(filteredOutput)
+		payload["logs"] = string(filteredOutput)
 	}
 
-	return emit(rc, result)
+	return emit(rc, payload)
 }
 
 // logcatClear clears the logcat buffer.
 func logcatClear(ctx context.Context, rc *skillmain.RunContext, serial string) error {
 	// Clear all buffers
-	cmd := adbCommand(ctx, serial, "logcat", "-c")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adb logcat -c: %w", err)
+	result := mobileutil.RunADB(ctx, serial, "logcat", "-c")
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb logcat -c", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -878,16 +810,12 @@ func emitLogcatResult(ctx context.Context, rc *skillmain.RunContext, operation s
 	if len(output) > 10000 {
 		artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "android_logs")
 		if err != nil {
-			return fmt.Errorf("persist logs: %w", err)
+			return skillerr.WrapIO("persist logs", err)
 		}
 		result["artifact"] = artifact.Digest
 		// Show preview
-		previewLines := lines
-		if len(lines) > 50 {
-			previewLines = lines[len(lines)-50:]
-		}
-		result["preview"] = strings.Join(previewLines, "\n")
-		result["hint"] = "Full logs stored in CAS; fetch via: agentctl cas get " + artifact.Digest
+		result["preview"] = textutil.JoinTail(lines, 50, "\n")
+		result["hint"] = skillout.FormatCASHint("logs", artifact.Digest)
 	} else {
 		result["logs"] = string(output)
 	}
@@ -898,13 +826,13 @@ func emitLogcatResult(ctx context.Context, rc *skillmain.RunContext, operation s
 // openURL opens a URL.
 func openURL(ctx context.Context, rc *skillmain.RunContext, serial, url string) error {
 	if url == "" {
-		return errors.New("url is required for open_url operation")
+		return skillerr.Arg("url is required for open_url operation", skillerr.WithHint("Provide a URL to open."))
 	}
 
-	cmd := adbCommand(ctx, serial, "shell", "am", "start",
+	result := mobileutil.RunADB(ctx, serial, "shell", "am", "start",
 		"-a", "android.intent.action.VIEW", "-d", url)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("adb am start VIEW: %w", err)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb am start VIEW", result.Err)
 	}
 
 	return emit(rc, map[string]any{
@@ -917,10 +845,13 @@ func openURL(ctx context.Context, rc *skillmain.RunContext, serial, url string) 
 // grantPermission grants a runtime permission.
 func grantPermission(ctx context.Context, rc *skillmain.RunContext, serial, pkg, permission string) error {
 	if pkg == "" {
-		return errors.New("app (package name) is required for grant_permission")
+		return skillerr.Arg(
+			"app (package name) is required for grant_permission",
+			skillerr.WithHint("Provide the app package name in app."),
+		)
 	}
 	if permission == "" {
-		return errors.New("permission is required")
+		return skillerr.Arg("permission is required", skillerr.WithHint("Provide a permission name to grant."))
 	}
 
 	// Ensure full permission name
@@ -928,9 +859,10 @@ func grantPermission(ctx context.Context, rc *skillmain.RunContext, serial, pkg,
 		permission = "android.permission." + permission
 	}
 
-	cmd := adbCommand(ctx, serial, "shell", "pm", "grant", pkg, permission)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("adb pm grant: %w (%s)", err, string(output))
+	result := mobileutil.RunADB(ctx, serial, "shell", "pm", "grant", pkg, permission)
+	combined := append(append([]byte{}, result.Stdout...), result.Stderr...)
+	if result.Err != nil {
+		return skillerr.Runtimef("adb pm grant: %v (%s)", result.Err, string(combined))
 	}
 
 	return emit(rc, map[string]any{
@@ -957,27 +889,27 @@ func recordScreen(ctx context.Context, rc *skillmain.RunContext, serial, outputP
 	remotePath := fmt.Sprintf("/sdcard/screen_recording_%d.mp4", time.Now().UnixNano())
 
 	// Start recording in background on device
-	cmd := adbCommand(ctx, serial, "shell", "screenrecord", "--time-limit", "180", remotePath)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("adb screenrecord: %w", err)
+	cmd, err := executil.Start(ctx, "", "adb", mobileutil.ADBArgs(serial, "shell", "screenrecord", "--time-limit", "180", remotePath)...)
+	if err != nil {
+		return skillerr.WrapRuntime("adb screenrecord", err)
 	}
 
 	// Store PID and remote path for later stop
 	pid := cmd.Process.Pid
 	if err := os.WriteFile(androidRecordPIDFile, []byte(strconv.Itoa(pid)), 0o600); err != nil {
 		errs.Ignore(cmd.Process.Kill(), "kill recording process after pid file write failure")
-		return fmt.Errorf("write pid file: %w", err)
+		return skillerr.WrapIO("write pid file", err)
 	}
 	if err := os.WriteFile(androidRecordPathFile, []byte(remotePath), 0o600); err != nil {
 		_ = os.Remove(androidRecordPIDFile)
 		errs.Ignore(cmd.Process.Kill(), "kill recording process after path file write failure")
-		return fmt.Errorf("write path file: %w", err)
+		return skillerr.WrapIO("write path file", err)
 	}
 	if err := os.WriteFile(androidRecordSerialFile, []byte(serial), 0o600); err != nil {
 		_ = os.Remove(androidRecordPIDFile)
 		_ = os.Remove(androidRecordPathFile)
 		errs.Ignore(cmd.Process.Kill(), "kill recording process after serial file write failure")
-		return fmt.Errorf("write serial file: %w", err)
+		return skillerr.WrapIO("write serial file", err)
 	}
 
 	// Start a goroutine to wait for the process (prevents zombie)
@@ -1019,8 +951,7 @@ func recordStop(ctx context.Context, rc *skillmain.RunContext) error {
 	pidData, err := os.ReadFile(androidRecordPIDFile)
 	if err != nil {
 		// Fallback to pkill if no PID file - use stored serial if available
-		cmd := adbCommand(ctx, serial, "shell", "pkill", "-INT", "screenrecord")
-		errs.Ignore(cmd.Run(), "pkill screenrecord fallback")
+		errs.Ignore(mobileutil.RunADB(ctx, serial, "shell", "pkill", "-INT", "screenrecord").Err, "pkill screenrecord fallback")
 		time.Sleep(time.Second)
 		return emit(rc, map[string]any{
 			"operation":   "record_stop",
@@ -1034,17 +965,11 @@ func recordStop(ctx context.Context, rc *skillmain.RunContext) error {
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
 	if err != nil {
 		_ = os.Remove(androidRecordPIDFile)
-		return fmt.Errorf("invalid pid file: %w", err)
+		return skillerr.WrapParse("invalid pid file", err)
 	}
 
 	// Send SIGINT to the specific process via adb
-	var killCmd *exec.Cmd
-	if serial != "" {
-		killCmd = exec.CommandContext(ctx, "adb", "-s", serial, "shell", "kill", "-INT", strconv.Itoa(pid))
-	} else {
-		killCmd = exec.CommandContext(ctx, "adb", "shell", "kill", "-INT", strconv.Itoa(pid))
-	}
-	errs.Ignore(killCmd.Run(), "send interrupt to recording process")
+	errs.Ignore(mobileutil.RunADB(ctx, serial, "shell", "kill", "-INT", strconv.Itoa(pid)).Err, "send interrupt to recording process")
 	_ = os.Remove(androidRecordPIDFile)
 
 	// Wait for it to finish
@@ -1064,20 +989,19 @@ func dumpsys(ctx context.Context, rc *skillmain.RunContext, serial, service stri
 		service = "activity"
 	}
 
-	cmd := adbCommand(ctx, serial, "shell", "dumpsys", service)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("adb dumpsys: %w", err)
+	result := mobileutil.RunADB(ctx, serial, "shell", "dumpsys", service)
+	if result.Err != nil {
+		return skillerr.WrapRuntime("adb dumpsys", result.Err)
 	}
 
 	// Store in CAS for large outputs
-	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(output), "text/plain", "android_dumpsys")
+	artifact, err := skillout.PersistBuffer(ctx, rc, bytes.NewBuffer(result.Stdout), "text/plain", "android_dumpsys")
 	if err != nil {
-		return fmt.Errorf("persist dumpsys: %w", err)
+		return skillerr.WrapIO("persist dumpsys", err)
 	}
 
 	// Preview
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(string(result.Stdout), "\n")
 	preview := lines
 	if len(lines) > 100 {
 		preview = lines[:100]
@@ -1095,16 +1019,17 @@ func dumpsys(ctx context.Context, rc *skillmain.RunContext, serial, service stri
 // pullFile pulls a file from the device.
 func pullFile(ctx context.Context, rc *skillmain.RunContext, serial, remotePath, localPath string) error {
 	if remotePath == "" {
-		return errors.New("remote_path is required for pull_file")
+		return skillerr.Arg("remote_path is required for pull_file",
+			skillerr.WithHint("Provide the device file path to pull in remote_path."))
 	}
 	if localPath == "" {
 		localPath = "/tmp/" + strings.ReplaceAll(remotePath, "/", "_")
 	}
 
-	cmd := adbCommand(ctx, serial, "pull", remotePath, localPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("adb pull: %w (%s)", err, string(output))
+	result := mobileutil.RunADB(ctx, serial, "pull", remotePath, localPath)
+	combined := append(append([]byte{}, result.Stdout...), result.Stderr...)
+	if result.Err != nil {
+		return skillerr.Runtimef("adb pull: %v (%s)", result.Err, string(combined))
 	}
 
 	// Get file info
@@ -1126,16 +1051,18 @@ func pullFile(ctx context.Context, rc *skillmain.RunContext, serial, remotePath,
 // pushFile pushes a file to the device.
 func pushFile(ctx context.Context, rc *skillmain.RunContext, serial, localPath, remotePath string) error {
 	if localPath == "" {
-		return errors.New("local_path is required for push_file")
+		return skillerr.Arg("local_path is required for push_file",
+			skillerr.WithHint("Provide the local file path to push in local_path."))
 	}
 	if remotePath == "" {
-		return errors.New("remote_path is required for push_file")
+		return skillerr.Arg("remote_path is required for push_file",
+			skillerr.WithHint("Provide the destination path on device in remote_path."))
 	}
 
-	cmd := adbCommand(ctx, serial, "push", localPath, remotePath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("adb push: %w (%s)", err, string(output))
+	result := mobileutil.RunADB(ctx, serial, "push", localPath, remotePath)
+	combined := append(append([]byte{}, result.Stdout...), result.Stderr...)
+	if result.Err != nil {
+		return skillerr.Runtimef("adb push: %v (%s)", result.Err, string(combined))
 	}
 
 	return emit(rc, map[string]any{
@@ -1143,7 +1070,7 @@ func pushFile(ctx context.Context, rc *skillmain.RunContext, serial, localPath, 
 		"local_path":  localPath,
 		"remote_path": remotePath,
 		"success":     true,
-		"message":     strings.TrimSpace(string(output)),
+		"message":     strings.TrimSpace(string(combined)),
 	})
 }
 

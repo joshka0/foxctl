@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
@@ -72,7 +73,6 @@ signature:
 
 	resolver := NewSkillResolver(cfg)
 	handle, err := resolver.Resolve("test/skill")
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,7 +84,7 @@ signature:
 	}
 }
 
-func TestDedupeCleanPaths(t *testing.T) {
+func TestNormalizeSearchPaths(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    []string
@@ -109,7 +109,7 @@ func TestDedupeCleanPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := dedupeCleanPaths(tt.input)
+			result := skill.NormalizeSearchPaths(tt.input)
 			if len(result) != len(tt.expected) {
 				t.Errorf("expected %d paths, got %d", len(tt.expected), len(result))
 				return

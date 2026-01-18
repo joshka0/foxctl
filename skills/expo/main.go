@@ -5,17 +5,35 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mobileutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 const skillName = "mobile/expo"
+
+var allowedOps = []string{
+	"shake",
+	"reload",
+	"deep_link",
+	"dev_menu",
+	"toggle_inspector",
+	"toggle_performance",
+	"toggle_remote_debug",
+	"build",
+	"update",
+	"build_status",
+	"logs",
+}
 
 // Input represents the skill input parameters.
 type Input struct {
@@ -37,14 +55,19 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
-	if in.Operation == "" {
-		return fmt.Errorf("operation is required")
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
 	}
 
 	// Detect platform if not specified
 	platform := detectPlatform(in.DeviceID, in.Platform)
 
-	switch in.Operation {
+	switch op {
 	// Device operations
 	case "shake":
 		return shake(ctx, rc, platform, in.DeviceID)
@@ -71,7 +94,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	case "logs":
 		return logs(ctx, rc, in.Filter, in.Count)
 	default:
-		return fmt.Errorf("unknown operation: %s", in.Operation)
+		return skillerr.Arg(fmt.Sprintf("unknown operation: %s", in.Operation), skillerr.WithHint(opHint))
 	}
 }
 
@@ -132,32 +155,23 @@ func shake(ctx context.Context, rc *skillmain.RunContext, platform, deviceID str
 func iosShake(ctx context.Context, udid string) error {
 	// Method 1: Try sending keyboard shortcut via IDB (Cmd+D opens React Native dev menu)
 	// First, focus the simulator
-	focusArgs := []string{"focus"}
-	if udid != "" {
-		focusArgs = append(focusArgs, "--udid", udid)
-	}
-	focusCmd := exec.CommandContext(ctx, "idb", focusArgs...)
-	_ = focusCmd.Run() // Ignore errors, just best effort
+	_ = mobileutil.RunIDB(ctx, udid, "focus").Err // Ignore errors, just best effort
 
 	// Method 2: Use IDB to send key sequence that opens dev menu
 	// Sending 'd' key typically opens dev menu in Expo apps
-	keyArgs := []string{"ui", "text", "d"}
-	if udid != "" {
-		keyArgs = append(keyArgs, "--udid", udid)
-	}
-	keyCmd := exec.CommandContext(ctx, "idb", keyArgs...)
-	if err := keyCmd.Run(); err != nil {
+	keyResult := mobileutil.RunIDB(ctx, udid, "ui", "text", "d")
+	if keyResult.Err != nil {
 		// Method 3: Try AppleScript to trigger shake via menu (requires accessibility)
 		script := `tell application "Simulator" to activate
-delay 0.3
-tell application "System Events"
-	tell process "Simulator"
-		click menu item "Shake" of menu "Device" of menu bar 1
-	end tell
-end tell`
-		appleCmd := exec.CommandContext(ctx, "osascript", "-e", script)
-		if appleErr := appleCmd.Run(); appleErr != nil {
-			return fmt.Errorf("shake failed (idb key: %v, applescript: %v)", err, appleErr)
+	delay 0.3
+	tell application "System Events"
+		tell process "Simulator"
+			click menu item "Shake" of menu "Device" of menu bar 1
+		end tell
+	end tell`
+		appleResult := executil.Run(ctx, "", "osascript", "-e", script)
+		if appleResult.Err != nil {
+			return skillerr.Runtime("shake failed", skillerr.WithCause(errors.Join(keyResult.Err, appleResult.Err)))
 		}
 	}
 	return nil
@@ -166,9 +180,8 @@ end tell`
 func androidShake(ctx context.Context, serial string) error {
 	// Android: Send accelerometer event to simulate shake
 	// Using input command to send key events that trigger shake detection
-	args := adbArgs(serial, "shell", "input", "keyevent", "82") // KEYCODE_MENU opens dev menu
-	cmd := exec.CommandContext(ctx, "adb", args...)
-	return cmd.Run()
+	result := mobileutil.RunADB(ctx, serial, "shell", "input", "keyevent", "82") // KEYCODE_MENU opens dev menu
+	return result.Err
 }
 
 // reload triggers a JS bundle reload.
@@ -195,39 +208,33 @@ func reload(ctx context.Context, rc *skillmain.RunContext, platform, deviceID st
 func iosReload(ctx context.Context, udid string) error {
 	// Shake to open dev menu
 	if err := iosShake(ctx, udid); err != nil {
-		return fmt.Errorf("shake for reload: %w", err)
+		return skillerr.Runtime("shake for reload", skillerr.WithCause(err))
 	}
 
 	time.Sleep(500 * time.Millisecond)
 
 	// Type 'r' for reload
-	args := []string{"ui", "text", "r"}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	return cmd.Run()
+	result := mobileutil.RunIDB(ctx, udid, "ui", "text", "r")
+	return result.Err
 }
 
 func androidReload(ctx context.Context, serial string) error {
 	// Open dev menu first
 	if err := androidShake(ctx, serial); err != nil {
-		return fmt.Errorf("open dev menu for reload: %w", err)
+		return skillerr.Runtime("open dev menu for reload", skillerr.WithCause(err))
 	}
 
 	time.Sleep(500 * time.Millisecond)
 
 	// Send 'r' key for reload (double-tap R in Expo)
-	args := adbArgs(serial, "shell", "input", "text", "rr")
-	cmd := exec.CommandContext(ctx, "adb", args...)
-	return cmd.Run()
+	result := mobileutil.RunADB(ctx, serial, "shell", "input", "text", "rr")
+	return result.Err
 }
 
 // deepLink opens an Expo deep link URL.
 func deepLink(ctx context.Context, rc *skillmain.RunContext, platform, deviceID, url string) error {
 	if url == "" {
-		return fmt.Errorf("url is required for deep_link operation")
+		return skillerr.Arg("url is required for deep_link operation")
 	}
 
 	// Ensure URL has exp:// or exps:// scheme
@@ -256,19 +263,13 @@ func deepLink(ctx context.Context, rc *skillmain.RunContext, platform, deviceID,
 }
 
 func iosDeepLink(ctx context.Context, udid, url string) error {
-	args := []string{"open", url}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	return cmd.Run()
+	result := mobileutil.RunIDB(ctx, udid, "open", url)
+	return result.Err
 }
 
 func androidDeepLink(ctx context.Context, serial, url string) error {
-	args := adbArgs(serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url)
-	cmd := exec.CommandContext(ctx, "adb", args...)
-	return cmd.Run()
+	result := mobileutil.RunADB(ctx, serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url)
+	return result.Err
 }
 
 // devMenu opens the Expo developer menu.
@@ -343,35 +344,28 @@ func toggleRemoteDebug(ctx context.Context, rc *skillmain.RunContext, platform, 
 func iosToggleDevOption(ctx context.Context, udid, key string) error {
 	// Open dev menu
 	if err := iosShake(ctx, udid); err != nil {
-		return fmt.Errorf("open dev menu: %w", err)
+		return skillerr.Runtime("open dev menu", skillerr.WithCause(err))
 	}
 
 	time.Sleep(500 * time.Millisecond)
 
 	// Type the key
-	args := []string{"ui", "text", key}
-	if udid != "" {
-		args = append(args, "--udid", udid)
-	}
-
-	cmd := exec.CommandContext(ctx, "idb", args...)
-	return cmd.Run()
+	result := mobileutil.RunIDB(ctx, udid, "ui", "text", key)
+	return result.Err
 }
 
 func androidToggleDevOption(ctx context.Context, serial, key string) error {
 	// Open dev menu
-	args := adbArgs(serial, "shell", "input", "keyevent", "82")
-	cmd := exec.CommandContext(ctx, "adb", args...)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("open dev menu: %w", err)
+	result := mobileutil.RunADB(ctx, serial, "shell", "input", "keyevent", "82")
+	if result.Err != nil {
+		return skillerr.Runtime("open dev menu", skillerr.WithCause(result.Err))
 	}
 
 	time.Sleep(500 * time.Millisecond)
 
 	// Type the key
-	args = adbArgs(serial, "shell", "input", "text", key)
-	cmd = exec.CommandContext(ctx, "adb", args...)
-	return cmd.Run()
+	result = mobileutil.RunADB(ctx, serial, "shell", "input", "text", key)
+	return result.Err
 }
 
 // ============================================================================
@@ -389,24 +383,23 @@ func build(ctx context.Context, rc *skillmain.RunContext, buildPlatform, profile
 
 	args := []string{"build", "--platform", buildPlatform, "--profile", profile, "--json", "--non-interactive"}
 
-	cmd := exec.CommandContext(ctx, "eas", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("eas build: %w", err)
+	result := executil.Run(ctx, "", "eas", args...)
+	if result.Err != nil {
+		return skillerr.Integration("eas build", skillerr.WithCause(result.Err))
 	}
 
 	// Parse JSON output
 	var builds []map[string]any
-	if err := json.Unmarshal(output, &builds); err != nil {
+	if err := json.Unmarshal(result.Stdout, &builds); err != nil {
 		// Try single object
 		var build map[string]any
-		if err := json.Unmarshal(output, &build); err != nil {
+		if err := json.Unmarshal(result.Stdout, &build); err != nil {
 			return emit(rc, map[string]any{
 				"operation":      "build",
 				"build_platform": buildPlatform,
 				"profile":        profile,
 				"success":        true,
-				"raw_output":     string(output),
+				"raw_output":     string(result.Stdout),
 				"message":        "Build triggered (could not parse JSON output)",
 			})
 		}
@@ -435,7 +428,7 @@ func build(ctx context.Context, rc *skillmain.RunContext, buildPlatform, profile
 // update publishes an OTA update.
 func update(ctx context.Context, rc *skillmain.RunContext, channel, message string) error {
 	if channel == "" {
-		return fmt.Errorf("channel is required for update operation")
+		return skillerr.Arg("channel is required for update operation")
 	}
 
 	args := []string{"update", "--channel", channel, "--json", "--non-interactive"}
@@ -443,21 +436,20 @@ func update(ctx context.Context, rc *skillmain.RunContext, channel, message stri
 		args = append(args, "--message", message)
 	}
 
-	cmd := exec.CommandContext(ctx, "eas", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("eas update: %w", err)
+	cmdResult := executil.Run(ctx, "", "eas", args...)
+	if cmdResult.Err != nil {
+		return skillerr.Integration("eas update", skillerr.WithCause(cmdResult.Err))
 	}
 
 	// Parse JSON output
 	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal(cmdResult.Stdout, &result); err != nil {
 		return emit(rc, map[string]any{
 			"operation":  "update",
 			"channel":    channel,
 			"message":    message,
 			"success":    true,
-			"raw_output": string(output),
+			"raw_output": string(cmdResult.Stdout),
 		})
 	}
 
@@ -480,19 +472,18 @@ func update(ctx context.Context, rc *skillmain.RunContext, channel, message stri
 func buildStatus(ctx context.Context, rc *skillmain.RunContext) error {
 	args := []string{"build:list", "--json", "--non-interactive", "--limit", "5"}
 
-	cmd := exec.CommandContext(ctx, "eas", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("eas build:list: %w", err)
+	result := executil.Run(ctx, "", "eas", args...)
+	if result.Err != nil {
+		return skillerr.Integration("eas build:list", skillerr.WithCause(result.Err))
 	}
 
 	// Parse JSON output
 	var builds []map[string]any
-	if err := json.Unmarshal(output, &builds); err != nil {
+	if err := json.Unmarshal(result.Stdout, &builds); err != nil {
 		return emit(rc, map[string]any{
 			"operation":  "build_status",
 			"success":    true,
-			"raw_output": string(output),
+			"raw_output": string(result.Stdout),
 		})
 	}
 
@@ -592,7 +583,7 @@ func logs(ctx context.Context, rc *skillmain.RunContext, filter string, count in
 	if len(output) > 4096 {
 		artifact, err := skillmain.PersistBuffer(ctx, rc, bytes.NewBufferString(output), "text/plain", "expo_logs")
 		if err != nil {
-			return fmt.Errorf("persist logs: %w", err)
+			return skillerr.IO("persist logs", skillerr.WithCause(err))
 		}
 
 		return emit(rc, map[string]any{
@@ -601,7 +592,7 @@ func logs(ctx context.Context, rc *skillmain.RunContext, filter string, count in
 			"artifact":    artifact.Digest,
 			"total_lines": len(lines),
 			"source":      logPath,
-			"hint":        "Full logs stored in CAS; fetch via: agentctl cas get " + artifact.Digest,
+			"hint":        skillout.FormatCASHint("logs", artifact.Digest),
 		})
 	}
 
@@ -617,11 +608,3 @@ func logs(ctx context.Context, rc *skillmain.RunContext, filter string, count in
 // ============================================================================
 // Helpers
 // ============================================================================
-
-// adbArgs builds ADB command arguments with optional serial.
-func adbArgs(serial string, args ...string) []string {
-	if serial != "" {
-		return append([]string{"-s", serial}, args...)
-	}
-	return args
-}

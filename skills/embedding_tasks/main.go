@@ -12,7 +12,9 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -99,14 +101,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open task store
-	taskStore, err := tasks.Open(ctx, rc.Config.Storage.Root)
+	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err != nil {
 		return skillerr.Runtime("open task store", skillerr.WithCause(err))
 	}
-	defer taskStore.Close() //nolint:errcheck
+	defer cleanup() //nolint:errcheck
 
 	// Open memory store
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
 		return skillerr.Runtime("open memory store", skillerr.WithCause(err))
 	}
@@ -143,35 +145,17 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillout.Emit(rc, command, output)
 	}
 
-	// Initialize embedding provider (prefer Voyage, fall back to Gemini)
-	var provider interface {
-		Embed(ctx context.Context, text string) ([]float32, error)
-		Model() string
+	embedder, err := semantic.NewEmbedderFromConfig(
+		semantic.ScopeTasks,
+		rc.Config,
+		semantic.WithVoyageKey(voyageKey),
+		semantic.WithGeminiKey(geminiKey),
+	)
+	if err != nil {
+		return skillerr.Runtime("embedding provider", skillerr.WithCause(err))
 	}
 
-	if voyageKey != "" {
-		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeTasks)
-		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			Model:         model,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			return skillerr.Runtime("voyage provider", skillerr.WithCause(err))
-		}
-		provider = vp
-	} else {
-		gp, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey:        geminiKey,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			return skillerr.Runtime("gemini provider", skillerr.WithCause(err))
-		}
-		provider = gp
-	}
-
-	sessionID := resolveSessionID()
+	sessionID := sessionkit.ResolveSessionID(rc.Workspace, rc.SessionID)
 
 	// Track already embedded tasks to skip
 	embeddedIDs := make(map[string]bool)
@@ -227,7 +211,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				continue
 			}
 
-			embedding, err := provider.Embed(ctx, content)
+			embeddingResult, err := embedder.Embed(ctx, content)
 			if err != nil {
 				output.Errors++
 				output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: %v", t.ID, err))
@@ -262,7 +246,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				continue
 			}
 
-			if err := memStore.UpdateEmbedding(ctx, name, workspace, embedding); err != nil {
+			if err := memStore.UpdateEmbedding(ctx, name, workspace, embeddingResult.Vec); err != nil {
 				output.Errors++
 				output.ErrorDetails = append(output.ErrorDetails, fmt.Sprintf("%s: update embedding failed: %v", t.ID, err))
 				embeddedIDs[t.ID] = true
@@ -293,8 +277,25 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 // taskEmbeddingContent builds rich semantic text from task fields.
 // Format: Title + Description + Notes + Gotchas for maximum semantic coverage.
+// taskEmbeddingContent generates embedding text for a task.
+// Format: [Jan 2026] [completed] Task: title\nDescription: ...\nDependencies: N tasks\nEpic: ...
 func taskEmbeddingContent(t tasks.Task) string {
 	var parts []string
+
+	// Date prefix (use completed_at if done, else created_at)
+	var dateStr string
+	if t.CompletedAt != nil {
+		dateStr = t.CompletedAt.Format("Jan 2006")
+	} else {
+		dateStr = t.CreatedAt.Format("Jan 2006")
+	}
+
+	// Status prefix
+	status := t.Status
+	if status == "" {
+		status = "pending"
+	}
+	parts = append(parts, fmt.Sprintf("[%s] [%s]", dateStr, status))
 
 	// Title is always included
 	if t.Title != "" {
@@ -304,6 +305,16 @@ func taskEmbeddingContent(t tasks.Task) string {
 	// Description provides context
 	if t.Description != "" {
 		parts = append(parts, "Description: "+t.Description)
+	}
+
+	// Dependencies count
+	if len(t.DependsOn) > 0 {
+		parts = append(parts, fmt.Sprintf("Dependencies: %d tasks", len(t.DependsOn)))
+	}
+
+	// Epic association
+	if t.EpicID != "" {
+		parts = append(parts, "Epic: "+t.EpicID)
 	}
 
 	// Notes capture implementation details
@@ -316,11 +327,6 @@ func taskEmbeddingContent(t tasks.Task) string {
 		parts = append(parts, "Gotchas: "+t.Gotchas)
 	}
 
-	// Status provides context about completion
-	if t.Status != "" {
-		parts = append(parts, "Status: "+t.Status)
-	}
-
 	return strings.Join(parts, "\n")
 }
 
@@ -329,13 +335,7 @@ func listAllTasks(ctx context.Context, store tasks.Store, scope, workspaceID str
 	// Get all tasks from the specified workspace (or current workspace)
 	var allTasks []tasks.Task
 
-	// Default to current working directory if no workspace specified
-	if workspaceID == "" {
-		cwd, err := os.Getwd()
-		if err == nil {
-			workspaceID = cwd
-		}
-	}
+	workspaceID = workspaceutil.ResolveID(workspaceID, "")
 
 	// Fetch tasks for the workspace
 	taskList, err := store.ListByWorkspace(ctx, workspaceID)
@@ -373,28 +373,3 @@ func listAllTasks(ctx context.Context, store tasks.Store, scope, workspaceID str
 }
 
 // boolPtr returns a pointer to a bool value.
-func boolPtr(b bool) *bool {
-	return &b
-}
-
-// resolveSessionID returns the session ID from environment variables.
-// Priority: AGENTCTL_SESSION_ID > CLAUDE_SESSION_ID > OPENCODE_SESSION_ID >
-// CURSOR_SESSION_ID > TERM_SESSION_ID. Returns empty string if none set.
-func resolveSessionID() string {
-	if sid := os.Getenv("AGENTCTL_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("CLAUDE_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("OPENCODE_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("CURSOR_SESSION_ID"); sid != "" {
-		return sid
-	}
-	if sid := os.Getenv("TERM_SESSION_ID"); sid != "" {
-		return sid
-	}
-	return ""
-}

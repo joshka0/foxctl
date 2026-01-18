@@ -130,7 +130,7 @@ func runDaemonStart(cmd *cobra.Command, background bool, workspace string) error
 	cfg, ok := config.FromContext(ctx)
 	if !ok {
 		var err error
-		cfg, err = config.Load(ctx)
+		cfg, err = loadConfig(ctx)
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}

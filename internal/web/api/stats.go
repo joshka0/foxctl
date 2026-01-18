@@ -69,7 +69,7 @@ func StatsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 
 // InsightsHandler returns a handler for GET /api/insights.
 // Provides task graph analysis including PageRank priorities.
-func InsightsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+func InsightsHandler(_ config.Config, _ zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")

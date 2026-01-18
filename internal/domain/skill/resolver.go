@@ -19,7 +19,7 @@ type ResolverOption func(*Resolver)
 // NewResolver creates a new skill resolver with default search paths.
 func NewResolver(opts ...ResolverOption) *Resolver {
 	r := &Resolver{
-		searchPaths: defaultSearchPaths(),
+		searchPaths: DefaultSearchPaths(),
 	}
 
 	for _, opt := range opts {
@@ -32,14 +32,14 @@ func NewResolver(opts ...ResolverOption) *Resolver {
 // WithSearchPaths sets custom search paths, replacing the defaults.
 func WithSearchPaths(paths ...string) ResolverOption {
 	return func(r *Resolver) {
-		r.searchPaths = paths
+		r.searchPaths = NormalizeSearchPaths(paths)
 	}
 }
 
 // WithAdditionalPaths adds paths to the default search paths.
 func WithAdditionalPaths(paths ...string) ResolverOption {
 	return func(r *Resolver) {
-		r.searchPaths = append(r.searchPaths, paths...)
+		r.searchPaths = NormalizeSearchPaths(append(r.searchPaths, paths...))
 	}
 }
 
@@ -174,7 +174,7 @@ func (r *Resolver) resolveFromSearchPaths(name string) (Handle, error) {
 
 	for _, basePath := range r.searchPaths {
 		// Try both the original name and the normalized name
-		candidates := []string{name, normalizedName}
+		candidates := []string{normalizedName, name}
 
 		for _, candidate := range candidates {
 			manifestPath := filepath.Join(basePath, candidate, "skill.yaml")
@@ -191,42 +191,6 @@ func (r *Resolver) resolveFromSearchPaths(name string) (Handle, error) {
 	}
 
 	return Handle{}, fmt.Errorf("skill not found: %s (searched: %v)", name, r.searchPaths)
-}
-
-// defaultSearchPaths returns the default skill search paths.
-// Search order:
-// 1. AGENTCTL_SKILLS_PATH environment variable (can be multiple paths)
-// 2. User skills directory (~/.agentctl/skills)
-// 3. Built-in skills (relative to executable)
-// 4. Development paths (./dist/skills, ./skills)
-func defaultSearchPaths() []string {
-	var paths []string
-
-	// 1. AGENTCTL_SKILLS_PATH environment variable
-	if skillsPath := os.Getenv("AGENTCTL_SKILLS_PATH"); skillsPath != "" {
-		paths = append(paths, filepath.SplitList(skillsPath)...)
-	}
-
-	// 2. User skills directory (~/.agentctl/skills)
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		userSkills := filepath.Join(homeDir, ".agentctl", "skills")
-		paths = append(paths, userSkills)
-	}
-
-	// 3. Built-in skills (relative to executable)
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		builtinPath := filepath.Join(exeDir, "skills")
-		paths = append(paths, builtinPath)
-	}
-
-	// 4. Development paths (useful during development)
-	if pwd, err := os.Getwd(); err == nil {
-		paths = append(paths, filepath.Join(pwd, "dist", "skills"))
-		paths = append(paths, filepath.Join(pwd, "skills"))
-	}
-
-	return paths
 }
 
 // normalizeSkillName is an alias for NormalizeSkillName for internal use.

@@ -2,18 +2,14 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"os/exec"
-	"path/filepath"
-	"sort"
-	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/rgutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textmatch"
+	"github.com/jkatigb/agentctl/internal/tools/ripgrep"
 )
 
 const command = "text/ripgrep"
@@ -29,28 +25,7 @@ type input struct {
 	Hidden          bool     `json:"hidden"`
 }
 
-type match struct {
-	File    string `json:"file"`
-	Line    int    `json:"line_no"`
-	Text    string `json:"line"`
-	Snippet string `json:"snippet"`
-}
-
-// ripgrep JSON output types
-type rgMessage struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
-}
-
-type rgMatchData struct {
-	Path struct {
-		Text string `json:"text"`
-	} `json:"path"`
-	Lines struct {
-		Text string `json:"text"`
-	} `json:"lines"`
-	LineNumber int `json:"line_number"`
-}
+type match = textmatch.Match
 
 func main() {
 	skillmain.Main(command, run)
@@ -58,52 +33,42 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate pattern
-	if strings.TrimSpace(in.Pattern) == "" {
-		return fmt.Errorf("pattern is required")
+	if err := textmatch.RequirePattern(in.Pattern); err != nil {
+		return err
 	}
-	// Apply defaults
-	if in.MaxMatches <= 0 {
-		in.MaxMatches = 10000
-	}
-	if in.ContextLines < 0 {
-		in.ContextLines = 0
-	}
+	searchInput := rgutil.Normalize(rgutil.SearchInput{
+		Pattern:         in.Pattern,
+		CaseInsensitive: in.CaseInsensitive,
+		Glob:            in.Glob,
+		GlobNot:         in.GlobNot,
+		MaxMatches:      in.MaxMatches,
+		ContextLines:    in.ContextLines,
+		Hidden:          in.Hidden,
+	})
+	in.MaxMatches = searchInput.MaxMatches
 	// Check if ripgrep is available
-	if _, err := exec.LookPath("rg"); err != nil {
-		return fmt.Errorf("ripgrep (rg) not found in PATH: %w", err)
+	if err := rgutil.RequireRipgrep(); err != nil {
+		return err
 	}
-
 	// Resolve workspace and path
-	workspace, searchPath, err := resolveWorkspace(rc, in.Path)
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
 	if err != nil {
 		return err
 	}
 
-	// Build ripgrep command
-	args := buildRipgrepArgs(in, searchPath)
-
-	// Execute ripgrep
-	cmd := exec.CommandContext(ctx, "rg", args...)
-	cmd.Dir = workspace
-
-	output, err := cmd.Output()
+	opts := rgutil.BuildSearchOpts(searchInput, workspace, searchPath, nil)
+	result, err := ripgrep.SearchJSON(ctx, opts)
 	if err != nil {
-		// Exit code 1 means no matches found, which is not an error
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return emitEmptyResult(rc, in)
-		}
-		return fmt.Errorf("ripgrep execution failed: %w", err)
+		return skillerr.WrapRuntime("ripgrep execution failed", err)
 	}
 
-	// Parse ripgrep JSON output
-	matches, fileHits, err := parseRipgrepOutput(output, workspace, in.MaxMatches)
-	if err != nil {
-		return err
+	if len(result.Matches) == 0 {
+		return emitEmptyResult(rc, in)
 	}
 
-	// Prepare preview and artifact
-	preview, truncated := preparePreview(matches, rc.MaxPreview)
-	artifact, err := persistMatchesArtifact(ctx, rc, matches, truncated)
+	matches, fileHits := convertMatches(result.Matches)
+
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, matches, rc.MaxPreview, "text_ripgrep", true)
 	if err != nil {
 		return err
 	}
@@ -114,209 +79,33 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"case_insensitive": in.CaseInsensitive,
 		"match_count":      len(matches),
 		"files_touched":    len(fileHits),
-		"preview":          preview,
-		"top_files":        summarizeTopFiles(fileHits, 5),
+		"preview":          previewResult.Preview,
+		"top_files":        skillout.SummarizeTopFiles(fileHits, 5),
 		"max_matches":      in.MaxMatches,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, command, data)
-}
-
-func resolveWorkspace(rc *skillmain.RunContext, candidate string) (string, string, error) {
-	workspace := rc.PathValidator.Workspace()
-	if strings.TrimSpace(candidate) == "" {
-		return workspace, workspace, nil
-	}
-	resolved, err := rc.PathValidator.ValidatePath(candidate)
-	if err != nil {
-		return "", "", fmt.Errorf("path validation failed: %w", err)
-	}
-	return workspace, resolved, nil
-}
-
-func buildRipgrepArgs(in input, searchPath string) []string {
-	args := []string{
-		"--json",                                        // JSON output
-		"--no-heading",                                  // Included in JSON output
-		"--line-number",                                 // Include line numbers
-		"--no-messages",                                 // Suppress error messages
-		"--max-count", fmt.Sprintf("%d", in.MaxMatches), // Limit matches per file
-	}
-
-	// Case sensitivity
-	if in.CaseInsensitive {
-		args = append(args, "--ignore-case")
-	}
-
-	// Context lines
-	if in.ContextLines > 0 {
-		args = append(args, "--context", fmt.Sprintf("%d", in.ContextLines))
-	}
-
-	// Hidden files
-	if in.Hidden {
-		args = append(args, "--hidden")
-	}
-
-	// Include globs
-	for _, glob := range in.Glob {
-		args = append(args, "--glob", glob)
-	}
-
-	// Exclude globs
-	for _, glob := range in.GlobNot {
-		args = append(args, "--glob", "!"+glob)
-	}
-
-	// Default exclusions (if no custom glob_not provided)
-	if len(in.GlobNot) == 0 {
-		args = append(args,
-			"--glob", "!.git",
-			"--glob", "!node_modules",
-			"--glob", "!vendor",
-		)
-	}
-
-	// Pattern and search path
-	args = append(args, "--", in.Pattern, searchPath)
-
-	return args
-}
-
-func parseRipgrepOutput(output []byte, workspace string, maxMatches int) ([]match, map[string]int, error) {
-	var matches []match
-	fileHits := make(map[string]int)
-
-	scanner := bufio.NewScanner(bytes.NewReader(output))
-	for scanner.Scan() && len(matches) < maxMatches {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var msg rgMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			// Skip unparseable lines
-			continue
-		}
-
-		if msg.Type == "match" {
-			var matchData rgMatchData
-			if err := json.Unmarshal(msg.Data, &matchData); err != nil {
-				continue
-			}
-
-			// Extract line text (ripgrep includes newline)
-			lineText := strings.TrimSuffix(matchData.Lines.Text, "\n")
-			snippet := trimLine(lineText, 240)
-
-			// Make path relative to workspace
-			relPath := relativeTo(workspace, matchData.Path.Text)
-
-			matches = append(matches, match{
-				File:    relPath,
-				Line:    matchData.LineNumber,
-				Text:    lineText,
-				Snippet: snippet,
-			})
-
-			fileHits[relPath]++
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, nil, fmt.Errorf("scan ripgrep output: %w", err)
-	}
-
-	return matches, fileHits, nil
 }
 
 func emitEmptyResult(rc *skillmain.RunContext, in input) error {
-	data := map[string]any{
-		"pattern":          in.Pattern,
-		"case_insensitive": in.CaseInsensitive,
-		"match_count":      0,
-		"files_touched":    0,
-		"preview":          []match{},
-		"top_files":        [][2]any{},
-		"max_matches":      in.MaxMatches,
-	}
+	data := textmatch.EmptySearchResult(in.Pattern, in.CaseInsensitive, []match{})
+	data["max_matches"] = in.MaxMatches
 	return skillout.Emit(rc, command, data)
 }
 
-func preparePreview(matches []match, limit int) ([]match, bool) {
-	preview, truncated := skillout.PreparePreview(matches, limit)
-	if truncated {
-		dup := make([]match, len(preview))
-		copy(dup, preview)
-		preview = dup
+func convertMatches(rgMatches []ripgrep.Match) ([]match, map[string]int) {
+	matches := make([]match, 0, len(rgMatches))
+	fileHits := make(map[string]int)
+	for _, m := range rgMatches {
+		snippet := textmatch.TrimLine(m.Text, 240)
+		matches = append(matches, match{
+			File:    m.Path,
+			Line:    m.Line,
+			Text:    m.Text,
+			Snippet: snippet,
+		})
+		fileHits[m.Path]++
 	}
-	return preview, truncated
+	return matches, fileHits
 }
-
-func persistMatchesArtifact(ctx context.Context, rc *skillmain.RunContext, matches []match, truncated bool) (skillmain.Artifact, error) {
-	if !truncated {
-		return skillmain.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, m := range matches {
-		if err := enc.Encode(m); err != nil {
-			return skillmain.Artifact{}, fmt.Errorf("encode match: %w", err)
-		}
-	}
-	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_ripgrep")
-}
-
-func relativeTo(base, target string) string {
-	if base == "" {
-		if rel, err := filepath.Rel(".", target); err == nil {
-			return filepath.ToSlash(rel)
-		}
-		return filepath.ToSlash(target)
-	}
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
-func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
-	type kv struct {
-		File  string
-		Count int
-	}
-	var list []kv
-	for file, count := range counts {
-		list = append(list, kv{File: file, Count: count})
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].Count == list[j].Count {
-			return list[i].File < list[j].File
-		}
-		return list[i].Count > list[j].Count
-	})
-	if len(list) > limit {
-		list = list[:limit]
-	}
-	var out [][2]any
-	for _, item := range list {
-		out = append(out, [2]any{item.File, item.Count})
-	}
-	return out
-}
-
-func trimLine(line string, limit int) string {
-	if len(line) <= limit {
-		return line
-	}
-	return line[:limit] + "..."
-}
-

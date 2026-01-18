@@ -4,13 +4,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	openapiauth "github.com/jkatigb/agentctl/internal/openapi/auth"
 	"github.com/jkatigb/agentctl/internal/openapi/builder"
 	"github.com/jkatigb/agentctl/internal/openapi/client"
@@ -63,42 +65,31 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if in.Spec == "" {
-		return &client.Error{
-			Code:    "EARG",
-			Message: "spec is required (provide a spec path, URL, or memory: reference)",
-		}
+		return skillerr.Arg(
+			"spec is required",
+			skillerr.WithHint("Provide a spec path, URL, or memory: reference."),
+		)
 	}
 	if in.OperationID == "" {
-		return &client.Error{
-			Code:    "EARG",
-			Message: "operationId is required (use 'agentctl openapi describe <spec>' to list available operations)",
-		}
+		return skillerr.Arg(
+			"operationId is required",
+			skillerr.WithHint("Use `agentctl openapi describe <spec>` to list available operations."),
+		)
 	}
 
 	// Initialize memory store if memory: references are used
 	var memStore storage.MemoryStore
 	if strings.HasPrefix(in.Spec, "memory:") {
 		var err error
-		memStore, err = memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+		memStore, err = memory.OpenWithConfig(ctx, rc.Config)
 		if err != nil {
-			return &client.Error{
-				Code:    "ERUNTIME",
-				Message: fmt.Sprintf("failed to open memory store: %v", err),
-				Err:     err,
-			}
+			return skillerr.WrapIO("failed to open memory store", err)
 		}
 		defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 	}
 
 	// Load OpenAPI spec
-	workspace := os.Getenv("AGENTCTL_WORKSPACE")
-	if workspace == "" {
-		var err error
-		workspace, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("determine workspace: %w", err)
-		}
-	}
+	workspace := workspaceutil.ResolveID("", rc.Workspace)
 
 	ldr := loader.New(rc.CASStore, memStore, loader.WithWorkspace(workspace))
 	spec, err := ldr.Load(ctx, in.Spec)
@@ -109,11 +100,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		} else if strings.HasPrefix(in.Spec, "http://") || strings.HasPrefix(in.Spec, "https://") {
 			hint = "Check the URL is accessible and returns a valid OpenAPI specification"
 		}
-		return &client.Error{
-			Code:    "EOPENAPI",
-			Message: fmt.Sprintf("failed to load spec %q: %v. %s", in.Spec, err, hint),
-			Err:     err,
-		}
+		return skillerr.Runtime(
+			fmt.Sprintf("failed to load spec %q: %v", in.Spec, err),
+			skillerr.WithCause(err),
+			skillerr.WithHint(hint),
+		)
 	}
 
 	// Check if operation exists and provide helpful error
@@ -121,11 +112,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		available := suggestOperations(spec, in.OperationID)
 		hint := fmt.Sprintf("Operation %q not found. Available operations: %s. Use 'agentctl openapi describe %s' to list all operations",
 			in.OperationID, available, in.Spec)
-		return &client.Error{
-			Code:    "EOPENAPI",
-			Message: hint,
-			Err:     fmt.Errorf("operation not found: %s", in.OperationID),
-		}
+		return skillerr.NotFound(hint, skillerr.WithCause(fmt.Errorf("operation not found: %s", in.OperationID)))
 	}
 
 	// Build request from operation
@@ -134,30 +121,28 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if err != nil {
 		// Enhance error message with suggestions
 		hint := generateBuildHint(err, spec, in.OperationID)
-		return &client.Error{
-			Code:    "EARG",
-			Message: fmt.Sprintf("failed to build request: %v. %s", err, hint),
-			Err:     err,
-		}
+		return skillerr.Arg(
+			fmt.Sprintf("failed to build request: %v", err),
+			skillerr.WithCause(err),
+			skillerr.WithHint(hint),
+		)
 	}
 
 	// Convert to http.Request
 	req, err := builtReq.ToHTTPRequest()
 	if err != nil {
-		return &client.Error{
-			Code:    "EARG",
-			Message: fmt.Sprintf("failed to create HTTP request: %v", err),
-			Err:     err,
-		}
+		return skillerr.Arg(
+			fmt.Sprintf("failed to create HTTP request: %v", err),
+			skillerr.WithCause(err),
+		)
 	}
 
 	// Apply authentication
 	if err := openapiauth.Apply(req, in.Auth); err != nil {
-		return &client.Error{
-			Code:    "EAUTH",
-			Message: fmt.Sprintf("failed to apply authentication: %v", err),
-			Err:     err,
-		}
+		return skillerr.Auth(
+			fmt.Sprintf("failed to apply authentication: %v", err),
+			skillerr.WithCause(err),
+		)
 	}
 
 	// If dry-run, return request plan
@@ -176,7 +161,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Single request execution (retry logic is handled internally by client)
 	response, err := httpClient.Execute(ctx, req)
 	if err != nil {
-		return err
+		return wrapOpenAPIError(err)
 	}
 
 	return emitResponse(rc, response, nil)
@@ -196,11 +181,10 @@ func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *h
 		PerPageParam: pagingCfg.PerPageParam,
 	})
 	if err != nil {
-		return &client.Error{
-			Code:    "EPAGINATION",
-			Message: fmt.Sprintf("failed to create paginator: %v", err),
-			Err:     err,
-		}
+		return skillerr.Arg(
+			fmt.Sprintf("failed to create paginator: %v", err),
+			skillerr.WithCause(err),
+		)
 	}
 
 	var allResponses []*client.Response
@@ -219,7 +203,7 @@ func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *h
 				partialSummary := paginator.Summary()
 				return emitResponse(rc, combined, &partialSummary)
 			}
-			return err
+			return wrapOpenAPIError(err)
 		}
 
 		if pageResponse == nil {
@@ -248,11 +232,7 @@ func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *h
 			if b, err := json.Marshal(v); err == nil {
 				bodyBytes = b
 			} else {
-				return &client.Error{
-					Code:    "EPAGINATION",
-					Message: fmt.Sprintf("failed to convert response body to bytes for pagination: %v", err),
-					Err:     err,
-				}
+				return skillerr.WrapRuntime("failed to convert response body to bytes for pagination", err)
 			}
 		}
 
@@ -265,11 +245,7 @@ func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *h
 		// Check if we should continue
 		nextReq, done, err := paginator.ShouldContinue(pagResp)
 		if err != nil {
-			return &client.Error{
-				Code:    "EPAGINATION",
-				Message: fmt.Sprintf("pagination error: %v", err),
-				Err:     err,
-			}
+			return skillerr.WrapRuntime("pagination error", err)
 		}
 
 		if done {
@@ -285,10 +261,10 @@ func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *h
 
 	// Aggregate all responses
 	if len(allResponses) == 0 {
-		return &client.Error{
-			Code:    "EPAGINATION",
-			Message: "no pages fetched (check page size/offset or upstream pagination response)",
-		}
+		return skillerr.Runtime(
+			"no pages fetched",
+			skillerr.WithHint("Check page size/offset or upstream pagination response."),
+		)
 	}
 
 	// Get pagination summary
@@ -302,6 +278,28 @@ func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *h
 	combined.Body = aggregated
 
 	return emitResponse(rc, combined, &summary)
+}
+
+func wrapOpenAPIError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var openErr *client.Error
+	if !errors.As(err, &openErr) {
+		return err
+	}
+	message := openErr.Message
+	if message == "" && openErr.Err != nil {
+		message = openErr.Err.Error()
+	}
+	switch openErr.Code {
+	case "EARG":
+		return skillerr.Arg(message, skillerr.WithCause(openErr.Err))
+	case "EAUTH":
+		return skillerr.Auth(message, skillerr.WithCause(openErr.Err))
+	default:
+		return skillerr.Runtime(message, skillerr.WithCause(openErr.Err))
+	}
 }
 
 func convertHeaders(headers map[string]string) http.Header {

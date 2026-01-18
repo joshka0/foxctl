@@ -59,28 +59,81 @@ type ClaudeMaxTokenStorage struct {
 	Expire       string `json:"expired"`
 }
 
+// TokenStorage abstracts token persistence for FC/IS compliance.
+// Callers can inject custom implementations for testing or alternative storage.
+type TokenStorage interface {
+	// Load reads token data from storage.
+	Load() ([]byte, error)
+	// Save writes token data to storage.
+	Save(data []byte) error
+}
+
+// FileTokenStorage is the default file-based token storage.
+type FileTokenStorage struct {
+	Path string
+}
+
+// Load reads token data from the file.
+func (f *FileTokenStorage) Load() ([]byte, error) {
+	data, err := os.ReadFile(f.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("claude max tokens not found, run 'agentctl auth claude-login' first")
+		}
+		return nil, err
+	}
+	return data, nil
+}
+
+// Save writes token data to the file.
+func (f *FileTokenStorage) Save(data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(f.Path, data, 0o600)
+}
+
 // ClaudeMaxLLM implements core.LLM using Claude Max subscription OAuth.
 type ClaudeMaxLLM struct {
 	model      string
-	tokenPath  string
 	token      *ClaudeMaxTokenStorage
+	storage    TokenStorage // FC/IS: injected storage abstraction
 	httpClient *http.Client
 }
 
-// NewClaudeMaxLLM creates a new Claude Max LLM.
-// It loads tokens from ~/.agentctl/auth/claude_token.json
-func NewClaudeMaxLLM(model string) (*ClaudeMaxLLM, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
+// ClaudeMaxLLMOption configures ClaudeMaxLLM.
+type ClaudeMaxLLMOption func(*ClaudeMaxLLM)
+
+// WithTokenStorage sets a custom token storage implementation.
+// FC/IS: allows injecting storage at the boundary for testing.
+func WithTokenStorage(storage TokenStorage) ClaudeMaxLLMOption {
+	return func(l *ClaudeMaxLLM) {
+		l.storage = storage
 	}
+}
 
-	tokenPath := filepath.Join(home, ".agentctl", "auth", "claude_token.json")
-
+// NewClaudeMaxLLM creates a new Claude Max LLM client.
+// By default, uses file-based token storage at ~/.agentctl/auth/claude_token.json.
+func NewClaudeMaxLLM(model string, opts ...ClaudeMaxLLMOption) (*ClaudeMaxLLM, error) {
 	llm := &ClaudeMaxLLM{
 		model:      model,
-		tokenPath:  tokenPath,
 		httpClient: &http.Client{Timeout: 120 * time.Second},
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(llm)
+	}
+
+	// Default to file storage if not set
+	if llm.storage == nil {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("get home dir: %w", err)
+		}
+		llm.storage = &FileTokenStorage{
+			Path: filepath.Join(home, ".agentctl", "auth", "claude_token.json"),
+		}
 	}
 
 	// Load existing tokens
@@ -92,11 +145,8 @@ func NewClaudeMaxLLM(model string) (*ClaudeMaxLLM, error) {
 }
 
 func (l *ClaudeMaxLLM) loadTokens() error {
-	data, err := os.ReadFile(l.tokenPath)
+	data, err := l.storage.Load()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("claude max tokens not found, run 'agentctl auth claude-login' first")
-		}
 		return err
 	}
 
@@ -110,16 +160,12 @@ func (l *ClaudeMaxLLM) loadTokens() error {
 }
 
 func (l *ClaudeMaxLLM) saveTokens() error {
-	if err := os.MkdirAll(filepath.Dir(l.tokenPath), 0o700); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(l.token, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(l.tokenPath, data, 0o600)
+	return l.storage.Save(data)
 }
 
 func (l *ClaudeMaxLLM) refreshTokens(ctx context.Context) error {

@@ -48,7 +48,7 @@ func newSkillsHelpCommand() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_ = jsonFlag
-			cfg, err := config.Load(cmd.Context())
+			cfg, err := loadConfig(cmd.Context())
 			if err != nil {
 				return err
 			}

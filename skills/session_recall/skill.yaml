@@ -35,6 +35,14 @@ signature:
       type: string
       required: false
       description: "Filter by project name (optional)"
+    - name: window_granularity
+      type: boolean
+      required: false
+      description: "Search at context window level (default: false)"
+    - name: chunk_granularity
+      type: boolean
+      required: false
+      description: "Search at chunk level (requires embeddings)"
   help:
     short: "Recall relevant sessions via semantic search."
     long: |
@@ -55,6 +63,12 @@ signature:
     - name: matches
       type: array
       description: "Matching sessions with similarity scores"
+    - name: window_matches
+      type: array
+      description: "Matching context windows with similarity scores"
+    - name: chunk_matches
+      type: array
+      description: "Matching chunks with similarity scores"
     - name: total_with_embeddings
       type: integer
       description: "Total sessions with embeddings available"

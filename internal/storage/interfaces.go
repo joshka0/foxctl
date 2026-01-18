@@ -156,6 +156,32 @@ type MemoryStats struct {
 	Path  string
 }
 
+// MemorySaveOptions provides structured options for saving memory entries.
+type MemorySaveOptions struct {
+	Name      string
+	Type      string
+	Workspace string
+	Summary   string
+	Result    []byte
+	SessionID string // AI coding tool session ID (optional)
+}
+
+// MemoryListFilter provides filter options for listing memories.
+type MemoryListFilter struct {
+	Types     []string
+	SessionID string
+}
+
+// EmbeddingMetadata captures embedding configuration for a workspace.
+type EmbeddingMetadata struct {
+	Workspace  string    `json:"workspace"`
+	Provider   string    `json:"provider"`
+	Model      string    `json:"model"`
+	Dimensions int       `json:"dimensions"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 // MemoryStore persists named memories and auto-cache entries.
 type MemoryStore interface {
 	Store
@@ -173,6 +199,19 @@ type MemoryStore interface {
 	UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error
 	// SearchSimilar finds entries similar to the given embedding using vector similarity.
 	SearchSimilar(ctx context.Context, workspace string, embedding []float32, limit int) ([]ScoredEntry, error)
+	// SaveResult stores a result envelope using structured options.
+	SaveResult(ctx context.Context, opts MemorySaveOptions) (NamedEntry, error)
+	// ListFiltered returns named memories for a workspace with optional filters and pagination.
+	ListFiltered(ctx context.Context, workspace string, filter MemoryListFilter, limit, offset int) ([]NamedEntry, int, error)
+	// ListWithoutEmbedding returns memories that don't have embeddings yet.
+	ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]NamedEntry, error)
+	// ValidateEmbeddingDimensions checks if new embedding dimensions are compatible with existing ones.
+	ValidateEmbeddingDimensions(ctx context.Context, workspace string, dimensions int) error
+	// SetEmbeddingMetadata stores embedding configuration for a workspace.
+	SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata) error
+	// ExistsByNameSuffix checks if any entry exists with a name ending in the given suffix.
+	// Used for content-hash deduplication across sessions (e.g., suffix ":<type>:<digest>").
+	ExistsByNameSuffix(ctx context.Context, workspace, suffix string) (bool, error)
 }
 
 // Session represents a captured Claude Code conversation session.
@@ -198,14 +237,18 @@ type Session struct {
 	ToolInvocations int       `json:"tool_invocations"`
 	TotalTokens     int       `json:"total_tokens"`
 	RawJSONLPath    string    `json:"raw_jsonl_path"`
+	ContentHash     string    `json:"content_hash,omitempty"` // Hash of filtered conversation content for deduplication
 	Embedding       []byte    `json:"embedding,omitempty"`
 	EmbeddingModel  string    `json:"embedding_model,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	// Lineage fields for session tracking
 	ParentSessionID string `json:"parent_session_id,omitempty"`
-	AgentID         string `json:"agent_id,omitempty"` // AI agent identifier (default: "agentctl")
-	Status          string `json:"status,omitempty"`   // ok, error, canceled
+	AgentID         string `json:"agent_id,omitempty"`   // AI agent identifier (default: "agentctl")
+	AgentType       string `json:"agent_type,omitempty"` // Source system (claude, codex, opencode)
+	Status          string `json:"status,omitempty"`     // ok, error, canceled
+	// Pending restore flag for post-compact context injection
+	PendingRestoreAt *time.Time `json:"pending_restore_at,omitempty"`
 }
 
 // Session status constants
@@ -301,15 +344,24 @@ type SessionStore interface {
 	List(ctx context.Context, opts SessionListOptions) ([]Session, error)
 	Delete(ctx context.Context, id string) error
 	Search(ctx context.Context, query string, limit int) ([]Session, error)
-	SearchSimilar(ctx context.Context, embedding []float32, limit int) ([]SimilarSession, error)
+	SearchSimilar(ctx context.Context, workspace string, embedding []float32, limit int) ([]SimilarSession, error)
 	UpdateSummary(ctx context.Context, id string, summary string, accomplished, decisions, gotchas, userInsights, tags, keyFiles []string, toolsPattern string) error
 	SetEmbedding(ctx context.Context, id string, embedding []byte, model string) error
 	Stats(ctx context.Context) (SessionStats, error)
+
+	// Content hash deduplication
+	FindByContentHash(ctx context.Context, contentHash string) (*Session, error)
+	SetContentHash(ctx context.Context, id, contentHash string) error
 
 	// Lineage operations
 	GetActive(ctx context.Context, workspace, agentID string) (*Session, error)
 	SetStatus(ctx context.Context, id, status string) error
 	FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error)
+
+	// Pending restore operations (for post-compact context injection)
+	SetPendingRestore(ctx context.Context, id string) error
+	ClearPendingRestore(ctx context.Context, id string) error
+	GetPendingRestore(ctx context.Context, workspace string) (*Session, error)
 	SaveEdge(ctx context.Context, edge SessionEdge) error
 	GetAncestorChain(ctx context.Context, sessionID string, maxDepth int) ([]Session, error)
 	GetEdges(ctx context.Context, sessionID string) ([]SessionEdge, error)
@@ -331,6 +383,13 @@ type SessionStore interface {
 	DeleteChunks(ctx context.Context, sessionID string) error
 	SetArchivePath(ctx context.Context, sessionID, archivePath string) error
 	GetArchivePath(ctx context.Context, sessionID string) (string, error)
+
+	// Chunk summary operations (for persisted chunk-level summaries)
+	SaveChunkSummary(ctx context.Context, summary SessionChunkSummary) (SessionChunkSummary, error)
+	SaveChunkSummaries(ctx context.Context, summaries []SessionChunkSummary) error
+	GetChunkSummaries(ctx context.Context, sessionID string, windowIndex int) ([]SessionChunkSummary, error)
+	GetChunkSummary(ctx context.Context, summaryID string) (SessionChunkSummary, error)
+	DeleteChunkSummaries(ctx context.Context, sessionID string) error
 
 	// Context window operations (for granular sub-session retrieval)
 	SaveContextWindow(ctx context.Context, window ContextWindow) (ContextWindow, error)
@@ -365,6 +424,23 @@ type SessionChunk struct {
 	Embedding          []byte    `json:"embedding,omitempty"`
 	EmbeddingModel     string    `json:"embedding_model,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
+}
+
+type SessionChunkSummary struct {
+	ID            string    `json:"id"`
+	SessionID     string    `json:"session_id"`
+	WindowIndex   int       `json:"window_index"`
+	Trigger       string    `json:"trigger,omitempty"`
+	ChunkIndices  []int     `json:"chunk_indices"`
+	ChunkIndexMin int       `json:"chunk_index_min"`
+	ChunkIndexMax int       `json:"chunk_index_max"`
+	Tools         []string  `json:"tools,omitempty"`
+	Files         []string  `json:"files,omitempty"`
+	Errors        []string  `json:"errors,omitempty"`
+	Summary       string    `json:"summary"`
+	SummaryModel  string    `json:"summary_model,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // ScoredChunk couples a chunk with a relevance score.

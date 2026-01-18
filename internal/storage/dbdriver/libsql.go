@@ -20,6 +20,7 @@ type libsqlDB struct {
 	enableVectorSearch bool
 	vectorDimensions   int
 	driverType         DriverType
+	syncURL            string // non-empty if remote sync is enabled
 }
 
 // openLibSQL opens a local libSQL database file
@@ -37,11 +38,26 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 		vectorDims = 384 // Default to all-MiniLM-L6-v2 dimensions
 	}
 
-	// Create libSQL connector for local file database
-	// For local files, just pass the path directly
-	connector, err := libsql.NewEmbeddedReplicaConnector(cfg.Path, "")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create libsql connector: %w", err)
+	// Create libSQL connector
+	var connector *libsql.Connector
+	var err error
+
+	if cfg.SyncURL != "" {
+		// Remote sync mode - create embedded replica that syncs with remote sqld
+		opts := []libsql.Option{}
+		if cfg.AuthToken != "" {
+			opts = append(opts, libsql.WithAuthToken(cfg.AuthToken))
+		}
+		connector, err = libsql.NewEmbeddedReplicaConnector(cfg.Path, cfg.SyncURL, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create libsql connector with sync (url=%s): %w", cfg.SyncURL, err)
+		}
+	} else {
+		// Local-only mode - no remote sync
+		connector, err = libsql.NewEmbeddedReplicaConnector(cfg.Path, "")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create libsql connector: %w", err)
+		}
 	}
 
 	// Open database connection
@@ -78,6 +94,7 @@ func openLibSQL(ctx context.Context, cfg LibSQLConfig, migrate MigrationFunc) (D
 		enableVectorSearch: cfg.EnableVectorSearch,
 		vectorDimensions:   vectorDims,
 		driverType:         DriverLibSQL,
+		syncURL:            cfg.SyncURL,
 	}, nil
 }
 
@@ -192,4 +209,27 @@ func (l *libsqlDB) GetDriverType() DriverType {
 // GetVectorDimensions returns the configured vector dimensions
 func (l *libsqlDB) GetVectorDimensions() int {
 	return l.vectorDimensions
+}
+
+// Sync triggers a manual sync with the remote sqld server.
+// Returns nil immediately if SyncURL is not configured (local-only mode).
+func (l *libsqlDB) Sync() error {
+	if l.syncURL == "" {
+		return nil // local-only mode, no-op
+	}
+	_, err := l.connector.Sync()
+	if err != nil {
+		return fmt.Errorf("libsql sync failed: %w", err)
+	}
+	return nil
+}
+
+// IsSyncEnabled returns true if remote sync is configured.
+func (l *libsqlDB) IsSyncEnabled() bool {
+	return l.syncURL != ""
+}
+
+// GetSyncURL returns the configured sync URL (empty if local-only).
+func (l *libsqlDB) GetSyncURL() string {
+	return l.syncURL
 }

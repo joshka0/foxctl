@@ -123,6 +123,46 @@ Use CAS for large results:
 
 ---
 
+## Engineering Principles
+
+These principles keep agentctl **safe, deterministic, and testable**.
+
+| Principle | Rule | Why |
+|-----------|------|-----|
+| **Functional Core** | Business logic = pure functions (no IO, env, clock, globals) | Unit tests stay fast; behavior is deterministic |
+| **Imperative Shell** | IO + wiring in thin shell only | Isolates effects; skills can swap runtimes |
+| **Plan/Apply** | State changes split into `Plan() → Apply()` | Enables `--dry-run`; safer refactors |
+| **Explicit Deps** | Inject clock/UUID/config as parameters | Reproducible tests; stable golden files |
+| **Boundary Parsing** | Validate envelopes at edge; domain types inside | No stringly-typed bugs in core |
+| **Context Threading** | `context.Context` through all calls | Clean cancellation; timeout safety |
+
+### Preferred Shape
+
+```go
+// Core (functional) - pure, testable
+func Plan(input DomainInput) (Plan, error) {
+    // Business logic only - no IO, no time.Now(), no env reads
+}
+
+// Shell (imperative) - IO lives here
+func Apply(ctx context.Context, deps Dependencies, plan Plan) (Result, error) {
+    // Perform effects: DB writes, file ops, network calls
+}
+```
+
+### Dependency Direction
+
+```
+skills/ → internal/adapters/skillslib/ → internal/platform/
+              ↓ (never reverse)
+        internal/domain/  ← pure, no IO imports
+```
+
+- Core/domain packages must NOT import `os`, `database/sql`, or adapter packages
+- Envelope/transport types stay at boundaries, domain types inside
+
+---
+
 ## Testing Requirements
 
 ```bash
@@ -135,6 +175,12 @@ make check       # All of the above
 - New features need unit + golden tests
 - Coverage target: 85%
 - Golden files in `testdata/*.json`
+- **Determinism:** Golden tests must be reproducible
+  - Sort keys/arrays in output
+  - Inject timestamps via clock interface (no `time.Now()` in core)
+  - Use stable IDs or inject UUID generator
+- Prefer testing the **functional core** with table-driven tests (no IO)
+- Use fakes/adapters for shell tests; keep integration tests focused
 
 ---
 
@@ -147,6 +193,20 @@ make check       # All of the above
 | Non-JSON stdout from CLI/skills | Envelopes-only forever |
 | Missing `--dry-run` on state-changing cmd | Safety valve |
 | CGO build without `-tags=libsqlite3` | Duplicate SQLite symbols |
+| IO mixed into core logic (time.Now, env reads, DB in pure func) | Untestable; nondeterministic |
+
+### Code Smells (Flag in Review)
+
+These aren't auto-reject but should be called out:
+
+| Smell | Why It Matters |
+|-------|----------------|
+| `time.Now()`, `rand`, UUID generation in core logic | Breaks determinism; use injected deps |
+| `map[string]any` deep in domain logic | Stringly-typed bugs; parse at boundary |
+| Core packages importing `os`, `database/sql`, adapters | Architecture violation; invert dependency |
+| Non-deterministic output ordering | Flaky golden tests; sort before emit |
+| Unbounded goroutines / missing `ctx` cancellation | Resource leaks; hang on shutdown |
+| Giant in-memory buffers when CAS exists | OOM risk; stream to CAS |
 
 ---
 

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -90,6 +89,14 @@ func resolveOwnerRepo(ctx context.Context, owner, repo string) (string, string) 
 	}
 
 	return owner, repo
+}
+
+// resolvePRFlag returns the effective PR identifier, preferring prBranch if provided.
+func resolvePRFlag(pr, prBranch string) string {
+	if prBranch != "" {
+		return prBranch
+	}
+	return pr
 }
 
 func newCICommand() *cobra.Command {
@@ -173,6 +180,7 @@ type MergeSection struct {
 
 func newCIStatusCommand() *cobra.Command {
 	var pr string
+	var prBranch string
 	var owner string
 	var repo string
 	var format string
@@ -185,25 +193,33 @@ func newCIStatusCommand() *cobra.Command {
 		Use:   "status",
 		Short: "Unified view of CI status, comments, and merge status",
 		Long: "Show a unified, concise view of CI failures, review comments, and merge status for a PR. " +
-			"Aggregates data from ci/github_checks and ci/prcomments skills into a single actionable report.",
+			"Aggregates data from ci/checks and ci/prcomments skills into a single actionable report.",
 		Example: "  # View unified status for current branch\n" +
 			"  agentctl ci status --pr feat/my-branch\n\n" +
 			"  # View unified status for PR number\n" +
 			"  agentctl ci status --pr 123\n\n" +
+			"  # View unified status by branch name\n" +
+			"  agentctl ci status --pr-branch feat/my-feature\n\n" +
 			"  # JSON output for AI consumption\n" +
 			"  agentctl ci status --pr 123 --data-only\n",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if helpJSON {
 				return writeCIHelpJSON(cmd)
 			}
-			if strings.TrimSpace(pr) == "" {
-				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 66.")
+			// --pr-branch takes precedence over --pr
+			effectivePR := pr
+			if prBranch != "" {
+				effectivePR = prBranch
 			}
-			return runCIStatus(cmd, pr, owner, repo, format, skipCache, dataOnly, noCAS)
+			if strings.TrimSpace(effectivePR) == "" {
+				return writeCIValidationError(cmd, "--pr or --pr-branch is required", "pr", "Provide --pr with a pull request number or --pr-branch with a branch name, for example: --pr 66 or --pr-branch feat/my-feature.")
+			}
+			return runCIStatus(cmd, effectivePR, owner, repo, format, skipCache, dataOnly, noCAS)
 		},
 	}
 
-	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name")
+	cmd.Flags().StringVar(&prBranch, "pr-branch", "", "Branch name to find PR (alternative to --pr)")
 	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
 	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name or owner/repo shorthand (optional)")
 	cmd.Flags().StringVar(&format, "format", "markdown", "Output format: markdown or json")
@@ -239,8 +255,8 @@ func runCIStatus(cmd *cobra.Command, pr, owner, repo, format string, skipCache, 
 		commentsPayload["repo"] = repo
 	}
 
-	// Call ci/github_checks
-	checksEnv, checksErr := runCISkillForEnvelopeWithOpts(cmd, "ci/github_checks", checksPayload, skipCache, noCAS)
+	// Call ci/checks
+	checksEnv, checksErr := runCISkillForEnvelopeWithOpts(cmd, "ci/checks", checksPayload, skipCache, noCAS)
 
 	// Call ci/prcomments
 	commentsEnv, commentsErr := runCISkillForEnvelopeWithOpts(cmd, "ci/prcomments", commentsPayload, skipCache, noCAS)
@@ -281,7 +297,7 @@ func buildCIStatus(checksEnv envelope.Envelope, checksErr error, commentsEnv env
 		},
 	}
 
-	// Extract from ci/github_checks
+	// Extract from ci/checks
 	if checksErr == nil && checksEnv.Status == "ok" {
 		if data, ok := checksEnv.Data.(map[string]any); ok {
 			if prNum, ok := data["pr_number"].(float64); ok {
@@ -468,6 +484,7 @@ func formatCIStatusMarkdown(status CIStatus) string {
 
 func newCIPRCommentsCommand() *cobra.Command {
 	var pr string
+	var prBranch string
 	var owner string
 	var repo string
 	var format string
@@ -504,14 +521,15 @@ func newCIPRCommentsCommand() *cobra.Command {
 			if helpJSON {
 				return writeCIHelpJSON(cmd)
 			}
-			if strings.TrimSpace(pr) == "" {
-				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 66.")
+			effectivePR := resolvePRFlag(pr, prBranch)
+			if strings.TrimSpace(effectivePR) == "" {
+				return writeCIValidationError(cmd, "--pr or --pr-branch is required", "pr", "Provide --pr with a pull request number or --pr-branch with a branch name.")
 			}
 			// Auto-detect owner/repo from git if not provided
 			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
 
 			payload := map[string]any{
-				"pr":           pr,
+				"pr":           effectivePR,
 				"with_context": withContext,
 				"errors_only":  errorsOnly,
 			}
@@ -532,6 +550,7 @@ func newCIPRCommentsCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&prBranch, "pr-branch", "", "Branch name to find PR (alternative to --pr)")
 	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
 	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name or owner/repo shorthand (optional)")
 	cmd.Flags().StringVar(&format, "format", "", "Output format emphasis: markdown or json (default markdown)")
@@ -549,6 +568,7 @@ func newCIPRCommentsCommand() *cobra.Command {
 
 func newCIChecksCommand() *cobra.Command {
 	var pr string
+	var prBranch string
 	var owner string
 	var repo string
 	var mode string
@@ -573,14 +593,15 @@ func newCIChecksCommand() *cobra.Command {
 			if helpJSON {
 				return writeCIHelpJSON(cmd)
 			}
-			if strings.TrimSpace(pr) == "" {
-				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 66.")
+			effectivePR := resolvePRFlag(pr, prBranch)
+			if strings.TrimSpace(effectivePR) == "" {
+				return writeCIValidationError(cmd, "--pr or --pr-branch is required", "pr", "Provide --pr with a pull request number or --pr-branch with a branch name.")
 			}
 			// Auto-detect owner/repo from git if not provided
 			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
 
 			payload := map[string]any{
-				"pr":          pr,
+				"pr":          effectivePR,
 				"errors_only": errorsOnly,
 			}
 			if owner != "" {
@@ -592,11 +613,12 @@ func newCIChecksCommand() *cobra.Command {
 			if mode != "" {
 				payload["mode"] = mode
 			}
-			return runCISkill(cmd, "ci/github_checks", payload, skipCache, dataOnly, false, noCAS)
+			return runCISkill(cmd, "ci/checks", payload, skipCache, dataOnly, false, noCAS)
 		},
 	}
 
 	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&prBranch, "pr-branch", "", "Branch name to find PR (alternative to --pr)")
 	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
 	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name or owner/repo shorthand (optional)")
 	cmd.Flags().StringVar(&mode, "mode", "", "Detail level: summary or detailed (default summary)")
@@ -611,6 +633,7 @@ func newCIChecksCommand() *cobra.Command {
 
 func newCITodosCommand() *cobra.Command {
 	var pr string
+	var prBranch string
 	var owner string
 	var repo string
 	var storePath string
@@ -631,14 +654,15 @@ func newCITodosCommand() *cobra.Command {
 			if helpJSON {
 				return writeCIHelpJSON(cmd)
 			}
-			if strings.TrimSpace(pr) == "" {
-				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name, for example: --pr 78.")
+			effectivePR := resolvePRFlag(pr, prBranch)
+			if strings.TrimSpace(effectivePR) == "" {
+				return writeCIValidationError(cmd, "--pr or --pr-branch is required", "pr", "Provide --pr with a pull request number or --pr-branch with a branch name.")
 			}
 			// Auto-detect owner/repo from git if not provided
 			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
 
 			payload := map[string]any{
-				"pr":           pr,
+				"pr":           effectivePR,
 				"with_context": false,
 				"errors_only":  true,
 				"format":       "json",
@@ -680,6 +704,7 @@ func newCITodosCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&prBranch, "pr-branch", "", "Branch name to find PR (alternative to --pr)")
 	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
 	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name or owner/repo shorthand (optional)")
 	cmd.Flags().StringVar(&storePath, "store", "", "Path to todo store (default: ~/.agentctl/todo/tasks.json)")
@@ -692,6 +717,7 @@ func newCITodosCommand() *cobra.Command {
 
 func newCICommentsCommand() *cobra.Command {
 	var pr string
+	var prBranch string
 	var owner string
 	var repo string
 	var source string
@@ -715,13 +741,14 @@ func newCICommentsCommand() *cobra.Command {
 			"  # Get only CodeRabbit comments\n" +
 			"  agentctl ci comments --pr 128 --source coderabbit\n",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if strings.TrimSpace(pr) == "" {
-				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name.")
+			effectivePR := resolvePRFlag(pr, prBranch)
+			if strings.TrimSpace(effectivePR) == "" {
+				return writeCIValidationError(cmd, "--pr or --pr-branch is required", "pr", "Provide --pr with a pull request number or --pr-branch with a branch name.")
 			}
 			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
 
 			payload := map[string]any{
-				"pr":               pr,
+				"pr":               effectivePR,
 				"errors_only":      false,
 				"format":           "json",
 				"include_resolved": showAll, // Include resolved comments when --all is specified
@@ -792,6 +819,7 @@ func newCICommentsCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&prBranch, "pr-branch", "", "Branch name to find PR (alternative to --pr)")
 	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
 	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name (optional)")
 	cmd.Flags().StringVar(&source, "source", "", "Filter by comment source: coderabbit, greptile, human")
@@ -805,6 +833,7 @@ func newCICommentsCommand() *cobra.Command {
 
 func newCIResultsCommand() *cobra.Command {
 	var pr string
+	var prBranch string
 	var owner string
 	var repo string
 	var failedOnly bool
@@ -821,13 +850,14 @@ func newCIResultsCommand() *cobra.Command {
 			"  # Get only failed checks\n" +
 			"  agentctl ci results --pr 128 --failed\n",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if strings.TrimSpace(pr) == "" {
-				return writeCIValidationError(cmd, "--pr is required", "pr", "Provide --pr with a pull request number or branch name.")
+			effectivePR := resolvePRFlag(pr, prBranch)
+			if strings.TrimSpace(effectivePR) == "" {
+				return writeCIValidationError(cmd, "--pr or --pr-branch is required", "pr", "Provide --pr with a pull request number or --pr-branch with a branch name.")
 			}
 			owner, repo = resolveOwnerRepo(cmd.Context(), owner, repo)
 
 			payload := map[string]any{
-				"pr":          pr,
+				"pr":          effectivePR,
 				"mode":        "detailed",
 				"errors_only": failedOnly,
 			}
@@ -838,11 +868,12 @@ func newCIResultsCommand() *cobra.Command {
 				payload["repo"] = repo
 			}
 
-			return runCISkill(cmd, "ci/github_checks", payload, skipCache, dataOnly, false, noCAS)
+			return runCISkill(cmd, "ci/checks", payload, skipCache, dataOnly, false, noCAS)
 		},
 	}
 
 	cmd.Flags().StringVar(&pr, "pr", "", "Pull request number or branch name (required)")
+	cmd.Flags().StringVar(&prBranch, "pr-branch", "", "Branch name to find PR (alternative to --pr)")
 	cmd.Flags().StringVar(&owner, "owner", "", "GitHub repository owner (optional)")
 	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository name (optional)")
 	cmd.Flags().BoolVar(&failedOnly, "failed", false, "Show only failed checks")
@@ -877,7 +908,7 @@ type ciExample struct {
 }
 
 func runCISkillForEnvelopeWithOpts(cmd *cobra.Command, skillName string, payload map[string]any, skipCache, noCAS bool) (envelope.Envelope, error) {
-	cfg, err := config.Load(cmd.Context())
+	cfg, err := loadConfig(cmd.Context())
 	if err != nil {
 		return envelope.Envelope{}, err
 	}
@@ -984,7 +1015,7 @@ func createTodoFromCITask(cmd *cobra.Command, tm map[string]any, storePath strin
 }
 
 func runCISkill(cmd *cobra.Command, skillName string, payload map[string]any, skipCache, dataOnly, noComments, noCAS bool) error {
-	cfg, err := config.Load(cmd.Context())
+	cfg, err := loadConfig(cmd.Context())
 	if err != nil {
 		return err
 	}

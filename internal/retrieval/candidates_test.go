@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
@@ -144,6 +145,53 @@ func (m *mockMemoryStore) SearchSimilar(ctx context.Context, workspace string, e
 
 func (m *mockMemoryStore) UpdateEmbedding(ctx context.Context, name, workspace string, embedding []float32) error {
 	// Mock: no-op since we don't track embeddings in this mock
+	return nil
+}
+
+func (m *mockMemoryStore) SaveResult(ctx context.Context, opts storage.MemorySaveOptions) (storage.NamedEntry, error) {
+	entry := storage.NamedEntry{
+		Name:      opts.Name,
+		Type:      opts.Type,
+		Workspace: opts.Workspace,
+		Summary:   opts.Summary,
+		Result:    opts.Result,
+		SessionID: opts.SessionID,
+	}
+	m.entries[opts.Name] = entry
+	return entry, nil
+}
+
+func (m *mockMemoryStore) ListFiltered(ctx context.Context, workspace string, filter storage.MemoryListFilter, limit, offset int) ([]storage.NamedEntry, int, error) {
+	var entries []storage.NamedEntry
+	for _, e := range m.entries {
+		if e.Workspace == workspace {
+			entries = append(entries, e)
+		}
+	}
+	return entries, len(entries), nil
+}
+
+func (m *mockMemoryStore) ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]storage.NamedEntry, error) {
+	return m.List(ctx, workspace, limit)
+}
+
+func (m *mockMemoryStore) ExistsByNameSuffix(ctx context.Context, workspace, suffix string) (bool, error) {
+	for name, entry := range m.entries {
+		if entry.Workspace != workspace {
+			continue
+		}
+		if strings.HasSuffix(name, suffix) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *mockMemoryStore) ValidateEmbeddingDimensions(ctx context.Context, workspace string, dimensions int) error {
+	return nil
+}
+
+func (m *mockMemoryStore) SetEmbeddingMetadata(ctx context.Context, meta storage.EmbeddingMetadata) error {
 	return nil
 }
 

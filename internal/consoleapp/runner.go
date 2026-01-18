@@ -140,11 +140,11 @@ type StreamCallback struct {
 func (s *StreamCallback) EmitToolCall(tc engine.ToolCall, result string) {
 	// Emit tool call event
 	s.session.BroadcastEvent(s.correlationID, fmt.Sprintf("Tool: %s", tc.Name), map[string]any{
-		"tool":       tc.Name,
-		"tool_id":    tc.ID,
-		"arguments":  json.RawMessage(tc.Arguments),
-		"partial":    false,
-		"phase":      "call",
+		"tool":      tc.Name,
+		"tool_id":   tc.ID,
+		"arguments": json.RawMessage(tc.Arguments),
+		"partial":   false,
+		"phase":     "call",
 	})
 
 	// Emit tool result event
@@ -156,10 +156,10 @@ func (s *StreamCallback) EmitToolCall(tc engine.ToolCall, result string) {
 		}
 
 		s.session.BroadcastEvent(s.correlationID, displayResult, map[string]any{
-			"tool":       tc.Name,
-			"tool_id":    tc.ID,
-			"partial":    false,
-			"phase":      "result",
+			"tool":    tc.Name,
+			"tool_id": tc.ID,
+			"partial": false,
+			"phase":   "result",
 		})
 	}
 }

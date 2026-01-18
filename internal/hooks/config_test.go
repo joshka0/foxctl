@@ -91,7 +91,7 @@ hooks:
         timeout_ms: 3000
         fail_open: true
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -122,7 +122,7 @@ hooks:
     run:
       - skill: test/skill
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -160,7 +160,7 @@ hooks:
     run:
       - skill: test/skill
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -203,7 +203,7 @@ hooks:
     run:
       - skill: test/skill3
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -239,7 +239,7 @@ hooks:
       - skill: test/skill2
         required: true
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -275,7 +275,7 @@ hooks:
     run:
       - skill: global/only
 `
-	if err := os.WriteFile(globalPath, []byte(globalContent), 0644); err != nil {
+	if err := os.WriteFile(globalPath, []byte(globalContent), 0o644); err != nil {
 		t.Fatalf("failed to write global config: %v", err)
 	}
 
@@ -293,7 +293,7 @@ hooks:
     run:
       - skill: workspace/only
 `
-	if err := os.WriteFile(workspacePath, []byte(workspaceContent), 0644); err != nil {
+	if err := os.WriteFile(workspacePath, []byte(workspaceContent), 0o644); err != nil {
 		t.Fatalf("failed to write workspace config: %v", err)
 	}
 
@@ -345,7 +345,7 @@ hooks:
   - id: test
     event: [invalid yaml here
 `
-	if err := os.WriteFile(configPath, []byte(invalidContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(invalidContent), 0o644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 
@@ -424,7 +424,7 @@ hooks:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			configPath := filepath.Join(tmpDir, tt.name+".yaml")
-			if err := os.WriteFile(configPath, []byte(tt.content), 0644); err != nil {
+			if err := os.WriteFile(configPath, []byte(tt.content), 0o644); err != nil {
 				t.Fatalf("failed to write config: %v", err)
 			}
 

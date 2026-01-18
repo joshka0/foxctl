@@ -10,8 +10,7 @@ import (
 )
 
 func TestVoyageProvider_Rerank(t *testing.T) {
-	// Mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/rerank" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 			http.Error(w, "not found", http.StatusNotFound)
@@ -56,18 +55,13 @@ func TestVoyageProvider_Rerank(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
-	provider, err := NewVoyageProvider(VoyageConfig{
+	provider := newTestProvider(t, handler, VoyageConfig{
 		APIKey:    "test-key",
 		Model:     "rerank-2.5",
-		BaseURL:   server.URL,
 		RateLimit: intPtr(0), // Disable rate limiting for tests
 	})
-	if err != nil {
-		t.Fatalf("create provider: %v", err)
-	}
 
 	candidates := []Candidate{
 		{ID: "doc1", Content: "First document about Go programming", OriginalScore: 0.7},
@@ -111,7 +105,7 @@ func TestVoyageProvider_Rerank(t *testing.T) {
 }
 
 func TestVoyageProvider_TopK(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req voyageRerankRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -140,17 +134,12 @@ func TestVoyageProvider_TopK(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
-	provider, err := NewVoyageProvider(VoyageConfig{
+	provider := newTestProvider(t, handler, VoyageConfig{
 		APIKey:    "test-key",
-		BaseURL:   server.URL,
 		RateLimit: intPtr(0),
 	})
-	if err != nil {
-		t.Fatalf("create provider: %v", err)
-	}
 
 	candidates := []Candidate{
 		{ID: "doc1", Content: "First"},
@@ -170,7 +159,7 @@ func TestVoyageProvider_TopK(t *testing.T) {
 }
 
 func TestVoyageProvider_ScoreBlend(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := voyageRerankResponse{
 			Object: "list",
 			Data: []struct {
@@ -188,18 +177,13 @@ func TestVoyageProvider_ScoreBlend(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
-	provider, err := NewVoyageProvider(VoyageConfig{
+	provider := newTestProvider(t, handler, VoyageConfig{
 		APIKey:     "test-key",
-		BaseURL:    server.URL,
 		RateLimit:  intPtr(0),
 		ScoreBlend: 0.5, // 50% rerank, 50% original
 	})
-	if err != nil {
-		t.Fatalf("create provider: %v", err)
-	}
 
 	candidates := []Candidate{
 		{ID: "doc1", Content: "First", OriginalScore: 0.6},  // blend: 0.5*0.8 + 0.5*0.6 = 0.7
@@ -254,7 +238,7 @@ func TestVoyageProvider_EmptyCandidates(t *testing.T) {
 
 func TestVoyageProvider_RateLimit(t *testing.T) {
 	callCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		resp := voyageRerankResponse{
 			Object: "list",
@@ -271,23 +255,19 @@ func TestVoyageProvider_RateLimit(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	rateLimitWait := false
-	provider, err := NewVoyageProvider(VoyageConfig{
+	provider := newTestProvider(t, handler, VoyageConfig{
 		APIKey:        "test-key",
-		BaseURL:       server.URL,
 		RateLimit:     intPtr(1),
 		RateWindow:    100 * time.Millisecond,
 		RateLimitWait: &rateLimitWait,
 	})
-	if err != nil {
-		t.Fatalf("create provider: %v", err)
-	}
 
 	candidates := []Candidate{{ID: "doc1", Content: "test"}}
 	ctx := context.Background()
+	var err error
 
 	// First call should succeed
 	_, err = provider.Rerank(ctx, "query", candidates, 0)
@@ -316,7 +296,7 @@ func TestVoyageProvider_RateLimit(t *testing.T) {
 }
 
 func TestVoyageProvider_Usage(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := voyageRerankResponse{
 			Object: "list",
 			Data: []struct {
@@ -332,22 +312,17 @@ func TestVoyageProvider_Usage(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
-	provider, err := NewVoyageProvider(VoyageConfig{
+	provider := newTestProvider(t, handler, VoyageConfig{
 		APIKey:    "test-key",
-		BaseURL:   server.URL,
 		RateLimit: intPtr(0),
 	})
-	if err != nil {
-		t.Fatalf("create provider: %v", err)
-	}
 
 	candidates := []Candidate{{ID: "doc1", Content: "test content"}}
 	ctx := context.Background()
 
-	_, err = provider.Rerank(ctx, "query", candidates, 0)
+	_, err := provider.Rerank(ctx, "query", candidates, 0)
 	if err != nil {
 		t.Fatalf("rerank: %v", err)
 	}
@@ -492,6 +467,33 @@ func TestConfig_Merge_ScoreBlendOverride(t *testing.T) {
 	if merged.ScoreBlend == nil || *merged.ScoreBlend != 0.0 {
 		t.Errorf("ScoreBlend should be overridden to 0.0, got %v", merged.ScoreBlend)
 	}
+}
+
+type handlerTransport struct {
+	handler http.Handler
+}
+
+func (t *handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	recorder := httptest.NewRecorder()
+	t.handler.ServeHTTP(recorder, req)
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return recorder.Result(), nil
+}
+
+func newTestProvider(t *testing.T, handler http.Handler, cfg VoyageConfig) *VoyageProvider {
+	t.Helper()
+	cfg.BaseURL = "http://mock"
+	provider, err := NewVoyageProvider(cfg)
+	if err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	provider.httpClient = &http.Client{Transport: &handlerTransport{handler: handler}}
+	return provider
 }
 
 // Helper functions

@@ -14,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 	"github.com/jkatigb/agentctl/internal/storage/jobs"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
@@ -544,7 +545,7 @@ func TestEnforceOutputLimit(t *testing.T) {
 		t.Fatalf("unmarshal wrapped: %v", err)
 	}
 
-	data, ok := wrapped["data"].(map[string]any)
+	data, ok := maputil.AsStringMap(wrapped["data"])
 	if !ok {
 		t.Fatalf("expected data map in wrapper")
 	}
@@ -553,7 +554,7 @@ func TestEnforceOutputLimit(t *testing.T) {
 		t.Fatalf("expected artifact digest in wrapper, got: %v", data["artifact"])
 	}
 
-	meta, ok := wrapped["meta"].(map[string]any)
+	meta, ok := maputil.AsStringMap(wrapped["meta"])
 	if !ok {
 		t.Fatalf("expected meta map in wrapper")
 	}

@@ -1,0 +1,73 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: codemap/import
+  version: 0.1.0
+  description: "Import codemap JSON files into the memory store with optional embeddings"
+  tags: ["codemap", "import", "memory", "embedding"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: codemap/import
+  parameters:
+    - name: path
+      type: string
+      required: true
+      description: "Path to a .codemap file or a directory containing .codemap files"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace path (defaults to current directory)"
+    - name: recursive
+      type: boolean
+      required: false
+      default: false
+      description: "Recursively scan directories for .codemap files"
+    - name: skip_existing
+      type: boolean
+      required: false
+      default: true
+      description: "Skip codemaps that already exist"
+    - name: embed
+      type: boolean
+      required: false
+      default: true
+      description: "Generate and store embeddings for imported codemaps"
+  help:
+    short: "Import codemap JSON files."
+    long: |
+      Import codemap JSON files and store them as type="codemap" in memory.
+      Example commands:
+        agentctl run codemap/import --input '{"path":"docs/codemaps/Skill_Resolution__Input_Loading__and_Run_Execution_Flow_20260115_003130.codemap"}'
+        agentctl run codemap/import --input '{"path":"docs/codemaps","recursive":false}'
+        agentctl run codemap/import --input '{"path":"docs/codemaps","recursive":true,"skip_existing":true}'
+    workflows:
+      - id: import-single
+        description: "Import a single codemap file."
+        example_input:
+          path: "docs/codemaps/example.codemap"
+      - id: import-directory
+        description: "Import all codemaps in a directory."
+        example_input:
+          path: "docs/codemaps"
+          recursive: false
+returns:
+  - name: imported
+    type: integer
+    description: "Number of codemaps imported"
+  - name: skipped
+    type: integer
+    description: "Number of codemaps skipped due to existing IDs"
+  - name: errors
+    type: integer
+    description: "Number of files that failed to import"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

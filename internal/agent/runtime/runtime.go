@@ -4,7 +4,7 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +16,8 @@ import (
 
 	agenttools "github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/agentprompt"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -75,6 +77,9 @@ type Config struct {
 
 	// TrajectoryStorageRoot enables agent tool call capture when set.
 	TrajectoryStorageRoot string
+
+	// HookDispatcher dispatches hook events for tool calls.
+	HookDispatcher hooks.Dispatcher
 }
 
 // SpawnHandler processes spawn requests from agents.
@@ -160,12 +165,17 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 	toolsCfg := agenttools.Config{
 		WorkspaceRoot:         r.config.WorkspaceRoot,
 		WorkspaceID:           cfg.WorkspaceID,
+		SessionID:             sessionID,
 		ActorID:               cfg.ActorID,
 		TaskID:                cfg.TaskID,
 		EpicID:                cfg.EpicID,
+		Depth:                 cfg.Depth,
+		MaxDepth:              cfg.MaxDepth,
+		LocalMaxDepth:         cfg.LocalMaxDepth,
 		AgentRole:             string(cfg.Role),
 		TraceID:               traceID,
 		TrajectoryStorageRoot: r.config.TrajectoryStorageRoot,
+		HookDispatcher:        r.config.HookDispatcher,
 		OpenMemoryStore: func(ctx context.Context) (storage.MemoryStore, error) {
 			if r.config.OpenMemoryStore == nil {
 				return nil, fmt.Errorf("named memory store not configured")
@@ -242,25 +252,19 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 		apiKey = r.config.LLMAPIKey
 	}
 
-	// Resolve provider: agent → runtime → env → default
+	// Resolve provider: agent → runtime → default
 	provider := cfg.LLMProvider
 	if provider == "" {
 		provider = r.config.LLMProvider
 	}
 	if provider == "" {
-		provider = os.Getenv("AGENTCTL_LLM_PROVIDER")
-	}
-	if provider == "" {
 		provider = "gemini" // Default provider
 	}
 
-	// Resolve model: agent → runtime → env → provider-specific default
+	// Resolve model: agent → runtime → provider-specific default
 	model := cfg.LLMModel
 	if model == "" {
 		model = r.config.LLMModel
-	}
-	if model == "" {
-		model = os.Getenv("AGENTCTL_LLM_MODEL")
 	}
 	if model == "" {
 		model = defaultModelForProvider(provider)
@@ -317,93 +321,7 @@ func (r *Runtime) createAgent(cfg types.AgentConfig, toolsRegistry *agenttools.R
 
 // buildAgentSignature creates the signature for the agent based on its role.
 func buildAgentSignature(cfg types.AgentConfig) *core.Signature {
-	var instruction string
-	switch cfg.Role {
-	case types.RoleCoder:
-		instruction = `You are a coding agent. You have access to file system tools to read and write code.
-
-Code Search & Retrieval Tools:
-- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
-- code.swe_grep: Extract high-signal code snippets from candidate files (use after symbol_search)
-- code.search: Search code using ripgrep patterns
-
-File Operations:
-- fs.read_file: Read file contents
-- fs.list_dir: List directory contents
-
-Edit Tools:
-- edit.create_file: Create new files
-- edit.apply_patch: Modify existing files with simple text replacement
-- edit.apply_structured_diff: Apply structured diffs from code/diff skill (for complex multi-hunk changes)
-
-Testing:
-- tests.run: Run tests
-
-Workflow: Use code.symbol_search to find relevant symbols, then code.swe_grep to get detailed context.
-Apply changes with edit.apply_patch for simple edits or edit.apply_structured_diff for complex refactors.`
-	case types.RolePlanner:
-		instruction = `You are a planning agent. You analyze tasks and create structured plans.
-Available tools:
-- todo.add: Add new tasks
-- todo.query: Query existing tasks
-- todo.graph_insights: Get task graph analysis
-- mail.send: Send messages to other agents
-
-Use these tools to plan and coordinate work.`
-	case types.RoleReviewer:
-		instruction = `You are a code review agent. Your job is to understand proposed changes,
-evaluate their impact, and suggest improvements. You do not directly apply edits yourself.
-
-Code Search & Retrieval Tools (read/inspect):
-- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
-- code.swe_grep: Extract high-signal code snippets from candidate files (use after symbol_search)
-- code.search: Search code using ripgrep patterns
-
-File Operations (read-only):
-- fs.read_file: Read file contents for review
-- fs.list_dir: Inspect project structure
-
-Validation:
-- tests.run: Run tests to validate changes
-
-Coordination:
-- mail.send: Communicate findings and requests to other agents
-- todo.add: Create follow-up tasks from review findings
-
-Workflow:
-1. Use code.symbol_search and code.swe_grep to understand the relevant code paths.
-2. Use fs.read_file to inspect surrounding context.
-3. Use tests.run to verify behavior and check for regressions.
-4. Suggest concrete patches or improvements in your output, but leave edits to Coder.
-	5. Use mail.send to communicate review feedback or todo.add to track follow-ups.`
-	case types.RoleFixer:
-		instruction = `You are a fixing agent. Apply targeted code changes to address bugs, review feedback, and failing tests.
-
-Workflow:
-1. Identify the root cause.
-2. Make minimal, safe edits.
-3. Run tests to verify.
-4. Summarize what changed and why.`
-	case types.RoleVerifier:
-		instruction = `You are a verification agent. Validate claims, results, and proposed changes.
-
-Guidelines:
-- Prefer evidence: tests, logs, diffs, and direct code inspection.
-- Use verification/cove_verify when appropriate.
-- Do not apply edits; propose concrete fixes or next steps.`
-	default:
-		instruction = `You are a helpful agent. Complete the given task using available tools.`
-	}
-
-	sig := core.NewSignature(
-		[]core.InputField{
-			{Field: core.NewField("task", core.WithDescription("The task to be completed by the agent"))},
-		},
-		[]core.OutputField{
-			{Field: core.NewField("result", core.WithDescription("The final result or answer from completing the task"))},
-		},
-	).WithInstruction(instruction)
-	return &sig
+	return agentprompt.BuildSignature(cfg.Role)
 }
 
 // defaultModelForProvider returns the default model for a given LLM provider.
@@ -443,23 +361,64 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 
 	// Build the task prompt based on config
 	taskPrompt := buildTaskPrompt(session.Config)
-
-	// Run the agent using Execute
-	input := map[string]any{
-		"task": taskPrompt,
-	}
-	resultMap, err := session.Agent.Execute(ctx, input)
-
-	// Extract result string
 	var result string
-	if resultMap != nil {
-		if r, ok := resultMap["result"].(string); ok {
-			result = r
-		} else if r, ok := resultMap["output"].(string); ok {
-			result = r
-		} else {
-			result = fmt.Sprintf("%v", resultMap)
+
+	for {
+		// Run the agent using Execute
+		input := map[string]any{
+			"task": taskPrompt,
 		}
+		resultMap, err := session.Agent.Execute(ctx, input)
+
+		// Extract result string
+		if resultMap != nil {
+			if r, ok := resultMap["result"].(string); ok {
+				result = r
+			} else if r, ok := resultMap["output"].(string); ok {
+				result = r
+			} else {
+				result = fmt.Sprintf("%v", resultMap)
+			}
+		}
+
+		if err != nil {
+			session.mu.Lock()
+			defer session.mu.Unlock()
+
+			now := time.Now()
+			session.EndedAt = &now
+
+			if ctx.Err() == context.Canceled {
+				session.Status = types.StatusCanceled
+				session.Error = "session canceled"
+			} else if ctx.Err() == context.DeadlineExceeded {
+				session.Status = types.StatusError
+				session.Error = "session timeout"
+			} else {
+				session.Status = types.StatusError
+				session.Error = err.Error()
+			}
+			return
+		}
+
+		stopResult := r.dispatchStopRequested(ctx, session, taskPrompt, result)
+		if stopResult.Blocked {
+			continuation := buildStopContinuation(result, stopResult.Output.Context)
+			if continuation == "" {
+				session.mu.Lock()
+				defer session.mu.Unlock()
+
+				now := time.Now()
+				session.EndedAt = &now
+				session.Status = types.StatusError
+				session.Error = fmt.Sprintf("stop blocked without continuation: %s", stopResult.Output.Reason)
+				return
+			}
+			taskPrompt = continuation
+			continue
+		}
+
+		break
 	}
 
 	session.mu.Lock()
@@ -467,20 +426,6 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 
 	now := time.Now()
 	session.EndedAt = &now
-
-	if err != nil {
-		if ctx.Err() == context.Canceled {
-			session.Status = types.StatusCanceled
-			session.Error = "session canceled"
-		} else if ctx.Err() == context.DeadlineExceeded {
-			session.Status = types.StatusError
-			session.Error = "session timeout"
-		} else {
-			session.Status = types.StatusError
-			session.Error = err.Error()
-		}
-		return
-	}
 
 	// Parse result
 	session.Status = types.StatusOK
@@ -503,6 +448,45 @@ func buildTaskPrompt(cfg types.AgentConfig) string {
 	prompt += "Please analyze the workspace and complete your assigned work."
 
 	return prompt
+}
+
+func (r *Runtime) dispatchStopRequested(ctx context.Context, session *Session, prompt, assistantText string) hooks.Result {
+	if r.config.HookDispatcher == nil {
+		return hooks.Result{Output: hooks.NewApprove("no dispatcher", nil)}
+	}
+
+	input := hooks.Input{
+		Event:         hooks.EventStopRequested,
+		Prompt:        prompt,
+		AssistantText: assistantText,
+		SessionID:     session.ID,
+		ActorID:       session.Config.ActorID,
+		WorkspaceID:   session.Config.WorkspaceID,
+		WorkspaceRoot: r.config.WorkspaceRoot,
+		TraceID:       traceIDFromContext(ctx),
+	}
+
+	result, err := r.config.HookDispatcher.Dispatch(ctx, input)
+	if err != nil {
+		return hooks.Result{Output: hooks.NewApprove("dispatch error", nil)}
+	}
+	return result
+}
+
+func buildStopContinuation(result string, context string) string {
+	result = strings.TrimSpace(result)
+	context = strings.TrimSpace(context)
+
+	if result == "" && context == "" {
+		return ""
+	}
+	if result == "" {
+		return context
+	}
+	if context == "" {
+		return fmt.Sprintf("Previous response:\n%s", result)
+	}
+	return fmt.Sprintf("Previous response:\n%s\n\n%s", result, context)
 }
 
 // Get returns a session by ID.

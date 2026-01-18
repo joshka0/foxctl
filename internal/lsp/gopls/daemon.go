@@ -16,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 )
 
 // debug enables verbose logging when AGENTCTL_GOPLS_DEBUG=1
@@ -126,7 +128,7 @@ func IsDaemonReady(workspace string) bool {
 // Note: First request will be slow (~30-40s) as gopls loads packages.
 // Subsequent requests reusing the same daemon are much faster (~100ms).
 func startDaemon(ctx context.Context, workspace string) (*Daemon, error) {
-	goplsPath, err := exec.LookPath("gopls")
+	goplsPath, err := executil.RequireTool("gopls", "install gopls (go install golang.org/x/tools/gopls@latest)")
 	if err != nil {
 		return nil, fmt.Errorf("gopls not found: %w", err)
 	}

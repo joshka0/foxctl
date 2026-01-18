@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 )
 
 // resultArtifacts holds CAS digests extracted from execution results.
@@ -23,7 +24,7 @@ func extractArtifacts(result []byte) resultArtifacts {
 		return resultArtifacts{}
 	}
 
-	meta, ok := env["meta"].(map[string]any)
+	meta, ok := maputil.AsStringMap(env["meta"])
 	if !ok {
 		return resultArtifacts{}
 	}

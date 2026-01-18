@@ -10,14 +10,14 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	cihelpers "github.com/jkatigb/agentctl/internal/adapters/skillslib/ci"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/rs/zerolog"
@@ -28,14 +28,14 @@ var logger = zerolog.New(os.Stderr).With().Str("component", "ci_prcomments").Tim
 
 // Input defines the skill input parameters.
 type Input struct {
-	PR              string `json:"pr" validate:"required"`
-	Owner           string `json:"owner,omitempty"`
-	Repo            string `json:"repo,omitempty"`
-	WithContext     bool   `json:"with_context,omitempty"`
-	Format          string `json:"format,omitempty"`
-	OutputPath      string `json:"output_path,omitempty"`
-	ErrorsOnly      bool   `json:"errors_only,omitempty"`
-	IncludeResolved bool   `json:"include_resolved,omitempty"` // Include resolved/addressed comments (default: false)
+	PR              skillmain.FlexString `json:"pr" validate:"required"`
+	Owner           string               `json:"owner,omitempty"`
+	Repo            string               `json:"repo,omitempty"`
+	WithContext     bool                 `json:"with_context,omitempty"`
+	Format          string               `json:"format,omitempty"`
+	OutputPath      string               `json:"output_path,omitempty"`
+	ErrorsOnly      bool                 `json:"errors_only,omitempty"`
+	IncludeResolved bool                 `json:"include_resolved,omitempty"` // Include resolved/addressed comments (default: false)
 }
 
 type Comment struct {
@@ -133,66 +133,33 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	prRef := strings.TrimSpace(in.PR)
+	prRef := strings.TrimSpace(in.PR.String())
 
 	format := strings.ToLower(strings.TrimSpace(in.Format))
 	if format == "" {
 		format = "markdown"
 	}
 
-	owner := strings.TrimSpace(in.Owner)
-	repo := strings.TrimSpace(in.Repo)
-
-	if repo != "" && strings.Contains(repo, "/") {
-		parts := strings.SplitN(repo, "/", 2)
-		if len(parts) == 2 {
-			if owner == "" {
-				owner = parts[0]
-			}
-			repo = parts[1]
-		}
-	}
-
-	if owner == "" {
-		owner = strings.TrimSpace(os.Getenv("GITHUB_OWNER"))
-	}
-	if repo == "" {
-		repo = strings.TrimSpace(os.Getenv("GITHUB_REPO"))
-	}
-
-	if owner == "" || repo == "" {
-		detectedOwner, detectedRepo, err := detectRepo(ctx)
-		if err == nil {
-			if owner == "" {
-				owner = detectedOwner
-			}
-			if repo == "" {
-				repo = detectedRepo
-			}
-		} else {
-			logger.Warn().Err(err).Str("operation", "auto-detect-repo").Msg("could not auto-detect repository")
-		}
-	}
-
-	if owner == "" || repo == "" {
-		return fmt.Errorf("repository owner and name are required; set owner/repo, GITHUB_OWNER/GITHUB_REPO, or run in a git repository with origin set")
-	}
-
-	token, err := resolveToken(ctx)
+	owner, repo, err := cihelpers.ResolveOwnerRepo(ctx, in.Owner, in.Repo)
 	if err != nil {
 		return err
 	}
 
-	prNum, err := resolvePRNumber(owner, repo, prRef, token)
+	token, err := cihelpers.ResolveToken(ctx)
 	if err != nil {
-		return fmt.Errorf("resolve PR: %w", err)
+		return err
+	}
+
+	prNum, err := cihelpers.ResolvePRNumber(owner, repo, prRef, token)
+	if err != nil {
+		return err
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	prInfo, err := getPR(client, token, owner, repo, prNum)
 	if err != nil {
-		return fmt.Errorf("get PR info: %w", err)
+		return err
 	}
 
 	var conflictingFiles []string
@@ -279,15 +246,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	if in.OutputPath != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.OutputPath)
+		validated, err := skillmain.ValidatePath(rc, in.OutputPath, skillmain.WithPathMessage("validate output_path"))
 		if err != nil {
-			return fmt.Errorf("validate output_path: %w", err)
+			return err
 		}
 		if err := os.MkdirAll(filepath.Dir(validated), 0o755); err != nil {
-			return fmt.Errorf("mkdir output_path: %w", err)
+			return skillerr.WrapIO("mkdir output_path", err)
 		}
 		if err := os.WriteFile(validated, []byte(markdown), 0o644); err != nil {
-			return fmt.Errorf("write output_path: %w", err)
+			return skillerr.WrapIO("write output_path", err)
 		}
 		data["markdown_output_path"] = in.OutputPath
 	}
@@ -307,92 +274,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "ci/prcomments", data)
 }
 
-func detectRepo(ctx context.Context) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
-	// Try running from AGENTCTL_WORKSPACE if set (fallback for MCP/daemon mode)
-	if ws := os.Getenv("AGENTCTL_WORKSPACE"); ws != "" {
-		cmd.Dir = ws
-	}
-	out, err := cmd.Output()
-	if err != nil {
-		return "", "", fmt.Errorf("detect repo: %w", err)
-	}
-	url := strings.TrimSpace(string(out))
-	if url == "" {
-		return "", "", fmt.Errorf("empty remote url")
-	}
-
-	// Support https and ssh formats
-	if strings.HasPrefix(url, "git@") {
-		// git@github.com:owner/repo.git
-		parts := strings.SplitN(url, ":", 2)
-		if len(parts) != 2 {
-			return "", "", fmt.Errorf("unexpected ssh remote format: %s", url)
-		}
-		path := strings.TrimSuffix(parts[1], ".git")
-		sub := strings.SplitN(path, "/", 2)
-		if len(sub) != 2 {
-			return "", "", fmt.Errorf("unexpected ssh path format: %s", path)
-		}
-		return sub[0], sub[1], nil
-	}
-
-	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
-		// https://github.com/owner/repo.git
-		parts := strings.Split(url, "/")
-		if len(parts) < 2 {
-			return "", "", fmt.Errorf("unexpected https remote format: %s", url)
-		}
-		owner := parts[len(parts)-2]
-		repo := strings.TrimSuffix(parts[len(parts)-1], ".git")
-		return owner, repo, nil
-	}
-
-	return "", "", fmt.Errorf("unsupported remote url format: %s", url)
-}
-
-func resolveToken(ctx context.Context) (string, error) {
-	token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
-	if token != "" {
-		return token, nil
-	}
-
-	if _, err := exec.LookPath("gh"); err == nil {
-		cmd := exec.CommandContext(ctx, "gh", "auth", "token")
-		out, err := cmd.Output()
-		if err == nil {
-			candidate := strings.TrimSpace(string(out))
-			if candidate != "" {
-				return candidate, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("GitHub token is required; set GITHUB_TOKEN or configure gh auth token")
-}
-
-func resolvePRNumber(owner, repo, prRef, token string) (int, error) {
-	if prNum, err := strconv.Atoi(prRef); err == nil {
-		return prNum, nil
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls?head=%s:%s&state=all", owner, repo, owner, prRef)
-
-	var prs []PRInfo
-	if err := githubGET(client, token, url, &prs); err != nil {
-		return 0, err
-	}
-	if len(prs) == 0 {
-		return 0, fmt.Errorf("no PR found for branch %q", prRef)
-	}
-	return prs[0].Number, nil
-}
-
 func getPR(client *http.Client, token, owner, repo string, prNum int) (*PRInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, prNum)
 	var pr PRInfo
-	if err := githubGET(client, token, url, &pr); err != nil {
+	if err := cihelpers.GitHubGET(client, token, url, &pr); err != nil {
 		return nil, err
 	}
 	return &pr, nil
@@ -401,7 +286,7 @@ func getPR(client *http.Client, token, owner, repo string, prNum int) (*PRInfo, 
 func getIssueComments(client *http.Client, token, owner, repo string, prNum int) ([]Comment, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", owner, repo, prNum)
 	var comments []Comment
-	if err := githubGET(client, token, url, &comments); err != nil {
+	if err := cihelpers.GitHubGET(client, token, url, &comments); err != nil {
 		return nil, err
 	}
 	return comments, nil
@@ -410,7 +295,7 @@ func getIssueComments(client *http.Client, token, owner, repo string, prNum int)
 func getReviewComments(client *http.Client, token, owner, repo string, prNum int) ([]Comment, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/comments", owner, repo, prNum)
 	var comments []Comment
-	if err := githubGET(client, token, url, &comments); err != nil {
+	if err := cihelpers.GitHubGET(client, token, url, &comments); err != nil {
 		return nil, err
 	}
 	return comments, nil
@@ -420,7 +305,7 @@ func getReviewComments(client *http.Client, token, owner, repo string, prNum int
 func getPRReviews(client *http.Client, token, owner, repo string, prNum int) ([]PRReview, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/reviews", owner, repo, prNum)
 	var reviews []PRReview
-	if err := githubGET(client, token, url, &reviews); err != nil {
+	if err := cihelpers.GitHubGET(client, token, url, &reviews); err != nil {
 		return nil, err
 	}
 	return reviews, nil
@@ -534,26 +419,26 @@ query($owner: String!, $repo: String!, $prNum: Int!) {
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal graphql query: %w", err)
+		return nil, skillerr.WrapRuntime("marshal graphql query", err)
 	}
 
 	req, err := http.NewRequest("POST", "https://api.github.com/graphql", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create graphql request: %w", err)
+		return nil, skillerr.WrapRuntime("create graphql request", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("graphql request: %w", err)
+		return nil, skillerr.WrapRuntime("graphql request", err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("graphql request failed with status %d", resp.StatusCode)
+		return nil, skillerr.Runtimef("graphql request failed with status %d", resp.StatusCode)
 	}
 
 	var result struct {
@@ -577,7 +462,7 @@ query($owner: String!, $repo: String!, $prNum: Int!) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode graphql response: %w", err)
+		return nil, skillerr.WrapParse("decode graphql response", err)
 	}
 
 	statuses := make(map[int]ReviewThreadStatus)
@@ -611,7 +496,7 @@ func getCheckRuns(client *http.Client, token, owner, repo string, prNum int) ([]
 			SHA string `json:"sha"`
 		} `json:"head"`
 	}
-	if err := githubGET(client, token, prURL, &pr); err != nil {
+	if err := cihelpers.GitHubGET(client, token, prURL, &pr); err != nil {
 		return nil, err
 	}
 
@@ -619,7 +504,7 @@ func getCheckRuns(client *http.Client, token, owner, repo string, prNum int) ([]
 	var response struct {
 		CheckRuns []CheckRun `json:"check_runs"`
 	}
-	if err := githubGET(client, token, checksURL, &response); err != nil {
+	if err := cihelpers.GitHubGET(client, token, checksURL, &response); err != nil {
 		return nil, err
 	}
 
@@ -642,7 +527,7 @@ func getCheckRuns(client *http.Client, token, owner, repo string, prNum int) ([]
 func getCheckRunDetails(client *http.Client, token, owner, repo string, checkID int) (*CheckRun, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/check-runs/%d", owner, repo, checkID)
 	var check CheckRun
-	if err := githubGET(client, token, url, &check); err != nil {
+	if err := cihelpers.GitHubGET(client, token, url, &check); err != nil {
 		return nil, err
 	}
 	return &check, nil
@@ -651,13 +536,13 @@ func getCheckRunDetails(client *http.Client, token, owner, repo string, checkID 
 func getJobDetails(client *http.Client, token, owner, repo, jobURL string) (*JobDetails, error) {
 	parts := strings.Split(jobURL, "/")
 	if len(parts) < 8 {
-		return nil, fmt.Errorf("invalid job URL format")
+		return nil, skillerr.Validation("invalid job URL format")
 	}
 	jobID := parts[len(parts)-1]
 
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%s", owner, repo, jobID)
 	var job JobDetails
-	if err := githubGET(client, token, url, &job); err != nil {
+	if err := cihelpers.GitHubGET(client, token, url, &job); err != nil {
 		return nil, err
 	}
 	return &job, nil
@@ -667,7 +552,7 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d/logs", owner, repo, jobID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", err
+		return "", skillerr.WrapRuntime("create log request", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
@@ -680,7 +565,7 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 
 	resp, err := clientNoRedirect.Do(req)
 	if err != nil {
-		return "", err
+		return "", skillerr.WrapRuntime("send log request", err)
 	}
 	defer resp.Body.Close()
 
@@ -689,11 +574,11 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 		if location != "" {
 			redirectReq, err := http.NewRequest("GET", location, nil)
 			if err != nil {
-				return "", err
+				return "", skillerr.WrapRuntime("create redirect request", err)
 			}
 			redirectResp, err := client.Do(redirectReq)
 			if err != nil {
-				return "", err
+				return "", skillerr.WrapRuntime("send redirect request", err)
 			}
 			defer redirectResp.Body.Close()
 			resp = redirectResp
@@ -701,12 +586,12 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		return "", skillerr.Runtimef("GitHub API returned status %d", resp.StatusCode)
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", skillerr.WrapIO("read log response", err)
 	}
 
 	contentType := resp.Header.Get("Content-Type")
@@ -715,7 +600,7 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 	if strings.Contains(contentType, "zip") || strings.Contains(contentDisposition, ".zip") || bytes.HasPrefix(data, []byte("PK\x03\x04")) {
 		zipReader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 		if err != nil {
-			return "", fmt.Errorf("failed to parse ZIP: %w", err)
+			return "", skillerr.WrapIO("parse ZIP", err)
 		}
 
 		var bestMatch string
@@ -793,7 +678,7 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 		if bestMatch != "" {
 			return bestMatch, nil
 		}
-		return "", fmt.Errorf("no relevant log content found in ZIP")
+		return "", skillerr.Runtime("no relevant log content found in ZIP")
 	}
 
 	logContent := string(data)
@@ -848,34 +733,6 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 		return strings.Join(lines[len(lines)-20:], "\n"), nil
 	}
 	return logContent, nil
-}
-
-func githubGET(client *http.Client, token, url string, v any) error {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		// Error body read; error is not actionable in error path.
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) //nolint:errcheck
-		return fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
-		return err
-	}
-	return nil
 }
 
 func sortCommentsByTime(comments []Comment) {
@@ -994,7 +851,7 @@ func getChangedFilesForPR(client *http.Client, token, owner, repo string, prNum 
 		Filename string `json:"filename"`
 		Status   string `json:"status"`
 	}
-	if err := githubGET(client, token, url, &files); err != nil {
+	if err := cihelpers.GitHubGET(client, token, url, &files); err != nil {
 		logger.Warn().Err(err).Str("operation", "get-pr-files").Int("pr", prNum).Msg("failed to get PR files")
 		return []string{}
 	}
@@ -1385,4 +1242,3 @@ func classifyGreptileTask(cleanBody string) (severity, summary string) {
 
 	return severity, summary
 }
-

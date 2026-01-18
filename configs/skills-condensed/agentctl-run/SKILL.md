@@ -18,8 +18,8 @@ agentctl run <skill-name> --input '<json>'
 | Category | Skills |
 |----------|--------|
 | **File System** | `fs/ls`, `fs/read`, `fs/write`, `fs/tree`, `fs/find` |
-| **Code** | `code/diff`, `code/symbols`, `code/complexity`, `code/imports`, `code/security`, `code/smart_search` |
-| **Text** | `text/grep`, `text/ripgrep`, `text/replace` |
+| **Code** | `code/diff`, `code/symbols`, `code/imports`, `code/security`, `code/smart_search`, `code/context_grep` |
+| **Text** | `text/grep`, `text/replace` |
 | **Git** | `git/status`, `code/git` |
 | **Data** | `data/jq`, `json/transform` |
 | **Tasks** | `todo/manage` |

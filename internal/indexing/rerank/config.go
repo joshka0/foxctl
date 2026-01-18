@@ -6,6 +6,19 @@ import (
 	"time"
 )
 
+// Environment variable names for rerank configuration.
+// FC/IS: Constants ensure consistency between FromEnv and ConfigFromMap.
+const (
+	EnvRerankEnabled       = "AGENTCTL_RERANK_ENABLED"
+	EnvRerankTopK          = "AGENTCTL_RERANK_TOP_K"
+	EnvRerankFinalK        = "AGENTCTL_RERANK_FINAL_K"
+	EnvRerankScoreBlend    = "AGENTCTL_RERANK_SCORE_BLEND"
+	EnvRerankModel         = "AGENTCTL_RERANK_MODEL"
+	EnvRerankRateLimit     = "AGENTCTL_RERANK_RATE_LIMIT"
+	EnvRerankRateLimitWait = "AGENTCTL_RERANK_RATE_LIMIT_WAIT"
+	EnvRerankTimeout       = "AGENTCTL_RERANK_TIMEOUT"
+)
+
 // Config holds configuration for reranking operations.
 type Config struct {
 	// Enabled controls whether reranking is active.
@@ -78,25 +91,43 @@ func DefaultConfig() Config {
 //   - AGENTCTL_RERANK_RATE_LIMIT_WAIT: "true" to wait, "false" to error immediately
 //   - AGENTCTL_RERANK_TIMEOUT: timeout duration (e.g., "30s", "1m")
 func FromEnv() Config {
+	// FC/IS: Collect env values at boundary, delegate parsing to pure function.
+	envMap := map[string]string{
+		EnvRerankEnabled:       os.Getenv(EnvRerankEnabled),
+		EnvRerankTopK:          os.Getenv(EnvRerankTopK),
+		EnvRerankFinalK:        os.Getenv(EnvRerankFinalK),
+		EnvRerankScoreBlend:    os.Getenv(EnvRerankScoreBlend),
+		EnvRerankModel:         os.Getenv(EnvRerankModel),
+		EnvRerankRateLimit:     os.Getenv(EnvRerankRateLimit),
+		EnvRerankRateLimitWait: os.Getenv(EnvRerankRateLimitWait),
+		EnvRerankTimeout:       os.Getenv(EnvRerankTimeout),
+	}
+	return ConfigFromMap(envMap)
+}
+
+// ConfigFromMap creates a Config from a string map.
+// FC/IS: Pure function for parsing - no os.Getenv calls.
+// Tests can call this directly with controlled values.
+func ConfigFromMap(envMap map[string]string) Config {
 	cfg := DefaultConfig()
 
-	if v := os.Getenv("AGENTCTL_RERANK_ENABLED"); v != "" {
+	if v := envMap[EnvRerankEnabled]; v != "" {
 		cfg.Enabled = v == "true" || v == "1"
 	}
 
-	if v := os.Getenv("AGENTCTL_RERANK_TOP_K"); v != "" {
+	if v := envMap[EnvRerankTopK]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.TopK = n
 		}
 	}
 
-	if v := os.Getenv("AGENTCTL_RERANK_FINAL_K"); v != "" {
+	if v := envMap[EnvRerankFinalK]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.FinalK = n
 		}
 	}
 
-	if v := os.Getenv("AGENTCTL_RERANK_SCORE_BLEND"); v != "" {
+	if v := envMap[EnvRerankScoreBlend]; v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			if f < 0 {
 				f = 0
@@ -108,22 +139,22 @@ func FromEnv() Config {
 		}
 	}
 
-	if v := os.Getenv("AGENTCTL_RERANK_MODEL"); v != "" {
+	if v := envMap[EnvRerankModel]; v != "" {
 		cfg.Model = v
 	}
 
-	if v := os.Getenv("AGENTCTL_RERANK_RATE_LIMIT"); v != "" {
+	if v := envMap[EnvRerankRateLimit]; v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			cfg.RateLimit = &n
 		}
 	}
 
-	if v := os.Getenv("AGENTCTL_RERANK_RATE_LIMIT_WAIT"); v != "" {
+	if v := envMap[EnvRerankRateLimitWait]; v != "" {
 		wait := v == "true" || v == "1"
 		cfg.RateLimitWait = &wait
 	}
 
-	if v := os.Getenv("AGENTCTL_RERANK_TIMEOUT"); v != "" {
+	if v := envMap[EnvRerankTimeout]; v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.Timeout = d
 		}

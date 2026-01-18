@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -43,16 +44,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Custom validation: either content or digest required
 	if in.Content == "" && in.Digest == "" {
-		return fmt.Errorf("either content or digest is required")
+		return skillerr.Arg("either content or digest is required")
 	}
 	if in.Content != "" && in.Digest != "" {
-		return fmt.Errorf("cannot specify both content and digest")
+		return skillerr.Arg("cannot specify both content and digest")
 	}
 
 	// Validate path
-	targetPath, err := rc.PathValidator.ValidatePath(in.Path)
+	targetPath, err := skillmain.ValidatePath(rc, in.Path, skillmain.WithPathMessage("resolve target path"))
 	if err != nil {
-		return fmt.Errorf("resolve target path: %w", err)
+		return err
 	}
 
 	// Get content
@@ -64,7 +65,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Parse permissions
 	perm, err := parsePermissions(in.Permissions)
 	if err != nil {
-		return fmt.Errorf("invalid permissions: %w", err)
+		return err
 	}
 
 	// Check write mode
@@ -76,12 +77,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.CreateDirs {
 		dir := filepath.Dir(targetPath)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create parent directories: %w", err)
+			return skillerr.WrapIO("create parent directories", err)
 		}
 	}
 
 	// Perform write operation
-	bytesWritten, _, err := performWrite(targetPath, content, in.Mode, perm)
+	bytesWritten, checksum, err := performWrite(targetPath, content, in.Mode, perm)
 	if err != nil {
 		return err
 	}
@@ -98,6 +99,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		"bytes_written": bytesWritten,
 		"file_size":     fileSize,
 		"permissions":   fmt.Sprintf("%04o", perm),
+		"checksum":      checksum,
 	}
 
 	return skillout.Emit(rc, "fs/write", data)
@@ -112,7 +114,7 @@ func getContent(ctx context.Context, rc *skillmain.RunContext, in Input) ([]byte
 	if in.Digest != "" {
 		reader, _, err := rc.CASStore.Get(ctx, in.Digest)
 		if err != nil {
-			return nil, fmt.Errorf("failed to retrieve content from CAS: %w", err)
+			return nil, skillerr.WrapIO("retrieve content from CAS", err)
 		}
 		defer func() {
 			errs.Ignore(reader.Close(), "close CAS reader")
@@ -120,12 +122,12 @@ func getContent(ctx context.Context, rc *skillmain.RunContext, in Input) ([]byte
 
 		content, err := io.ReadAll(reader)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read content from CAS: %w", err)
+			return nil, skillerr.WrapIO("read content from CAS", err)
 		}
 		return content, nil
 	}
 
-	return nil, fmt.Errorf("no content provided")
+	return nil, skillerr.Arg("no content provided")
 }
 
 func parsePermissions(perm string) (fs.FileMode, error) {
@@ -133,7 +135,7 @@ func parsePermissions(perm string) (fs.FileMode, error) {
 	perm = strings.TrimPrefix(perm, "0")
 	mode, err := strconv.ParseUint(perm, 8, 32)
 	if err != nil {
-		return 0, err
+		return 0, skillerr.WrapValidation("invalid permissions", err, skillerr.WithHint("Use an octal string like \"0644\"."))
 	}
 	return fs.FileMode(mode), nil
 }
@@ -145,14 +147,14 @@ func checkWriteMode(path, mode string) error {
 	switch mode {
 	case "create":
 		if exists {
-			return fmt.Errorf("file already exists (use 'overwrite' mode to replace)")
+			return skillerr.Validation("file already exists (use 'overwrite' mode to replace)")
 		}
 	case "overwrite":
 		// OK to overwrite
 	case "append":
 		// OK to append (will create if doesn't exist)
 	default:
-		return fmt.Errorf("invalid mode: %s (must be create, overwrite, or append)", mode)
+		return skillerr.Validationf("invalid mode: %s (must be create, overwrite, or append)", mode)
 	}
 
 	return nil
@@ -168,19 +170,21 @@ func performWrite(path string, content []byte, mode string, perm fs.FileMode) (i
 	case "append":
 		f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, perm)
 	default:
-		return 0, "", fmt.Errorf("invalid mode: %s", mode)
+		return 0, "", skillerr.Validationf("invalid mode: %s", mode)
 	}
 
 	if err != nil {
-		return 0, "", fmt.Errorf("open file: %w", err)
+		return 0, "", skillerr.WrapIO("open file", err)
 	}
 	defer func() {
-		errs.Ignore(f.Close(), "close file")
+		if f != nil {
+			errs.Ignore(f.Close(), "close file")
+		}
 	}()
 
 	n, err := f.Write(content)
 	if err != nil {
-		return 0, "", fmt.Errorf("write file: %w", err)
+		return 0, "", skillerr.WrapIO("write file", err)
 	}
 
 	// Calculate checksum
@@ -188,12 +192,13 @@ func performWrite(path string, content []byte, mode string, perm fs.FileMode) (i
 	if mode == "append" {
 		// For append mode, checksum should cover the entire final file
 		if err := f.Close(); err != nil {
-			return n, "", fmt.Errorf("close file before checksum: %w", err)
+			return n, "", skillerr.WrapIO("close file before checksum", err)
 		}
+		f = nil
 
 		finalContent, err := os.ReadFile(path)
 		if err != nil {
-			return n, "", fmt.Errorf("read file for checksum: %w", err)
+			return n, "", skillerr.WrapIO("read file for checksum", err)
 		}
 		hash := sha256.Sum256(finalContent)
 		checksum = hex.EncodeToString(hash[:])

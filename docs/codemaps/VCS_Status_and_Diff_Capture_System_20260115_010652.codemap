@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "id": "VCS_Status_and_Diff_Capture_System_20260115_010652",
+  "stableId": "1ab94595-029f-4b50-87a1-244655e3aab3",
+  "metadata": {
+    "cascadeId": "ea427ea5-1e41-409b-beae-a9813efe8766",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T01:06:52+02:00",
+    "mode": "FAST",
+    "originalPrompt": "Explore: VCS status + diff capture. Start from: skills/git_status/main.go, skills/code_diff/main.go"
+  },
+  "title": "VCS Status and Diff Capture System",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Git Status Operation Flow",
+      "description": "Handles git repository status requests through the git_status skill",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 47,
+          "lineContent": "func main() {\n\tskillmain.Main(command, run)\n}",
+          "title": "Skill Entry Point",
+          "description": "Main function delegates to skills framework"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 72,
+          "lineContent": "data, err := oputil.NewSwitch(in.Operation).\n\t\tCase(\"status\", func() (map[string]any, error) { return getStatus(ctx, gitPath, repoPath) })",
+          "title": "Operation Dispatch",
+          "description": "Routes to status handler based on input operation"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 91,
+          "lineContent": "cmd := exec.CommandContext(ctx, gitPath, \"-C\", repoPath, \"status\", \"--porcelain=v1\", \"-b\")",
+          "title": "Git Command Execution",
+          "description": "Executes git status with porcelain output format"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 97,
+          "lineContent": "files, branch, upstream := parseStatusOutput(string(output))",
+          "title": "Output Parsing",
+          "description": "Parses git porcelain output into structured data"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 86,
+          "lineContent": "return skillout.Emit(rc, command, data)",
+          "title": "Result Emission",
+          "description": "Emits structured result through envelope system"
+        }
+      ],
+      "traceTextDiagram": "Git Status Skill Execution\n├── skillmain.Main() framework entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:81\n│   ├── mainWithCode() setup \u0026 validation \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:98\n│   │   ├── buildRunContext() creates env \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:126\n│   │   └── JSON input parsing \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:141\n│   └── run() skill business logic \u003c-- 1a\n├── Operation dispatch via Switch \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go:72\n│   └── Case(\"status\") handler \u003c-- 1b\n├── Git command execution\n│   └── exec.CommandContext() git status \u003c-- 1c\n├── Output processing\n│   └── parseStatusOutput() porcelain parsing \u003c-- 1d\n└── Result emission\n    └── skillout.Emit() envelope output \u003c-- 1e",
+      "traceGuide": "# Motivation\n\nThe git status skill solves the problem of **standardized git repository inspection** across different environments. Instead of agents needing to parse raw git output directly, this skill provides a clean, structured JSON interface for repository state, diffs, and commit history. It handles the complexity of git's various output formats and provides consistent data structures that can be consumed by AI agents or other tools.\n\n# Details\n\nThe system follows a **dispatch pattern** where a single skill handles multiple git operations [1a]. When you request a status operation, the skill executes `git status --porcelain=v1` to get machine-readable output [1c], then parses this into structured data with file status, branch info, and counts [1d]. The result is emitted through a standardized envelope system that includes metadata and handles large outputs via CAS storage [1e].\n\nThe framework handles **input validation**, path security, and execution context automatically [1b]. This ensures that git operations are only performed within allowed workspace boundaries and that all inputs are properly validated before execution. The skill supports three operations: status (current repo state), diff (show changes), and log (commit history)."
+    },
+    {
+      "id": "2",
+      "title": "Git Diff with Large Output Handling",
+      "description": "Handles git diff requests with automatic CAS storage for large outputs",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 74,
+          "lineContent": "Case(\"diff\", func() (map[string]any, error) { return getDiff(ctx, rc, gitPath, repoPath, in) })",
+          "title": "Diff Operation Routing",
+          "description": "Routes diff operations to specialized handler"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 146,
+          "lineContent": "cmd := exec.CommandContext(ctx, gitPath, args...)",
+          "title": "Git Diff Execution",
+          "description": "Executes git diff with configurable arguments"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 163,
+          "lineContent": "if len(diff) \u003e rc.MaxPreview {\n\t\tdata[\"preview\"] = diff[:rc.MaxPreview] + \"\\n... (truncated)\"\n\t\ttruncated = true",
+          "title": "Size Check and Truncation",
+          "description": "Checks if diff exceeds preview size limit"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 173,
+          "lineContent": "artifact, err := skillmain.PersistBuffer(ctx, rc, buf, \"text/plain\", \"git_diff\")",
+          "title": "CAS Storage",
+          "description": "Stores large diff in content-addressable storage"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go",
+          "lineNumber": 175,
+          "lineContent": "data[\"artifact\"] = artifact.Digest",
+          "title": "Artifact Reference",
+          "description": "Includes CAS digest in response for retrieval"
+        }
+      ],
+      "traceTextDiagram": "Git Diff Operation Flow\n├── Operation Dispatch \u003c-- 2a\n│   └── Git Diff Execution \u003c-- 2b\n│       └── Size Check \u0026 Truncation \u003c-- 2c\n│           ├── if diff too large \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go:163\n│           │   └── CAS Storage \u003c-- 2d\n│           │       └── Add Artifact Ref \u003c-- 2e\n│           └── if diff small \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go:166\n│               └── Direct output \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go:167\n└── Envelope Emission \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go:86\n    └── Return to caller \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go:186",
+      "traceGuide": "# Motivation\n\nWhen developers work with git repositories, they often need to see changes but diffs can become **massive** - think megabytes of output for large commits. The system solves this by automatically detecting when diff output exceeds reasonable limits and storing the full content in a Content-Addressable Storage (CAS) system, while providing a preview in the immediate response. This prevents command-line tools from flooding terminals while still giving users access to complete diff information when needed.\n\n# Details\n\nThe git diff operation begins with skill dispatch routing [2a], which executes git commands with configurable arguments like staged/unstaged changes and commit ranges [2b]. The critical size check happens immediately after git execution [2c] - if the diff exceeds the configured preview limit, the system truncates the inline response and stores the complete diff in CAS [2d]. The CAS digest is then included in the response metadata [2e], allowing users to retrieve the full diff later using commands like `agentctl cas read \u003cdigest\u003e`. For smaller diffs that fit within limits, the system provides the complete content directly without CAS overhead [2c]. All responses are wrapped in standardized envelopes that include metadata about truncation status and artifact references."
+    },
+    {
+      "id": "3",
+      "title": "Code Diff File Comparison",
+      "description": "Handles file-to-file diff comparison using custom LCS algorithm",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "lineNumber": 52,
+          "lineContent": "skillmain.Main(\"code/diff\", run)",
+          "title": "Code Diff Entry",
+          "description": "Entry point for code diff skill"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "lineNumber": 78,
+          "lineContent": "oldContent, err := os.ReadFile(oldPath)",
+          "title": "File Reading",
+          "description": "Reads old file content for comparison"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "lineNumber": 83,
+          "lineContent": "newContent, err := os.ReadFile(newPath)",
+          "title": "File Reading",
+          "description": "Reads new file content for comparison"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "lineNumber": 99,
+          "lineContent": "hunks := computeDiff(oldLines, newLines, in.ContextLines)",
+          "title": "Diff Computation",
+          "description": "Computes diff using LCS-based algorithm"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go",
+          "lineNumber": 112,
+          "lineContent": "result.Unified = generateUnifiedDiff(result.OldFile, result.NewFile, hunks)",
+          "title": "Unified Diff Generation",
+          "description": "Generates unified diff format from hunks"
+        }
+      ],
+      "traceTextDiagram": "Code Diff File Comparison\n├── skillmain.Main() framework entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:81\n│   └── run() function execution \u003c-- 3a\n├── File Input Validation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:64\n│   ├── ValidatePath() security check \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:67\n│   └── os.ReadFile() old file \u003c-- 3b\n├── File Content Processing \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:88\n│   ├── os.ReadFile() new file \u003c-- 3c\n│   ├── splitLines() tokenization \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:95\n│   └── computeDiff() LCS algorithm \u003c-- 3d\n└── Output Formatting \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:102\n    ├── build result structure \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_diff/main.go:103\n    └── generateUnifiedDiff() formatting \u003c-- 3e",
+      "traceGuide": "## Motivation\n\nWhen developers need to compare two files to understand changes, they need a **reliable diff system** that can handle arbitrary file types and generate human-readable output. The code/diff skill solves this problem by implementing a **custom LCS-based diff algorithm** that doesn't rely on external tools, providing unified diff format, statistics, and change detection with automatic handling of large outputs through content-addressable storage.\n\n## Details\n\nThe system starts with the skills framework entry point [3a] which validates input paths and ensures security by checking files are within workspace boundaries. It reads both old and new file contents [3b][3c], then tokenizes them into lines using the splitLines function. The core diff computation uses a **Longest Common Subsequence algorithm** [3d] to identify changes, additions, and deletions, building structured hunks with context lines. Finally, it formats the output as a unified diff [3e] with proper headers, or provides statistics/summary formats as requested. For large diffs, the system automatically stores the full output in CAS and returns a preview with retrieval hints."
+    },
+    {
+      "id": "4",
+      "title": "Skills Framework Execution",
+      "description": "Core framework that handles skill execution, validation, and output formatting",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go",
+          "lineNumber": 81,
+          "lineContent": "func Main[I any](command string, run RunFunc[I]) {\n\tcode := mainWithCode(command, run, os.Stdin, os.Stdout)",
+          "title": "Framework Entry",
+          "description": "Generic main function handles type-safe skill execution"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go",
+          "lineNumber": 126,
+          "lineContent": "rc, err := buildRunContext(cfg, stdout)",
+          "title": "Context Building",
+          "description": "Builds execution context with CAS, validator, and path security"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go",
+          "lineNumber": 156,
+          "lineContent": "if err := rc.Validator.Struct(input); err != nil",
+          "title": "Input Validation",
+          "description": "Validates input using struct tags"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go",
+          "lineNumber": 167,
+          "lineContent": "if err := run(ctx, rc, input); err != nil",
+          "title": "Skill Execution",
+          "description": "Executes the actual skill business logic"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go",
+          "lineNumber": 24,
+          "lineContent": "env := envelope.OK(command, data, envelope.WithMeta(meta))",
+          "title": "Envelope Creation",
+          "description": "Creates standardized success envelope with metadata"
+        }
+      ],
+      "traceTextDiagram": "Skills Framework Execution\n├── Main() generic entry point \u003c-- 4a\n│   └── mainWithCode() core execution \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:98\n│       ├── buildRunContext() setup \u003c-- 4b\n│       │   ├── Load CAS store \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:209\n│       │   ├── Create path validator \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:233\n│       │   └── Initialize validator \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:248\n│       ├── JSON input parsing \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:141\n│       ├── Struct validation \u003c-- 4c\n│       └── run() skill execution \u003c-- 4d\n│           └── skillout.Emit() output \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/git_status/main.go:86\n│               └── envelope.OK() creation \u003c-- 4e\n└── Error handling path \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillmain/main.go:167\n    └── envelope.Error() on failure \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/skillslib/skillout/emit.go:29",
+      "traceGuide": "## Motivation\n\nThe skills framework solves the **execution consistency problem** for agent tools. When agents need to run git operations, file diffs, or other skills, they need a standardized way to handle input validation, path security, error formatting, and large output storage. Without this framework, each skill would reinvent these concerns, leading to inconsistent behavior and potential security issues.\n\n## Details\n\nThe framework uses a **generic entry point** [4a] that handles all skills through a common pipeline. First, it builds a **secure execution context** [4b] containing a CAS store for large outputs, a path validator to prevent file system escapes, and a struct validator for input validation. The system then **parses JSON input** from stdin and validates it against struct tags [4c] before executing the actual skill logic [4d].\n\nA key innovation is the **envelope-based output system** [4e] that wraps all results in a standardized JSON format with metadata. When skills produce large outputs like git diffs, the framework automatically detects size limits and stores the content in **content-addressable storage** while returning a digest for retrieval. This keeps agent responses fast while preserving full data access.\n\nThe error handling path ensures **graceful failures** with structured error envelopes that include error codes, messages, and helpful hints for debugging."
+    }
+  ],
+  "description": "VCS status and diff capture system spanning git operations, file comparison, and skill execution framework. Key locations include git command execution [1c], CAS storage for large diffs [2d], custom diff algorithm [3d], and framework validation [4c].",
+  "mermaidDiagram": "graph TB\n    subgraph Framework[\"Skills Framework\"]\n        4a[\"4a: Framework Entry\u003cbr/\u003eMain delegates to framework\"]\n        4b[\"4b: Context Building\u003cbr/\u003eCreates RunContext with CAS, validator\"]\n        4c[\"4c: Input Validation\u003cbr/\u003eValidates struct with tags\"]\n        4d[\"4d: Skill Execution\u003cbr/\u003eCalls skill run function\"]\n        4e[\"4e: Envelope Creation\u003cbr/\u003eWraps result in canonical format\"]\n        \n        4a --\u003e 4b\n        4b --\u003e 4c\n        4c --\u003e 4d\n        4d --\u003e 4e\n    end\n    \n    subgraph GitOps[\"Git Operations\"]\n        1a[\"1a: Git Status Entry\u003cbr/\u003eSkill main function\"]\n        1c[\"1c: Git Command\u003cbr/\u003eExecutes git status porcelain\"]\n        1d[\"1d: Output Parsing\u003cbr/\u003eParses status into structures\"]\n        1e[\"1e: Result Emission\u003cbr/\u003eReturns structured data\"]\n        \n        2a[\"2a: Git Diff Routing\u003cbr/\u003eRoutes to diff handler\"]\n        2b[\"2b: Git Diff Execution\u003cbr/\u003eExecutes git diff command\"]\n        2c[\"2c: Size Check\u003cbr/\u003eChecks if output exceeds limit\"]\n        2d[\"2d: CAS Storage\u003cbr/\u003ePersists large diff to storage\"]\n        2e[\"2e: Artifact Reference\u003cbr/\u003eIncludes digest in response\"]\n        \n        1a --\u003e 1c\n        1c --\u003e 1d\n        1d --\u003e 1e\n        \n        2a --\u003e 2b\n        2b --\u003e 2c\n        2c --\u003e 2d\n        2d --\u003e 2e\n    end\n    \n    subgraph CodeDiff[\"Code Diff\"]\n        3a[\"3a: Code Diff Entry\u003cbr/\u003eSkill main function\"]\n        3b[\"3b: File Reading\u003cbr/\u003eReads old file content\"]\n        3c[\"3c: File Reading\u003cbr/\u003eReads new file content\"]\n        3d[\"3d: Diff Computation\u003cbr/\u003eComputes LCS-based diff\"]\n        3e[\"3e: Unified Generation\u003cbr/\u003eGenerates unified diff format\"]\n        \n        3a --\u003e 3b\n        3b --\u003e 3c\n        3c --\u003e 3d\n        3d --\u003e 3e\n    end\n    \n    1a --\u003e|calls| 4a\n    2a --\u003e|calls| 4a\n    3a --\u003e|calls| 4a\n    \n    4d --\u003e|executes| 1a\n    4d --\u003e|executes| 2a\n    4d --\u003e|executes| 3a\n    \n    1e --\u003e|emits via| 4e\n    2e --\u003e|emits via| 4e\n    3e --\u003e|emits via| 4e\n    \n    4b -.-\u003e|provides context| 1a\n    4b -.-\u003e|provides context| 2a\n    4b -.-\u003e|provides context| 3a\n    \n    2c -.-\u003e|uses CAS from| 4b\n    \n    style Framework fill:#a5d8ff\n    style GitOps fill:#ffec99\n    style CodeDiff fill:#b2f2bb"
+}

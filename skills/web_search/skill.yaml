@@ -1,0 +1,97 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: web/search
+  version: 0.1.0
+  description: "Search the web with Exa/Tavily backends, optional snippet extraction"
+  tags: ["web", "search", "exa", "tavily"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: web/search
+  parameters:
+    - name: query
+      type: string
+      required: true
+      description: "Search query"
+    - name: max_results
+      type: integer
+      required: false
+      default: 10
+      description: "Maximum number of search results (1-20)"
+    - name: extract
+      type: boolean
+      required: false
+      default: false
+      description: "Extract content snippets from top results"
+    - name: extract_query
+      type: string
+      required: false
+      description: "Optional query for snippet extraction (defaults to search query)"
+    - name: extract_limit
+      type: integer
+      required: false
+      default: 3
+      description: "Number of results to extract content from"
+    - name: provider
+      type: string
+      required: false
+      description: "Search provider: exa, tavily (defaults to AGENTCTL_SEARCH_PROVIDER or exa)"
+    - name: topic
+      type: string
+      required: false
+      description: "Topic filter: general, news"
+  help:
+    short: "Search the web with curated results and optional extraction."
+    long: |
+      Use web/search to search the web using Exa or Tavily APIs.
+      Results are curated and can optionally include extracted content snippets.
+      Large results are stored in CAS automatically.
+
+      Environment variables:
+        EXA_API_KEY - Required for Exa provider
+        TAVILY_API_KEY - Required for Tavily provider
+        AGENTCTL_SEARCH_PROVIDER - Default provider (exa or tavily)
+
+      Example commands:
+        agentctl run web/search --input '{"query": "React hooks best practices"}'
+        agentctl run web/search --input '{"query": "OpenAI API", "extract": true, "extract_limit": 3}'
+        agentctl run web/search --input '{"query": "latest news", "topic": "news", "max_results": 5}'
+    workflows:
+      - id: basic-search
+        description: "Simple web search"
+        example_input:
+          query: "golang error handling patterns"
+          max_results: 10
+      - id: search-with-extraction
+        description: "Search and extract content from top results"
+        example_input:
+          query: "React Server Components tutorial"
+          extract: true
+          extract_limit: 3
+      - id: news-search
+        description: "Search for recent news"
+        example_input:
+          query: "AI developments"
+          topic: "news"
+          max_results: 5
+returns:
+  - name: results
+    type: array
+    description: "Search results with title, url, snippet"
+  - name: extractions
+    type: array
+    description: "Extracted content from top results (when extract=true)"
+  - name: artifact
+    type: string
+    description: "CAS digest if results were truncated"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

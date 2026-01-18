@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+# install.sh - One-step agentctl installation
+#
+# Usage:
+#   From repo:     ./install.sh
+#   Standalone:    curl -fsSL https://raw.githubusercontent.com/jkatigb/agentctl/main/install.sh | bash
+#
+# Options:
+#   --provider <name>   Install for specific provider (claude-code, opencode, codex, all)
+#   --skip-hooks        Skip hooks installation
+#   --skip-skills       Skip skills installation
+#   --no-build          Skip building (use pre-built or existing binary)
+#   --validate          Only validate installation, don't install
+#   --help              Show this help
+#
+# Environment:
+#   AGENTCTL_HOME       Installation directory (default: ~/.agentctl)
+#   AGENTCTL_PROVIDER   Default provider (default: auto-detect)
+
+set -euo pipefail
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Logging
+info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+success() { echo -e "${GREEN}[OK]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; }
+step() { echo -e "\n${CYAN}==> $1${NC}"; }
+
+# Defaults
+AGENTCTL_HOME="${AGENTCTL_HOME:-$HOME/.agentctl}"
+LOCAL_BIN="${HOME}/.local/bin"
+PROVIDER="${AGENTCTL_PROVIDER:-auto}"
+SKIP_HOOKS=false
+SKIP_SKILLS=false
+NO_BUILD=false
+VALIDATE_ONLY=false
+REPO_URL="https://github.com/jkatigb/agentctl"
+
+# Detect if running from repo
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$SCRIPT_DIR/Makefile" && -d "$SCRIPT_DIR/configs" ]]; then
+    REPO_ROOT="$SCRIPT_DIR"
+    FROM_REPO=true
+else
+    REPO_ROOT=""
+    FROM_REPO=false
+fi
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --provider)
+            PROVIDER="$2"
+            shift 2
+            ;;
+        --skip-hooks)
+            SKIP_HOOKS=true
+            shift
+            ;;
+        --skip-skills)
+            SKIP_SKILLS=true
+            shift
+            ;;
+        --no-build)
+            NO_BUILD=true
+            shift
+            ;;
+        --validate)
+            VALIDATE_ONLY=true
+            shift
+            ;;
+        --help|-h)
+            head -19 "$0" | tail -17
+            exit 0
+            ;;
+        *)
+            error "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+detect_provider() {
+    if [[ "$PROVIDER" != "auto" ]]; then
+        echo "$PROVIDER"
+        return
+    fi
+
+    # Claude Code (most common)
+    if [[ -d "$HOME/.claude" ]] || command -v claude &>/dev/null; then
+        echo "claude-code"
+        return
+    fi
+
+    # OpenCode
+    if [[ -d "$HOME/.opencode" ]] || command -v opencode &>/dev/null; then
+        echo "opencode"
+        return
+    fi
+
+    # Default to claude-code
+    echo "claude-code"
+}
+
+ensure_directories() {
+    mkdir -p "$AGENTCTL_HOME"/{storage,skills,cache,cas}
+    mkdir -p "$LOCAL_BIN"
+}
+
+# =============================================================================
+# Build/Download
+# =============================================================================
+
+build_agentctl() {
+    if [[ "$NO_BUILD" == true ]]; then
+        info "Skipping build (--no-build)"
+        return 0
+    fi
+
+    if [[ "$FROM_REPO" != true ]]; then
+        warn "Not in repo, skipping build"
+        return 0
+    fi
+
+    step "Building agentctl"
+    cd "$REPO_ROOT"
+
+    # Prefer CGO build for full functionality
+    if [[ -n "${CGO_ENABLED:-}" ]] || command -v gcc &>/dev/null; then
+        info "Building with CGO support"
+        make build-cgo 2>/dev/null || make build
+    else
+        info "Building without CGO"
+        make build
+    fi
+
+    success "Built agentctl"
+}
+
+link_binary() {
+    local binary="$AGENTCTL_HOME/bin/agentctl"
+
+    # Check various locations for the binary
+    if [[ -f "$REPO_ROOT/bin/agentctl" ]]; then
+        binary="$REPO_ROOT/bin/agentctl"
+    elif [[ -f "$AGENTCTL_HOME/bin/agentctl" ]]; then
+        binary="$AGENTCTL_HOME/bin/agentctl"
+    fi
+
+    if [[ -f "$binary" ]]; then
+        ln -sf "$binary" "$LOCAL_BIN/agentctl"
+        success "Linked agentctl to $LOCAL_BIN/agentctl"
+        return 0
+    fi
+
+    # Check if already in PATH
+    if command -v agentctl &>/dev/null; then
+        success "agentctl already in PATH"
+        return 0
+    fi
+
+    warn "agentctl binary not found"
+    return 1
+}
+
+build_skills() {
+    if [[ "$SKIP_SKILLS" == true ]]; then
+        info "Skipping skills build (--skip-skills)"
+        return 0
+    fi
+
+    if [[ "$FROM_REPO" != true ]]; then
+        return 0
+    fi
+
+    step "Building skills"
+    cd "$REPO_ROOT"
+    make skills-install 2>/dev/null || warn "Skills build failed (non-fatal)"
+    success "Built skills"
+}
+
+# =============================================================================
+# Main Installation via Skill
+# =============================================================================
+
+run_setup_skill() {
+    local provider
+    provider=$(detect_provider)
+
+    step "Running setup/install skill"
+
+    # Build the JSON input
+    local input
+    input=$(jq -nc \
+        --arg provider "$provider" \
+        --argjson skip_hooks "$SKIP_HOOKS" \
+        --argjson skip_skills "$SKIP_SKILLS" \
+        --argjson validate_only "$VALIDATE_ONLY" \
+        --arg repo_root "$REPO_ROOT" \
+        '{
+            provider: $provider,
+            skip_hooks: $skip_hooks,
+            skip_skills: $skip_skills,
+            validate_only: $validate_only,
+            repo_root: (if $repo_root == "" then null else $repo_root end)
+        }')
+
+    # Run the skill
+    local result
+    if result=$(agentctl run setup/install --input "$input" 2>&1); then
+        # Parse and display results
+        local status hook_count
+        status=$(echo "$result" | jq -r '.data.status // "unknown"')
+        hook_count=$(echo "$result" | jq -r '.data.hooks.hook_count // 0')
+
+        if [[ "$status" == "ok" ]]; then
+            success "Installation complete"
+            info "Provider: $provider"
+            info "Hooks installed: $hook_count"
+
+            if [[ "$VALIDATE_ONLY" == true ]]; then
+                info "Validation mode - no changes made"
+            fi
+        else
+            local err_msg
+            err_msg=$(echo "$result" | jq -r '.error.message // "Unknown error"')
+            error "Installation failed: $err_msg"
+            return 1
+        fi
+    else
+        error "Failed to run setup/install skill"
+        echo "$result" >&2
+        return 1
+    fi
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+main() {
+    echo -e "${CYAN}"
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║                    agentctl installer                         ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+
+    if [[ "$FROM_REPO" == true ]]; then
+        info "Installing from repository: $REPO_ROOT"
+    else
+        info "Standalone installation"
+    fi
+
+    # Step 1: Ensure directories exist
+    step "Creating directories"
+    ensure_directories
+    success "Directories ready"
+
+    # Step 2: Build agentctl (if from repo)
+    build_agentctl
+
+    # Step 3: Link binary to PATH
+    step "Linking binary"
+    link_binary || true
+
+    # Step 4: Build skills (if from repo)
+    build_skills
+
+    # Step 5: Run setup/install skill for hooks and config
+    if ! command -v agentctl &>/dev/null; then
+        error "agentctl not found in PATH after installation"
+        info "Add $LOCAL_BIN to your PATH and re-run"
+        exit 1
+    fi
+
+    run_setup_skill
+
+    # Done
+    echo ""
+    success "Installation complete!"
+    echo ""
+    info "Next steps:"
+    echo "  1. Ensure $LOCAL_BIN is in your PATH"
+    echo "  2. Run 'agentctl --help' to get started"
+    echo "  3. Run 'agentctl run setup/install --input '{\"validate_only\": true}'' to verify"
+}
+
+main "$@"

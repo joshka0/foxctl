@@ -230,14 +230,14 @@ Identify:
 
 		// Filter to read-only skills
 		readOnlySkills := map[string]bool{
-			"code/symbols":    true,
-			"code/complexity": true,
-			"code/snippet_extract":   true,
-			"search/grep":     true,
-			"search/ripgrep":  true,
-			"fs/read":         true,
-			"fs/list":         true,
-			"fs/tree":         true,
+			"code/symbols":         true,
+			"code/complexity":      true,
+			"code/snippet_extract": true,
+			"search/grep":          true,
+			"search/ripgrep":       true,
+			"fs/read":              true,
+			"fs/list":              true,
+			"fs/tree":              true,
 		}
 
 		if !readOnlySkills[skill] {

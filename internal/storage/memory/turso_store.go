@@ -122,13 +122,14 @@ func (s *TursoStore) validateDimensions(ctx context.Context, expectedDims int) e
 
 // migrateTursoWithDimensions runs migrations with configurable vector dimensions and model.
 func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int, model string) error {
-	// Create embedding_metadata table for dimension tracking
+	// Create embedding_metadata table to track provider/model/dimensions per workspace
+	// This enables detection of dimension mismatches if embedding models change
 	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS embedding_metadata (
-			table_name TEXT PRIMARY KEY,
-			column_name TEXT NOT NULL,
+			workspace TEXT PRIMARY KEY,
+			provider TEXT NOT NULL,
+			model TEXT NOT NULL,
 			dimensions INTEGER NOT NULL,
-			model TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)
@@ -229,6 +230,20 @@ func (s *TursoStore) Stats(ctx context.Context) (Stats, error) {
 		Named: count,
 		Path:  "turso",
 	}, nil
+}
+
+// ExistsByNameSuffix checks if any entry exists with a name ending in the given suffix.
+// Used for content-hash deduplication across sessions (e.g., suffix ":<type>:<digest>").
+func (s *TursoStore) ExistsByNameSuffix(ctx context.Context, workspace, suffix string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM named_memory
+		WHERE workspace = ? AND name LIKE '%' || ?`,
+		workspace, suffix).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("memory: exists by suffix: %w", err)
+	}
+	return count > 0, nil
 }
 
 // SaveWithEmbedding saves a named memory entry with its embedding vector.
@@ -479,6 +494,43 @@ func (s *TursoStore) Get(ctx context.Context, name, workspace string) (NamedEntr
 		SET last_accessed = ?, access_count = access_count + 1
 		WHERE id = ?`, sqlutil.FormatTimestamp(timeutil.NowUTC()), entry.ID)
 
+	return entry, nil
+}
+
+// getWithoutTracking retrieves a named memory without updating access metadata.
+// Use this for internal operations (like Update) that shouldn't count as user access.
+func (s *TursoStore) getWithoutTracking(ctx context.Context, name, workspace string) (NamedEntry, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests,
+			created_at, updated_at, last_accessed, access_count, session_id
+		FROM named_memory
+		WHERE name = ? AND workspace = ?`, name, workspace)
+
+	var entry NamedEntry
+	var digestsJSON string
+	var createdAt, updatedAt, lastAccess string
+	var sessionID sql.NullString
+
+	err := row.Scan(
+		&entry.ID, &entry.Name, &entry.Type, &entry.Workspace, &entry.Summary,
+		&entry.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &entry.AccessCount, &sessionID,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return NamedEntry{}, ErrNotFound
+		}
+		return NamedEntry{}, fmt.Errorf("memory: get: %w", err)
+	}
+
+	_ = sqlutil.ScanJSON(digestsJSON, &entry.Digests)
+	entry.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+	entry.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+	entry.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+	if sessionID.Valid {
+		entry.SessionID = sessionID.String
+	}
+
+	// No access tracking update - intentional for internal use
 	return entry, nil
 }
 
@@ -818,6 +870,273 @@ func (s *TursoStore) ListWorkspaces(ctx context.Context) ([]string, error) {
 		workspaces = append(workspaces, ws)
 	}
 	return workspaces, rows.Err()
+}
+
+// DeleteByNamePrefix deletes all entries matching the name prefix.
+func (s *TursoStore) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix string) (int, error) {
+	result, err := s.db.ExecContext(ctx, `
+		DELETE FROM named_memory
+		WHERE workspace = ? AND name LIKE ? || '%'`,
+		workspace, namePrefix)
+	if err != nil {
+		return 0, fmt.Errorf("memory: delete by prefix: %w", err)
+	}
+	count, _ := result.RowsAffected()
+	return int(count), nil
+}
+
+// Update updates an existing memory entry's summary and/or type.
+// Uses getWithoutTracking to avoid incrementing access_count for internal operations.
+func (s *TursoStore) Update(ctx context.Context, name, workspace string, summary, typ *string) (NamedEntry, error) {
+	entry, err := s.getWithoutTracking(ctx, name, workspace)
+	if err != nil {
+		return NamedEntry{}, err
+	}
+	if summary != nil {
+		entry.Summary = *summary
+	}
+	if typ != nil && *typ != "" {
+		entry.Type = *typ
+	}
+	entry.UpdatedAt = timeutil.NowUTC()
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE named_memory
+		SET summary = ?, type = ?, updated_at = ?
+		WHERE id = ?`, entry.Summary, entry.Type, sqlutil.FormatTimestamp(entry.UpdatedAt), entry.ID); err != nil {
+		return NamedEntry{}, fmt.Errorf("memory: update: %w", err)
+	}
+	return entry, nil
+}
+
+// Relevant returns the most relevant entries for the workspace based on recency and access patterns.
+func (s *TursoStore) Relevant(ctx context.Context, workspace string, limit int) ([]ScoredEntry, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	const maxWindow = 500
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+		FROM named_memory
+		WHERE workspace = ?
+		ORDER BY last_accessed DESC, updated_at DESC
+		LIMIT ?`, workspace, maxWindow)
+	if err != nil {
+		return nil, fmt.Errorf("memory: relevant: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close relevant rows") }()
+
+	var entries []NamedEntry
+	for rows.Next() {
+		var e NamedEntry
+		var digestsJSON string
+		var createdAt, updatedAt, lastAccess string
+		var sessionID sql.NullString
+		if err := rows.Scan(&e.ID, &e.Name, &e.Type, &e.Workspace, &e.Summary, &e.Result, &digestsJSON, &createdAt, &updatedAt, &lastAccess, &e.AccessCount, &sessionID); err != nil {
+			continue
+		}
+		_ = sqlutil.ScanJSON(digestsJSON, &e.Digests)
+		e.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+		e.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		e.LastAccess, _ = sqlutil.ScanTimestamp(lastAccess)
+		if sessionID.Valid {
+			e.SessionID = sessionID.String
+		}
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory: relevant rows: %w", err)
+	}
+
+	// Score and sort entries
+	scored := make([]ScoredEntry, 0, len(entries))
+	for _, e := range entries {
+		scored = append(scored, ScoredEntry{Entry: e, Score: scoreEntry(e)})
+	}
+	sort.Slice(scored, func(i, j int) bool { return scored[i].Score > scored[j].Score })
+
+	if len(scored) > limit {
+		scored = scored[:limit]
+	}
+	return scored, nil
+}
+
+// SaveFromResult saves a memory entry from skill result data.
+func (s *TursoStore) SaveFromResult(ctx context.Context, name, typ, workspace, summary string, result []byte) (NamedEntry, error) {
+	entry := NamedEntry{
+		Name:      name,
+		Type:      typ,
+		Workspace: workspace,
+		Summary:   summary,
+		Result:    result,
+	}
+	return s.Save(ctx, entry)
+}
+
+// SaveResult stores a result envelope using structured options.
+func (s *TursoStore) SaveResult(ctx context.Context, opts SaveOptions) (NamedEntry, error) {
+	entry := NamedEntry{
+		Name:      opts.Name,
+		Type:      opts.Type,
+		Workspace: opts.Workspace,
+		Summary:   opts.Summary,
+		Result:    opts.Result,
+		SessionID: opts.SessionID,
+	}
+	return s.Save(ctx, entry)
+}
+
+// ListFiltered returns named memories for a workspace with optional filters.
+func (s *TursoStore) ListFiltered(ctx context.Context, workspace string, filter ListFilter, limit, offset int) ([]NamedEntry, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	where := []string{"workspace = ?"}
+	args := []any{workspace}
+
+	if strings.TrimSpace(filter.SessionID) != "" {
+		where = append(where, "session_id = ?")
+		args = append(args, strings.TrimSpace(filter.SessionID))
+	}
+
+	if len(filter.Types) > 0 {
+		placeholders := make([]string, 0, len(filter.Types))
+		for _, t := range filter.Types {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, t)
+		}
+		if len(placeholders) > 0 {
+			where = append(where, fmt.Sprintf("type IN (%s)", strings.Join(placeholders, ",")))
+		}
+	}
+
+	whereSQL := strings.Join(where, " AND ")
+
+	var total int
+	if err := s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM named_memory WHERE %s", whereSQL), args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("memory: list filtered count: %w", err)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+		FROM named_memory
+		WHERE %s
+		ORDER BY updated_at DESC
+		LIMIT ? OFFSET ?`, whereSQL)
+	qArgs := append(append([]any{}, args...), limit, offset)
+
+	rows, err := s.db.QueryContext(ctx, q, qArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("memory: list filtered: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close rows") }()
+
+	var entries []NamedEntry
+	for rows.Next() {
+		var e NamedEntry
+		var digestsJSON string
+		var createdAt, updatedAt, lastAccessed string
+		var result, sessionID sql.NullString
+		if err := rows.Scan(&e.ID, &e.Name, &e.Type, &e.Workspace, &e.Summary, &result, &digestsJSON, &createdAt, &updatedAt, &lastAccessed, &e.AccessCount, &sessionID); err != nil {
+			return nil, 0, fmt.Errorf("memory: scan filtered: %w", err)
+		}
+		if result.Valid {
+			e.Result = []byte(result.String)
+		}
+		_ = sqlutil.ScanJSON(digestsJSON, &e.Digests)
+		if sessionID.Valid {
+			e.SessionID = sessionID.String
+		}
+		e.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+		e.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		e.LastAccess, _ = sqlutil.ScanTimestamp(lastAccessed)
+		entries = append(entries, e)
+	}
+
+	return entries, total, nil
+}
+
+// ListWithoutEmbedding returns memories that don't have embeddings yet.
+func (s *TursoStore) ListWithoutEmbedding(ctx context.Context, workspace string, limit int) ([]NamedEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// Check for NULL or zero-length embedding (F32_BLOB comparison)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, type, workspace, summary, result, digests, created_at, updated_at, last_accessed, access_count, session_id
+		FROM named_memory
+		WHERE workspace = ? AND (embedding IS NULL OR LENGTH(embedding) = 0)
+		ORDER BY updated_at DESC
+		LIMIT ?`, workspace, limit)
+	if err != nil {
+		return nil, fmt.Errorf("memory: list without embedding: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close rows") }()
+
+	var entries []NamedEntry
+	for rows.Next() {
+		var e NamedEntry
+		var digestsJSON string
+		var createdAt, updatedAt, lastAccessed string
+		var result, sessionID sql.NullString
+		if err := rows.Scan(&e.ID, &e.Name, &e.Type, &e.Workspace, &e.Summary, &result, &digestsJSON, &createdAt, &updatedAt, &lastAccessed, &e.AccessCount, &sessionID); err != nil {
+			return nil, fmt.Errorf("memory: scan without embedding: %w", err)
+		}
+		if result.Valid {
+			e.Result = []byte(result.String)
+		}
+		_ = sqlutil.ScanJSON(digestsJSON, &e.Digests)
+		if sessionID.Valid {
+			e.SessionID = sessionID.String
+		}
+		e.CreatedAt, _ = sqlutil.ScanTimestamp(createdAt)
+		e.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAt)
+		e.LastAccess, _ = sqlutil.ScanTimestamp(lastAccessed)
+		entries = append(entries, e)
+	}
+
+	return entries, nil
+}
+
+// ValidateEmbeddingDimensions checks if new embedding dimensions are compatible with existing ones.
+func (s *TursoStore) ValidateEmbeddingDimensions(ctx context.Context, workspace string, dimensions int) error {
+	// TursoStore validates dimensions at open time via vectorDimension field
+	if s.vectorDimension > 0 && dimensions != s.vectorDimension {
+		return fmt.Errorf("memory: dimension mismatch: store configured for %d, got %d", s.vectorDimension, dimensions)
+	}
+	return nil
+}
+
+// SetEmbeddingMetadata stores embedding configuration for a workspace.
+func (s *TursoStore) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMetadata) error {
+	now := timeutil.NowUTC()
+	if meta.CreatedAt.IsZero() {
+		meta.CreatedAt = now
+	}
+	meta.UpdatedAt = now
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO embedding_metadata (workspace, provider, model, dimensions, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace) DO UPDATE SET
+			provider = excluded.provider,
+			model = excluded.model,
+			dimensions = excluded.dimensions,
+			updated_at = excluded.updated_at
+	`, meta.Workspace, meta.Provider, meta.Model, meta.Dimensions,
+		sqlutil.FormatTimestamp(meta.CreatedAt), sqlutil.FormatTimestamp(meta.UpdatedAt))
+	if err != nil {
+		return fmt.Errorf("memory: set embedding metadata: %w", err)
+	}
+	return nil
 }
 
 // scoreEntry is defined in store.go - using same function for both SQLite and Turso

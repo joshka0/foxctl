@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 )
@@ -60,7 +61,7 @@ func TestDetectLanguage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			got := detectLanguage(tt.path)
+			got := langutil.DetectAllowed(tt.path, langutil.CommonCodeLanguages)
 			if got != tt.want {
 				t.Errorf("detectLanguage(%q) = %q, want %q", tt.path, got, tt.want)
 			}

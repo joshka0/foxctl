@@ -1,18 +1,18 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/execution/runner"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
@@ -24,15 +24,14 @@ type SkillRunner struct {
 
 // NewSkillRunner creates a new skill runner.
 func NewSkillRunner(cfg config.Config) *SkillRunner {
-	var searchPaths []string
-
-	// Environment override
-	if env := os.Getenv("AGENTCTL_SKILLS_PATH"); env != "" {
-		searchPaths = append(searchPaths, filepath.SplitList(env)...)
+	searchPaths := append([]string{}, skill.EnvSearchPaths()...)
+	if cfg.Paths.Skills != "" {
+		searchPaths = append(searchPaths, cfg.Paths.Skills)
 	}
-
-	// Configured skills path
-	searchPaths = append(searchPaths, cfg.Paths.Skills)
+	searchPaths = append(searchPaths, skill.UserSearchPaths()...)
+	searchPaths = append(searchPaths, skill.BuiltinSearchPaths()...)
+	searchPaths = append(searchPaths, skill.DevSearchPaths()...)
+	searchPaths = skill.NormalizeSearchPaths(searchPaths)
 
 	return &SkillRunner{
 		cfg:         cfg,
@@ -49,10 +48,10 @@ type SkillHandle struct {
 
 // RunResult contains the result of a skill execution.
 type RunResult struct {
-	Success  bool           `json:"success"`
+	Success  bool            `json:"success"`
 	Output   json.RawMessage `json:"output,omitempty"`
-	Error    string         `json:"error,omitempty"`
-	Duration time.Duration  `json:"duration_ms"`
+	Error    string          `json:"error,omitempty"`
+	Duration time.Duration   `json:"duration_ms"`
 }
 
 // Resolve finds a skill by name.
@@ -116,62 +115,51 @@ func (r *SkillRunner) Run(ctx context.Context, skillName string, input map[strin
 
 	handle, err := r.Resolve(skillName)
 	if err != nil {
-		return &RunResult{
-			Success:  false,
-			Error:    err.Error(),
-			Duration: time.Since(start),
-		}, nil
+		return nil, err
 	}
 
 	// Marshal input to JSON
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return &RunResult{
-			Success:  false,
-			Error:    fmt.Sprintf("failed to marshal input: %v", err),
-			Duration: time.Since(start),
-		}, nil
+		return nil, fmt.Errorf("failed to marshal input: %w", err)
 	}
-
-	// Execute skill based on distribution type
-	var output []byte
-	var runErr error
 
 	switch handle.Manifest.Distribution.Type {
-	case "exec":
-		output, runErr = r.runExec(ctx, handle, inputJSON)
-	case "wasi":
-		return &RunResult{
-			Success:  false,
-			Error:    "WASI execution not yet supported via web API",
-			Duration: time.Since(start),
-		}, nil
+	case "exec", "wasi":
 	default:
-		return &RunResult{
-			Success:  false,
-			Error:    fmt.Sprintf("unknown distribution type: %s", handle.Manifest.Distribution.Type),
-			Duration: time.Since(start),
-		}, nil
+		return nil, fmt.Errorf("unknown distribution type: %s", handle.Manifest.Distribution.Type)
 	}
+
+	stdout, stderr, runErr := runner.RunWithOptions(ctx, runner.RunOptions{
+		Manifest:     handle.Manifest,
+		ArtifactPath: handle.ArtifactPath,
+		Input:        inputJSON,
+		WorkDir:      filepath.Dir(handle.ManifestPath),
+		ExtraEnv: []string{
+			"AGENTCTL_HOME=" + r.cfg.Home,
+			"AGENTCTL_STORAGE_ROOT=" + r.cfg.Storage.Root,
+			"AGENTCTL_CACHE_ROOT=" + r.cfg.Paths.Cache,
+		},
+	})
 
 	duration := time.Since(start)
 
 	if runErr != nil {
-		return &RunResult{
-			Success:  false,
-			Error:    runErr.Error(),
-			Duration: duration,
-		}, nil
+		errMsg := runErr.Error()
+		if len(stderr) > 0 {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, strings.TrimSpace(string(stderr)))
+		}
+		return nil, fmt.Errorf("skill run failed: %s", errMsg)
 	}
 
 	// Try to parse output as JSON
 	var rawOutput json.RawMessage
-	if len(output) > 0 {
-		if json.Valid(output) {
-			rawOutput = output
+	if len(stdout) > 0 {
+		if json.Valid(stdout) {
+			rawOutput = stdout
 		} else {
 			// Wrap non-JSON output
-			rawOutput, _ = json.Marshal(map[string]string{"raw": string(output)})
+			rawOutput, _ = json.Marshal(map[string]string{"raw": string(stdout)})
 		}
 	}
 
@@ -182,43 +170,6 @@ func (r *SkillRunner) Run(ctx context.Context, skillName string, input map[strin
 	}, nil
 }
 
-// runExec runs an exec-type skill.
-func (r *SkillRunner) runExec(ctx context.Context, handle *SkillHandle, input []byte) ([]byte, error) {
-	// Create command
-	cmd := exec.CommandContext(ctx, handle.ArtifactPath)
-
-	// Set up environment
-	cmd.Env = append(os.Environ(),
-		"AGENTCTL_HOME="+r.cfg.Home,
-		"AGENTCTL_STORAGE_ROOT="+r.cfg.Storage.Root,
-		"AGENTCTL_CACHE_ROOT="+r.cfg.Paths.Cache,
-	)
-
-	// Set working directory to skill directory
-	cmd.Dir = filepath.Dir(handle.ManifestPath)
-
-	// Pipe input to stdin
-	cmd.Stdin = bytes.NewReader(input)
-
-	// Capture output
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	// Run the command
-	err := cmd.Run()
-	if err != nil {
-		// Include stderr in error message
-		errMsg := err.Error()
-		if stderr.Len() > 0 {
-			errMsg = fmt.Sprintf("%s: %s", errMsg, strings.TrimSpace(stderr.String()))
-		}
-		return nil, fmt.Errorf("skill execution failed: %s", errMsg)
-	}
-
-	return stdout.Bytes(), nil
-}
-
 // loadSkillDir loads a skill from a directory.
 func loadSkillDir(dir string) (*SkillHandle, error) {
 	manifestPath := filepath.Join(dir, "skill.yaml")
@@ -226,38 +177,12 @@ func loadSkillDir(dir string) (*SkillHandle, error) {
 		return nil, err
 	}
 
-	manifest, err := skill.LoadManifest(manifestPath)
+	manifest, artifact, err := skill.LoadManifestAndArtifactFromDir(dir, skill.ArtifactOptions{})
 	if err != nil {
+		if errors.Is(err, skill.ErrArtifactsMissing) {
+			return nil, fmt.Errorf("skill artifact not found in %s", dir)
+		}
 		return nil, err
-	}
-
-	var artifact string
-	switch manifest.Distribution.Type {
-	case "exec":
-		// Check for binary
-		candidates := []string{
-			filepath.Join(dir, "bin-cgo"),
-			filepath.Join(dir, "bin"),
-		}
-		// Also check for main.go (source skill)
-		if _, err := os.Stat(filepath.Join(dir, "main.go")); err == nil {
-			candidates = append(candidates, dir)
-		}
-		for _, c := range candidates {
-			if info, err := os.Stat(c); err == nil && !info.IsDir() {
-				artifact = c
-				break
-			}
-		}
-	case "wasi":
-		artifact = filepath.Join(dir, "module.wasm")
-		if _, err := os.Stat(artifact); err != nil {
-			artifact = ""
-		}
-	}
-
-	if artifact == "" {
-		return nil, fmt.Errorf("skill artifact not found in %s", dir)
 	}
 
 	return &SkillHandle{

@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "id": "Task_Management_and_Graph_Operations_in_agentctl_20260115_010638",
+  "stableId": "a628ab5a-9cc4-42c0-bfa0-80da616e9d16",
+  "metadata": {
+    "cascadeId": "6fc7789c-0725-4d2d-9a63-39f2e9396df3",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T01:06:38+02:00",
+    "mode": "FAST",
+    "originalPrompt": "Explore: task management and graph operations. Start from: skills/todo/main.go, skills/graph/main.go"
+  },
+  "title": "Task Management and Graph Operations in agentctl",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Task Creation and Dependency Graph Integration",
+      "description": "Traces task creation from todo skill through storage and graph edge creation",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 289,
+          "lineContent": "task, allTasks, err := handleAdd(ctx, store, cfg, workspaceID, addSessionID, in.Add)",
+          "title": "Task Add Operation Entry",
+          "description": "Main entry point for task creation in todo skill"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 680,
+          "lineContent": "added, err := store.Add(ctx, newTask)",
+          "title": "Persist Task to Storage",
+          "description": "Saves task to SQLite database through task store"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 685,
+          "lineContent": "createTaskDependencyEdges(ctx, cfg, workspaceID, added)",
+          "title": "Create Graph Dependencies",
+          "description": "Creates corresponding nodes and edges in the graph system"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 294,
+          "lineContent": "persistPageRanks(ctx, store, workspaceID)",
+          "title": "Update PageRank Scores",
+          "description": "Recomputes and persists PageRank after graph changes"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 2113,
+          "lineContent": "errs.Ignore(graphStore.UpsertEdge(ctx, edge), \"upsert depends_on edge\")",
+          "title": "Create Dependency Edge",
+          "description": "Creates depends_on edge in graph store for task dependencies"
+        }
+      ],
+      "traceTextDiagram": "Todo Skill Main Flow\n├── run() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:251\n│   ├── handleAdd() task creation \u003c-- 1a\n│   │   ├── store.Add() persist task \u003c-- 1b\n│   │   ├── createTaskDependencyEdges() \u003c-- 1c\n│   │   │   ├── graph.Open() store \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2036\n│   │   │   ├── UpsertNode() create nodes \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2053\n│   │   │   └── UpsertEdge() create deps \u003c-- 1e\n│   │   └── persistPageRanks() update scores \u003c-- 1d\n│   └── skillout.Emit() return result \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:580\n└── skillmain.Main() skill runner \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:248",
+      "traceGuide": "# Motivation\n\nManaging complex software projects requires tracking not just individual tasks, but their **interdependencies** and relative importance. The agentctl task management system solves this by treating tasks as nodes in a dependency graph, automatically computing their importance using PageRank algorithms, and maintaining relationships between parent tasks, subtasks, and dependencies. This enables intelligent task prioritization and prevents developers from working on blocked or low-impact tasks.\n\n# Details\n\nWhen a task is created through the todo skill [1a], the system first persists it to SQLite storage [1b], then automatically creates corresponding nodes and edges in the graph database to represent its relationships [1c]. For each dependency, it creates \"depends_on\" edges pointing from the task to its prerequisites [1e], and for parent-child relationships, it creates \"parent_of\" edges. After any structural change, the system recomputes PageRank scores for all tasks in the workspace [1d] using the tasksgraph analyzer, which treats the dependency network as a directed graph and applies Google's PageRank algorithm to determine task importance. The final result is emitted back through the skill framework, providing the caller with task metadata and updated graph metrics."
+    },
+    {
+      "id": "2",
+      "title": "Graph Analysis and PageRank Computation",
+      "description": "Shows how task graphs are analyzed to compute importance metrics",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 460,
+          "lineContent": "insights, err := tasksgraph.NewAnalyzer().Analyze(allTasks, workspaceID)",
+          "title": "Graph Analysis Request",
+          "description": "Initiates graph analysis for task insights"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "lineNumber": 74,
+          "lineContent": "g := simple.NewDirectedGraph()",
+          "title": "Build Directed Graph",
+          "description": "Creates gonum directed graph from task dependencies"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "lineNumber": 98,
+          "lineContent": "pageRanks := network.PageRank(g, 0.85, 1e-6)",
+          "title": "Compute PageRank",
+          "description": "Calculates PageRank scores using gonum network algorithms"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "lineNumber": 117,
+          "lineContent": "criticalPaths := computeCriticalPaths(g, nodeToID)",
+          "title": "Calculate Critical Paths",
+          "description": "Computes longest path scores for task prioritization"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 2024,
+          "lineContent": "if err := store.SetPageRanks(ctx, ranks); err != nil",
+          "title": "Persist PageRank Scores",
+          "description": "Stores computed PageRank values back to task database"
+        }
+      ],
+      "traceTextDiagram": "Graph Analysis System\n├── todo skill requests analysis \u003c-- 2a\n│   ├── NewAnalyzer().Analyze() called \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:42\n│   │   ├── Build directed graph from tasks \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:73\n│   │   │   └── simple.NewDirectedGraph() \u003c-- 2b\n│   │   ├── Compute PageRank scores \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:97\n│   │   │   └── network.PageRank() \u003c-- 2c\n│   │   ├── Calculate critical paths \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:116\n│   │   │   └── computeCriticalPaths() \u003c-- 2d\n│   │   └── Return insights to caller \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:154\n│   └── persistPageRanks() called \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:1998\n│       └── store.SetPageRanks() \u003c-- 2e\n└── Task store updates database \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:659\n    └── SQLite persistence layer \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:180",
+      "traceGuide": "## Motivation\n\nWhen managing hundreds of interconnected tasks, how do you determine which ones are most critical? The system needs to **automatically prioritize tasks** based on their dependencies and importance in the overall project structure. Without intelligent analysis, developers would waste time on low-impact tasks while critical path items remain blocked.\n\n## Details\n\nThe graph analysis system transforms flat task lists into a **dependency network** that reveals true task importance. It builds a directed graph where task dependencies become edges [2b], then applies Google's PageRank algorithm [2c] to measure task authority based on how many other tasks depend on it. Simultaneously, it calculates **critical path scores** [2d] to identify tasks that lie on the longest dependency chains - these are bottlenecks that delay project completion.\n\nThe analysis runs automatically whenever tasks are added, updated, or completed [2a], ensuring priority scores stay current. Results are persisted back to the task database [2e] so they can be used for sorting and recommendations throughout the system. This creates a **self-optimizing task management** system where the most important tasks naturally bubble to the top based on their actual impact on the project."
+    },
+    {
+      "id": "3",
+      "title": "Graph Operations and Node Management",
+      "description": "Low-level graph node and edge manipulation through graph skill",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go",
+          "lineNumber": 118,
+          "lineContent": "store, err := graph.Open(ctx, rc.Config.Storage.Root)",
+          "title": "Open Graph Store",
+          "description": "Initializes SQLite-backed graph storage"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go",
+          "lineNumber": 126,
+          "lineContent": "return handleAddNode(ctx, rc, store, workspace, in.AddNode)",
+          "title": "Handle Node Addition",
+          "description": "Routes to node creation handler"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go",
+          "lineNumber": 163,
+          "lineContent": "if err := store.UpsertNode(ctx, node); err != nil",
+          "title": "Upsert Graph Node",
+          "description": "Creates or updates node in graph database"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/graph/store.go",
+          "lineNumber": 406,
+          "lineContent": "edges, err := store.GetEdgesFrom(ctx, workspace, req.NodeID, edgeTypes)",
+          "title": "Query Graph Edges",
+          "description": "Retrieves edges originating from a specific node"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go",
+          "lineNumber": 301,
+          "lineContent": "neighbors, err := store.GetNeighbors(ctx, workspace, req.NodeID, graph.NeighborOptions{",
+          "title": "Get Node Neighbors",
+          "description": "Finds connected nodes with relationship context"
+        }
+      ],
+      "traceTextDiagram": "Graph Skill Operations Flow\n├── run() main entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go:101\n│   ├── Open graph store \u003c-- 3a\n│   └── Switch on operation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go:124\n│       └── handleAddNode() \u003c-- 3b\n│           ├── Create node struct \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go:153\n│           └── Upsert to database \u003c-- 3c\n├── Query Operations\n│   ├── handleQuery() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/graph/main.go:129\n│   │   └── Get edges from node \u003c-- 3d\n│   └── handleNeighbors() \u003c-- 3e\n│       └── Get connected nodes \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/graph/store.go:442\n└── Store Implementation\n    ├── SQLite operations \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/graph/store.go:139\n    └── Graph traversal logic \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/graph/store.go:907",
+      "traceGuide": "## Motivation\n\nThe graph operations system provides a **unified dependency graph** that tracks relationships between different entities in the agentctl ecosystem - tasks, sessions, code symbols, files, and memories. This solves the problem of **fragmented context** by creating a single source of truth for how different components interact, enabling powerful features like dependency analysis, impact assessment, and intelligent task prioritization.\n\n## Details\n\nThe graph skill operates through a **simple command interface** that opens a SQLite-backed graph store [3a] and routes to specific handlers based on the operation type. The most common flow is node creation, where the system validates input, creates a node struct with metadata, and persists it to the database [3b][3c]. For querying, the system supports both direct edge retrieval [3d] and neighbor discovery [3e], which traverses the graph to find connected entities. The underlying store implementation handles the **complex SQLite operations** and provides graph traversal algorithms for shortest path finding and cycle detection. All nodes are identified using stable IDs that survive renames and refactoring, ensuring the graph remains consistent as the codebase evolves."
+    },
+    {
+      "id": "4",
+      "title": "Task Recommendation and Scoring System",
+      "description": "Shows how overseer combines graph insights with mailbox data for task prioritization",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 491,
+          "lineContent": "scorer := overseer.NewScorer(store, boardStore)",
+          "title": "Create Task Scorer",
+          "description": "Initializes overseer scorer with task and board stores"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 492,
+          "lineContent": "rec, err := scorer.Recommend(ctx, workspaceID, limit)",
+          "title": "Generate Recommendations",
+          "description": "Computes scored task recommendations"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "lineNumber": 91,
+          "lineContent": "insights, err := analyzer.Analyze(pending, workspaceID)",
+          "title": "Analyze Task Graph",
+          "description": "Gets graph insights for pending tasks"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "lineNumber": 166,
+          "lineContent": "score := WeightCriticalPath*normCritPath + WeightPageRank*normPageRank +",
+          "title": "Compute Weighted Score",
+          "description": "Combines multiple factors into final task score"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "lineNumber": 230,
+          "lineContent": "admin, overseerCnt, total, err := s.boardStore.CountMessagesByTask(ctx, workspaceID, t.ID)",
+          "title": "Count Task Messages",
+          "description": "Retrieves mailbox message counts for task weighting"
+        }
+      ],
+      "traceTextDiagram": "Task Recommendation System\n├── todo skill main() \u003c-- 4a\n│   └── scorer.Recommend() \u003c-- 4b\n│       ├── analyzer.Analyze() \u003c-- 4c\n│       │   └── compute graph metrics \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:50\n│       ├── getTaskMailCounts() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:221\n│       │   └── boardStore.CountMessagesByTask() \u003c-- 4e\n│       └── compute weighted scores \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:166\n│           ├── normalize critical path \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:137\n│           ├── normalize pagerank \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:143\n│           ├── normalize mail counts \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:157\n│           └── apply formula weights \u003c-- 4d\n└── overseer scoring engine \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:51\n    └── combines graph insights + mailbox \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:65",
+      "traceGuide": "## Motivation\n\nWhen you have dozens of pending tasks across a project, **how do you decide what to work on next?** The overseer scoring system solves this problem by automatically ranking tasks based on multiple factors: critical path importance (tasks that block others), graph centrality (important hub tasks), unread admin/overseer messages, and recency. This creates an intelligent task queue that adapts to your project's dependency structure and communication patterns.\n\n## Details\n\nThe recommendation system starts in the todo skill [4a] where a `Scorer` is created with access to both task storage and the mailbox system. The core `Recommend()` function [4b] first analyzes the task dependency graph using the tasksgraph analyzer [4c] to compute PageRank and critical path scores. It then retrieves message counts per task from the blackboard mailbox system [4e] to incorporate communication urgency. \n\nThe scoring algorithm normalizes all inputs to 0-1 ranges and applies weighted factors: 30% critical path, 20% PageRank, 25% admin messages, 15% overseer messages, and 10% recency [4d]. This prevents any single factor from dominating and ensures balanced recommendations. The final output is a sorted list of scored tasks with the top recommendation highlighted, giving developers a data-driven starting point for their work sessions."
+    },
+    {
+      "id": "5",
+      "title": "Task Storage and Persistence Layer",
+      "description": "Core SQLite persistence operations for task management",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 254,
+          "lineContent": "store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)",
+          "title": "Open Task Store",
+          "description": "Initializes SQLite-backed task storage"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 330,
+          "lineContent": "allTasks, err := store.ListByWorkspace(ctx, workspaceID)",
+          "title": "List Workspace Tasks",
+          "description": "Retrieves all tasks for a workspace"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 725,
+          "lineContent": "task, err := store.Get(ctx, req.ID)",
+          "title": "Get Single Task",
+          "description": "Retrieves specific task by ID"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 766,
+          "lineContent": "updated, err := store.Update(ctx, task)",
+          "title": "Update Task",
+          "description": "Persists task modifications to database"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "lineNumber": 350,
+          "lineContent": "_, err = s.db.ExecContext(ctx, `INSERT INTO tasks (id, workspace_id, title, description",
+          "title": "Execute SQL Insert",
+          "description": "Low-level SQL execution for task persistence"
+        }
+      ],
+      "traceTextDiagram": "Task Storage Persistence Layer\n├── sessionkit.OpenTasks() \u003c-- 5a\n│   └── SQLite database initialization \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:182\n├── Task CRUD Operations\n│   ├── ListByWorkspace() \u003c-- 5b\n│   │   └── SQL SELECT with workspace filter \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:418\n│   ├── Get() for single task \u003c-- 5c\n│   │   └── SQL SELECT by primary key \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:410\n│   ├── Update() task changes \u003c-- 5d\n│   │   └── SQL UPDATE with new values \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:386\n│   └── Add() new task creation \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:312\n│       └── SQL INSERT execution \u003c-- 5e\n└── Connection management\n    └── Store.Close() cleanup \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:190",
+      "traceGuide": "## Motivation\n\nManaging complex software projects requires **persistent task tracking** with dependency relationships. The agentctl task storage system solves this by providing a SQLite-backed database that maintains task state across sessions, supports workspace isolation, and enables sophisticated graph-based analysis for task prioritization and dependency management.\n\n## Details\n\nThe storage layer centers around the `Store` interface which provides **CRUD operations** for tasks with workspace scoping [5a]. Tasks are stored with rich metadata including dependencies, parent-child relationships, session tracking, and review gate status. The system uses standard SQL operations for persistence - SELECT queries for retrieval [5b][5c], UPDATE statements for modifications [5d], and INSERT for new tasks [5e]. \n\nKey architectural decisions include:\n- **Workspace isolation** ensures task separation between projects\n- **SQLite persistence** provides reliable local storage without external dependencies  \n- **Graph integration** automatically creates dependency edges in the parallel graph system\n- **PageRank persistence** stores computed importance scores for task prioritization\n- **Connection management** handles database lifecycle with proper cleanup [5c]\n\nThe storage layer serves as the foundation for higher-level features like graph analysis, overseer scoring, and semantic search, making it the critical persistence backbone of the entire task management system."
+    }
+  ],
+  "description": "Comprehensive task management system with dependency graph operations, showing integration between todo skill [1a], graph analysis [2b], overseer scoring [4d], and SQLite persistence [5e]. Key flows include task creation with automatic graph edge creation [1e], PageRank computation [2c], and intelligent task recommendation [4b].",
+  "mermaidDiagram": "graph TB\n    subgraph Storage[\"Storage Layer\"]\n        5a[\"5a: Open Task Store\"]\n        5b[\"5b: List Workspace Tasks\"]\n        5c[\"5c: Get Single Task\"]\n        5d[\"5d: Update Task\"]\n        5e[\"5e: Execute SQL Insert\"]\n    end\n    \n    subgraph TaskMgmt[\"Task Management\"]\n        1a[\"1a: Task Add Operation\"]\n        1b[\"1b: Persist Task to Storage\"]\n        1c[\"1c: Create Graph Dependencies\"]\n        1d[\"1d: Update PageRank Scores\"]\n    end\n    \n    subgraph GraphOps[\"Graph Operations\"]\n        3a[\"3a: Open Graph Store\"]\n        3b[\"3b: Handle Node Addition\"]\n        3c[\"3c: Upsert Graph Node\"]\n        3d[\"3d: Query Graph Edges\"]\n        3e[\"3e: Get Node Neighbors\"]\n    end\n    \n    subgraph Analysis[\"Graph Analysis\"]\n        2a[\"2a: Graph Analysis Request\"]\n        2b[\"2b: Build Directed Graph\"]\n        2c[\"2c: Compute PageRank\"]\n        2d[\"2d: Calculate Critical Paths\"]\n        2e[\"2e: Persist PageRank Scores\"]\n    end\n    \n    subgraph Recommendation[\"Task Recommendation\"]\n        4a[\"4a: Create Task Scorer\"]\n        4b[\"4b: Generate Recommendations\"]\n        4c[\"4c: Analyze Task Graph\"]\n        4d[\"4d: Compute Weighted Score\"]\n        4e[\"4e: Count Task Messages\"]\n    end\n    \n    1a --\u003e|saves task| 1b\n    1b --\u003e|persists| 5e\n    1b --\u003e|reads tasks| 5b\n    1a --\u003e|triggers| 1c\n    1c --\u003e|creates edges| 3c\n    1a --\u003e|triggers| 1d\n    1d --\u003e|analyzes graph| 2a\n    \n    2a --\u003e|reads tasks| 5b\n    2a --\u003e|builds graph| 2b\n    2b --\u003e|computes| 2c\n    2b --\u003e|computes| 2d\n    2c --\u003e|writes scores| 2e\n    2e --\u003e|persists| 5d\n    \n    3a --\u003e|initializes| 3b\n    3b --\u003e|upserts| 3c\n    3c --\u003e|queries| 3d\n    3d --\u003e|retrieves| 3e\n    \n    4b --\u003e|uses scorer| 4a\n    4b --\u003e|analyzes| 4c\n    4c --\u003e|computes graph| 2a\n    4d --\u003e|weights factors| 4b\n    4e --\u003e|reads mailbox| 4b\n    \n    5a --\u003e|initializes| 5b\n    5b --\u003e|queries| 5c\n    5c --\u003e|updates| 5d\n    \n    style Storage fill:#a5d8ff\n    style TaskMgmt fill:#fcc2d7\n    style GraphOps fill:#99e9f2\n    style Analysis fill:#d0bfff\n    style Recommendation fill:#ffec99"
+}

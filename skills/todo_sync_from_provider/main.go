@@ -10,7 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/providers/claude/todos"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/todosync"
 )
 
@@ -37,6 +37,7 @@ type output struct {
 	Created   int      `json:"created"`
 	Updated   int      `json:"updated"`
 	Completed int      `json:"completed"`
+	Removed   int      `json:"removed"`
 	Mapped    int      `json:"mapped"`
 	Unmapped  int      `json:"unmapped"`
 	DepsAdded int      `json:"deps_added"`
@@ -50,11 +51,11 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Open task store
-	taskStore, err := tasks.Open(ctx, rc.Config.Storage.Root)
+	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err != nil {
 		return err
 	}
-	defer taskStore.Close()
+	defer cleanup()
 
 	// Resolve session ID
 	sessionID := in.SessionID
@@ -94,6 +95,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		Created:   result.Created,
 		Updated:   result.Updated,
 		Completed: result.Completed,
+		Removed:   result.Removed,
 		Mapped:    result.Mapped,
 		Unmapped:  result.Unmapped,
 		DepsAdded: result.DepsAdded,

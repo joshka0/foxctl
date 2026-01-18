@@ -171,6 +171,88 @@ const ANCHOR_TRIGGER = /(^|\b)(anchor this|anchor it|anchor prompt|@anchor|\/anc
 const TODO_TRIGGER = /(^|\b)(\/todo)(\b|$)/i;
 const COUNSEL_TRIGGER = /(^|\s)\/counsel(\s|$)/i;
 const CONTEXT_TRIGGER = /(^|\s)\/context(\s|$)/i;
+const STRICT_TRIGGER = /^\s*@(strict|agentctl)\s*(on|off|enable|disable|status|1|0|true|false)?\s*$/i;
+
+// Agentctl mode state per workspace (in-memory, synced with SQLite via skill)
+const agentctlModeByWorkspace = new Map<string, boolean>();
+
+/**
+ * Check if agentctl mode is enabled for workspace
+ */
+async function isAgentctlModeEnabled(workspace: string): Promise<boolean> {
+  // Check in-memory first
+  if (agentctlModeByWorkspace.has(workspace)) {
+    return agentctlModeByWorkspace.get(workspace) || false;
+  }
+
+  // Load from persistent storage via skill
+  const result = await runSkill<{ enabled?: boolean }>(
+    "setup/agentctl_mode",
+    { operation: "get", workspace_id: workspace },
+    { workspace, ephemeral: true, timeout: 2000 }
+  ).catch(() => ({ success: false, data: undefined }));
+
+  const enabled = result.success && result.data?.enabled === true;
+  agentctlModeByWorkspace.set(workspace, enabled);
+  return enabled;
+}
+
+/**
+ * Set agentctl mode for workspace
+ */
+async function setAgentctlMode(workspace: string, enabled: boolean): Promise<boolean> {
+  const result = await runSkill(
+    "setup/agentctl_mode",
+    { operation: "set", workspace_id: workspace, enabled },
+    { workspace, ephemeral: true, timeout: 2000 }
+  ).catch(() => ({ success: false }));
+
+  if (result.success) {
+    agentctlModeByWorkspace.set(workspace, enabled);
+  }
+  return result.success;
+}
+
+// Skill advisor patterns - suggest relevant agentctl skills based on prompt
+const SKILL_PATTERNS: Array<{ pattern: RegExp; hint: string }> = [
+  // CI/PR patterns
+  {
+    pattern: /(pr\s+comment|review\s+comment|reviewer|what\s+did.*say|feedback\s+on\s+pr)/i,
+    hint: "**Skill hint:** Check PR comments:\n```bash\nagentctl run ci/prcomments --input '{\"pr\": <number>}'\n```",
+  },
+  {
+    pattern: /(ci\s+status|build\s+status|check.*fail|pipeline|workflow.*fail|github.*action)/i,
+    hint: "**Skill hint:** Check CI status:\n```bash\nagentctl run ci/checks --input '{\"pr\": <number>}'\n```",
+  },
+  // Search patterns
+  {
+    pattern: /(semantic.*search|search.*semantic|vector.*search)/i,
+    hint: "**Skill hint:** Semantic code search:\n```bash\nagentctl run code/semantic_search --input '{\"query\": \"<your query>\"}'\n```",
+  },
+  {
+    pattern: /(investigate|dig\s+into|explore.*code|understand.*how|figure\s+out)/i,
+    hint: "**Skill hint:** Code investigation:\n```bash\nagentctl run code/smart_search --input '{\"query\": \"<pattern>\"}'\n```",
+  },
+  // Code analysis patterns
+  {
+    pattern: /(complexity|how\s+complex|cyclomatic|cognitive)/i,
+    hint: "**Skill hint:** Code complexity analysis:\n```bash\nagentctl run code/complexity --input '{\"path\": \"<file_or_dir>\"}'\n```",
+  },
+  {
+    pattern: /(security|vulnerabilities|secrets|audit)/i,
+    hint: "**Skill hint:** Security scan:\n```bash\nagentctl run code/security --input '{\"path\": \".\"}'\n```",
+  },
+  // Session patterns
+  {
+    pattern: /(past\s+session|session\s+history|what\s+did\s+we\s+discuss|previous.*session)/i,
+    hint: "**Skill hint:** Session recall:\n```bash\nagentctl run session/recall --input '{\"query\": \"<topic>\"}'\n```",
+  },
+  // Memory patterns
+  {
+    pattern: /(gotcha|learned|remember.*that|don't\s+forget)/i,
+    hint: "**Skill hint:** Save a memory:\n```bash\nagentctl memory put --name \"gotcha-<topic>\" --type gotcha --summary \"<learning>\"\n```",
+  },
+];
 
 // Track file reads per session for counsel suggestion
 const fileReadsPerSession = new Map<string, Set<string>>();
@@ -896,10 +978,205 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       output: { parts: any[] }
     ): Promise<void> => {
       const text = partsToText(output.parts);
+
+      // Handle @strict/@agentctl commands first
+      const strictMatch = text.match(STRICT_TRIGGER);
+      if (strictMatch) {
+        const cmd = (strictMatch[2] || "status").toLowerCase();
+        const isEnable = ["on", "enable", "1", "true"].includes(cmd);
+        const isDisable = ["off", "disable", "0", "false"].includes(cmd);
+
+        if (isEnable) {
+          const success = await setAgentctlMode(workspace, true);
+          if (success) {
+            await writePendingContext(
+              input.sessionID,
+              "Agentctl Mode",
+              `**Agentctl Mode: ENABLED**
+
+Tool redirections active:
+- Edit/Write/MultiEdit → fs/apply_edit (dry-run preview)
+- Grep → code/smart_search (semantic + snippet extraction)
+- Glob → code/semantic_search (vector similarity)
+- Read (large files) → symbols outline + navigation
+
+Use \`@strict off\` to disable.`
+            );
+          }
+        } else if (isDisable) {
+          const success = await setAgentctlMode(workspace, false);
+          if (success) {
+            await writePendingContext(
+              input.sessionID,
+              "Agentctl Mode",
+              `**Agentctl Mode: DISABLED**
+
+Default tool behavior restored. Use \`@strict on\` to re-enable.`
+            );
+          }
+        } else {
+          // Status check
+          const enabled = await isAgentctlModeEnabled(workspace);
+          await writePendingContext(
+            input.sessionID,
+            "Agentctl Mode",
+            enabled
+              ? `**Agentctl Mode: ENABLED**
+
+Tool redirections:
+- Edit/Write/MultiEdit → fs/apply_edit
+- Grep → code/smart_search
+- Glob → code/semantic_search
+- Read (large files) → symbols outline`
+              : `**Agentctl Mode: DISABLED** (use \`@strict on\` to enable)`
+          );
+        }
+        return; // Don't process further
+      }
+
       const hasAnchor = ANCHOR_TRIGGER.test(text);
       const hasTodo = TODO_TRIGGER.test(text);
       const hasCounsel = COUNSEL_TRIGGER.test(text);
       const hasContext = CONTEXT_TRIGGER.test(text);
+
+      // Skill advisor - check for patterns and suggest skills (runs even without slash commands)
+      if (process.env.AGENTCTL_SKILL_ADVISOR_DISABLED !== "1" && text.length >= 10) {
+        for (const { pattern, hint } of SKILL_PATTERNS) {
+          if (pattern.test(text)) {
+            await writePendingContext(input.sessionID, "Skill Advisor", hint, 60_000);
+            break; // Only show first matching hint
+          }
+        }
+      }
+
+      // Keyword triggers - execute skills based on natural language patterns
+      const textLower = text.toLowerCase();
+
+      // Recall patterns - "how did we", "recall", "remember when"
+      const RECALL_PATTERN = /(how did (we|i)|where did (we|i)|what was the|when did (we|i)|recall|remember when|previously|earlier we|last time|didn't (we|i) already|like before|as we discussed)/i;
+      if (RECALL_PATTERN.test(textLower)) {
+        const query = text.replace(RECALL_PATTERN, "").trim();
+        if (query.length > 3) {
+          const memResult = await runSkill<{
+            results?: Array<{ type?: string; summary?: string }>;
+          }>(
+            "memory/search",
+            { query, limit: 5 },
+            { workspace, ephemeral: true, timeout: 5000 }
+          ).catch(() => ({ success: false, data: undefined }));
+
+          if (memResult.success && memResult.data?.results?.length) {
+            const formatted = memResult.data.results
+              .slice(0, 5)
+              .map((m) => `- [${m.type || "memory"}] ${(m.summary || "").slice(0, 80)}`)
+              .join("\n");
+            await writePendingContext(
+              input.sessionID,
+              "Recall Results",
+              `**Recall for:** ${query}\n\n**Memories:**\n${formatted}`
+            );
+          } else {
+            await writePendingContext(
+              input.sessionID,
+              "Recall",
+              `No matching memories found for "${query}". Try \`agentctl run session/recall\` for session history.`
+            );
+          }
+        }
+      }
+
+      // Memory save patterns - "remember", "gotcha", "learned"
+      const MEMORY_SAVE_PATTERN = /^(remember|note|gotcha|learned|important|decision):?/i;
+      const MEMORY_SAVE_INLINE = /(remember this|note this|save this|don't forget|the trick is|the key is|turns out|watch out)/i;
+      if (MEMORY_SAVE_PATTERN.test(textLower) || MEMORY_SAVE_INLINE.test(textLower)) {
+        // Determine memory type
+        let memType = "context";
+        if (/^gotcha/i.test(textLower) || /(trick|watch out|careful)/i.test(textLower)) {
+          memType = "gotcha";
+        } else if (/^learned/i.test(textLower) || /(turns out|realized)/i.test(textLower)) {
+          memType = "learning";
+        } else if (/^decision/i.test(textLower)) {
+          memType = "decision";
+        }
+
+        const content = text.replace(MEMORY_SAVE_PATTERN, "").replace(MEMORY_SAVE_INLINE, "").trim();
+        if (content.length > 10) {
+          const saveResult = await runSkill<{ id?: string }>(
+            "memory/put",
+            { summary: content, type: memType },
+            { workspace, ephemeral: true, timeout: 3000 }
+          ).catch(() => ({ success: false, data: undefined }));
+
+          if (saveResult.success) {
+            await writePendingContext(
+              input.sessionID,
+              "Memory Saved",
+              `**[${memType}]:** ${content.slice(0, 100)}${content.length > 100 ? "..." : ""}\nID: ${saveResult.data?.id || "saved"}`
+            );
+          }
+        } else {
+          await writePendingContext(
+            input.sessionID,
+            "Memory Hint",
+            `Detected ${memType} pattern. Add more detail to auto-save.`
+          );
+        }
+      }
+
+      // Semantic search patterns - "search for", "find the", "where is"
+      const SEARCH_PATTERN = /^(search|find|query|where is|look for)/i;
+      const SEARCH_INLINE = /(search for|find the|locate)/i;
+      if (SEARCH_PATTERN.test(textLower) || SEARCH_INLINE.test(textLower)) {
+        const query = text.replace(SEARCH_PATTERN, "").replace(SEARCH_INLINE, "").trim();
+        if (query.length > 3) {
+          const searchResult = await runSkill<{
+            results?: Array<{ path?: string; line?: number; snippet?: string; symbol?: string }>;
+          }>(
+            "code/semantic_search",
+            { query, limit: 8 },
+            { workspace, ephemeral: true, timeout: 8000 }
+          ).catch(() => ({ success: false, data: undefined }));
+
+          if (searchResult.success && searchResult.data?.results?.length) {
+            const formatted = searchResult.data.results
+              .slice(0, 8)
+              .map((r) => `- ${r.path || "?"}:${r.line || "?"} — ${(r.snippet || r.symbol || "").slice(0, 50)}`)
+              .join("\n");
+            await writePendingContext(
+              input.sessionID,
+              "Semantic Search",
+              `**Search for:** ${query}\n\n${formatted}\n\n*Use \`code/snippet_extract\` for full context.*`
+            );
+          }
+        }
+      }
+
+      // Codemap patterns - "trace", "how does...connect", "architecture of"
+      const CODEMAP_PATTERN = /(trace|codemap|how does.*connect|flow of|architecture of)/i;
+      if (CODEMAP_PATTERN.test(textLower)) {
+        const query = text.replace(/^(trace|codemap|how does|show me the)/i, "").trim();
+        if (query.length > 3) {
+          const listResult = await runSkill<{
+            codemaps?: Array<{ id?: string; query?: string }>;
+          }>(
+            "codemap/list",
+            { limit: 5 },
+            { workspace, ephemeral: true, timeout: 3000 }
+          ).catch(() => ({ success: false, data: undefined }));
+
+          const maps = listResult.success && listResult.data?.codemaps?.length
+            ? listResult.data.codemaps
+                .slice(0, 5)
+                .map((m) => `- \`${m.id || "?"}\`: ${(m.query || "").slice(0, 60)}`)
+                .join("\n")
+            : "(no codemaps)";
+          await writePendingContext(
+            input.sessionID,
+            "Codemap Search",
+            `**Codemap for:** ${query}\n\n**Existing codemaps:**\n${maps}\n\n*Generate new: \`agentctl run codemap/generate --input '{"query": "..."}'\`*`
+          );
+        }
+      }
 
       if (!hasAnchor && !hasTodo && !hasCounsel && !hasContext) {
         return;
@@ -1242,6 +1519,145 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
       const sessionID = input.sessionID;
       const args = output.args;
 
+      // =========================================================================
+      // AGENTCTL MODE - Block/redirect tools when enabled
+      // =========================================================================
+      const agentctlModeEnabled = await isAgentctlModeEnabled(workspace);
+      if (agentctlModeEnabled) {
+        const tool = input.tool;
+
+        // Self-protection: block edits to hook files and settings
+        if (tool === "Edit" || tool === "Write" || tool === "MultiEdit") {
+          const editPath = (args.file_path || args.path || "") as string;
+          if (editPath.includes("/.opencode/") || editPath.includes("/opencode-hooks/")) {
+            throw new Error(
+              "**[Agentctl Mode] Cannot edit plugin files while enabled.**\n\nUse `@strict off` first to modify plugins."
+            );
+          }
+          if (editPath.includes("/settings.json") || editPath.includes("/config.json")) {
+            throw new Error(
+              "**[Agentctl Mode] Cannot edit settings while enabled.**\n\nUse `@strict off` first to modify settings."
+            );
+          }
+
+          // Block Edit/Write - redirect to fs/apply_edit
+          const filePath = editPath;
+          throw new Error(
+            `**[Agentctl Mode] Use search/replace via fs/apply_edit**
+
+**Workflow:**
+1. **Get exact text**: \`agentctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
+2. **Preview change**: \`agentctl run fs/apply_edit --input '{"path": "${filePath}", "edits": [{"search": "exact old text", "replace": "new text"}], "dry_run": true}'\`
+3. **Apply**: Set \`dry_run: false\`
+
+**Tips:**
+- \`search\` must match exactly (copy from context_grep output)
+- Multiple edits: \`"edits": [{...}, {...}]\`
+- Use \`--input-file\` for complex edits`
+          );
+        }
+
+        // Block Grep - redirect to code/smart_search
+        if (tool === "Grep") {
+          const pattern = (args.pattern || "") as string;
+          throw new Error(
+            `**[Agentctl Mode] Smart Search via code/smart_search**
+
+> Direct: \`agentctl run code/smart_search --input '{"question": "${pattern.replace(/'/g, "\\'")}"}'\`
+> Params: \`limits.max_candidates\`, \`limits.max_snippets\` to control output size.`
+          );
+        }
+
+        // Block Glob - redirect to code/semantic_search
+        if (tool === "Glob") {
+          const pattern = (args.pattern || "") as string;
+          throw new Error(
+            `**[Agentctl Mode] Semantic Search via code/semantic_search**
+
+> Direct: \`agentctl run code/semantic_search --input '{"query": "${pattern.replace(/'/g, "\\'")}","scope": ["symbols"], "limit": 10}'\`
+> Scopes: \`symbols\`, \`memory\`, \`codemaps\`. Uses vector embeddings.
+> Memory scope supports date-based search (e.g., "January gotchas", "2026 decisions").`
+          );
+        }
+
+        // Block Read for large files - redirect to symbols/context_grep
+        if (tool === "Read") {
+          const filePath = (args.file_path || args.path || "") as string;
+          const offset = (args.offset || 0) as number;
+          const limit = (args.limit || 0) as number;
+
+          // Allow specific line ranges
+          if (offset > 0 || limit > 0) {
+            // Allow - user specified a range
+          } else if (filePath) {
+            // Check file size via skill
+            const sizeResult = await runSkill<{ line_count?: number }>(
+              "fs/stat",
+              { path: filePath },
+              { workspace, ephemeral: true, timeout: 2000 }
+            ).catch(() => ({ success: false, data: { line_count: 0 } }));
+
+            const lineCount = sizeResult.data?.line_count || 0;
+            if (lineCount > 300) {
+              // Large file - show symbols instead
+              const fileName = filePath.split("/").pop() || filePath;
+
+              const symbolsResult = await runSkill<{
+                symbols?: Array<{ name: string; type: string; line: number }>;
+              }>(
+                "code/symbols",
+                { path: filePath, max_results: 30 },
+                { workspace, ephemeral: true, timeout: 5000 }
+              ).catch(() => ({ success: false, data: undefined }));
+
+              const symbolsList = symbolsResult.success && symbolsResult.data?.symbols?.length
+                ? symbolsResult.data.symbols
+                    .slice(0, 30)
+                    .map((s) => `- ${s.type} \`${s.name}\` (line ${s.line})`)
+                    .join("\n")
+                : "(no symbols found)";
+
+              // Search for relevant gotchas
+              const gotchasResult = await runSkill<{
+                results?: Array<{ name?: string; summary?: string; snippet?: string }>;
+              }>(
+                "code/semantic_search",
+                { query: `${fileName} gotchas`, scope: "memory", limit: 3 },
+                { workspace, ephemeral: true, timeout: 3000 }
+              ).catch(() => ({ success: false, data: undefined }));
+
+              let gotchasSection = "";
+              if (gotchasResult.success && gotchasResult.data?.results?.length) {
+                const gotchasList = gotchasResult.data.results
+                  .slice(0, 2)
+                  .map((g) => `- **${g.name || "gotcha"}**: ${(g.snippet || g.summary || "").split("\n")[0]}`)
+                  .join("\n");
+                gotchasSection = `\n\n**Relevant Gotchas:**\n${gotchasList}`;
+              }
+
+              throw new Error(
+                `**[Agentctl Mode] Large File: ${fileName} (${lineCount} lines)**
+
+**Symbols:**
+${symbolsList}${gotchasSection}
+
+**To read specific lines:**
+  \`agentctl run code/context_grep --input '{"mode": "line", "file_path": "${filePath}", "line_start": N, "line_end": M}'\`
+
+**To search by concept:**
+  \`agentctl run code/semantic_search --input '{"query": "your concept here"}'\`
+
+**To read full file anyway (${lineCount} lines):**
+  \`agentctl run fs/read --input '{"path": "${filePath}"}'\``
+              );
+            }
+          }
+        }
+      }
+      // =========================================================================
+      // END AGENTCTL MODE
+      // =========================================================================
+
       if (input.tool === "Edit" || input.tool === "Write") {
         const filePath = (args.file_path || args.path) as string;
         if (filePath) {
@@ -1401,6 +1817,85 @@ export const AgentctlPlugin: Plugin = async ({ client, directory, $ }) => {
             { paths: [filePath], workspace },
             { workspace, ephemeral: true, timeout: 5000 }
           ).catch(() => {});
+
+          // LSP Diagnostics - run language-specific linting after edits
+          if (process.env.AGENTCTL_LSP_DIAG_DISABLED !== "1") {
+            const lspResult = await runSkill<{
+              diagnostics?: Array<{ line: number; col?: number; message: string; severity?: string }>;
+              error_count?: number;
+            }>(
+              "code/lsp_check",
+              { path: filePath, max_errors: 10 },
+              { workspace, ephemeral: true, timeout: 10000 }
+            ).catch(() => ({ success: false, data: undefined }));
+
+            if (lspResult.success && lspResult.data?.diagnostics?.length) {
+              const formatted = lspResult.data.diagnostics
+                .slice(0, 5)
+                .map((d) => `- ${d.severity || "Error"} [L${d.line}${d.col ? `:${d.col}` : ""}]: ${d.message}`)
+                .join("\n");
+              await writePendingContext(
+                input.sessionID,
+                `LSP Diagnostics: ${filePath.split("/").pop()}`,
+                `**${lspResult.data.error_count ?? lspResult.data.diagnostics.length} issues found:**\n${formatted}`
+              );
+            }
+          }
+
+          // Code complexity warning after edits
+          if (process.env.AGENTCTL_COMPLEXITY_DISABLED !== "1") {
+            const complexityResult = await runSkill<{
+              hotspots?: Array<{ name: string; complexity: number; line: number }>;
+            }>(
+              "code/complexity",
+              { path: filePath, threshold: 15, analysis_mode: "hotspots", max_results: 3 },
+              { workspace, ephemeral: true, timeout: 5000 }
+            ).catch(() => ({ success: false, data: undefined }));
+
+            if (complexityResult.success && complexityResult.data?.hotspots?.length) {
+              const formatted = complexityResult.data.hotspots
+                .map((h) => `- \`${h.name}\` (L${h.line}): complexity ${h.complexity}`)
+                .join("\n");
+              await writePendingContext(
+                input.sessionID,
+                "Complexity Warning",
+                `**High complexity functions detected:**\n${formatted}\n\nConsider refactoring.`
+              );
+            }
+          }
+        }
+      }
+
+      // TodoWrite sync - sync todos with agentctl and prompt for memories on completion
+      if (input.tool === "TodoWrite") {
+        const todos = output.metadata?.todos as Array<{ content?: string; status?: string }> | undefined;
+        if (todos?.length) {
+          // Sync todos with agentctl task system
+          runSkill(
+            "todo/sync_from_provider",
+            {
+              workspace_id: workspace,
+              session_id: input.sessionID,
+              provider: "opencode",
+              todos: todos.map((t) => ({
+                title: t.content || "",
+                status: t.status || "pending",
+              })),
+            },
+            { workspace, ephemeral: true, timeout: 5000 }
+          ).catch(() => {});
+
+          // Memory prompt on task completion
+          if (process.env.AGENTCTL_MEMORY_PROMPT_DISABLED !== "1") {
+            const completedTasks = todos.filter((t) => t.status === "completed");
+            if (completedTasks.length > 0) {
+              const taskNames = completedTasks.map((t) => t.content).filter(Boolean).join(", ");
+              const hint = completedTasks.length === 1
+                ? `**Memory prompt:** Task completed: "${taskNames}"\n\nIf you learned something useful or encountered a gotcha, save it:\n\`agentctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``
+                : `**Memory prompt:** Completed ${completedTasks.length} tasks.\n\nIf you learned something useful or encountered gotchas, save them:\n\`agentctl memory put --name "gotcha-<topic>" --type gotcha --summary "<learning>"\``;
+              await writePendingContext(input.sessionID, "Memory Prompt", hint);
+            }
+          }
         }
       }
 

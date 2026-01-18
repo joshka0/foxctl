@@ -2,6 +2,7 @@ package consolews
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -11,10 +12,13 @@ import (
 )
 
 // persistAsync runs a persistence function asynchronously with a timeout.
-// Logs errors but does not block the caller.
-func persistAsync(log zerolog.Logger, name string, fn func(ctx context.Context) error) {
+// The goroutine is tracked by wg for graceful shutdown, and derives its
+// context from parentCtx (FC/IS compliant - no context.Background()).
+func persistAsync(parentCtx context.Context, wg *sync.WaitGroup, log zerolog.Logger, name string, fn func(ctx context.Context) error) {
+	wg.Add(1)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 		defer cancel()
 		if err := fn(ctx); err != nil {
 			log.Error().Err(err).Str("op", name).Msg("persistence failed")

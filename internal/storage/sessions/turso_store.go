@@ -11,6 +11,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 
@@ -142,10 +143,12 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 			tool_invocations INTEGER DEFAULT 0,
 			total_tokens INTEGER DEFAULT 0,
 			raw_jsonl_path TEXT,
+			content_hash TEXT,
 			embedding F32_BLOB(%d),
 			embedding_model TEXT,
 			parent_session_id TEXT,
 			agent_id TEXT NOT NULL DEFAULT 'agentctl',
+			agent_type TEXT NOT NULL DEFAULT 'claude',
 			status TEXT NOT NULL DEFAULT 'ok',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -194,7 +197,9 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 	}{
 		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT"},
 		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl'"},
+		{"agent_type", "ALTER TABLE sessions ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'claude'"},
 		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'"},
+		{"content_hash", "ALTER TABLE sessions ADD COLUMN content_hash TEXT"},
 	}
 	for _, m := range columnMigrations {
 		// Try to add the column - ignore error if it already exists
@@ -209,6 +214,7 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		`CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_workspace_agent ON sessions(workspace_path, agent_id, started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_content_hash ON sessions(content_hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_session_edges_from ON session_edges(from_session)`,
 		`CREATE INDEX IF NOT EXISTS idx_session_edges_to ON session_edges(to_session)`,
 	}
@@ -279,6 +285,51 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int)
 		return fmt.Errorf("insert chunks metadata: %w", err)
 	}
 
+	// Create session_chunk_summaries table for persisted chunk-level summaries
+	_, err = db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS session_chunk_summaries (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			window_index INTEGER NOT NULL,
+			trigger TEXT,
+			chunk_indices TEXT NOT NULL,
+			chunk_index_min INTEGER,
+			chunk_index_max INTEGER,
+			tools TEXT,
+			files TEXT,
+			errors TEXT,
+			summary TEXT NOT NULL,
+			summary_model TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+			UNIQUE(session_id, window_index, chunk_indices)
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("create session_chunk_summaries table: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_min INTEGER`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("add chunk_index_min column: %w", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_max INTEGER`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("add chunk_index_max column: %w", err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chunk_summaries_session ON session_chunk_summaries(session_id)`); err != nil {
+		return fmt.Errorf("create chunk summary index: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chunk_summaries_window ON session_chunk_summaries(session_id, window_index)`); err != nil {
+		return fmt.Errorf("create chunk summary index: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_chunk_summaries_range ON session_chunk_summaries(session_id, window_index, chunk_index_min, chunk_index_max)`); err != nil {
+		return fmt.Errorf("create chunk summary index: %w", err)
+	}
+
 	return nil
 }
 
@@ -335,6 +386,9 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 	if session.AgentID == "" {
 		session.AgentID = "agentctl"
 	}
+	if session.AgentType == "" {
+		session.AgentType = "claude"
+	}
 	// Set default status if empty
 	if session.Status == "" {
 		session.Status = storage.SessionStatusOK
@@ -366,10 +420,10 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 				id, workspace_path, project_name, git_branch, claude_version,
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
-				tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-				parent_session_id, agent_id, status,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector('%s'), ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, vector('%s'), ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				workspace_path = excluded.workspace_path,
 				project_name = excluded.project_name,
@@ -390,10 +444,12 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 				tool_invocations = excluded.tool_invocations,
 				total_tokens = excluded.total_tokens,
 				raw_jsonl_path = excluded.raw_jsonl_path,
+				content_hash = COALESCE(excluded.content_hash, sessions.content_hash),
 				embedding = excluded.embedding,
 				embedding_model = excluded.embedding_model,
 				parent_session_id = excluded.parent_session_id,
 				agent_id = excluded.agent_id,
+				agent_type = excluded.agent_type,
 				status = excluded.status,
 				updated_at = excluded.updated_at
 		`, vectorStr)
@@ -403,9 +459,9 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 			sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
 			session.Summary, accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON,
 			tagsJSON, keyFilesJSON, session.ToolsPattern, session.MessageCount, session.UserTurns,
-			session.ToolInvocations, session.TotalTokens, session.RawJSONLPath,
+			session.ToolInvocations, session.TotalTokens, session.RawJSONLPath, session.ContentHash,
 			session.EmbeddingModel,
-			parentSessionID, session.AgentID, session.Status,
+			parentSessionID, session.AgentID, session.AgentType, session.Status,
 			sqlutil.FormatTimestamp(session.CreatedAt), sqlutil.FormatTimestamp(session.UpdatedAt))
 		if err != nil {
 			return Session{}, fmt.Errorf("sessions: save: %w", err)
@@ -416,10 +472,10 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 				id, workspace_path, project_name, git_branch, claude_version,
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
-				tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-				parent_session_id, agent_id, status,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+				parent_session_id, agent_id, agent_type, status,
 				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				workspace_path = excluded.workspace_path,
 				project_name = excluded.project_name,
@@ -440,17 +496,19 @@ func (s *TursoStore) Save(ctx context.Context, session Session) (Session, error)
 				tool_invocations = excluded.tool_invocations,
 				total_tokens = excluded.total_tokens,
 				raw_jsonl_path = excluded.raw_jsonl_path,
+				content_hash = COALESCE(excluded.content_hash, sessions.content_hash),
 				embedding_model = excluded.embedding_model,
 				parent_session_id = excluded.parent_session_id,
 				agent_id = excluded.agent_id,
+				agent_type = excluded.agent_type,
 				status = excluded.status,
 				updated_at = excluded.updated_at`,
 			session.ID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
 			sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
 			session.Summary, accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON,
 			tagsJSON, keyFilesJSON, session.ToolsPattern, session.MessageCount, session.UserTurns,
-			session.ToolInvocations, session.TotalTokens, session.RawJSONLPath, session.EmbeddingModel,
-			parentSessionID, session.AgentID, session.Status,
+			session.ToolInvocations, session.TotalTokens, session.RawJSONLPath, session.ContentHash, session.EmbeddingModel,
+			parentSessionID, session.AgentID, session.AgentType, session.Status,
 			sqlutil.FormatTimestamp(session.CreatedAt), sqlutil.FormatTimestamp(session.UpdatedAt))
 		if err != nil {
 			return Session{}, fmt.Errorf("sessions: save: %w", err)
@@ -492,8 +550,8 @@ func (s *TursoStore) Get(ctx context.Context, id string) (Session, error) {
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, status,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+			parent_session_id, agent_id, agent_type, status,
 			created_at, updated_at
 		FROM sessions WHERE id = ?`, id)
 
@@ -506,8 +564,8 @@ func (s *TursoStore) List(ctx context.Context, opts ListOptions) ([]Session, err
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, status,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+			parent_session_id, agent_id, agent_type, status,
 			created_at, updated_at
 		FROM sessions WHERE 1=1`
 
@@ -569,8 +627,8 @@ func (s *TursoStore) Search(ctx context.Context, query string, limit int) ([]Ses
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, status,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+			parent_session_id, agent_id, agent_type, status,
 			created_at, updated_at
 		FROM sessions
 		WHERE summary LIKE ? OR accomplished LIKE ? OR decisions LIKE ? OR gotchas LIKE ?
@@ -594,7 +652,8 @@ func (s *TursoStore) Search(ctx context.Context, query string, limit int) ([]Ses
 }
 
 // SearchSimilar finds sessions similar to the given embedding using native vector search.
-func (s *TursoStore) SearchSimilar(ctx context.Context, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
+// If workspace is provided, results are filtered to that workspace.
+func (s *TursoStore) SearchSimilar(ctx context.Context, workspace string, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -610,35 +669,67 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, queryEmbedding []float32
 	if s.hasIndex {
 		// Use vector_top_k for fast indexed search
 		// vector_top_k returns only rowid, we must compute distance ourselves
-		topKExpr := s.vh.VectorTopK("idx_sessions_embedding_vec", vec, limit)
+		// Note: We fetch more results and filter by workspace in-memory to handle index limitations
+		topKExpr := s.vh.VectorTopK("idx_sessions_embedding_vec", vec, limit*3) // Fetch more to filter
 		distExpr := s.vh.CosineSimilarity("s.embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
-				s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
-				s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
-				s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.embedding_model,
-				s.parent_session_id, s.agent_id, s.status,
-				s.created_at, s.updated_at,
-				%s as distance
-			FROM %s vt
-			JOIN sessions s ON s.rowid = vt.id`, distExpr, topKExpr)
-		rows, err = s.db.QueryContext(ctx, query)
+		if workspace != "" {
+			query = fmt.Sprintf(`
+				SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+					s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
+					s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
+					s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
+					s.parent_session_id, s.agent_id, s.status,
+					s.created_at, s.updated_at,
+					%s as distance
+				FROM %s vt
+				JOIN sessions s ON s.rowid = vt.id
+				WHERE s.workspace_path = ?`, distExpr, topKExpr)
+			rows, err = s.db.QueryContext(ctx, query, workspace)
+		} else {
+			query = fmt.Sprintf(`
+				SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
+					s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
+					s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
+					s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding_model,
+					s.parent_session_id, s.agent_id, s.status,
+					s.created_at, s.updated_at,
+					%s as distance
+				FROM %s vt
+				JOIN sessions s ON s.rowid = vt.id`, distExpr, topKExpr)
+			rows, err = s.db.QueryContext(ctx, query)
+		}
 	} else {
 		// Fallback to full table scan with cosine distance
 		distExpr := s.vh.CosineSimilarity("embedding", vec)
-		query = fmt.Sprintf(`
-			SELECT id, workspace_path, project_name, git_branch, claude_version,
-				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-				tags, key_files, tools_pattern, message_count, user_turns,
-				tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-				parent_session_id, agent_id, status,
-				created_at, updated_at,
-				%s as distance
-			FROM sessions
-			WHERE embedding IS NOT NULL
-			ORDER BY distance ASC
-			LIMIT ?`, distExpr)
-		rows, err = s.db.QueryContext(ctx, query, limit)
+		if workspace != "" {
+			query = fmt.Sprintf(`
+				SELECT id, workspace_path, project_name, git_branch, claude_version,
+					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+					tags, key_files, tools_pattern, message_count, user_turns,
+					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+					parent_session_id, agent_id, agent_type, status,
+					created_at, updated_at,
+					%s as distance
+				FROM sessions
+				WHERE workspace_path = ? AND embedding IS NOT NULL
+				ORDER BY distance ASC
+				LIMIT ?`, distExpr)
+			rows, err = s.db.QueryContext(ctx, query, workspace, limit)
+		} else {
+			query = fmt.Sprintf(`
+				SELECT id, workspace_path, project_name, git_branch, claude_version,
+					started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+					tags, key_files, tools_pattern, message_count, user_turns,
+					tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+					parent_session_id, agent_id, agent_type, status,
+					created_at, updated_at,
+					%s as distance
+				FROM sessions
+				WHERE embedding IS NOT NULL
+				ORDER BY distance ASC
+				LIMIT ?`, distExpr)
+			rows, err = s.db.QueryContext(ctx, query, limit)
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search similar: %w", err)
@@ -650,7 +741,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, queryEmbedding []float32
 		var session Session
 		var projectName, gitBranch, clauveVersion, summary, toolsPattern sql.NullString
 		var endedAt, embeddingModel sql.NullString
-		var parentSessionID, agentID, status sql.NullString
+		var parentSessionID, agentID, agentType, status sql.NullString
 		var accomplishedJSON, decisionsJSON, gotchasJSON, userInsightsJSON string
 		var tagsJSON, keyFilesJSON string
 		var startedAtStr, createdAtStr, updatedAtStr string
@@ -661,7 +752,7 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, queryEmbedding []float32
 			&startedAtStr, &endedAt, &summary, &accomplishedJSON, &decisionsJSON, &gotchasJSON, &userInsightsJSON,
 			&tagsJSON, &keyFilesJSON, &toolsPattern, &session.MessageCount, &session.UserTurns,
 			&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embeddingModel,
-			&parentSessionID, &agentID, &status,
+			&parentSessionID, &agentID, &agentType, &status,
 			&createdAtStr, &updatedAtStr, &distance,
 		)
 		if err != nil {
@@ -678,6 +769,10 @@ func (s *TursoStore) SearchSimilar(ctx context.Context, queryEmbedding []float32
 		session.AgentID = agentID.String
 		if session.AgentID == "" {
 			session.AgentID = "agentctl"
+		}
+		session.AgentType = agentType.String
+		if session.AgentType == "" {
+			session.AgentType = "claude"
 		}
 		session.Status = status.String
 		if session.Status == "" {
@@ -758,6 +853,49 @@ func (s *TursoStore) SetEmbedding(ctx context.Context, id string, embedding []by
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// --- Content Hash Deduplication ---
+
+// FindByContentHash finds a summarized session with the given content hash.
+// Returns nil if no matching session is found.
+func (s *TursoStore) FindByContentHash(ctx context.Context, contentHash string) (*Session, error) {
+	if contentHash == "" {
+		return nil, nil
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding_model,
+			parent_session_id, agent_id, agent_type, status,
+			created_at, updated_at
+		FROM sessions
+		WHERE content_hash = ? AND summary != '' AND summary IS NOT NULL
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, contentHash)
+
+	session, err := scanSessionRow(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sessions: find by content hash: %w", err)
+	}
+	return &session, nil
+}
+
+// SetContentHash sets the content hash for a session.
+func (s *TursoStore) SetContentHash(ctx context.Context, id, contentHash string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET content_hash = ?, updated_at = ? WHERE id = ?
+	`, contentHash, sqlutil.FormatTimestamp(timeutil.NowUTC()), id)
+	if err != nil {
+		return fmt.Errorf("sessions: set content hash: %w", err)
 	}
 	return nil
 }
@@ -1121,6 +1259,223 @@ func (s *TursoStore) SearchChunks(ctx context.Context, embedding []float32, limi
 // DeleteChunks removes all chunks for a session.
 func (s *TursoStore) DeleteChunks(ctx context.Context, sessionID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunks WHERE session_id = ?`, sessionID)
+	return err
+}
+
+// SaveChunkSummary upserts a chunk-level summary record.
+func (s *TursoStore) SaveChunkSummary(ctx context.Context, summary SessionChunkSummary) (SessionChunkSummary, error) {
+	if summary.ID == "" {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: missing id")
+	}
+	if summary.SessionID == "" {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: missing session_id")
+	}
+	if summary.Summary == "" {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: missing summary")
+	}
+
+	now := timeutil.NowUTC()
+	if summary.CreatedAt.IsZero() {
+		summary.CreatedAt = now
+	}
+	summary.UpdatedAt = now
+	if len(summary.ChunkIndices) > 0 {
+		if min, max, ok := chunkIndexBounds(summary.ChunkIndices); ok {
+			summary.ChunkIndexMin = min
+			summary.ChunkIndexMax = max
+		}
+	}
+
+	chunkIndicesJSON, _ := sqlutil.FormatJSON(summary.ChunkIndices)
+	toolsJSON, _ := sqlutil.FormatJSON(summary.Tools)
+	filesJSON, _ := sqlutil.FormatJSON(summary.Files)
+	errorsJSON, _ := sqlutil.FormatJSON(summary.Errors)
+
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO session_chunk_summaries (
+	id, session_id, window_index, trigger, chunk_indices, chunk_index_min, chunk_index_max, tools, files, errors,
+	summary, summary_model, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+	trigger = excluded.trigger,
+	chunk_indices = excluded.chunk_indices,
+	chunk_index_min = excluded.chunk_index_min,
+	chunk_index_max = excluded.chunk_index_max,
+	tools = excluded.tools,
+	files = excluded.files,
+	errors = excluded.errors,
+	summary = excluded.summary,
+	summary_model = excluded.summary_model,
+	updated_at = excluded.updated_at`,
+		summary.ID, summary.SessionID, summary.WindowIndex, summary.Trigger, chunkIndicesJSON,
+		summary.ChunkIndexMin, summary.ChunkIndexMax, toolsJSON, filesJSON, errorsJSON,
+		summary.Summary, summary.SummaryModel,
+		sqlutil.FormatTimestamp(summary.CreatedAt), sqlutil.FormatTimestamp(summary.UpdatedAt),
+	)
+	if err != nil {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: %w", err)
+	}
+	return summary, nil
+}
+
+// SaveChunkSummaries upserts multiple chunk-level summaries.
+func (s *TursoStore) SaveChunkSummaries(ctx context.Context, summaries []SessionChunkSummary) error {
+	for _, summary := range summaries {
+		if _, err := s.SaveChunkSummary(ctx, summary); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetChunkSummaries loads chunk summaries for a window.
+func (s *TursoStore) GetChunkSummaries(ctx context.Context, sessionID string, windowIndex int) ([]SessionChunkSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, session_id, window_index, trigger, chunk_indices, tools, files, errors,
+       chunk_index_min, chunk_index_max, summary, summary_model, created_at, updated_at
+FROM session_chunk_summaries
+WHERE session_id = ? AND window_index = ?
+ORDER BY created_at ASC`, sessionID, windowIndex)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: get chunk summaries: %w", err)
+	}
+	defer func() { errs.Ignore(rows.Close(), "close chunk summaries rows") }()
+
+	var summaries []SessionChunkSummary
+	for rows.Next() {
+		var summary SessionChunkSummary
+		var trigger, chunkIndicesJSON, toolsJSON, filesJSON, errorsJSON sql.NullString
+		var chunkIndexMin, chunkIndexMax sql.NullInt64
+		var summaryModel sql.NullString
+		var createdAtStr, updatedAtStr sql.NullString
+
+		err := rows.Scan(
+			&summary.ID, &summary.SessionID, &summary.WindowIndex, &trigger, &chunkIndicesJSON,
+			&toolsJSON, &filesJSON, &errorsJSON, &chunkIndexMin, &chunkIndexMax, &summary.Summary,
+			&summaryModel,
+			&createdAtStr, &updatedAtStr,
+		)
+		if err != nil {
+			continue
+		}
+		if trigger.Valid {
+			summary.Trigger = trigger.String
+		}
+		if summaryModel.Valid {
+			summary.SummaryModel = summaryModel.String
+		}
+		if createdAtStr.Valid {
+			summary.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr.String)
+		}
+		if updatedAtStr.Valid {
+			summary.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr.String)
+		}
+		if chunkIndicesJSON.Valid {
+			_ = sqlutil.ScanJSON(chunkIndicesJSON.String, &summary.ChunkIndices)
+		}
+		if chunkIndexMin.Valid {
+			summary.ChunkIndexMin = int(chunkIndexMin.Int64)
+		}
+		if chunkIndexMax.Valid {
+			summary.ChunkIndexMax = int(chunkIndexMax.Int64)
+		}
+		if (!chunkIndexMin.Valid || !chunkIndexMax.Valid) && len(summary.ChunkIndices) > 0 {
+			if min, max, ok := chunkIndexBounds(summary.ChunkIndices); ok {
+				if !chunkIndexMin.Valid {
+					summary.ChunkIndexMin = min
+				}
+				if !chunkIndexMax.Valid {
+					summary.ChunkIndexMax = max
+				}
+			}
+		}
+		if toolsJSON.Valid {
+			_ = sqlutil.ScanJSON(toolsJSON.String, &summary.Tools)
+		}
+		if filesJSON.Valid {
+			_ = sqlutil.ScanJSON(filesJSON.String, &summary.Files)
+		}
+		if errorsJSON.Valid {
+			_ = sqlutil.ScanJSON(errorsJSON.String, &summary.Errors)
+		}
+
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
+}
+
+// GetChunkSummary loads a chunk summary by ID.
+func (s *TursoStore) GetChunkSummary(ctx context.Context, summaryID string) (SessionChunkSummary, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, session_id, window_index, trigger, chunk_indices, tools, files, errors,
+       chunk_index_min, chunk_index_max, summary, summary_model, created_at, updated_at
+FROM session_chunk_summaries
+WHERE id = ?`, summaryID)
+
+	var summary SessionChunkSummary
+	var trigger, chunkIndicesJSON, toolsJSON, filesJSON, errorsJSON sql.NullString
+	var chunkIndexMin, chunkIndexMax sql.NullInt64
+	var summaryModel sql.NullString
+	var createdAtStr, updatedAtStr sql.NullString
+
+	if err := row.Scan(
+		&summary.ID, &summary.SessionID, &summary.WindowIndex, &trigger, &chunkIndicesJSON,
+		&toolsJSON, &filesJSON, &errorsJSON, &chunkIndexMin, &chunkIndexMax, &summary.Summary,
+		&summaryModel, &createdAtStr, &updatedAtStr,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return SessionChunkSummary{}, ErrNotFound
+		}
+		return SessionChunkSummary{}, fmt.Errorf("sessions: get chunk summary: %w", err)
+	}
+
+	if trigger.Valid {
+		summary.Trigger = trigger.String
+	}
+	if summaryModel.Valid {
+		summary.SummaryModel = summaryModel.String
+	}
+	if createdAtStr.Valid {
+		summary.CreatedAt, _ = sqlutil.ScanTimestamp(createdAtStr.String)
+	}
+	if updatedAtStr.Valid {
+		summary.UpdatedAt, _ = sqlutil.ScanTimestamp(updatedAtStr.String)
+	}
+	if chunkIndicesJSON.Valid {
+		_ = sqlutil.ScanJSON(chunkIndicesJSON.String, &summary.ChunkIndices)
+	}
+	if chunkIndexMin.Valid {
+		summary.ChunkIndexMin = int(chunkIndexMin.Int64)
+	}
+	if chunkIndexMax.Valid {
+		summary.ChunkIndexMax = int(chunkIndexMax.Int64)
+	}
+	if (!chunkIndexMin.Valid || !chunkIndexMax.Valid) && len(summary.ChunkIndices) > 0 {
+		if min, max, ok := chunkIndexBounds(summary.ChunkIndices); ok {
+			if !chunkIndexMin.Valid {
+				summary.ChunkIndexMin = min
+			}
+			if !chunkIndexMax.Valid {
+				summary.ChunkIndexMax = max
+			}
+		}
+	}
+	if toolsJSON.Valid {
+		_ = sqlutil.ScanJSON(toolsJSON.String, &summary.Tools)
+	}
+	if filesJSON.Valid {
+		_ = sqlutil.ScanJSON(filesJSON.String, &summary.Files)
+	}
+	if errorsJSON.Valid {
+		_ = sqlutil.ScanJSON(errorsJSON.String, &summary.Errors)
+	}
+
+	return summary, nil
+}
+
+// DeleteChunkSummaries removes all chunk summaries for a session.
+func (s *TursoStore) DeleteChunkSummaries(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunk_summaries WHERE session_id = ?`, sessionID)
 	return err
 }
 
@@ -1495,16 +1850,17 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 	var startedAt, endedAt, createdAt, updatedAt sql.NullString
 	var summary, accomplished, decisions, gotchas, userInsights, tags, keyFiles sql.NullString
 	var toolsPattern, rawJSONLPath sql.NullString
+	var contentHash sql.NullString
 	var embeddingModel sql.NullString
-	var parentSessionID, agentID, status sql.NullString
+	var parentSessionID, agentID, agentType, status sql.NullString
 	var messageCount, userTurns, toolInvocations, totalTokens sql.NullInt64
 
 	err := row.Scan(
 		&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &messageCount, &userTurns,
-		&toolInvocations, &totalTokens, &rawJSONLPath, &embeddingModel,
-		&parentSessionID, &agentID, &status,
+		&toolInvocations, &totalTokens, &rawJSONLPath, &contentHash, &embeddingModel,
+		&parentSessionID, &agentID, &agentType, &status,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -1551,6 +1907,9 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 	if rawJSONLPath.Valid {
 		session.RawJSONLPath = rawJSONLPath.String
 	}
+	if contentHash.Valid {
+		session.ContentHash = contentHash.String
+	}
 	if embeddingModel.Valid {
 		session.EmbeddingModel = embeddingModel.String
 	}
@@ -1562,6 +1921,11 @@ func scanSessionRow(row *sql.Row) (Session, error) {
 		session.AgentID = agentID.String
 	} else {
 		session.AgentID = "agentctl"
+	}
+	if agentType.Valid && agentType.String != "" {
+		session.AgentType = agentType.String
+	} else {
+		session.AgentType = "claude"
 	}
 	if status.Valid && status.String != "" {
 		session.Status = status.String
@@ -1612,16 +1976,17 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 	var startedAt, endedAt, createdAt, updatedAt sql.NullString
 	var summary, accomplished, decisions, gotchas, userInsights, tags, keyFiles sql.NullString
 	var toolsPattern, rawJSONLPath sql.NullString
+	var contentHash sql.NullString
 	var embeddingModel sql.NullString
-	var parentSessionID, agentID, status sql.NullString
+	var parentSessionID, agentID, agentType, status sql.NullString
 	var messageCount, userTurns, toolInvocations, totalTokens sql.NullInt64
 
 	err := rows.Scan(
 		&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &messageCount, &userTurns,
-		&toolInvocations, &totalTokens, &rawJSONLPath, &embeddingModel,
-		&parentSessionID, &agentID, &status,
+		&toolInvocations, &totalTokens, &rawJSONLPath, &contentHash, &embeddingModel,
+		&parentSessionID, &agentID, &agentType, &status,
 		&createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -1665,6 +2030,9 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 	if rawJSONLPath.Valid {
 		session.RawJSONLPath = rawJSONLPath.String
 	}
+	if contentHash.Valid {
+		session.ContentHash = contentHash.String
+	}
 	if embeddingModel.Valid {
 		session.EmbeddingModel = embeddingModel.String
 	}
@@ -1676,6 +2044,11 @@ func scanSessionRows(rows *sql.Rows) (Session, error) {
 		session.AgentID = agentID.String
 	} else {
 		session.AgentID = "agentctl"
+	}
+	if agentType.Valid && agentType.String != "" {
+		session.AgentType = agentType.String
+	} else {
+		session.AgentType = "claude"
 	}
 	if status.Valid && status.String != "" {
 		session.Status = status.String
@@ -1730,7 +2103,7 @@ func (s *TursoStore) GetActive(ctx context.Context, workspace, agentID string) (
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, status,
+			parent_session_id, agent_id, agent_type, status,
 			created_at, updated_at
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ? AND status = 'running'
@@ -1775,6 +2148,58 @@ func (s *TursoStore) SetStatus(ctx context.Context, id, status string) error {
 	return nil
 }
 
+// SetPendingRestore marks a session as needing restore after compaction.
+func (s *TursoStore) SetPendingRestore(ctx context.Context, id string) error {
+	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
+	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = ?, updated_at = ? WHERE id = ?`, now, now, id)
+	if err != nil {
+		return fmt.Errorf("sessions: set pending restore: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearPendingRestore removes the pending restore flag from a session.
+func (s *TursoStore) ClearPendingRestore(ctx context.Context, id string) error {
+	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
+	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = NULL, updated_at = ? WHERE id = ?`, now, id)
+	if err != nil {
+		return fmt.Errorf("sessions: clear pending restore: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetPendingRestore finds a session with pending restore for a workspace.
+func (s *TursoStore) GetPendingRestore(ctx context.Context, workspace string) (*Session, error) {
+	cutoff := sqlutil.FormatTimestamp(timeutil.NowUTC().Add(-10 * time.Minute))
+	query := `
+		SELECT id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
+			parent_session_id, agent_id, agent_type, status,
+			created_at, updated_at
+		FROM sessions
+		WHERE workspace_path = ? AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+		ORDER BY pending_restore_at DESC LIMIT 1`
+	row := s.db.QueryRowContext(ctx, query, workspace, cutoff)
+	session, err := scanSessionRow(row)
+	if err == ErrNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sessions: get pending restore: %w", err)
+	}
+	return &session, nil
+}
+
 // FindLastSession returns the most recent session matching the criteria.
 func (s *TursoStore) FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error) {
 	query := `
@@ -1782,7 +2207,7 @@ func (s *TursoStore) FindLastSession(ctx context.Context, workspace, agentID str
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, status,
+			parent_session_id, agent_id, agent_type, status,
 			created_at, updated_at
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ?`
@@ -1919,7 +2344,7 @@ func (s *TursoStore) SearchSimilarGlobal(ctx context.Context, queryEmbedding []f
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-				parent_session_id, agent_id, status,
+					parent_session_id, agent_id, agent_type, status,
 				created_at, updated_at,
 				%s as distance
 			FROM sessions
@@ -2032,7 +2457,7 @@ func (s *TursoStore) SearchSimilarMultiWorkspace(ctx context.Context, workspaces
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, embedding_model,
-			parent_session_id, agent_id, status,
+			parent_session_id, agent_id, agent_type, status,
 			created_at, updated_at,
 			%s as distance
 		FROM sessions

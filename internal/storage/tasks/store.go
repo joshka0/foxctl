@@ -18,6 +18,16 @@ import (
 // DefaultListAllLimit is the maximum number of tasks returned by ListAll when no limit is specified.
 const DefaultListAllLimit = 1000
 
+// Connection pool settings for SQLite file-based storage.
+// Tasks are write-heavy with typically single-process access patterns,
+// so we use conservative settings to minimize lock contention.
+const (
+	defaultMaxOpenConns    = 1                // Single writer reduces lock weirdness for SQLite
+	defaultMaxIdleConns    = 1                // Keep one connection ready
+	defaultConnMaxLifetime = 10 * time.Minute // Connection recycling interval
+	defaultConnMaxIdleTime = 5 * time.Minute  // Idle connection timeout
+)
+
 // Store defines the persistence interface for tasks and active-task state.
 type Store interface {
 	Close() error
@@ -57,6 +67,26 @@ type Store interface {
 	// SetPageRanks bulk updates PageRank scores for multiple tasks.
 	// The map key is task ID, value is the PageRank score.
 	SetPageRanks(ctx context.Context, ranks map[string]float64) error
+
+	// Epic management
+	// AddEpic creates a new epic.
+	AddEpic(ctx context.Context, e Epic) (Epic, error)
+	// GetEpic returns an epic by ID.
+	GetEpic(ctx context.Context, id string) (Epic, error)
+	// UpdateEpic updates an existing epic.
+	UpdateEpic(ctx context.Context, e Epic) (Epic, error)
+	// ListEpics returns epics for a workspace.
+	ListEpics(ctx context.Context, workspaceID string) ([]Epic, error)
+	// GetActiveEpic returns the active epic for a workspace and session, if any.
+	GetActiveEpic(ctx context.Context, workspaceID, sessionID string) (Epic, bool, error)
+	// SetActiveEpic sets the active epic for a workspace and session.
+	SetActiveEpic(ctx context.Context, workspaceID, sessionID, epicID string) error
+	// ClearActiveEpic removes the active epic for a workspace and session.
+	ClearActiveEpic(ctx context.Context, workspaceID, sessionID string) error
+	// ListTasksByEpic returns tasks linked to a specific epic.
+	ListTasksByEpic(ctx context.Context, epicID string) ([]Task, error)
+	// LinkTaskToEpic associates a task with an epic.
+	LinkTaskToEpic(ctx context.Context, taskID, epicID string) error
 }
 
 // Task represents a persisted task record.
@@ -89,6 +119,9 @@ type Task struct {
 
 	// Graph metrics - computed by tasksgraph analyzer
 	PageRank float64 // PageRank score for priority ordering (higher = more important)
+
+	// Epic linkage - groups tasks under a higher-level goal
+	EpicID string // ID of the epic this task belongs to (if any)
 }
 
 // ListOptions configures task list queries.
@@ -126,6 +159,29 @@ const (
 	ReviewStatusStale = "stale"
 )
 
+// Epic represents a higher-level goal that groups related tasks.
+// Epics persist across sessions and provide continuity for multi-session work.
+type Epic struct {
+	ID          string
+	WorkspaceID string
+	Title       string
+	Goal        string // Detailed description of what this epic aims to achieve
+	Status      string // active, completed, archived
+	CreatedAt   time.Time
+	CompletedAt *time.Time
+	SessionID   string // Session that created the epic
+}
+
+// Epic status constants
+const (
+	// EpicStatusActive indicates the epic is currently being worked on.
+	EpicStatusActive = "active"
+	// EpicStatusCompleted indicates all tasks in the epic are done.
+	EpicStatusCompleted = "completed"
+	// EpicStatusArchived indicates the epic is no longer relevant.
+	EpicStatusArchived = "archived"
+)
+
 type sqlStore struct {
 	db *sql.DB
 }
@@ -137,6 +193,14 @@ func Open(ctx context.Context, root string) (Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tasks: open db: %w", err)
 	}
+
+	// Configure connection pool for optimal SQLite performance.
+	// Single writer pattern reduces lock contention for write-heavy task operations.
+	db.SetMaxOpenConns(defaultMaxOpenConns)
+	db.SetMaxIdleConns(defaultMaxIdleConns)
+	db.SetConnMaxLifetime(defaultConnMaxLifetime)
+	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
+
 	return &sqlStore{db: db}, nil
 }
 
@@ -175,6 +239,28 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 	task_id TEXT NOT NULL,
 	FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS epics (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	title TEXT NOT NULL,
+	goal TEXT,
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TEXT NOT NULL,
+	completed_at TEXT,
+	session_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_epics_workspace ON epics(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_epics_status ON epics(workspace_id, status);
+
+CREATE TABLE IF NOT EXISTS active_epics (
+	workspace_id TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	epic_id TEXT NOT NULL,
+	PRIMARY KEY (workspace_id, session_id),
+	FOREIGN KEY(epic_id) REFERENCES epics(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id);
 `
 	if _, err := db.ExecContext(ctx, ddl); err != nil {
 		return fmt.Errorf("tasks: migrate: %w", err)
@@ -191,6 +277,7 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 		`ALTER TABLE tasks ADD COLUMN embedding BLOB`,
 		`ALTER TABLE tasks ADD COLUMN embedding_model TEXT`,
 		`ALTER TABLE tasks ADD COLUMN pagerank REAL`,
+		`ALTER TABLE tasks ADD COLUMN epic_id TEXT`,
 	}
 	for _, stmt := range alterDDL {
 		// Ignore errors from "duplicate column" - columns may already exist.
@@ -202,6 +289,42 @@ CREATE TABLE IF NOT EXISTS active_tasks (
 
 	// Create session index for cross-session queries (any AI coding tool)
 	_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id)`) //nolint:errcheck
+
+	// Migrate active_epics table to include session_id (if old schema exists)
+	// Check if session_id column exists by querying table info
+	var hasSessionID bool
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(active_epics)`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull, pk int
+			var dfltValue any
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err == nil {
+				if name == "session_id" {
+					hasSessionID = true
+					break
+				}
+			}
+		}
+	}
+	if !hasSessionID {
+		// Drop old table and let CREATE TABLE IF NOT EXISTS rebuild it.
+		// NOTE: This migration intentionally drops existing active_epics data.
+		// Active epics are transient session state that gets re-established via
+		// /anchor commands, so data loss during schema evolution is acceptable.
+		_, _ = db.ExecContext(ctx, `DROP TABLE IF EXISTS active_epics`) //nolint:errcheck
+		_, _ = db.ExecContext(ctx, `
+CREATE TABLE IF NOT EXISTS active_epics (
+	workspace_id TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	epic_id TEXT NOT NULL,
+	PRIMARY KEY (workspace_id, session_id),
+	FOREIGN KEY(epic_id) REFERENCES epics(id) ON DELETE CASCADE
+)`) //nolint:errcheck
+		_, _ = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id)`) //nolint:errcheck
+	}
 
 	return nil
 }
@@ -306,7 +429,7 @@ WHERE id = ?`,
 // Get returns a task by ID.
 func (s *sqlStore) Get(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id
 FROM tasks WHERE id = ?`, id)
 	return scanTask(row)
 }
@@ -314,7 +437,7 @@ FROM tasks WHERE id = ?`, id)
 // ListByWorkspace returns tasks scoped to a workspace.
 func (s *sqlStore) ListByWorkspace(ctx context.Context, workspaceID string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id
 FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list: %w", err)
@@ -338,7 +461,7 @@ FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 // ListWithOptions returns tasks scoped to a workspace with filtering options.
 func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts ListOptions) ([]Task, error) {
 	// Build query with optional filters
-	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank FROM tasks WHERE workspace_id = ?`
+	query := `SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id FROM tasks WHERE workspace_id = ?`
 	args := []any{workspaceID}
 
 	if opts.SessionID != "" {
@@ -384,7 +507,7 @@ func (s *sqlStore) ListWithOptions(ctx context.Context, workspaceID string, opts
 // ListByPlanFile returns tasks linked to a specific plan file.
 func (s *sqlStore) ListByPlanFile(ctx context.Context, planFile string) ([]Task, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id
 FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list by plan: %w", err)
@@ -405,7 +528,7 @@ FROM tasks WHERE plan_file = ? ORDER BY created_at ASC`, planFile)
 // GetActive returns the active task for a workspace, if any.
 func (s *sqlStore) GetActive(ctx context.Context, workspaceID string) (Task, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank
+SELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank, t.epic_id
 FROM tasks t
 JOIN active_tasks a ON t.id = a.task_id
 WHERE a.workspace_id = ?`, workspaceID)
@@ -513,7 +636,7 @@ func (s *sqlStore) ListAll(ctx context.Context, limit int) ([]Task, error) {
 		limit = DefaultListAllLimit
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id
 FROM tasks ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: list all: %w", err)
@@ -597,12 +720,13 @@ func scanTask(row *sql.Row) (Task, error) {
 	var planFile, planSection sql.NullString
 	var sessionID sql.NullString
 	var pagerank sql.NullFloat64
+	var epicID sql.NullString
 
 	err := row.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection, &sessionID, &pagerank)
+		&planFile, &planSection, &sessionID, &pagerank, &epicID)
 	if err != nil {
 		if dbutil.IsNoRows(err) {
 			return Task{}, err
@@ -621,6 +745,7 @@ func scanTask(row *sql.Row) (Task, error) {
 	t.PlanSection = planSection.String
 	t.SessionID = sessionID.String
 	t.PageRank = pagerank.Float64
+	t.EpicID = epicID.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {
@@ -638,6 +763,203 @@ func scanTask(row *sql.Row) (Task, error) {
 	return t, nil
 }
 
+// Epic management methods
+
+// AddEpic creates a new epic.
+func (s *sqlStore) AddEpic(ctx context.Context, e Epic) (Epic, error) {
+	if e.ID == "" {
+		e.ID = ulid.Make().String()
+	}
+	if e.Status == "" {
+		e.Status = EpicStatusActive
+	}
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = timeutil.NowUTC()
+	}
+
+	var completedAt *string
+	if e.CompletedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*e.CompletedAt)
+		completedAt = &s
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO epics (id, workspace_id, title, goal, status, created_at, completed_at, session_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.WorkspaceID, e.Title, e.Goal, e.Status,
+		timeutil.FormatRFC3339Nano(e.CreatedAt), completedAt, e.SessionID)
+	if err != nil {
+		return Epic{}, fmt.Errorf("tasks: insert epic: %w", err)
+	}
+	return e, nil
+}
+
+// GetEpic returns an epic by ID.
+func (s *sqlStore) GetEpic(ctx context.Context, id string) (Epic, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, workspace_id, title, goal, status, created_at, completed_at, session_id
+FROM epics WHERE id = ?`, id)
+	return scanEpic(row)
+}
+
+// UpdateEpic updates an existing epic.
+func (s *sqlStore) UpdateEpic(ctx context.Context, e Epic) (Epic, error) {
+	var completedAt *string
+	if e.CompletedAt != nil {
+		s := timeutil.FormatRFC3339Nano(*e.CompletedAt)
+		completedAt = &s
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+UPDATE epics SET title = ?, goal = ?, status = ?, completed_at = ?, session_id = ?
+WHERE id = ?`,
+		e.Title, e.Goal, e.Status, completedAt, e.SessionID, e.ID)
+	if err != nil {
+		return Epic{}, fmt.Errorf("tasks: update epic: %w", err)
+	}
+	return e, nil
+}
+
+// ListEpics returns epics for a workspace.
+func (s *sqlStore) ListEpics(ctx context.Context, workspaceID string) ([]Epic, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, workspace_id, title, goal, status, created_at, completed_at, session_id
+FROM epics WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list epics: %w", err)
+	}
+	defer rows.Close()
+
+	var epics []Epic
+	for rows.Next() {
+		e, err := scanEpicRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		epics = append(epics, e)
+	}
+	return epics, rows.Err()
+}
+
+// GetActiveEpic returns the active epic for a workspace, if any.
+func (s *sqlStore) GetActiveEpic(ctx context.Context, workspaceID, sessionID string) (Epic, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT e.id, e.workspace_id, e.title, e.goal, e.status, e.created_at, e.completed_at, e.session_id
+FROM epics e
+JOIN active_epics a ON e.id = a.epic_id
+WHERE a.workspace_id = ? AND a.session_id = ?`, workspaceID, sessionID)
+
+	e, err := scanEpic(row)
+	if dbutil.IsNoRows(err) {
+		return Epic{}, false, nil
+	}
+	if err != nil {
+		return Epic{}, false, err
+	}
+	return e, true, nil
+}
+
+// SetActiveEpic sets the active epic for a workspace.
+func (s *sqlStore) SetActiveEpic(ctx context.Context, workspaceID, sessionID, epicID string) error {
+	_, err := s.db.ExecContext(ctx, `
+INSERT INTO active_epics (workspace_id, session_id, epic_id) VALUES (?, ?, ?)
+ON CONFLICT(workspace_id, session_id) DO UPDATE SET epic_id = excluded.epic_id`, workspaceID, sessionID, epicID)
+	if err != nil {
+		return fmt.Errorf("tasks: set active epic: %w", err)
+	}
+	return nil
+}
+
+// ClearActiveEpic removes the active epic for a workspace.
+func (s *sqlStore) ClearActiveEpic(ctx context.Context, workspaceID, sessionID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM active_epics WHERE workspace_id = ? AND session_id = ?`, workspaceID, sessionID)
+	if err != nil {
+		return fmt.Errorf("tasks: clear active epic: %w", err)
+	}
+	return nil
+}
+
+// ListTasksByEpic returns tasks linked to a specific epic.
+func (s *sqlStore) ListTasksByEpic(ctx context.Context, epicID string) ([]Task, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id, pagerank, epic_id
+FROM tasks WHERE epic_id = ? ORDER BY created_at ASC`, epicID)
+	if err != nil {
+		return nil, fmt.Errorf("tasks: list by epic: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []Task
+	for rows.Next() {
+		t, err := scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// LinkTaskToEpic associates a task with an epic.
+func (s *sqlStore) LinkTaskToEpic(ctx context.Context, taskID, epicID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET epic_id = ? WHERE id = ?`, epicID, taskID)
+	if err != nil {
+		return fmt.Errorf("tasks: link to epic: %w", err)
+	}
+	return nil
+}
+
+// scanEpic scans a single epic from a row.
+func scanEpic(row *sql.Row) (Epic, error) {
+	var e Epic
+	var goal, sessionID sql.NullString
+	var createdAtStr string
+	var completedAtStr sql.NullString
+
+	err := row.Scan(&e.ID, &e.WorkspaceID, &e.Title, &goal, &e.Status,
+		&createdAtStr, &completedAtStr, &sessionID)
+	if err != nil {
+		if dbutil.IsNoRows(err) {
+			return Epic{}, err
+		}
+		return Epic{}, fmt.Errorf("tasks: scan epic: %w", err)
+	}
+
+	e.Goal = goal.String
+	e.SessionID = sessionID.String
+	e.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
+	if completedAtStr.Valid {
+		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
+		e.CompletedAt = &ct
+	}
+
+	return e, nil
+}
+
+// scanEpicRow scans an epic from rows (for iteration).
+func scanEpicRow(rows *sql.Rows) (Epic, error) {
+	var e Epic
+	var goal, sessionID sql.NullString
+	var createdAtStr string
+	var completedAtStr sql.NullString
+
+	err := rows.Scan(&e.ID, &e.WorkspaceID, &e.Title, &goal, &e.Status,
+		&createdAtStr, &completedAtStr, &sessionID)
+	if err != nil {
+		return Epic{}, fmt.Errorf("tasks: scan epic row: %w", err)
+	}
+
+	e.Goal = goal.String
+	e.SessionID = sessionID.String
+	e.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
+	if completedAtStr.Valid {
+		ct := timeutil.MustParseRFC3339Nano(completedAtStr.String)
+		e.CompletedAt = &ct
+	}
+
+	return e, nil
+}
+
 // scanTaskRow scans a task from rows (for iteration).
 func scanTaskRow(rows *sql.Rows) (Task, error) {
 	var t Task
@@ -649,12 +971,13 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	var planFile, planSection sql.NullString
 	var sessionID sql.NullString
 	var pagerank sql.NullFloat64
+	var epicID sql.NullString
 
 	err := rows.Scan(
 		&t.ID, &t.WorkspaceID, &t.Title, &description, &scopePath, &parentID,
 		&childrenJSON, &dependsOnJSON, &t.Status, &createdAtStr, &completedAtStr,
 		&notes, &gotchas, &lastReviewStatus, &lastReviewAt, &lastReviewID,
-		&planFile, &planSection, &sessionID, &pagerank)
+		&planFile, &planSection, &sessionID, &pagerank, &epicID)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: scan row: %w", err)
 	}
@@ -670,6 +993,7 @@ func scanTaskRow(rows *sql.Rows) (Task, error) {
 	t.PlanSection = planSection.String
 	t.SessionID = sessionID.String
 	t.PageRank = pagerank.Float64
+	t.EpicID = epicID.String
 
 	t.CreatedAt = timeutil.MustParseRFC3339Nano(createdAtStr)
 	if completedAtStr.Valid {

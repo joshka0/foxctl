@@ -3,9 +3,11 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ func TestService_StartsAndStops(t *testing.T) {
 
 	// Create temp directories
 	tmp := t.TempDir()
+	skipIfUnixSocketsUnavailable(t, tmp)
 	cfg := config.Config{
 		Paths: config.Paths{
 			Cache: filepath.Join(tmp, "cache"),
@@ -41,19 +44,8 @@ func TestService_StartsAndStops(t *testing.T) {
 		errCh <- svc.Run(ctx)
 	}()
 
-	// Wait for socket to be created
 	socketPath := SocketPath()
-	for i := 0; i < 50; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// Verify socket exists
-	if _, err := os.Stat(socketPath); err != nil {
-		t.Fatalf("socket not created: %v", err)
-	}
+	waitForSocket(t, socketPath, errCh)
 
 	// Test connection
 	conn, err := net.Dial("unix", socketPath)
@@ -74,6 +66,7 @@ func TestService_StatusRequest(t *testing.T) {
 	// Note: not parallel because we modify XDG_RUNTIME_DIR
 
 	tmp := t.TempDir()
+	skipIfUnixSocketsUnavailable(t, tmp)
 	cfg := config.Config{
 		Paths: config.Paths{
 			Cache: filepath.Join(tmp, "cache"),
@@ -96,14 +89,8 @@ func TestService_StatusRequest(t *testing.T) {
 		errCh <- svc.Run(ctx)
 	}()
 
-	// Wait for socket
 	socketPath := SocketPath()
-	for i := 0; i < 50; i++ {
-		if _, err := os.Stat(socketPath); err == nil {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitForSocket(t, socketPath, errCh)
 
 	// Connect and send status request
 	conn, err := net.Dial("unix", socketPath)
@@ -151,6 +138,41 @@ func TestService_StatusRequest(t *testing.T) {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer shutdownCancel()
 	_ = svc.Shutdown(shutdownCtx)
+}
+
+func waitForSocket(t *testing.T, socketPath string, errCh <-chan error) {
+	t.Helper()
+	for i := 0; i < 200; i++ {
+		if _, err := os.Stat(socketPath); err == nil {
+			return
+		}
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("service run: %v", err)
+			}
+			t.Fatalf("service stopped before socket created")
+		default:
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(socketPath); err != nil {
+		t.Fatalf("socket not created: %v", err)
+	}
+}
+
+func skipIfUnixSocketsUnavailable(t *testing.T, dir string) {
+	t.Helper()
+	socketPath := filepath.Join(dir, "agentctl-test.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EINVAL) || os.IsPermission(err) {
+			t.Skipf("unix sockets not permitted: %v", err)
+		}
+		t.Fatalf("probe unix socket: %v", err)
+	}
+	_ = listener.Close()
+	_ = os.Remove(socketPath)
 }
 
 func TestClient_IsRunning_NoDaemon(t *testing.T) {

@@ -58,7 +58,7 @@ agentctl run ci/prcomments --input '{\"pr\": <number>}'
 elif [[ "$prompt" =~ (ci\ status|build\ status|check.*fail|pipeline|workflow.*fail|github.*action) ]]; then
   hint="**Skill hint:** Check CI status:
 \`\`\`bash
-agentctl run ci/github_checks --input '{\"pr\": <number>}'
+agentctl run ci/checks --input '{\"pr\": <number>}'
 \`\`\`"
 elif [[ "$prompt" =~ (merge\ conflict|can.*merge|mergeable|ready\ to\ merge) ]]; then
   hint="**Skill hint:** Check merge status:

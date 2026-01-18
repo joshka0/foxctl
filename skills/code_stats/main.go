@@ -3,18 +3,19 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
@@ -68,14 +69,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Resolve workspace and search path
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	// Collect statistics
@@ -86,14 +82,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		Languages: languages,
 	}
 
-	err := filepath.WalkDir(searchPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+	err = filepath.WalkDir(searchPath, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
 			return nil
 		}
 
 		// Check depth
 		if in.MaxDepth > 0 {
-			depth := strings.Count(relativeTo(searchPath, path), "/")
+			depth := strings.Count(pathutil.RelTo(searchPath, path), "/")
 			if depth > in.MaxDepth {
 				if d.IsDir() {
 					return filepath.SkipDir
@@ -103,7 +99,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 
 		// Skip hidden and common excludes
-		if strings.HasPrefix(d.Name(), ".") || isCommonExclude(d.Name()) {
+		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -116,7 +112,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 
 		// Skip test files if requested
-		if !in.IncludeTests && isTestFile(d.Name()) {
+		if !in.IncludeTests && fsutil.IsTestFile(d.Name()) {
 			return nil
 		}
 
@@ -158,7 +154,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		case "language":
 			key = lang
 		case "directory":
-			key = filepath.Dir(relativeTo(searchPath, path))
+			key = filepath.Dir(pathutil.RelTo(searchPath, path))
 			if key == "." {
 				key = "(root)"
 			}
@@ -184,7 +180,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 		// Track top files
 		allFiles = append(allFiles, fileStats{
-			Path:      relativeTo(workspace, path),
+			Path:      pathutil.RelTo(workspace, path),
 			Lines:     lineCount,
 			CodeLines: codeLines,
 			Language:  lang,
@@ -193,7 +189,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("directory walk failed: %w", err)
+		return skillerr.WrapIO("directory walk failed", err)
 	}
 
 	// Convert breakdown to array and calculate percentages
@@ -220,22 +216,26 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	// Prepare response
 	preview, truncated := preparePreview(totalStats, rc.MaxPreview)
-	artifact, err := persistStatsArtifact(ctx, rc, totalStats, truncated)
-	if err != nil {
-		return err
+	var artifact skillmain.Artifact
+	var casHint *envelope.CASHint
+	if truncated {
+		artifact, casHint, err = skillout.PersistJSONWithHint(ctx, rc, totalStats, "code_stats", skillout.DefaultCASHintLines)
+		if err != nil {
+			return skillerr.WrapIO("persist stats artifact", err)
+		}
 	}
 
 	data := map[string]any{
 		"statistics":   preview,
 		"breakdown_by": in.BreakdownBy,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
+	skillout.AddArtifact(data, &artifact)
+	if casHint != nil {
+		data["cas_hint"] = casHint
 	}
 
 	return skillout.Emit(rc, command, data)
 }
-
 
 func detectLanguage(ext, name string) string {
 	langMap := map[string]string{
@@ -367,43 +367,6 @@ func getCommentPrefixes(lang string) commentStyle {
 	}
 }
 
-func isTestFile(name string) bool {
-	name = strings.ToLower(name)
-	return strings.HasSuffix(name, "_test.go") ||
-		strings.HasSuffix(name, "_test.py") ||
-		strings.HasSuffix(name, ".test.js") ||
-		strings.HasSuffix(name, ".test.ts") ||
-		strings.HasSuffix(name, ".spec.js") ||
-		strings.HasSuffix(name, ".spec.ts") ||
-		strings.Contains(name, "test_")
-}
-
-func isCommonExclude(name string) bool {
-	excludes := []string{
-		".git", ".svn", ".hg",
-		"node_modules", "vendor", "__pycache__",
-		".venv", "venv", ".tox",
-		"dist", "build", "target",
-	}
-	for _, exclude := range excludes {
-		if name == exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
 func preparePreview(s *stats, limit int) (*stats, bool) {
 	// For stats, keep the full struct; return a truncated view for preview only.
 	if limit <= 0 || len(s.Breakdown) <= limit {
@@ -413,15 +376,4 @@ func preparePreview(s *stats, limit int) (*stats, bool) {
 	cp.Breakdown = make([]breakdownItem, limit)
 	copy(cp.Breakdown, s.Breakdown[:limit])
 	return &cp, true
-}
-
-func persistStatsArtifact(ctx context.Context, rc *skillmain.RunContext, s *stats, truncated bool) (skillmain.Artifact, error) {
-	if !truncated {
-		return skillmain.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	if err := json.NewEncoder(buf).Encode(s); err != nil {
-		return skillmain.Artifact{}, fmt.Errorf("encode stats: %w", err)
-	}
-	return skillmain.PersistBuffer(ctx, rc, buf, "application/json", "code_stats")
 }

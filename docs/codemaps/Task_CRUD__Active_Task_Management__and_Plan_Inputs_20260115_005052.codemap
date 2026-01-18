@@ -1,0 +1,416 @@
+{
+  "schemaVersion": 1,
+  "id": "Task_CRUD__Active_Task_Management__and_Plan_Inputs_20260115_005052",
+  "stableId": "9c3a2f29-a485-4627-9130-e225fb8b6cb6",
+  "metadata": {
+    "cascadeId": "078b5791-f937-442b-99aa-08c3a92fbab0",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T00:50:52+02:00",
+    "mode": "SMART",
+    "originalPrompt": "Explore: task CRUD, active task management, and plan inputs. Start from: skills/todo/main.go, internal/storage/tasks/store.go"
+  },
+  "title": "Task CRUD, Active Task Management, and Plan Inputs",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Task Creation Flow",
+      "description": "Core todo/manage skill - traces from skill entrypoint through validation, duplicate detection, SQLite persistence, to graph edge creation and PageRank computation",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 289,
+          "lineContent": "task, allTasks, err := handleAdd(ctx, store, cfg, workspaceID, addSessionID, in.Add)",
+          "title": "Add operation dispatch",
+          "description": "Main switch case delegates to handleAdd for task creation"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 618,
+          "lineContent": "existing := findOpenDuplicateTask(allTasks, workspaceID, sessionID, req.ParentID, normalizedTitle)",
+          "title": "Duplicate detection",
+          "description": "Checks for existing open tasks with same title/parent/session to avoid duplicates"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 680,
+          "lineContent": "added, err := store.Add(ctx, newTask)",
+          "title": "Task persistence",
+          "description": "Inserts new task into SQLite database via store interface"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "lineNumber": 350,
+          "lineContent": "_, err = s.db.ExecContext(ctx, `\nINSERT INTO tasks (id, workspace_id, title, description, scope_path, parent_id, children, depends_on, status, created_at, completed_at, notes, gotchas, last_review_status, last_review_at, last_review_id, plan_file, plan_section, session_id)\nVALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,",
+          "title": "SQLite insertion",
+          "description": "Executes SQL INSERT with all task fields including review gate and session tracking"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 685,
+          "lineContent": "createTaskDependencyEdges(ctx, cfg, workspaceID, added)",
+          "title": "Graph edge creation",
+          "description": "Creates parent_of and depends_on edges in graph store for task relationships"
+        },
+        {
+          "id": "1f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 294,
+          "lineContent": "persistPageRanks(ctx, store, workspaceID)",
+          "title": "PageRank computation",
+          "description": "Recomputes and persists PageRank scores after graph structure changes"
+        }
+      ],
+      "traceTextDiagram": "Task Creation Flow (skills/todo/main.go)\n├── run() skill entrypoint \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:251\n│   └── switch case \"add\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:283\n│       └── handleAdd() call \u003c-- 1a\n│           ├── validateText() checks \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:587\n│           ├── store.ListByWorkspace() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:598\n│           ├── findOpenDuplicateTask() \u003c-- 1b\n│           │   └── normalizeTaskTitle() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:617\n│           ├── if duplicate exists \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:622\n│           │   └── store.Update() merge \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:643\n│           └── else create new\n│               ├── store.Add() \u003c-- 1c\n│               │   └── SQLite INSERT \u003c-- 1d\n│               ├── createTaskDependencyEdges() \u003c-- 1e\n│               │   └── graph.UpsertNode/Edge() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2053\n│               └── return to run()\n└── persistPageRanks() \u003c-- 1f\n    ├── tasksgraph.Analyze() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2012\n    └── store.SetPageRanks() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2024",
+      "traceGuide": "## Motivation\n\nWhen users create tasks in agentctl, the system needs to prevent duplicates, maintain task relationships (parent-child hierarchies and dependencies), and keep graph metrics up-to-date for intelligent prioritization. Without duplicate detection, users would accumulate redundant tasks across sessions. Without graph tracking, the system couldn't recommend which tasks to work on next based on their importance in the dependency network.\n\n## Details\n\n### Task Creation Entry Point\n\nThe `todo/manage` skill handles task operations through a unified interface [1a]. When `operation=\"add\"` is specified, the request flows to `handleAdd()`, which orchestrates validation, duplicate checking, persistence, and graph updates.\n\n### Duplicate Detection\n\nBefore creating a task, the system **normalizes the title** (lowercases, collapses whitespace) and searches for existing open tasks with the same normalized title, parent, and session [1b]. This prevents users from accidentally creating \"Fix bug in parser\" multiple times. If a duplicate exists, the system merges new information (description, scope path, dependencies) into the existing task rather than creating a new one.\n\n### SQLite Persistence\n\nNew tasks are inserted into the `tasks` table with a comprehensive schema [1c, 1d] that includes:\n- Core fields: title, description, status, timestamps\n- Hierarchy: `parent_id`, `children` (JSON array)\n- Dependencies: `depends_on` (JSON array of task IDs)\n- Review gate: `last_review_status`, `last_review_at`, `last_review_id`\n- Session tracking: `session_id` for multi-session continuity\n- Graph metrics: `pagerank` for prioritization\n\n### Graph Edge Creation\n\nAfter persisting the task, the system creates **structural edges** in a separate graph store [1e]. Two edge types are created:\n- `parent_of`: from parent task to child task\n- `depends_on`: from task to each of its dependencies\n\nThese edges have **no TTL** (they don't expire) because they represent permanent task relationships, unlike temporal activity edges.\n\n### PageRank Computation\n\nFinally, the system recomputes **PageRank scores** for all tasks in the workspace [1f]. This uses the gonum library to run the PageRank algorithm on the dependency graph, treating tasks as nodes and dependencies as edges. Higher PageRank scores indicate tasks that are more \"central\" or \"important\" in the dependency network—these are the tasks that many other tasks depend on, directly or indirectly. The scores are persisted back to the `pagerank` column in the tasks table for use in recommendations and prioritization."
+    },
+    {
+      "id": "2",
+      "title": "Task Completion with Review Gate",
+      "description": "Todo/manage skill - traces completion flow including dependency validation, review gate enforcement, status update, and graph metric recalculation",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 317,
+          "lineContent": "task, allTasks, err := handleComplete(ctx, store, workspaceID, in.Complete)",
+          "title": "Complete operation dispatch",
+          "description": "Main switch delegates to handleComplete for task completion"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 817,
+          "lineContent": "for _, dep := range task.DependsOn {\n\t\tif depTask, ok := index[dep]; ok {\n\t\t\tif depTask.Status != statusDone {",
+          "title": "Dependency validation",
+          "description": "Ensures all dependencies are completed before allowing task completion"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 828,
+          "lineContent": "if isReviewGateEnabled() {\n\t\tif task.Status != tasks.StatusReadyForReview {",
+          "title": "Review gate check",
+          "description": "Enforces review gate policy requiring ready_for_review status and passing review"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 838,
+          "lineContent": "task.Status = statusDone\n\ttask.CompletedAt = \u0026now",
+          "title": "Status transition",
+          "description": "Marks task as completed with timestamp after all validations pass"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 843,
+          "lineContent": "updated, err := store.Update(ctx, task)",
+          "title": "Persist completion",
+          "description": "Updates task record in SQLite with completed status and timestamp"
+        },
+        {
+          "id": "2f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 322,
+          "lineContent": "persistPageRanks(ctx, store, workspaceID)",
+          "title": "Graph recalculation",
+          "description": "Recomputes PageRank after completion changes graph structure"
+        }
+      ],
+      "traceTextDiagram": "Task Completion Flow (todo/manage skill)\n├── run() switch on operation=\"complete\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:316\n│   └── handleComplete() call \u003c-- 2a\n│       ├── store.Get() - fetch task \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:793\n│       ├── Dependency validation loop \u003c-- 2b\n│       │   └── check each dep.Status == done \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:819\n│       ├── Review gate enforcement \u003c-- 2c\n│       │   ├── isReviewGateEnabled() check \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:828\n│       │   ├── verify StatusReadyForReview \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:829\n│       │   └── verify LastReviewStatus == OK \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:832\n│       ├── Status \u0026 timestamp update \u003c-- 2d\n│       │   ├── task.Status = statusDone \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:838\n│       │   └── task.CompletedAt = \u0026now \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:839\n│       └── store.Update() persist \u003c-- 2e\n└── persistPageRanks() recalculation \u003c-- 2f\n    ├── store.ListByWorkspace() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2002\n    ├── tasksgraph.Analyze() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2012\n    └── store.SetPageRanks() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2024",
+      "traceGuide": "## Motivation\n\nWhen a user marks a task as complete, the system must ensure **data integrity** and **workflow correctness** before allowing the transition. Specifically, it must verify that all dependency tasks are finished (you can't complete a task if it depends on incomplete work), and if the workspace has a **review gate** enabled, it must enforce that the task has passed review before being marked done. This prevents premature completion and maintains quality standards.\n\n## Details\n\n### Completion Request Flow\n\nThe completion flow begins when `handleComplete()` [2a] is invoked from the main skill dispatcher. The first step is fetching the task from the database to validate it exists and belongs to the correct workspace.\n\n### Dependency Validation\n\nBefore allowing completion, the system iterates through all tasks listed in `DependsOn` [2b] and checks that each dependency has `Status == \"completed\"`. If any dependency is incomplete, the operation fails with a validation error. This ensures **topological correctness** in the task graph—you can't finish work that depends on unfinished prerequisites.\n\n### Review Gate Enforcement\n\nIf the workspace has review gates enabled (controlled by `AGENTCTL_TODO_REVIEW_GATE` environment variable), the system enforces a **quality checkpoint** [2c]. The task must be in `ready_for_review` status and have `LastReviewStatus == \"ok\"` with a valid `LastReviewID`. This prevents tasks from being marked complete without passing automated checks (lint, tests) or human review. The review gate is **kernel-owned**—agents cannot bypass it.\n\n### Status Transition\n\nOnce all validations pass, the task transitions to completed state [2d]: `Status` becomes `\"completed\"` and `CompletedAt` timestamp is set. This is persisted to SQLite [2e] via `store.Update()`, which executes an UPDATE statement on the tasks table.\n\n### Graph Recalculation\n\nAfter completion, the system recomputes **PageRank scores** [2f] for all tasks in the workspace. Completion changes the graph structure (completed tasks effectively become sinks), so PageRank values must be recalculated to maintain accurate priority rankings. This involves fetching all workspace tasks, running the tasksgraph analyzer (which uses gonum's PageRank algorithm), and bulk-updating the `pagerank` column in the database."
+    },
+    {
+      "id": "3",
+      "title": "Active Task Management",
+      "description": "Task store operations - traces EnsureActive flow from skill through store logic that checks for existing active task or creates new one",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 441,
+          "lineContent": "task, created, err := store.EnsureActive(ctx, workspaceID, title, scopePath)",
+          "title": "EnsureActive call",
+          "description": "Skill invokes store method to get or create active task for workspace"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "lineNumber": 555,
+          "lineContent": "t, found, err := s.GetActive(ctx, workspaceID)",
+          "title": "Check existing active",
+          "description": "Queries active_tasks table to see if workspace already has active task"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "lineNumber": 509,
+          "lineContent": "row := s.db.QueryRowContext(ctx, `\nSELECT t.id, t.workspace_id, t.title, t.description, t.scope_path, t.parent_id, t.children, t.depends_on, t.status, t.created_at, t.completed_at, t.notes, t.gotchas, t.last_review_status, t.last_review_at, t.last_review_id, t.plan_file, t.plan_section, t.session_id, t.pagerank, t.epic_id\nFROM tasks t\nJOIN active_tasks a ON t.id = a.task_id\nWHERE a.workspace_id = ?`, workspaceID)",
+          "title": "Active task query",
+          "description": "Joins tasks and active_tasks tables to retrieve currently active task"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "lineNumber": 570,
+          "lineContent": "t, err = s.Add(ctx, newTask)",
+          "title": "Create new task",
+          "description": "If no active task exists, creates new task with default title and scope"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "lineNumber": 575,
+          "lineContent": "_, err = s.SetActive(ctx, workspaceID, t.ID)",
+          "title": "Set as active",
+          "description": "Inserts or updates active_tasks table to mark new task as active"
+        },
+        {
+          "id": "3f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go",
+          "lineNumber": 533,
+          "lineContent": "_, err = s.db.ExecContext(ctx, `\nINSERT INTO active_tasks (workspace_id, task_id) VALUES (?, ?)\nON CONFLICT(workspace_id) DO UPDATE SET task_id = excluded.task_id`, workspaceID, taskID)",
+          "title": "Active task upsert",
+          "description": "SQLite upsert ensures only one active task per workspace"
+        }
+      ],
+      "traceTextDiagram": "Active Task Management Flow\n├── todo/manage skill entrypoint \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:251\n│   └── case \"ensure_active\" \u003c-- 3a\n│       └── store.EnsureActive() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:553\n│           ├── GetActive() check \u003c-- 3b\n│           │   └── SQL JOIN query \u003c-- 3c\n│           │       └── tasks ⋈ active_tasks\n│           ├── if not found: \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:560\n│           │   ├── Add() new task \u003c-- 3d\n│           │   └── SetActive() \u003c-- 3e\n│           │       └── UPSERT active_tasks \u003c-- 3f\n│           └── return (task, created) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:579",
+      "traceGuide": "## Motivation\n\nWhen working on tasks in agentctl, you need a way to track **which task is currently being worked on** in a given workspace. Without this, agents and users would have to manually specify the task ID for every operation, and there would be no clear answer to \"what am I working on right now?\"\n\nThe **active task** concept solves this by maintaining a single \"current task\" per workspace. This enables operations like \"add notes to the current task\" or \"complete what I'm working on\" without requiring explicit task IDs every time.\n\n## Details\n\n### Storage Model\n\nActive task state is stored in a dedicated `active_tasks` table [3f] with a **one-to-one relationship** between workspace and active task. The table uses `workspace_id` as the primary key, ensuring only one task can be active per workspace at a time.\n\n### EnsureActive Pattern\n\nThe `EnsureActive` operation [3a] implements a **get-or-create** pattern that's particularly useful for workflows that need to guarantee an active task exists:\n\n1. **First, check** if an active task already exists via a JOIN query between `tasks` and `active_tasks` tables [3c]\n2. **If found**, return it immediately with `created=false` [3b]\n3. **If not found**, create a new task with the provided default title and scope [3d], then mark it as active [3e]\n\nThis pattern is atomic and prevents race conditions through SQLite's `ON CONFLICT` upsert semantics [3f].\n\n### Setting Active Tasks\n\nThe `SetActive` operation uses an **upsert** (INSERT ... ON CONFLICT DO UPDATE) to atomically replace the active task [3f]. This ensures that even concurrent calls will result in a consistent final state - exactly one active task per workspace.\n\n### Use Cases\n\n- **Session restoration**: When resuming work, ensure there's an active task to attach operations to\n- **Implicit context**: Skills can operate on \"the current task\" without requiring task IDs in every call\n- **Workflow continuity**: Agents can maintain focus on a single task across multiple operations"
+    },
+    {
+      "id": "4",
+      "title": "LLM-Powered Plan Generation",
+      "description": "Planning subsystem - traces from plan operation through LLM provider selection, task decomposition via API call, to task creation and graph construction",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 512,
+          "lineContent": "planResult, err := handlePlan(ctx, store, boardStore, cfg, workspaceID, rc.SessionID, in.Plan)",
+          "title": "Plan operation dispatch",
+          "description": "Main switch delegates to handlePlan for LLM-based task decomposition"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 1471,
+          "lineContent": "planner := llm.AutoPlanner()",
+          "title": "Planner selection",
+          "description": "AutoPlanner checks env vars to select OpenRouter, Groq, or OpenAI provider"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/planning/llm/auto.go",
+          "lineNumber": 10,
+          "lineContent": "if os.Getenv(\"OPENROUTER_API_KEY\") != \"\" {\n\t\tmodel := os.Getenv(\"OPENROUTER_MODEL_NAME\")\n\t\tif model == \"\" {\n\t\t\tmodel = \"openrouter/auto\"\n\t\t}\n\t\treturn NewOpenAIPlanner(OpenAIConfig{",
+          "title": "Provider priority",
+          "description": "Prefers OpenRouter, falls back to Groq, then OpenAI based on API keys"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 1483,
+          "lineContent": "llmResult, err := planner.Plan(ctx, llm.PlanRequest{",
+          "title": "LLM API call",
+          "description": "Sends goal and constraints to LLM for task decomposition"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 1611,
+          "lineContent": "created, err := store.Add(ctx, plannedTasks[i])",
+          "title": "Task creation loop",
+          "description": "Iterates through LLM-generated tasks and persists each to database"
+        },
+        {
+          "id": "4f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 1617,
+          "lineContent": "createTaskDependencyEdges(ctx, cfg, workspaceID, created)",
+          "title": "Graph edge creation",
+          "description": "Creates dependency edges for each task in the plan"
+        },
+        {
+          "id": "4g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 525,
+          "lineContent": "persistPageRanks(ctx, store, workspaceID)",
+          "title": "Graph metrics update",
+          "description": "Recomputes PageRank for entire workspace after plan tasks added"
+        }
+      ],
+      "traceTextDiagram": "LLM-Powered Plan Generation Flow\n├── todo/manage skill entrypoint\n│   └── switch case \"plan\" \u003c-- 4a\n│       └── handlePlan() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:1378\n│           ├── AutoPlanner() selection \u003c-- 4b\n│           │   └── Check env vars (OpenRouter/Groq/\n│           │       OpenAI) \u003c-- 4c\n│           ├── planner.Plan() LLM call \u003c-- 4d\n│           │   ├── buildPrompt() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/planning/llm/planner.go:46\n│           │   ├── HTTP POST to LLM API \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/planning/llm/openai.go:127\n│           │   └── parseResponse() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/planning/llm/planner.go:94\n│           └── Apply mode: create tasks \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:1550\n│               ├── for each planned task \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:1556\n│               │   ├── store.Add() \u003c-- 4e\n│               │   └── createTaskDependencyEdges() \u003c-- 4f\n│               └── persistPageRanks() \u003c-- 4g",
+      "traceGuide": "## Motivation\n\nWhen users request complex features like \"implement user authentication\" or \"add caching layer,\" they need those goals **decomposed into concrete, actionable tasks**. Manual decomposition is tedious and inconsistent. The LLM-powered planning system solves this by automatically breaking down high-level goals into structured task hierarchies with proper dependencies, then persisting them as trackable work items in the task database.\n\n## Details\n\n### Plan Request Entry\n\nThe `todo/manage` skill accepts a `plan` operation with a goal description, optional context, and scope paths [4a]. The system first checks if LLM planning is available by looking for API keys in the environment [4b].\n\n### Provider Selection\n\n**AutoPlanner** implements a priority cascade: it prefers OpenRouter (most flexible), falls back to Groq (fast and free), then OpenAI [4c]. This ensures planning works across different deployment environments without hardcoding a single provider.\n\n### LLM Decomposition\n\nThe planner constructs a structured prompt containing the goal, constraints (max tasks, max depth), and scope hints, then sends it to the LLM API [4d]. The LLM responds with a JSON array of tasks, each with a title, description, optional scope path, and dependency references (by title).\n\n### Task Persistence\n\nIn \"apply\" mode, the system iterates through the generated tasks and persists each via `store.Add()` [4e]. **Duplicate detection** runs first—if an open task with the same title, parent, and session already exists, it's updated rather than creating a duplicate.\n\n### Graph Construction\n\nAfter each task is created, the system calls `createTaskDependencyEdges()` to build graph edges representing parent-child and dependency relationships [4f]. These edges enable downstream features like critical path analysis and cycle detection.\n\n### Priority Computation\n\nFinally, `persistPageRanks()` recomputes PageRank scores for all tasks in the workspace [4g]. This **weighted metric** combines graph topology with other signals to power the recommendation system, ensuring high-impact tasks surface to the top."
+    },
+    {
+      "id": "5",
+      "title": "Task Graph Analysis and PageRank",
+      "description": "Graph analysis subsystem - traces from analyzer creation through directed graph construction, PageRank computation via gonum, to critical path calculation",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 354,
+          "lineContent": "insights, err := tasksgraph.NewAnalyzer().Analyze(allTasks, workspaceID)",
+          "title": "Analyzer invocation",
+          "description": "Creates analyzer and runs full graph analysis on workspace tasks"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "lineNumber": 74,
+          "lineContent": "g := simple.NewDirectedGraph()",
+          "title": "Graph construction",
+          "description": "Creates gonum directed graph for dependency analysis"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "lineNumber": 83,
+          "lineContent": "for _, t := range taskList {\n\t\tfromID := idToNode[t.ID]\n\t\tfor _, dep := range t.DependsOn {\n\t\t\ttoID, exists := idToNode[dep]\n\t\t\tif !exists {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tif fromID != toID {\n\t\t\t\tg.SetEdge(g.NewEdge(simple.Node(fromID), simple.Node(toID)))",
+          "title": "Edge creation",
+          "description": "Adds directed edges from tasks to their dependencies (A depends on B = A→B)"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "lineNumber": 98,
+          "lineContent": "pageRanks := network.PageRank(g, 0.85, 1e-6)",
+          "title": "PageRank computation",
+          "description": "Gonum computes PageRank scores with damping factor 0.85 and convergence threshold"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go",
+          "lineNumber": 117,
+          "lineContent": "criticalPaths := computeCriticalPaths(g, nodeToID)",
+          "title": "Critical path calculation",
+          "description": "Computes longest path from each node to any sink via memoized DFS"
+        },
+        {
+          "id": "5f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 2024,
+          "lineContent": "if err := store.SetPageRanks(ctx, ranks); err != nil {",
+          "title": "PageRank persistence",
+          "description": "Bulk updates pagerank column in tasks table for all computed scores"
+        }
+      ],
+      "traceTextDiagram": "Task Graph Analysis and PageRank Flow\n├── todo/manage skill entrypoint \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:251\n│   └── case \"list\" operation \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:329\n│       └── Analyzer.Analyze() call \u003c-- 5a\n│\n└── tasksgraph.Analyzer \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:40\n    ├── Build directed graph\n    │   ├── NewDirectedGraph() \u003c-- 5b\n    │   └── Add edges from dependencies \u003c-- 5c\n    │\n    ├── Compute graph metrics\n    │   ├── network.PageRank() \u003c-- 5d\n    │   └── computeCriticalPaths() \u003c-- 5e\n    │\n    └── Return to skill layer\n        └── persistPageRanks() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:2000\n            └── store.SetPageRanks() \u003c-- 5f",
+      "traceGuide": "## Motivation\n\nWhen managing dozens or hundreds of tasks across a project, **prioritization becomes critical**. Which task should you work on next? A simple chronological list doesn't account for task dependencies, importance, or how tasks relate to each other. The task graph analysis system solves this by treating tasks as a **directed dependency graph** and computing metrics like **PageRank** and **critical path scores** to objectively rank task importance [5d, 5e].\n\nThis enables the system to answer: \"Given my current task backlog, what should I focus on to maximize progress?\" The answer considers both the task's position in the dependency chain (blocking other work) and its centrality in the overall project structure.\n\n## Details\n\n### Graph Construction\n\nThe system starts by building a **directed graph** where each task is a node [5b]. If task A depends on task B, an edge points from A→B [5c]. This representation captures the constraint that B must complete before A can start. The graph is built using the gonum library's `simple.DirectedGraph` type.\n\n### PageRank Computation\n\n**PageRank** measures task importance by analyzing the graph structure [5d]. Tasks that many other tasks depend on (directly or indirectly) receive higher scores. The algorithm uses a damping factor of 0.85 and converges to within 1e-6 precision. This metric identifies \"hub\" tasks that unblock significant downstream work.\n\n### Critical Path Analysis\n\nThe **critical path score** represents the longest dependency chain from a task to any leaf node [5e]. It's computed via memoized depth-first search. Tasks with high critical path scores are bottlenecks—completing them shortens the overall project timeline more than other tasks.\n\n### Persistence\n\nAfter computation, PageRank scores are bulk-written to the `pagerank` column in the tasks table [5f]. This allows subsequent queries to sort and filter tasks by importance without recomputing the graph. The scores are recalculated whenever the task graph structure changes (new tasks, new dependencies, completions).\n\n### Integration\n\nThe analysis runs automatically during list operations when ranked results are requested [5a]. It also runs after mutations (add, complete, update) to keep scores fresh. The computed metrics feed into the recommendation system, which combines PageRank with other signals like unread messages and recency to suggest the next best task to work on."
+    },
+    {
+      "id": "6",
+      "title": "Task Recommendation Scoring",
+      "description": "Overseer subsystem - traces from recommend operation through graph analysis, mailbox integration, weighted scoring formula, to sorted recommendations",
+      "locations": [
+        {
+          "id": "6a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 492,
+          "lineContent": "rec, err := scorer.Recommend(ctx, workspaceID, limit)",
+          "title": "Recommend invocation",
+          "description": "Skill calls overseer scorer to generate prioritized task recommendations"
+        },
+        {
+          "id": "6b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "lineNumber": 90,
+          "lineContent": "analyzer := tasksgraph.NewAnalyzer()\n\tinsights, err := analyzer.Analyze(pending, workspaceID)",
+          "title": "Graph analysis",
+          "description": "Analyzes pending tasks to get PageRank and critical path metrics"
+        },
+        {
+          "id": "6c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "lineNumber": 103,
+          "lineContent": "taskMailCounts := s.getTaskMailCounts(ctx, workspaceID, pending)",
+          "title": "Mailbox integration",
+          "description": "Retrieves unread message counts from admin/overseer for each task"
+        },
+        {
+          "id": "6d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "lineNumber": 166,
+          "lineContent": "score := WeightCriticalPath*normCritPath +\n\t\t\tWeightPageRank*normPageRank +\n\t\t\tWeightAdminMail*normAdmin +\n\t\t\tWeightOverseerMail*normOverseer +\n\t\t\tWeightRecency*recencyFactor",
+          "title": "Weighted scoring",
+          "description": "Combines normalized metrics with weights: 30% critical path, 20% PageRank, 25% admin mail, 15% overseer mail, 10% recency"
+        },
+        {
+          "id": "6e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go",
+          "lineNumber": 190,
+          "lineContent": "sort.Slice(scores, func(i, j int) bool {\n\t\treturn scores[i].Score \u003e scores[j].Score\n\t})",
+          "title": "Score sorting",
+          "description": "Sorts tasks by computed score descending to prioritize recommendations"
+        }
+      ],
+      "traceTextDiagram": "Task Recommendation Flow (Trace 6)\n├── todo/manage skill entrypoint\n│   └── case \"recommend\" \u003c-- 6a\n│       └── scorer.Recommend() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:492\n│           ├── Filter to pending tasks \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:73\n│           ├── tasksgraph.Analyzer.Analyze() \u003c-- 6b\n│           │   ├── Build directed graph \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:74\n│           │   ├── Compute PageRank \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:98\n│           │   └── Calculate critical paths \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/tasksgraph/graph.go:117\n│           ├── getTaskMailCounts() \u003c-- 6c\n│           │   └── boardStore.CountMessagesByTask() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:230\n│           ├── Normalize metrics (0-1 range) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:139\n│           ├── For each task: \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:132\n│           │   └── Compute weighted score \u003c-- 6d\n│           └── sort.Slice(scores, ...) \u003c-- 6e\n│               └── Return top N recommendations \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:199\n└── Output: Recommendation struct\n    ├── TopRecommended task \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:208\n    └── Sorted task list by priority \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/analysis/overseer/scorer.go:204",
+      "traceGuide": "## Motivation\n\nWhen managing dozens or hundreds of tasks across a workspace, **deciding what to work on next becomes a critical bottleneck**. The task recommendation system solves this by computing a **priority score** for each pending task that combines multiple signals: how critical the task is to the overall dependency graph (PageRank and critical path), how much attention it's receiving from admins and the overseer (unread message counts), and how recently it was updated (recency factor). This produces a ranked list where the highest-scoring task is the most important thing to work on right now.\n\n## Details\n\n### Entry Point\n\nThe recommendation flow starts when `todo/manage` receives an `operation=\"recommend\"` request [6a]. The skill creates an `overseer.Scorer` instance and calls `Recommend()` with the workspace ID and result limit.\n\n### Graph Analysis\n\nThe scorer first filters all workspace tasks to **pending tasks only** (excluding completed and cancelled) [6b]. It then invokes `tasksgraph.Analyzer.Analyze()` which builds a directed graph where edges represent dependencies (if task A depends on B, there's an edge A→B). The analyzer computes two key metrics:\n\n- **PageRank**: Uses gonum's network.PageRank with damping factor 0.85 to identify tasks that many other tasks depend on\n- **Critical Path Score**: Calculates the longest path from each task to any sink (task with no dependencies) via memoized DFS\n\n### Mailbox Integration\n\nThe scorer queries the blackboard/mailbox system to count **unread messages per task** [6c], separating counts by sender type (admin vs overseer). This surfaces tasks that humans or the overseer agent have flagged as needing attention.\n\n### Weighted Scoring Formula\n\nFor each pending task, the scorer computes a final priority score [6d] using **normalized metrics** (all scaled 0-1) with these weights:\n\n- 30% Critical Path Score\n- 20% PageRank  \n- 25% Admin Mail Count\n- 15% Overseer Mail Count\n- 10% Recency Factor (1 / (1 + days_since_update))\n\nAll metrics are normalized against the maximum value in the current task set to prevent unbounded score inflation.\n\n### Output\n\nTasks are sorted by score descending [6e] and the top N are returned in a `Recommendation` struct containing the sorted task list, the single highest-priority task (`TopRecommended`), and metadata like total pending count and whether cycles exist in the graph."
+    },
+    {
+      "id": "7",
+      "title": "Review Gate Request Flow",
+      "description": "Review gate subsystem - traces from review_request operation through task validation, CAS artifact storage, to status transition and review tracking",
+      "locations": [
+        {
+          "id": "7a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 535,
+          "lineContent": "task, err := handleReviewRequest(ctx, store, workspaceID, cfg, in.ReviewRequest)",
+          "title": "Review request dispatch",
+          "description": "Main switch delegates to handleReviewRequest for review gate initiation"
+        },
+        {
+          "id": "7b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 882,
+          "lineContent": "switch task.Status {\n\tcase tasks.StatusInProgress, tasks.StatusReadyForReview:\n\t\t// OK\n\tcase tasks.StatusPending:\n\t\treturn nil, skillerr.Validationf(\"task %s is pending; start work before requesting review\", req.TaskID)",
+          "title": "Status validation",
+          "description": "Ensures task is in_progress or ready_for_review before allowing review request"
+        },
+        {
+          "id": "7c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 903,
+          "lineContent": "review := agent.ReviewArtifact{\n\t\tWorkspaceID: workspaceID,\n\t\tTaskID:      task.ID,\n\t\tKind:        kind,\n\t\tStatus:      tasks.ReviewStatusPending,\n\t\tSummary:     fmt.Sprintf(\"pending review for task %s: %s\", task.ID, task.Title),\n\t\tCreatedBy:   os.Getenv(\"AGENTCTL_AGENT_NAME\"),\n\t}",
+          "title": "Review artifact creation",
+          "description": "Constructs review artifact with pending status and metadata"
+        },
+        {
+          "id": "7d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 911,
+          "lineContent": "review, err = artifacts.StoreReviewArtifact(ctx, cfg, review, nil)",
+          "title": "CAS persistence",
+          "description": "Stores review artifact in content-addressable storage for durability"
+        },
+        {
+          "id": "7e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 917,
+          "lineContent": "task.Status = tasks.StatusReadyForReview\n\ttask.LastReviewStatus = tasks.ReviewStatusPending\n\tnow := time.Now().UTC()\n\ttask.LastReviewAt = \u0026now\n\ttask.LastReviewID = review.ID",
+          "title": "Status transition",
+          "description": "Transitions task to ready_for_review and records review metadata"
+        },
+        {
+          "id": "7f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go",
+          "lineNumber": 923,
+          "lineContent": "updated, err := store.Update(ctx, task)",
+          "title": "Task update",
+          "description": "Persists review status and metadata to tasks table"
+        }
+      ],
+      "traceTextDiagram": "Review Gate Request Flow (Trace 7)\n├── todo/manage skill entrypoint\n│   └── switch case \"review_request\" \u003c-- 7a\n│       └── handleReviewRequest() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:860\n│           ├── store.Get(ctx, taskID) \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/todo/main.go:868\n│           │   └── fetch task from SQLite \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:410\n│           ├── validate task.Status \u003c-- 7b\n│           │   └── must be in_progress or ready_for_review\n│           ├── construct ReviewArtifact \u003c-- 7c\n│           │   └── set Status=pending, Kind, Summary\n│           ├── artifacts.StoreReviewArtifact() \u003c-- 7d\n│           │   └── persist to CAS with JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/review_store.go:65\n│           ├── set task review fields \u003c-- 7e\n│           │   ├── Status → ready_for_review\n│           │   ├── LastReviewStatus → pending\n│           │   └── LastReviewID → review.ID\n│           └── store.Update(ctx, task) \u003c-- 7f\n│               └── UPDATE tasks SET status \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/tasks/store.go:386",
+      "traceGuide": "## Motivation\n\nWhen agents or humans complete implementation work on a task, there needs to be a **quality gate** before marking it as done. The review gate system solves this by introducing a **ready_for_review** status that sits between \"in progress\" and \"completed\". This prevents premature task completion and ensures automated checks (tests, lints) and optional human review happen before work is considered finished.\n\nWithout this gate, tasks could be marked complete without validation, leading to broken builds and technical debt accumulation. The review gate enforces a **structured lifecycle**: work → request review → checks pass → completion.\n\n## Details\n\n### Review Request Flow\n\nThe review gate is triggered via the `todo/manage` skill with `operation=\"review_request\"` [7a]. The system first validates that the task is in an appropriate state—it must be **in_progress or ready_for_review** [7b]. Tasks that are still pending (not started) or already completed cannot enter review.\n\n### Artifact Persistence\n\nWhen a review is requested, the system creates a **ReviewArtifact** [7c] containing metadata like workspace ID, task ID, review kind (auto/human/mixed), and status (pending). This artifact is immediately persisted to **content-addressable storage (CAS)** [7d] for durability and auditability. The CAS digest becomes the review's permanent identifier.\n\n### Task State Transition\n\nAfter storing the review artifact, the task itself is updated [7e] with three key fields:\n- **Status** transitions to `ready_for_review`\n- **LastReviewStatus** set to `pending` \n- **LastReviewID** links to the CAS artifact\n\nThese changes are persisted to the SQLite tasks table [7f], making the review state queryable and enabling downstream systems (like the overseer) to track which tasks are awaiting review.\n\n### Integration Points\n\nThe review gate integrates with the **task guard hook** which automatically demotes tasks back to `in_progress` if new writes occur after a passing review, ensuring reviews don't become stale. The **completion operation** [2c] enforces that when the review gate is enabled, tasks cannot transition to completed without a passing review artifact."
+    }
+  ],
+  "description": "Comprehensive map of task management system spanning CRUD operations, active task tracking, LLM-powered planning, graph analysis, and review gates. Key flows include task creation with duplicate detection [1b], completion with review enforcement [2c], active task management [3b-3e], LLM plan generation [4d-4e], PageRank computation [5d], weighted recommendation scoring [6d], and review gate lifecycle [7c-7f].",
+  "mermaidDiagram": "graph TB\n    subgraph Skills[\"Skill Operations\"]\n        add[\"1a: add operation\"]\n        update[\"2a: update operation\"]\n        complete[\"2a: complete operation\"]\n        ensure[\"3a: ensure_active operation\"]\n        plan[\"4a: plan operation\"]\n        recommend[\"6a: recommend operation\"]\n        review[\"7a: review_request operation\"]\n    end\n\n    subgraph Storage[\"Storage Layer\"]\n        store[\"store interface\"]\n        sqlite[\"SQLite tasks table\"]\n        active_table[\"active_tasks table\"]\n    end\n\n    subgraph Graph[\"Graph Analysis \u0026 Metrics\"]\n        analyzer[\"5a: tasksgraph.Analyzer\"]\n        pagerank[\"5d: PageRank computation\"]\n        edges[\"1e/4f: createTaskDependencyEdges\"]\n        persist[\"1f/2f/4g: persistPageRanks\"]\n    end\n\n    subgraph Planning[\"LLM Planning\"]\n        autoplanner[\"4b: AutoPlanner selection\"]\n        llmcall[\"4d: planner.Plan API call\"]\n        taskloop[\"4e: task creation loop\"]\n    end\n\n    subgraph Scoring[\"Recommendation Engine\"]\n        scorer[\"6b: graph analysis\"]\n        mailbox[\"6c: mailbox integration\"]\n        weighted[\"6d: weighted scoring formula\"]\n    end\n\n    subgraph Review[\"Review Gate System\"]\n        artifact[\"7c: ReviewArtifact creation\"]\n        casstore[\"7d: StoreReviewArtifact\"]\n        transition[\"7e: status transition\"]\n    end\n\n    add --\u003e|creates| store\n    update --\u003e|modifies| store\n    complete --\u003e|finalizes| store\n    ensure --\u003e|checks/creates| store\n    plan --\u003e|generates tasks via| taskloop\n    recommend --\u003e|analyzes| scorer\n    review --\u003e|initiates| artifact\n\n    store --\u003e|persists to| sqlite\n    store --\u003e|manages| active_table\n\n    add --\u003e|triggers| edges\n    update --\u003e|triggers| edges\n    complete --\u003e|triggers| edges\n    plan --\u003e|triggers| edges\n    edges --\u003e|creates graph edges| Graph\n\n    add --\u003e|recomputes| persist\n    update --\u003e|recomputes| persist\n    complete --\u003e|recomputes| persist\n    plan --\u003e|recomputes| persist\n    persist --\u003e|invokes| analyzer\n\n    analyzer --\u003e|computes| pagerank\n    pagerank --\u003e|updates| sqlite\n\n    plan --\u003e|selects provider via| autoplanner\n    autoplanner --\u003e|calls| llmcall\n    llmcall --\u003e|generates tasks| taskloop\n    taskloop --\u003e|persists| store\n\n    recommend --\u003e|gets metrics from| analyzer\n    scorer --\u003e|queries| mailbox\n    mailbox --\u003e|weights| weighted\n\n    artifact --\u003e|stores in CAS| casstore\n    casstore --\u003e|records| sqlite\n    transition --\u003e|updates status| store\n\n    style Skills fill:#fcc2d7\n    style Storage fill:#a5d8ff\n    style Graph fill:#99e9f2\n    style Planning fill:#ffec99\n    style Scoring fill:#b2f2bb\n    style Review fill:#eebefa"
+}

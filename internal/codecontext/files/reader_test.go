@@ -15,7 +15,7 @@ import (
 func createTestFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 	return path
@@ -166,7 +166,7 @@ func TestSafeReader_RejectsSymlinkEscape(t *testing.T) {
 func TestSafeReader_RejectsDirectory(t *testing.T) {
 	dir := createTestDir(t)
 	subdir := filepath.Join(dir, "subdir")
-	if err := os.Mkdir(subdir, 0755); err != nil {
+	if err := os.Mkdir(subdir, 0o755); err != nil {
 		t.Fatalf("failed to create subdir: %v", err)
 	}
 

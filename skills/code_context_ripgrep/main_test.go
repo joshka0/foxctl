@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeblocks"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/rgutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
 func TestParseInput(t *testing.T) {
@@ -102,57 +106,84 @@ func TestParseInput(t *testing.T) {
 	}
 }
 
-func TestBuildRipgrepArgs(t *testing.T) {
+func TestBuildSearchOpts(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      input
-		searchPath string
-		wantArgs   []string
+		name        string
+		input       rgutil.SearchInput
+		searchPath  string
+		workspace   string
+		wantExclude []string
 	}{
 		{
 			name: "basic pattern",
-			input: input{
+			input: rgutil.SearchInput{
 				Pattern:    "TODO",
 				MaxMatches: 100,
 			},
 			searchPath: "/workspace",
-			wantArgs:   []string{"--json", "--no-heading", "--line-number", "--no-messages", "--max-count", "100", "--glob", "!.git", "--glob", "!node_modules", "--glob", "!vendor", "--glob", "!__pycache__", "--glob", "!.godot", "--", "TODO", "/workspace"},
+			workspace:  "/workspace",
+			wantExclude: []string{
+				".git",
+				"node_modules",
+				"vendor",
+				"__pycache__",
+				".godot",
+			},
 		},
 		{
 			name: "with globs",
-			input: input{
+			input: rgutil.SearchInput{
 				Pattern:    "func",
 				MaxMatches: 50,
 				Glob:       []string{"*.go", "*.py"},
 				GlobNot:    []string{"test/*"},
 			},
 			searchPath: ".",
-			wantArgs:   []string{"--json", "--no-heading", "--line-number", "--no-messages", "--max-count", "50", "--glob", "*.go", "--glob", "*.py", "--glob", "!test/*", "--", "func", "."},
+			workspace:  "/repo",
+			wantExclude: []string{
+				"test/*",
+			},
 		},
 		{
 			name: "case insensitive and hidden",
-			input: input{
+			input: rgutil.SearchInput{
 				Pattern:         "error",
 				MaxMatches:      100,
 				CaseInsensitive: true,
 				Hidden:          true,
 			},
 			searchPath: "/src",
-			wantArgs:   []string{"--json", "--no-heading", "--line-number", "--no-messages", "--max-count", "100", "--ignore-case", "--hidden", "--glob", "!.git", "--glob", "!node_modules", "--glob", "!vendor", "--glob", "!__pycache__", "--glob", "!.godot", "--", "error", "/src"},
+			workspace:  "/src",
+			wantExclude: []string{
+				".git",
+				"node_modules",
+				"vendor",
+				"__pycache__",
+				".godot",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildRipgrepArgs(tt.input, tt.searchPath)
-			if len(got) != len(tt.wantArgs) {
-				t.Errorf("len(args) = %d, want %d\ngot:  %v\nwant: %v", len(got), len(tt.wantArgs), got, tt.wantArgs)
-				return
+			opts := rgutil.BuildSearchOpts(tt.input, tt.workspace, tt.searchPath, nil)
+			if opts.Pattern != tt.input.Pattern {
+				t.Errorf("Pattern = %q, want %q", opts.Pattern, tt.input.Pattern)
 			}
-			for i, arg := range got {
-				if arg != tt.wantArgs[i] {
-					t.Errorf("args[%d] = %q, want %q", i, arg, tt.wantArgs[i])
-				}
+			if opts.Path != tt.searchPath {
+				t.Errorf("Path = %q, want %q", opts.Path, tt.searchPath)
+			}
+			if opts.WorkingDir != tt.workspace {
+				t.Errorf("WorkingDir = %q, want %q", opts.WorkingDir, tt.workspace)
+			}
+			if opts.CaseInsensitive != tt.input.CaseInsensitive {
+				t.Errorf("CaseInsensitive = %v, want %v", opts.CaseInsensitive, tt.input.CaseInsensitive)
+			}
+			if opts.Hidden != tt.input.Hidden {
+				t.Errorf("Hidden = %v, want %v", opts.Hidden, tt.input.Hidden)
+			}
+			if !reflect.DeepEqual(opts.ExcludeGlobs, tt.wantExclude) {
+				t.Errorf("ExcludeGlobs = %v, want %v", opts.ExcludeGlobs, tt.wantExclude)
 			}
 		})
 	}
@@ -167,7 +198,7 @@ func TestGroupByFile(t *testing.T) {
 		{File: "a.go", Line: 5, Text: "line5"},
 	}
 
-	grouped := groupByFile(matches)
+	grouped := codeblocks.GroupMatchesByFile(matches)
 
 	if len(grouped) != 3 {
 		t.Errorf("expected 3 files, got %d", len(grouped))
@@ -193,22 +224,15 @@ func TestPrepareBlockPreview(t *testing.T) {
 		{File: "c.go", StartLine: 20, EndLine: 30, SymbolName: "baz", MatchCount: 3},
 	}
 
-	// Limit to 2
-	preview := prepareBlockPreview(blocks, 2)
-	if len(preview) != 2 {
-		t.Errorf("expected 2 preview items, got %d", len(preview))
+	preview := codeblocks.PrepareBlockPreview(blocks)
+	if len(preview) != 3 {
+		t.Errorf("expected 3 preview items, got %d", len(preview))
 	}
 	if preview[0].SymbolName != "foo" {
 		t.Errorf("first preview should be foo, got %s", preview[0].SymbolName)
 	}
 	if preview[1].SymbolName != "bar" {
 		t.Errorf("second preview should be bar, got %s", preview[1].SymbolName)
-	}
-
-	// No limit exceeded
-	fullPreview := prepareBlockPreview(blocks, 10)
-	if len(fullPreview) != 3 {
-		t.Errorf("expected 3 preview items, got %d", len(fullPreview))
 	}
 }
 
@@ -220,7 +244,7 @@ func TestSummarizeTopFiles(t *testing.T) {
 		"d.go": 7,
 	}
 
-	summary := summarizeTopFiles(counts, 2)
+	summary := skillout.SummarizeTopFiles(counts, 2)
 	if len(summary) != 2 {
 		t.Errorf("expected 2 items, got %d", len(summary))
 	}

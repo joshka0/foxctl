@@ -10,6 +10,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -79,7 +80,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Default workspace
-	in.Workspace = sessionkit.WorkspaceOrDefault(in.Workspace, rc.Workspace)
+	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
 
 	// Resolve session ID
 	sessionID := sessionkit.ResolveSessionID(in.Workspace, in.SessionID)

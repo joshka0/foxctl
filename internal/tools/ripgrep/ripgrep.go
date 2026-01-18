@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 )
 
 // DefaultExcludeGlobs are patterns excluded by default from searches.
@@ -145,8 +147,7 @@ func FilesWithMatches(ctx context.Context, opts SearchOpts) ([]string, error) {
 
 // Available returns true if ripgrep is installed and accessible.
 func Available() bool {
-	_, err := exec.LookPath("rg")
-	return err == nil
+	return executil.HasTool("rg")
 }
 
 // CmdResult holds the raw output from ripgrep.
@@ -276,8 +277,8 @@ type rgMatchData struct {
 	Lines struct {
 		Text string `json:"text"`
 	} `json:"lines"`
-	LineNumber  int `json:"line_number"`
-	Submatches  []rgSubmatch `json:"submatches"`
+	LineNumber int          `json:"line_number"`
+	Submatches []rgSubmatch `json:"submatches"`
 }
 
 type rgSubmatch struct {

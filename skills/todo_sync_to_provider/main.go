@@ -14,7 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/providers/claude/todos"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/todosync"
 )
 
@@ -66,11 +66,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	allowProviderState := os.Getenv("AGENTCTL_ALLOW_PROVIDER_STATE") == "1"
 
 	// Open task store
-	taskStore, err := tasks.Open(ctx, rc.Config.Storage.Root)
+	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err != nil {
 		return err
 	}
-	defer taskStore.Close()
+	defer cleanup()
 
 	// Resolve session ID
 	sessionID := in.SessionID

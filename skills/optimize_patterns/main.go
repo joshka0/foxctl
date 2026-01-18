@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
@@ -35,13 +36,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
+		return skillerr.WrapIO("resolve workspace", err)
 	}
 
 	// Open pattern store
 	patternStore, err := optimization.OpenPatternStore(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open pattern store: %w", err)
+		return skillerr.WrapIO("open pattern store", err)
 	}
 	defer patternStore.Close()
 
@@ -53,7 +54,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "hints":
 		return getHints(ctx, rc, patternStore, absWorkspace, in)
 	default:
-		return fmt.Errorf("unknown action: %s (use: list, clear, hints)", in.Action)
+		return skillerr.Arg(
+			fmt.Sprintf("unknown action: %s", in.Action),
+			skillerr.WithHint("Use action=list, action=clear, or action=hints."),
+		)
 	}
 }
 
@@ -65,7 +69,7 @@ func listPatterns(ctx context.Context, rc *skillmain.RunContext, store optimizat
 
 	patterns, err := store.List(ctx, in.Role, limit)
 	if err != nil {
-		return fmt.Errorf("list patterns: %w", err)
+		return skillerr.WrapRuntime("list patterns", err)
 	}
 
 	// Convert to output format
@@ -93,7 +97,7 @@ func listPatterns(ctx context.Context, rc *skillmain.RunContext, store optimizat
 
 func clearPatterns(ctx context.Context, rc *skillmain.RunContext, store optimization.PatternStore, in input) error {
 	if err := store.Clear(ctx, in.Role); err != nil {
-		return fmt.Errorf("clear patterns: %w", err)
+		return skillerr.WrapRuntime("clear patterns", err)
 	}
 
 	msg := "all patterns cleared"
@@ -109,23 +113,23 @@ func clearPatterns(ctx context.Context, rc *skillmain.RunContext, store optimiza
 
 func getHints(ctx context.Context, rc *skillmain.RunContext, patternStore optimization.PatternStore, workspace string, in input) error {
 	if in.Role == "" {
-		return fmt.Errorf("role is required for hints")
+		return skillerr.Arg("role is required for hints")
 	}
 	if in.Context == "" {
-		return fmt.Errorf("context is required for hints")
+		return skillerr.Arg("context is required for hints")
 	}
 
 	// Open trajectory store for collector
 	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open trajectory store: %w", err)
+		return skillerr.WrapIO("open trajectory store", err)
 	}
 	defer trajStore.Close()
 
 	collector := optimization.NewMCPPatternCollector(patternStore, trajStore)
 	hints, err := collector.GetHints(ctx, in.Role, in.Context)
 	if err != nil {
-		return fmt.Errorf("get hints: %w", err)
+		return skillerr.WrapRuntime("get hints", err)
 	}
 
 	// Convert to output format

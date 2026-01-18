@@ -738,7 +738,7 @@ func TestLoadWalletConfigFromEnv(t *testing.T) {
 
 func TestRPCCall(t *testing.T) {
 	t.Run("successful call", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Verify request
 			if r.Method != "POST" {
 				t.Errorf("method = %s, want POST", r.Method)
@@ -757,62 +757,65 @@ func TestRPCCall(t *testing.T) {
 
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x123"}`))
-		}))
-		defer server.Close()
+		})
 
-		ctx := context.Background()
-		req := JSONRPCRequest{
-			JSONRPC: "2.0",
-			Method:  "eth_blockNumber",
-			Params:  []any{},
-			ID:      1,
-		}
+		withRPCClient(t, handler, func() {
+			ctx := context.Background()
+			req := JSONRPCRequest{
+				JSONRPC: "2.0",
+				Method:  "eth_blockNumber",
+				Params:  []any{},
+				ID:      1,
+			}
 
-		result, err := rpcCall(ctx, server.URL, req)
-		if err != nil {
-			t.Errorf("rpcCall() error = %v", err)
-			return
-		}
+			result, err := rpcCall(ctx, "http://mock", req)
+			if err != nil {
+				t.Errorf("rpcCall() error = %v", err)
+				return
+			}
 
-		var hexResult string
-		_ = json.Unmarshal(result, &hexResult)
-		if hexResult != "0x123" {
-			t.Errorf("result = %s, want 0x123", hexResult)
-		}
+			var hexResult string
+			_ = json.Unmarshal(result, &hexResult)
+			if hexResult != "0x123" {
+				t.Errorf("result = %s, want 0x123", hexResult)
+			}
+		})
 	})
 
 	t.Run("RPC error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Invalid Request"}}`))
-		}))
-		defer server.Close()
+		})
 
-		ctx := context.Background()
-		req := JSONRPCRequest{JSONRPC: "2.0", Method: "test", ID: 1}
+		withRPCClient(t, handler, func() {
+			ctx := context.Background()
+			req := JSONRPCRequest{JSONRPC: "2.0", Method: "test", ID: 1}
 
-		_, err := rpcCall(ctx, server.URL, req)
-		if err == nil {
-			t.Error("rpcCall() should return error on RPC error")
-		}
-		if !strings.Contains(err.Error(), "Invalid Request") {
-			t.Errorf("error should contain 'Invalid Request', got: %v", err)
-		}
+			_, err := rpcCall(ctx, "http://mock", req)
+			if err == nil {
+				t.Error("rpcCall() should return error on RPC error")
+			}
+			if !strings.Contains(err.Error(), "Invalid Request") {
+				t.Errorf("error should contain 'Invalid Request', got: %v", err)
+			}
+		})
 	})
 
 	t.Run("HTTP error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		defer server.Close()
+		})
 
-		ctx := context.Background()
-		req := JSONRPCRequest{JSONRPC: "2.0", Method: "test", ID: 1}
+		withRPCClient(t, handler, func() {
+			ctx := context.Background()
+			req := JSONRPCRequest{JSONRPC: "2.0", Method: "test", ID: 1}
 
-		_, err := rpcCall(ctx, server.URL, req)
-		if err == nil {
-			t.Error("rpcCall() should return error on invalid JSON response")
-		}
+			_, err := rpcCall(ctx, "http://mock", req)
+			if err == nil {
+				t.Error("rpcCall() should return error on invalid JSON response")
+			}
+		})
 	})
 
 	t.Run("connection error", func(t *testing.T) {
@@ -826,23 +829,24 @@ func TestRPCCall(t *testing.T) {
 	})
 
 	t.Run("invalid JSON response", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`not json`))
-		}))
-		defer server.Close()
+		})
 
-		ctx := context.Background()
-		req := JSONRPCRequest{JSONRPC: "2.0", Method: "test", ID: 1}
+		withRPCClient(t, handler, func() {
+			ctx := context.Background()
+			req := JSONRPCRequest{JSONRPC: "2.0", Method: "test", ID: 1}
 
-		_, err := rpcCall(ctx, server.URL, req)
-		if err == nil {
-			t.Error("rpcCall() should return error on invalid JSON")
-		}
+			_, err := rpcCall(ctx, "http://mock", req)
+			if err == nil {
+				t.Error("rpcCall() should return error on invalid JSON")
+			}
+		})
 	})
 }
 
 func TestRPCGetBalance(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req JSONRPCRequest
 		_ = json.Unmarshal(body, &req)
@@ -853,23 +857,24 @@ func TestRPCGetBalance(t *testing.T) {
 
 		// Return 1 ETH in wei
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0xde0b6b3a7640000"}`))
-	}))
-	defer server.Close()
+	})
 
-	ctx := context.Background()
-	balance, err := rpcGetBalance(ctx, server.URL, "0x1234")
-	if err != nil {
-		t.Errorf("rpcGetBalance() error = %v", err)
-		return
-	}
+	withRPCClient(t, handler, func() {
+		ctx := context.Background()
+		balance, err := rpcGetBalance(ctx, "http://mock", "0x1234")
+		if err != nil {
+			t.Errorf("rpcGetBalance() error = %v", err)
+			return
+		}
 
-	if balance != "1.000000" {
-		t.Errorf("balance = %s, want 1.000000", balance)
-	}
+		if balance != "1.000000" {
+			t.Errorf("balance = %s, want 1.000000", balance)
+		}
+	})
 }
 
 func TestRPCGetERC20Balance(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var req JSONRPCRequest
 		_ = json.Unmarshal(body, &req)
@@ -880,19 +885,20 @@ func TestRPCGetERC20Balance(t *testing.T) {
 
 		// Return 100 USDC (100 * 10^6)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x5f5e100"}`))
-	}))
-	defer server.Close()
+	})
 
-	ctx := context.Background()
-	balance, err := rpcGetERC20Balance(ctx, server.URL, "0x1234", "0xUSDC")
-	if err != nil {
-		t.Errorf("rpcGetERC20Balance() error = %v", err)
-		return
-	}
+	withRPCClient(t, handler, func() {
+		ctx := context.Background()
+		balance, err := rpcGetERC20Balance(ctx, "http://mock", "0x1234", "0xUSDC")
+		if err != nil {
+			t.Errorf("rpcGetERC20Balance() error = %v", err)
+			return
+		}
 
-	if balance != "100.00" {
-		t.Errorf("balance = %s, want 100.00", balance)
-	}
+		if balance != "100.00" {
+			t.Errorf("balance = %s, want 100.00", balance)
+		}
+	})
 }
 
 func TestGetBalances(t *testing.T) {
@@ -905,7 +911,7 @@ func TestGetBalances(t *testing.T) {
 	})
 
 	t.Run("with mock RPC", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, _ := io.ReadAll(r.Body)
 			var req JSONRPCRequest
 			_ = json.Unmarshal(body, &req)
@@ -916,13 +922,22 @@ func TestGetBalances(t *testing.T) {
 			case "eth_call":
 				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x5f5e100"}`))
 			}
-		}))
-		defer server.Close()
+		})
 
-		// We can't easily inject the RPC URL, but we can test the function structure
-		ctx := context.Background()
-		// This will fail because it tries to connect to real RPC
-		_, _ = getBalances(ctx, "0x1234", NetworkBaseSepolia)
+		withRPCClient(t, handler, func() {
+			ctx := context.Background()
+			balances, err := getBalances(ctx, "0x1234", NetworkBaseSepolia)
+			if err != nil {
+				t.Errorf("getBalances() error = %v", err)
+				return
+			}
+			if balances["ETH"] != "1.000000" {
+				t.Errorf("ETH balance = %s, want 1.000000", balances["ETH"])
+			}
+			if balances["USDC"] != "100.00" {
+				t.Errorf("USDC balance = %s, want 100.00", balances["USDC"])
+			}
+		})
 	})
 }
 
@@ -961,8 +976,8 @@ func TestHandlePayValidation(t *testing.T) {
 		if err == nil {
 			t.Error("handlePay() should fail without to address")
 		}
-		if !strings.Contains(err.Error(), "to address") {
-			t.Errorf("error should mention to address, got: %v", err)
+		if !strings.Contains(err.Error(), "to is required") {
+			t.Errorf("error should mention to is required, got: %v", err)
 		}
 	})
 
@@ -1280,8 +1295,8 @@ func TestRunOperationDispatch(t *testing.T) {
 		if err == nil {
 			t.Error("run() should fail for unknown operation")
 		}
-		if !strings.Contains(err.Error(), "unknown operation") {
-			t.Errorf("error should mention unknown operation, got: %v", err)
+		if !strings.Contains(err.Error(), "invalid operation") {
+			t.Errorf("error should mention invalid operation, got: %v", err)
 		}
 	})
 
@@ -1450,22 +1465,24 @@ func TestEdgeCases(t *testing.T) {
 
 func TestFetchWithTestServer(t *testing.T) {
 	t.Run("successful fetch", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("X-Custom") != "header" {
 				t.Errorf("custom header not received")
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
-		}))
-		defer server.Close()
+		})
 
 		// We can't fully test handleFetch without runner.RunnerContext,
 		// but we can test the HTTP interaction patterns
 		ctx := context.Background()
-		req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+		req, _ := http.NewRequestWithContext(ctx, "GET", "http://mock", nil)
 		req.Header.Set("X-Custom", "header")
 
-		client := &http.Client{Timeout: 5 * time.Second}
+		client := &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: &handlerTransport{handler: handler},
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Errorf("request error = %v", err)
@@ -1486,17 +1503,19 @@ func TestFetchWithTestServer(t *testing.T) {
 		}}
 		reqJSON, _ := json.Marshal(requirements)
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Payment-Required", string(reqJSON))
 			w.WriteHeader(http.StatusPaymentRequired)
 			_, _ = w.Write([]byte(`{"error":"payment required"}`))
-		}))
-		defer server.Close()
+		})
 
 		ctx := context.Background()
-		req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
+		req, _ := http.NewRequestWithContext(ctx, "GET", "http://mock", nil)
 
-		client := &http.Client{Timeout: 5 * time.Second}
+		client := &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: &handlerTransport{handler: handler},
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			t.Errorf("request error = %v", err)
@@ -1537,7 +1556,7 @@ func TestErrorMessages(t *testing.T) {
 			fn: func() error {
 				return run(ctx, nil, Input{Operation: "bad"})
 			},
-			contains: "unknown operation",
+			contains: "invalid operation",
 		},
 		{
 			name: "handleWalletInit unknown type",
@@ -1558,7 +1577,7 @@ func TestErrorMessages(t *testing.T) {
 			fn: func() error {
 				return handlePay(ctx, nil, Input{Amount: "1"})
 			},
-			contains: "to address",
+			contains: "to is required",
 		},
 		{
 			name: "handlePay no amount",
@@ -1589,6 +1608,35 @@ func TestErrorMessages(t *testing.T) {
 			}
 		})
 	}
+}
+
+type handlerTransport struct {
+	handler http.Handler
+}
+
+func (t *handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	recorder := httptest.NewRecorder()
+	t.handler.ServeHTTP(recorder, req)
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return recorder.Result(), nil
+}
+
+func withRPCClient(t *testing.T, handler http.Handler, fn func()) {
+	t.Helper()
+	prev := rpcHTTPClient
+	rpcHTTPClient = &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &handlerTransport{handler: handler},
+	}
+	t.Cleanup(func() {
+		rpcHTTPClient = prev
+	})
+	fn()
 }
 
 // Prevent unused import errors

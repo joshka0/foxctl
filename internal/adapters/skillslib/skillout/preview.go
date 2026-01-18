@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 )
@@ -133,6 +134,33 @@ func TruncateString(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
+// TruncateStringWithSuffix truncates a string to maxLen and appends suffix when truncated.
+func TruncateStringWithSuffix(s string, maxLen int, suffix string) string {
+	if maxLen <= 0 || len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + suffix
+}
+
+// TruncateSingleLine trims whitespace, replaces newlines, and truncates with ellipsis.
+func TruncateSingleLine(s string, maxLen int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.TrimSpace(s)
+	return TruncateString(s, maxLen)
+}
+
+// TruncateRunes truncates a string by rune count, adding ellipsis if truncated.
+func TruncateRunes(s string, maxLen int) string {
+	if maxLen <= 3 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
 // PreviewArtifact holds the result of a preview-and-persist operation.
 type PreviewArtifact[T any] struct {
 	// Preview contains the first N items for inline display.
@@ -217,6 +245,13 @@ func PreviewAndPersistNDJSON[T any](
 	}
 
 	return result, nil
+}
+
+// AddArtifact adds the artifact digest to the data map when present.
+func AddArtifact(data map[string]any, artifact *skillmain.Artifact) {
+	if artifact != nil && artifact.Digest != "" {
+		data["artifact"] = artifact.Digest
+	}
 }
 
 // persistNDJSON writes items as NDJSON to CAS.

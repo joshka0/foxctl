@@ -6,7 +6,9 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/secretutil"
 	"github.com/jkatigb/agentctl/internal/codecontext"
+	"github.com/jkatigb/agentctl/internal/codecontext/guard"
 )
 
 func TestScanForSecrets_NoSecrets(t *testing.T) {
@@ -24,7 +26,7 @@ func TestScanForSecrets_NoSecrets(t *testing.T) {
 		},
 	}
 
-	warnings, hasHigh := scanForSecrets(ctx, evidence, logger)
+	warnings, hasHigh := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeWarn)
 
 	if len(warnings) != 0 {
 		t.Errorf("expected no warnings, got %d", len(warnings))
@@ -49,7 +51,7 @@ func TestScanForSecrets_HighSeveritySecret(t *testing.T) {
 		},
 	}
 
-	warnings, hasHigh := scanForSecrets(ctx, evidence, logger)
+	warnings, hasHigh := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeWarn)
 
 	if len(warnings) == 0 {
 		t.Fatal("expected warnings, got none")
@@ -73,7 +75,7 @@ func TestScanForSecrets_EmptyEvidence(t *testing.T) {
 	logger := zerolog.Nop()
 
 	// Nil evidence
-	warnings, hasHigh := scanForSecrets(ctx, nil, logger)
+	warnings, hasHigh := secretutil.ScanEvidence(ctx, nil, logger, guard.ModeWarn)
 	if warnings != nil {
 		t.Error("expected nil warnings for nil evidence")
 	}
@@ -85,7 +87,7 @@ func TestScanForSecrets_EmptyEvidence(t *testing.T) {
 	evidence := &codecontext.Evidence{
 		Snippets: []codecontext.Snippet{},
 	}
-	warnings, hasHigh = scanForSecrets(ctx, evidence, logger)
+	warnings, hasHigh = secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeWarn)
 	if warnings != nil {
 		t.Error("expected nil warnings for empty snippets")
 	}

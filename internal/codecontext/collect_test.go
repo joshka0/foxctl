@@ -15,7 +15,7 @@ import (
 func createTestFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("failed to create test file: %v", err)
 	}
 	return path
@@ -286,7 +286,7 @@ func TestCollect_SkipsEmptyPaths(t *testing.T) {
 	ctx := context.Background()
 	evidence, err := codecontext.Collect(ctx, codecontext.CollectOpts{
 		Candidates: []codecontext.Candidate{
-			{Path: "", Priority: 1.0},     // empty, should skip
+			{Path: "", Priority: 1.0}, // empty, should skip
 			{Path: "test.txt", Priority: 0.5},
 		},
 		PathValidator: validator,

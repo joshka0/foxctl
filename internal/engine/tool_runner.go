@@ -39,6 +39,9 @@ type ToolRunnerConfig struct {
 	// Workspace is the workspace root for hook context.
 	Workspace string
 
+	// WorkspaceID is the stable workspace ID for hook context.
+	WorkspaceID string
+
 	// SessionID is the session identifier for hook context.
 	SessionID string
 
@@ -135,9 +138,12 @@ func (r *ToolRunner) dispatchPreToolUse(ctx context.Context, call ToolCall) (hoo
 	input := hooks.Input{
 		Event:         hooks.EventPreToolUse,
 		ToolName:      call.Name,
+		ToolCanonical: call.Name,
+		ToolKind:      hooks.ClassifyToolKind(call.Name, call.Name),
 		ToolInput:     call.Arguments,
 		SessionID:     r.config.SessionID,
 		ActorID:       r.config.ActorID,
+		WorkspaceID:   r.config.WorkspaceID,
 		WorkspaceRoot: r.config.Workspace,
 	}
 
@@ -161,11 +167,14 @@ func (r *ToolRunner) dispatchPostToolUse(ctx context.Context, call ToolCall, res
 	input := hooks.Input{
 		Event:           hooks.EventPostToolUse,
 		ToolName:        call.Name,
+		ToolCanonical:   call.Name,
+		ToolKind:        hooks.ClassifyToolKind(call.Name, call.Name),
 		ToolInput:       call.Arguments,
 		ToolObservation: observation,
 		ToolDurationMS:  durationMS,
 		SessionID:       r.config.SessionID,
 		ActorID:         r.config.ActorID,
+		WorkspaceID:     r.config.WorkspaceID,
 		WorkspaceRoot:   r.config.Workspace,
 	}
 
@@ -187,7 +196,6 @@ func (r *ToolRunner) List() []ToolDef {
 
 // ToolRunnerOption configures a ToolRunner.
 type ToolRunnerOption func(*ToolRunnerConfig)
-
 
 // WithToolRunnerWorkspace sets the workspace.
 func WithToolRunnerWorkspace(workspace string) ToolRunnerOption {
@@ -262,4 +270,3 @@ func (m *MockToolExecutor) Execute(ctx context.Context, name string, args json.R
 func (m *MockToolExecutor) List() []ToolDef {
 	return m.Tools
 }
-

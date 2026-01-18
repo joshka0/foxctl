@@ -44,7 +44,11 @@ func (c *Client) Status() (*StatusResult, error) {
 	}
 
 	var result StatusResult
-	if err := json.Unmarshal(mustMarshal(resp.Result), &result); err != nil {
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal result: %w", err)
 	}
 
@@ -70,7 +74,11 @@ func (c *Client) Run(skill string, input []byte, workspace string, ephemeral boo
 	}
 
 	var result RunResult
-	if err := json.Unmarshal(mustMarshal(resp.Result), &result); err != nil {
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal result: %w", err)
 	}
 
@@ -186,11 +194,10 @@ func PIDPath() string {
 // ErrDaemonNotRunning is returned when the daemon is not running.
 var ErrDaemonNotRunning = errors.New("daemon not running")
 
-// mustMarshal marshals v to JSON, panicking on error (for known-good types).
-func mustMarshal(v any) []byte {
+func marshalResult(v any) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("marshal result: %w", err)
 	}
-	return b
+	return b, nil
 }

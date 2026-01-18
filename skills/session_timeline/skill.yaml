@@ -1,0 +1,127 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: session/timeline
+  version: 0.1.0
+  description: "Retrieve timeline summaries and learnings up to a session anchor"
+  tags: ["session", "timeline", "memory", "summaries"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/session_timeline/session_timeline
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: session/timeline
+  parameters:
+    - name: session_id
+      type: string
+      required: true
+      description: "Session ID to retrieve timeline for"
+    - name: summary_id
+      type: string
+      required: false
+      description: "Anchor chunk summary ID (preferred)"
+    - name: window_index
+      type: integer
+      required: false
+      description: "Anchor context window index (used with chunk_index or last summary in window)"
+    - name: chunk_index
+      type: integer
+      required: false
+      description: "Anchor chunk index within the window"
+    - name: workspace
+      type: string
+      required: false
+      description: "Workspace path override for memory lookups"
+    - name: types
+      type: array
+      required: false
+      description: "Memory types to include (decision, gotcha, preference, anti_pattern, learning)"
+    - name: include_list
+      type: boolean
+      required: false
+      description: "Include timeline lists (default: true)"
+    - name: include_rollup
+      type: boolean
+      required: false
+      description: "Include rollup aggregation (default: true)"
+    - name: include_chunk_summaries
+      type: boolean
+      required: false
+      description: "Include chunk summaries (default: true)"
+    - name: include_learnings
+      type: boolean
+      required: false
+      description: "Include learnings (default: true)"
+    - name: limit
+      type: integer
+      required: false
+      description: "Limit chunk summary list length (default: no limit)"
+    - name: max_windows
+      type: integer
+      required: false
+      description: "Limit how many context windows back from anchor to include (0 = all)"
+    - name: since
+      type: string
+      required: false
+      description: "Start of time range: duration ('30m', '2h', '7d') or RFC3339/date timestamp"
+    - name: until
+      type: string
+      required: false
+      description: "End of time range: duration or timestamp (default: now)"
+  help:
+    short: "Retrieve timeline summaries and learnings up to an anchor."
+    long: |
+      Use session/timeline to gather chunk summaries and extracted learnings
+      up to a specific anchor within a session.
+
+      Example commands:
+        agentctl run session/timeline --input '{"session_id":"01HXYZ...","summary_id":"chunk_summary_abc"}'
+        agentctl run session/timeline --input '{"session_id":"01HXYZ...","window_index":2,"chunk_index":34}'
+    workflows:
+      - id: timeline-anchor
+        description: "Fetch timeline up to an anchor summary."
+        example_input:
+          session_id: "01HXYZ..."
+          summary_id: "chunk_summary_abc"
+  returns:
+    - name: session_id
+      type: string
+      description: "Session ID"
+    - name: anchor
+      type: object
+      description: "Resolved anchor summary"
+    - name: chunk_summaries
+      type: array
+      description: "Chunk summaries up to anchor"
+    - name: learnings
+      type: array
+      description: "Extracted learnings up to anchor"
+    - name: rollup
+      type: object
+      description: "Aggregated timeline metadata"
+    - name: status
+      type: string
+      description: "Status of the timeline retrieval"
+    - name: message
+      type: string
+      description: "Human-readable status message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false
+examples:
+  - name: "Timeline by summary id"
+    input:
+      session_id: "01HXYZ..."
+      summary_id: "chunk_summary_abc"
+    description: "Fetch timeline up to a specific chunk summary"
+  - name: "Timeline by window + chunk"
+    input:
+      session_id: "01HXYZ..."
+      window_index: 2
+      chunk_index: 34
+    description: "Fetch timeline up to a specific chunk index"

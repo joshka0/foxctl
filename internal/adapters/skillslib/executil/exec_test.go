@@ -175,6 +175,33 @@ func TestHasTool(t *testing.T) {
 	}
 }
 
+func TestAgentctlBin_EnvOverride(t *testing.T) {
+	customPath := "/custom/path/to/agentctl"
+	t.Setenv("AGENTCTL_BIN", customPath)
+
+	bin := AgentctlBin()
+	if bin != customPath {
+		t.Errorf("expected AGENTCTL_BIN override %q, got %q", customPath, bin)
+	}
+}
+
+func TestAgentctlBin_DefaultFallback(t *testing.T) {
+	t.Setenv("AGENTCTL_BIN", "")
+
+	bin := AgentctlBin()
+	if bin == "" {
+		t.Error("AgentctlBin returned empty string when AGENTCTL_BIN is empty")
+	}
+}
+
+func TestRunAgentctlSkill_EmptySkill(t *testing.T) {
+	ctx := context.Background()
+
+	if _, err := RunAgentctlSkill(ctx, "", "", nil); err == nil {
+		t.Error("RunAgentctlSkill should fail with empty skill")
+	}
+}
+
 func TestRun(t *testing.T) {
 	ctx := context.Background()
 

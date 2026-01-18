@@ -1,11 +1,11 @@
 package main
 
 import (
-	"context"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skilltest"
 )
 
@@ -92,18 +92,10 @@ func TestTruncate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := truncate(tt.input, tt.limit)
+		got := skillout.TruncateStringWithSuffix(tt.input, tt.limit, "... (truncated)")
 		if got != tt.want {
 			t.Errorf("truncate(%q, %d) = %q, want %q", tt.input, tt.limit, got, tt.want)
 		}
-	}
-}
-
-func TestGetExitCode(t *testing.T) {
-	// nil error returns default 1
-	code := getExitCode(nil)
-	if code != 1 {
-		t.Errorf("expected 1 for nil error, got %d", code)
 	}
 }
 
@@ -230,9 +222,7 @@ func TestSummarizeResults_Empty(t *testing.T) {
 	}
 }
 
-func TestBuildTestCommand_Modes(t *testing.T) {
-	ctx := context.Background()
-
+func TestBuildTestArgs_Modes(t *testing.T) {
 	tests := []struct {
 		mode     string
 		wantArgs []string
@@ -247,7 +237,7 @@ func TestBuildTestCommand_Modes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
-			cmd, err := buildTestCommand(ctx, tt.mode, "./...", input{Timeout: "10m"})
+			args, _, err := buildTestArgs(tt.mode, "./...", input{Timeout: "10m"})
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error for invalid mode")
@@ -255,10 +245,9 @@ func TestBuildTestCommand_Modes(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("buildTestCommand failed: %v", err)
+				t.Fatalf("buildTestArgs failed: %v", err)
 			}
 
-			args := cmd.Args
 			for _, want := range tt.wantArgs {
 				found := false
 				for _, arg := range args {
@@ -275,8 +264,7 @@ func TestBuildTestCommand_Modes(t *testing.T) {
 	}
 }
 
-func TestBuildTestCommand_Flags(t *testing.T) {
-	ctx := context.Background()
+func TestBuildTestArgs_Flags(t *testing.T) {
 	in := input{
 		Short:   true,
 		Verbose: true,
@@ -284,44 +272,54 @@ func TestBuildTestCommand_Flags(t *testing.T) {
 		Timeout: "5m",
 	}
 
-	cmd, err := buildTestCommand(ctx, "test", "./...", in)
+	args, _, err := buildTestArgs("test", "./...", in)
 	if err != nil {
-		t.Fatalf("buildTestCommand failed: %v", err)
+		t.Fatalf("buildTestArgs failed: %v", err)
 	}
 
-	args := strings.Join(cmd.Args, " ")
-	if !strings.Contains(args, "-short") {
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-short") {
 		t.Error("expected -short flag")
 	}
-	if !strings.Contains(args, "-v") {
+	if !strings.Contains(joined, "-v") {
 		t.Error("expected -v flag")
 	}
-	if !strings.Contains(args, "-run=TestFoo") {
+	if !strings.Contains(joined, "-run=TestFoo") {
 		t.Error("expected -run=TestFoo flag")
 	}
-	if !strings.Contains(args, "-timeout=5m") {
+	if !strings.Contains(joined, "-timeout=5m") {
 		t.Error("expected -timeout=5m flag")
 	}
 }
 
-func TestBuildTestCommand_BenchPattern(t *testing.T) {
-	ctx := context.Background()
+func TestBuildTestArgs_BenchPattern(t *testing.T) {
 	in := input{
 		Pattern: "BenchmarkFoo",
 		Timeout: "10m",
 	}
 
-	cmd, err := buildTestCommand(ctx, "bench", "./...", in)
+	args, _, err := buildTestArgs("bench", "./...", in)
 	if err != nil {
-		t.Fatalf("buildTestCommand failed: %v", err)
+		t.Fatalf("buildTestArgs failed: %v", err)
 	}
 
-	args := strings.Join(cmd.Args, " ")
-	if !strings.Contains(args, "-bench=BenchmarkFoo") {
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-bench=BenchmarkFoo") {
 		t.Error("expected -bench=BenchmarkFoo flag")
 	}
 	// Should NOT have -run=BenchmarkFoo for bench mode
-	if strings.Contains(args, "-run=BenchmarkFoo") {
+	if strings.Contains(joined, "-run=BenchmarkFoo") {
 		t.Error("should not have -run flag for bench mode pattern")
+	}
+}
+
+func TestBuildTestArgs_RaceEnv(t *testing.T) {
+	_, env, err := buildTestArgs("race", "./...", input{Timeout: "10m"})
+	if err != nil {
+		t.Fatalf("buildTestArgs failed: %v", err)
+	}
+	joined := strings.Join(env, " ")
+	if !strings.Contains(joined, "CGO_ENABLED=1") {
+		t.Errorf("expected CGO_ENABLED=1 in env, got %v", env)
 	}
 }

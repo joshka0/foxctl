@@ -3,7 +3,6 @@ package semantic
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -41,6 +40,21 @@ type embedderConfig struct {
 	modelOverride string
 	rateLimitWait bool
 	allowFallback bool
+}
+
+func newEmbedderConfig(opts ...EmbedderOption) *embedderConfig {
+	// FC/IS compliant: no os.Getenv in core. Callers must pass keys via
+	// WithVoyageKey/WithGeminiKey options (loaded from config at boundary).
+	cfg := &embedderConfig{
+		rateLimitWait: true,  // Default to waiting for rate limits
+		allowFallback: false, // Default to no fallback
+	}
+
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	return cfg
 }
 
 // WithVoyageKey sets the Voyage API key.
@@ -88,16 +102,7 @@ func WithAllowFallback(allow bool) EmbedderOption {
 //
 // If no API keys are available, returns an error.
 func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error) {
-	cfg := &embedderConfig{
-		voyageKey:     os.Getenv("VOYAGE_API_KEY"),
-		geminiKey:     os.Getenv("GEMINI_API_KEY"),
-		rateLimitWait: true,  // Default to waiting for rate limits
-		allowFallback: false, // Default to no fallback
-	}
-
-	for _, opt := range opts {
-		opt(cfg)
-	}
+	cfg := newEmbedderConfig(opts...)
 
 	e := &Embedder{
 		scope:         scope,
@@ -143,6 +148,26 @@ func NewEmbedder(scope EmbeddingScope, opts ...EmbedderOption) (*Embedder, error
 	}
 
 	return nil, fmt.Errorf("no embedding provider available: set VOYAGE_API_KEY or GEMINI_API_KEY")
+}
+
+// NewEmbedderWithModel creates an Embedder while honoring a model override.
+// If modelOverride is empty, this behaves the same as NewEmbedder.
+func NewEmbedderWithModel(scope EmbeddingScope, modelOverride string, opts ...EmbedderOption) (*Embedder, error) {
+	if strings.TrimSpace(modelOverride) != "" {
+		opts = append(opts, WithModelOverride(modelOverride))
+	}
+	return NewEmbedder(scope, opts...)
+}
+
+// ResolveModelOverride returns the model override for a scope, if configured.
+// Per-scope overrides take precedence over the default model.
+func ResolveModelOverride(scope EmbeddingScope, defaultModel string, overrides map[string]string) string {
+	if overrides != nil {
+		if model, ok := overrides[string(scope)]; ok && strings.TrimSpace(model) != "" {
+			return strings.TrimSpace(model)
+		}
+	}
+	return strings.TrimSpace(defaultModel)
 }
 
 // Embed generates an embedding for the given text.

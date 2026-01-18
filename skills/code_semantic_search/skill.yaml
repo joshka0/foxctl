@@ -78,6 +78,20 @@ signature:
       required: false
       default: json
       description: Output format - "json" (default) or "tree" (displays file paths as directory tree)
+    - name: timeline
+      type: boolean
+      required: false
+      default: false
+      description: Enrich session results with timeline data (chunk summaries and learnings)
+    - name: timeline_limit
+      type: integer
+      required: false
+      default: 3
+      description: Maximum number of sessions to fetch timeline data for
+    - name: timeline_types
+      type: array
+      required: false
+      description: Learning types to include in timeline (decision, gotcha, preference, anti_pattern, learning)
   returns:
     - name: query
       type: string
@@ -94,6 +108,9 @@ signature:
     - name: tree_text
       type: string
       description: ASCII tree visualization of related files (present when format=tree)
+    - name: timelines
+      type: array
+      description: Timeline data for matched sessions (present when timeline=true)
   help:
     short: "Search code, sessions, and memories with semantic understanding"
     long: |
@@ -181,6 +198,13 @@ signature:
           query: "embedding vector search"
           scope: ["symbols"]
           format: "tree"
+      - id: search-timeline
+        description: "Search sessions and show what happened"
+        example_input:
+          query: "database migration issues"
+          scope: ["sessions"]
+          timeline: true
+          timeline_limit: 3
 capabilities:
   network: "egress"
   filesystem:

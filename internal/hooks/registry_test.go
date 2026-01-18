@@ -24,9 +24,9 @@ func TestRegistry_GetRunner_ShellHook(t *testing.T) {
 
 	cfg := EmptyConfig()
 	registry := &Registry{
-		config:       cfg,
-		shellRunner:  shellRunner,
-		skillRunner:  skillRunner,
+		config:        cfg,
+		shellRunner:   shellRunner,
+		skillRunner:   skillRunner,
 		defaultRunner: skillRunner,
 	}
 
@@ -51,9 +51,9 @@ func TestRegistry_GetRunner_SkillHook(t *testing.T) {
 
 	cfg := EmptyConfig()
 	registry := &Registry{
-		config:       cfg,
-		shellRunner:  shellRunner,
-		skillRunner:  skillRunner,
+		config:        cfg,
+		shellRunner:   shellRunner,
+		skillRunner:   skillRunner,
 		defaultRunner: skillRunner,
 	}
 
@@ -85,8 +85,8 @@ func TestRegistry_Run(t *testing.T) {
 	}
 
 	registry := &Registry{
-		config:       cfg,
-		skillRunner:  skillRunner,
+		config:        cfg,
+		skillRunner:   skillRunner,
 		defaultRunner: skillRunner,
 	}
 
@@ -124,8 +124,8 @@ func TestRegistryRunner_DelegatesToRegistry(t *testing.T) {
 	}
 
 	registry := &Registry{
-		config:       cfg,
-		skillRunner:  skillRunner,
+		config:        cfg,
+		skillRunner:   skillRunner,
 		defaultRunner: skillRunner,
 	}
 

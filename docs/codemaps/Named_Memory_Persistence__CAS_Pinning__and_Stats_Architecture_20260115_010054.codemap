@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 1,
+  "id": "Named_Memory_Persistence__CAS_Pinning__and_Stats_Architecture_20260115_010054",
+  "stableId": "7a02ffd9-3a09-4373-a178-72590e43710f",
+  "metadata": {
+    "cascadeId": "46a084c8-77df-4ab7-81b3-5e61c2190301",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T01:00:54+02:00",
+    "mode": "SMART",
+    "originalPrompt": "Explore: named memory persistence, CAS pinning, and stats. Start from: internal/storage/memory/store.go, internal/platform/config/config.go"
+  },
+  "title": "Named Memory Persistence, CAS Pinning, and Stats Architecture",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Named Memory Save with CAS Artifact Pinning",
+      "description": "Memory store (internal/storage/memory) - Shows how saving a named memory automatically pins referenced CAS artifacts to prevent garbage collection",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 146,
+          "lineContent": "_, err = s.db.ExecContext(ctx, `",
+          "title": "Insert named memory into SQLite",
+          "description": "Upserts entry into named_memory table with digests stored as JSON"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 163,
+          "lineContent": "s.pin(ctx, entry.Digests)",
+          "title": "Pin artifacts after save",
+          "description": "Calls internal pin helper to protect referenced CAS objects"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 448,
+          "lineContent": "Digests:   cache.CollectDigests(opts.Result),",
+          "title": "Extract digests from envelope",
+          "description": "SaveResult helper parses result envelope to find sha256 digests"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 477,
+          "lineContent": "if err := s.artifactManager.Pin(ctx, digests...); err != nil {",
+          "title": "Delegate to artifact manager",
+          "description": "Artifact manager coordinates pinning across CAS backends"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/manager.go",
+          "lineNumber": 53,
+          "lineContent": "if err := m.store.Pin(ctx, digest); err != nil {",
+          "title": "Call CAS store Pin method",
+          "description": "Manager iterates digests and pins each in CAS store"
+        },
+        {
+          "id": "1f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "lineNumber": 395,
+          "lineContent": "result, err := s.db.ExecContext(ctx, `",
+          "title": "Update CAS pinned flag",
+          "description": "Sets pinned=1 in cas_objects table to protect from GC"
+        }
+      ],
+      "traceTextDiagram": "Named Memory Save with CAS Pinning\n├── Memory Store Layer\n│   ├── Save() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:126\n│   │   ├── INSERT INTO named_memory \u003c-- 1a\n│   │   ├── s.pin(ctx, entry.Digests) \u003c-- 1b\n│   │   └── [internal helper method] \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:469\n│   │       └── artifactManager.Pin() \u003c-- 1d\n│   └── SaveResult() helper \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:441\n│       └── CollectDigests(result) \u003c-- 1c\n│           └── [calls artifacts.Digests()] \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go:501\n├── Artifact Manager Layer\n│   └── Manager.Pin(digests...) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/manager.go:47\n│       └── for each digest \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/manager.go:52\n│           └── store.Pin(digest) \u003c-- 1e\n└── CAS Store Layer\n    └── SQLiteStore.Pin() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:387\n        └── UPDATE cas_objects SET pinned=1 \u003c-- 1f",
+      "traceGuide": "## Motivation\n\nWhen agentctl stores named memories or cache entries containing references to large artifacts (logs, files, API responses), those artifacts live in a **content-addressed storage (CAS)** system identified by SHA-256 digests. The problem: CAS runs periodic garbage collection to reclaim disk space, but it must **never delete artifacts that are still referenced** by active memories or cache entries. The solution is **automatic pinning** - when a memory is saved, the system extracts artifact digests from the result envelope and marks those CAS objects as \"pinned\" to protect them from deletion.\n\n## Details\n\n### Saving a Memory with Artifact Protection\n\nWhen you call `Save()` on the memory store [1a], the system performs two critical operations in sequence:\n\n1. **Persists the entry**: Inserts or updates a row in the `named_memory` SQLite table, storing the result envelope and a JSON array of digests [1a]\n\n2. **Pins referenced artifacts**: Immediately calls `s.pin(ctx, entry.Digests)` to protect those artifacts [1b]\n\nThe digest extraction happens in `SaveResult()` via `cache.CollectDigests()` [1c], which parses the JSON envelope looking for `data.artifact` and `data.artifacts[]` fields containing `sha256:` prefixed strings.\n\n### Pin Coordination Through Artifact Manager\n\nThe memory store doesn't talk directly to CAS. Instead, it delegates to an **artifact manager** [1d] that coordinates pinning across different CAS backends (file-based, SQLite, Turso). The manager iterates through each digest and calls `store.Pin(digest)` [1e] on the underlying CAS implementation.\n\n### CAS Pin Implementation\n\nIn the SQLite-backed CAS store, pinning is a simple database update: `UPDATE cas_objects SET pinned = 1` [1f]. This boolean flag is checked during garbage collection - any object with `pinned != 0` is skipped, preventing deletion of artifacts that memories still reference.\n\n### Why This Matters\n\nWithout this automatic pinning mechanism, garbage collection could delete artifacts while memories still reference them, causing **broken references** and data loss. The pin/unpin lifecycle ensures that artifacts remain available for the entire lifetime of the memories that reference them."
+    },
+    {
+      "id": "2",
+      "title": "Named Memory Deletion with CAS Artifact Unpinning",
+      "description": "Memory store (internal/storage/memory) - Demonstrates cleanup flow where deleting a memory unpins its artifacts, allowing eventual garbage collection",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 368,
+          "lineContent": "row := s.db.QueryRowContext(ctx, `SELECT digests FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace)",
+          "title": "Query digests before deletion",
+          "description": "Retrieves artifact references to unpin after deletion"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 376,
+          "lineContent": "if _, err := s.db.ExecContext(ctx, `DELETE FROM named_memory WHERE name = ? AND workspace = ?`, name, workspace); err != nil {",
+          "title": "Delete memory entry",
+          "description": "Removes row from named_memory table"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 384,
+          "lineContent": "s.unpin(ctx, arr)",
+          "title": "Unpin artifacts after deletion",
+          "description": "Releases CAS pin so objects become eligible for GC"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 490,
+          "lineContent": "if err := s.artifactManager.Unpin(ctx, digests...); err != nil {",
+          "title": "Delegate to artifact manager",
+          "description": "Artifact manager coordinates unpinning across CAS backends"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/manager.go",
+          "lineNumber": 69,
+          "lineContent": "if err := m.store.Unpin(ctx, digest); err != nil {",
+          "title": "Call CAS store Unpin method",
+          "description": "Manager iterates digests and unpins each in CAS store"
+        },
+        {
+          "id": "2f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "lineNumber": 420,
+          "lineContent": "result, err := s.db.ExecContext(ctx, `",
+          "title": "Clear CAS pinned flag",
+          "description": "Sets pinned=0 in cas_objects table, allowing future GC"
+        }
+      ],
+      "traceTextDiagram": "Named Memory Deletion Flow\n└── Memory Store (internal/storage/memory)\n    ├── Delete(ctx, name, workspace) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:367\n    │   ├── Query digests before delete \u003c-- 2a\n    │   ├── DELETE FROM named_memory \u003c-- 2b\n    │   └── s.unpin(ctx, arr) \u003c-- 2c\n    │       └── artifactManager.Unpin() \u003c-- 2d\n    │           └── Artifact Manager\n    │               └── (internal/adapters/artifacts)\n    │                   └── for each digest \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/manager.go:68\n    │                       └── store.Unpin(digest) \u003c-- 2e\n    │                           └── CAS Store (SQLite)\n    │                               └── UPDATE pinned=0 \u003c-- 2f",
+      "traceGuide": "## Motivation\n\nNamed memories in agentctl store persistent data like session summaries, gotchas, and task results. These memories often reference large artifacts (logs, code snippets, analysis results) stored in the **content-addressed storage (CAS)**. The problem: if we delete a memory, when is it safe to garbage collect its referenced artifacts? Other memories or cache entries might still reference the same artifacts.\n\nThe solution is **reference counting via pinning**. When a memory is saved, its artifacts are pinned [2a]. When deleted, they're unpinned [2c]. The CAS garbage collector respects pins and won't delete pinned objects, preventing dangling references.\n\n## Details\n\n**Deletion flow**: The `Delete` method first queries the `digests` column to retrieve artifact references before removing the row [2a]. This is critical—once the row is deleted [2b], we've lost track of which artifacts to unpin.\n\n**Digest format**: Artifacts are identified by SHA-256 digests like `sha256:abc123...` stored as JSON arrays in the database. These digests are extracted from result envelopes that contain fields like `data.artifact` or `data.artifacts[]`.\n\n**Unpinning coordination**: After deletion, the memory store calls its internal `unpin` helper [2c], which delegates to the artifact manager [2d]. The artifact manager iterates through each digest [2e] and calls the CAS store's `Unpin` method. The CAS store updates the `pinned` flag from 1 to 0 in the `cas_objects` table [2f].\n\n**Garbage collection safety**: When CAS garbage collection runs, it checks the `pinned` column. Objects with `pinned=1` are skipped, ensuring that artifacts referenced by any memory or cache entry are never prematurely deleted. Only when all references are removed (all memories/cache entries deleted) does `pinned` return to 0, making the object eligible for cleanup.\n\n**Error handling**: Unpinning is best-effort—errors are logged but don't fail the deletion. This prevents CAS issues from blocking memory operations, though it may cause temporary pin leaks that GC will eventually clean up."
+    },
+    {
+      "id": "3",
+      "title": "Cache Entry Lifecycle with Artifact Pinning",
+      "description": "Cache store (internal/storage/cache) - Shows how auto-cache entries pin artifacts on Put and unpin on eviction/deletion",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go",
+          "lineNumber": 153,
+          "lineContent": "_, err = s.db.ExecContext(ctx, `",
+          "title": "Insert cache entry",
+          "description": "Upserts into auto_cache table with TTL and digests"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go",
+          "lineNumber": 168,
+          "lineContent": "s.pinDigests(ctx, entry.Digests)",
+          "title": "Pin artifacts on cache put",
+          "description": "Protects referenced CAS objects from garbage collection"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go",
+          "lineNumber": 500,
+          "lineContent": "func CollectDigests(result []byte) []string {",
+          "title": "Extract digests helper",
+          "description": "Parses envelope JSON to find artifact references"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/artifacts.go",
+          "lineNumber": 11,
+          "lineContent": "func Digests(result []byte) []string {",
+          "title": "Parse envelope for digests",
+          "description": "Extracts sha256: prefixed strings from data.artifact and data.artifacts[]"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go",
+          "lineNumber": 441,
+          "lineContent": "if _, err := s.db.ExecContext(ctx, `DELETE FROM auto_cache WHERE cache_key = ?`, d.key); err != nil {",
+          "title": "Delete expired cache entry",
+          "description": "Eviction removes entry from auto_cache during cleanup"
+        },
+        {
+          "id": "3f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go",
+          "lineNumber": 444,
+          "lineContent": "s.unpinDigests(ctx, d.digests)",
+          "title": "Unpin on eviction",
+          "description": "Releases CAS pins when cache entry expires or is deleted"
+        }
+      ],
+      "traceTextDiagram": "Cache Entry Lifecycle with Artifact Pinning\n├── Cache.Put() entry point \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go:134\n│   ├── Insert into auto_cache table \u003c-- 3a\n│   ├── Pin artifacts after insert \u003c-- 3b\n│   │   └── artifactManager.Pin() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go:457\n│   │       └── CAS.Pin() updates pinned=1 \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:387\n│   └── Digest extraction flow\n│       ├── CollectDigests() helper \u003c-- 3c\n│       └── artifacts.Digests() parser \u003c-- 3d\n│           └── Parse data.artifact/artifacts[] \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/artifacts.go:22\n└── Cache eviction flow\n    ├── evictExpired() scans TTL \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go:411\n    ├── DELETE expired entries \u003c-- 3e\n    └── Unpin after deletion \u003c-- 3f\n        └── artifactManager.Unpin() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go:470\n            └── CAS.Unpin() sets pinned=0 \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:412",
+      "traceGuide": "## Motivation\n\nWhen agentctl stores skill execution results in its **auto-cache**, these results often contain references to large artifacts (like files, logs, or binary data) stored in the **CAS (content-addressed storage)**. The problem: if we naively delete cache entries, we might remove the last reference to a CAS artifact, but the artifact itself remains on disk, wasting space. Conversely, if we run garbage collection on CAS too aggressively, we might delete artifacts that are still referenced by active cache entries, breaking the system.\n\nThe solution is **reference counting via pinning**: when a cache entry is created, we \"pin\" all artifacts it references in the CAS [3b], marking them as protected. When the cache entry expires or is deleted, we \"unpin\" those artifacts [3f], allowing them to be garbage collected later.\n\n## Details\n\n**Cache entry creation flow**: When `Put()` inserts a new entry into the `auto_cache` table [3a], it immediately calls `pinDigests()` [3b] to protect referenced artifacts. The digest extraction happens via `CollectDigests()` [3c], which delegates to `artifacts.Digests()` [3d] to parse the result envelope JSON and extract any `sha256:` prefixed strings from `data.artifact` or `data.artifacts[]` fields.\n\n**Pin coordination**: The cache store doesn't directly manipulate CAS state. Instead, it delegates to an `artifactManager` [3b at line 457], which iterates through digests and calls `CAS.Pin()` for each one. The CAS store then updates the `pinned` column to `1` in its `cas_objects` table, protecting the object from garbage collection.\n\n**Cache eviction flow**: The cache store periodically runs `evictExpired()` to scan for entries past their TTL [3e at line 411]. For each expired entry, it deletes the row from `auto_cache` [3e] and then calls `unpinDigests()` [3f]. This mirrors the pin flow: the artifact manager coordinates unpinning, and the CAS store sets `pinned=0`, making the object eligible for future garbage collection.\n\n**Key invariant**: An artifact in CAS should only be deleted when `pinned=0` AND it meets age/policy criteria. This ensures cache entries always have valid artifact references, while still allowing cleanup of truly unused data."
+    },
+    {
+      "id": "4",
+      "title": "Stats Retrieval from CLI to Storage Layer",
+      "description": "CLI and storage layers - Traces how 'agentctl memory stats' command aggregates counts from cache and memory stores",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go",
+          "lineNumber": 19,
+          "lineContent": "if err := memorycmd.WithCacheStore(ctx, cfg, func(store storage.CacheStore) error {",
+          "title": "Open cache store",
+          "description": "CLI helper opens cache store with config-provided paths"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go",
+          "lineNumber": 20,
+          "lineContent": "stats, err := store.Stats(ctx)",
+          "title": "Query cache stats",
+          "description": "Retrieves entry count and TTL from cache store"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cache/store.go",
+          "lineNumber": 127,
+          "lineContent": "if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM auto_cache`).Scan(\u0026count); err != nil {",
+          "title": "Count cache entries",
+          "description": "Executes SQL COUNT query on auto_cache table"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go",
+          "lineNumber": 31,
+          "lineContent": "if err := memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {",
+          "title": "Open memory store",
+          "description": "CLI helper opens named memory store"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go",
+          "lineNumber": 32,
+          "lineContent": "stats, err := store.Stats(ctx)",
+          "title": "Query memory stats",
+          "description": "Retrieves named memory entry count and database path"
+        },
+        {
+          "id": "4f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 119,
+          "lineContent": "if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM named_memory`).Scan(\u0026count); err != nil {",
+          "title": "Count named memories",
+          "description": "Executes SQL COUNT query on named_memory table"
+        }
+      ],
+      "traceTextDiagram": "CLI Memory Stats Command\n├── newMemoryStatsCommand() entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go:12\n│   └── RunE handler \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go:16\n│       ├── WithConfig() load config \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go:17\n│       │   ├── Open cache store \u003c-- 4a\n│       │   │   └── store.Stats(ctx) \u003c-- 4b\n│       │   │       └── SELECT COUNT(*) FROM auto_cache \u003c-- 4c\n│       │   └── Open memory store \u003c-- 4d\n│       │       └── store.Stats(ctx) \u003c-- 4e\n│       │           └── SELECT COUNT(*) FROM named_memory \u003c-- 4f\n│       └── WriteOK() format response \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memory_stats.go:59\n│           └── Return JSON with cache + memory stats",
+      "traceGuide": "## Motivation\n\nThe `agentctl memory stats` command provides **observability into storage usage** across the system's two main persistence layers: the **auto-cache** (for skill execution results) and **named memories** (for user-stored data like gotchas, session summaries, and task state). Without this command, operators have no visibility into how many entries are stored, where the databases are located, or how TTL policies are configured—making it difficult to debug storage issues or understand system resource usage.\n\n## Details\n\n### Command Entry Point\n\nThe stats command is registered as a Cobra CLI command [4a] that orchestrates two independent store queries. It uses the **helper pattern** `WithCacheStore` and `WithMemoryStore` to handle store lifecycle (open, query, close) automatically.\n\n### Cache Stats Collection\n\nThe cache store query [4b] executes a simple `SELECT COUNT(*)` against the **auto_cache table** [4c], which holds skill execution results with TTL-based expiration. The returned `CacheStats` structure includes:\n- Entry count\n- Configured TTL duration (from config, typically 24h)\n- Database file path (e.g., `~/.agentctl/cache/cache.db`)\n\n### Memory Stats Collection\n\nThe memory store query [4e] similarly counts rows in the **named_memory table** [4f], which persists user-created memories indefinitely (no TTL). The `MemoryStats` structure includes:\n- Entry count\n- Database file path (e.g., `~/.agentctl/storage/memory.db`)\n\n### Response Format\n\nBoth stat structures are aggregated into a single JSON envelope and written via `WriteOK()` [4a], producing output like:\n```json\n{\n  \"cache\": {\"entries\": 42, \"ttl_seconds\": 86400, \"db_path\": \"...\"},\n  \"memory\": {\"entries\": 128, \"db_path\": \"...\"}\n}\n```\n\nThis enables both **human operators** (via CLI) and **programmatic consumers** (via JSON parsing) to monitor storage health."
+    },
+    {
+      "id": "5",
+      "title": "Store Initialization with CAS Integration",
+      "description": "Config and store initialization - Shows how memory/cache stores are opened with CAS path configuration for artifact management",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memorycmd/helper.go",
+          "lineNumber": 57,
+          "lineContent": "store, err := memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)",
+          "title": "Open memory store with config",
+          "description": "CLI helper passes storage root and CAS path from config"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 102,
+          "lineContent": "return Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)",
+          "title": "OpenFromConfig delegates to Open",
+          "description": "Preferred initialization method using config paths"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 71,
+          "lineContent": "db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)",
+          "title": "Open SQLite database",
+          "description": "Creates memory.db with WAL mode and connection pooling"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 90,
+          "lineContent": "if casStore, err = cas.NewStore(casPath); err != nil {",
+          "title": "Initialize CAS store",
+          "description": "Creates file-based or database-backed CAS if path provided"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go",
+          "lineNumber": 93,
+          "lineContent": "artifactMgr = artifacts.NewManager(casStore)",
+          "title": "Create artifact manager",
+          "description": "Wraps CAS store for pin/unpin coordination"
+        },
+        {
+          "id": "5f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go",
+          "lineNumber": 294,
+          "lineContent": "v.SetDefault(\"paths.cas\", filepath.Join(defaultHome, \"cas\"))",
+          "title": "Default CAS path configuration",
+          "description": "Config system sets default CAS path to ~/.agentctl/cas"
+        }
+      ],
+      "traceTextDiagram": "Store Initialization with CAS Integration\n├── CLI Helper Layer\n│   └── WithMemoryStore() opens store \u003c-- 5a\n│       └── passes cfg.Storage.Root + CAS \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/memorycmd/helper.go:57\n├── Memory Store Initialization\n│   ├── OpenFromConfig() wrapper \u003c-- 5b\n│   │   └── delegates to Open() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:102\n│   ├── Open() core logic \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:69\n│   │   ├── sqliteutil.OpenDB() \u003c-- 5c\n│   │   │   └── creates memory.db with WAL \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:70\n│   │   ├── cas.NewStore() if path provided \u003c-- 5d\n│   │   │   └── initializes CAS backend \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:89\n│   │   └── artifacts.NewManager(casStore) \u003c-- 5e\n│   │       └── wraps CAS for pin/unpin ops \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/adapters/artifacts/manager.go:35\n│   └── returns Store{db, cas, artifactMgr} \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/memory/store.go:95\n└── Configuration System\n    └── applyDefaults() \u003c-- 5f\n        └── sets paths.cas = ~/.agentctl/cas \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/config/config.go:294",
+      "traceGuide": "## Motivation\n\nNamed memories and cache entries in agentctl reference large artifacts (files, outputs) stored in a **content-addressed storage (CAS)** system. Without coordination, the CAS garbage collector could delete artifacts that are still referenced by active memories, breaking retrieval. The store initialization system solves this by **integrating an artifact manager** that automatically pins referenced CAS objects when memories are saved and unpins them when deleted, ensuring referential integrity across the storage layer.\n\n## Details\n\n### Configuration-Driven Paths\n\nThe system uses a layered configuration approach where storage paths are defined once and propagated throughout [5f]. The default CAS path is `~/.agentctl/cas`, and the memory database lives in `~/.agentctl/storage/memory.db`. CLI commands use helper functions like `WithMemoryStore()` [5a] that load configuration and pass both the storage root and CAS path to the store constructor.\n\n### Two-Phase Initialization\n\nMemory store initialization happens in two phases. First, `OpenFromConfig()` [5b] extracts paths from the config object and delegates to the core `Open()` function. Second, `Open()` performs the actual setup: it creates a SQLite database with WAL mode enabled [5c], optionally initializes a CAS store if a path is provided [5d], and wraps the CAS store in an artifact manager [5e]. This separation allows the same store to work with or without CAS integration.\n\n### Artifact Manager as Coordinator\n\nThe artifact manager [5e] acts as a **coordination layer** between the memory/cache stores and the underlying CAS backend. When a memory is saved, the store extracts digests from the result envelope and calls `artifactManager.Pin()`, which iterates through each digest and updates the `pinned` flag in the CAS. This design decouples the memory store from CAS implementation details—the same artifact manager interface works with file-based, SQLite-based, or Turso-based CAS backends.\n\n### Connection Pool Configuration\n\nThe SQLite database is opened with specific connection pool settings: 10 max open connections, 5 idle connections, and connection recycling every 10 minutes. These values balance concurrency with SQLite's write serialization constraints, preventing connection exhaustion while maintaining responsiveness for concurrent memory operations."
+    },
+    {
+      "id": "6",
+      "title": "CAS Garbage Collection with Pin Protection",
+      "description": "CAS garbage collection (internal/storage/cas) - Demonstrates how GC respects pinned objects to avoid deleting artifacts referenced by memories/cache",
+      "locations": [
+        {
+          "id": "6a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go",
+          "lineNumber": 21,
+          "lineContent": "objects, err := s.List(ctx)",
+          "title": "List all CAS objects",
+          "description": "GC starts by enumerating all stored objects"
+        },
+        {
+          "id": "6b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go",
+          "lineNumber": 34,
+          "lineContent": "if opts.KeepPinned \u0026\u0026 obj.Pinned {",
+          "title": "Check pinned status",
+          "description": "Skip objects with pinned=1 to protect referenced artifacts"
+        },
+        {
+          "id": "6c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go",
+          "lineNumber": 48,
+          "lineContent": "if err := s.Remove(ctx, obj.Digest); err != nil {",
+          "title": "Attempt removal",
+          "description": "Tries to delete unpinned objects meeting age criteria"
+        },
+        {
+          "id": "6d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "lineNumber": 360,
+          "lineContent": "err := s.db.QueryRowContext(ctx, \"SELECT pinned FROM cas_objects WHERE digest = ?\", digest).Scan(\u0026pinned)",
+          "title": "Verify not pinned before removal",
+          "description": "Remove checks pinned flag as safety guard"
+        },
+        {
+          "id": "6e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "lineNumber": 368,
+          "lineContent": "if pinned != 0 {",
+          "title": "Reject pinned deletion",
+          "description": "Returns ErrPinned if object is still referenced"
+        },
+        {
+          "id": "6f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go",
+          "lineNumber": 372,
+          "lineContent": "result, err := s.db.ExecContext(ctx, \"DELETE FROM cas_objects WHERE digest = ?\", digest)",
+          "title": "Delete CAS object",
+          "description": "Removes unpinned object from cas_objects table"
+        }
+      ],
+      "traceTextDiagram": "CAS Garbage Collection with Pin Protection\n├── GC() entrypoint \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go:17\n│   ├── List all CAS objects \u003c-- 6a\n│   ├── For each object: \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go:29\n│   │   ├── Check if pinned \u003c-- 6b\n│   │   │   └── Skip if KeepPinned \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go:35\n│   │   ├── Check age criteria \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go:39\n│   │   │   └── Skip if too recent \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go:40\n│   │   └── Attempt removal \u003c-- 6c\n│   │       └── Remove(ctx, digest) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go:48\n│   └── Return GCResult \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/gc.go:68\n└── Remove() safety checks \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:350\n    ├── Query pinned status \u003c-- 6d\n    ├── Reject if pinned \u003c-- 6e\n    │   └── return ErrPinned \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/cas/sqlite_store.go:369\n    └── DELETE from cas_objects \u003c-- 6f",
+      "traceGuide": "## Motivation\n\nWhen named memories or cache entries store large artifacts (like file contents or command outputs), those artifacts are stored in a **content-addressed storage (CAS)** system. The problem: if you naively delete old CAS objects to reclaim disk space, you might accidentally delete artifacts that are still referenced by active memories or cache entries, breaking those references.\n\nThe solution is **pinning**: when a memory or cache entry is saved, it \"pins\" its referenced artifacts [1f], marking them as protected. When the memory is deleted, those artifacts are \"unpinned\" [2f]. Garbage collection then respects these pins, skipping pinned objects [6b] and only removing truly unreferenced artifacts [6f].\n\n## Details\n\n**CAS garbage collection** starts by listing all stored objects [6a]. For each object, it checks whether the object is pinned [6b, 6d]. If `KeepPinned` is enabled and the object has `pinned=1` in the database, GC skips it to protect referenced artifacts.\n\nThe **Remove operation has a safety guard**: even if GC tries to delete a pinned object, Remove queries the pinned status [6d] and returns `ErrPinned` [6e] if the object is still protected. Only unpinned objects are actually deleted from the `cas_objects` table [6f].\n\n**Age-based filtering** is also supported: GC can skip objects newer than a cutoff time, allowing you to preserve recent artifacts regardless of pin status.\n\nThe pinning mechanism creates a **reference counting system** where:\n- Memory saves increment the pin count [1f]\n- Memory deletes decrement the pin count [2f]  \n- GC respects the pin count to avoid premature deletion [6b]\n\nThis ensures that artifacts remain available as long as any memory or cache entry references them, while still allowing cleanup of truly orphaned objects."
+    }
+  ],
+  "description": "This map traces how named memories and cache entries persist to SQLite databases while automatically pinning referenced artifacts in the CAS (content-addressed storage) to prevent garbage collection. Key integration points include digest extraction [1c], artifact manager coordination [1d, 2d], and stats aggregation [4b, 4c].",
+  "mermaidDiagram": "graph TB\n    subgraph Config[\"Config System\"]\n        5f[\"5f: Default CAS path\"]\n    end\n    \n    subgraph CLI[\"CLI Layer\"]\n        4a[\"4a: Open cache store\"]\n        4d[\"4d: Open memory store\"]\n        4b[\"4b: Query cache stats\"]\n        4e[\"4e: Query memory stats\"]\n    end\n    \n    subgraph Memory[\"Named Memory Store\"]\n        1a[\"1a: Insert memory entry\"]\n        1c[\"1c: Extract digests\"]\n        2a[\"2a: Query digests\"]\n        2b[\"2b: Delete entry\"]\n        4f[\"4f: Count memories\"]\n    end\n    \n    subgraph Cache[\"Cache Store\"]\n        3a[\"3a: Insert cache entry\"]\n        3c[\"3c: Extract digests helper\"]\n        3e[\"3e: Delete expired entry\"]\n        4c[\"4c: Count cache entries\"]\n    end\n    \n    subgraph ArtifactMgr[\"Artifact Manager Hub\"]\n        1d[\"1d: Delegate pin\"]\n        1e[\"1e: Call CAS Pin\"]\n        2d[\"2d: Delegate unpin\"]\n        2e[\"2e: Call CAS Unpin\"]\n        3b[\"3b: Pin on put\"]\n        3f[\"3f: Unpin on evict\"]\n    end\n    \n    subgraph CAS[\"CAS Store\"]\n        1f[\"1f: Update pinned flag\"]\n        2f[\"2f: Clear pinned flag\"]\n        6a[\"6a: List objects\"]\n        6b[\"6b: Check pinned status\"]\n        6d[\"6d: Verify not pinned\"]\n        6f[\"6f: Delete object\"]\n    end\n    \n    subgraph GC[\"CAS Garbage Collection\"]\n        6c[\"6c: Attempt removal\"]\n        6e[\"6e: Reject if pinned\"]\n    end\n    \n    5f --\u003e|configures| 1a\n    5f --\u003e|configures| 3a\n    \n    4a --\u003e|opens| Cache\n    4d --\u003e|opens| Memory\n    \n    4b --\u003e|calls| 4c\n    4e --\u003e|calls| 4f\n    \n    1a --\u003e|extracts| 1c\n    1c --\u003e|sends digests to| 1d\n    1d --\u003e|pins each digest| 1e\n    1e --\u003e|updates| 1f\n    \n    2a --\u003e|retrieves| 2b\n    2b --\u003e|unpins digests via| 2d\n    2d --\u003e|unpins each digest| 2e\n    2e --\u003e|clears flag in| 2f\n    \n    3a --\u003e|extracts| 3c\n    3c --\u003e|sends digests to| 3b\n    3b --\u003e|pins via manager| 1e\n    \n    3e --\u003e|triggers unpin| 3f\n    3f --\u003e|unpins via manager| 2e\n    \n    6a --\u003e|enumerates| 6b\n    6b --\u003e|checks| CAS\n    6c --\u003e|attempts| 6d\n    6d --\u003e|rejects pinned| 6e\n    6d --\u003e|deletes unpinned| 6f\n    \n    style Config fill:#ffec99\n    style CLI fill:#fcc2d7\n    style Memory fill:#b2f2bb\n    style Cache fill:#a5d8ff\n    style ArtifactMgr fill:#d0bfff\n    style CAS fill:#ffd8a8\n    style GC fill:#eebefa"
+}

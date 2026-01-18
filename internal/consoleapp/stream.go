@@ -37,9 +37,9 @@ type ToolCallDelta struct {
 
 // StreamParser parses SSE streams from OpenAI-compatible APIs.
 type StreamParser struct {
-	reader     io.Reader
-	onDelta    func(StreamDelta)
-	onError    func(error)
+	reader      io.Reader
+	onDelta     func(StreamDelta)
+	onError     func(error)
 	accumulator *StreamAccumulator
 }
 
@@ -137,8 +137,8 @@ func (p *StreamParser) Result() *StreamAccumulator {
 
 // StreamAccumulator accumulates streaming deltas into complete data.
 type StreamAccumulator struct {
-	Content    strings.Builder
-	ToolCalls  []AccumulatedToolCall
+	Content      strings.Builder
+	ToolCalls    []AccumulatedToolCall
 	FinishReason string
 }
 
@@ -220,9 +220,9 @@ type CompletedToolCall struct {
 type oaiStreamChunk struct {
 	ID      string `json:"id"`
 	Choices []struct {
-		Index        int    `json:"index"`
+		Index        int      `json:"index"`
 		Delta        oaiDelta `json:"delta"`
-		FinishReason string `json:"finish_reason"`
+		FinishReason string   `json:"finish_reason"`
 	} `json:"choices"`
 }
 

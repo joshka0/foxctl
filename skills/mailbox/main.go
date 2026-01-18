@@ -5,18 +5,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/teams"
 )
 
 const command = "mailbox/manage"
+
+var allowedOps = []string{
+	"send",
+	"inbox",
+	"ack",
+	"mark_surfaced",
+	"reserve",
+	"release",
+}
 
 type input struct {
 	Operation    string           `json:"operation"`
@@ -84,12 +95,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	defer store.Close()
 
-	op := strings.ToLower(strings.TrimSpace(in.Operation))
-	workspaceID := in.WorkspaceID
-	if workspaceID == "" {
-		// Fallback to current directory; error is not actionable.
-		workspaceID, _ = os.Getwd() //nolint:errcheck
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
 	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
+	workspaceID := workspaceutil.ResolveID(in.WorkspaceID, rc.Workspace)
 
 	var data map[string]any
 
@@ -373,4 +387,3 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	return skillout.Emit(rc, command, data)
 }
-

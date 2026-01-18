@@ -10,6 +10,7 @@ import (
 
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 )
 
 // StructuredDiff represents a diff output from code/diff skill.
@@ -241,7 +242,7 @@ func (r *Registry) applyStructuredDiff(ctx context.Context, args map[string]any)
 		return errorResult("path is required"), nil
 	}
 
-	diffJSON, ok := args["diff_json"].(map[string]any)
+	diffJSON, ok := maputil.AsStringMap(args["diff_json"])
 	if !ok {
 		return errorResult("diff_json is required and must be an object"), nil
 	}
@@ -334,7 +335,7 @@ func (r *Registry) applyStructuredDiff(ctx context.Context, args map[string]any)
 // parseHunksFromJSON extracts DiffHunk slice from diff_json map.
 func parseHunksFromJSON(diffJSON map[string]any) ([]DiffHunk, error) {
 	// Check for nested diff object (code/diff returns {"diff": {...}})
-	if diff, ok := diffJSON["diff"].(map[string]any); ok {
+	if diff, ok := maputil.AsStringMap(diffJSON["diff"]); ok {
 		diffJSON = diff
 	}
 
@@ -345,7 +346,7 @@ func parseHunksFromJSON(diffJSON map[string]any) ([]DiffHunk, error) {
 
 	hunks := make([]DiffHunk, 0, len(hunksRaw))
 	for i, h := range hunksRaw {
-		hMap, ok := h.(map[string]any)
+		hMap, ok := maputil.AsStringMap(h)
 		if !ok {
 			return nil, fmt.Errorf("hunk[%d] must be an object", i)
 		}

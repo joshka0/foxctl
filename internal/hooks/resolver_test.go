@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 )
 
 func TestDefaultResolver_FindsArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "test", "skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("failed to create skill dir: %v", err)
 	}
 
@@ -35,12 +36,12 @@ capabilities:
 memory:
   recommend: false
 `
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
 	// Create bin artifact
-	if err := os.WriteFile(filepath.Join(skillDir, "bin"), []byte("binary"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "bin"), []byte("binary"), 0o755); err != nil {
 		t.Fatalf("failed to write bin: %v", err)
 	}
 
@@ -59,9 +60,12 @@ memory:
 }
 
 func TestDefaultResolver_PrefersCGO(t *testing.T) {
+	if !buildinfo.IsCGO() {
+		t.Skip("skipping CGO preference test in non-CGO build")
+	}
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "test", "skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("failed to create skill dir: %v", err)
 	}
 
@@ -85,15 +89,15 @@ capabilities:
 memory:
   recommend: false
 `
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 
 	// Create both bin and bin-cgo
-	if err := os.WriteFile(filepath.Join(skillDir, "bin"), []byte("binary"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "bin"), []byte("binary"), 0o755); err != nil {
 		t.Fatalf("failed to write bin: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(skillDir, "bin-cgo"), []byte("cgo binary"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "bin-cgo"), []byte("cgo binary"), 0o755); err != nil {
 		t.Fatalf("failed to write bin-cgo: %v", err)
 	}
 
@@ -112,12 +116,12 @@ memory:
 func TestDefaultResolver_MissingManifest(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "test", "skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("failed to create skill dir: %v", err)
 	}
 
 	// Create bin but no manifest
-	if err := os.WriteFile(filepath.Join(skillDir, "bin"), []byte("binary"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "bin"), []byte("binary"), 0o755); err != nil {
 		t.Fatalf("failed to write bin: %v", err)
 	}
 
@@ -131,7 +135,7 @@ func TestDefaultResolver_MissingManifest(t *testing.T) {
 func TestDefaultResolver_MissingArtifact(t *testing.T) {
 	tmpDir := t.TempDir()
 	skillDir := filepath.Join(tmpDir, "test", "skill")
-	if err := os.MkdirAll(skillDir, 0755); err != nil {
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatalf("failed to create skill dir: %v", err)
 	}
 
@@ -155,7 +159,7 @@ capabilities:
 memory:
   recommend: false
 `
-	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(skillDir, "skill.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("failed to write manifest: %v", err)
 	}
 

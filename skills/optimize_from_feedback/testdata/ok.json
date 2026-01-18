@@ -1,0 +1,50 @@
+{
+  "skill": "optimize/from_feedback",
+  "data": {
+    "feedback_count": 25,
+    "avg_rating": 4.2,
+    "outcome_distribution": {
+      "success": 18,
+      "partial": 5,
+      "failure": 2
+    },
+    "top_successes": [
+      {"pattern": "incremental changes with tests", "count": 8},
+      {"pattern": "clear task breakdown", "count": 6},
+      {"pattern": "early validation", "count": 4}
+    ],
+    "top_failures": [
+      {"pattern": "missing error handling", "count": 2}
+    ],
+    "top_blockers": [
+      {"pattern": "unclear requirements", "count": 3},
+      {"pattern": "missing dependencies", "count": 2}
+    ],
+    "top_suggestions": [
+      {"pattern": "add more tests", "count": 5},
+      {"pattern": "improve error messages", "count": 3}
+    ],
+    "tool_usage_stats": {
+      "Read": 120,
+      "Edit": 85,
+      "Bash": 45,
+      "Grep": 30,
+      "Glob": 20
+    },
+    "avg_duration_minutes": 18.5,
+    "recommendations": [
+      {
+        "priority": "high",
+        "category": "workflow",
+        "description": "Break large tasks into smaller increments",
+        "evidence": "Sessions with incremental changes had 90% success rate vs 60% for large changes"
+      },
+      {
+        "priority": "medium",
+        "category": "tooling",
+        "description": "Run tests more frequently during development",
+        "evidence": "5 suggestions mentioned adding more tests"
+      }
+    ]
+  }
+}

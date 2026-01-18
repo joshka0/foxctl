@@ -6,15 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
+	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
 )
 
@@ -32,7 +35,7 @@ type Input struct {
 	// Name is the identifier for the item (memory name, symbol ID, or session ID).
 	Name string `json:"name" validate:"required"`
 
-	// Workspace is the workspace context (optional, defaults to "default").
+	// Workspace is the workspace context (optional, defaults to detected workspace).
 	Workspace string `json:"workspace,omitempty"`
 
 	// DryRun if true, generates embedding but doesn't store it.
@@ -56,9 +59,7 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set default workspace
-	if in.Workspace == "" {
-		in.Workspace = "default"
-	}
+	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
 
 	start := time.Now()
 	output := Output{
@@ -115,53 +116,36 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillout.Emit(rc, command, output)
 	}
 
-	// Generate embedding - prefer Voyage, fall back to Gemini (both rate-limited)
-	var embedding []float32
-	var embeddingModel string
-
-	if voyageKey != "" {
-		// Use scope-based model selection for consistency
-		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSymbols)
-		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			Model:         model,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			output.Status = "error"
-			output.Message = fmt.Sprintf("voyage provider failed: %v", err)
-			output.DurationMs = time.Since(start).Milliseconds()
-			return skillout.Emit(rc, command, output)
-		}
-		embedding, err = vp.Embed(ctx, content)
-		if err != nil {
-			output.Status = "error"
-			output.Message = fmt.Sprintf("embedding generation failed: %v", err)
-			output.DurationMs = time.Since(start).Milliseconds()
-			return skillout.Emit(rc, command, output)
-		}
-		embeddingModel = vp.Model()
-	} else {
-		// Use GeminiProvider with rate limiting
-		gp, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey:        geminiKey,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			output.Status = "error"
-			output.Message = fmt.Sprintf("gemini provider failed: %v", err)
-			output.DurationMs = time.Since(start).Milliseconds()
-			return skillout.Emit(rc, command, output)
-		}
-		embedding, err = gp.Embed(ctx, content)
-		if err != nil {
-			output.Status = "error"
-			output.Message = fmt.Sprintf("embedding generation failed: %v", err)
-			output.DurationMs = time.Since(start).Milliseconds()
-			return skillout.Emit(rc, command, output)
-		}
-		embeddingModel = gp.Model()
+	scope := semantic.ScopeSymbols
+	switch in.Scope {
+	case "memory":
+		scope = semantic.ScopeMemory
+	case "session":
+		scope = semantic.ScopeSessions
 	}
+	embedder, err := semantic.NewEmbedderFromConfig(
+		scope,
+		rc.Config,
+		semantic.WithVoyageKey(voyageKey),
+		semantic.WithGeminiKey(geminiKey),
+	)
+	if err != nil {
+		output.Status = "error"
+		output.Message = fmt.Sprintf("embedding provider failed: %v", err)
+		output.DurationMs = time.Since(start).Milliseconds()
+		return skillout.Emit(rc, command, output)
+	}
+
+	embeddingResult, err := embedder.Embed(ctx, content)
+	if err != nil {
+		output.Status = "error"
+		output.Message = fmt.Sprintf("embedding generation failed: %v", err)
+		output.DurationMs = time.Since(start).Milliseconds()
+		return skillout.Emit(rc, command, output)
+	}
+
+	embedding := embeddingResult.Vec
+	embeddingModel := embeddingResult.Model
 
 	// Store embedding based on scope
 	switch in.Scope {
@@ -188,13 +172,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-var errNotFound = fmt.Errorf("not found")
+var errNotFound = errors.New("not found")
 
 // getMemoryContent retrieves content from a named memory entry.
+// Format: [Jan 2026] [type] Summary text
+// This enables natural language date/type searches like "January gotchas".
 func getMemoryContent(ctx context.Context, rc *skillmain.RunContext, name, workspace string) (string, error) {
-	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	store, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return "", fmt.Errorf("open memory store: %w", err)
+		return "", skillerr.WrapIO("open memory store", err)
 	}
 	defer store.Close() //nolint:errcheck
 
@@ -206,12 +192,29 @@ func getMemoryContent(ctx context.Context, rc *skillmain.RunContext, name, works
 		return "", err
 	}
 
-	// Use summary + name as embedding text
+	return formatMemoryContent(entry), nil
+}
+
+// formatMemoryContent builds embedding text with date and type prefixes.
+// Format: [Jan 2026] [gotcha] Summary text here
+func formatMemoryContent(entry storage.NamedEntry) string {
+	// Date prefix from creation time
+	dateStr := entry.CreatedAt.Format("Jan 2006")
+
+	// Type prefix (default to "note" if empty)
+	typeStr := entry.Type
+	if typeStr == "" {
+		typeStr = "note"
+	}
+
+	// Content from summary or name
 	content := entry.Summary
 	if content == "" {
 		content = entry.Name
 	}
-	return content, nil
+
+	// Format: [Jan 2026] [gotcha] Summary
+	return fmt.Sprintf("[%s] [%s] %s", dateStr, typeStr, content)
 }
 
 // getSymbolContent retrieves content from a code symbol.
@@ -223,22 +226,39 @@ func getSymbolContent(ctx context.Context, symbolID, workspaceID string) (string
 }
 
 // getSessionContent retrieves content from a session.
+// Format: [Jan 2, 2026] [activity] Summary...
+// This enables natural language date/activity searches like "January debugging sessions".
 func getSessionContent(ctx context.Context, rc *skillmain.RunContext, sessionID string) (string, error) {
-	store, err := sessions.Open(ctx, rc.Config.Storage.Root)
+	store, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		return "", fmt.Errorf("open sessions store: %w", err)
+		return "", skillerr.WrapIO("open sessions store", err)
 	}
-	defer store.Close() //nolint:errcheck
+	defer cleanup() //nolint:errcheck
 
 	session, err := store.Get(ctx, sessionID)
 	if err != nil {
 		return "", errNotFound
 	}
 
-	// Build embedding text from session summary data
+	return formatSessionContent(session), nil
+}
+
+// formatSessionContent builds embedding text with date and activity prefixes.
+// Format: [Jan 2, 2026] [debugging] Summary. Accomplished: ... Files: ...
+func formatSessionContent(session storage.Session) string {
 	var parts []string
+
+	// Date prefix from session start time
+	dateStr := session.StartedAt.Format("Jan 2, 2006")
+
+	// Activity type inferred from tags
+	activity := inferActivityType(session.Tags)
+
+	// Header with date and activity
+	parts = append(parts, fmt.Sprintf("[%s] [%s]", dateStr, activity))
+
 	if session.Summary != "" {
-		parts = append(parts, "Summary: "+session.Summary)
+		parts = append(parts, session.Summary)
 	}
 	if len(session.Accomplished) > 0 {
 		parts = append(parts, "Accomplished: "+joinStrings(session.Accomplished, "; "))
@@ -249,15 +269,41 @@ func getSessionContent(ctx context.Context, rc *skillmain.RunContext, sessionID 
 	if len(session.Gotchas) > 0 {
 		parts = append(parts, "Gotchas: "+joinStrings(session.Gotchas, "; "))
 	}
+	if len(session.KeyFiles) > 0 {
+		parts = append(parts, "Files: "+joinStrings(session.KeyFiles, ", "))
+	}
 	if len(session.Tags) > 0 {
-		parts = append(parts, "Tags: "+joinStrings(session.Tags, ", "))
+		parts = append(parts, "Topics: "+joinStrings(session.Tags, ", "))
 	}
 
-	if len(parts) == 0 {
-		return "", errNotFound
-	}
+	return joinStrings(parts, "\n")
+}
 
-	return joinStrings(parts, "\n"), nil
+// inferActivityType extracts an activity type from session tags.
+// Maps common tags to activity categories for searchability.
+func inferActivityType(tags []string) string {
+	for _, tag := range tags {
+		lower := strings.ToLower(tag)
+		switch {
+		case strings.Contains(lower, "debug"):
+			return "debugging"
+		case strings.Contains(lower, "fix") || strings.Contains(lower, "bug"):
+			return "bug-fix"
+		case strings.Contains(lower, "feature") || strings.Contains(lower, "implement"):
+			return "feature"
+		case strings.Contains(lower, "refactor"):
+			return "refactoring"
+		case strings.Contains(lower, "test"):
+			return "testing"
+		case strings.Contains(lower, "doc"):
+			return "documentation"
+		case strings.Contains(lower, "review"):
+			return "code-review"
+		case strings.Contains(lower, "setup") || strings.Contains(lower, "config"):
+			return "setup"
+		}
+	}
+	return "development"
 }
 
 func joinStrings(s []string, sep string) string {
@@ -279,7 +325,7 @@ func storeMemoryEmbedding(ctx context.Context, rc *skillmain.RunContext, name, w
 	// Get provider and model from config/env
 	model := os.Getenv("EMBEDDING_MODEL")
 	if model == "" {
-		model = cfg.Embedding.Model
+		model = semantic.ResolveModelForScope(semantic.ScopeMemory, cfg)
 	}
 	if model == "" {
 		model = geminiModel
@@ -314,19 +360,19 @@ func storeMemoryEmbeddingTurso(ctx context.Context, rc *skillmain.RunContext, na
 
 	// Validate dimensions before attempting Turso store
 	if len(embedding) != expectedDims {
-		return fmt.Errorf("dimension mismatch: got %d, expected %d from config; update embedding.model or embedding.dimensions", len(embedding), expectedDims)
+		return skillerr.Validationf("dimension mismatch: got %d, expected %d from config; update embedding.model or embedding.dimensions", len(embedding), expectedDims)
 	}
 
 	// First get the memory entry from SQLite store to get its data
-	sqliteStore, err := memory.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
+	sqliteStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("open sqlite store: %w", err)
+		return skillerr.WrapIO("open sqlite store", err)
 	}
 	defer sqliteStore.Close() //nolint:errcheck
 
 	entry, err := sqliteStore.Get(ctx, name, workspace)
 	if err != nil {
-		return fmt.Errorf("get memory entry: %w", err)
+		return skillerr.WrapIO("get memory entry", err)
 	}
 
 	// Open Turso store with vector support
@@ -337,14 +383,14 @@ func storeMemoryEmbeddingTurso(ctx context.Context, rc *skillmain.RunContext, na
 	}
 	tursoStore, err := memory.OpenTurso(ctx, tursoCfg)
 	if err != nil {
-		return fmt.Errorf("open turso store: %w", err)
+		return skillerr.WrapIO("open turso store", err)
 	}
 	defer tursoStore.Close() //nolint:errcheck
 
 	// Save with embedding to Turso
 	_, err = tursoStore.SaveWithEmbedding(ctx, entry, embedding, model)
 	if err != nil {
-		return fmt.Errorf("save with embedding: %w", err)
+		return skillerr.WrapIO("save with embedding", err)
 	}
 
 	return nil
@@ -352,9 +398,9 @@ func storeMemoryEmbeddingTurso(ctx context.Context, rc *skillmain.RunContext, na
 
 // storeMemoryEmbeddingSQLite stores embedding via SQLite (BM25-only, no vector search).
 func storeMemoryEmbeddingSQLite(ctx context.Context, rc *skillmain.RunContext, name, workspace string, embedding []float32, model string) error {
-	store, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	store, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
+		return skillerr.WrapIO("open memory store", err)
 	}
 	defer store.Close() //nolint:errcheck
 
@@ -363,12 +409,12 @@ func storeMemoryEmbeddingSQLite(ctx context.Context, rc *skillmain.RunContext, n
 
 	// Validate dimensions match existing metadata (if any)
 	if err := store.ValidateEmbeddingDimensions(ctx, workspace, dimensions); err != nil {
-		return err
+		return skillerr.WrapValidation("validate embedding dimensions", err)
 	}
 
 	// Store the embedding
 	if err := store.UpdateEmbedding(ctx, name, workspace, embedding); err != nil {
-		return err
+		return skillerr.WrapIO("update embedding", err)
 	}
 
 	// Update embedding metadata for workspace
@@ -379,7 +425,7 @@ func storeMemoryEmbeddingSQLite(ctx context.Context, rc *skillmain.RunContext, n
 		Dimensions: dimensions,
 	}
 	if err := store.SetEmbeddingMetadata(ctx, meta); err != nil {
-		return fmt.Errorf("store metadata: %w", err)
+		return skillerr.WrapIO("store metadata", err)
 	}
 
 	return nil
@@ -389,16 +435,16 @@ func storeMemoryEmbeddingSQLite(ctx context.Context, rc *skillmain.RunContext, n
 func storeSymbolEmbedding(ctx context.Context, symbolID, workspaceID string, embedding []float32) error {
 	// Symbol embeddings are stored via embedding_queue
 	// This would need to interact with that store
-	return fmt.Errorf("symbol embedding refresh should use embedding/queue")
+	return skillerr.Validation("symbol embedding refresh should use embedding/queue")
 }
 
 // storeSessionEmbedding stores an embedding for a session.
 func storeSessionEmbedding(ctx context.Context, rc *skillmain.RunContext, sessionID string, embedding []float32, model string) error {
-	store, err := sessions.Open(ctx, rc.Config.Storage.Root)
+	store, cleanup, err := sessionkit.OpenSessions(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open sessions store: %w", err)
+		return skillerr.WrapIO("open sessions store", err)
 	}
-	defer store.Close() //nolint:errcheck
+	defer cleanup() //nolint:errcheck
 
 	// Serialize embedding as binary float32 (little-endian)
 	embeddingBytes := vector.SerializeF32(embedding)
@@ -406,6 +452,3 @@ func storeSessionEmbedding(ctx context.Context, rc *skillmain.RunContext, sessio
 }
 
 // boolPtr returns a pointer to a bool value.
-func boolPtr(b bool) *bool {
-	return &b
-}

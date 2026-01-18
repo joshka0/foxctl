@@ -5,6 +5,7 @@ unexport GOTOOLDIR
 GO ?= go
 GO_CMD := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=0 $(GO)
 GO_CMD_CGO := env -u GOROOT -u GOBIN -u GOTOOLDIR CGO_ENABLED=1 $(GO)
+GOCACHE_DIR := $(shell $(GO) env GOCACHE)
 
 # RACE_PKGS includes all packages except internal/storage/vector.
 # The vector package links github.com/mattn/go-sqlite3 for sqlite-vector support,
@@ -17,6 +18,8 @@ GOFUMPT ?= gofumpt
 GOLANGCI ?= golangci-lint
 GOFILES := $(shell find cmd internal skills -name '*.go')
 SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
+# Skills requiring CGO (excluded from non-CGO builds)
+CGO_SKILLS := libsql_migrate
 
 .PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck
 
@@ -59,9 +62,11 @@ vet:
 	@$(GO_CMD) vet ./...
 
 test:
+	@if [ -n "$(GOCACHE_DIR)" ]; then mkdir -p "$(GOCACHE_DIR)"; fi
 	@$(GO_CMD) test ./...
 
 test-short:
+	@if [ -n "$(GOCACHE_DIR)" ]; then mkdir -p "$(GOCACHE_DIR)"; fi
 	@$(GO_CMD) test -short ./...
 
 test-cgo:
@@ -265,6 +270,14 @@ skills-build:
 		mkdir -p dist/skills; \
 		for dir in $(SKILL_DIRS); do \
 			name=$$(basename "$$dir"); \
+			if echo " $(CGO_SKILLS) " | grep -q " $$name "; then \
+				echo " - $$name (skipped, requires CGO)"; \
+				continue; \
+			fi; \
+			if ls "$$dir"/*.go >/dev/null 2>&1 && grep -qE '^//go:build cgo|^// +build cgo' "$$dir"/*.go; then \
+				echo " - $$name (skipped, requires CGO)"; \
+				continue; \
+			fi; \
 			outdir="dist/skills/$$name"; \
 			echo " - $$name"; \
 			mkdir -p "$$outdir"; \
@@ -296,18 +309,29 @@ skills-build-cgo:
 skills-build-all: skills-build skills-build-cgo
 	@echo "Built both non-CGO and CGO skill variants"
 
-skills-install: skills-build build
+skills-install: skills-build-all build
 	@set -euo pipefail; \
 		echo "Installing skills"; \
 		for dir in $(SKILL_DIRS); do \
 			name=$$(basename "$$dir"); \
 			manifest="$$dir/skill.yaml"; \
 			binary="dist/skills/$$name/bin"; \
+			binaryCgo="dist/skills/$$name/bin-cgo"; \
 			if [ -f "$$manifest" ] && [ -f "$$binary" ]; then \
 				echo " - $$name"; \
 				bin/$(BINARY) skills install --manifest "$$manifest" --binary "$$binary" --force 2>&1 | grep -E '(installed|error|failed)' || true; \
+			elif [ -f "$$manifest" ] && [ -f "$$binaryCgo" ]; then \
+				echo " - $$name (cgo-only)"; \
+				bin/$(BINARY) skills install --manifest "$$manifest" --binary "$$binaryCgo" --force 2>&1 | grep -E '(installed|error|failed)' || true; \
 			elif [ -f "$$manifest" ]; then \
 				echo " - $$name (no binary, skip)"; \
+			fi; \
+			if [ -f "$$manifest" ] && [ -f "$$binaryCgo" ]; then \
+				skillName=$$(grep -E '^  name:' "$$manifest" | head -1 | sed 's/.*name: *//'); \
+				destDir="$${HOME}/.agentctl/skills/$$skillName"; \
+				if [ -d "$$destDir" ]; then \
+					cp "$$binaryCgo" "$$destDir/bin-cgo"; \
+				fi; \
 			fi; \
 		done; \
 		echo "Done. Run 'bin/agentctl skills list' to verify."

@@ -122,6 +122,7 @@ func newSessionsShowCommand() *cobra.Command {
 						ProjectName:     session.ProjectName,
 						GitBranch:       session.GitBranch,
 						ClaudeVersion:   session.ClaudeVersion,
+						AgentType:       session.AgentType,
 						StartedAt:       session.StartedAt,
 						EndedAt:         session.EndedAt,
 						Summary:         session.Summary,
@@ -217,6 +218,7 @@ func newSessionsStatsCommand() *cobra.Command {
 }
 
 func newSessionsDeleteCommand() *cobra.Command {
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "delete <session-id>",
 		Short: "Delete a captured session",
@@ -225,10 +227,29 @@ func newSessionsDeleteCommand() *cobra.Command {
 			sessionID := args[0]
 			return sessionscmd.WithConfig(cmd, func(ctx context.Context, cfg config.Config) error {
 				return sessionscmd.WithSessionStore(ctx, cfg, func(store storage.SessionStore) error {
-					if err := store.Delete(ctx, sessionID); err != nil {
+					// Check if session exists (for both dry-run and actual delete)
+					_, err := store.Get(ctx, sessionID)
+					if err != nil {
 						if errors.Is(err, sessions.ErrNotFound) {
 							return sessionscmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.sessions.delete", sessionID)
 						}
+						return err
+					}
+
+					if dryRun {
+						payload := struct {
+							SessionID string `json:"session_id"`
+							DryRun    bool   `json:"dry_run"`
+							Message   string `json:"message"`
+						}{
+							SessionID: sessionID,
+							DryRun:    true,
+							Message:   "Would delete session",
+						}
+						return sessionscmd.WriteOK(cmd.OutOrStdout(), "agentctl.sessions.delete", payload)
+					}
+
+					if err := store.Delete(ctx, sessionID); err != nil {
 						return err
 					}
 
@@ -244,6 +265,7 @@ func newSessionsDeleteCommand() *cobra.Command {
 			})
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without making changes")
 	return cmd
 }
 
@@ -446,7 +468,7 @@ func runSessionSkill(cmd *cobra.Command, skillName string, payload map[string]an
 	cfg, ok := config.FromContext(cmd.Context())
 	if !ok {
 		var err error
-		cfg, err = config.Load(cmd.Context())
+		cfg, err = loadConfig(cmd.Context())
 		if err != nil {
 			return err
 		}
@@ -513,6 +535,7 @@ type sessionDetail struct {
 	ProjectName     string    `json:"project_name"`
 	GitBranch       string    `json:"git_branch,omitempty"`
 	ClaudeVersion   string    `json:"claude_version,omitempty"`
+	AgentType       string    `json:"agent_type,omitempty"`
 	StartedAt       time.Time `json:"started_at,omitempty"`
 	EndedAt         time.Time `json:"ended_at,omitempty"`
 	Summary         string    `json:"summary,omitempty"`

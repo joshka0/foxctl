@@ -23,11 +23,6 @@ agentctl run code/diff --input '{"staged": true}'
 agentctl run code/diff --input '{"base": "origin/main", "head": "HEAD"}'
 ```
 
-### Complexity hotspots
-```bash
-agentctl run code/complexity --input '{"path": ".", "analysis_mode": "hotspots"}'
-```
-
 ### Imports / dependency graph
 ```bash
 agentctl run code/imports --input '{"path": "internal/", "recursive": true}'

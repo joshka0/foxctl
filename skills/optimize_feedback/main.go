@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
@@ -37,13 +38,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
+		return skillerr.WrapIO("resolve workspace", err)
 	}
 
 	// Open trajectory store
 	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open trajectory store: %w", err)
+		return skillerr.WrapIO("open trajectory store", err)
 	}
 	defer trajStore.Close()
 
@@ -56,16 +57,19 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "stats":
 		return getFeedbackStats(ctx, rc, collector, absWorkspace, in)
 	default:
-		return fmt.Errorf("unknown action: %s (use: add, stats)", in.Action)
+		return skillerr.Arg(
+			fmt.Sprintf("unknown action: %s", in.Action),
+			skillerr.WithHint("Use action=add or action=stats."),
+		)
 	}
 }
 
 func addFeedback(ctx context.Context, rc *skillmain.RunContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
 	if in.TrajectoryID == "" {
-		return fmt.Errorf("trajectory_id is required for add action")
+		return skillerr.Arg("trajectory_id is required for add action")
 	}
 	if in.Rating < 1 || in.Rating > 5 {
-		return fmt.Errorf("rating must be between 1 and 5")
+		return skillerr.Validation("rating must be between 1 and 5")
 	}
 
 	feedback := optimization.HumanFeedback{
@@ -77,7 +81,7 @@ func addFeedback(ctx context.Context, rc *skillmain.RunContext, collector *optim
 	}
 
 	if err := collector.RecordFeedback(ctx, feedback); err != nil {
-		return fmt.Errorf("record feedback: %w", err)
+		return skillerr.WrapRuntime("record feedback", err)
 	}
 
 	return skillout.Emit(rc, command, map[string]any{
@@ -93,12 +97,12 @@ func addFeedback(ctx context.Context, rc *skillmain.RunContext, collector *optim
 
 func getFeedbackStats(ctx context.Context, rc *skillmain.RunContext, collector *optimization.FeedbackCollector, workspace string, in input) error {
 	if in.Role == "" {
-		return fmt.Errorf("role is required for stats action")
+		return skillerr.Arg("role is required for stats action")
 	}
 
 	stats, err := collector.GetFeedbackStats(ctx, workspace, in.Role)
 	if err != nil {
-		return fmt.Errorf("get stats: %w", err)
+		return skillerr.WrapRuntime("get stats", err)
 	}
 
 	// Build rating distribution

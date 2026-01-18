@@ -9,7 +9,6 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -248,7 +247,7 @@ func runSemanticIndexUpdate(cmd *cobra.Command, workspace string, files, deleted
 
 func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, chunkOverlap int, model, providerName string) (*semantic.Indexer, func(), error) {
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("load config: %w", err)
 	}

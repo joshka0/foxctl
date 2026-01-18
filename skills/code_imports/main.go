@@ -2,10 +2,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -14,8 +11,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
 type input struct {
@@ -66,20 +68,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Resolve workspace and search path
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	// Check if path is a file or directory
 	info, err := os.Stat(searchPath)
 	if err != nil {
-		return fmt.Errorf("stat path: %w", err)
+		return skillerr.WrapIO("stat path", err)
 	}
 
 	// Collect imports
@@ -92,7 +89,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		var imports []string
 		allImports, imports, err = extractFromFile(searchPath, workspace, in)
 		if err == nil {
-			fileImports[relativeTo(workspace, searchPath)] = imports
+			fileImports[pathutil.RelTo(workspace, searchPath)] = imports
 		}
 	}
 	if err != nil {
@@ -117,9 +114,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "deps", "dependents":
 		// For these, we need a specific file
 		if info.IsDir() {
-			return fmt.Errorf("deps/dependents query requires a specific file path")
+			return skillerr.Validation("deps/dependents query requires a specific file path")
 		}
-		relPath := relativeTo(workspace, searchPath)
+		relPath := pathutil.RelTo(workspace, searchPath)
 		if in.QueryType == "deps" {
 			results = getDependencies(relPath, fileImports, in.MaxDepth)
 		} else {
@@ -131,14 +128,38 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		resultType = "imports"
 	}
 
-	// Limit results if it's a slice
-	results = limitResults(results, in.MaxResults)
-
 	// Prepare preview and artifact
-	preview, truncated := preparePreview(results, rc.MaxPreview)
-	artifact, err := persistImportsArtifact(ctx, rc, results, truncated)
-	if err != nil {
-		return err
+	var (
+		preview  any
+		artifact *skillmain.Artifact
+	)
+	switch typed := results.(type) {
+	case []importInfo:
+		typed = sliceutil.Limit(typed, in.MaxResults)
+		previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, typed, rc.MaxPreview, "code_imports", true)
+		if err != nil {
+			return err
+		}
+		preview = previewResult.Preview
+		artifact = previewResult.Artifact
+	case []graphNode:
+		typed = sliceutil.Limit(typed, in.MaxResults)
+		previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, typed, rc.MaxPreview, "code_imports", true)
+		if err != nil {
+			return err
+		}
+		preview = previewResult.Preview
+		artifact = previewResult.Artifact
+	case []string:
+		typed = sliceutil.Limit(typed, in.MaxResults)
+		previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, typed, rc.MaxPreview, "code_imports", true)
+		if err != nil {
+			return err
+		}
+		preview = previewResult.Preview
+		artifact = previewResult.Artifact
+	default:
+		preview = results
 	}
 
 	// Count statistics
@@ -151,9 +172,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"preview":     preview,
 		"statistics":  stats,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
-	}
+	skillout.AddArtifact(data, artifact)
 
 	return skillout.Emit(rc, "code/imports", data)
 }
@@ -168,7 +187,7 @@ func extractFromDirectory(dir, workspace string, in input) ([]importInfo, map[st
 		}
 
 		// Skip hidden and common excludes
-		if strings.HasPrefix(d.Name(), ".") || isCommonExclude(d.Name()) {
+		if fsutil.ShouldSkipHiddenOrCommon(d.Name()) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -181,7 +200,7 @@ func extractFromDirectory(dir, workspace string, in input) ([]importInfo, map[st
 		}
 
 		// Check language
-		lang := detectLanguage(in.Language, filepath.Ext(path))
+		lang := langutil.DetectAllowedWithHint(in.Language, path, langutil.CommonCodeLanguages)
 		if lang == "" {
 			return nil
 		}
@@ -192,7 +211,7 @@ func extractFromDirectory(dir, workspace string, in input) ([]importInfo, map[st
 			return nil // Skip files with errors
 		}
 
-		relPath := relativeTo(workspace, path)
+		relPath := pathutil.RelTo(workspace, path)
 		fileImports[relPath] = importPaths
 		imports = append(imports, fileImportList...)
 		return nil
@@ -203,9 +222,9 @@ func extractFromDirectory(dir, workspace string, in input) ([]importInfo, map[st
 
 func extractFromFile(path, workspace string, in input) ([]importInfo, []string, error) {
 	// Detect language
-	lang := detectLanguage(in.Language, filepath.Ext(path))
+	lang := langutil.DetectAllowedWithHint(in.Language, path, langutil.CommonCodeLanguages)
 	if lang == "" {
-		return nil, nil, fmt.Errorf("unsupported file type")
+		return nil, nil, skillerr.Validation("unsupported file type")
 	}
 
 	switch lang {
@@ -216,7 +235,7 @@ func extractFromFile(path, workspace string, in input) ([]importInfo, []string, 
 	case "javascript", "typescript":
 		return extractJSImports(path, workspace, in)
 	default:
-		return nil, nil, fmt.Errorf("language not supported: %s", lang)
+		return nil, nil, skillerr.Validationf("language not supported: %s", lang)
 	}
 }
 
@@ -224,12 +243,12 @@ func extractGoImports(path, workspace string, in input) ([]importInfo, []string,
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse go file: %w", err)
+		return nil, nil, skillerr.WrapParse("parse go file", err)
 	}
 
 	var imports []importInfo
 	var importPaths []string
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 
 	for _, imp := range file.Imports {
 		importPath := strings.Trim(imp.Path.Value, `"`)
@@ -262,12 +281,12 @@ func extractGoImports(path, workspace string, in input) ([]importInfo, []string,
 func extractPythonImports(path, workspace string, _ input) ([]importInfo, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("read file", err)
 	}
 
 	var imports []importInfo
 	var importPaths []string
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 	lines := strings.Split(string(content), "\n")
 
 	for i, line := range lines {
@@ -327,12 +346,12 @@ func extractPythonImports(path, workspace string, _ input) ([]importInfo, []stri
 func extractJSImports(path, workspace string, _ input) ([]importInfo, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, skillerr.WrapIO("read file", err)
 	}
 
 	var imports []importInfo
 	var importPaths []string
-	relPath := relativeTo(workspace, path)
+	relPath := pathutil.RelTo(workspace, path)
 	lines := strings.Split(string(content), "\n")
 
 	for i, line := range lines {
@@ -551,102 +570,4 @@ func isPythonStdLib(importPath string) bool {
 		}
 	}
 	return false
-}
-
-func detectLanguage(requested, ext string) string {
-	if requested != "auto" {
-		return requested
-	}
-
-	langMap := map[string]string{
-		".go":  "go",
-		".py":  "python",
-		".js":  "javascript",
-		".ts":  "typescript",
-		".jsx": "javascript",
-		".tsx": "typescript",
-	}
-
-	return langMap[ext]
-}
-
-func isCommonExclude(name string) bool {
-	excludes := []string{
-		".git", ".svn", ".hg",
-		"node_modules", "vendor", "__pycache__",
-		".venv", "venv", ".tox",
-		"dist", "build", "target",
-	}
-	for _, exclude := range excludes {
-		if name == exclude {
-			return true
-		}
-	}
-	return false
-}
-
-func relativeTo(base, target string) string {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
-func limitResults(results any, limit int) any {
-	switch r := results.(type) {
-	case []importInfo:
-		if len(r) > limit {
-			return r[:limit]
-		}
-	case []graphNode:
-		if len(r) > limit {
-			return r[:limit]
-		}
-	case []string:
-		if len(r) > limit {
-			return r[:limit]
-		}
-	}
-	return results
-}
-
-func preparePreview(results any, limit int) (any, bool) {
-	switch r := results.(type) {
-	case []importInfo:
-		preview, truncated := skillout.PreparePreview(r, limit)
-		if truncated {
-			dup := make([]importInfo, len(preview))
-			copy(dup, preview)
-			return dup, true
-		}
-		return preview, false
-	case []graphNode:
-		preview, truncated := skillout.PreparePreview(r, limit)
-		if truncated {
-			dup := make([]graphNode, len(preview))
-			copy(dup, preview)
-			return dup, true
-		}
-		return preview, false
-	case []string:
-		preview, truncated := skillout.PreparePreview(r, limit)
-		return preview, truncated
-	default:
-		return results, false
-	}
-}
-
-func persistImportsArtifact(ctx context.Context, rc *skillmain.RunContext, results any, truncated bool) (skillmain.Artifact, error) {
-	if !truncated {
-		return skillmain.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	if err := json.NewEncoder(buf).Encode(results); err != nil {
-		return skillmain.Artifact{}, fmt.Errorf("encode results: %w", err)
-	}
-	return skillmain.PersistBuffer(ctx, rc, buf, "application/json", "code_imports")
 }

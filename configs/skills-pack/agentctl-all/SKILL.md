@@ -16,16 +16,14 @@ List: `agentctl skills list`
 |-------|---------|
 | `fs/tree` | Directory tree (gitignore-aware) |
 | `fs/ls`, `fs/read`, `fs/write`, `fs/find` | File operations |
-| `text/ripgrep` | Fast regex search |
 | `text/grep`, `text/replace` | Text ops |
-| `code/context_ripgrep` | Search + expand to full functions |
+| `code/context_grep` | Search + expand to full functions |
 | `code/smart_search` | Smart code search |
 
 ### Code Intelligence
 | Skill | Purpose |
 |-------|---------|
 | `code/symbols` | Extract functions/types/vars |
-| `code/complexity` | Cyclomatic complexity, hotspots |
 | `code/imports` | Dependency graph |
 | `code/security` | Security scan |
 | `code/semantic_search` | Vector search across symbols/codemaps/memories |
@@ -44,7 +42,7 @@ List: `agentctl skills list`
 | Skill | Purpose |
 |-------|---------|
 | `test/run` | Run tests with coverage |
-| `ci/github_checks` | CI status, failed checks |
+| `ci/checks` | CI status, failed checks |
 | `ci/prcomments` | PR review comments (coderabbit, greptile, human) |
 | `git/status` | Working tree status |
 | `verification/cove_verify` | Chain-of-Verification for claims |
@@ -115,7 +113,7 @@ agentctl run code/semantic_search --query "task guard" --format tree --limit 10
 # Verify changes
 agentctl run git/status
 agentctl run test/run --path ./...
-agentctl run ci/github_checks --pr 123
+agentctl run ci/checks --pr 123
 
 # Task workflow
 agentctl todo add --title "Implement feature X"

@@ -65,6 +65,8 @@ agentctl skills list
 # Memory
 agentctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
 agentctl memory search "query"
+# Date-based search: "January gotchas", "recent decisions", "last week debugging"
+# Activity search: "feature sessions", "bug-fix work", "refactoring"
 
 # CI
 agentctl ci status --pr 123
@@ -83,6 +85,9 @@ agentctl codemap generate "trace auth flow"
 ```bash
 # Semantic search - find code by meaning
 agentctl run code/semantic_search --input '{"query": "auth middleware", "limit": 10}'
+
+# Timeline search - search sessions and see what happened (chunk summaries + learnings)
+agentctl run code/semantic_search --input '{"query": "database issues", "scope": ["sessions"], "timeline": true}'
 
 # Smart search - auto-find candidates + extract snippets (all-in-one)
 agentctl run code/smart_search --input '{"query": "error handling patterns"}'
@@ -218,6 +223,15 @@ go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
 
 # Wrong - loader won't find it
 go build -o ./my_skill ./skills/my_skill
+```
+
+### Building Skills After Edits
+```bash
+# Correct - use make target (builds AND installs)
+make skill SKILL=session_restore
+
+# Wrong - just builds, doesn't install properly
+go build -o ~/.agentctl/skills/session_restore/bin ./skills/session_restore/
 ```
 
 ### Skills Must Load .env

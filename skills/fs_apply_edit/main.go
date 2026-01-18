@@ -3,17 +3,18 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math"
-	"os"
 	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/editutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 )
 
 // MatchMode defines how to match the search string.
@@ -29,7 +30,7 @@ const (
 type Edit struct {
 	Search        string    `json:"search" validate:"required"`
 	Replace       string    `json:"replace"`
-	LineHint      int       `json:"line_hint,omitempty"`
+	LineHint      int       `json:"line_hint,omitempty" validate:"omitempty,min=1"`
 	ContextBefore string    `json:"context_before,omitempty"`
 	ContextAfter  string    `json:"context_after,omitempty"`
 	Global        bool      `json:"global,omitempty"`
@@ -54,13 +55,14 @@ type EditResult struct {
 
 // Output is the skill output.
 type Output struct {
-	Path             string       `json:"path"`
-	BackupDigest     string       `json:"backup_digest,omitempty"`
-	EditsApplied     int          `json:"edits_applied"`
-	ReplacementsMade int          `json:"replacements_made"`
-	Diff             string       `json:"diff,omitempty"`
-	DryRun           bool         `json:"dry_run"`
-	EditResults      []EditResult `json:"edit_results,omitempty"`
+	Path             string            `json:"path"`
+	BackupDigest     string            `json:"backup_digest,omitempty"`
+	BackupCASHint    *envelope.CASHint `json:"backup_cas_hint,omitempty"`
+	EditsApplied     int               `json:"edits_applied"`
+	ReplacementsMade int               `json:"replacements_made"`
+	Diff             string            `json:"diff,omitempty"`
+	DryRun           bool              `json:"dry_run"`
+	EditResults      []EditResult      `json:"edit_results,omitempty"`
 }
 
 func main() {
@@ -77,68 +79,69 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			in.Edits[i].MatchMode = MatchFuzzy
 		}
 	}
+	for i, edit := range in.Edits {
+		if edit.MatchMode != MatchRegex {
+			continue
+		}
+		if _, err := regexp.Compile(edit.Search); err != nil {
+			return skillerr.Arg(
+				fmt.Sprintf("edits[%d].search is not a valid regex: %v", i, err),
+				skillerr.WithHint("Use a valid Go regexp or set match_mode to \"exact\" or \"fuzzy\"."),
+			)
+		}
+	}
 
 	// Resolve and validate path
-	targetPath, err := rc.PathValidator.ValidatePath(in.Path)
+	targetPath, err := skillmain.ValidatePath(rc, in.Path, skillmain.WithPathMessage("invalid path"))
 	if err != nil {
-		return fmt.Errorf("invalid path: %w", err)
-	}
-
-	// Read original content
-	originalBytes, err := os.ReadFile(targetPath)
-	if err != nil {
-		return fmt.Errorf("read file: %w", err)
-	}
-	original := string(originalBytes)
-
-	// Backup to CAS if requested
-	var backupDigest string
-	if in.CreateBackup && !in.DryRun {
-		obj, err := rc.CASStore.Put(ctx, bytes.NewReader(originalBytes), "text/plain", []string{
-			"backup",
-			"fs/apply_edit",
-			fmt.Sprintf("path:%s", targetPath),
-		})
-		if err != nil {
-			return fmt.Errorf("backup to CAS: %w", err)
-		}
-		backupDigest = obj.Digest
+		return err
 	}
 
 	// Apply edits
-	modified := original
 	var editResults []EditResult
 	totalReplacements := 0
 	editsApplied := 0
 
-	for _, edit := range in.Edits {
-		result, newContent, err := applyEdit(modified, edit)
-		if err != nil {
-			result.Error = err.Error()
-		} else if result.Replacements > 0 {
-			modified = newContent
-			editsApplied++
-			totalReplacements += result.Replacements
+	apply := func(original string) (string, error) {
+		modified := original
+		for _, edit := range in.Edits {
+			result, newContent, err := applyEdit(modified, edit)
+			if err != nil {
+				result.Error = err.Error()
+			} else if result.Replacements > 0 {
+				modified = newContent
+				editsApplied++
+				totalReplacements += result.Replacements
+			}
+			editResults = append(editResults, result)
 		}
-		editResults = append(editResults, result)
+		return modified, nil
 	}
 
-	// Generate diff
-	diff, _ := diffutil.UnifiedDiff(targetPath, original, modified, 0)
+	result, err := editutil.ApplyFile(ctx, rc, targetPath, editutil.FileOptions{
+		DryRun:           in.DryRun,
+		CreateBackup:     in.CreateBackup,
+		BackupTags:       []string{"backup", "fs/apply_edit", fmt.Sprintf("path:%s", targetPath)},
+		DiffContext:      0,
+		AllowDiffFailure: true,
+	}, apply)
+	if err != nil {
+		return err
+	}
 
-	// Write if not dry run
-	if !in.DryRun && modified != original {
-		if err := os.WriteFile(targetPath, []byte(modified), 0o644); err != nil {
-			return fmt.Errorf("write file: %w", err)
-		}
+	var backupHint *envelope.CASHint
+	if result.BackupArtifact != nil {
+		hint := skillout.DefaultCASHint(*result.BackupArtifact)
+		backupHint = &hint
 	}
 
 	out := Output{
 		Path:             targetPath,
-		BackupDigest:     backupDigest,
+		BackupDigest:     result.BackupDigest,
+		BackupCASHint:    backupHint,
 		EditsApplied:     editsApplied,
 		ReplacementsMade: totalReplacements,
-		Diff:             diff,
+		Diff:             result.Diff,
 		DryRun:           in.DryRun,
 		EditResults:      editResults,
 	}
@@ -194,7 +197,7 @@ func applyExactMatch(content string, edit Edit) (EditResult, string, error) {
 	}
 
 	result.Replacements = 1
-	result.Lines = []int{countLines(content[:idx]) + 1}
+	result.Lines = []int{textutil.CountNewlines(content[:idx]) + 1}
 	return result, strings.Replace(content, edit.Search, edit.Replace, 1), nil
 }
 
@@ -276,7 +279,7 @@ func applyRegexMatch(content string, edit Edit) (EditResult, string, error) {
 	}
 
 	for _, m := range matches {
-		result.Lines = append(result.Lines, countLines(content[:m[0]])+1)
+		result.Lines = append(result.Lines, textutil.CountNewlines(content[:m[0]])+1)
 	}
 
 	if edit.Global {
@@ -409,16 +412,11 @@ func findMatchLines(content, search string) []int {
 		if pos < 0 {
 			break
 		}
-		lineNum := countLines(content[:idx+pos]) + 1
+		lineNum := textutil.CountNewlines(content[:idx+pos]) + 1
 		lines = append(lines, lineNum)
 		idx += pos + len(search)
 	}
 	return lines
-}
-
-// countLines counts newlines in s.
-func countLines(s string) int {
-	return strings.Count(s, "\n")
 }
 
 // normalizeWhitespace collapses whitespace for fuzzy matching.

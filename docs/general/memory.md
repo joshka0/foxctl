@@ -84,6 +84,33 @@ agentctl memory query --type gotcha
 agentctl memory query --workspace /path/to/project
 ```
 
+### Date-Based Search
+
+Memories are enriched with date and type prefixes for natural language temporal queries:
+
+```bash
+# Search by month
+agentctl memory search "January gotchas"
+agentctl memory search "December learnings"
+
+# Search recent items
+agentctl memory search "recent decisions"
+agentctl memory search "latest preferences"
+
+# Search by relative time
+agentctl memory search "last week's learnings"
+agentctl memory search "last month decisions"
+
+# Combined queries
+agentctl memory search "January debugging gotchas"
+agentctl memory search "recent feature decisions"
+```
+
+**How it works:**
+- Memories are indexed with `[Jan 2026] [gotcha]` prefixes
+- Queries are automatically enriched with matching date/type patterns
+- This improves semantic similarity for temporal searches
+
 ### List Memories
 
 ```bash

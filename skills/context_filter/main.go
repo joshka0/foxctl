@@ -9,13 +9,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/platform/env"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
@@ -92,14 +94,13 @@ type outputEnvelopeData struct {
 	LLMUsage     map[string]any `json:"llm_usage"`
 }
 
-var debugContextFilter = strings.TrimSpace(os.Getenv("CONTEXT_FILTER_DEBUG")) != ""
+var debugContextFilter = env.GetString("CONTEXT_FILTER_DEBUG") != ""
 
-func debugf(format string, args ...any) {
+func debugf(logger zerolog.Logger, format string, args ...any) {
 	if !debugContextFilter {
 		return
 	}
-	// Debug output to stderr; error is not actionable.
-	fmt.Fprintf(os.Stderr, "context/filter: "+format+"\n", args...)
+	logger.Debug().Msg(fmt.Sprintf("context/filter: "+format, args...))
 }
 
 func main() {
@@ -172,7 +173,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return skillout.Emit(rc, command, data)
 	}
 
-	selection, usage, err := callLLMForSelection(ctx, in, candidates)
+	selection, usage, err := callLLMForSelection(ctx, rc.Logger, in, candidates)
 	if err != nil {
 		return err
 	}
@@ -285,11 +286,11 @@ func chunkText(text string) []candidateChunk {
 	return out
 }
 
-func callLLMForSelection(ctx context.Context, in input, candidates []candidateChunk) (llmSelectionResponse, map[string]any, error) {
+func callLLMForSelection(ctx context.Context, logger zerolog.Logger, in input, candidates []candidateChunk) (llmSelectionResponse, map[string]any, error) {
 	prompt := buildLLMPrompt(in.Prompt, in.Scope, candidates, in.Budget)
 
 	start := time.Now()
-	content, usage, err := callProvider(ctx, in.LLM, prompt)
+	content, usage, err := callProvider(ctx, logger, in.LLM, prompt)
 	if err != nil {
 		return llmSelectionResponse{}, nil, err
 	}
@@ -421,10 +422,10 @@ func estimateTokens(chunks []outputChunk) int {
 	return chars / 4
 }
 
-func callProvider(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
+func callProvider(ctx context.Context, logger zerolog.Logger, llm llmInput, prompt string) (string, map[string]any, error) {
 	switch llm.Provider {
 	case "openai", "groq", "openrouter":
-		return callOpenAICompatible(ctx, llm, prompt)
+		return callOpenAICompatible(ctx, logger, llm, prompt)
 	case "anthropic":
 		return callAnthropic(ctx, llm, prompt)
 	case "gemini":
@@ -434,7 +435,7 @@ func callProvider(ctx context.Context, llm llmInput, prompt string) (string, map
 	}
 }
 
-func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
+func callOpenAICompatible(ctx context.Context, logger zerolog.Logger, llm llmInput, prompt string) (string, map[string]any, error) {
 	var baseURL, apiKeyEnv, path string
 	path = "/v1/chat/completions"
 	switch llm.Provider {
@@ -451,13 +452,13 @@ func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (str
 		apiKeyEnv = "OPENROUTER_API_KEY"
 	}
 
-	apiKey := strings.TrimSpace(os.Getenv(apiKeyEnv))
+	apiKey := env.GetString(apiKeyEnv)
 	if apiKey == "" {
 		return "", nil, fmt.Errorf("missing API key for provider %s (env %s)", llm.Provider, apiKeyEnv)
 	}
 
 	url := strings.TrimRight(baseURL, "/") + path
-	debugf("calling provider=%s url=%s model=%s", llm.Provider, url, llm.Model)
+	debugf(logger, "calling provider=%s url=%s model=%s", llm.Provider, url, llm.Model)
 	body := map[string]any{
 		"model":       llm.Model,
 		"temperature": llm.Temperature,
@@ -490,7 +491,7 @@ func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (str
 		}
 	}()
 
-	debugf("provider=%s status=%d", llm.Provider, resp.StatusCode)
+	debugf(logger, "provider=%s status=%d", llm.Provider, resp.StatusCode)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Error body read; error is not actionable in error path.
@@ -533,7 +534,7 @@ func callOpenAICompatible(ctx context.Context, llm llmInput, prompt string) (str
 }
 
 func callAnthropic(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
-	apiKey := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY"))
+	apiKey := env.GetString("ANTHROPIC_API_KEY")
 	if apiKey == "" {
 		return "", nil, fmt.Errorf("missing API key for provider anthropic (env ANTHROPIC_API_KEY)")
 	}
@@ -616,7 +617,7 @@ func callAnthropic(ctx context.Context, llm llmInput, prompt string) (string, ma
 }
 
 func callGemini(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
-	apiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	apiKey := env.GetString("GEMINI_API_KEY")
 	if apiKey == "" {
 		return "", nil, fmt.Errorf("missing API key for provider gemini (env GEMINI_API_KEY)")
 	}
@@ -689,4 +690,3 @@ func callGemini(ctx context.Context, llm llmInput, prompt string) (string, map[s
 
 	return text, usage, nil
 }
-

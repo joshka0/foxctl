@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
+	"github.com/jkatigb/agentctl/internal/protocol"
 )
 
 // SkillRunner executes Go-based hook skills using the execution framework.
@@ -84,29 +87,16 @@ func parseSkillOutput(data []byte) (Output, error) {
 		return NewApprove("skill completed", nil), nil
 	}
 
-	// Try to parse as envelope format first
-	var env struct {
-		Version int    `json:"version"`
-		Status  string `json:"status"`
-		Command string `json:"command"`
-		Data    struct {
-			HookOutput Output `json:"hook_output"`
-		} `json:"data"`
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-
-	if err := json.Unmarshal(data, &env); err == nil && env.Version != 0 {
-		// Looks like a valid envelope (has version field)
-		if env.Status == "error" {
-			return Output{}, fmt.Errorf("skill error: %s: %s", env.Error.Code, env.Error.Message)
+	if env, err := protocol.DecodeEnvelope(data); err == nil && env.Version != 0 {
+		if env.Status == envelope.StatusError {
+			return Output{}, protocol.EnvelopeStatusErrorFromEnvelope(env)
 		}
-
-		// Extract hook_output from data
-		if env.Data.HookOutput.Decision != "" {
-			return env.Data.HookOutput, nil
+		if payload, ok := maputil.AsStringMap(env.Data); ok {
+			if hookRaw, ok := payload["hook_output"]; ok {
+				if hookOutput, ok := decodeHookOutput(hookRaw); ok && hookOutput.Decision != "" {
+					return hookOutput, nil
+				}
+			}
 		}
 
 		// Envelope OK but no hook_output - treat as approve
@@ -126,6 +116,25 @@ func parseSkillOutput(data []byte) (Output, error) {
 
 	// No decision field - treat as approve
 	return NewApprove("skill completed", nil), nil
+}
+
+func decodeHookOutput(value any) (Output, bool) {
+	switch v := value.(type) {
+	case Output:
+		return v, v.Decision != ""
+	case map[string]any:
+		payload, err := json.Marshal(v)
+		if err != nil {
+			return Output{}, false
+		}
+		var out Output
+		if err := json.Unmarshal(payload, &out); err != nil {
+			return Output{}, false
+		}
+		return out, out.Decision != ""
+	default:
+		return Output{}, false
+	}
 }
 
 // buildSkillExtraEnv builds extra environment variables for skill execution.

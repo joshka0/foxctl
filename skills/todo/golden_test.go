@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 )
 
@@ -57,11 +59,8 @@ func TestGolden(t *testing.T) {
 				if !tt.isError {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				// Emulate main.go's fail handling
-				e := envelope.Error("todo/manage", "ERUNTIME", err.Error(), nil)
-				if err := envelope.Write(buf, e); err != nil {
-					t.Fatal(err)
-				}
+				// Emulate skillmain error handling.
+				writeErrEnvelope(t, buf, err)
 			} else if tt.isError {
 				t.Fatalf("expected error but got none")
 			}
@@ -90,6 +89,45 @@ func TestGolden(t *testing.T) {
 				t.Errorf("Golden file mismatch %s:\nGot:\n%s\nWant:\n%s", goldenFile, got, want)
 			}
 		})
+	}
+}
+
+func writeErrEnvelope(t *testing.T, buf *bytes.Buffer, err error) {
+	t.Helper()
+
+	var skillErr *skillerr.Error
+	if errors.As(err, &skillErr) {
+		appendUsageHint("todo/manage", skillErr)
+		env := envelope.Error("todo/manage", skillErr.Code, skillErr.Message, skillErr.ToEnvelopeData())
+		if err := envelope.Write(buf, env); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	wrapped := skillerr.WrapRuntime("execute", err)
+	appendUsageHint("todo/manage", wrapped)
+	env := envelope.Error("todo/manage", wrapped.Code, wrapped.Message, wrapped.ToEnvelopeData())
+	if err := envelope.Write(buf, env); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func appendUsageHint(command string, err *skillerr.Error) {
+	if err == nil {
+		return
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return
+	}
+	usage := "For examples, run: agentctl run " + command + " --examples"
+	if err.Hint == "" {
+		err.Hint = usage
+		return
+	}
+	if !strings.Contains(err.Hint, "--examples") {
+		err.Hint = strings.TrimSpace(err.Hint + " " + usage)
 	}
 }
 

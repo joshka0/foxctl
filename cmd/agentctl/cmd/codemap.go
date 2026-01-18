@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jkatigb/agentctl/internal/codemap"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/oklog/ulid/v2"
@@ -32,6 +33,7 @@ and document architectural relationships.`,
 		newCodemapShowCommand(),
 		newCodemapDeleteCommand(),
 		newCodemapSearchCommand(),
+		newCodemapImportCommand(),
 	)
 	return cmd
 }
@@ -295,6 +297,45 @@ Examples:
 	return cmd
 }
 
+func newCodemapImportCommand() *cobra.Command {
+	var workspace string
+	var recursive bool
+	var skipExisting bool
+	var embed bool
+
+	cmd := &cobra.Command{
+		Use:   "import <path>",
+		Short: "Import codemap files",
+		Long: `Import codemap JSON files into the memory store.
+
+Examples:
+  agentctl codemap import docs/codemaps/Skill_Resolution__Input_Loading__and_Run_Execution_Flow_20260115_003130.codemap
+  agentctl codemap import docs/codemaps --recursive`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := args[0]
+			payload := map[string]any{
+				"path":           path,
+				"recursive":      recursive,
+				"skip_existing":  skipExisting,
+				"embed":          embed,
+				"correlation_id": ulid.Make().String(),
+				"cli_command":    cmd.CommandPath(),
+			}
+			if workspace != "" {
+				payload["workspace"] = workspace
+			}
+			return runCodemapSkill(cmd, "codemap/import", payload)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", "", "Workspace path (defaults to current directory)")
+	cmd.Flags().BoolVar(&recursive, "recursive", false, "Recursively scan directories for .codemap files")
+	cmd.Flags().BoolVar(&skipExisting, "skip-existing", true, "Skip codemaps that already exist")
+	cmd.Flags().BoolVar(&embed, "embed", true, "Generate embeddings for imported codemaps")
+	return cmd
+}
+
 func openCodemapMemoryStore(cmd *cobra.Command, workspaceFlag string) (*memory.Store, string, error) {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
@@ -353,6 +394,12 @@ func renderCodemap(cmd *cobra.Command, data []byte) error {
 		return fmt.Errorf("codemap has no data")
 	}
 
+	if ws, ok, err := codemap.ParseWindsurfCodemap(data); err != nil {
+		return fmt.Errorf("parse codemap: %w", err)
+	} else if ok {
+		return renderWindsurfCodemap(cmd, ws)
+	}
+
 	var codemap struct {
 		ID          string `json:"id"`
 		Title       string `json:"title"`
@@ -407,6 +454,91 @@ func renderCodemap(cmd *cobra.Command, data []byte) error {
 				fmt.Fprintf(out, "  `%s`\n\n", ann.Path)
 			}
 		}
+	}
+
+	return nil
+}
+
+func renderWindsurfCodemap(cmd *cobra.Command, cm *codemap.WindsurfCodemap) error {
+	if cm == nil {
+		return fmt.Errorf("codemap has no data")
+	}
+
+	out := cmd.OutOrStdout()
+	title := cm.Title
+	if title == "" {
+		title = cm.ID
+	}
+
+	fmt.Fprintf(out, "# %s\n\n", title)
+	if cm.Description != "" {
+		fmt.Fprintf(out, "%s\n\n", cm.Description)
+	}
+	if cm.Metadata.OriginalPrompt != "" {
+		fmt.Fprintf(out, "**Prompt:** %s\n", cm.Metadata.OriginalPrompt)
+	}
+	if cm.Metadata.GenerationTimestamp != "" {
+		fmt.Fprintf(out, "**Generated:** %s\n", cm.Metadata.GenerationTimestamp)
+	}
+	if cm.Metadata.Mode != "" {
+		fmt.Fprintf(out, "**Mode:** %s\n", cm.Metadata.Mode)
+	}
+	if cm.Metadata.OriginalPrompt != "" || cm.Metadata.GenerationTimestamp != "" || cm.Metadata.Mode != "" {
+		fmt.Fprintln(out)
+	}
+
+	for i, trace := range cm.Traces {
+		traceTitle := trace.Title
+		if traceTitle == "" {
+			traceTitle = fmt.Sprintf("Trace %d", i+1)
+		}
+		if trace.ID != "" {
+			fmt.Fprintf(out, "## Trace %d: %s (%s)\n\n", i+1, traceTitle, trace.ID)
+		} else {
+			fmt.Fprintf(out, "## Trace %d: %s\n\n", i+1, traceTitle)
+		}
+		if trace.Description != "" {
+			fmt.Fprintf(out, "%s\n\n", trace.Description)
+		}
+		if trace.TraceTextDiagram != "" {
+			fmt.Fprintf(out, "```\n%s\n```\n\n", trace.TraceTextDiagram)
+		}
+		if trace.TraceGuide != "" {
+			fmt.Fprintf(out, "%s\n\n", trace.TraceGuide)
+		}
+
+		if len(trace.Locations) > 0 {
+			fmt.Fprintln(out, "### Locations")
+			for _, loc := range trace.Locations {
+				label := loc.ID
+				if label == "" {
+					label = "loc"
+				}
+				title := loc.Title
+				if title == "" {
+					title = loc.Path
+				}
+				fmt.Fprintf(out, "**[%s] %s**\n", label, title)
+				if loc.Description != "" {
+					fmt.Fprintf(out, "  %s\n", loc.Description)
+				}
+				if loc.Path != "" {
+					if loc.LineNumber > 0 {
+						fmt.Fprintf(out, "  `%s:%d`\n\n", loc.Path, loc.LineNumber)
+					} else {
+						fmt.Fprintf(out, "  `%s`\n\n", loc.Path)
+					}
+				} else {
+					fmt.Fprintln(out)
+				}
+			}
+		}
+	}
+
+	if cm.MermaidDiagram != "" {
+		fmt.Fprintln(out, "## Mermaid Diagram")
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "```mermaid\n%s\n```\n", cm.MermaidDiagram)
 	}
 
 	return nil

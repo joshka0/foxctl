@@ -200,25 +200,3 @@ func TestSummary_JSONMarshal(t *testing.T) {
 		t.Errorf("snippets_emitted mismatch")
 	}
 }
-
-func TestFindAgentctlBin_EnvOverride(t *testing.T) {
-	// Test that AGENTCTL_BIN environment variable overrides default behavior
-	customPath := "/custom/path/to/agentctl"
-	t.Setenv("AGENTCTL_BIN", customPath)
-
-	bin := findAgentctlBin()
-	if bin != customPath {
-		t.Errorf("expected AGENTCTL_BIN override %q, got %q", customPath, bin)
-	}
-}
-
-func TestFindAgentctlBin_DefaultFallback(t *testing.T) {
-	// Test that without env var, function returns a non-empty default
-	// Note: t.Setenv automatically restores the original value after the test
-	t.Setenv("AGENTCTL_BIN", "")
-
-	bin := findAgentctlBin()
-	if bin == "" {
-		t.Error("findAgentctlBin returned empty string when AGENTCTL_BIN is empty")
-	}
-}

@@ -88,24 +88,6 @@ func TestCloseOnErr(t *testing.T) {
 	})
 }
 
-func TestMust(t *testing.T) {
-	t.Run("no error", func(t *testing.T) {
-		result := Must(42, nil)
-		if result != 42 {
-			t.Errorf("expected 42, got %d", result)
-		}
-	})
-
-	t.Run("with error", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic")
-			}
-		}()
-		Must(42, errors.New("test error"))
-	})
-}
-
 func TestIgnore(_ *testing.T) {
 	// This function does nothing, just ensure it compiles and doesn't panic
 	Ignore(errors.New("test error"), "testing ignore")

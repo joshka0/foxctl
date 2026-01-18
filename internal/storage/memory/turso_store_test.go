@@ -163,6 +163,9 @@ func TestTursoEmbeddingDimensionMismatch(t *testing.T) {
 }
 
 func TestTursoConnectionFailure(t *testing.T) {
+	if os.Getenv("TURSO_DATABASE_URL") == "" || os.Getenv("TURSO_AUTH_TOKEN") == "" {
+		t.Skip("TURSO_DATABASE_URL and TURSO_AUTH_TOKEN not set, skipping Turso connection failure test")
+	}
 	ctx := context.Background()
 
 	// Invalid URL should fail to connect

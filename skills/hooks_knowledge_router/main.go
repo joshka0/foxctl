@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
@@ -260,12 +260,12 @@ func minFloat(a, b float64) float64 {
 }
 
 func emitOutput(rc *skillmain.RunContext, output hooks.Output, recommendations []Match, cfg RouterConfig) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
+	var extras map[string]any
 	if len(recommendations) > 0 {
-		data["recommendations"] = recommendations
-		data["config"] = cfg
+		extras = map[string]any{
+			"recommendations": recommendations,
+			"config":          cfg,
+		}
 	}
-	return skillout.Emit(rc, "hooks/knowledge_router", data)
+	return hookutil.EmitOutput(rc, "hooks/knowledge_router", output, extras)
 }

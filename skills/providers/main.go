@@ -12,6 +12,9 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -69,6 +72,19 @@ var providers = map[string]Provider{
 		ConfigType: "json",
 		MCPKey:     "mcpServers",
 	},
+}
+
+var allowedOps = []string{
+	"list",
+	"get",
+	"set",
+	"add-mcp",
+	"remove-mcp",
+	"add-skill",
+	"remove-skill",
+	"sync",
+	"export",
+	"import",
 }
 
 type input struct {
@@ -137,6 +153,15 @@ func main() {
 }
 
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
+	op := oputil.Op(in.Operation)
+	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
+	if op == "" {
+		return skillerr.Arg("operation is required", skillerr.WithHint(opHint))
+	}
+	if err := oputil.Validate(op, allowedOps...); err != nil {
+		return skillerr.Arg(err.Error(), skillerr.WithHint(opHint))
+	}
+
 	// Default provider
 	if in.Provider == "" {
 		in.Provider = "claude"
@@ -145,35 +170,50 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	var out *output
 	var err error
 
-	switch in.Operation {
+	switch op {
 	case "list":
 		out, err = listProviders()
 	case "get":
 		out, err = getConfig(in.Provider)
 	case "set":
+		if in.Setting == nil || strings.TrimSpace(in.Setting.Key) == "" {
+			return skillerr.Arg("setting is required for set operation", skillerr.WithHint("Provide setting with key and value."))
+		}
 		out, err = setConfig(in.Provider, in.Setting, in.DryRun)
 	case "add-mcp":
+		if in.MCP == nil || strings.TrimSpace(in.MCP.Name) == "" {
+			return skillerr.Arg("mcp is required for add-mcp operation", skillerr.WithHint("Provide mcp with name, command, and args."))
+		}
 		out, err = addMCP(in.Provider, in.MCP, in.DryRun)
 	case "remove-mcp":
-		if in.MCP == nil {
-			return fmt.Errorf("mcp config is required for remove-mcp operation")
+		if in.MCP == nil || strings.TrimSpace(in.MCP.Name) == "" {
+			return skillerr.Arg("mcp is required for remove-mcp operation", skillerr.WithHint("Provide mcp with name."))
 		}
 		out, err = removeMCP(in.Provider, in.MCP.Name, in.DryRun)
 	case "add-skill":
+		if in.Skill == nil || strings.TrimSpace(in.Skill.Name) == "" {
+			return skillerr.Arg("skill is required for add-skill operation", skillerr.WithHint("Provide skill with name and source."))
+		}
 		out, err = addSkill(in.Provider, in.Skill, in.DryRun)
 	case "remove-skill":
-		if in.Skill == nil {
-			return fmt.Errorf("skill config is required for remove-skill operation")
+		if in.Skill == nil || strings.TrimSpace(in.Skill.Name) == "" {
+			return skillerr.Arg("skill is required for remove-skill operation", skillerr.WithHint("Provide skill with name."))
 		}
 		out, err = removeSkill(in.Provider, in.Skill.Name, in.DryRun)
 	case "sync":
+		if in.SyncConfig == nil || strings.TrimSpace(in.SyncConfig.From) == "" || len(in.SyncConfig.To) == 0 {
+			return skillerr.Arg("sync_config is required for sync operation", skillerr.WithHint("Provide sync_config with from and to."))
+		}
 		out, err = syncProviders(in.SyncConfig, in.DryRun)
 	case "export":
 		out, err = exportConfig(in.Provider, in.File)
 	case "import":
+		if strings.TrimSpace(in.File) == "" {
+			return skillerr.Arg("file is required for import operation", skillerr.WithHint("Provide file path to import."))
+		}
 		out, err = importConfig(in.Provider, in.File, in.DryRun)
 	default:
-		return fmt.Errorf("unknown operation: %s", in.Operation)
+		return skillerr.Arg("invalid operation", skillerr.WithHint(opHint))
 	}
 
 	if err != nil {
@@ -449,7 +489,7 @@ func addSkill(providerName string, skill *skillConfig, dryRun bool) (*output, er
 
 		// Remove existing if it's a symlink
 		if info, err := os.Lstat(targetPath); err == nil {
-			if info.Mode()&os.ModeSymlink != 0 {
+			if fsutil.IsSymlinkMode(info.Mode()) {
 				os.Remove(targetPath)
 			}
 		}

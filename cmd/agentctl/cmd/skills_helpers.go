@@ -10,6 +10,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/platform/env"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 )
@@ -17,7 +18,7 @@ import (
 func resolveWorkspaceContext(ctx context.Context, workspaceOverride string) context.Context {
 	ws := workspace.Normalize(workspaceOverride)
 	if ws == "" {
-		if envWS := strings.TrimSpace(os.Getenv("AGENTCTL_WORKSPACE")); envWS != "" {
+		if envWS := env.GetString("AGENTCTL_WORKSPACE"); envWS != "" {
 			ws = workspace.Normalize(envWS)
 		}
 	}

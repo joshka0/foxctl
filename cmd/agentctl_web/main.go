@@ -66,7 +66,7 @@ func main() {
 		Logger()
 
 	// Create server
-	srv, err := web.NewServer(web.Options{
+	srv, err := web.NewServer(ctx, web.Options{
 		Addr:    addr,
 		UIDir:   uiDir,
 		DevCORS: devCORS,
@@ -108,8 +108,11 @@ func main() {
 
 	logger.Info().Str("signal", sig.String()).Msg("shutting down")
 
-	// Cancel context to stop SSE hub
+	// Cancel context to stop SSE hub and persistence goroutines
 	cancel()
+
+	// Wait for console hub persistence goroutines
+	srv.ConsoleHub().Wait()
 
 	// Graceful HTTP shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -49,8 +49,7 @@ func TestNewGeminiProvider_GeminiEmbedding001(t *testing.T) {
 }
 
 func TestGeminiProvider_Embed(t *testing.T) {
-	// Mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -74,16 +73,11 @@ func TestGeminiProvider_Embed(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		// Mock server response; error would panic the test anyway.
 		_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck
-	}))
-	defer server.Close()
-
-	provider, err := NewGeminiProvider(GeminiConfig{
-		APIKey:  "test-key",
-		BaseURL: server.URL,
 	})
-	if err != nil {
-		t.Fatalf("NewGeminiProvider failed: %v", err)
-	}
+
+	provider := newTestGeminiProvider(t, handler, GeminiConfig{
+		APIKey: "test-key",
+	})
 
 	embedding, err := provider.Embed(context.Background(), "test text")
 	if err != nil {
@@ -99,8 +93,7 @@ func TestGeminiProvider_Embed(t *testing.T) {
 }
 
 func TestGeminiProvider_EmbedBatch(t *testing.T) {
-	// Mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Return mock batch embeddings
 		resp := geminiBatchEmbedResponse{
 			Embeddings: []struct {
@@ -119,16 +112,11 @@ func TestGeminiProvider_EmbedBatch(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		// Mock server response; error would panic the test anyway.
 		_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck
-	}))
-	defer server.Close()
-
-	provider, err := NewGeminiProvider(GeminiConfig{
-		APIKey:  "test-key",
-		BaseURL: server.URL,
 	})
-	if err != nil {
-		t.Fatalf("NewGeminiProvider failed: %v", err)
-	}
+
+	provider := newTestGeminiProvider(t, handler, GeminiConfig{
+		APIKey: "test-key",
+	})
 
 	embeddings, err := provider.EmbedBatch(context.Background(), []string{"a", "b", "c"})
 	if err != nil {
@@ -153,8 +141,8 @@ func TestGeminiProvider_EmbedBatch(t *testing.T) {
 }
 
 func TestGeminiProvider_Embed_APIError(t *testing.T) {
-	// Mock server that returns an error
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	// Mock handler that returns an error
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		resp := geminiEmbedResponse{
 			Error: &geminiError{
@@ -165,18 +153,13 @@ func TestGeminiProvider_Embed_APIError(t *testing.T) {
 		}
 		// Mock server response; error would panic the test anyway.
 		_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck
-	}))
-	defer server.Close()
-
-	provider, err := NewGeminiProvider(GeminiConfig{
-		APIKey:  "bad-key",
-		BaseURL: server.URL,
 	})
-	if err != nil {
-		t.Fatalf("NewGeminiProvider failed: %v", err)
-	}
 
-	_, err = provider.Embed(context.Background(), "test")
+	provider := newTestGeminiProvider(t, handler, GeminiConfig{
+		APIKey: "bad-key",
+	})
+
+	_, err := provider.Embed(context.Background(), "test")
 	if err == nil {
 		t.Error("expected error for API error response")
 	}
@@ -197,4 +180,31 @@ func TestGeminiProvider_EmbedBatch_Empty(t *testing.T) {
 	if embeddings != nil {
 		t.Errorf("expected nil for empty batch, got %v", embeddings)
 	}
+}
+
+type handlerTransport struct {
+	handler http.Handler
+}
+
+func (t *handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	recorder := httptest.NewRecorder()
+	t.handler.ServeHTTP(recorder, req)
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return recorder.Result(), nil
+}
+
+func newTestGeminiProvider(t *testing.T, handler http.Handler, cfg GeminiConfig) *GeminiProvider {
+	t.Helper()
+	cfg.BaseURL = "http://mock"
+	provider, err := NewGeminiProvider(cfg)
+	if err != nil {
+		t.Fatalf("NewGeminiProvider failed: %v", err)
+	}
+	provider.httpClient = &http.Client{Transport: &handlerTransport{handler: handler}}
+	return provider
 }

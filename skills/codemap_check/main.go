@@ -6,19 +6,21 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/codemap"
-	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -62,17 +64,10 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.CodemapID == "" {
-		return fmt.Errorf("codemap_id is required")
+		return skillerr.Arg("codemap_id is required", skillerr.WithHint("Provide a codemap_id from codemap/list."))
 	}
 
-	workspace := in.Workspace
-	if workspace == "" {
-		if wd, err := os.Getwd(); err == nil && wd != "" {
-			workspace = wd
-		} else {
-			return fmt.Errorf("detect workspace: %w", err)
-		}
-	}
+	workspace := workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
 
 	result, err := checkStaleness(ctx, rc.Config, in.CodemapID, workspace, in.IncludeDiff, in.Regenerate)
 	if err != nil {
@@ -86,7 +81,7 @@ func checkStaleness(ctx context.Context, cfg config.Config, codemapID, workspace
 	// Load codemap from memory store
 	cm, err := loadCodemap(ctx, cfg, codemapID, workspace)
 	if err != nil {
-		return nil, fmt.Errorf("load codemap: %w", err)
+		return nil, err
 	}
 
 	// Extract file paths from annotations
@@ -112,7 +107,7 @@ func checkStaleness(ctx context.Context, cfg config.Config, codemapID, workspace
 		// Git check failed - fall back to mtime check
 		changedFiles, err = checkMtimeChanges(workspace, cm.CreatedAt, filePaths)
 		if err != nil {
-			return nil, fmt.Errorf("check changes: %w", err)
+			return nil, err
 		}
 	}
 	if changedFiles == nil {
@@ -165,12 +160,9 @@ func checkStaleness(ctx context.Context, cfg config.Config, codemapID, workspace
 }
 
 func loadCodemap(ctx context.Context, cfg config.Config, codemapID, workspace string) (*codemap.Codemap, error) {
-	storageRoot := cfg.Storage.Root
-	casRoot := filepath.Join(filepath.Dir(storageRoot), "cas")
-
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer memStore.Close()
 
@@ -181,7 +173,7 @@ func loadCodemap(ctx context.Context, cfg config.Config, codemapID, workspace st
 		// Try listing all entries and matching by ID
 		entries, listErr := memStore.List(ctx, workspace, 100)
 		if listErr != nil {
-			return nil, fmt.Errorf("get codemap %s: %w", codemapID, err)
+			return nil, skillerr.WrapIO(fmt.Sprintf("get codemap %s", codemapID), err)
 		}
 
 		// Find matching codemap
@@ -194,15 +186,39 @@ func loadCodemap(ctx context.Context, cfg config.Config, codemapID, workspace st
 			}
 		}
 		if found == nil {
-			return nil, fmt.Errorf("codemap not found: %s", codemapID)
+			return nil, skillerr.NotFound(
+				fmt.Sprintf("codemap not found: %s", codemapID),
+				skillerr.WithHint("Use codemap/list to find available codemaps."),
+			)
 		}
 		entry = *found
 	}
 
-	// Parse the codemap from result
+	// Parse the codemap from result (support Windsurf format)
+	if ws, ok, err := codemap.ParseWindsurfCodemap(entry.Result); err != nil {
+		return nil, skillerr.WrapParse("parse codemap", err)
+	} else if ok {
+		converted := ws.ToCodemap()
+		if converted != nil {
+			if converted.ID == "" {
+				converted.ID = codemapIDFromName(entry.Name)
+			}
+			if converted.CreatedAt.IsZero() {
+				converted.CreatedAt = entry.CreatedAt
+			}
+			return converted, nil
+		}
+	}
+
 	var cm codemap.Codemap
 	if err := json.Unmarshal(entry.Result, &cm); err != nil {
-		return nil, fmt.Errorf("parse codemap: %w", err)
+		return nil, skillerr.WrapParse("parse codemap", err)
+	}
+	if cm.ID == "" {
+		cm.ID = codemapIDFromName(entry.Name)
+	}
+	if cm.CreatedAt.IsZero() {
+		cm.CreatedAt = entry.CreatedAt
 	}
 
 	return &cm, nil
@@ -235,6 +251,12 @@ func extractFilePaths(cm *codemap.Codemap) []string {
 	return paths
 }
 
+func codemapIDFromName(name string) string {
+	name = strings.TrimPrefix(name, "codemap://")
+	name = strings.TrimPrefix(name, "codemap:")
+	return name
+}
+
 func checkGitChanges(ctx context.Context, workspace string, since time.Time, files []string) ([]changedFile, error) {
 	if len(files) == 0 {
 		return []changedFile{}, nil
@@ -253,20 +275,17 @@ func checkGitChanges(ctx context.Context, workspace string, since time.Time, fil
 	}
 	args = append(args, files...)
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = workspace
-
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git log: %w", err)
+	result := executil.Run(ctx, workspace, "git", args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git log failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	if len(out) == 0 {
+	if len(result.Stdout) == 0 {
 		return []changedFile{}, nil // No changes
 	}
 
 	// Parse output
-	return parseGitLogOutput(string(out), files)
+	return parseGitLogOutput(string(result.Stdout), files)
 }
 
 func parseGitLogOutput(output string, watchedFiles []string) ([]changedFile, error) {
@@ -379,54 +398,17 @@ func regenerateCodemap(ctx context.Context, cfg config.Config, query, workspace 
 	}
 	inputJSON, err := json.Marshal(genInput)
 	if err != nil {
-		return "", fmt.Errorf("marshal input: %w", err)
-	}
-
-	// Execute codemap/generate skill via exec
-	// We use the agentctl binary to run the skill
-	agentctlBin := "agentctl"
-	if bin := os.Getenv("AGENTCTL_BIN"); bin != "" {
-		agentctlBin = bin
-	}
-
-	cmd := exec.CommandContext(ctx, agentctlBin, "run", "codemap/generate", "--input-file", "-")
-	cmd.Dir = workspace
-	cmd.Stdin = strings.NewReader(string(inputJSON))
-
-	output, err := cmd.Output()
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("codemap/generate failed: %s", string(exitErr.Stderr))
-		}
-		return "", fmt.Errorf("exec codemap/generate: %w", err)
-	}
-
-	// Parse envelope response to get new codemap ID
-	var env envelope.Envelope
-	if err := json.Unmarshal(output, &env); err != nil {
-		return "", fmt.Errorf("parse response: %w", err)
-	}
-
-	if env.Status != "ok" {
-		var errMsg string
-		if env.Error.Message != "" {
-			errMsg = env.Error.Message
-		} else {
-			b, _ := json.Marshal(env)
-			errMsg = string(b)
-		}
-		return "", fmt.Errorf("codemap/generate error: %s", errMsg)
-	}
-
-	// Extract ID from data
-	dataBytes, err := json.Marshal(env.Data)
-	if err != nil {
-		return "", fmt.Errorf("marshal data: %w", err)
+		return "", skillerr.WrapRuntime("marshal input", err)
 	}
 
 	var cm codemap.Codemap
-	if err := json.Unmarshal(dataBytes, &cm); err != nil {
-		return "", fmt.Errorf("parse codemap: %w", err)
+	result, err := executil.RunAgentctlSkillDecode(ctx, workspace, "codemap/generate", inputJSON, &cm)
+	if err != nil {
+		var decodeErr executil.DecodeError
+		if errors.As(err, &decodeErr) {
+			return "", skillerr.WrapParse("parse codemap", decodeErr)
+		}
+		return "", skillerr.Runtimef("codemap/generate failed: %v\nstderr: %s", err, string(result.Stderr))
 	}
 
 	return cm.ID, nil

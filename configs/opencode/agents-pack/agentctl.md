@@ -39,7 +39,7 @@ Help: `--help` | Examples: `--examples` | List: `agentctl skills list`
 | Skill | Purpose |
 |-------|---------|
 | `test/run` | Tests with coverage |
-| `ci/github_checks`, `ci/prcomments` | CI status, PR comments |
+| `ci/checks`, `ci/prcomments` | CI status, PR comments |
 | `git/status` | Working tree |
 | `verification/cove_verify` | Verify claims |
 
@@ -83,5 +83,5 @@ agentctl run code/semantic_search --query "task guard" --limit 10
 
 # Verify
 agentctl run test/run --path ./...
-agentctl run ci/github_checks --pr 123
+agentctl run ci/checks --pr 123
 ```

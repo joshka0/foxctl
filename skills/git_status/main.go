@@ -5,12 +5,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/gitutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/oputil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -55,61 +58,55 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		in.Limit = 10
 	}
 
-	repoPath, err := resolveRepoPath(rc, in.RepoPath)
+	repoPath, err := gitutil.ResolveRepoPath(rc, in.RepoPath)
 	if err != nil {
-		return fmt.Errorf("resolve repo path: %w", err)
+		return err
 	}
 
-	if _, err := exec.LookPath("git"); err != nil {
-		return fmt.Errorf("git command not found: %w", err)
+	gitPath, err := gitutil.RequireGit()
+	if err != nil {
+		return err
 	}
 
 	// Dispatch operation
 	data, err := oputil.NewSwitch(in.Operation).
-		Case("status", func() (map[string]any, error) { return getStatus(ctx, repoPath) }).
-		Case("diff", func() (map[string]any, error) { return getDiff(ctx, rc, repoPath, in) }).
-		Case("log", func() (map[string]any, error) { return getLog(ctx, repoPath, in) }).
+		Case("status", func() (map[string]any, error) { return getStatus(ctx, gitPath, repoPath) }).
+		Case("diff", func() (map[string]any, error) { return getDiff(ctx, rc, gitPath, repoPath, in) }).
+		Case("log", func() (map[string]any, error) { return getLog(ctx, gitPath, repoPath, in) }).
 		Run()
 	if err != nil {
+		var invalid *oputil.InvalidOpError
+		if errors.As(err, &invalid) {
+			hint := fmt.Sprintf("Use one of: %s.", strings.Join(invalid.Allowed, ", "))
+			return skillerr.Arg(err.Error(), skillerr.WithHint(hint))
+		}
 		return err
 	}
 
 	return skillout.Emit(rc, command, data)
 }
 
-func resolveRepoPath(rc *skillmain.RunContext, path string) (string, error) {
-	if path == "" {
-		path = "."
-	}
-	valid, err := rc.PathValidator.ValidatePath(path)
-	if err != nil {
-		return "", fmt.Errorf("path validation failed: %w", err)
-	}
-	return valid, nil
-}
-
-func getStatus(ctx context.Context, repoPath string) (map[string]any, error) {
+func getStatus(ctx context.Context, gitPath, repoPath string) (map[string]any, error) {
 	// Get porcelain status
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "status", "--porcelain=v1", "-b")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git status failed: %w", err)
+	result := executil.Run(ctx, "", gitPath, "-C", repoPath, "status", "--porcelain=v1", "-b")
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git status failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	files, branch, upstream := parseStatusOutput(string(output))
+	files, branch, upstream := parseStatusOutput(string(result.Stdout))
 
 	// Get HEAD info
 	var headHash string
-	headCmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "HEAD")
-	if headOutput, err := headCmd.Output(); err == nil {
-		headHash = strings.TrimSpace(string(headOutput))
+	headResult := executil.Run(ctx, "", gitPath, "-C", repoPath, "rev-parse", "HEAD")
+	if headResult.Err == nil {
+		headHash = strings.TrimSpace(string(headResult.Stdout))
 	}
 
 	// Get short hash
 	var shortHash string
-	shortCmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--short", "HEAD")
-	if shortOutput, err := shortCmd.Output(); err == nil {
-		shortHash = strings.TrimSpace(string(shortOutput))
+	shortResult := executil.Run(ctx, "", gitPath, "-C", repoPath, "rev-parse", "--short", "HEAD")
+	if shortResult.Err == nil {
+		shortHash = strings.TrimSpace(string(shortResult.Stdout))
 	}
 
 	data := map[string]any{
@@ -132,7 +129,7 @@ func getStatus(ctx context.Context, repoPath string) (map[string]any, error) {
 	return data, nil
 }
 
-func getDiff(ctx context.Context, rc *skillmain.RunContext, repoPath string, in input) (map[string]any, error) {
+func getDiff(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	args := []string{"-C", repoPath, "diff"}
 
 	if in.Staged {
@@ -145,13 +142,12 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, repoPath string, in 
 		args = append(args, "--stat")
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git diff failed: %w", err)
+	result := executil.Run(ctx, "", gitPath, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git diff failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	diff := string(output)
+	diff := string(result.Stdout)
 
 	data := map[string]any{
 		"operation": "diff",
@@ -163,7 +159,7 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, repoPath string, in 
 	// Add preview or full diff
 	truncated := false
 	if len(diff) > rc.MaxPreview {
-		data["preview"] = diff[:rc.MaxPreview] + "\n... (truncated)"
+		data["preview"] = skillout.TruncateStringWithSuffix(diff, rc.MaxPreview, "\n... (truncated)")
 		truncated = true
 	} else {
 		data["preview"] = diff
@@ -173,8 +169,8 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, repoPath string, in 
 	if truncated {
 		buf := bytes.NewBufferString(diff)
 		artifact, err := skillmain.PersistBuffer(ctx, rc, buf, "text/plain", "git_diff")
-		if err == nil && artifact.Digest != "" {
-			data["artifact"] = artifact.Digest
+		if err == nil {
+			skillout.AddArtifact(data, &artifact)
 		}
 	}
 
@@ -188,7 +184,7 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, repoPath string, in 
 	return data, nil
 }
 
-func getLog(ctx context.Context, repoPath string, in input) (map[string]any, error) {
+func getLog(ctx context.Context, gitPath, repoPath string, in input) (map[string]any, error) {
 	format := "--pretty=format:%H%x00%h%x00%an%x00%ai%x00%s"
 	args := []string{"-C", repoPath, "log", format, fmt.Sprintf("-%d", in.Limit)}
 
@@ -196,13 +192,12 @@ func getLog(ctx context.Context, repoPath string, in input) (map[string]any, err
 		args = append(args, in.Commit)
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("git log failed: %w", err)
+	result := executil.Run(ctx, "", gitPath, args...)
+	if result.Err != nil {
+		return nil, skillerr.Runtimef("git log failed: %v\nstderr: %s", result.Err, string(result.Stderr))
 	}
 
-	commits := parseLogOutput(string(output))
+	commits := parseLogOutput(string(result.Stdout))
 
 	data := map[string]any{
 		"operation":    "log",
@@ -317,4 +312,3 @@ func countByStatus(files []fileStatus, status string) int {
 	}
 	return count
 }
-

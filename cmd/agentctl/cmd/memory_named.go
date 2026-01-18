@@ -357,6 +357,7 @@ func newMemoryUpdateCommand() *cobra.Command {
 
 func newMemoryDeleteCommand() *cobra.Command {
 	var workspaceFlag string
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "delete <name>",
 		Short: "Delete a named memory entry",
@@ -366,10 +367,31 @@ func newMemoryDeleteCommand() *cobra.Command {
 				ws := resolveWorkspace(cfg, workspaceFlag)
 				name := args[0]
 				return memorycmd.WithMemoryStore(ctx, cfg, func(store storage.MemoryStore) error {
-					if err := store.Delete(ctx, name, ws); err != nil {
+					// Check if entry exists (for both dry-run and actual delete)
+					_, err := store.Get(ctx, name, ws)
+					if err != nil {
 						if errors.Is(err, memstore.ErrNotFound) {
 							return memorycmd.WriteNotFound(cmd.OutOrStdout(), "agentctl.memory.delete", name, ws)
 						}
+						return err
+					}
+
+					if dryRun {
+						payload := struct {
+							Name      string `json:"name"`
+							Workspace string `json:"workspace"`
+							DryRun    bool   `json:"dry_run"`
+							Message   string `json:"message"`
+						}{
+							Name:      name,
+							Workspace: ws,
+							DryRun:    true,
+							Message:   "Would delete memory entry",
+						}
+						return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.delete", payload)
+					}
+
+					if err := store.Delete(ctx, name, ws); err != nil {
 						return err
 					}
 					payload := struct {
@@ -387,6 +409,7 @@ func newMemoryDeleteCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&workspaceFlag, "workspace", "", "Workspace path (default: auto-detect)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be deleted without making changes")
 	return cmd
 }
 

@@ -3,8 +3,8 @@ kind: Skill
 metadata:
   name: session/capture
   version: 0.1.0
-  description: "Capture and extract high-signal content from Claude Code conversation sessions"
-  tags: ["session", "memory", "claude-code", "conversation"]
+  description: "Capture and extract high-signal content from Claude Code and Codex conversation sessions"
+  tags: ["session", "memory", "claude-code", "codex", "conversation"]
 distribution:
   type: exec
   exec:
@@ -23,10 +23,26 @@ signature:
       type: string
       required: false
       description: "Specific session ID to capture (optional, captures most recent if omitted)"
+    - name: source
+      type: string
+      required: false
+      description: "Session source: claude (default) or codex"
     - name: claude_home
       type: string
       required: false
       description: "Path to Claude Code home directory (defaults to ~/.claude)"
+    - name: codex_home
+      type: string
+      required: false
+      description: "Path to Codex home directory (defaults to ~/.codex)"
+    - name: scan
+      type: boolean
+      required: false
+      description: "For source=codex, scan all Codex sessions and capture those matching the workspace"
+    - name: scan_limit
+      type: integer
+      required: false
+      description: "Maximum number of Codex session files to scan"
     - name: summarize
       type: boolean
       required: false
@@ -55,6 +71,12 @@ signature:
         example_input:
           session_id: "abc123"
           force: true
+      - id: capture-codex-scan
+        description: "Scan Codex sessions for this workspace."
+        example_input:
+          source: "codex"
+          scan: true
+          workspace: "./"
 returns:
   - name: session_id
     type: string
@@ -74,6 +96,18 @@ returns:
   - name: status
     type: string
     description: "Capture status: captured, exists, error"
+  - name: sessions_scanned
+    type: integer
+    description: "Number of Codex session files scanned (scan mode)"
+  - name: sessions_matched
+    type: integer
+    description: "Number of Codex sessions matched to workspace (scan mode)"
+  - name: sessions_captured
+    type: integer
+    description: "Number of Codex sessions captured (scan mode)"
+  - name: sessions_skipped
+    type: integer
+    description: "Number of Codex sessions skipped (scan mode)"
   - name: message
     type: string
     description: "Human-readable summary"

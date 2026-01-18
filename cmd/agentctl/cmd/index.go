@@ -19,6 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
+	"github.com/jkatigb/agentctl/internal/storage/vector"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
@@ -41,6 +42,119 @@ func modelForScope(scope string) string {
 	}
 	model, _ := semantic.ScopeModelRecommendation(s)
 	return model
+}
+
+// formatSessionEmbeddingText enriches session summary with date and activity type.
+// Format: [Jan 2, 2006] [feature] Summary\nAccomplished: ...\nDecisions: ...
+func formatSessionEmbeddingText(sess sessions.Session) string {
+	var parts []string
+
+	// Date prefix from session start time
+	dateStr := sess.StartedAt.Format("Jan 2, 2006")
+
+	// Activity type inferred from tags
+	activity := inferSessionActivityType(sess.Tags)
+
+	// Header with date and activity
+	parts = append(parts, fmt.Sprintf("[%s] [%s]", dateStr, activity))
+
+	if sess.Summary != "" {
+		parts = append(parts, sess.Summary)
+	}
+	if len(sess.Accomplished) > 0 {
+		parts = append(parts, "Accomplished: "+strings.Join(sess.Accomplished, "; "))
+	}
+	if len(sess.Decisions) > 0 {
+		parts = append(parts, "Decisions: "+strings.Join(sess.Decisions, "; "))
+	}
+	if len(sess.Gotchas) > 0 {
+		parts = append(parts, "Gotchas: "+strings.Join(sess.Gotchas, "; "))
+	}
+	if len(sess.KeyFiles) > 0 {
+		parts = append(parts, "Files: "+strings.Join(sess.KeyFiles, ", "))
+	}
+	if len(sess.Tags) > 0 {
+		parts = append(parts, "Topics: "+strings.Join(sess.Tags, ", "))
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+// inferSessionActivityType derives activity type from session tags.
+func inferSessionActivityType(tags []string) string {
+	for _, tag := range tags {
+		lower := strings.ToLower(tag)
+		switch {
+		case strings.Contains(lower, "bug") || strings.Contains(lower, "fix"):
+			return "bugfix"
+		case strings.Contains(lower, "feature") || strings.Contains(lower, "feat"):
+			return "feature"
+		case strings.Contains(lower, "refactor"):
+			return "refactor"
+		case strings.Contains(lower, "doc"):
+			return "docs"
+		case strings.Contains(lower, "test"):
+			return "testing"
+		case strings.Contains(lower, "perf"):
+			return "performance"
+		case strings.Contains(lower, "config") || strings.Contains(lower, "setup"):
+			return "config"
+		}
+	}
+	return "development"
+}
+
+// formatTaskEmbeddingText enriches task with date and status.
+// Format: [Jan 2026] [completed]\nTask: title\nDescription: ...
+func formatTaskEmbeddingText(t tasks.Task) string {
+	var parts []string
+
+	// Date prefix (use completed_at if done, else created_at)
+	var dateStr string
+	if t.CompletedAt != nil {
+		dateStr = t.CompletedAt.Format("Jan 2006")
+	} else {
+		dateStr = t.CreatedAt.Format("Jan 2006")
+	}
+
+	// Status prefix
+	status := t.Status
+	if status == "" {
+		status = "pending"
+	}
+	parts = append(parts, fmt.Sprintf("[%s] [%s]", dateStr, status))
+
+	// Title is always included
+	if t.Title != "" {
+		parts = append(parts, "Task: "+t.Title)
+	}
+
+	// Description provides context
+	if t.Description != "" {
+		parts = append(parts, "Description: "+t.Description)
+	}
+
+	// Dependencies count
+	if len(t.DependsOn) > 0 {
+		parts = append(parts, fmt.Sprintf("Dependencies: %d tasks", len(t.DependsOn)))
+	}
+
+	// Epic association
+	if t.EpicID != "" {
+		parts = append(parts, "Epic: "+t.EpicID)
+	}
+
+	// Notes capture implementation details
+	if t.Notes != "" {
+		parts = append(parts, "Notes: "+t.Notes)
+	}
+
+	// Gotchas are valuable for future reference
+	if t.Gotchas != "" {
+		parts = append(parts, "Gotchas: "+t.Gotchas)
+	}
+
+	return strings.Join(parts, "\n")
 }
 
 func newIndexCommand() *cobra.Command {
@@ -169,7 +283,7 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 	}
 
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -307,7 +421,7 @@ func runIndexStatus(cmd *cobra.Command, workspace string) error {
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
 
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -521,10 +635,8 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 
 	count := 0
 	for _, task := range allTasks {
-		text := task.Title
-		if task.Description != "" {
-			text += "\n" + task.Description
-		}
+		// Use enriched text with date prefix and status
+		text := formatTaskEmbeddingText(task)
 		if text == "" {
 			continue
 		}
@@ -535,11 +647,8 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 			continue
 		}
 
-		// Convert []float32 to []byte (JSON encoding for storage)
-		embeddingBytes, err := json.Marshal(embedding)
-		if err != nil {
-			continue
-		}
+		// Convert []float32 to []byte (binary format for vector search)
+		embeddingBytes := vector.SerializeF32(embedding)
 
 		// Store embedding in tasks.db
 		if err := store.SetEmbedding(ctx, task.ID, embeddingBytes, modelForScope("tasks")); err != nil {
@@ -608,7 +717,8 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 
 	count := 0
 	for _, sess := range recentSessions {
-		text := sess.Summary
+		// Use enriched text with date prefix and metadata
+		text := formatSessionEmbeddingText(sess)
 		if text == "" {
 			continue
 		}
@@ -619,11 +729,8 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 			continue
 		}
 
-		// Convert []float32 to []byte (JSON encoding for storage)
-		embeddingBytes, err := json.Marshal(embedding)
-		if err != nil {
-			continue
-		}
+		// Convert []float32 to []byte (binary format for vector search)
+		embeddingBytes := vector.SerializeF32(embedding)
 
 		if err := store.SetEmbedding(ctx, sess.ID, embeddingBytes, modelForScope("sessions")); err != nil {
 			continue
@@ -765,7 +872,7 @@ func runIndexSyncPush(cmd *cobra.Command, workspace, remoteURL, remoteToken stri
 	}
 
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -856,7 +963,7 @@ func runIndexSyncQuery(cmd *cobra.Command, remoteURL, remoteToken, query string,
 	}
 
 	// Load config for dimensions
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -1162,7 +1269,7 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 	}
 
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

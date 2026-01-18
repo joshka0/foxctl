@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/runservice"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
@@ -542,7 +541,7 @@ func newOptimizeWeightsShowCommand() *cobra.Command {
 				return err
 			}
 
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return writeOptimizeError(out, optimizeWeightsCommand, err.Error())
 			}
@@ -607,7 +606,7 @@ to suggest improved weight distributions.`,
 				return err
 			}
 
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return writeOptimizeError(out, optimizeWeightsCommand, err.Error())
 			}
@@ -694,7 +693,7 @@ trajectories for an agent role.`,
 				return err
 			}
 
-			cfg, err := config.Load(ctx)
+			cfg, err := loadConfig(ctx)
 			if err != nil {
 				return writeOptimizeError(out, optimizeCommand, err.Error())
 			}

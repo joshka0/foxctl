@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -13,6 +14,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/platform/logging"
@@ -134,6 +136,25 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 				return memstore.Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 			},
 		}
+
+		hooksCfg, err := hooks.LoadConfigWithDefaults(workspaceRoot)
+		if err != nil {
+			logger := logging.FromContext(ctx)
+			logger.Warn().Err(err).Msg("dspy-agent: failed to load hooks config; continuing without hooks")
+			hooksCfg = hooks.EmptyConfig()
+		}
+
+		skillsDir := cfg.Paths.Skills
+		if skillsDir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				globalDspyRuntimeErr = fmt.Errorf("resolve agentctl home: %w", err)
+				return
+			}
+			skillsDir = filepath.Join(home, ".agentctl", "skills")
+		}
+
+		runtimeCfg.HookDispatcher = hooks.NewDispatcherWithRegistry(hooksCfg, skillsDir)
 
 		globalDspyRuntime = runtime.NewRuntime(runtimeCfg)
 	})

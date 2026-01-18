@@ -69,8 +69,7 @@ func TestLLMChatEngine_BuildTools(t *testing.T) {
 }
 
 func TestLLMChatEngine_Run_NoToolCalls(t *testing.T) {
-	// Create mock server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := oaiResponse{
 			ID: "test-123",
 			Choices: []struct {
@@ -91,23 +90,21 @@ func TestLLMChatEngine_Run_NoToolCalls(t *testing.T) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	engine := &LLMChatEngine{
 		config: LLMChatConfig{
 			APIKey:        "test-key",
-			BaseURL:       server.URL,
+			BaseURL:       "http://mock",
 			Model:         "test-model",
 			MaxIterations: 10,
 		},
-		client: http.DefaultClient,
+		client: &http.Client{Transport: &handlerTransport{handler: handler}},
 	}
 
 	output, err := engine.Run(context.Background(), EngineInput{
 		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +123,7 @@ func TestLLMChatEngine_Run_NoToolCalls(t *testing.T) {
 func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	callCount := 0
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 
 		if callCount == 1 {
@@ -173,8 +170,7 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	// Create mock tool executor
 	mockExecutor := &MockToolExecutor{
@@ -186,11 +182,11 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	engine := &LLMChatEngine{
 		config: LLMChatConfig{
 			APIKey:        "test-key",
-			BaseURL:       server.URL,
+			BaseURL:       "http://mock",
 			Model:         "test-model",
 			MaxIterations: 10,
 		},
-		client:     http.DefaultClient,
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
 		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
 	}
 
@@ -200,7 +196,6 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 			{Name: "get_weather", Description: "Get weather"},
 		},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -219,8 +214,24 @@ func TestLLMChatEngine_Run_WithToolCall(t *testing.T) {
 	}
 }
 
+type handlerTransport struct {
+	handler http.Handler
+}
+
+func (t *handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	recorder := httptest.NewRecorder()
+	t.handler.ServeHTTP(recorder, req)
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+	return recorder.Result(), nil
+}
+
 func TestLLMChatEngine_Run_MaxIterations(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Always return tool call to trigger max iterations
 		resp := oaiResponse{
 			ID: "test-123",
@@ -247,8 +258,7 @@ func TestLLMChatEngine_Run_MaxIterations(t *testing.T) {
 			},
 		}
 		_ = json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
 
 	mockExecutor := &MockToolExecutor{
 		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
@@ -259,11 +269,11 @@ func TestLLMChatEngine_Run_MaxIterations(t *testing.T) {
 	engine := &LLMChatEngine{
 		config: LLMChatConfig{
 			APIKey:        "test-key",
-			BaseURL:       server.URL,
+			BaseURL:       "http://mock",
 			Model:         "test-model",
 			MaxIterations: 3, // Low limit
 		},
-		client:     http.DefaultClient,
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
 		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
 	}
 
@@ -271,7 +281,6 @@ func TestLLMChatEngine_Run_MaxIterations(t *testing.T) {
 		Messages: []Message{{Role: RoleUser, Content: "Loop forever"}},
 		Tools:    []ToolDef{{Name: "loop_tool", Description: "Loops"}},
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

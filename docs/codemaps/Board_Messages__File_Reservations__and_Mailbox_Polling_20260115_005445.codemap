@@ -1,0 +1,473 @@
+{
+  "schemaVersion": 1,
+  "id": "Board_Messages__File_Reservations__and_Mailbox_Polling_20260115_005445",
+  "stableId": "c1b3cf7f-478d-443e-a03e-e273e77c98de",
+  "metadata": {
+    "cascadeId": "485c4217-2dd9-45cf-9574-92c764193d64",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T00:54:45+02:00",
+    "mode": "SMART",
+    "originalPrompt": "Explore: board messages, reservations, and mailbox polling. Start from: internal/storage/blackboard/board_store.go, internal/storage/mailbox/store.go"
+  },
+  "title": "Board Messages, File Reservations, and Mailbox Polling",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Human sends message to agent via agentctl-mail",
+      "description": "Board message system: CLI command flow that persists a message to board.db and surfaces it to the agent via hooks",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl-mail/main.go",
+          "lineNumber": 94,
+          "lineContent": "msgID, err := sendMessage(ctx, ws, agent.BoardMessage{",
+          "title": "CLI entry point",
+          "description": "agentctl-mail command constructs BoardMessage from flags"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl-mail/main.go",
+          "lineNumber": 139,
+          "lineContent": "store, err := blackboard.OpenBoardStore(ctx, cfg.Storage.Root)",
+          "title": "Open board store",
+          "description": "Opens board.db SQLite database for message persistence"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl-mail/main.go",
+          "lineNumber": 149,
+          "lineContent": "if err := store.SendMessage(ctx, \u0026msg); err != nil {",
+          "title": "Send message",
+          "description": "Persists message with workspace_id, recipient, priority, status"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 79,
+          "lineContent": "_, err := s.db.ExecContext(ctx, `",
+          "title": "SQL INSERT",
+          "description": "Inserts board_messages row with ULID, defaults status='unread'"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_overseer_inbox/main.go",
+          "lineNumber": 79,
+          "lineContent": "messages, err := boardStore.Inbox(ctx, filter)",
+          "title": "Hook queries inbox",
+          "description": "Hook polls for OnlyUnsurfaced messages to inject into context"
+        },
+        {
+          "id": "1f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 129,
+          "lineContent": "rows, err := s.db.QueryContext(ctx, query, args...)",
+          "title": "Query with filters",
+          "description": "SELECT with workspace_id, recipient, status filters and priority ordering"
+        },
+        {
+          "id": "1g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/hooks_overseer_inbox/main.go",
+          "lineNumber": 111,
+          "lineContent": "_, _ = boardStore.MarkSurfaced(ctx, workspaceID, recipient, ids)",
+          "title": "Mark as surfaced",
+          "description": "Updates status from 'unread' to 'surfaced' to prevent re-injection"
+        }
+      ],
+      "traceTextDiagram": "Human sends message to agent (Trace 1)\n├── CLI Command Entry\n│   └── agentctl-mail main() \u003c-- 1a\n│       └── sendMessage() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl-mail/main.go:133\n│           ├── Load config \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl-mail/main.go:134\n│           ├── OpenBoardStore() \u003c-- 1b\n│           └── store.SendMessage() \u003c-- 1c\n│               └── BoardStore.SendMessage() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:62\n│                   ├── Generate ULID \u0026 defaults \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:63\n│                   └── SQL INSERT board_messages \u003c-- 1d\n│\n└── Agent Hook Retrieval\n    └── hooks/overseer_inbox run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_overseer_inbox/main.go:37\n        ├── OpenBoardStore() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_overseer_inbox/main.go:59\n        ├── boardStore.Inbox() \u003c-- 1e\n        │   ├── Build SQL query with filters \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:100\n        │   └── QueryContext() \u003c-- 1f\n        │       └── SELECT WHERE recipient \u0026 status \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:103\n        ├── buildOverseerContext() \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/hooks_overseer_inbox/main.go:99\n        └── boardStore.MarkSurfaced() \u003c-- 1g\n            └── UPDATE status='surfaced' \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:208",
+      "traceGuide": "## Motivation\n\n**Human-in-the-loop communication** during agent execution requires a way for humans to send messages to running agents and for those messages to be surfaced in the agent's context. The board message system solves this by providing **workspace-scoped messaging** with priority levels, status tracking (unread/surfaced/read), and automatic injection into agent context via hooks.\n\nThe problem: A human needs to tell a running Claude Code session \"stop working on feature X, focus on bug Y instead\" or \"review this before proceeding.\" Without this system, there's no way to interrupt or guide an agent mid-execution.\n\n## Details\n\n### Message Persistence\n\nMessages are stored in **board.db** SQLite database in the `board_messages` table [1d]. Each message has:\n- **workspace_id**: Scopes messages to a specific project\n- **recipient**: Target actor ID or \"*\" for broadcast\n- **priority**: 1 (highest) to 5 (lowest) for ordering\n- **status**: \"unread\" → \"surfaced\" → \"read\" → \"acked\"\n- **sender**: Who sent it (e.g., \"human\", actor ID)\n\n### Sending Flow\n\nThe **agentctl-mail** CLI command [1a] is the primary way humans send messages. It:\n1. Detects the workspace (via env vars or git root) [1b]\n2. Opens the board store for that workspace\n3. Calls `SendMessage()` which auto-generates a ULID and sets defaults [1c]\n4. Inserts the row with status=\"unread\" [1d]\n\n### Retrieval and Surfacing\n\nThe **hooks/overseer_inbox** hook runs during agent execution [1e]. It:\n1. Queries for `OnlyUnsurfaced` messages (status=\"unread\") to avoid re-injection\n2. Uses SQL filters: `WHERE workspace_id = ? AND (recipient = ? OR recipient = '*')` [1f]\n3. Orders by **priority ASC, created_at DESC** to show urgent messages first\n4. Injects message content into the agent's context as formatted markdown\n5. Marks displayed messages as \"surfaced\" [1g] so they won't be injected again\n\n### Status Lifecycle\n\n- **unread**: Just created, never shown to agent\n- **surfaced**: Injected into context by hook, but not explicitly acknowledged\n- **read**: Agent or user explicitly marked as read\n- **acked**: Agent confirmed receipt (for ack_required messages)\n\nThis three-stage status prevents **message spam** while preserving the distinction between \"AI saw it\" (surfaced) and \"human/agent explicitly handled it\" (read/acked)."
+    },
+    {
+      "id": "2",
+      "title": "Agent sends board message via mail.send tool",
+      "description": "Board message system: Agent tool flow for inter-actor communication within workspace",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 172,
+          "lineContent": "func (r *Registry) mailSend(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {",
+          "title": "Tool handler entry",
+          "description": "mail.send tool extracts recipient, subject, body, priority from args"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 207,
+          "lineContent": "store, err := r.openBoardStore(ctx)",
+          "title": "Open board store",
+          "description": "Factory function opens board.db for the workspace"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 213,
+          "lineContent": "msg := \u0026agent.BoardMessage{",
+          "title": "Construct message",
+          "description": "Populates WorkspaceID, TaskID, Sender (ActorID), Stream, Kind"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 226,
+          "lineContent": "if err := store.SendMessage(ctx, msg); err != nil {",
+          "title": "Persist message",
+          "description": "Calls same SendMessage as CLI, generates ULID and defaults"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 64,
+          "lineContent": "msg.ID = ulid.Make().String()",
+          "title": "Generate ID",
+          "description": "Auto-generates ULID if not set, sets CreatedAt timestamp"
+        },
+        {
+          "id": "2f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 79,
+          "lineContent": "_, err := s.db.ExecContext(ctx, `",
+          "title": "SQL INSERT",
+          "description": "Same INSERT as [1d], stores in board_messages table"
+        }
+      ],
+      "traceTextDiagram": "Agent Tool: mail.send\n├── Tool handler entry \u003c-- 2a\n│   ├── Extract args (recipient, subject, body) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:177\n│   ├── Parse priority, kind, ack_required \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:198\n│   └── Open board store \u003c-- 2b\n│       └── OpenBoardStore(storageRoot) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:47\n├── Construct BoardMessage \u003c-- 2c\n│   ├── Set WorkspaceID, TaskID, Sender \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:214\n│   └── Set Stream, Kind, Priority \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:216\n├── Persist message \u003c-- 2d\n│   └── store.SendMessage(ctx, msg) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:62\n│       ├── Generate ULID if empty \u003c-- 2e\n│       ├── Set CreatedAt timestamp \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:66\n│       ├── Default status='unread' \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:70\n│       └── SQL INSERT execution \u003c-- 2f\n│           └── INSERT INTO board_messages \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:80\n│               (id, workspace_id, sender,\n│                recipient, priority, status...)\n└── Return success result \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:230\n    └── {message_id, sent_to, success: true} \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:231",
+      "traceGuide": "## Motivation\n\nAgents in agentctl need to **communicate with each other and with humans** during task execution. The `mail.send` tool enables this by allowing an agent to send **board messages**—workspace-scoped notifications with priority levels, acknowledgment tracking, and status management. These messages appear in recipient inboxes and can be surfaced by hooks into the agent's context, enabling human-in-the-loop workflows like \"pause and review this change\" or \"urgent: API design question.\"\n\n## Details\n\n### Tool Registration\n\nThe `mail.send` tool is registered in the agent's tool registry [2a] with a schema defining parameters: `recipient` (actor ID like \"overseer\" or \"agent:coder-1\"), `subject`, `body`, `kind` (instruction/info/alert/review_request), `priority` (1=highest, 5=lowest), and `ack_required` (boolean).\n\n### Message Construction\n\nWhen invoked, the tool handler extracts arguments from the tool call, applies defaults (priority=3, kind=info), and constructs a `BoardMessage` struct [2c] populated with:\n- **Workspace context**: `WorkspaceID` and `TaskID` from the agent's runtime config [2c]\n- **Sender identity**: `ActorID` from config becomes the `Sender` field\n- **Routing**: `Stream` defaults to \"coordination\" for workspace-wide messages\n- **Message content**: Subject, body, priority, kind, and ack flag from tool args\n\n### Persistence\n\nThe tool opens the **board store** [2b]—a SQLite database (`board.db`) in the storage root—and calls `SendMessage` [2d]. The store generates a **ULID** for the message ID [2e], sets `CreatedAt` timestamp, and defaults `Status` to \"unread\" [2f]. The message is then inserted into the `board_messages` table with all fields including workspace_id, sender, recipient, priority, and status.\n\n### Message Lifecycle\n\nOnce persisted, the message becomes queryable via the `Inbox` operation, which filters by workspace, recipient (including broadcast recipient \"*\"), and status. Messages progress through states: **unread** → **surfaced** (shown in context by hooks) → **read** (explicitly viewed) → **acked** (acknowledged). The priority field (1-5) controls ordering, with 1 being highest priority.\n\n### Return Value\n\nThe tool returns a success result [2a] containing the generated `message_id`, the `sent_to` recipient, and a success flag, allowing the agent to reference the message in subsequent operations or confirm delivery."
+    },
+    {
+      "id": "3",
+      "title": "Checking inbox and marking messages read",
+      "description": "Board message system: Mailbox skill retrieves filtered messages and updates status",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mailbox/main.go",
+          "lineNumber": 230,
+          "lineContent": "messages, err := store.Inbox(ctx, filter)",
+          "title": "Query inbox",
+          "description": "Skill operation='inbox' with ActorID, OnlyUnread, TaskID filters"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 100,
+          "lineContent": "query := `",
+          "title": "Build SQL query",
+          "description": "SELECT with WHERE workspace_id AND (recipient = ? OR recipient = '*')"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 126,
+          "lineContent": "query += ` ORDER BY priority ASC, created_at DESC LIMIT ?`",
+          "title": "Priority ordering",
+          "description": "Orders by priority (1=highest) then newest first, applies limit"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 129,
+          "lineContent": "rows, err := s.db.QueryContext(ctx, query, args...)",
+          "title": "Execute query",
+          "description": "Returns BoardMessage slice with ID, Subject, Body, Status, etc."
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/mailbox/main.go",
+          "lineNumber": 243,
+          "lineContent": "_, _ = store.MarkRead(ctx, workspaceID, in.Inbox.ActorID, ids)",
+          "title": "Mark as read",
+          "description": "Best-effort UPDATE status='read' for displayed messages"
+        },
+        {
+          "id": "3f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 176,
+          "lineContent": "res, err := s.db.ExecContext(ctx, query, args...)",
+          "title": "SQL UPDATE",
+          "description": "UPDATE board_messages SET status='read' WHERE status IN ('unread','surfaced')"
+        }
+      ],
+      "traceTextDiagram": "Inbox Query and Mark Read Flow (Trace 3)\n├── Mailbox Skill Entry\n│   └── run() with operation=\"inbox\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mailbox/main.go:91\n│       └── store.Inbox(ctx, filter) \u003c-- 3a\n│           └── BoardStore.Inbox() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:93\n│               ├── Build SQL query \u003c-- 3b\n│               │   ├── WHERE workspace_id AND recipient \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:100\n│               │   ├── Apply status filters \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:117\n│               │   └── ORDER BY priority, created_at \u003c-- 3c\n│               ├── Execute query \u003c-- 3d\n│               └── Return []BoardMessage \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:145\n└── Post-retrieval Processing\n    └── if !OnlyUnread \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/mailbox/main.go:237\n        └── store.MarkRead(ctx, ids) \u003c-- 3e\n            └── BoardStore.MarkRead() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:149\n                └── SQL UPDATE status='read' \u003c-- 3f",
+      "traceGuide": "## Motivation\n\nAgents need to **coordinate within a workspace** by sending messages to each other and to human overseers. The board message system provides **priority-based inbox functionality** where messages can be filtered by recipient, task, and read status. This enables human-in-the-loop workflows where a human can send instructions to a running agent, and hooks can surface unread messages into the agent's context without re-injecting them forever.\n\nThe key problem: **how do you query messages efficiently** while tracking whether they've been seen (surfaced into context) versus explicitly read, and how do you prevent the same message from being injected into every agent turn?\n\n## Details\n\n### Message Storage and Querying\n\nBoard messages are stored in **`board_messages` table** in `board.db` with fields for workspace, recipient, priority (1=highest), status, subject, and body [3b]. The `Inbox` method builds a SQL query that filters by workspace and recipient, supporting wildcard `*` for broadcast messages [3b].\n\n### Status Lifecycle\n\nMessages progress through three states:\n- **`unread`**: newly created, never shown to agent\n- **`surfaced`**: injected into context by hooks but not explicitly acknowledged  \n- **`read`**: explicitly marked as read by user/tool\n\nThe query supports two filtering modes [3c]:\n- `OnlyUnsurfaced`: returns strictly `unread` messages (for hooks)\n- `OnlyUnread`: returns both `unread` and `surfaced` (for user queries)\n\n### Priority Ordering\n\nResults are **ordered by priority ascending** (1 first), then by `created_at` descending (newest first) [3c]. This ensures high-priority messages surface first while recent messages within the same priority appear at the top.\n\n### Preventing Re-injection\n\nAfter displaying messages, the skill conditionally calls `MarkRead` [3e]. The key distinction: if the query was `OnlyUnread=true` (checking for unread), it **skips marking as read** to allow hooks to see the same messages multiple times. Only non-filtering queries trigger the read status update [3e].\n\nThe `MarkRead` operation updates status from both `unread` and `surfaced` to `read` [3f], ensuring messages transition properly regardless of whether they were previously surfaced by a hook.\n\n### Execution Flow\n\nThe mailbox skill receives operation `\"inbox\"` with an `InboxFilter` containing `ActorID`, `TaskID`, `OnlyUnread`, and `Limit` [3a]. The store executes the filtered query [3d], returns a slice of `BoardMessage` structs [3d], and optionally marks them read based on the query type [3e]."
+    },
+    {
+      "id": "4",
+      "title": "Reserving files for exclusive access",
+      "description": "File reservation system: Checks conflicts then creates advisory lock with TTL",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 316,
+          "lineContent": "func (r *Registry) mailReserve(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {",
+          "title": "Tool handler entry",
+          "description": "mail.reserve tool extracts paths, mode (exclusive/shared), ttl_seconds"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 361,
+          "lineContent": "conflicts, err := store.CheckConflicts(ctx, r.config.WorkspaceID, paths, r.config.ActorID, mode)",
+          "title": "Check conflicts",
+          "description": "Queries existing reservations to detect exclusive/shared conflicts"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 282,
+          "lineContent": "_, _ = s.db.ExecContext(ctx, `DELETE FROM file_reservations WHERE expires_at \u003c ?`, now)",
+          "title": "Cleanup expired",
+          "description": "Best-effort DELETE of expired reservations before conflict check"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 313,
+          "lineContent": "rows, err := s.db.QueryContext(ctx, query, args...)",
+          "title": "Query conflicts",
+          "description": "SELECT reservations WHERE path IN (?) AND holder != ? AND expires_at \u003e= ?"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 386,
+          "lineContent": "if err := store.Reserve(ctx, res); err != nil {",
+          "title": "Create reservation",
+          "description": "Inserts FileReservation if no conflicts found"
+        },
+        {
+          "id": "4f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 263,
+          "lineContent": "_, err := s.db.ExecContext(ctx, `",
+          "title": "SQL INSERT",
+          "description": "INSERT file_reservations with ULID, path, holder, mode, expires_at"
+        }
+      ],
+      "traceTextDiagram": "File Reservation Flow (Trace 4)\n├── Agent Tool Entry\n│   └── mail.reserve tool handler \u003c-- 4a\n│       └── Extract paths, mode, ttl from args \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:321\n│\n├── Conflict Detection Phase\n│   ├── store.CheckConflicts() call \u003c-- 4b\n│   │   ├── Cleanup expired reservations \u003c-- 4c\n│   │   │   └── DELETE WHERE expires_at \u003c now \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:282\n│   │   └── Query existing reservations \u003c-- 4d\n│   │       └── SELECT WHERE path IN (paths) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:313\n│   │           AND holder != current_actor\n│   │           AND expires_at \u003e= now\n│   └── Return conflicts[] or empty \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:331\n│\n└── Reservation Creation Phase\n    ├── If no conflicts found \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:365\n    │   └── store.Reserve() call \u003c-- 4e\n    │       └── INSERT file_reservations \u003c-- 4f\n    │           ├── Generate ULID for id \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:254\n    │           ├── Set workspace_id, path, holder \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:377\n    │           ├── Set mode (exclusive/shared) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:382\n    │           └── Set expires_at (now + ttl) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:384\n    └── Return success or conflict error \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:392",
+      "traceGuide": "## Motivation\n\nWhen multiple agents or processes work on the same codebase simultaneously, they can create **conflicting edits** to the same files. The file reservation system provides **advisory locks** that prevent this by allowing agents to declare their intent to modify specific files before making changes [4a]. This is similar to checking out a file in version control, but happens at runtime within a single workspace session.\n\nThe system uses **two reservation modes**: **exclusive** (only one holder can reserve) and **shared** (multiple holders can reserve for read-only access). Reservations automatically expire after a TTL (default 10 minutes) to prevent deadlocks if an agent crashes.\n\n## Details\n\n### Reservation Request Flow\n\nWhen an agent needs to modify files, it calls the `mail.reserve` tool with a list of paths [4a]. The tool first **checks for conflicts** by querying existing reservations in the `file_reservations` table [4b].\n\nBefore checking conflicts, the system performs **best-effort cleanup** of expired reservations by deleting rows where `expires_at \u003c now` [4c]. This prevents false conflicts from stale locks.\n\nThe conflict detection query [4d] looks for existing reservations on the same paths that:\n- Belong to a **different holder** (same actor can re-reserve)\n- Haven't expired yet (`expires_at \u003e= now`)\n- Would conflict with the requested mode (exclusive conflicts with everything; shared only conflicts with exclusive)\n\n### Conflict Resolution\n\nIf conflicts are found, the tool returns them to the agent with details about who holds the lock and when it expires [4b]. The agent can then decide to wait, request a different file, or escalate to human review.\n\nIf **no conflicts exist** [4e], the system creates a new reservation by inserting a row into `file_reservations` [4f]. Each reservation gets:\n- A **ULID** for unique identification [4f]\n- The **workspace_id** and **path** being reserved\n- The **holder** (actor ID making the reservation)\n- The **mode** (exclusive or shared)\n- An **expires_at** timestamp (current time + TTL)\n\nThe reservation is purely **advisory**—the system doesn't prevent file writes at the filesystem level. Agents are expected to check for conflicts before editing and respect existing reservations.\n\n### Storage Layer\n\nAll reservations live in the `board.db` SQLite database under the `file_reservations` table [4f]. The table is indexed on `(workspace_id, path)` for fast conflict lookups and on `expires_at` for efficient cleanup queries."
+    },
+    {
+      "id": "5",
+      "title": "Releasing file reservations",
+      "description": "File reservation system: Removes advisory locks by path or reservation ID",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 400,
+          "lineContent": "func (r *Registry) mailRelease(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {",
+          "title": "Tool handler entry",
+          "description": "mail.release tool accepts paths[] or reservation_ids[]"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 440,
+          "lineContent": "count, err := store.Release(ctx, r.config.WorkspaceID, r.config.ActorID, paths)",
+          "title": "Release by paths",
+          "description": "Deletes reservations matching workspace, actor, and paths"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 354,
+          "lineContent": "res, err := s.db.ExecContext(ctx, query, args...)",
+          "title": "SQL DELETE by path",
+          "description": "DELETE FROM file_reservations WHERE workspace_id=? AND holder=? AND path IN (?)"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go",
+          "lineNumber": 448,
+          "lineContent": "count, err := store.ReleaseByID(ctx, reservationIDs)",
+          "title": "Release by IDs",
+          "description": "Alternative deletion method using reservation ULIDs"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go",
+          "lineNumber": 381,
+          "lineContent": "res, err := s.db.ExecContext(ctx, query, args...)",
+          "title": "SQL DELETE by ID",
+          "description": "DELETE FROM file_reservations WHERE id IN (?) - no holder check"
+        }
+      ],
+      "traceTextDiagram": "File Reservation Release Flow\n├── mail.release tool handler \u003c-- 5a\n│   ├── Extract paths[] or reservation_ids[] \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:406\n│   │   from tool arguments\n│   ├── Open board store (board.db) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:431\n│   │\n│   ├── Release by paths branch\n│   │   ├── store.Release() call \u003c-- 5b\n│   │   │   └── Build DELETE query with \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:350\n│   │   │       workspace_id + holder + paths\n│   │   │       └── Execute DELETE \u003c-- 5c\n│   │   │           (WHERE workspace AND holder\n│   │   │            AND path IN (?))\n│   │\n│   └── Release by IDs branch\n│       ├── store.ReleaseByID() call \u003c-- 5d\n│       │   └── Build DELETE query with \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/blackboard/board_store.go:379\n│       │       reservation IDs only\n│       │       └── Execute DELETE \u003c-- 5e\n│       │           (WHERE id IN (?))\n│       │\n│       └── Return released_count to agent \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/agent/tools/mail_tools.go:455",
+      "traceGuide": "## Motivation\n\nWhen multiple agents or processes work on files in a shared workspace, **concurrent edits can corrupt work or create conflicts**. The file reservation system provides **advisory locks** that allow agents to declare their intent to modify specific files, preventing other agents from simultaneously editing the same files. These reservations are **time-limited** (with TTL) and stored in SQLite, so they survive process crashes and can be inspected or manually released.\n\nThe `mail.release` tool allows agents to **explicitly release their file reservations** when done editing, freeing the files for other agents to use [5a].\n\n## Details\n\n### Two Release Methods\n\nReservations can be released in two ways:\n\n1. **By file paths** - releases all reservations held by the current actor for specific files [5b]. This requires matching workspace ID, actor ID (holder), and file paths [5c].\n\n2. **By reservation IDs** - releases specific reservations using their ULID identifiers [5d]. This method doesn't check the holder, allowing cleanup of any reservation by ID [5e].\n\n### Implementation\n\nThe tool handler extracts either `paths[]` or `reservation_ids[]` from the tool arguments [5a]. It opens the board store (SQLite database at `board.db`) and calls the appropriate release method.\n\nFor path-based release, the SQL query is: `DELETE FROM file_reservations WHERE workspace_id = ? AND holder = ? AND path IN (?)` [5c]. This ensures agents can only release their own reservations.\n\nFor ID-based release, the query is simpler: `DELETE FROM file_reservations WHERE id IN (?)` [5e]. This is useful for administrative cleanup or when the reservation ID is known.\n\nBoth methods return the count of released reservations to the agent, allowing it to verify the operation succeeded.\n\n### Best Practices\n\nAgents should **release reservations as soon as editing is complete** to avoid blocking other agents unnecessarily. The TTL provides a safety net (default 10 minutes), but explicit release is preferred for responsive coordination."
+    },
+    {
+      "id": "6",
+      "title": "Reactive mailbox message notification via SQLite trigger",
+      "description": "Mailbox polling system: SQLite trigger fires on INSERT, watcher polls notify table, sends WakeUp to supervisor",
+      "locations": [
+        {
+          "id": "6a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go",
+          "lineNumber": 64,
+          "lineContent": "_, err = s.db.ExecContext(ctx, `",
+          "title": "Message INSERT",
+          "description": "INSERT INTO mailbox triggers mailbox_notify_trigger"
+        },
+        {
+          "id": "6b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/watcher.go",
+          "lineNumber": 130,
+          "lineContent": "trigger := `",
+          "title": "Trigger definition",
+          "description": "AFTER INSERT ON mailbox BEGIN INSERT INTO mailbox_notify (to_ns)"
+        },
+        {
+          "id": "6c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/watcher.go",
+          "lineNumber": 163,
+          "lineContent": "rows, err := w.db.QueryContext(ctx, `",
+          "title": "Poll notify table",
+          "description": "Watcher polls mailbox_notify every 50ms for new notifications"
+        },
+        {
+          "id": "6d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/watcher.go",
+          "lineNumber": 189,
+          "lineContent": "w.wakeUpCh \u003c- WakeUp{Namespace: ns, Timestamp: now}",
+          "title": "Send WakeUp signal",
+          "description": "Sends namespace wake-up to supervisor, one per namespace per poll"
+        },
+        {
+          "id": "6e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go",
+          "lineNumber": 570,
+          "lineContent": "case wake := \u003c-s.watcher.WakeUps():",
+          "title": "Supervisor receives",
+          "description": "Supervisor's runWatcher loop receives WakeUp from channel"
+        },
+        {
+          "id": "6f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go",
+          "lineNumber": 571,
+          "lineContent": "s.HandleWakeUp(s.ctx, wake)",
+          "title": "Handle wake-up",
+          "description": "Spawns goroutine to process wake-up if actor is idle"
+        }
+      ],
+      "traceTextDiagram": "Reactive Mailbox Message Notification Flow\n├── Message arrives in mailbox\n│   └── INSERT INTO mailbox \u003c-- 6a\n│       └── SQLite trigger fires\n│           └── AFTER INSERT trigger definition \u003c-- 6b\n│               └── INSERT INTO mailbox_notify \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/watcher.go:134\n├── Watcher polling loop (50ms interval) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/watcher.go:143\n│   └── SELECT FROM mailbox_notify \u003c-- 6c\n│       └── Group by namespace \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/watcher.go:174\n│           └── Send WakeUp to channel \u003c-- 6d\n└── Supervisor receives notification\n    ├── WakeUp received from channel \u003c-- 6e\n    └── HandleWakeUp() spawns goroutine \u003c-- 6f\n        └── Check if actor is idle \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go:373\n            └── Poll mailbox for message \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go:383",
+      "traceGuide": "## Motivation\n\nAgents in agentctl need to react to incoming messages immediately rather than polling continuously. The problem: **how do you wake up an idle actor when a new message arrives without burning CPU on constant polling?** The solution uses SQLite triggers to create a reactive notification system that provides ~50ms latency while keeping actors idle when there's no work.\n\n## Details\n\n### SQLite Trigger-Based Notifications\n\nWhen a message is inserted into the `mailbox` table [6a], a SQLite trigger automatically fires [6b] and inserts a notification row into `mailbox_notify` with the recipient namespace [6b]. This happens **atomically within the same transaction** as the message insert, ensuring no messages are missed.\n\n### Watcher Polling Loop\n\nThe `Watcher` runs a background goroutine that polls the `mailbox_notify` table every 50ms [6c]. This is far more efficient than polling the mailbox itself because:\n- The notify table is tiny (just namespace strings)\n- Multiple messages to the same namespace produce only one wake-up signal\n- Notifications are deleted after processing, keeping the table small\n\nWhen notifications are found, the watcher groups them by namespace [6c] and sends one `WakeUp` signal per namespace to a buffered channel [6d].\n\n### Supervisor Wake-Up Handling\n\nThe `Supervisor` listens on the wake-up channel in its main loop [6e]. When a `WakeUp` arrives, it spawns a goroutine to handle it [6f], but only if:\n1. The actor for that namespace is registered\n2. The actor is currently **idle** (not already processing a message)\n3. No other goroutine is already handling this namespace\n\nThis prevents unbounded goroutine spawning under high message volume while maintaining the **sequential processing contract**: each actor processes one message at a time.\n\n### Atomic Message Claiming\n\nOnce the actor is confirmed idle, the supervisor calls `mailbox.Poll()` [6f → 7a] which uses a **transaction with lease semantics** to atomically claim the message. The wake-up is just a signal—the actual message consumption happens through the existing Poll/Ack mechanism, preserving crash safety."
+    },
+    {
+      "id": "7",
+      "title": "Polling and acknowledging mailbox messages with lease",
+      "description": "Mailbox polling system: Atomic lease-based message claim, delivery to actor, and acknowledgment",
+      "locations": [
+        {
+          "id": "7a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go",
+          "lineNumber": 383,
+          "lineContent": "msg, err := s.mailbox.Poll(ctx, wake.Namespace, s.leaseTimeout)",
+          "title": "Poll for message",
+          "description": "Supervisor polls mailbox if actor is idle (sequential processing)"
+        },
+        {
+          "id": "7b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go",
+          "lineNumber": 83,
+          "lineContent": "tx, err := s.db.BeginTx(ctx, nil)",
+          "title": "Begin transaction",
+          "description": "Poll uses transaction to atomically claim message with lease"
+        },
+        {
+          "id": "7c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go",
+          "lineNumber": 92,
+          "lineContent": "rows, err := tx.QueryContext(ctx, `",
+          "title": "SELECT visible",
+          "description": "SELECT WHERE to_ns=? AND visible_at \u003c= ? ORDER BY ts LIMIT 1"
+        },
+        {
+          "id": "7d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go",
+          "lineNumber": 128,
+          "lineContent": "res, err := tx.ExecContext(ctx, `",
+          "title": "UPDATE lease",
+          "description": "UPDATE visible_at to future time, increment attempt for lease"
+        },
+        {
+          "id": "7e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go",
+          "lineNumber": 413,
+          "lineContent": "err := actor.OnMailReceived(ctx, msg)",
+          "title": "Deliver to actor",
+          "description": "Calls actor's message handler with leased message"
+        },
+        {
+          "id": "7f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go",
+          "lineNumber": 431,
+          "lineContent": "if err := s.mailbox.Ack(ctx, msg.ID); err != nil {",
+          "title": "Acknowledge message",
+          "description": "On success, ack deletes message; on error, nack extends lease"
+        },
+        {
+          "id": "7g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go",
+          "lineNumber": 172,
+          "lineContent": "res, err := s.db.ExecContext(ctx, `DELETE FROM mailbox WHERE id = ?`, messageID)",
+          "title": "SQL DELETE",
+          "description": "Ack removes message from mailbox table permanently"
+        }
+      ],
+      "traceTextDiagram": "Mailbox Message Polling \u0026 Acknowledgment Flow\n├── Supervisor receives WakeUp signal \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go:570\n│   └── HandleWakeUp() spawns goroutine \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go:571\n│       ├── Check actor is idle \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go:373\n│       └── Poll mailbox atomically \u003c-- 7a\n│           └── MailboxAdapter.Poll() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/mailbox_adapter.go:62\n│               └── Store.Poll() begins transaction \u003c-- 7b\n│                   ├── SELECT visible messages \u003c-- 7c\n│                   ├── UPDATE visible_at (lease) \u003c-- 7d\n│                   └── COMMIT transaction \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:164\n├── Deliver message to actor\n│   └── actor.OnMailReceived(msg) \u003c-- 7e\n│       └── Actor processes message\n│           └── Returns success/error\n└── Acknowledge or Nack message \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go:425\n    ├── On success: mailbox.Ack() \u003c-- 7f\n    │   └── DELETE FROM mailbox \u003c-- 7g\n    └── On error: mailbox.Nack() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/supervisor.go:465\n        └── UPDATE visible_at (retry later) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:188",
+      "traceGuide": "## Motivation\n\nAgents need to communicate asynchronously without blocking or polling. The **mailbox polling system** solves this by storing messages in SQLite and using **database triggers** to notify a supervisor when new messages arrive. This enables **reactive, event-driven actors** that wake up only when work is available, rather than constantly polling an empty queue.\n\nThe system guarantees **at-least-once delivery** through lease-based message claiming: when an actor polls for work, it atomically claims a message with a TTL lease [7b, 7c, 7d]. If processing fails or the actor crashes, the lease expires and the message becomes visible again for retry.\n\n## Details\n\n### Reactive Notification Flow\n\nWhen a message is inserted into the `mailbox` table [6a], a SQLite trigger automatically inserts a row into `mailbox_notify` [6b]. A **Watcher** polls this notify table every 50ms [6c], groups notifications by namespace, and sends **WakeUp signals** to the supervisor [6d, 6e, 6f]. This provides ~50ms latency while keeping the mailbox durable.\n\n### Atomic Message Claiming\n\nThe supervisor receives a WakeUp and checks if the target actor is idle (enforcing **sequential processing** per actor). It then calls `Poll()` [7a], which begins a transaction [7b], selects messages where `visible_at \u003c= now` [7c], and updates `visible_at` to a future timestamp (the lease) [7d]. The transaction commit makes the claim atomic—only one poller wins the race.\n\n### Processing and Acknowledgment\n\nThe supervisor delivers the message to the actor via `OnMailReceived()` [7e]. On success, it calls `Ack()` [7f] which **deletes the message** from the mailbox [7g]. On failure, it calls `Nack()` which extends the `visible_at` timestamp, making the message invisible temporarily before becoming available for retry.\n\n### Adapter Pattern\n\nThe `MailboxAdapter` wraps the storage layer [8a, 8b] and converts between `agent.Message` (storage format with `json.RawMessage` payload) and `actor.Message` (supervisor format with typed fields) [8d, 8e]. This decouples the actor system from storage implementation details."
+    },
+    {
+      "id": "8",
+      "title": "Mailbox adapter converts between storage and actor formats",
+      "description": "Mailbox polling system: Adapter pattern wraps storage layer, converts agent.Message to actor.Message",
+      "locations": [
+        {
+          "id": "8a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/mailbox_adapter.go",
+          "lineNumber": 62,
+          "lineContent": "func (a *MailboxAdapter) Poll(ctx context.Context, namespace string, leaseTimeout time.Duration) (*Message, error) {",
+          "title": "Adapter Poll",
+          "description": "Wraps mailbox.Store to provide MailboxStore interface for supervisor"
+        },
+        {
+          "id": "8b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/mailbox_adapter.go",
+          "lineNumber": 64,
+          "lineContent": "messages, err := a.store.Poll(ctx, namespace, leaseTimeout, 1)",
+          "title": "Call storage Poll",
+          "description": "Delegates to storage layer, requests maxMessages=1"
+        },
+        {
+          "id": "8c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go",
+          "lineNumber": 75,
+          "lineContent": "func (s *sqlStore) Poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int) ([]agent.Message, error) {",
+          "title": "Storage Poll",
+          "description": "Returns []agent.Message with Payload as json.RawMessage"
+        },
+        {
+          "id": "8d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/mailbox_adapter.go",
+          "lineNumber": 72,
+          "lineContent": "return a.toActorMessage(\u0026messages[0]), nil",
+          "title": "Convert message",
+          "description": "Transforms agent.Message to actor.Message for supervisor"
+        },
+        {
+          "id": "8e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/actor/mailbox_adapter.go",
+          "lineNumber": 92,
+          "lineContent": "return \u0026Message{",
+          "title": "Message mapping",
+          "description": "Maps Type→Subject, Payload→Body, Timestamp→CreatedAt, TTLMS→ExpiresAt"
+        }
+      ],
+      "traceTextDiagram": "Mailbox Message Polling Flow\n├── Supervisor Layer\n│   └── MailboxAdapter.Poll() \u003c-- 8a\n│       ├── calls storage with maxMessages=1 \u003c-- 8b\n│       └── converts response format \u003c-- 8d\n│           └── toActorMessage() mapping \u003c-- 8e\n│               └── Type→Subject, Payload→Body \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/actor/mailbox_adapter.go:96\n│\n└── Storage Layer\n    └── sqlStore.Poll() \u003c-- 8c\n        ├── BeginTx() for atomic claim \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:83\n        ├── SELECT WHERE visible_at \u003c= now \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:92\n        ├── UPDATE visible_at for lease \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:128\n        ├── Commit transaction \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:164\n        └── returns []agent.Message \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:168\n            └── (json.RawMessage payload) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/mailbox/store.go:398",
+      "traceGuide": "## Motivation\n\nThe actor system needs to deliver messages from a **durable SQLite mailbox** to in-memory actors, but the storage layer uses `agent.Message` (with `json.RawMessage` payloads and Unix timestamps) while the supervisor expects `actor.Message` (with byte slices and `time.Time` fields). The **MailboxAdapter** [8a] bridges this impedance mismatch, converting between the two formats so the supervisor can work with a clean interface without knowing about storage details.\n\n## Details\n\n### Adapter Pattern\n\nThe `MailboxAdapter` wraps `mailbox.Store` and implements the `MailboxStore` interface expected by the supervisor. When the supervisor calls `Poll()` [8a], the adapter delegates to the underlying storage's `Poll()` method [8b], which returns `[]agent.Message` [8c].\n\n### Message Conversion\n\nThe storage layer returns messages with fields like `Type` (message type enum), `Payload` (JSON bytes), and `Timestamp` (Unix seconds) [8c]. The adapter's `toActorMessage()` function [8d] transforms this into `actor.Message` by:\n- Mapping `Type` → `Subject` (string conversion) [8e]\n- Mapping `Payload` → `Body` (raw bytes)\n- Converting `Timestamp` + `TTLMS` → `CreatedAt` and `ExpiresAt` (`time.Time` objects)\n\n### Lease Semantics\n\nThe storage layer handles the **atomic message claim** with a transaction [8b]: it queries for visible messages, updates `visible_at` to a future timestamp (the lease), and commits. The adapter simply requests `maxMessages=1` and returns the single claimed message to the supervisor, which then delivers it to the actor for processing.\n\nThis separation allows the storage layer to focus on durability and atomicity while the supervisor works with idiomatic Go types."
+    }
+  ],
+  "description": "Three coordination systems: (1) Board messages for workspace-scoped human-agent communication with priority/status tracking, (2) File reservations for preventing concurrent edits, and (3) Mailbox polling for durable inter-actor messaging with reactive SQLite triggers. Key entry points: human message sending [1a], agent tool usage [2a], file reservation [4a], and reactive message polling [6c].",
+  "mermaidDiagram": "graph TB\n    subgraph BoardMsgs[\"Board Messages\"]\n        style BoardMsgs fill:#fcc2d7\n        1a[\"1a: CLI entry point\"]\n        1c[\"1c: Send message\"]\n        1d[\"1d: SQL INSERT\"]\n        1e[\"1e: Hook queries inbox\"]\n        1g[\"1g: Mark surfaced\"]\n        2a[\"2a: Tool handler\"]\n        2d[\"2d: Persist message\"]\n        2f[\"2f: SQL INSERT\"]\n        3a[\"3a: Query inbox\"]\n        3d[\"3d: Execute query\"]\n        3f[\"3f: SQL UPDATE read\"]\n    end\n    \n    subgraph FileRes[\"File Reservations\"]\n        style FileRes fill:#eebefa\n        4a[\"4a: Tool reserve\"]\n        4b[\"4b: Check conflicts\"]\n        4d[\"4d: Query conflicts\"]\n        4f[\"4f: SQL INSERT\"]\n        5a[\"5a: Tool release\"]\n        5c[\"5c: SQL DELETE path\"]\n        5e[\"5e: SQL DELETE ID\"]\n    end\n    \n    subgraph BoardStore[\"BoardStore Hub\"]\n        style BoardStore fill:#ffec99\n        BS[\"board.db\u003cbr/\u003eboard_messages\u003cbr/\u003efile_reservations\"]\n    end\n    \n    subgraph MailboxPoll[\"Mailbox Polling\"]\n        style MailboxPoll fill:#99e9f2\n        6a[\"6a: Message INSERT\"]\n        6b[\"6b: Trigger fires\"]\n        6c[\"6c: Watcher polls\"]\n        6d[\"6d: WakeUp signal\"]\n        6e[\"6e: Supervisor receives\"]\n        6f[\"6f: Handle wake-up\"]\n        7a[\"7a: Poll message\"]\n        7b[\"7b: Begin transaction\"]\n        7d[\"7d: UPDATE lease\"]\n        7e[\"7e: Deliver to actor\"]\n        7f[\"7f: Acknowledge\"]\n        7g[\"7g: SQL DELETE\"]\n    end\n    \n    subgraph MailboxStore[\"Mailbox Hub\"]\n        style MailboxStore fill:#a5d8ff\n        MS[\"mailbox.db\u003cbr/\u003emailbox table\u003cbr/\u003emailbox_notify\"]\n    end\n    \n    subgraph Adapter[\"Message Adapter\"]\n        style Adapter fill:#d0bfff\n        8a[\"8a: Adapter Poll\"]\n        8b[\"8b: Call storage\"]\n        8c[\"8c: Storage Poll\"]\n        8d[\"8d: Convert message\"]\n    end\n    \n    subgraph Tools[\"Agent Tools\"]\n        style Tools fill:#b2f2bb\n        SEND[\"mail.send\"]\n        RESERVE[\"mail.reserve\"]\n        RELEASE[\"mail.release\"]\n        INBOX[\"mail.inbox\"]\n    end\n    \n    subgraph Hooks[\"Hooks\"]\n        style Hooks fill:#ffd8a8\n        OVERSEER[\"overseer_inbox\"]\n        FILEGUARD[\"file_guard\"]\n    end\n    \n    %% Board Messages flow\n    1a --\u003e|opens| BS\n    1c --\u003e|persists| BS\n    1d --\u003e|inserts| BS\n    \n    2a --\u003e|is| SEND\n    2d --\u003e|persists| BS\n    2f --\u003e|inserts| BS\n    \n    3a --\u003e|is| INBOX\n    3d --\u003e|queries| BS\n    3f --\u003e|updates| BS\n    \n    %% File Reservations flow\n    4a --\u003e|is| RESERVE\n    4b --\u003e|queries| BS\n    4d --\u003e|checks| BS\n    4f --\u003e|inserts| BS\n    \n    5a --\u003e|is| RELEASE\n    5c --\u003e|deletes| BS\n    5e --\u003e|deletes| BS\n    \n    %% Hooks consume board messages\n    1e --\u003e|is| OVERSEER\n    1g --\u003e|marks| BS\n    FILEGUARD --\u003e|reads| BS\n    \n    %% Mailbox polling flow\n    6a --\u003e|triggers| 6b\n    6b --\u003e|fires| 6c\n    6c --\u003e|polls| MS\n    6d --\u003e|sends| 6e\n    6e --\u003e|routes| 6f\n    6f --\u003e|calls| 7a\n    \n    %% Poll and ack flow\n    7a --\u003e|begins| 7b\n    7b --\u003e|claims| MS\n    7d --\u003e|leases| MS\n    7e --\u003e|delivers| 7f\n    7f --\u003e|acks| 7g\n    7g --\u003e|deletes| MS\n    \n    %% Adapter bridges\n    8a --\u003e|wraps| 8b\n    8b --\u003e|calls| 8c\n    8c --\u003e|returns| 8d\n    8d --\u003e|maps| 8e\n    \n    %% Supervisor uses adapter\n    6f --\u003e|uses| 8a\n    8c --\u003e|queries| MS"
+}

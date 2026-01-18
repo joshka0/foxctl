@@ -268,6 +268,25 @@ func codemapListItemFromEntry(entry memory.NamedEntry) (CodemapListItemResponse,
 }
 
 func codemapFromEntry(entry memory.NamedEntry) (codemap.Codemap, error) {
+	if ws, ok, err := codemap.ParseWindsurfCodemap(entry.Result); err != nil {
+		return codemap.Codemap{}, err
+	} else if ok {
+		converted := ws.ToCodemap()
+		if converted == nil {
+			return codemap.Codemap{}, errors.New("parse codemap: empty Windsurf conversion")
+		}
+		if converted.ID == "" {
+			converted.ID = codemapIDFromName(entry.Name)
+		}
+		if converted.Workspace == "" {
+			converted.Workspace = entry.Workspace
+		}
+		if converted.CreatedAt.IsZero() {
+			converted.CreatedAt = entry.CreatedAt
+		}
+		return *converted, nil
+	}
+
 	var cm codemap.Codemap
 	if err := json.Unmarshal(entry.Result, &cm); err != nil {
 		return cm, err

@@ -7,12 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -53,29 +52,25 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate path
 	testPath, err := resolveTestPath(rc, in.Path)
 	if err != nil {
-		return fmt.Errorf("resolve test path: %w", err)
+		return err
 	}
 
 	// Check if go is available
-	if _, err := exec.LookPath("go"); err != nil {
+	if _, err := executil.RequireTool("go", "install Go from https://go.dev/doc/install"); err != nil {
 		return fmt.Errorf("go command not found: %w", err)
 	}
 
 	// Build command based on mode
-	cmd, err := buildTestCommand(ctx, in.Mode, testPath, in)
+	args, env, err := buildTestArgs(in.Mode, testPath, in)
 	if err != nil {
 		return err
 	}
 
 	// Execute tests
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	execErr := cmd.Run()
+	result := executil.RunWithEnv(ctx, "", "go", env, args...)
 
 	// Parse output
-	results := parseTestOutput(stdout.String(), in.Mode)
+	results := parseTestOutput(string(result.Stdout), in.Mode)
 
 	// Prepare response data
 	data := map[string]any{
@@ -91,21 +86,22 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Include stderr if there were errors
-	if execErr != nil {
-		data["exit_code"] = getExitCode(execErr)
-		if stderr.Len() > 0 {
-			data["stderr_preview"] = truncate(stderr.String(), 500)
+	if result.Err != nil {
+		data["exit_code"] = result.ExitCode
+		if len(result.Stderr) > 0 {
+			data["stderr_preview"] = skillout.TruncateStringWithSuffix(string(result.Stderr), 500, "... (truncated)")
 		}
 	}
 
 	// Store full output as artifact if substantial
-	if stdout.Len() > 5000 {
-		artifact, err := skillout.PersistBuffer(ctx, rc, &stdout, "text/plain", "test_output")
-		if err == nil && artifact.Digest != "" {
-			data["artifact"] = artifact.Digest
+	if len(result.Stdout) > 5000 {
+		stdout := bytes.NewBuffer(result.Stdout)
+		artifact, err := skillout.PersistBuffer(ctx, rc, stdout, "text/plain", "test_output")
+		if err == nil {
+			skillout.AddArtifact(data, &artifact)
 		}
-	} else if stdout.Len() > 0 {
-		data["output_preview"] = truncate(stdout.String(), 1000)
+	} else if len(result.Stdout) > 0 {
+		data["output_preview"] = skillout.TruncateStringWithSuffix(string(result.Stdout), 1000, "... (truncated)")
 	}
 
 	return skillout.Emit(rc, command, data)
@@ -115,14 +111,14 @@ func resolveTestPath(rc *skillmain.RunContext, path string) (string, error) {
 	if path == "" || path == "./..." {
 		return path, nil
 	}
-	valid, err := rc.PathValidator.ValidatePath(path)
+	valid, err := skillmain.ValidatePath(rc, path, skillmain.WithPathMessage("resolve test path"))
 	if err != nil {
-		return "", fmt.Errorf("path validation failed: %w", err)
+		return "", err
 	}
 	return valid, nil
 }
 
-func buildTestCommand(ctx context.Context, mode, path string, in input) (*exec.Cmd, error) {
+func buildTestArgs(mode, path string, in input) ([]string, []string, error) {
 	var args []string
 
 	switch mode {
@@ -141,7 +137,7 @@ func buildTestCommand(ctx context.Context, mode, path string, in input) (*exec.C
 	case "coverage":
 		args = []string{"test", "-cover", "-covermode=atomic"}
 	default:
-		return nil, fmt.Errorf("invalid mode: %s", mode)
+		return nil, nil, fmt.Errorf("invalid mode: %s", mode)
 	}
 
 	// Add common flags
@@ -165,17 +161,13 @@ func buildTestCommand(ctx context.Context, mode, path string, in input) (*exec.C
 	// Add path
 	args = append(args, path)
 
-	cmd := exec.CommandContext(ctx, "go", args...)
-	cmd.Env = os.Environ()
-
-	// For race mode, we need CGO_ENABLED=1
+	// For race mode, we need CGO_ENABLED=1.
+	env := []string{"CGO_ENABLED=0"}
 	if mode == "race" {
-		cmd.Env = append(cmd.Env, "CGO_ENABLED=1")
-	} else {
-		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+		env = []string{"CGO_ENABLED=1"}
 	}
 
-	return cmd, nil
+	return args, env, nil
 }
 
 func parseTestOutput(output, mode string) []testResult {
@@ -273,18 +265,3 @@ func summarizeResults(results []testResult) map[string]any {
 
 	return summary
 }
-
-func getExitCode(err error) int {
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		return exitErr.ExitCode()
-	}
-	return 1
-}
-
-func truncate(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	return s[:limit] + "... (truncated)"
-}
-

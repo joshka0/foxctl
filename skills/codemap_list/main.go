@@ -4,13 +4,14 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -95,20 +96,20 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		},
 	}
 
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
+		return skillerr.WrapIO("open memory store", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	var allEntries []storage.ScoredEntry
 
 	if in.Query != "" {
-		allEntries, err = searchCodemaps(ctx, memStore, rc.Workspace, in.Query, in.Limit+in.Offset+10)
+		allEntries, err = searchCodemaps(ctx, memStore, rc.Config, rc.Workspace, in.Query, in.Limit+in.Offset+10)
 		if err != nil {
 			entries, listErr := memStore.List(ctx, rc.Workspace, 500)
 			if listErr != nil {
-				return fmt.Errorf("list memories: %w", listErr)
+				return skillerr.WrapIO("list memories", listErr)
 			}
 			for _, e := range entries {
 				if e.Type == "codemap" {
@@ -122,7 +123,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	} else {
 		entries, err := memStore.List(ctx, rc.Workspace, 500)
 		if err != nil {
-			return fmt.Errorf("list memories: %w", err)
+			return skillerr.WrapIO("list memories", err)
 		}
 		for _, e := range entries {
 			if e.Type == "codemap" {
@@ -156,7 +157,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		entry := scored.Entry
 		cm := CodemapEntry{
 			ID:      entry.Name,
-			Summary: truncate(entry.Summary, in.MaxSummaryChars),
+			Summary: skillout.TruncateRunes(entry.Summary, in.MaxSummaryChars),
 		}
 
 		if !entry.CreatedAt.IsZero() {
@@ -190,20 +191,20 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
-func searchCodemaps(ctx context.Context, memStore *memory.Store, workspacePath, query string, limit int) ([]storage.ScoredEntry, error) {
-	embedder, err := semantic.NewEmbedder(semantic.ScopeCodemaps)
+func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg config.Config, workspacePath, query string, limit int) ([]storage.ScoredEntry, error) {
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeCodemaps, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create embedder: %w", err)
+		return nil, skillerr.WrapRuntime("create embedder", err)
 	}
 
 	result, err := embedder.Embed(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("generate query embedding: %w", err)
+		return nil, skillerr.WrapRuntime("generate query embedding", err)
 	}
 
 	results, err := memStore.SearchSimilar(ctx, workspacePath, result.Vec, limit)
 	if err != nil {
-		return nil, fmt.Errorf("vector search: %w", err)
+		return nil, skillerr.WrapIO("vector search", err)
 	}
 
 	filtered := make([]storage.ScoredEntry, 0, len(results))
@@ -223,15 +224,4 @@ func extractTitleFromName(name string) string {
 		return string(runes[:26])
 	}
 	return name
-}
-
-func truncate(s string, maxLen int) string {
-	if maxLen <= 3 {
-		return s
-	}
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen-3]) + "..."
 }

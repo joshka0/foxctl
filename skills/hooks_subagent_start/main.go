@@ -6,13 +6,13 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agentpolicy"
@@ -72,9 +72,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Build output with context injection
 	output := hooks.NewNoneWithContext(briefing)
 	output.Meta = map[string]any{
-		"subagent_name":   subagentName,
+		"subagent_name":    subagentName,
 		"inferred_profile": string(profile),
-		"allowed_skills":  agentpolicy.GetAllowedSkillNames(profile),
+		"allowed_skills":   agentpolicy.GetAllowedSkillNames(profile),
 	}
 
 	data := map[string]any{
@@ -129,26 +129,19 @@ func generateBriefing(ctx context.Context, profile agentpolicy.Profile) (string,
 		return "", err
 	}
 
-	cmd := exec.CommandContext(ctx, "agentctl", "run", "agent/handbook", "--input", string(inputJSON))
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("handbook skill failed: %w (stderr: %s)", err, stderr.String())
+	var data struct {
+		Briefing string `json:"briefing"`
+	}
+	result, err := executil.RunAgentctlSkillDecode(ctx, "", "agent/handbook", inputJSON, &data)
+	if err != nil {
+		var decodeErr executil.DecodeError
+		if errors.As(err, &decodeErr) {
+			return "", fmt.Errorf("parse handbook output: %w", decodeErr)
+		}
+		return "", fmt.Errorf("handbook skill failed: %w (stderr: %s)", err, string(result.Stderr))
 	}
 
-	// Parse the output envelope
-	var envelope struct {
-		Data struct {
-			Briefing string `json:"briefing"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
-		return "", fmt.Errorf("parse handbook output: %w", err)
-	}
-
-	return envelope.Data.Briefing, nil
+	return data.Briefing, nil
 }
 
 // generateFallbackBriefing creates a simple briefing when the handbook skill fails.

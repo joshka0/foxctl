@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
@@ -116,25 +115,14 @@ func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
 
 // createSkillResolver creates a resolver with paths from config.
 func createSkillResolver(cfg config.Config) *skill.Resolver {
-	var searchPaths []string
-
-	// Environment override takes highest precedence and supports list format.
-	if env := os.Getenv("AGENTCTL_SKILLS_PATH"); env != "" {
-		searchPaths = append(searchPaths, filepath.SplitList(env)...)
+	searchPaths := append([]string{}, skill.EnvSearchPaths()...)
+	if cfg.Paths.Skills != "" {
+		searchPaths = append(searchPaths, cfg.Paths.Skills)
 	}
-
-	// Configured skills path (defaults to ~/.agentctl/skills).
-	searchPaths = append(searchPaths, cfg.Paths.Skills)
-
-	// Development paths near the current working directory.
-	if pwd, err := os.Getwd(); err == nil {
-		searchPaths = append(searchPaths,
-			filepath.Join(pwd, "dist", "skills"),
-			filepath.Join(pwd, "skills"),
-		)
-	}
-
-	return skill.NewResolver(skill.WithSearchPaths(dedupeCleanPaths(searchPaths)...))
+	searchPaths = append(searchPaths, skill.UserSearchPaths()...)
+	searchPaths = append(searchPaths, skill.BuiltinSearchPaths()...)
+	searchPaths = append(searchPaths, skill.DevSearchPaths()...)
+	return skill.NewResolver(skill.WithSearchPaths(skill.NormalizeSearchPaths(searchPaths)...))
 }
 
 func loadSkillDir(dir string) (SkillHandle, error) {
@@ -146,47 +134,17 @@ func loadSkillDir(dir string) (SkillHandle, error) {
 	if err != nil {
 		return SkillHandle{}, err
 	}
-	if err := policy.ValidateWASIPolicy(manifest); err != nil {
+	if err := skill.ValidateWASIPolicy(manifest); err != nil {
 		return SkillHandle{}, err
 	}
-	var artifact string
-	switch manifest.Distribution.Type {
-	case "exec":
-		// Check candidates in priority order:
-		// 1. CGO binary (bin-cgo) if running CGO build - for Turso/native features
-		// 2. Standard binary (bin)
-		// 3. Source-tree skill directory itself (skills/<name>/ with main.go)
-		var candidates []string
-		if buildinfo.IsCGO() {
-			// CGO build: prefer bin-cgo, fall back to bin
-			candidates = append(candidates, filepath.Join(dir, "bin-cgo"))
+	artifact, err := skill.ResolveArtifactPath(dir, manifest, skill.ArtifactOptions{
+		PreferCGO: buildinfo.IsCGO(),
+	})
+	if err != nil {
+		if errors.Is(err, skill.ErrArtifactsMissing) {
+			return SkillHandle{}, fmt.Errorf("skill artifacts missing under %s; run 'make skills-build' to compile skills", dir)
 		}
-		candidates = append(candidates, filepath.Join(dir, "bin"))
-		// For source-tree skills, check if main.go exists (Go skill)
-		if _, err := os.Stat(filepath.Join(dir, "main.go")); err == nil {
-			candidates = append(candidates, dir)
-		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				artifact = c
-				break
-			}
-		}
-	case "wasi":
-		candidates := []string{
-			filepath.Join(dir, "module.wasm"),
-		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				artifact = c
-				break
-			}
-		}
-	default:
-		return SkillHandle{}, fmt.Errorf("unsupported distribution %q", manifest.Distribution.Type)
-	}
-	if artifact == "" {
-		return SkillHandle{}, fmt.Errorf("skill artifacts missing under %s; run 'make skills-build' to compile skills", dir)
+		return SkillHandle{}, err
 	}
 	return SkillHandle{
 		Manifest:     manifest,
@@ -257,23 +215,6 @@ func resolveAlternateSkill(resolver *skill.Resolver, requested string, failed sk
 func normalizeSkillCandidate(name string) string {
 	name = strings.ReplaceAll(name, "/", "_")
 	return strings.ReplaceAll(name, "-", "_")
-}
-
-func dedupeCleanPaths(paths []string) []string {
-	seen := make(map[string]struct{})
-	var out []string
-	for _, p := range paths {
-		cleaned := filepath.Clean(strings.TrimSpace(p))
-		if cleaned == "" {
-			continue
-		}
-		if _, ok := seen[cleaned]; ok {
-			continue
-		}
-		seen[cleaned] = struct{}{}
-		out = append(out, cleaned)
-	}
-	return out
 }
 
 func withinDir(root, target string) bool {

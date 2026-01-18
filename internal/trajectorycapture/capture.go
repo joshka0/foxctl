@@ -279,12 +279,36 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 		return fmt.Errorf("trajectorycapture: decode envelope: %w", err)
 	}
 
+	kind := deriveResultKind(env, c.todoOp)
+	dataInline := buildResultInlineData(env, c.todoOp)
+	artifact := resolveResultArtifact(env)
+	meta := c.buildResultMeta(dataInline, jobID, correlationID, artifact)
+
+	_, err := c.store.InsertEvent(ctx, trajectory.Event{
+		TrajectoryID: c.traj.ID,
+		Kind:         kind,
+		Actor:        "",
+		Command:      env.Command,
+		Status:       env.Status,
+		DataInline:   dataInline,
+		DataArtifact: artifact,
+		Meta:         meta,
+	})
+	if err != nil {
+		return err
+	}
+
+	c.updateTrajectoryStatus(env, dataInline)
+	return c.store.UpdateTrajectory(ctx, c.traj)
+}
+
+func deriveResultKind(env envelope.Envelope, todoOp string) trajectory.EventKind {
 	kind := trajectory.EventKindToolResult
 	if strings.HasPrefix(env.Command, "hooks/") {
 		kind = trajectory.EventKindHookResult
 	}
 	if env.Command == "todo/manage" {
-		switch c.todoOp {
+		switch todoOp {
 		case "add", "complete", "set_active", "ensure_active", "clear_active", "get_active", "plan":
 			kind = trajectory.EventKindTaskTransition
 		case "review_request":
@@ -295,7 +319,10 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 			kind = trajectory.EventKindToolResult
 		}
 	}
+	return kind
+}
 
+func buildResultInlineData(env envelope.Envelope, todoOp string) map[string]any {
 	dataInline := map[string]any{}
 	if m, ok := env.Data.(map[string]any); ok {
 		if s, ok := m["summary"].(string); ok && strings.TrimSpace(s) != "" {
@@ -323,16 +350,26 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 			dataInline["summary"] = env.Error.Message
 		}
 	}
-	if c.todoOp != "" {
-		dataInline["operation"] = c.todoOp
+	if todoOp != "" {
+		dataInline["operation"] = todoOp
 	}
-	dataInline = secrets.RedactMap(dataInline)
+	return secrets.RedactMap(dataInline)
+}
 
+func resolveResultArtifact(env envelope.Envelope) string {
 	artifact := extractArtifactDigest(env.Data)
 	if artifact == "" {
 		artifact = strings.TrimSpace(env.Meta.CASDigest)
 	}
+	return artifact
+}
 
+func (c *RunCapture) buildResultMeta(
+	dataInline map[string]any,
+	jobID string,
+	correlationID string,
+	artifact string,
+) *trajectory.EventMeta {
 	meta := &trajectory.EventMeta{
 		TraceID:   strings.TrimSpace(correlationID),
 		JobID:     strings.TrimSpace(jobID),
@@ -352,21 +389,10 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 			c.traj.TaskIDs = append(c.traj.TaskIDs, tid)
 		}
 	}
+	return meta
+}
 
-	_, err := c.store.InsertEvent(ctx, trajectory.Event{
-		TrajectoryID: c.traj.ID,
-		Kind:         kind,
-		Actor:        "",
-		Command:      env.Command,
-		Status:       env.Status,
-		DataInline:   dataInline,
-		DataArtifact: artifact,
-		Meta:         meta,
-	})
-	if err != nil {
-		return err
-	}
-
+func (c *RunCapture) updateTrajectoryStatus(env envelope.Envelope, dataInline map[string]any) {
 	if env.Status == envelope.StatusOK {
 		c.traj.Status = trajectory.StatusOK
 	} else {
@@ -375,7 +401,6 @@ func (c *RunCapture) CaptureResult(ctx context.Context, envBytes []byte, jobID s
 	if s, ok := dataInline["summary"].(string); ok {
 		c.traj.Summary = strings.TrimSpace(secrets.Redact(s))
 	}
-	return c.store.UpdateTrajectory(ctx, c.traj)
 }
 
 func deriveTaskHints(command string, input []byte) (*trajectory.TaskHints, string) {

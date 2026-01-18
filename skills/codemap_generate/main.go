@@ -7,18 +7,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/logging"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codemap"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
-	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
+	"github.com/rs/zerolog"
 )
 
 const command = "codemap/generate"
@@ -45,7 +45,7 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Query == "" {
-		return fmt.Errorf("query is required")
+		return skillerr.Arg("query is required", skillerr.WithHint("Provide a natural language query to generate a codemap."))
 	}
 
 	cfg := rc.Config
@@ -55,9 +55,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if workspace == "" {
 		workspace = rc.PathValidator.Workspace()
 	} else {
-		validated, err := rc.PathValidator.ValidatePath(workspace)
+		validated, err := skillmain.ValidatePath(
+			rc,
+			workspace,
+			skillmain.WithPathMessage("workspace validation failed"),
+			skillmain.WithPathHint("Provide a workspace within the allowed roots."),
+		)
 		if err != nil {
-			return fmt.Errorf("workspace validation failed: %w", err)
+			return err
 		}
 		workspace = validated
 	}
@@ -90,7 +95,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 
 	agent, err := codemap.NewAgent(agentOpts...)
 	if err != nil {
-		return fmt.Errorf("create agent: %w", err)
+		return skillerr.WrapRuntime("create agent", err)
 	}
 
 	// Generate codemap
@@ -100,66 +105,48 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		Depth:     depth,
 	})
 	if err != nil {
-		return fmt.Errorf("generate codemap: %w", err)
+		return skillerr.WrapRuntime("generate codemap", err)
 	}
 
 	// Store codemap with embedding for semantic search
-	if err := storeCodemapWithEmbedding(ctx, &cfg, result, workspace); err != nil {
+	if err := storeCodemapWithEmbedding(ctx, rc.Logger, &cfg, result, workspace); err != nil {
 		// Log error but don't fail - codemap was generated successfully
-		fmt.Fprintf(os.Stderr, "warning: failed to store codemap embedding: %v\n", err)
+		rc.Logger.Warn().Err(err).Msg("codemap: failed to store embedding")
 	}
 
 	return skillout.Emit(rc, command, result)
 }
 
-// storeCodemapWithEmbedding saves the codemap to memory store with an embedding
-// for semantic search. Uses voyage-3.5 model via ScopeModelRecommendation.
-func storeCodemapWithEmbedding(ctx context.Context, cfg *config.Config, cm *codemap.Codemap, workspace string) error {
-	// Check for Voyage API key
+// storeCodemapWithEmbedding saves the codemap to memory store with chunked embeddings
+// for semantic search.
+func storeCodemapWithEmbedding(ctx context.Context, logger zerolog.Logger, cfg *config.Config, cm *codemap.Codemap, workspace string) error {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
-	if voyageKey == "" {
-		return fmt.Errorf("VOYAGE_API_KEY not set; embedding skipped")
-	}
-
-	// Create embedding provider using scope-based model recommendation
-	model, _ := semantic.ScopeModelRecommendation(semantic.ScopeCodemaps)
-	provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-		APIKey: voyageKey,
-		Model:  model,
-	})
-	if err != nil {
-		return fmt.Errorf("create embedding provider: %w", err)
-	}
-
-	// Build embedding text from title, description, and query
-	embeddingText := fmt.Sprintf("%s - %s\nQuery: %s", cm.Title, cm.Description, cm.Query)
-
-	// Generate embedding
-	embedding, err := provider.Embed(ctx, embeddingText)
-	if err != nil {
-		return fmt.Errorf("generate embedding: %w", err)
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if voyageKey == "" && geminiKey == "" {
+		return skillerr.Auth(
+			"no embedding API key set; embedding skipped",
+			skillerr.WithHint("Set VOYAGE_API_KEY or GEMINI_API_KEY to enable codemap embeddings."),
+		)
 	}
 
 	// Open memory store
-	storageRoot := cfg.Storage.Root
-	casRoot := filepath.Join(filepath.Dir(storageRoot), "cas")
-	memStore, err := memory.Open(ctx, storageRoot, casRoot)
+	memStore, err := memory.OpenWithConfig(ctx, *cfg)
 	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
+		return skillerr.WrapIO("open memory store", err)
 	}
-	defer memStore.Close()
+	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	// Serialize codemap result
 	resultJSON, err := json.Marshal(cm)
 	if err != nil {
-		return fmt.Errorf("marshal codemap: %w", err)
+		return skillerr.WrapRuntime("marshal codemap", err)
 	}
 
 	// Create named entry with type="codemap"
 	entry := memory.NamedEntry{
 		Name:      fmt.Sprintf("codemap://%s", cm.ID),
 		Type:      "codemap",
-		Summary:   fmt.Sprintf("%s - %s", cm.Title, cm.Description),
+		Summary:   buildCodemapSummary(cm.Title, cm.Description, cm.ID),
 		Result:    resultJSON,
 		Workspace: workspace,
 	}
@@ -167,14 +154,28 @@ func storeCodemapWithEmbedding(ctx context.Context, cfg *config.Config, cm *code
 	// Save entry first
 	saved, err := memStore.Save(ctx, entry)
 	if err != nil {
-		return fmt.Errorf("save codemap entry: %w", err)
+		return skillerr.WrapIO("save codemap entry", err)
 	}
 
-	// Update with embedding
-	if err := memStore.UpdateEmbedding(ctx, saved.Name, workspace, embedding); err != nil {
-		return fmt.Errorf("update embedding: %w", err)
+	// Store chunked embeddings for codemap search
+	plan := codemap.BuildEmbeddingPlan(cm)
+	if _, err := codemap.StoreEmbeddingPlan(ctx, memStore, *cfg, workspace, saved.Name, plan); err != nil {
+		return skillerr.WrapIO("store codemap embeddings", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Stored codemap with embedding: %s\n", saved.Name)
+	logger.Info().Str("codemap_entry", saved.Name).Msg("Stored codemap with embeddings")
 	return nil
+}
+
+func buildCodemapSummary(title, description, fallback string) string {
+	if title == "" && description == "" {
+		return fallback
+	}
+	if title == "" {
+		return description
+	}
+	if description == "" {
+		return title
+	}
+	return fmt.Sprintf("%s - %s", title, description)
 }

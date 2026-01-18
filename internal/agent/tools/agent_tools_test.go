@@ -20,6 +20,9 @@ func TestAgentSpawnTool(t *testing.T) {
 		WorkspaceRoot: tmpDir,
 		WorkspaceID:   "workspace-1",
 		ActorID:       "actor:agent:tester",
+		Depth:         1,
+		MaxDepth:      3,
+		LocalMaxDepth: 3,
 		OpenMailboxStore: func(ctx context.Context) (mailbox.Store, error) {
 			return mailbox.Open(ctx, tmpDir)
 		},
@@ -39,9 +42,14 @@ func TestAgentSpawnTool(t *testing.T) {
 	require.NotNil(t, tool)
 
 	args := map[string]any{
-		"role":         "coder",
-		"prompt":       "You are a coder",
-		"skills_allow": []string{"fs.read_file"},
+		"epic_id":      "epic-1",
+		"spawn_reason": "Need parallel coding",
+		"requested_subagents": []any{
+			map[string]any{
+				"role": "coder",
+				"task": "Implement helper logic",
+			},
+		},
 	}
 	result, err := tool.Call(ctx, args)
 	require.NoError(t, err)
@@ -64,17 +72,22 @@ func TestAgentSpawnTool(t *testing.T) {
 	var env envelope.Envelope
 	require.NoError(t, json.Unmarshal(msg.Payload, &env))
 	require.NoError(t, envelope.Validate(env))
-	require.Equal(t, "agent.cmd", env.Command)
+	require.Equal(t, "agent.spawn", env.Command)
 
 	dataBytes, err := json.Marshal(env.Data)
 	require.NoError(t, err)
 	var payload struct {
-		Action      string `json:"action"`
-		ChildConfig struct {
+		EpicID             string `json:"epic_id"`
+		SpawnReason        string `json:"spawn_reason"`
+		RequestedSubagents []struct {
 			Role string `json:"role"`
-		} `json:"child_config"`
+			Task string `json:"task"`
+		} `json:"requested_subagents"`
 	}
 	require.NoError(t, json.Unmarshal(dataBytes, &payload))
-	require.Equal(t, "spawn", payload.Action)
-	require.Equal(t, "coder", payload.ChildConfig.Role)
+	require.Equal(t, "epic-1", payload.EpicID)
+	require.Equal(t, "Need parallel coding", payload.SpawnReason)
+	require.Len(t, payload.RequestedSubagents, 1)
+	require.Equal(t, "coder", payload.RequestedSubagents[0].Role)
+	require.Equal(t, "Implement helper logic", payload.RequestedSubagents[0].Task)
 }

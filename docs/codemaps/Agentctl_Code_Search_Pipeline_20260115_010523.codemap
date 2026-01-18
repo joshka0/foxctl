@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 1,
+  "id": "Agentctl_Code_Search_Pipeline_20260115_010523",
+  "stableId": "f261003b-4c37-4561-a27a-e0857171a8a2",
+  "metadata": {
+    "cascadeId": "88d205b7-66e3-4058-98c3-5e053b71fb68",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T01:05:23+02:00",
+    "mode": "FAST",
+    "originalPrompt": "Explore: code search pipeline from semantic retrieval to snippet extraction and ripgrep expansion. Start from: skills/code_semantic_search/main.go, skills/code_smart_search/main.go, skills/code_snippet_extract/main.go, skills/code_context_ripgrep/main.go"
+  },
+  "title": "Agentctl Code Search Pipeline",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Smart Search Pipeline",
+      "description": "User-facing entry point that orchestrates candidate generation and snippet extraction",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "lineNumber": 91,
+          "lineContent": "func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {",
+          "title": "Smart Search Entry Point",
+          "description": "Main skill logic that combines candidate generation with snippet extraction"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "lineNumber": 113,
+          "lineContent": "candidates, err := generateCandidates(ctx, rc, in)",
+          "title": "Generate Candidates",
+          "description": "Uses retrieval package to generate ranked file candidates"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "lineNumber": 190,
+          "lineContent": "generator := retrieval.NewGenerator(store, nil, workspace, logger)",
+          "title": "Create Retrieval Generator",
+          "description": "Instantiates generator with memory store for symbol/semantic search"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "lineNumber": 212,
+          "lineContent": "result, err := generator.Generate(ctx, in.WorkspaceID, in.Question, opts)",
+          "title": "Generate Candidates",
+          "description": "Calls the core retrieval generation logic"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go",
+          "lineNumber": 143,
+          "lineContent": "extractResult, err := invokeSnippetExtract(ctx, rc, in, candidates)",
+          "title": "Invoke Snippet Extract",
+          "description": "Calls code/snippet_extract skill with generated candidates"
+        }
+      ],
+      "traceTextDiagram": "Smart Search Skill Entry Point \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:87\n├── run() main skill logic \u003c-- 1a\n│   ├── generateCandidates() \u003c-- 1b\n│   │   ├── NewGenerator() creation \u003c-- 1c\n│   │   │   └── store + workspace setup \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:181\n│   │   └── generator.Generate() call \u003c-- 1d\n│   │       ├── Symbol index search \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go:121\n│   │       ├── Semantic vector search \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go:133\n│   │       └── Ripgrep fallback \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go:150\n│   └── invokeSnippetExtract() call \u003c-- 1e\n│       ├── Build extract input JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:251\n│       └── Execute snippet_extract skill \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:266\n└── skillmain.Main() wrapper \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:87\n    └── Command registration \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_smart_search/main.go:28",
+      "traceGuide": "## Motivation\n\nWhen developers search code, they need more than simple text matching - they need to find **relevant code blocks** that actually solve their problem. The code/smart_search skill solves this by combining intelligent candidate generation from multiple sources (symbol index, semantic embeddings, and ripgrep fallback) with precise snippet extraction, giving developers the most relevant code without manual hunting.\n\n## Details\n\nThe smart search pipeline starts with the main entry point [1a] which orchestrates two key phases. First, it generates ranked file candidates using the retrieval package's Generator [1b]. This generator creates a memory store connection [1c] and calls Generate() [1d] to search three sources in parallel: the symbol index for function/class names, semantic embeddings for conceptual similarity, and ripgrep as a fallback. The candidates are then merged and ranked with weighted scoring.\n\nSecond, it invokes the snippet_extract skill [1e] with the generated candidates. This builds a JSON payload [1e] and executes the skill as a subprocess [1e], which reads the actual files, extracts relevant code blocks using keyword matching and symbol-aware parsing, and returns the final snippets. The results are aggregated with statistics about candidates generated and snippets extracted.\n\nThe beauty of this design is that each skill has a **single responsibility**: smart_search orchestrates, retrieval generates candidates, and snippet_extract does the heavy lifting of file processing and code block extraction."
+    },
+    {
+      "id": "2",
+      "title": "Retrieval Generation Orchestration",
+      "description": "Core retrieval package that combines multiple search sources and ranks candidates",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "lineNumber": 111,
+          "lineContent": "func (g *Generator) Generate(ctx context.Context, workspaceID, question string, opts Options) (*GenerateResult, error) {",
+          "title": "Generate Method Entry",
+          "description": "Main orchestration method for candidate generation"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "lineNumber": 121,
+          "lineContent": "candidates, err := g.searchSymbolIndex(ctx, workspaceID, question, opts.MaxSymbolCandidates)",
+          "title": "Symbol Index Search",
+          "description": "Searches indexed code symbols for matches"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "lineNumber": 133,
+          "lineContent": "candidates, err := g.searchSemanticIndex(ctx, workspaceID, question, opts.MaxSemanticCandidates)",
+          "title": "Semantic Vector Search",
+          "description": "Performs embedding-based similarity search"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "lineNumber": 150,
+          "lineContent": "candidates, err := g.ripgrepFallback(ctx, question, opts.MaxRipgrepCandidates)",
+          "title": "Ripgrep Fallback",
+          "description": "Uses ripgrep when symbol/semantic results are sparse"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go",
+          "lineNumber": 168,
+          "lineContent": "merged := mergeCandidates(allCandidates, weights, opts.MaxTotalCandidates)",
+          "title": "Merge and Rank",
+          "description": "Combines candidates from all sources with weighted scoring"
+        }
+      ],
+      "traceTextDiagram": "Retrieval Generation Orchestration\n├── Generate() main entry point \u003c-- 2a\n│   ├── Initialize allCandidates \u0026 stats \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go:116\n│   ├── searchSymbolIndex() \u003c-- 2b\n│   │   └── Build search terms from question \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/symbol_search.go:19\n│   ├── searchSemanticIndex() \u003c-- 2c\n│   │   ├── Generate query embedding \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:29\n│   │   └── Execute hybrid search \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:39\n│   ├── ripgrepFallback() \u003c-- 2d\n│   │   └── Extract keywords \u0026 run rg \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/ripgrep.go:20\n│   └── mergeCandidates() \u003c-- 2e\n│       ├── Group by file path \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/merge.go:22\n│       ├── Apply source weights \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/merge.go:31\n│       └── Sort \u0026 limit results \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/merge.go:61\n└── Return GenerateResult with candidates \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/candidates.go:185",
+      "traceGuide": "## Motivation\n\nWhen you search for code in a large codebase, you need to find the **most relevant files** quickly. Simple text search returns too many irrelevant results, while semantic search alone might miss exact symbol matches. The retrieval system solves this by **combining three complementary search methods**: symbol index search (finds exact function/class names), semantic vector search (finds conceptually similar code), and ripgrep fallback (catches anything missed by the indexes). This hybrid approach ensures you get the best possible candidates regardless of how you phrase your search query.\n\n## Details\n\nThe retrieval pipeline starts in `Generate()` [2a] which orchestrates three parallel searches. First, `searchSymbolIndex()` [2b] queries the symbol index using tokenized search terms, scoring matches based on symbol names, signatures, and documentation. Second, `searchSemanticIndex()` [2c] converts your question to an embedding vector and performs hybrid BM25+vector similarity search. Third, if the first two methods return few results, `ripgrepFallback()` [2d] extracts keywords from your query and runs ripgrep to find files containing those terms.\n\nAll candidates flow into `mergeCandidates()` [2e] which groups by file path, applies source weights (symbol search gets weight 1.0, semantic 0.7, ripgrep 0.5), and gives a **multi-source bonus** when the same file appears from multiple sources. The final ranked list is returned as `GenerateResult` with detailed statistics about how many candidates came from each source.\n\nThis design ensures **graceful degradation** - if symbol indexes are missing, you still get semantic results; if embeddings fail, you get BM25 and ripgrep; if everything fails, ripgrep still provides basic text search coverage."
+    },
+    {
+      "id": "3",
+      "title": "Semantic Search Implementation",
+      "description": "Vector-based semantic search using embedding providers and hybrid BM25+vector search",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go",
+          "lineNumber": 14,
+          "lineContent": "func (g *Generator) searchSemanticIndex(ctx context.Context, workspaceID, question string, limit int) ([]Candidate, error) {",
+          "title": "Semantic Search Entry",
+          "description": "Main semantic search implementation"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go",
+          "lineNumber": 29,
+          "lineContent": "vec, err := g.embedProvider.Embed(ctx, question)",
+          "title": "Generate Query Embedding",
+          "description": "Converts question to vector using embedding provider"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go",
+          "lineNumber": 39,
+          "lineContent": "results, err := searchable.SearchHybrid(ctx, question, queryVec, workspaceID, limit*2)",
+          "title": "Hybrid Search Execution",
+          "description": "Performs BM25 + vector similarity search"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go",
+          "lineNumber": 50,
+          "lineContent": "return g.memoryResultsToCandidates(results, limit)",
+          "title": "Convert to Candidates",
+          "description": "Transforms memory search results to candidate objects"
+        }
+      ],
+      "traceTextDiagram": "Semantic Search Implementation\n├── searchSemanticIndex() entry point \u003c-- 3a\n│   ├── Check embedding provider availability \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:15\n│   ├── Generate query embedding \u003c-- 3b\n│   │   └── embedProvider.Embed(ctx, question) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:29\n│   ├── Perform hybrid search \u003c-- 3c\n│   │   ├── searchable.SearchHybrid() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:39\n│   │   └── Fallback to BM25 if needed \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:41\n│   └── Convert results to candidates \u003c-- 3d\n│       ├── memoryResultsToCandidates() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:50\n│       └── Extract file paths from entries \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:143\n└── BM25 fallback path \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:54\n    ├── store.Search() simple search \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:56\n    └── Convert to candidates with scoring \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/retrieval/semantic_search.go:84",
+      "traceGuide": "# Motivation\n\nSemantic search solves the **fundamental problem** of finding code based on meaning rather than exact keywords. Traditional text search fails when you don't know the exact function names or variable names used in a codebase. By converting both code and queries into vector embeddings, the system can find semantically similar files even when they use different terminology - like finding \"authentication logic\" when the code uses \"login validation\" or \"user verification\" terminology.\n\n# Details\n\nThe semantic search system operates as a **hybrid search engine** that combines vector similarity with traditional BM25 text search. When a user submits a query, the system first generates an embedding vector using providers like Voyage or Gemini APIs [3b]. This vector is then compared against pre-indexed file embeddings using either pure vector similarity or hybrid search that also considers text matches [3c].\n\nThe system gracefully **degrades to BM25-only search** when embedding providers are unavailable or when vector search fails [3a]. This ensures the search remains functional even without API keys or during network issues. Results from both search modes are converted into standardized candidate objects that include file paths, relevance scores, and metadata [3d].\n\nA key innovation is the **file path extraction logic** that parses different memory entry formats (symbol://, file://, semantic://) to consistently extract workspace-relative file paths for candidate generation. This allows the same search infrastructure to work across different indexing strategies while maintaining a unified candidate format."
+    },
+    {
+      "id": "4",
+      "title": "Snippet Extraction Process",
+      "description": "Extracts relevant code blocks from candidate files using keyword matching and symbol-aware extraction",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go",
+          "lineNumber": 169,
+          "lineContent": "func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {",
+          "title": "Snippet Extract Entry",
+          "description": "Main skill logic for extracting code snippets"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go",
+          "lineNumber": 216,
+          "lineContent": "fileResults := processFiles(ctx, rc, in.Candidates, limits)",
+          "title": "Process Candidate Files",
+          "description": "Validates paths and reads file content"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go",
+          "lineNumber": 232,
+          "lineContent": "snippets := extractSnippets(fileResults, in.Question, limits.MaxSnippets)",
+          "title": "Extract Snippets",
+          "description": "Finds matching code blocks using keywords and symbol detection"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go",
+          "lineNumber": 400,
+          "lineContent": "if snippet := extractSymbolBody(fr, lines); snippet != nil {",
+          "title": "Symbol-Aware Extraction",
+          "description": "Uses AST to extract complete symbol bodies for Go files"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go",
+          "lineNumber": 407,
+          "lineContent": "matchingLines := findMatchingLines(lines, keywords)",
+          "title": "Keyword Matching",
+          "description": "Finds lines containing query keywords"
+        }
+      ],
+      "traceTextDiagram": "Snippet Extraction Process\n├── run() main skill entry \u003c-- 4a\n│   ├── processFiles() validate \u0026 read \u003c-- 4b\n│   │   ├── validate paths through PathValidator \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:1017\n│   │   ├── resolve symlinks \u0026 re-validate \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:1028\n│   │   └── read file content with limits \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:1048\n│   └── extractSnippets() find matches \u003c-- 4c\n│       ├── extractKeywords() from question \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:738\n│       ├── for each file result\n│       │   ├── extractSymbolBody() if symbol_id \u003c-- 4d\n│       │   │   ├── parseSymbolName() from ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:554\n│       │   │   ├── detectLanguage() from extension \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:563\n│       │   │   ├── extractGoSymbolBody() for Go files \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:465\n│       │   │   └── extractSymbolBodyHeuristic() fallback \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:523\n│       │   └── findMatchingLines() keywords \u003c-- 4e\n│       │       ├── splitLines() content \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:778\n│       │       ├── check each line for keywords\n│       │       └── groupIntoBlocks() with context \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:807\n│       └── makeInlinePreviews() for output \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_snippet_extract/main.go:883",
+      "traceGuide": "## Motivation\n\nThe snippet extraction system solves the **core problem** of finding relevant code blocks when you have a natural language question. Imagine asking \"how does authentication work?\" - you don't want entire files, you want the specific functions, classes, and code blocks that actually implement authentication. This system takes candidate files from search and intelligently extracts only the most relevant snippets, using both **keyword matching** and **symbol-aware extraction** to understand code structure.\n\n## Details\n\nThe process starts with the main entry point [4a] which receives candidate files and a question. First, it validates and reads each file [4b], ensuring paths are safe and content is loaded within size limits. Then the real intelligence begins: it extracts meaningful keywords from your question and finds matching lines in each file [4e].\n\nWhat makes this system smart is its **symbol-aware extraction**. When a symbol_id is provided (like \"auth.go:Login\"), it uses language-specific parsing to extract the complete function or class body [4d]. For Go files, it uses the AST to find exact boundaries [4d], while for other languages it uses heuristic pattern matching based on language syntax rules.\n\nThe system groups matching lines into logical code blocks with surrounding context, then ranks them by relevance to surface the most useful snippets first. Finally, it creates inline previews for immediate display and can persist full snippets as artifacts when the content is too large [4a].\n\nThe result is precise, context-aware code extraction that understands both **what you're asking for** and **how code is structured**."
+    },
+    {
+      "id": "5",
+      "title": "Ripgrep Context Expansion",
+      "description": "Performs ripgrep searches and expands matches to surrounding code blocks using language-specific heuristics",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go",
+          "lineNumber": 71,
+          "lineContent": "func run(ctx context.Context, rc *skillmain.RunContext, in input) error {",
+          "title": "Context Ripgrep Entry",
+          "description": "Main skill logic for ripgrep with block expansion"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go",
+          "lineNumber": 105,
+          "lineContent": "result, err := ripgrep.SearchJSON(ctx, opts)",
+          "title": "Execute Ripgrep Search",
+          "description": "Runs ripgrep to find pattern matches"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go",
+          "lineNumber": 144,
+          "lineContent": "expander := NewExpander(lang, in.MaxBlockLines)",
+          "title": "Create Language Expander",
+          "description": "Creates expander for language-specific block detection"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go",
+          "lineNumber": 146,
+          "lineContent": "fileBlocks := expander.ExpandMatches(file, lines, fileMatches)",
+          "title": "Expand to Code Blocks",
+          "description": "Expands individual matches to surrounding code blocks"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/expander.go",
+          "lineNumber": 80,
+          "lineContent": "start, end, header, symbolName, symbolKind := e.findBlockBoundaries(lines, lineIdx)",
+          "title": "Find Block Boundaries",
+          "description": "Uses language-specific patterns to find function/class boundaries"
+        }
+      ],
+      "traceTextDiagram": "Context Ripgrep Main Flow\n├── run() skill entry point \u003c-- 5a\n│   ├── ripgrep.SearchJSON() execution \u003c-- 5b\n│   │   └── Parse raw matches from JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go:279\n│   ├── Group matches by file \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go:187\n│   └── For each file:\n│       ├── Read file content \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go:136\n│       ├── NewExpander() creation \u003c-- 5c\n│       │   └── Set language \u0026 max lines \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/expander.go:33\n│       └── ExpandMatches() call \u003c-- 5d\n│           └── For each match:\n│               └── findBlockBoundaries() \u003c-- 5e\n│                   ├── Detect language type \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/expander.go:40\n│                   ├── Search upward for symbol \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/expander.go:175\n│                   └── Find block end (brace/indent) \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/expander.go:509\n└── Format blocks as output \u003c-- /Users/jkatigbak/repos/personal/agentctl/skills/code_context_ripgrep/main.go:209",
+      "traceGuide": "## Motivation\n\nWhen you search code with ripgrep, you get individual line matches that lack context. A function definition might be on line 15, but the interesting code could be on line 150. The **code/context_ripgrep** skill solves this by expanding ripgrep matches to their surrounding code blocks - functions, methods, classes - giving you **meaningful context** instead of isolated lines.\n\n## Details\n\nThe skill starts by executing ripgrep to find pattern matches [5a][5b]. For each file with matches, it reads the content and creates a language-specific expander [5c]. The expander uses regex patterns to identify code structures - functions, classes, methods - and finds the boundaries of the block containing each match [5d][5e].\n\nFor Go files, it searches upward for `func` or `type` declarations, then uses brace matching to find the block end. For Python, it tracks indentation levels. For JavaScript/TypeScript, it looks for function declarations and arrow functions. The system groups overlapping matches into single blocks to avoid duplication and formats the results with symbol names and line ranges.\n\nThe result is a set of **complete code blocks** rather than scattered line matches, making it much easier to understand the context around your search terms."
+    }
+  ],
+  "description": "Maps the complete code search pipeline in agentctl, from user-facing skills through retrieval orchestration to final snippet extraction. Key locations include the smart search orchestration [1b], retrieval generation logic [2a], semantic search implementation [3b], snippet extraction process [4c], and ripgrep block expansion [5e].",
+  "mermaidDiagram": "graph TB\n    subgraph SmartSearch[\"Smart Search Pipeline\"]\n        style SmartSearch fill:#fcc2d7\n        1a[\"1a: Smart Search Entry\u003cbr/\u003erun function\"]\n        1b[\"1b: Generate Candidates\u003cbr/\u003ecalls retrieval.Generator\"]\n        1e[\"1e: Invoke Snippet Extract\u003cbr/\u003ecalls code/snippet_extract skill\"]\n        1a --\u003e 1b\n        1a --\u003e 1e\n    end\n\n    subgraph Retrieval[\"Retrieval Orchestration\"]\n        style Retrieval fill:#a5d8ff\n        2a[\"2a: Generate Method\u003cbr/\u003eorchestrates all sources\"]\n        2b[\"2b: Symbol Index Search\u003cbr/\u003esearches indexed symbols\"]\n        2c[\"2c: Semantic Vector Search\u003cbr/\u003eembedding-based search\"]\n        2d[\"2d: Ripgrep Fallback\u003cbr/\u003ekeyword-based fallback\"]\n        2e[\"2e: Merge and Rank\u003cbr/\u003ecombines all sources\"]\n        2a --\u003e 2b\n        2a --\u003e 2c\n        2a --\u003e 2d\n        2b --\u003e 2e\n        2c --\u003e 2e\n        2d --\u003e 2e\n    end\n\n    subgraph SemanticImpl[\"Semantic Search Implementation\"]\n        style SemanticImpl fill:#a5d8ff\n        3a[\"3a: Semantic Search Entry\u003cbr/\u003emain semantic search\"]\n        3b[\"3b: Generate Query Embedding\u003cbr/\u003econverts question to vector\"]\n        3c[\"3c: Hybrid Search Execution\u003cbr/\u003eBM25 + vector search\"]\n        3d[\"3d: Convert to Candidates\u003cbr/\u003etransforms results\"]\n        3a --\u003e 3b\n        3b --\u003e 3c\n        3c --\u003e 3d\n    end\n\n    subgraph SnippetExtraction[\"Snippet Extraction\"]\n        style SnippetExtraction fill:#b2f2bb\n        4a[\"4a: Snippet Extract Entry\u003cbr/\u003erun function\"]\n        4b[\"4b: Process Candidate Files\u003cbr/\u003evalidates and reads files\"]\n        4c[\"4c: Extract Snippets\u003cbr/\u003efinds matching blocks\"]\n        4d[\"4d: Symbol-Aware Extraction\u003cbr/\u003eAST-based for Go\"]\n        4e[\"4e: Keyword Matching\u003cbr/\u003efinds matching lines\"]\n        4a --\u003e 4b\n        4b --\u003e 4c\n        4c --\u003e 4d\n        4c --\u003e 4e\n    end\n\n    subgraph RipgrepSystem[\"Ripgrep Context Expansion\"]\n        style RipgrepSystem fill:#ffec99\n        5a[\"5a: Context Ripgrep Entry\u003cbr/\u003erun function\"]\n        5b[\"5b: Execute Ripgrep Search\u003cbr/\u003eruns ripgrep pattern match\"]\n        5c[\"5c: Create Language Expander\u003cbr/\u003elanguage-specific detector\"]\n        5d[\"5d: Expand to Code Blocks\u003cbr/\u003eexpands matches to blocks\"]\n        5e[\"5e: Find Block Boundaries\u003cbr/\u003edetects function/class boundaries\"]\n        5a --\u003e 5b\n        5a --\u003e 5c\n        5b --\u003e 5d\n        5c --\u003e 5d\n        5d --\u003e 5e\n    end\n\n    1b --\u003e|generates candidates| 2a\n    2c --\u003e|calls semantic search| 3a\n    1e --\u003e|extracts snippets from| 4a\n    2e --\u003e|returns candidates to| 1b\n    3d --\u003e|returns candidates to| 2c"
+}

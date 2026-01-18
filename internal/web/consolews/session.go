@@ -108,7 +108,7 @@ func (s *Session) AddMessage(msg Message) {
 
 	// Persist turn if persistence is configured on hub
 	if s.hub != nil && s.hub.persistence != nil {
-		persistAsync(s.log, "save_turn", func(ctx context.Context) error {
+		persistAsync(s.hub.ctx, &s.hub.wg, s.log, "save_turn", func(ctx context.Context) error {
 			return s.hub.persistence.SaveTurn(ctx, s.id, msg, turnIndex)
 		})
 	}

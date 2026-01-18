@@ -48,6 +48,9 @@ type TurnListOptions = storage.SessionTurnListOptions
 // SessionChunk aliases the shared chunk type.
 type SessionChunk = storage.SessionChunk
 
+// SessionChunkSummary aliases the shared chunk summary type.
+type SessionChunkSummary = storage.SessionChunkSummary
+
 // ScoredChunk aliases the shared scored chunk type.
 type ScoredChunk = storage.ScoredChunk
 
@@ -143,6 +146,9 @@ func (s *Store) Save(ctx context.Context, session Session) (Session, error) {
 	if session.AgentID == "" {
 		session.AgentID = "agentctl"
 	}
+	if session.AgentType == "" {
+		session.AgentType = "claude"
+	}
 	if session.Status == "" {
 		session.Status = StatusOK
 	}
@@ -180,9 +186,9 @@ INSERT INTO sessions (
 	id, workspace_path, project_name, git_branch, claude_version,
 	started_at, ended_at, summary, accomplished, decisions, gotchas,
 	tags, key_files, tools_pattern, message_count, user_turns,
-	tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-	created_at, updated_at, parent_session_id, agent_id, status
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+	created_at, updated_at, parent_session_id, agent_id, agent_type, status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	workspace_path = excluded.workspace_path,
 	project_name = excluded.project_name,
@@ -202,20 +208,22 @@ ON CONFLICT(id) DO UPDATE SET
 	tool_invocations = excluded.tool_invocations,
 	total_tokens = excluded.total_tokens,
 	raw_jsonl_path = excluded.raw_jsonl_path,
+	content_hash = COALESCE(excluded.content_hash, sessions.content_hash),
 	embedding = COALESCE(excluded.embedding, sessions.embedding),
 	embedding_model = COALESCE(excluded.embedding_model, sessions.embedding_model),
 	updated_at = excluded.updated_at,
 	parent_session_id = excluded.parent_session_id,
 	agent_id = excluded.agent_id,
+	agent_type = excluded.agent_type,
 	status = excluded.status
 `,
 		session.ID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
 		sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
 		session.Summary, accomplishedJSON, decisionsJSON, gotchasJSON,
 		tagsJSON, keyFilesJSON, session.ToolsPattern, session.MessageCount, session.UserTurns,
-		session.ToolInvocations, session.TotalTokens, session.RawJSONLPath, session.Embedding, session.EmbeddingModel,
+		session.ToolInvocations, session.TotalTokens, session.RawJSONLPath, session.ContentHash, session.Embedding, session.EmbeddingModel,
 		sqlutil.FormatTimestamp(session.CreatedAt), sqlutil.FormatTimestamp(session.UpdatedAt),
-		parentSessionID, session.AgentID, session.Status,
+		parentSessionID, session.AgentID, session.AgentType, session.Status,
 	)
 	if err != nil {
 		return Session{}, fmt.Errorf("sessions: save: %w", err)
@@ -229,8 +237,8 @@ func (s *Store) Get(ctx context.Context, id string) (Session, error) {
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status, key_questions
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
 		FROM sessions
 		WHERE id = ?`, id)
 	return scanSession(row)
@@ -274,8 +282,8 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status, key_questions
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
 		FROM sessions`
 
 	if len(conditions) > 0 {
@@ -321,8 +329,8 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status, key_questions
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
 		FROM sessions
 		WHERE LOWER(summary) LIKE ?
 			OR LOWER(tags) LIKE ?
@@ -428,21 +436,38 @@ func (s *Store) SetEmbedding(ctx context.Context, id string, embedding []byte, m
 }
 
 // SearchSimilar finds sessions similar to the given embedding using cosine similarity.
-func (s *Store) SearchSimilar(ctx context.Context, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
+func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedding []float32, limit int) ([]storage.SimilarSession, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 
-	// Load all sessions with embeddings
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workspace_path, project_name, git_branch, claude_version,
-			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
-			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status, key_questions
-		FROM sessions
-		WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0
-		ORDER BY started_at DESC`)
+	// Load sessions with embeddings, filtered by workspace if provided
+	var rows *sql.Rows
+	var err error
+
+	if workspace != "" {
+		// Filter by workspace for scoped search
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			FROM sessions
+			WHERE workspace_path = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+			ORDER BY started_at DESC`, workspace)
+	} else {
+		// Global search (no workspace filter)
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, workspace_path, project_name, git_branch, claude_version,
+				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+				tags, key_files, tools_pattern, message_count, user_turns,
+				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			FROM sessions
+			WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0
+			ORDER BY started_at DESC`)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("sessions: search similar: %w", err)
 	}
@@ -490,6 +515,49 @@ func (s *Store) SearchSimilar(ctx context.Context, queryEmbedding []float32, lim
 	return results, nil
 }
 
+// --- Content Hash Deduplication ---
+
+// FindByContentHash finds a summarized session with the given content hash.
+// Returns nil if no matching session is found.
+// This is used to detect forked sessions with identical content for deduplication.
+func (s *Store) FindByContentHash(ctx context.Context, contentHash string) (*Session, error) {
+	if contentHash == "" {
+		return nil, nil
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+		FROM sessions
+		WHERE content_hash = ? AND summary != '' AND summary IS NOT NULL
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, contentHash)
+
+	session, err := scanSession(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sessions: find by content hash: %w", err)
+	}
+	return &session, nil
+}
+
+// SetContentHash sets the content hash for a session.
+func (s *Store) SetContentHash(ctx context.Context, id, contentHash string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE sessions SET content_hash = ?, updated_at = ? WHERE id = ?
+	`, contentHash, timeutil.NowUTC(), id)
+	if err != nil {
+		return fmt.Errorf("sessions: set content hash: %w", err)
+	}
+	return nil
+}
+
 // --- Lineage Operations ---
 
 // GetActive returns the most recently started session for a workspace/agent that hasn't ended.
@@ -503,8 +571,8 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status, key_questions
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ? AND status = ?
 		ORDER BY started_at DESC
@@ -552,6 +620,70 @@ func (s *Store) SetStatus(ctx context.Context, id, status string) error {
 	return nil
 }
 
+// SetPendingRestore marks a session as needing restore after compaction.
+// This is used by the PreCompact hook to signal the UserPromptSubmit hook.
+func (s *Store) SetPendingRestore(ctx context.Context, id string) error {
+	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
+	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = ?, updated_at = ? WHERE id = ?`, now, now, id)
+	if err != nil {
+		return fmt.Errorf("sessions: set pending restore: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ClearPendingRestore removes the pending restore flag from a session.
+// Called after restore has been successfully performed.
+func (s *Store) ClearPendingRestore(ctx context.Context, id string) error {
+	now := sqlutil.FormatTimestamp(timeutil.NowUTC())
+	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET pending_restore_at = NULL, updated_at = ? WHERE id = ?`, now, id)
+	if err != nil {
+		return fmt.Errorf("sessions: clear pending restore: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sessions: rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// GetPendingRestore finds a session with pending restore for a workspace.
+// Returns nil if no session needs restore. Only returns sessions where
+// pending_restore_at is within the last 10 minutes (to avoid stale markers).
+func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Session, error) {
+	// Calculate 10 minute cutoff
+	cutoff := sqlutil.FormatTimestamp(timeutil.NowUTC().Add(-10 * time.Minute))
+
+	query := `
+		SELECT id, workspace_path, project_name, git_branch, claude_version,
+			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
+			tags, key_files, tools_pattern, message_count, user_turns,
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+		FROM sessions
+		WHERE workspace_path = ? AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
+		ORDER BY pending_restore_at DESC LIMIT 1`
+
+	row := s.db.QueryRowContext(ctx, query, workspace, cutoff)
+	session, err := scanSession(row)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("sessions: get pending restore: %w", err)
+	}
+	return &session, nil
+}
+
 // FindLastSession finds the most recent session matching criteria.
 // If statuses is empty, matches any status.
 func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, statuses []string) (*Session, error) {
@@ -566,8 +698,8 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
-			tool_invocations, total_tokens, raw_jsonl_path, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, status, key_questions
+			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ?`
 
@@ -1105,6 +1237,180 @@ func (s *Store) DeleteChunks(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// SaveChunkSummary upserts a chunk-level summary record.
+func (s *Store) SaveChunkSummary(ctx context.Context, summary SessionChunkSummary) (SessionChunkSummary, error) {
+	if summary.ID == "" {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: missing id")
+	}
+	if summary.SessionID == "" {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: missing session_id")
+	}
+	if summary.Summary == "" {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: missing summary")
+	}
+
+	now := timeutil.NowUTC()
+	if summary.CreatedAt.IsZero() {
+		summary.CreatedAt = now
+	}
+	summary.UpdatedAt = now
+	if len(summary.ChunkIndices) > 0 {
+		if min, max, ok := chunkIndexBounds(summary.ChunkIndices); ok {
+			summary.ChunkIndexMin = min
+			summary.ChunkIndexMax = max
+		}
+	}
+
+	chunkIndicesJSON, err := sqlutil.FormatJSON(summary.ChunkIndices)
+	if err != nil {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: format chunk_indices: %w", err)
+	}
+	toolsJSON, err := sqlutil.FormatJSON(summary.Tools)
+	if err != nil {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: format tools: %w", err)
+	}
+	filesJSON, err := sqlutil.FormatJSON(summary.Files)
+	if err != nil {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: format files: %w", err)
+	}
+	errorsJSON, err := sqlutil.FormatJSON(summary.Errors)
+	if err != nil {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: format errors: %w", err)
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO session_chunk_summaries (
+	id, session_id, window_index, trigger, chunk_indices, chunk_index_min, chunk_index_max, tools, files, errors,
+	summary, summary_model, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+	trigger = excluded.trigger,
+	chunk_indices = excluded.chunk_indices,
+	chunk_index_min = excluded.chunk_index_min,
+	chunk_index_max = excluded.chunk_index_max,
+	tools = excluded.tools,
+	files = excluded.files,
+	errors = excluded.errors,
+	summary = excluded.summary,
+	summary_model = excluded.summary_model,
+	updated_at = excluded.updated_at`,
+		summary.ID, summary.SessionID, summary.WindowIndex, summary.Trigger, chunkIndicesJSON,
+		summary.ChunkIndexMin, summary.ChunkIndexMax, toolsJSON, filesJSON, errorsJSON,
+		summary.Summary, summary.SummaryModel,
+		sqlutil.FormatTimestamp(summary.CreatedAt), sqlutil.FormatTimestamp(summary.UpdatedAt),
+	)
+	if err != nil {
+		return SessionChunkSummary{}, fmt.Errorf("sessions: save chunk summary: %w", err)
+	}
+	return summary, nil
+}
+
+// SaveChunkSummaries upserts multiple chunk-level summaries in a transaction.
+func (s *Store) SaveChunkSummaries(ctx context.Context, summaries []SessionChunkSummary) error {
+	if len(summaries) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("sessions: begin chunk summary tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+INSERT INTO session_chunk_summaries (
+	id, session_id, window_index, trigger, chunk_indices, chunk_index_min, chunk_index_max, tools, files, errors,
+	summary, summary_model, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET
+	trigger = excluded.trigger,
+	chunk_indices = excluded.chunk_indices,
+	chunk_index_min = excluded.chunk_index_min,
+	chunk_index_max = excluded.chunk_index_max,
+	tools = excluded.tools,
+	files = excluded.files,
+	errors = excluded.errors,
+	summary = excluded.summary,
+	summary_model = excluded.summary_model,
+	updated_at = excluded.updated_at`)
+	if err != nil {
+		return fmt.Errorf("sessions: prepare chunk summary stmt: %w", err)
+	}
+	defer stmt.Close()
+
+	now := timeutil.NowUTC()
+	for _, summary := range summaries {
+		if summary.ID == "" || summary.SessionID == "" || summary.Summary == "" {
+			return fmt.Errorf("sessions: save chunk summaries: missing required fields")
+		}
+		if summary.CreatedAt.IsZero() {
+			summary.CreatedAt = now
+		}
+		summary.UpdatedAt = now
+		if len(summary.ChunkIndices) > 0 {
+			if min, max, ok := chunkIndexBounds(summary.ChunkIndices); ok {
+				summary.ChunkIndexMin = min
+				summary.ChunkIndexMax = max
+			}
+		}
+
+		chunkIndicesJSON, _ := sqlutil.FormatJSON(summary.ChunkIndices)
+		toolsJSON, _ := sqlutil.FormatJSON(summary.Tools)
+		filesJSON, _ := sqlutil.FormatJSON(summary.Files)
+		errorsJSON, _ := sqlutil.FormatJSON(summary.Errors)
+
+		_, err := stmt.ExecContext(ctx,
+			summary.ID, summary.SessionID, summary.WindowIndex, summary.Trigger, chunkIndicesJSON,
+			summary.ChunkIndexMin, summary.ChunkIndexMax, toolsJSON, filesJSON, errorsJSON,
+			summary.Summary, summary.SummaryModel,
+			sqlutil.FormatTimestamp(summary.CreatedAt), sqlutil.FormatTimestamp(summary.UpdatedAt),
+		)
+		if err != nil {
+			return fmt.Errorf("sessions: save chunk summary batch: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("sessions: commit chunk summary tx: %w", err)
+	}
+	return nil
+}
+
+// GetChunkSummaries loads chunk summaries for a window.
+func (s *Store) GetChunkSummaries(ctx context.Context, sessionID string, windowIndex int) ([]SessionChunkSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, session_id, window_index, trigger, chunk_indices, tools, files, errors,
+       chunk_index_min, chunk_index_max, summary, summary_model, created_at, updated_at
+FROM session_chunk_summaries
+WHERE session_id = ? AND window_index = ?
+ORDER BY created_at ASC`, sessionID, windowIndex)
+	if err != nil {
+		return nil, fmt.Errorf("sessions: get chunk summaries: %w", err)
+	}
+	defer rows.Close()
+
+	return scanChunkSummaries(rows)
+}
+
+// GetChunkSummary loads a chunk summary by ID.
+func (s *Store) GetChunkSummary(ctx context.Context, summaryID string) (SessionChunkSummary, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id, session_id, window_index, trigger, chunk_indices, tools, files, errors,
+       chunk_index_min, chunk_index_max, summary, summary_model, created_at, updated_at
+FROM session_chunk_summaries
+WHERE id = ?`, summaryID)
+
+	return scanChunkSummary(row)
+}
+
+// DeleteChunkSummaries removes all chunk summaries for a session.
+func (s *Store) DeleteChunkSummaries(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_chunk_summaries WHERE session_id = ?`, sessionID)
+	if err != nil {
+		return fmt.Errorf("sessions: delete chunk summaries: %w", err)
+	}
+	return nil
+}
+
 // SetArchivePath sets the archive path for a session.
 func (s *Store) SetArchivePath(ctx context.Context, sessionID, archivePath string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET raw_jsonl_path = ? WHERE id = ?`, archivePath, sessionID)
@@ -1606,6 +1912,91 @@ func scanChunk(row scannable) (SessionChunk, error) {
 	return chunk, nil
 }
 
+func scanChunkSummary(row scannable) (SessionChunkSummary, error) {
+	var summary SessionChunkSummary
+	var trigger, chunkIndices, tools, files, errors sql.NullString
+	var chunkIndexMin, chunkIndexMax sql.NullInt64
+	var summaryModel sql.NullString
+	var createdAt, updatedAt sql.NullString
+
+	err := row.Scan(
+		&summary.ID, &summary.SessionID, &summary.WindowIndex, &trigger, &chunkIndices,
+		&tools, &files, &errors, &chunkIndexMin, &chunkIndexMax, &summary.Summary,
+		&summaryModel, &createdAt, &updatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return SessionChunkSummary{}, ErrNotFound
+		}
+		return SessionChunkSummary{}, fmt.Errorf("sessions: scan chunk summary: %w", err)
+	}
+
+	if trigger.Valid {
+		summary.Trigger = trigger.String
+	}
+	if summaryModel.Valid {
+		summary.SummaryModel = summaryModel.String
+	}
+	if createdAt.Valid {
+		ts, err := sqlutil.ScanTimestamp(createdAt.String)
+		errs.Ignore(err, "parse chunk summary created_at")
+		summary.CreatedAt = ts
+	}
+	if updatedAt.Valid {
+		ts, err := sqlutil.ScanTimestamp(updatedAt.String)
+		errs.Ignore(err, "parse chunk summary updated_at")
+		summary.UpdatedAt = ts
+	}
+
+	if chunkIndices.Valid {
+		errs.Ignore(sqlutil.ScanJSON(chunkIndices.String, &summary.ChunkIndices), "parse chunk_indices JSON")
+	}
+	if chunkIndexMin.Valid {
+		summary.ChunkIndexMin = int(chunkIndexMin.Int64)
+	}
+	if chunkIndexMax.Valid {
+		summary.ChunkIndexMax = int(chunkIndexMax.Int64)
+	}
+	if (!chunkIndexMin.Valid || !chunkIndexMax.Valid) && len(summary.ChunkIndices) > 0 {
+		if min, max, ok := chunkIndexBounds(summary.ChunkIndices); ok {
+			if !chunkIndexMin.Valid {
+				summary.ChunkIndexMin = min
+			}
+			if !chunkIndexMax.Valid {
+				summary.ChunkIndexMax = max
+			}
+		}
+	}
+	if tools.Valid {
+		errs.Ignore(sqlutil.ScanJSON(tools.String, &summary.Tools), "parse tools JSON")
+	}
+	if files.Valid {
+		errs.Ignore(sqlutil.ScanJSON(files.String, &summary.Files), "parse files JSON")
+	}
+	if errors.Valid {
+		errs.Ignore(sqlutil.ScanJSON(errors.String, &summary.Errors), "parse errors JSON")
+	}
+
+	return summary, nil
+}
+
+func chunkIndexBounds(indices []int) (min int, max int, ok bool) {
+	if len(indices) == 0 {
+		return 0, 0, false
+	}
+	min = indices[0]
+	max = indices[0]
+	for _, idx := range indices[1:] {
+		if idx < min {
+			min = idx
+		}
+		if idx > max {
+			max = idx
+		}
+	}
+	return min, max, true
+}
+
 func scanChunks(rows *sql.Rows) ([]SessionChunk, error) {
 	var chunks []SessionChunk
 	for rows.Next() {
@@ -1619,6 +2010,21 @@ func scanChunks(rows *sql.Rows) ([]SessionChunk, error) {
 		return nil, fmt.Errorf("sessions: chunks rows error: %w", err)
 	}
 	return chunks, nil
+}
+
+func scanChunkSummaries(rows *sql.Rows) ([]SessionChunkSummary, error) {
+	var summaries []SessionChunkSummary
+	for rows.Next() {
+		summary, err := scanChunkSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		summaries = append(summaries, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sessions: chunk summaries rows error: %w", err)
+	}
+	return summaries, nil
 }
 
 func boolToInt(b bool) int {
@@ -1731,7 +2137,10 @@ CREATE TABLE IF NOT EXISTS sessions (
 	-- Lineage fields
 	parent_session_id TEXT,
 	agent_id TEXT NOT NULL DEFAULT 'agentctl',
-	status TEXT NOT NULL DEFAULT 'ok'
+	agent_type TEXT NOT NULL DEFAULT 'claude',
+	status TEXT NOT NULL DEFAULT 'ok',
+	-- Post-compact restore tracking
+	pending_restore_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace ON sessions(workspace_path);
@@ -1788,6 +2197,29 @@ CREATE INDEX IF NOT EXISTS idx_chunks_session_index ON session_chunks(session_id
 CREATE INDEX IF NOT EXISTS idx_chunks_error ON session_chunks(session_id) WHERE has_error = 1;
 CREATE INDEX IF NOT EXISTS idx_chunks_hash ON session_chunks(content_hash);
 
+-- Session chunk summaries table for persisted chunk-level summaries
+CREATE TABLE IF NOT EXISTS session_chunk_summaries (
+	id TEXT PRIMARY KEY,
+	session_id TEXT NOT NULL,
+	window_index INTEGER NOT NULL,
+	trigger TEXT,
+	chunk_indices TEXT NOT NULL,
+	chunk_index_min INTEGER,
+	chunk_index_max INTEGER,
+	tools TEXT,
+	files TEXT,
+	errors TEXT,
+	summary TEXT NOT NULL,
+	summary_model TEXT,
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL,
+	FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+	UNIQUE(session_id, window_index, chunk_indices)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chunk_summaries_session ON session_chunk_summaries(session_id);
+CREATE INDEX IF NOT EXISTS idx_chunk_summaries_window ON session_chunk_summaries(session_id, window_index);
+
 -- Session edges table for lineage relationships
 CREATE TABLE IF NOT EXISTS session_edges (
 	id TEXT PRIMARY KEY,
@@ -1841,6 +2273,7 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspac
 	}{
 		{"parent_session_id", "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT", false},
 		{"agent_id", "ALTER TABLE sessions ADD COLUMN agent_id TEXT NOT NULL DEFAULT 'agentctl'", true},
+		{"agent_type", "ALTER TABLE sessions ADD COLUMN agent_type TEXT NOT NULL DEFAULT 'claude'", true},
 		{"status", "ALTER TABLE sessions ADD COLUMN status TEXT NOT NULL DEFAULT 'ok'", true},
 	}
 	for _, col := range lineageColumns {
@@ -1926,6 +2359,62 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 		}
 	}
 
+	// Add chunk_index_min/max columns for chunk summaries if missing (existing databases)
+	var chunkSummaryColCount int
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_chunk_summaries') WHERE name = 'chunk_index_min'")
+	if err := row.Scan(&chunkSummaryColCount); err == nil && chunkSummaryColCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_min INTEGER"); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sessions: add chunk_index_min column: %w", err)
+			}
+		}
+	}
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_chunk_summaries') WHERE name = 'chunk_index_max'")
+	if err := row.Scan(&chunkSummaryColCount); err == nil && chunkSummaryColCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE session_chunk_summaries ADD COLUMN chunk_index_max INTEGER"); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sessions: add chunk_index_max column: %w", err)
+			}
+		}
+	}
+	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_chunk_summaries_range ON session_chunk_summaries(session_id, window_index, chunk_index_min, chunk_index_max)"); err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			log.Printf("sessions: warning: failed to create chunk summaries range index: %v", err)
+		}
+	}
+
+	// Add content_hash column for conversation content deduplication (forked sessions)
+	var contentHashColCount int
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'content_hash'")
+	if err := row.Scan(&contentHashColCount); err == nil && contentHashColCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN content_hash TEXT"); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sessions: add content_hash column: %w", err)
+			}
+		}
+	}
+	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_content_hash ON sessions(content_hash)"); err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			log.Printf("sessions: warning: failed to create content_hash index: %v", err)
+		}
+	}
+
+	// Add pending_restore_at column for post-compact context injection
+	var pendingRestoreColCount int
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'pending_restore_at'")
+	if err := row.Scan(&pendingRestoreColCount); err == nil && pendingRestoreColCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE sessions ADD COLUMN pending_restore_at TEXT"); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sessions: add pending_restore_at column: %w", err)
+			}
+		}
+	}
+	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_pending_restore ON sessions(workspace_path, pending_restore_at) WHERE pending_restore_at IS NOT NULL"); err != nil {
+		if !strings.Contains(err.Error(), "already exists") {
+			log.Printf("sessions: warning: failed to create pending_restore index: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1940,15 +2429,16 @@ func scanSession(row scannable) (Session, error) {
 	var toolsPattern sql.NullString
 	var embedding []byte
 	var embeddingModel sql.NullString
-	var parentSessionID, agentID, status sql.NullString
+	var parentSessionID, agentID, agentType, status sql.NullString
 	var keyQuestions sql.NullString
+	var contentHash sql.NullString
 
 	err := row.Scan(
 		&session.ID, &session.WorkspacePath, &session.ProjectName, &session.GitBranch, &session.ClaudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &session.MessageCount, &session.UserTurns,
-		&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &embedding, &embeddingModel,
-		&createdAt, &updatedAt, &parentSessionID, &agentID, &status, &keyQuestions,
+		&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &contentHash, &embedding, &embeddingModel,
+		&createdAt, &updatedAt, &parentSessionID, &agentID, &agentType, &status, &keyQuestions,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -2014,6 +2504,9 @@ func scanSession(row scannable) (Session, error) {
 	if embeddingModel.Valid {
 		session.EmbeddingModel = embeddingModel.String
 	}
+	if contentHash.Valid {
+		session.ContentHash = contentHash.String
+	}
 
 	// Lineage fields
 	if parentSessionID.Valid {
@@ -2023,6 +2516,11 @@ func scanSession(row scannable) (Session, error) {
 		session.AgentID = agentID.String
 	} else {
 		session.AgentID = "agentctl" // default
+	}
+	if agentType.Valid {
+		session.AgentType = agentType.String
+	} else {
+		session.AgentType = "claude" // default
 	}
 	if status.Valid {
 		session.Status = status.String

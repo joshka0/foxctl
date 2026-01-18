@@ -57,6 +57,14 @@ func TestFsReadReturnsPreviewAndCasArtifact(t *testing.T) {
 	if preview == "" || preview != content {
 		t.Fatalf("unexpected preview: %q", preview)
 	}
+	previewNumbered, ok := data["preview_numbered"].(string)
+	if !ok {
+		t.Fatalf("preview_numbered is not a string: %T", data["preview_numbered"])
+	}
+	expectedNumbered := "1 | hello world\n2 | second line\n"
+	if previewNumbered != expectedNumbered {
+		t.Fatalf("unexpected preview_numbered: %q", previewNumbered)
+	}
 	artifact, ok := data["artifact"].(string)
 	if !ok {
 		t.Fatalf("artifact is not a string: %T", data["artifact"])

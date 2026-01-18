@@ -5,14 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -79,12 +81,7 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// Default workspace
-	if input.Workspace == "" {
-		if strings.TrimSpace(input.WorkspaceRoot) != "" {
-			input.Workspace = strings.TrimSpace(input.WorkspaceRoot)
-		}
-	}
-	input.Workspace = sessionkit.WorkspaceOrDefault(input.Workspace, rc.Workspace)
+	input.Workspace = workspaceutil.Resolve(input.Workspace, input.WorkspaceRoot, rc.Workspace)
 
 	// Open stores - memory uses cache path (matches CLI), tasks uses storage
 	memStore, memCleanup, err := sessionkit.OpenMemoryInCache(ctx, rc.Config)
@@ -173,7 +170,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	}
 
 	for _, plan := range plansToProcess {
-		result := processPlan(ctx, &plan, unifiedDetector, syncStates, taskStore, memStore, input, sessionID)
+		result := processPlan(ctx, rc.Logger, &plan, unifiedDetector, syncStates, taskStore, memStore, input, sessionID)
 		output.Results = append(output.Results, result)
 		output.PlansProcessed++
 
@@ -197,6 +194,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 
 func processPlan(
 	ctx context.Context,
+	logger zerolog.Logger,
 	plan *plans.PlanInfo,
 	detector *plans.UnifiedDetector,
 	syncStates map[string]PlanSyncState,
@@ -244,7 +242,10 @@ func processPlan(
 				existingTasks, err := taskStore.ListByPlanFile(ctx, plan.FilePath)
 				if err != nil {
 					// Log the error and skip task creation for this step to avoid duplicates
-					fmt.Fprintf(os.Stderr, "plan_sync: warning: failed to check existing tasks for %s: %v, skipping to avoid duplicates\n", plan.FilePath, err)
+					logger.Warn().
+						Err(err).
+						Str("plan_file", plan.FilePath).
+						Msg("plan_sync: failed to check existing tasks; skipping to avoid duplicates")
 					stepResult.Status = "skipped"
 					result.TasksSkipped++
 					result.Steps = append(result.Steps, stepResult)
@@ -304,7 +305,10 @@ func processPlan(
 
 		stateJSON, err := json.Marshal(newState)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "plan_sync: marshal state: %v\n", err)
+			logger.Warn().
+				Err(err).
+				Str("plan_file", plan.FilePath).
+				Msg("plan_sync: marshal state failed")
 		} else {
 			stateName := fmt.Sprintf("plan-sync-%s", sanitizeFileName(plan.FileName))
 
@@ -317,7 +321,11 @@ func processPlan(
 				SessionID: sessionID,
 			})
 			if saveErr != nil {
-				fmt.Fprintf(os.Stderr, "plan_sync: save state for %s: %v\n", plan.FileName, saveErr)
+				logger.Warn().
+					Err(saveErr).
+					Str("plan_file", plan.FilePath).
+					Str("state_name", stateName).
+					Msg("plan_sync: save state failed")
 			}
 		}
 	}

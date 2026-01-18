@@ -3,19 +3,17 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
-	"sort"
-	"strings"
 
 	fsutil "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textmatch"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
@@ -30,12 +28,7 @@ type input struct {
 	MaxMatches int      `json:"max_matches"`
 }
 
-type match struct {
-	File    string `json:"file"`
-	Line    int    `json:"line_no"`
-	Text    string `json:"line"`
-	Snippet string `json:"snippet"`
-}
+type match = textmatch.Match
 
 func main() {
 	skillmain.Main(command, run)
@@ -43,27 +36,32 @@ func main() {
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate pattern
-	if strings.TrimSpace(in.Pattern) == "" {
-		return fmt.Errorf("pattern is required")
+	if err := textmatch.RequirePattern(in.Pattern); err != nil {
+		return err
 	}
 	// Apply defaults
 	if in.MaxMatches <= 0 {
 		in.MaxMatches = 100000
 	}
 
-	re, err := compileRegex(in.Pattern, in.CI)
+	re, err := textmatch.CompileRegex(in.Pattern, textmatch.RegexOptions{CaseInsensitive: in.CI})
 	if err != nil {
 		return err
 	}
 
-	workspace, basePath, err := resolveWorkspace(rc, in.Path)
+	workspace, basePath, err := skillmain.ResolvePath(rc, in.Path)
 	if err != nil {
 		return err
 	}
 
-	entries, err := collectEntries(basePath, in.Include, in.Exclude)
+	entries, err := fsutil.CollectEntries(fsutil.CollectOptions{
+		Paths:         []string{basePath},
+		Include:       in.Include,
+		Exclude:       fsutil.AppendCommonExcludes(in.Exclude),
+		IncludeHidden: true,
+	})
 	if err != nil {
-		return err
+		return skillerr.WrapIO("collect entries", err)
 	}
 
 	var (
@@ -87,13 +85,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if len(fileMatches) == 0 {
 			continue
 		}
-		rel := relativeTo(workspace, entry.Path)
+		rel := pathutil.RelTo(workspace, entry.Path)
 		fileHits[rel] += len(fileMatches)
 		allMatches = append(allMatches, fileMatches...)
 	}
 
-	preview, truncated := preparePreview(allMatches, rc.MaxPreview)
-	artifact, err := persistMatchesArtifact(ctx, rc, allMatches, truncated)
+	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, allMatches, rc.MaxPreview, "text_grep", true)
 	if err != nil {
 		return err
 	}
@@ -103,77 +100,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		"case_insensitive": in.CI,
 		"match_count":      len(allMatches),
 		"files_touched":    len(fileHits),
-		"preview":          preview,
-		"top_files":        summarizeTopFiles(fileHits, 5),
+		"preview":          previewResult.Preview,
+		"top_files":        skillout.SummarizeTopFiles(fileHits, 5),
 		"max_matches":      in.MaxMatches,
 	}
-	if artifact.Digest != "" {
-		data["artifact"] = artifact.Digest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, command, data)
-}
-
-func resolveWorkspace(rc *skillmain.RunContext, candidate string) (string, string, error) {
-	workspace := rc.PathValidator.Workspace()
-	if strings.TrimSpace(candidate) == "" {
-		return workspace, workspace, nil
-	}
-	resolved, err := rc.PathValidator.ValidatePath(candidate)
-	if err != nil {
-		return "", "", fmt.Errorf("path validation failed: %w", err)
-	}
-	return workspace, resolved, nil
-}
-
-func preparePreview(matches []match, limit int) ([]match, bool) {
-	preview, truncated := skillout.PreparePreview(matches, limit)
-	if truncated {
-		dup := make([]match, len(preview))
-		copy(dup, preview)
-		preview = dup
-	}
-	return preview, truncated
-}
-
-func persistMatchesArtifact(ctx context.Context, rc *skillmain.RunContext, matches []match, truncated bool) (skillmain.Artifact, error) {
-	if !truncated {
-		return skillmain.Artifact{}, nil
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	for _, m := range matches {
-		if err := enc.Encode(m); err != nil {
-			return skillmain.Artifact{}, fmt.Errorf("encode match: %w", err)
-		}
-	}
-	return skillmain.PersistBuffer(ctx, rc, buf, "application/x-ndjson", "text_grep")
-}
-
-func collectEntries(path string, include, exclude []string) ([]fsutil.FileEntry, error) {
-	if path != "" {
-		info, err := os.Stat(path)
-		if err == nil && !info.IsDir() {
-			return []fsutil.FileEntry{{Path: path, Info: info}}, nil
-		}
-	}
-	opts := fsutil.ListOptions{
-		BasePath: path,
-		Include:  include,
-		Exclude:  append([]string{".git", "node_modules"}, exclude...),
-	}
-	return fsutil.WalkFiles(opts)
-}
-
-func compileRegex(pattern string, ci bool) (*regexp.Regexp, error) {
-	if ci && !strings.HasPrefix(pattern, "(?i)") {
-		pattern = "(?i)" + pattern
-	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("invalid regex: %w", err)
-	}
-	return re, nil
 }
 
 func grepFile(path, workspace string, re *regexp.Regexp, remaining int) ([]match, error) {
@@ -182,7 +115,7 @@ func grepFile(path, workspace string, re *regexp.Regexp, remaining int) ([]match
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
+		return nil, skillerr.WrapIO(fmt.Sprintf("open %s", path), err)
 	}
 	defer func() {
 		errs.Ignore(f.Close(), "close grep file")
@@ -196,9 +129,9 @@ func grepFile(path, workspace string, re *regexp.Regexp, remaining int) ([]match
 		lineNo++
 		line := scanner.Text()
 		if re.MatchString(line) {
-			snippet := trimLine(line, 240)
+			snippet := textmatch.TrimLine(line, 240)
 			matches = append(matches, match{
-				File:    relativeTo(workspace, path),
+				File:    pathutil.RelTo(workspace, path),
 				Line:    lineNo,
 				Text:    line,
 				Snippet: snippet,
@@ -209,57 +142,7 @@ func grepFile(path, workspace string, re *regexp.Regexp, remaining int) ([]match
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan %s: %w", path, err)
+		return nil, skillerr.WrapIO(fmt.Sprintf("scan %s", path), err)
 	}
 	return matches, nil
 }
-
-func relativeTo(base, target string) string {
-	if base == "" {
-		if rel, err := filepath.Rel(".", target); err == nil {
-			return filepath.ToSlash(rel)
-		}
-		return filepath.ToSlash(target)
-	}
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return filepath.ToSlash(target)
-	}
-	if strings.HasPrefix(rel, "..") {
-		return filepath.ToSlash(target)
-	}
-	return filepath.ToSlash(rel)
-}
-
-func summarizeTopFiles(counts map[string]int, limit int) [][2]any {
-	type kv struct {
-		File  string
-		Count int
-	}
-	var list []kv
-	for file, count := range counts {
-		list = append(list, kv{File: file, Count: count})
-	}
-	sort.Slice(list, func(i, j int) bool {
-		if list[i].Count == list[j].Count {
-			return list[i].File < list[j].File
-		}
-		return list[i].Count > list[j].Count
-	})
-	if len(list) > limit {
-		list = list[:limit]
-	}
-	var out [][2]any
-	for _, item := range list {
-		out = append(out, [2]any{item.File, item.Count})
-	}
-	return out
-}
-
-func trimLine(line string, limit int) string {
-	if len(line) <= limit {
-		return line
-	}
-	return line[:limit] + "..."
-}
-

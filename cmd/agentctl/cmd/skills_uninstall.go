@@ -10,6 +10,7 @@ import (
 )
 
 func newSkillsUninstallCommand() *cobra.Command {
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "uninstall <skill-name>",
 		Short: "Uninstall a skill",
@@ -27,6 +28,17 @@ func newSkillsUninstallCommand() *cobra.Command {
 			} else if err != nil {
 				return fmt.Errorf("failed to check skill directory: %w", err)
 			}
+
+			if dryRun {
+				result := map[string]any{
+					"name":    args[0],
+					"path":    skillPath,
+					"dry_run": true,
+					"message": "Would uninstall skill",
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.uninstall", result, protocol.WithSource("run"))
+			}
+
 			if err := os.RemoveAll(skillPath); err != nil {
 				return fmt.Errorf("failed to uninstall skill: %w", err)
 			}
@@ -37,5 +49,6 @@ func newSkillsUninstallCommand() *cobra.Command {
 			return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.skills.uninstall", result, protocol.WithSource("run"))
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be uninstalled without making changes")
 	return cmd
 }

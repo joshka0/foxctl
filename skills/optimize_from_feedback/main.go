@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -92,29 +93,28 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		if err != nil {
 			sinceTime, err = time.Parse("2006-01-02", in.Since)
 			if err != nil {
-				return fmt.Errorf("invalid since date format: %w", err)
+				return skillerr.Validation(
+					"invalid since date format",
+					skillerr.WithCause(err),
+					skillerr.WithHint("Use RFC3339 (YYYY-MM-DDTHH:MM:SSZ) or YYYY-MM-DD."),
+				)
 			}
 		}
 	}
 
 	// Open memory store using config paths (storage, not cache)
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return fmt.Errorf("open memory store: %w", err)
+		return skillerr.WrapIO("open memory store", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	// Get all feedback entries
-	workspace := in.Workspace
-	if workspace == "" {
-		if wd, err := os.Getwd(); err == nil {
-			workspace = wd
-		}
-	}
+	workspace := workspaceutil.ResolveID(in.Workspace, rc.Workspace)
 
 	entries, err := memStore.List(ctx, workspace, 1000)
 	if err != nil {
-		return fmt.Errorf("list memory entries: %w", err)
+		return skillerr.WrapIO("list memory entries", err)
 	}
 
 	// Filter for session_feedback type
@@ -298,4 +298,3 @@ func generateRecommendations(output Output) []Recommendation {
 
 	return recommendations
 }
-

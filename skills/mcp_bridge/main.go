@@ -4,20 +4,19 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
-	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/client"
-	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/mcputil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
@@ -46,6 +45,12 @@ func (i *arrayFlags) Set(value string) error {
 }
 
 func main() {
+	if err := runMain(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func runMain() error {
 	// Parse flags
 	var (
 		serverCmd     string
@@ -64,14 +69,9 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
-	config.LoadDotEnv()
-	cfg, err := config.Load(ctx)
+	rc, err := skillmain.Bootstrap(ctx, os.Stdout)
 	if err != nil {
-		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("load config", err))
-	}
-	rc, err := skillmain.BuildRunContext(cfg, os.Stdout)
-	if err != nil {
-		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("build context", err))
+		return skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("bootstrap", err))
 	}
 	defer func() {
 		errs.Ignore(rc.Close(), "run context close")
@@ -79,76 +79,52 @@ func main() {
 
 	in, err := parseInput(os.Stdin, serverCmd, serverURL, toolName, serverArgs, serverEnv, serverHeaders)
 	if err != nil {
-		skillout.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
+		var skillErr *skillerr.Error
+		if errors.As(err, &skillErr) {
+			return skillout.Fatal(os.Stdout, command, skillErr)
+		}
+		return skillout.Fatal(os.Stdout, command, skillerr.WrapArg("parse input", err))
 	}
 	if err := run(ctx, rc, in); err != nil {
-		skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
+		var skillErr *skillerr.Error
+		if errors.As(err, &skillErr) {
+			return skillout.Fatal(os.Stdout, command, skillErr)
+		}
+		return skillout.Fatal(os.Stdout, command, skillerr.WrapRuntime("execute", err))
 	}
+	return nil
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	var mcpClient *client.Client
 	var err error
 
-	if in.ServerURL != "" {
-		// SSE/HTTP Transport
-		// We use StreamableHTTP transport which supports both single-response and streaming responses via POST
-		mcpClient, err = client.NewStreamableHttpClient(in.ServerURL, transport.WithHTTPHeaders(in.ServerHeaders))
-		if err != nil {
-			return fmt.Errorf("failed to create HTTP client: %w", err)
-		}
-		// StreamableHTTP does not require explicit Start() for request-response,
-		// but we can call it to be safe (it handles background listening if enabled).
-		// client.NewStreamableHttpClient does NOT enable continuous listening by default.
-		// If we want notifications, we might need it.
-		// But for now, let's just use it.
-		// Start() in StreamableHTTP is strictly for "Continuous Listening" (GET).
-		// Exa rejected GET. So we probably shouldn't call Start() if it triggers GET.
-		// Checking StreamableHTTP.Start():
-		// if c.getListeningEnabled { ... createGETConnectionToServer ... }
-		// By default getListeningEnabled is false. So Start() does nothing.
-		// So we can call it or not.
-		if err := mcpClient.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start transport: %w", err)
-		}
+	if in.ServerURL == "" && in.ServerCmd == "" {
+		return skillerr.Arg(
+			"either server_cmd or server_url is required",
+			skillerr.WithHint("Provide server_cmd for stdio or server_url for SSE."),
+		)
+	}
 
-	} else if in.ServerCmd != "" {
-		// Stdio Transport
-		env := os.Environ()
-		for k, v := range in.ServerEnv {
-			env = append(env, fmt.Sprintf("%s=%s", k, v))
-		}
-		// NewStdioMCPClient starts the transport automatically
-		mcpClient, err = client.NewStdioMCPClient(in.ServerCmd, env, in.ServerArgs...)
-		if err != nil {
-			return fmt.Errorf("failed to create stdio client: %w", err)
-		}
-	} else {
-		return fmt.Errorf("either server_cmd or server_url is required")
+	mcpClient, err = mcputil.NewClient(ctx, mcputil.Config{
+		ServerCmd:     in.ServerCmd,
+		ServerArgs:    in.ServerArgs,
+		ServerEnv:     in.ServerEnv,
+		ServerURL:     in.ServerURL,
+		ServerHeaders: in.ServerHeaders,
+	})
+	if err != nil {
+		return skillerr.WrapRuntime("failed to create MCP client", err)
 	}
 	defer func() {
 		if err := mcpClient.Close(); err != nil {
 			// Log close error but don't fail the operation.
-			// Warning output to stderr; error is not actionable.
-			fmt.Fprintf(os.Stderr, "warning: failed to close MCP client: %v\n", err)
+			rc.Logger.Warn().Err(err).Msg("mcp bridge: failed to close MCP client")
 		}
 	}()
 
-	// Initialize the MCP session
-	initReq := mcp.InitializeRequest{
-		Params: mcp.InitializeParams{
-			ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
-			ClientInfo: mcp.Implementation{
-				Name:    "agentctl-mcp-bridge",
-				Version: "1.0.0",
-			},
-			Capabilities: mcp.ClientCapabilities{},
-		},
-	}
-
-	_, err = mcpClient.Initialize(ctx, initReq)
-	if err != nil {
-		return fmt.Errorf("mcp initialization failed: %w", err)
+	if err := mcputil.Initialize(ctx, mcpClient, "agentctl-mcp-bridge", "1.0.0"); err != nil {
+		return skillerr.WrapRuntime("mcp initialization failed", err)
 	}
 
 	// Call the tool
@@ -159,7 +135,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("tool call failed: %w", err)
+		return skillerr.WrapRuntime("tool call failed", err)
 	}
 
 	// Format Output
@@ -177,7 +153,7 @@ func parseInput(r io.Reader, cmdFlag, urlFlag, toolFlag string, argsFlag, envFla
 		// Parse Stdin as simple arguments map
 		var toolArgs map[string]any
 		if err := json.NewDecoder(r).Decode(&toolArgs); err != nil && err != io.EOF {
-			return input{}, fmt.Errorf("decode tool args: %w", err)
+			return input{}, skillerr.WrapParse("decode tool args", err)
 		}
 
 		// Parse Env flags
@@ -212,13 +188,16 @@ func parseInput(r io.Reader, cmdFlag, urlFlag, toolFlag string, argsFlag, envFla
 	// Legacy Mode: Parse everything from Stdin
 	var in input
 	if err := json.NewDecoder(r).Decode(&in); err != nil {
-		return input{}, fmt.Errorf("decode input: %w", err)
+		return input{}, skillerr.WrapParse("decode input", err)
 	}
 	if in.ServerCmd == "" && in.ServerURL == "" {
-		return input{}, fmt.Errorf("server_cmd or server_url is required")
+		return input{}, skillerr.Arg(
+			"server_cmd or server_url is required",
+			skillerr.WithHint("Provide server_cmd for stdio or server_url for SSE."),
+		)
 	}
 	if in.ToolName == "" {
-		return input{}, fmt.Errorf("tool_name is required")
+		return input{}, skillerr.Arg("tool_name is required")
 	}
 	return in, nil
 }

@@ -28,10 +28,10 @@ type SessionData struct {
 	EndedAt     *time.Time
 
 	// Session content
-	Turns    []SessionTurn
-	Chunks   []SessionChunk   // Optional: chunked content
-	Summary  *SessionSummary  // Optional: L1/L2 summary
-	Anchor   string           // Session anchor/goal if set
+	Turns   []SessionTurn
+	Chunks  []SessionChunk  // Optional: chunked content
+	Summary *SessionSummary // Optional: L1/L2 summary
+	Anchor  string          // Session anchor/goal if set
 }
 
 // SessionChunk represents a chunk of session content.
@@ -46,7 +46,7 @@ type SessionChunk struct {
 
 // SessionSummary represents a distilled session summary (L1/L2).
 type SessionSummary struct {
-	Level   int    // 1 or 2
+	Level   int // 1 or 2
 	Content string
 	Tokens  int
 }
@@ -89,10 +89,10 @@ func (e *Exporter) Export(ctx context.Context, data SessionData, opts SessionExp
 		Content:   e.formatSessionMeta(data),
 		CreatedAt: data.CreatedAt,
 		Tags: map[string]string{
-			"type":        "session_meta",
-			"session_id":  data.SessionID,
-			"workspace":   data.WorkspaceID,
-			"agent_id":    data.AgentID,
+			"type":       "session_meta",
+			"session_id": data.SessionID,
+			"workspace":  data.WorkspaceID,
+			"agent_id":   data.AgentID,
 		},
 	}
 	if data.Anchor != "" {

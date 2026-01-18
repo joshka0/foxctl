@@ -21,15 +21,19 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeedit"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/langutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/storage/sessions"
+	"github.com/jkatigb/agentctl/internal/sessionkit"
 )
 
 // Command is the envelope command for this skill.
@@ -46,14 +50,15 @@ const (
 	ErrCodeCapabilityPolicy = "EPOLICY"
 )
 
-// ValidationError wraps an error with a specific error code for the envelope.
-type ValidationError struct {
-	Code    string
-	Message string
-}
-
-func (e *ValidationError) Error() string {
-	return e.Message
+func newSkillError(code, message string, opts ...skillerr.Option) *skillerr.Error {
+	err := &skillerr.Error{
+		Code:    code,
+		Message: message,
+	}
+	for _, opt := range opts {
+		opt(err)
+	}
+	return err
 }
 
 // Candidate represents a single candidate file/symbol from upstream retrieval.
@@ -171,10 +176,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Validate question is provided (after alias applied)
 	if in.Question == "" {
-		return &ValidationError{
-			Code:    ErrCodeArg,
-			Message: "question or query is required",
-		}
+		return newSkillError(ErrCodeArg, "question or query is required")
 	}
 
 	// Apply workspace default
@@ -190,10 +192,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		}
 	}
 	if usable == 0 {
-		return &ValidationError{
-			Code:    ErrCodeNoCandidates,
-			Message: "no usable candidates provided. Hint: use code/smart_search if you don't have candidates - it auto-generates them from indexes",
-		}
+		return newSkillError(
+			ErrCodeNoCandidates,
+			"no usable candidates provided. Hint: use code/smart_search if you don't have candidates - it auto-generates them from indexes",
+		)
 	}
 
 	// Normalize limits
@@ -260,16 +262,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		thresholdBytes := inlineThresholdBytes(rc)
 		inlineSizeBytes, err := json.Marshal(data)
 		if err != nil {
-			return fmt.Errorf("measure inline payload: %w", err)
+			return skillerr.WrapRuntime("measure inline payload", err)
 		}
 		if thresholdBytes > 0 && len(inlineSizeBytes) > thresholdBytes {
 			artifact, err := persistSnippetsArtifact(ctx, rc, snippets)
 			if err != nil {
-				return fmt.Errorf("persist snippets artifact: %w", err)
+				return skillerr.WrapIO("persist snippets artifact", err)
 			}
-			if artifact.Digest != "" {
-				data["artifact"] = artifact.Digest
-			}
+			skillout.AddArtifact(data, &artifact)
 
 			if thresholdBytes > 0 {
 				if trimmed, err := trimPreviewsToFit(data, previews, thresholdBytes); err == nil {
@@ -304,7 +304,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, Command, data)
 }
 
-func fatalErrorForFileResults(results []FileResult) *ValidationError {
+func fatalErrorForFileResults(results []FileResult) *skillerr.Error {
 	for _, fr := range results {
 		if !fr.Skipped {
 			return nil
@@ -318,21 +318,21 @@ func fatalErrorForFileResults(results []FileResult) *ValidationError {
 	// 4) Fall back to EARG
 	for _, fr := range results {
 		if fr.ErrCode == ErrCodePolicy {
-			return &ValidationError{Code: ErrCodePolicy, Message: fr.SkipErr}
+			return newSkillError(ErrCodePolicy, fr.SkipErr)
 		}
 	}
 	for _, fr := range results {
 		if fr.ErrCode == ErrCodeNotFound {
-			return &ValidationError{Code: ErrCodeNotFound, Message: fr.SkipErr}
+			return newSkillError(ErrCodeNotFound, fr.SkipErr)
 		}
 	}
 	for _, fr := range results {
 		if fr.ErrCode != "" {
-			return &ValidationError{Code: fr.ErrCode, Message: fr.SkipErr}
+			return newSkillError(fr.ErrCode, fr.SkipErr)
 		}
 	}
 
-	return &ValidationError{Code: ErrCodeArg, Message: "no readable candidate files"}
+	return newSkillError(ErrCodeArg, "no readable candidate files")
 }
 
 // logSummary writes a structured log entry to stderr with summary stats.
@@ -390,7 +390,7 @@ func extractSnippetsForFile(fr FileResult, keywords []string, remaining int) []S
 		return nil
 	}
 
-	lines := splitLines(fr.Content)
+	lines := textutil.SplitLinesBytes(fr.Content)
 	if len(lines) == 0 {
 		return nil
 	}
@@ -448,7 +448,7 @@ func extractSymbolBody(fr FileResult, lines []string) *Snippet {
 	}
 
 	// Detect language from file extension
-	lang := detectLanguage(fr.Path)
+	lang := langutil.DetectAllowed(fr.Path, langutil.SnippetLanguages)
 
 	// For Go files, use AST-based extractor for accurate boundaries
 	if lang == "go" {
@@ -560,32 +560,6 @@ func parseSymbolName(symbolID string) string {
 }
 
 // detectLanguage returns a normalized language identifier from file extension.
-func detectLanguage(path string) string {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".go":
-		return "go"
-	case ".py":
-		return "python"
-	case ".ts", ".tsx":
-		return "typescript"
-	case ".js", ".jsx":
-		return "javascript"
-	case ".gd":
-		return "gdscript"
-	case ".rs":
-		return "rust"
-	case ".java":
-		return "java"
-	case ".c", ".h":
-		return "c"
-	case ".cpp", ".hpp", ".cc", ".cxx":
-		return "cpp"
-	default:
-		return ""
-	}
-}
-
 // findSymbolDefinition finds the 0-indexed line where a symbol is defined.
 // Returns -1 if not found.
 func findSymbolDefinition(lines []string, name string, lang string) int {
@@ -662,48 +636,8 @@ func findSymbolEnd(lines []string, startLine int, lang string) int {
 	case "python", "gdscript":
 		return findIndentationEnd(lines, startLine)
 	default:
-		return findBraceEnd(lines, startLine)
+		return codeedit.FindBraceEnd(lines, startLine)
 	}
-}
-
-// findBraceEnd finds the end of a brace-delimited block (Go, JS, TS, Rust, etc.)
-// using simple brace counting.
-//
-// LIMITATION: This is a heuristic approach that counts '{' and '}' characters
-// without parsing the actual syntax. It does NOT handle braces inside:
-//   - String literals (e.g., "{ not a block }")
-//   - Comments (e.g., // { or /* { */)
-//   - Character literals (e.g., '{')
-//   - Template literals (e.g., `${ expr }`)
-//
-// For accurate symbol boundary detection, prefer using AST-based extraction
-// (e.g., extractGoSymbolBody for Go files) when available.
-func findBraceEnd(lines []string, startLine int) int {
-	braceCount := 0
-	foundOpen := false
-
-	for i := startLine; i < len(lines); i++ {
-		line := lines[i]
-		for _, ch := range line {
-			switch ch {
-			case '{':
-				braceCount++
-				foundOpen = true
-			case '}':
-				braceCount--
-				if foundOpen && braceCount == 0 {
-					return i
-				}
-			}
-		}
-	}
-
-	// If no closing brace found, return a reasonable limit
-	maxEnd := startLine + MaxLinesPerSnippet - 1
-	if maxEnd >= len(lines) {
-		maxEnd = len(lines) - 1
-	}
-	return maxEnd
 }
 
 // findIndentationEnd finds the end of an indentation-based block (Python, GDScript)
@@ -814,17 +748,6 @@ func extractKeywords(question string) []string {
 	return keywords
 }
 
-// splitLines splits content into lines, preserving empty lines.
-func splitLines(content []byte) []string {
-	if len(content) == 0 {
-		return nil
-	}
-	s := string(content)
-	// Remove trailing newline to avoid empty last element
-	s = strings.TrimSuffix(s, "\n")
-	return strings.Split(s, "\n")
-}
-
 // findMatchingLines returns 0-indexed line numbers that contain any keyword.
 func findMatchingLines(lines []string, keywords []string) []int {
 	if len(keywords) == 0 {
@@ -923,15 +846,7 @@ func createFallbackSnippet(fr FileResult, lines []string, remaining int) []Snipp
 func makeInlinePreviews(snippets []Snippet) []SnippetPreview {
 	previews := make([]SnippetPreview, len(snippets))
 	for i, s := range snippets {
-		preview := s.Text
-		if len(preview) > MaxPreviewBytes {
-			// Truncate at MaxPreviewBytes, try to break at newline
-			preview = preview[:MaxPreviewBytes]
-			if lastNL := findLastNewline(preview); lastNL > MaxPreviewBytes/2 {
-				preview = preview[:lastNL+1]
-			}
-			preview += "..."
-		}
+		preview := textutil.TruncateWithNewlineSuffix(s.Text, MaxPreviewBytes, MaxPreviewBytes/2, "...")
 		previews[i] = SnippetPreview{
 			File:      s.File,
 			SymbolID:  s.SymbolID,
@@ -981,33 +896,14 @@ func persistSnippetsArtifact(ctx context.Context, rc *skillmain.RunContext, snip
 	enc := json.NewEncoder(buf)
 	for _, s := range snippets {
 		if err := enc.Encode(s); err != nil {
-			return skillmain.Artifact{}, fmt.Errorf("encode snippet: %w", err)
+			return skillmain.Artifact{}, skillerr.WrapRuntime("encode snippet", err)
 		}
 	}
-	return skillmain.PersistBuffer(ctx, rc, buf, ArtifactKind, "code_swe_grep")
-}
-
-// countLines counts the number of lines in content.
-func countLines(content []byte) int {
-	if len(content) == 0 {
-		return 0
+	artifact, err := skillmain.PersistBuffer(ctx, rc, buf, ArtifactKind, "code_swe_grep")
+	if err != nil {
+		return skillmain.Artifact{}, skillerr.WrapIO("persist snippets artifact", err)
 	}
-	count := bytes.Count(content, []byte{'\n'})
-	// Add 1 if content doesn't end with newline
-	if content[len(content)-1] != '\n' {
-		count++
-	}
-	return count
-}
-
-// findLastNewline returns the index of the last newline in s, or -1 if not found.
-func findLastNewline(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '\n' {
-			return i
-		}
-	}
-	return -1
+	return artifact, nil
 }
 
 // applyDefaultLimits fills in default values for unset limits.
@@ -1050,7 +946,7 @@ func processFiles(ctx context.Context, rc *skillmain.RunContext, candidates []Ca
 		}
 
 		// Validate path through PathValidator
-		absPath, err := rc.PathValidator.ValidatePath(c.Path)
+		absPath, err := skillmain.ValidatePath(rc, c.Path)
 		if err != nil {
 			fr.Skipped = true
 			fr.SkipErr, fr.ErrCode = classifyPathError(err)
@@ -1071,7 +967,7 @@ func processFiles(ctx context.Context, rc *skillmain.RunContext, candidates []Ca
 		}
 
 		// Re-validate the resolved path to catch symlink escapes
-		if _, err := rc.PathValidator.ValidatePath(resolvedPath); err != nil {
+		if _, err := skillmain.ValidatePath(rc, resolvedPath, skillmain.WithPathMessage("resolved path validation failed")); err != nil {
 			fr.Skipped = true
 			fr.SkipErr, fr.ErrCode = classifyPathError(err)
 			results = append(results, fr)
@@ -1239,29 +1135,18 @@ func searchRelatedSessions(ctx context.Context, cfg config.Config, workspaceID, 
 		return nil, fmt.Sprintf("session context unavailable: embedding failed: %v", err)
 	}
 
-	// Get AGENTCTL_HOME for storage path
-	agentctlHome := os.Getenv("AGENTCTL_HOME")
-	if agentctlHome == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return nil, "session context unavailable: home not resolved"
-		}
-		agentctlHome = filepath.Join(homeDir, ".agentctl")
-	}
-
 	// Open sessions store
-	storageRoot := filepath.Join(agentctlHome, "storage")
-	sessionStore, err := sessions.Open(ctx, storageRoot)
+	sessionStore, cleanup, err := sessionkit.OpenSessions(ctx, cfg)
 	if err != nil {
 		return nil, "session context unavailable: open sessions store failed"
 	}
-	defer sessionStore.Close()
+	defer cleanup()
 
 	// Search for similar sessions with timeout (fetch extra for workspace filtering)
 	searchCtx, searchCancel := context.WithTimeout(ctx, ContextSearchTimeout)
 	defer searchCancel()
 
-	results, err := sessionStore.SearchSimilar(searchCtx, queryVec, limit*2)
+	results, err := sessionStore.SearchSimilar(searchCtx, workspaceID, queryVec, limit*2)
 	if err != nil {
 		return nil, "session context unavailable: search failed"
 	}
@@ -1301,7 +1186,6 @@ func searchRelatedSessions(ctx context.Context, cfg config.Config, workspaceID, 
 
 // createEmbeddingProvider creates an embedding provider from config/env.
 // Returns provider (or nil) and a hint when unavailable.
-// Prefers Voyage with ScopeModelRecommendation for consistency.
 func createEmbeddingProvider(cfg config.Config) (semantic.EmbeddingProvider, string) {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
@@ -1310,27 +1194,14 @@ func createEmbeddingProvider(cfg config.Config) (semantic.EmbeddingProvider, str
 		return nil, "no embedding API key set (VOYAGE_API_KEY or GEMINI_API_KEY); session context disabled (BM25-only)"
 	}
 
-	// Prefer Voyage with scope-based model selection
-	if voyageKey != "" {
-		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeSessions)
-		provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey: voyageKey,
-			Model:  model,
-		})
-		if err != nil {
-			return nil, fmt.Sprintf("failed to create Voyage provider: %v; session context disabled", err)
-		}
-		return provider, ""
-	}
-
-	// Gemini fallback (not recommended - dimension mismatch with Voyage)
-	provider, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
-		APIKey: geminiKey,
-		Model:  "gemini-embedding-001",
-	})
+	provider, err := semantic.NewProviderForScope(
+		semantic.ScopeSessions,
+		cfg,
+		semantic.WithVoyageKey(voyageKey),
+		semantic.WithGeminiKey(geminiKey),
+	)
 	if err != nil {
-		return nil, fmt.Sprintf("failed to create Gemini provider: %v; session context disabled", err)
+		return nil, fmt.Sprintf("failed to create embedding provider: %v; session context disabled", err)
 	}
 	return provider, ""
 }
-

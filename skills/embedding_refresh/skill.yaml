@@ -27,8 +27,7 @@ signature:
     - name: workspace
       type: string
       required: false
-      default: "default"
-      description: "Workspace context"
+      description: "Workspace context (defaults to detected workspace)"
     - name: dry_run
       type: boolean
       required: false

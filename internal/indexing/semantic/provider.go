@@ -135,6 +135,13 @@ type EmbeddingProvider interface {
 	Dimensions() int
 }
 
+// QueryEmbeddingProvider extends EmbeddingProvider with query-specific embeddings.
+// Providers that support query/document input types should implement this interface.
+type QueryEmbeddingProvider interface {
+	EmbeddingProvider
+	EmbedQuery(ctx context.Context, query string) ([]float32, error)
+}
+
 // UsageTrackingProvider extends EmbeddingProvider with usage statistics.
 // Providers that track API usage should implement this interface.
 type UsageTrackingProvider interface {

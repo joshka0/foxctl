@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestDimensionValidation(t *testing.T) {
@@ -178,5 +180,49 @@ func TestErrorCodeConstants(t *testing.T) {
 		if code == "" {
 			t.Errorf("%s should not be empty", name)
 		}
+	}
+}
+
+func TestEmbeddingModelConfig_UsesOverrides(t *testing.T) {
+	cfg := config.Config{
+		Embedding: config.EmbeddingSettings{
+			Model: "voyage-3.5",
+			Models: map[string]string{
+				"symbols":  "voyage-code-3",
+				"memory":   "voyage-3-large",
+				"tasks":    "voyage-3.5",
+				"sessions": "voyage-3.5",
+			},
+		},
+	}
+
+	codeModel, memoryModel, textModel := embeddingModelConfig("voyage", cfg)
+	if codeModel != "voyage-code-3" {
+		t.Fatalf("code model = %q, want voyage-code-3", codeModel)
+	}
+	if memoryModel != "voyage-3-large" {
+		t.Fatalf("memory model = %q, want voyage-3-large", memoryModel)
+	}
+	if textModel != "voyage-3.5" {
+		t.Fatalf("text model = %q, want voyage-3.5", textModel)
+	}
+}
+
+func TestEmbeddingModelConfig_GeminiFallback(t *testing.T) {
+	cfg := config.Config{
+		Embedding: config.EmbeddingSettings{
+			Model: "voyage-3.5",
+		},
+	}
+
+	codeModel, memoryModel, textModel := embeddingModelConfig("gemini", cfg)
+	if codeModel != "gemini-embedding-001" {
+		t.Fatalf("code model = %q, want gemini-embedding-001", codeModel)
+	}
+	if memoryModel != "gemini-embedding-001" {
+		t.Fatalf("memory model = %q, want gemini-embedding-001", memoryModel)
+	}
+	if textModel != "gemini-embedding-001" {
+		t.Fatalf("text model = %q, want gemini-embedding-001", textModel)
 	}
 }

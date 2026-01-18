@@ -2,12 +2,12 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -22,33 +22,21 @@ type SkillHandle struct {
 
 // SkillResolver resolves skill names to executable handles.
 type SkillResolver struct {
-	cfg         config.Config
 	searchPaths []string
 }
 
 // NewSkillResolver creates a skill resolver with paths from config.
 func NewSkillResolver(cfg config.Config) *SkillResolver {
-	var searchPaths []string
-
-	// Environment override takes highest precedence and supports list format.
-	if env := os.Getenv("AGENTCTL_SKILLS_PATH"); env != "" {
-		searchPaths = append(searchPaths, filepath.SplitList(env)...)
+	searchPaths := append([]string{}, skill.EnvSearchPaths()...)
+	if cfg.Paths.Skills != "" {
+		searchPaths = append(searchPaths, cfg.Paths.Skills)
 	}
-
-	// Configured skills path (defaults to ~/.agentctl/skills).
-	searchPaths = append(searchPaths, cfg.Paths.Skills)
-
-	// Development paths near the current working directory.
-	if pwd, err := os.Getwd(); err == nil {
-		searchPaths = append(searchPaths,
-			filepath.Join(pwd, "dist", "skills"),
-			filepath.Join(pwd, "skills"),
-		)
-	}
+	searchPaths = append(searchPaths, skill.UserSearchPaths()...)
+	searchPaths = append(searchPaths, skill.BuiltinSearchPaths()...)
+	searchPaths = append(searchPaths, skill.DevSearchPaths()...)
 
 	return &SkillResolver{
-		cfg:         cfg,
-		searchPaths: dedupeCleanPaths(searchPaths),
+		searchPaths: skill.NormalizeSearchPaths(searchPaths),
 	}
 }
 
@@ -126,53 +114,14 @@ func loadSkillDir(dir string) (*SkillHandle, error) {
 		return nil, err
 	}
 
-	manifest, err := skill.LoadManifest(manifestPath)
+	manifest, artifact, err := skill.LoadManifestAndArtifactFromDir(dir, skill.ArtifactOptions{
+		PreferCGO: buildinfo.IsCGO(),
+	})
 	if err != nil {
+		if errors.Is(err, skill.ErrArtifactsMissing) {
+			return nil, fmt.Errorf("skill artifacts missing under %s; run 'make skills-build' to compile skills", dir)
+		}
 		return nil, err
-	}
-
-	if err := policy.ValidateWASIPolicy(manifest); err != nil {
-		return nil, err
-	}
-
-	var artifact string
-	switch manifest.Distribution.Type {
-	case "exec":
-		// Check candidates in priority order:
-		// 1. CGO binary (bin-cgo) if running CGO build - for Turso/native features
-		// 2. Standard binary (bin)
-		// 3. Source-tree skill directory itself (skills/<name>/ with main.go)
-		var candidates []string
-		if buildinfo.IsCGO() {
-			candidates = append(candidates, filepath.Join(dir, "bin-cgo"))
-		}
-		candidates = append(candidates, filepath.Join(dir, "bin"))
-		// For source-tree skills, check if main.go exists (Go skill)
-		if _, err := os.Stat(filepath.Join(dir, "main.go")); err == nil {
-			candidates = append(candidates, dir)
-		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				artifact = c
-				break
-			}
-		}
-	case "wasi":
-		candidates := []string{
-			filepath.Join(dir, "module.wasm"),
-		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				artifact = c
-				break
-			}
-		}
-	default:
-		return nil, fmt.Errorf("unsupported distribution %q", manifest.Distribution.Type)
-	}
-
-	if artifact == "" {
-		return nil, fmt.Errorf("skill artifacts missing under %s; run 'make skills-build' to compile skills", dir)
 	}
 
 	return &SkillHandle{
@@ -186,26 +135,4 @@ func loadSkillDir(dir string) (*SkillHandle, error) {
 func normalizeSkillCandidate(name string) string {
 	name = strings.ReplaceAll(name, "/", "_")
 	return strings.ReplaceAll(name, "-", "_")
-}
-
-// dedupeCleanPaths removes duplicates and cleans paths.
-func dedupeCleanPaths(paths []string) []string {
-	seen := make(map[string]struct{})
-	var out []string
-	for _, p := range paths {
-		trimmed := strings.TrimSpace(p)
-		if trimmed == "" {
-			continue
-		}
-		cleaned := filepath.Clean(trimmed)
-		if cleaned == "" || cleaned == "." {
-			continue
-		}
-		if _, ok := seen[cleaned]; ok {
-			continue
-		}
-		seen[cleaned] = struct{}{}
-		out = append(out, cleaned)
-	}
-	return out
 }

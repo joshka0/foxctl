@@ -6,7 +6,9 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/secretutil"
 	"github.com/jkatigb/agentctl/internal/codecontext"
+	"github.com/jkatigb/agentctl/internal/codecontext/guard"
 )
 
 func TestScanForSecrets_NoSecrets(t *testing.T) {
@@ -24,7 +26,7 @@ func TestScanForSecrets_NoSecrets(t *testing.T) {
 		},
 	}
 
-	findings, hasHigh := scanForSecrets(ctx, evidence, logger)
+	findings, hasHigh := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeBlock)
 
 	if len(findings) != 0 {
 		t.Errorf("expected no findings, got %d", len(findings))
@@ -49,7 +51,7 @@ func TestScanForSecrets_HighSeveritySecret(t *testing.T) {
 		},
 	}
 
-	findings, hasHigh := scanForSecrets(ctx, evidence, logger)
+	findings, hasHigh := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeBlock)
 
 	if len(findings) == 0 {
 		t.Fatal("expected findings, got none")
@@ -86,7 +88,7 @@ func TestScanForSecrets_MediumSeveritySecret(t *testing.T) {
 		},
 	}
 
-	findings, hasHigh := scanForSecrets(ctx, evidence, logger)
+	findings, hasHigh := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeBlock)
 
 	if len(findings) == 0 {
 		t.Fatal("expected findings, got none")
@@ -107,7 +109,7 @@ func TestScanForSecrets_EmptyEvidence(t *testing.T) {
 	logger := zerolog.Nop()
 
 	// Nil evidence
-	findings, hasHigh := scanForSecrets(ctx, nil, logger)
+	findings, hasHigh := secretutil.ScanEvidence(ctx, nil, logger, guard.ModeBlock)
 	if findings != nil {
 		t.Error("expected nil findings for nil evidence")
 	}
@@ -119,7 +121,7 @@ func TestScanForSecrets_EmptyEvidence(t *testing.T) {
 	evidence := &codecontext.Evidence{
 		Snippets: []codecontext.Snippet{},
 	}
-	findings, hasHigh = scanForSecrets(ctx, evidence, logger)
+	findings, hasHigh = secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeBlock)
 	if findings != nil {
 		t.Error("expected nil findings for empty snippets")
 	}
@@ -144,7 +146,7 @@ func TestScanForSecrets_LineNumberAdjustment(t *testing.T) {
 		},
 	}
 
-	findings, _ := scanForSecrets(ctx, evidence, logger)
+	findings, _ := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeBlock)
 
 	if len(findings) == 0 {
 		t.Fatal("expected findings, got none")

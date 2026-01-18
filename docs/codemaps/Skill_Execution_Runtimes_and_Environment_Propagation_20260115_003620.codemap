@@ -1,0 +1,489 @@
+{
+  "schemaVersion": 1,
+  "id": "Skill_Execution_Runtimes_and_Environment_Propagation_20260115_003620",
+  "stableId": "25509f5e-c45c-4581-846c-98425f4c2800",
+  "metadata": {
+    "cascadeId": "96ac246c-8303-4c05-abd8-fb8b4a2c8a13",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T00:36:20+02:00",
+    "mode": "SMART",
+    "originalPrompt": "Explore: skill execution runtimes and env propagation. Start from: internal/execution/runner/runner.go, internal/execution/exec/exec.go, internal/execution/wasi/wasi.go"
+  },
+  "title": "Skill Execution Runtimes and Environment Propagation",
+  "traces": [
+    {
+      "id": "1",
+      "title": "Unified Skill Execution Entry Point",
+      "description": "Core runner package - routes skill execution to appropriate runtime (exec or WASI) based on manifest distribution type",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 67,
+          "lineContent": "func RunWithOptions(ctx context.Context, opts RunOptions) ([]byte, []byte, error) {",
+          "title": "Main execution entry point",
+          "description": "Unified interface for executing skills with structured options"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 68,
+          "lineContent": "ws, _ := workspace.FromContext(ctx)",
+          "title": "Extract workspace from context",
+          "description": "Retrieves workspace path attached to context for downstream runners"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 84,
+          "lineContent": "switch opts.Manifest.Distribution.Type {",
+          "title": "Runtime type dispatch",
+          "description": "Routes to exec or WASI runtime based on manifest distribution type"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 86,
+          "lineContent": "r := execrunner.Runner{Manifest: opts.Manifest, Binary: opts.ArtifactPath}",
+          "title": "Create exec runner",
+          "description": "Instantiates native binary runner for exec distribution type"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 88,
+          "lineContent": "r.Options.Env = buildSkillEnv(os.Environ(), ws, false)",
+          "title": "Build exec environment",
+          "description": "Constructs env with os.Environ() base; session vars pass through automatically"
+        },
+        {
+          "id": "1f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 95,
+          "lineContent": "r := wasirunner.Runner{Manifest: opts.Manifest, ModulePath: opts.ArtifactPath}",
+          "title": "Create WASI runner",
+          "description": "Instantiates WebAssembly runner for WASI distribution type"
+        },
+        {
+          "id": "1g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 97,
+          "lineContent": "r.Options.Env = buildSkillEnv(nil, ws, true)",
+          "title": "Build WASI environment",
+          "description": "Constructs env with nil base and explicit session var propagation for isolated runtime"
+        }
+      ],
+      "traceTextDiagram": "Skill Execution Entry Point (runner.go)\n├── RunWithOptions() entry \u003c-- 1a\n│   ├── workspace.FromContext(ctx) \u003c-- 1b\n│   │   └── Extract workspace path \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/workspace/context.go:22\n│   ├── switch on Distribution.Type \u003c-- 1c\n│   │   ├── case \"exec\": \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:85\n│   │   │   ├── Create execrunner.Runner \u003c-- 1d\n│   │   │   ├── buildSkillEnv(os.Environ(), ...) \u003c-- 1e\n│   │   │   │   └── Inherits parent env, session vars\n│   │   │   │       pass through automatically\n│   │   │   └── r.Run(ctx, input) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:93\n│   │   │       └── → Trace 2: Exec Runtime\n│   │   └── case \"wasi\": \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:94\n│   │       ├── Create wasirunner.Runner \u003c-- 1f\n│   │       ├── buildSkillEnv(nil, ws, true) \u003c-- 1g\n│   │       │   └── Empty base, explicit session\n│   │       │       var propagation required\n│   │       └── r.Run(ctx, input) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:102\n│   │           └── → Trace 3: WASI Runtime\n│   └── Return stdout, stderr, error",
+      "traceGuide": "## Motivation\n\nSkills in agentctl can be distributed as **native binaries** (exec) or **WebAssembly modules** (WASI). These two runtime types have fundamentally different execution models: native binaries inherit the parent process environment automatically, while WebAssembly runs in an **isolated sandbox** with no environment by default. The unified runner [1a] solves the problem of executing both types through a single interface while handling their different environment propagation needs.\n\nA critical requirement is **session tracking across AI coding tools**. When Claude Code, Cursor, or other tools invoke agentctl skills, those skills need to know which session they're running in to maintain lineage and context. The system must propagate session IDs like `AGENTCTL_SESSION_ID` and `CLAUDE_SESSION_ID` from parent to child processes—but this propagation works differently for exec vs WASI.\n\n## Details\n\n### Unified Entry Point\n\n`RunWithOptions` [1a] is the main entry point that routes skill execution. It first extracts the workspace from the context [1b], then dispatches based on the manifest's distribution type [1c]. This single function handles both exec and WASI skills transparently.\n\n### Exec Runtime Path\n\nFor native binaries [1d], the runner calls `buildSkillEnv` with `os.Environ()` as the base [1e]. This means the child process **inherits all parent environment variables automatically**, including session tracking variables. The `propagateSessionVars` parameter is `false` because propagation happens implicitly through OS inheritance.\n\n### WASI Runtime Path\n\nFor WebAssembly modules [1f], the runner calls `buildSkillEnv` with `nil` as the base [1g]. WASI starts with an **empty environment** for security isolation. The `propagateSessionVars` parameter is `true`, which triggers explicit iteration through session variables (`AGENTCTL_SESSION_ID`, `CLAUDE_SESSION_ID`, etc.) and adds them one-by-one to the WASI environment. Without this explicit propagation, WASI skills would have no session context.\n\n### Environment Builder\n\nThe `buildSkillEnv` function constructs the skill's environment. When `propagateSessionVars` is true, it loops through a predefined list of session tracking variables, reads each from the parent environment using `env.GetString`, and appends them to the child environment. This ensures consistent session lineage regardless of which AI tool invoked the skill.\n\n### Workspace Propagation\n\nBoth runtimes receive `AGENTCTL_WORKSPACE` in their environment, enabling skills to detect git repositories and project structure. The workspace is detected using a priority chain: context value → `AGENTCTL_WORKSPACE` env var → `CLAUDE_PROJECT_DIR` → git markers."
+    },
+    {
+      "id": "2",
+      "title": "Exec Runtime Native Binary Execution",
+      "description": "Exec runner package - executes native binaries with full environment inheritance and platform-specific resource limits",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 54,
+          "lineContent": "func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {",
+          "title": "Exec runner entry point",
+          "description": "Executes native binary skill with input on stdin"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 86,
+          "lineContent": "cmd := exec.CommandContext(ctx, r.Binary)",
+          "title": "Create subprocess command",
+          "description": "Creates OS command with context for timeout support"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 114,
+          "lineContent": "env := r.Options.Env",
+          "title": "Get environment variables",
+          "description": "Retrieves pre-built environment from runner options"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 158,
+          "lineContent": "env = append(env, fmt.Sprintf(\"SKILL_NAME=%s\", r.Manifest.Metadata.Name))",
+          "title": "Inject skill metadata",
+          "description": "Adds SKILL_NAME and SKILL_VERSION to environment"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 165,
+          "lineContent": "cmd.Env = env",
+          "title": "Set command environment",
+          "description": "Assigns constructed environment to subprocess"
+        },
+        {
+          "id": "2f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 169,
+          "lineContent": "if err := setResourceLimits(cmd, r.Options.MaxMemoryBytes, r.Options.MaxCPUSeconds); err != nil {",
+          "title": "Apply resource limits",
+          "description": "Platform-specific resource limit enforcement (process groups, rlimits)"
+        },
+        {
+          "id": "2g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 173,
+          "lineContent": "err := cmd.Run()",
+          "title": "Execute binary",
+          "description": "Runs the native binary and waits for completion"
+        }
+      ],
+      "traceTextDiagram": "Exec Runtime Native Binary Execution\n└── Runner.Run() entrypoint \u003c-- 2a\n    ├── exec.CommandContext() creates process \u003c-- 2b\n    ├── Get environment from options \u003c-- 2c\n    ├── Inject SKILL_NAME/VERSION \u003c-- 2d\n    ├── cmd.Env = env assignment \u003c-- 2e\n    ├── setResourceLimits() platform-specific \u003c-- 2f\n    │   ├── [Linux] SysProcAttr.Setpgid = true \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_linux.go:16\n    │   ├── [Linux] SysProcAttr.Pdeathsig = SIGKILL \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_linux.go:19\n    │   └── [Unix] SysProcAttr.Setpgid = true \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_unix.go:16\n    └── cmd.Run() execute binary \u003c-- 2g\n        └── Returns stdout, stderr, error \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go:181",
+      "traceGuide": "## Motivation\n\nSkills in agentctl are executable programs (native binaries or WebAssembly modules) that need to run in a **controlled subprocess environment**. The exec runtime solves the problem of executing native binary skills with proper **environment variable propagation**, **resource isolation**, and **platform-specific safety guarantees**. Without this layer, skills would inherit unpredictable environments, lack timeout enforcement, and could leak resources or become orphaned processes.\n\n## Details\n\n### Execution Flow\n\nThe exec runtime starts at `Runner.Run()` [2a], which receives skill input as bytes. It creates a subprocess using `exec.CommandContext()` [2b], which provides **context-based timeout cancellation**—critical for preventing runaway skills.\n\n### Environment Construction\n\nThe runner retrieves a pre-built environment from `r.Options.Env` [2c], which was constructed by the unified runner layer with workspace paths and session tracking variables already propagated. The exec runtime then injects **skill metadata** [2d]—specifically `SKILL_NAME` and `SKILL_VERSION`—so skills can identify themselves in logs and telemetry. The complete environment is assigned via `cmd.Env` [2e].\n\n### Platform-Specific Resource Limits\n\nBefore execution, `setResourceLimits()` [2f] applies **OS-specific process isolation**. On Linux, this sets `Setpgid = true` to isolate the skill in its own process group and `Pdeathsig = SIGKILL` to ensure the child dies if the parent crashes—preventing orphaned processes. On other Unix systems (macOS, BSD), only process group isolation is available since `Pdeathsig` is Linux-specific.\n\n### Execution and Output Capture\n\nFinally, `cmd.Run()` [2g] executes the binary and blocks until completion. The runner uses **pooled buffers** for stdout/stderr capture to reduce allocations during high-frequency skill execution. The captured output is cloned from the pooled buffers before returning to prevent aliasing issues.\n\n### Key Design Decisions\n\n- **Exec inherits `os.Environ()` by default**, so session variables pass through automatically without explicit propagation (unlike WASI which starts with an empty environment)\n- **Resource limits are best-effort**: timeout via context is always enforced, but memory/CPU rlimits require Go 1.23+ or external tools\n- **Buffer pooling** prevents memory bloat by discarding buffers larger than 1MB rather than returning them to the pool"
+    },
+    {
+      "id": "3",
+      "title": "WASI Runtime WebAssembly Execution",
+      "description": "WASI runner package - executes WebAssembly modules in isolated sandbox using wazero runtime with explicit environment injection",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 52,
+          "lineContent": "func (r Runner) Run(ctx context.Context, input []byte) ([]byte, []byte, error) {",
+          "title": "WASI runner entry point",
+          "description": "Executes WASM module with input on stdin"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 91,
+          "lineContent": "runtime, closeRuntime, err := r.prepareRuntime(ctx)",
+          "title": "Initialize wazero runtime",
+          "description": "Creates WebAssembly runtime with WASI snapshot preview1 support"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 97,
+          "lineContent": "compiled, closeCompiled, err := r.compileModule(ctx, runtime, moduleBytes)",
+          "title": "Compile WASM module",
+          "description": "Compiles WebAssembly bytecode for execution"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 103,
+          "lineContent": "modConfig := r.buildModuleConfig(input, workDir, stdout, stderr)",
+          "title": "Build module configuration",
+          "description": "Constructs WASI config with stdio, filesystem mounts, and environment"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 229,
+          "lineContent": "for k, v := range r.envVars() {",
+          "title": "Inject environment variables",
+          "description": "Explicitly adds each env var to WASI module config (isolated environment)"
+        },
+        {
+          "id": "3f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 230,
+          "lineContent": "config = config.WithEnv(k, v)",
+          "title": "Set WASI environment",
+          "description": "Calls wazero WithEnv for each variable in isolated sandbox"
+        },
+        {
+          "id": "3g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 105,
+          "lineContent": "_, runErr := runtime.InstantiateModule(ctx, compiled, modConfig)",
+          "title": "Execute WASM module",
+          "description": "Instantiates and runs the compiled WebAssembly module"
+        }
+      ],
+      "traceTextDiagram": "WASI Runtime WebAssembly Execution\n├── Runner.Run() entrypoint \u003c-- 3a\n│   ├── prepareRuntime(ctx) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:195\n│   │   └── wazero.NewRuntime(ctx) \u003c-- 3b\n│   │       └── wasi_snapshot_preview1.Instantiate() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:200\n│   ├── compileModule(ctx, runtime, moduleBytes) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:207\n│   │   └── runtime.CompileModule() \u003c-- 3c\n│   ├── buildModuleConfig() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:218\n│   │   ├── wazero.NewModuleConfig() \u003c-- 3d\n│   │   │   ├── WithStdout/Stderr/Stdin \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:221\n│   │   │   └── WithFSConfig (mount /work) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:226\n│   │   ├── envVars() map construction \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:113\n│   │   └── for k, v := range r.envVars() \u003c-- 3e\n│   │       └── config.WithEnv(k, v) \u003c-- 3f\n│   └── runtime.InstantiateModule() \u003c-- 3g\n│       └── [WASM module executes in sandbox]\n└── Return stdout, stderr, error \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:110",
+      "traceGuide": "## Motivation\n\nSkills in agentctl can be distributed as **WebAssembly modules** (WASI) for maximum portability and security. Unlike native binaries that inherit the parent process environment, WASM modules run in a **completely isolated sandbox** with no access to the host system by default. This creates a challenge: how do you give a WASM skill access to exactly what it needs (stdin, stdout, filesystem mounts, environment variables) while maintaining isolation?\n\nThe WASI runtime solves this by **explicitly configuring** every capability the module receives—nothing is inherited automatically.\n\n## Details\n\n### Runtime Initialization\n\nThe execution starts by creating a **wazero runtime** [3b], which is a pure-Go WebAssembly runtime. The runtime is initialized with WASI snapshot preview1 support, providing the standard POSIX-like syscalls that WASM modules expect (file I/O, environment access, etc.).\n\n### Module Compilation\n\nThe WASM bytecode is **compiled ahead of execution** [3c] using `runtime.CompileModule()`. This compilation step validates the module and prepares it for instantiation, catching any malformed WASM before execution begins.\n\n### Configuration Assembly\n\nThe critical step is **building the module configuration** [3d]. This is where the isolated sandbox is configured:\n\n- **Standard I/O streams** are explicitly connected—stdin receives the skill input, stdout/stderr capture output\n- **Filesystem access** is granted via `WithDirMount(workDir, \"/work\")`, mounting the workspace directory at `/work` inside the sandbox\n- **Environment variables** must be explicitly injected [3e, 3f]—the runtime calls `config.WithEnv(k, v)` for each variable in a loop, since WASI starts with an empty environment\n\nThis explicit configuration is the key difference from exec-based skills: **nothing is inherited, everything must be granted**.\n\n### Execution\n\nFinally, `runtime.InstantiateModule()` [3g] instantiates and executes the compiled module with the configured capabilities. The WASM module runs in its sandbox, accessing only what was explicitly granted, and execution completes when the module's main function returns.\n\nThe isolation model ensures that WASI skills are **portable across platforms** and **safe by default**—they can only interact with the host through explicitly granted capabilities."
+    },
+    {
+      "id": "4",
+      "title": "Session Environment Propagation",
+      "description": "Runner package - builds environment with session tracking variables propagated from parent process for multi-tool lineage",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 33,
+          "lineContent": "func buildSkillEnv(baseEnv []string, workspace string, propagateSessionVars bool) []string {",
+          "title": "Environment builder entry",
+          "description": "Constructs skill environment with optional session var propagation"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 43,
+          "lineContent": "for _, key := range sessionEnvVars {",
+          "title": "Iterate session variables",
+          "description": "Loops through canonical session tracking env vars for propagation"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 44,
+          "lineContent": "if val := env.GetString(key); val != \"\" {",
+          "title": "Read session var from parent",
+          "description": "Retrieves session variable value from parent process environment"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 45,
+          "lineContent": "envVars = append(envVars, fmt.Sprintf(\"%s=%s\", key, val))",
+          "title": "Propagate to child process",
+          "description": "Adds session variable to child skill environment for lineage tracking"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go",
+          "lineNumber": 24,
+          "lineContent": "func ResolveSessionID(ws, explicit string) string {",
+          "title": "Session ID resolution",
+          "description": "Resolves session ID from multiple sources with priority order"
+        },
+        {
+          "id": "4f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go",
+          "lineNumber": 31,
+          "lineContent": "envVars := []string{",
+          "title": "Session ID priority list",
+          "description": "Defines priority: AGENTCTL_SESSION_ID \u003e CLAUDE_SESSION_ID \u003e OPENCODE_SESSION_ID \u003e CURSOR_SESSION_ID"
+        },
+        {
+          "id": "4g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/platform/workspace/workspace.go",
+          "lineNumber": 22,
+          "lineContent": "func Detect(start string) string {",
+          "title": "Workspace detection",
+          "description": "Detects workspace using AGENTCTL_WORKSPACE \u003e CLAUDE_PROJECT_DIR \u003e git markers"
+        }
+      ],
+      "traceTextDiagram": "Session Environment Propagation Flow\n├── buildSkillEnv() entry \u003c-- 4a\n│   ├── Start with baseEnv \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:34\n│   ├── Add AGENTCTL_WORKSPACE if present \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:37\n│   └── if propagateSessionVars == true \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:42\n│       └── for each sessionEnvVar \u003c-- 4b\n│           ├── env.GetString(key) \u003c-- 4c\n│           └── append to envVars \u003c-- 4d\n│\n├── Session ID Resolution (sessionkit)\n│   └── ResolveSessionID() \u003c-- 4e\n│       ├── Check explicit value first \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:26\n│       ├── Priority env var list \u003c-- 4f\n│       │   ├── AGENTCTL_SESSION_ID (highest) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:32\n│       │   ├── CLAUDE_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:33\n│       │   ├── OPENCODE_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:34\n│       │   └── CURSOR_SESSION_ID \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:35\n│       └── Fallback to identity file \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/sessionkit/identity.go:44\n│\n└── Workspace Detection (workspace pkg)\n    └── Detect() \u003c-- 4g\n        ├── AGENTCTL_WORKSPACE env \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/workspace/workspace.go:24\n        ├── CLAUDE_PROJECT_DIR env \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/workspace/workspace.go:29\n        └── Walk up for .git markers \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/platform/workspace/workspace.go:46",
+      "traceGuide": "## Motivation\n\nSkills in agentctl can be invoked from **multiple AI coding tools** (Claude Code, Cursor, OpenCode) and need to maintain **session lineage** across these different environments. When a skill runs, it needs to know which session spawned it, which workspace it's operating in, and which agent is executing it—even when skills call other skills recursively. The environment propagation system solves this by **automatically passing session tracking variables** through the execution chain, enabling skills to write to the correct session context, access the right workspace data, and maintain observability across the entire execution tree.\n\nAdditionally, the system supports **two runtime types**: native binaries (exec) that inherit the full parent environment, and WebAssembly modules (WASI) that run in isolated sandboxes. These require different environment propagation strategies—exec inherits automatically while WASI needs explicit injection.\n\n## Details\n\n### Environment Construction\n\nThe `buildSkillEnv` function [4a] constructs the environment for skill execution. It takes three parameters: a base environment (either `os.Environ()` for exec or `nil` for WASI), a workspace path, and a boolean flag indicating whether to explicitly propagate session variables [4a].\n\nFor **exec runtimes**, the base is `os.Environ()` and `propagateSessionVars` is `false` because session variables pass through automatically via environment inheritance [1e]. For **WASI runtimes**, the base is `nil` and `propagateSessionVars` is `true` because the isolated sandbox requires explicit injection of every variable [1g].\n\n### Session Variable Propagation\n\nWhen `propagateSessionVars` is true, the system iterates through a predefined list of session tracking variables [4b] including `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID`, `CLAUDE_SESSION_ID`, `OPENCODE_SESSION_ID`, `CURSOR_SESSION_ID`, and `TERM_SESSION_ID`. For each variable, it reads the value from the parent process environment [4c] and appends it to the child environment [4d].\n\n### Session ID Resolution\n\nThe `ResolveSessionID` function [4e] determines which session a skill belongs to by checking multiple sources in priority order [4f]. It first checks for an explicit value, then tries `AGENTCTL_SESSION_ID` (the canonical session identifier), followed by tool-specific variables like `CLAUDE_SESSION_ID`, `OPENCODE_SESSION_ID`, and `CURSOR_SESSION_ID`. This **multi-tool support** allows agentctl to work seamlessly regardless of which AI coding assistant invoked it.\n\nIf no environment variable is set, the system falls back to reading from an identity file stored in `~/.agentctl/sessions/active/` that maps workspace hashes to session IDs.\n\n### Workspace Detection\n\nThe `Detect` function [4g] identifies the workspace root using a fallback chain. It first checks `AGENTCTL_WORKSPACE` (highest priority, set by agentctl for sandbox scenarios), then `CLAUDE_PROJECT_DIR` (set by Claude Code), and finally walks up the directory tree looking for `.git` or `.agentctl` markers. This ensures skills can always locate the workspace root regardless of their execution context."
+    },
+    {
+      "id": "5",
+      "title": "Job Executor Orchestration",
+      "description": "Job executor package - full skill execution lifecycle with state management, persistence, observability, and result handling",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 108,
+          "lineContent": "func (e *Executor) RunSkill(ctx context.Context, manifest skill.Manifest, artifactPath string, input []byte) (types.Job, []byte, error) {",
+          "title": "Job executor entry point",
+          "description": "Orchestrates end-to-end skill execution with job preparation"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 109,
+          "lineContent": "job, duplicate, err := e.prepareSkillJob(ctx, manifest.Metadata.Name, input, false)",
+          "title": "Prepare job record",
+          "description": "Creates job entry in database with queued state"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 318,
+          "lineContent": "result, execErr := e.skillExecutor.Execute(ctx, execution.ExecuteOptions{",
+          "title": "Execute via skill executor",
+          "description": "Delegates to SkillExecutor interface (typically RunnerExecutor)"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 284,
+          "lineContent": "if err := e.persist.UpdateState(ctx, jobID, types.StateRunning, \"\", \"\"); err != nil {",
+          "title": "Update job state to running",
+          "description": "Persists state transition before execution"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 246,
+          "lineContent": "observability.Emit(ctx, eventBuilder.Error(runErr, duration))",
+          "title": "Emit observability event",
+          "description": "Records execution metrics and traces for monitoring"
+        },
+        {
+          "id": "5f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 394,
+          "lineContent": "if err := e.persist.UpdateState(stateCtx, jobID, types.StateOK, \"\", resultPath); err != nil {",
+          "title": "Persist success state",
+          "description": "Updates job state to OK with result path on successful completion"
+        }
+      ],
+      "traceTextDiagram": "Job Executor Orchestration\n├── RunSkill() entry \u003c-- 5a\n│   ├── prepareSkillJob() \u003c-- 5b\n│   │   ├── Create job record (ULID, queued state) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:150\n│   │   ├── InsertJob() to persistence \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:171\n│   │   └── Write input.json to job directory \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:181\n│   └── executeSkill() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:189\n│       ├── startExecution() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:190\n│       │   └── UpdateState(StateRunning) \u003c-- 5d\n│       ├── runSkill() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:228\n│       │   └── skillExecutor.Execute() \u003c-- 5c\n│       │       └── runner.RunWithOptions() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:336\n│       │           └── [exec or WASI runtime]\n│       ├── observability.Emit() \u003c-- 5e\n│       └── handleSuccess() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:251\n│           ├── Unmarshal \u0026 validate envelope \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:367\n│           ├── Write result.json \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:386\n│           └── UpdateState(StateOK) \u003c-- 5f",
+      "traceGuide": "## Motivation\n\nSkills in agentctl need to run reliably with **full lifecycle tracking**—from submission through execution to completion. The job executor provides this orchestration layer, ensuring that every skill execution is:\n\n- **Persisted** with a unique job ID before execution begins\n- **State-tracked** through queued → running → ok/error transitions\n- **Observable** with metrics and traces for debugging\n- **Recoverable** with results written to disk for later retrieval\n\nWithout this layer, skill executions would be ephemeral—if a process crashes or the user disconnects, there's no way to know what happened or retrieve results. The executor solves this by treating each skill run as a **durable job** with persistent state.\n\n## Details\n\n### Job Preparation\n\nThe executor starts by creating a job record [5b] with a ULID identifier, computing an args hash for deduplication, and setting the initial state to `queued`. It writes the input JSON to a job-specific directory on disk, ensuring the execution context is preserved even if the process restarts.\n\n### Execution Orchestration\n\nThe `executeSkill()` method [at executor.go:189] coordinates the full lifecycle:\n\n1. **State transition to running** [5d]—updates the database before execution begins so monitoring systems can track in-flight jobs\n2. **Skill execution** [5c]—delegates to the `SkillExecutor` interface, which typically routes through `runner.RunWithOptions()` [at executor.go:336] to either the exec or WASI runtime\n3. **Observability emission** [5e]—records execution metrics, duration, and traces with enriched cloud metadata for debugging\n\n### Result Handling\n\nOn successful execution, `handleSuccess()` [at executor.go:251] validates the skill's envelope output, writes `result.json` to the job directory, and updates the database state to `ok` [5f]. The result path is stored in the database, allowing clients to retrieve outputs later.\n\n### Error Resilience\n\nThe executor uses **background contexts** for final state updates to ensure they complete even if the original request context was cancelled. This prevents jobs from getting stuck in \"running\" state when timeouts occur.\n\n### Integration Points\n\nThe executor is used by:\n- **CLI commands** for interactive skill runs\n- **Daemon service** for fast repeated executions\n- **Hook system** for lifecycle event-triggered skills\n- **Agent runtime** for autonomous skill orchestration"
+    },
+    {
+      "id": "6",
+      "title": "Hook System Skill Execution",
+      "description": "Hook system - executes skills triggered by lifecycle events with input marshaling and output parsing",
+      "locations": [
+        {
+          "id": "6a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "lineNumber": 122,
+          "lineContent": "func (d *dispatcher) Dispatch(ctx context.Context, input Input) (Result, error) {",
+          "title": "Hook dispatcher entry",
+          "description": "Routes events to matching hooks and merges outputs"
+        },
+        {
+          "id": "6b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go",
+          "lineNumber": 170,
+          "lineContent": "output, err := d.runner.Run(hookCtx, entryHook, hookInput)",
+          "title": "Execute hook via runner",
+          "description": "Delegates to HookRunner (SkillRunner or ShellRunner)"
+        },
+        {
+          "id": "6c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go",
+          "lineNumber": 49,
+          "lineContent": "result, err := r.Executor.Execute(ctx, execution.ExecuteOptions{",
+          "title": "Hook skill execution",
+          "description": "Executes skill through SkillExecutor with hook input"
+        },
+        {
+          "id": "6d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go",
+          "lineNumber": 46,
+          "lineContent": "extraEnv := buildSkillExtraEnv(input)",
+          "title": "Build hook environment",
+          "description": "Constructs extra env vars with session ID, actor ID, trace ID from hook input"
+        },
+        {
+          "id": "6e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go",
+          "lineNumber": 136,
+          "lineContent": "env = append(env, \"AGENTCTL_SESSION_ID=\"+input.SessionID)",
+          "title": "Propagate session to hook",
+          "description": "Adds session tracking variables to hook skill environment"
+        },
+        {
+          "id": "6f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go",
+          "lineNumber": 65,
+          "lineContent": "output, err := parseSkillOutput(result.Stdout)",
+          "title": "Parse hook output",
+          "description": "Extracts hook.Output from skill envelope response"
+        }
+      ],
+      "traceTextDiagram": "Hook System Skill Execution Flow\n├── Event arrives at dispatcher\n│   └── Dispatch(ctx, input) \u003c-- 6a\n│       ├── Find matching hooks \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:129\n│       ├── For each hook entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:150\n│       │   └── runner.Run(hookCtx, hook, input) \u003c-- 6b\n│       │       └── SkillRunner.Run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go:21\n│       │           ├── buildSkillExtraEnv(input) \u003c-- 6d\n│       │           │   └── append session vars \u003c-- 6e\n│       │           ├── Marshal hook input to JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go:40\n│       │           └── Executor.Execute(ctx, opts) \u003c-- 6c\n│       │               └── runner.RunWithOptions() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go:28\n│       │                   └── exec/WASI runtime\n│       └── parseSkillOutput(stdout) \u003c-- 6f\n│           └── Extract hook.Output \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/skill_runner.go:108\n└── Merge outputs and return Result \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/hooks/dispatcher.go:206",
+      "traceGuide": "## Motivation\n\nThe hook system enables **lifecycle-aware skill execution** triggered by events during agent runtime (e.g., before a tool is used, after an LLM response, when a session starts). The problem: agents need to observe, validate, or augment operations at specific points in their execution flow, but the core runtime shouldn't be tightly coupled to these extensions. Hooks solve this by **dispatching events to skills** that can approve, block, inject context, or trigger side effects—all while maintaining clean separation between the core runtime and extension logic [6a].\n\n## Details\n\n### Event Dispatching\n\nWhen an event occurs (like `PreToolUse` or `PostToolUse`), the **dispatcher** receives a `hooks.Input` containing event metadata, session context, and tool information [6a]. It finds matching hooks from configuration, filters by matchers (tool name patterns, event types), and executes them in priority order.\n\n### Hook Execution Path\n\nFor each matching hook, the dispatcher calls `runner.Run()` [6b], which routes to either `SkillRunner` (for Go-based skills) or `ShellRunner` (for shell scripts). The **SkillRunner** is the primary path [6c]:\n\n1. **Environment construction** [6d]: Builds extra environment variables from the hook input, including `AGENTCTL_SESSION_ID`, `AGENTCTL_AGENT_ID`, `AGENTCTL_TRACE_ID`, and `AGENTCTL_CORRELATION_ID` [6e]. This ensures hooks can track lineage across the execution chain.\n\n2. **Input marshaling**: Serializes the `hooks.Input` struct to JSON, which becomes stdin for the skill process.\n\n3. **Execution delegation**: Calls `Executor.Execute()` [6c], which ultimately invokes `runner.RunWithOptions()` to run the skill through either the exec or WASI runtime (same path as regular skill execution).\n\n### Output Processing\n\nThe skill returns a JSON envelope on stdout. The **parseSkillOutput** function [6f] extracts the `hook_output` field from the envelope's data section, which contains a `hooks.Output` struct with:\n- **Decision**: `approve`, `block`, or `none`\n- **Context**: Text to inject into the LLM context\n- **Actions**: Structured actions like `enqueue_context`, `run_skill`, or `send_mailbox`\n- **Updated tool input**: For `PreToolUse` hooks that want to modify tool arguments\n\n### Output Merging\n\nThe dispatcher collects outputs from all executed hooks and **merges them** using precedence rules: any `block` decision blocks the operation, `updated_tool_input` uses last-wins semantics, and actions are concatenated in execution order. This merged result determines whether the original operation proceeds and what side effects occur."
+    },
+    {
+      "id": "7",
+      "title": "Daemon Service Fast Path",
+      "description": "Daemon service - provides low-latency skill execution through persistent service with pre-warmed resources",
+      "locations": [
+        {
+          "id": "7a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "lineNumber": 326,
+          "lineContent": "func (s *Service) handleRun(ctx context.Context, params json.RawMessage) (*RunResult, error) {",
+          "title": "Daemon run handler",
+          "description": "Handles skill execution requests via Unix socket"
+        },
+        {
+          "id": "7b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "lineNumber": 354,
+          "lineContent": "stdout, stderr, err := runner.RunWithOptions(ctx, runner.RunOptions{",
+          "title": "Execute via unified runner",
+          "description": "Calls RunWithOptions directly for fast execution path"
+        },
+        {
+          "id": "7c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "lineNumber": 345,
+          "lineContent": "extraEnv := s.buildSkillEnv(p.Workspace)",
+          "title": "Build daemon environment",
+          "description": "Constructs environment with workspace and session propagation"
+        },
+        {
+          "id": "7d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "lineNumber": 396,
+          "lineContent": "for _, key := range []string{",
+          "title": "Propagate session vars",
+          "description": "Reads AGENTCTL_SESSION_ID, CLAUDE_SESSION_ID, etc. from daemon environment"
+        },
+        {
+          "id": "7e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go",
+          "lineNumber": 400,
+          "lineContent": "if v := os.Getenv(key); v != \"\" {",
+          "title": "Read parent environment",
+          "description": "Retrieves session variables from daemon process environment"
+        }
+      ],
+      "traceTextDiagram": "Daemon Service Fast Path Execution\n├── Unix socket connection handler\n│   └── handleConnection() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:229\n│       └── route to \"run\" method \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:254\n│           └── handleRun() \u003c-- 7a\n│               ├── parse RunParams from JSON \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:330\n│               ├── resolve skill manifest \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:339\n│               ├── buildSkillEnv() \u003c-- 7c\n│               │   ├── add workspace to env \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/daemon/service.go:393\n│               │   └── propagate session vars \u003c-- 7d\n│               │       └── os.Getenv(key) \u003c-- 7e\n│               └── runner.RunWithOptions() \u003c-- 7b\n│                   ├── switch on distribution type \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:84\n│                   ├── execrunner.Runner.Run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:93\n│                   │   └── exec.CommandContext() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go:86\n│                   └── wasirunner.Runner.Run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:102\n│                       └── runtime.InstantiateModule() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:105",
+      "traceGuide": "## Motivation\n\nWhen agentctl runs skills (executable tools that extend agent capabilities), the typical execution path involves multiple layers: job preparation, state persistence, observability tracking, and cleanup. This adds **~300ms of latency** per skill invocation. For interactive workflows where an AI agent might call dozens of skills in rapid succession, this overhead becomes a significant bottleneck.\n\nThe **daemon service** solves this by providing a **persistent background process** that keeps resources warm (database connections, skill manifests, configuration) and offers a **fast path** that bypasses job orchestration entirely [7a]. Skills execute in **\u003c50ms** instead of 300ms, making agent interactions feel responsive.\n\n## Details\n\n### Architecture\n\nThe daemon runs as a Unix socket server [service.go:229] that accepts JSON-RPC-style requests. When a \"run\" request arrives [service.go:254], it takes the fast path through `handleRun()` [7a].\n\n### Execution Flow\n\n1. **Parse request**: Deserializes `RunParams` containing skill name, input JSON, and optional workspace [service.go:330]\n\n2. **Resolve skill**: Uses a pre-warmed `SkillResolver` to locate the skill manifest and binary without disk I/O overhead [service.go:339]\n\n3. **Build environment**: Constructs environment variables including workspace path and **session tracking variables** [7c]. The daemon propagates `AGENTCTL_SESSION_ID`, `CLAUDE_SESSION_ID`, and other session identifiers from its own environment [7d, 7e], enabling skills to maintain lineage across tool invocations.\n\n4. **Execute directly**: Calls `runner.RunWithOptions()` [7b] which routes to either:\n   - **Exec runtime** for native binaries [runner.go:93] → `exec.CommandContext()` [exec.go:86]\n   - **WASI runtime** for WebAssembly modules [runner.go:102] → `runtime.InstantiateModule()` [wasi.go:105]\n\n### Key Optimization\n\nBy calling `RunWithOptions()` directly, the daemon **skips**:\n- Job record creation in SQLite\n- State transitions (queued → running → ok)\n- Result persistence to disk\n- Progress tracking infrastructure\n- Observability event enrichment from cloud metadata\n\nThis makes the daemon ideal for **ephemeral skill calls** where you need the result immediately but don't need durable job history.\n\n### Session Propagation\n\nThe daemon inherits session variables from its parent process and propagates them to child skills [service.go:396-403]. This ensures that skills executed through the daemon can still identify which AI coding session (Claude, Cursor, etc.) triggered them, maintaining proper lineage for debugging and observability."
+    },
+    {
+      "id": "8",
+      "title": "Platform-Specific Resource Limits",
+      "description": "Exec runner platform layer - applies OS-specific process isolation and resource limits (Linux with Pdeathsig, Unix with process groups)",
+      "locations": [
+        {
+          "id": "8a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_linux.go",
+          "lineNumber": 10,
+          "lineContent": "func setResourceLimits(cmd *exec.Cmd, maxMemory, maxCPUSeconds uint64) error {",
+          "title": "Linux resource limits",
+          "description": "Linux-specific implementation with Pdeathsig support"
+        },
+        {
+          "id": "8b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_linux.go",
+          "lineNumber": 16,
+          "lineContent": "cmd.SysProcAttr.Setpgid = true",
+          "title": "Set process group",
+          "description": "Isolates child process in separate process group for cleanup"
+        },
+        {
+          "id": "8c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_linux.go",
+          "lineNumber": 19,
+          "lineContent": "cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL",
+          "title": "Set parent death signal",
+          "description": "Ensures child dies if parent dies (Linux-only feature)"
+        },
+        {
+          "id": "8d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_unix.go",
+          "lineNumber": 10,
+          "lineContent": "func setResourceLimits(cmd *exec.Cmd, maxMemory, maxCPUSeconds uint64) error {",
+          "title": "Unix resource limits",
+          "description": "Unix (non-Linux) implementation with basic process group isolation"
+        },
+        {
+          "id": "8e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_unix.go",
+          "lineNumber": 16,
+          "lineContent": "cmd.SysProcAttr.Setpgid = true",
+          "title": "Unix process group",
+          "description": "Process group isolation on macOS and other Unix systems"
+        }
+      ],
+      "traceTextDiagram": "Platform-Specific Resource Limit Enforcement\n├── Linux Implementation (rlimit_linux.go)\n│   └── setResourceLimits() entry \u003c-- 8a\n│       ├── Initialize SysProcAttr \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_linux.go:12\n│       ├── Set process group isolation \u003c-- 8b\n│       ├── Set parent death signal \u003c-- 8c\n│       └── Prepare rlimits (not enforced yet) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_linux.go:23\n│\n└── Unix Implementation (rlimit_unix.go)\n    └── setResourceLimits() entry \u003c-- 8d\n        ├── Initialize SysProcAttr \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/rlimit_unix.go:12\n        └── Set process group isolation \u003c-- 8e\n\nCalled from:\nexec.Runner.Run() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go:54\n└── cmd := exec.CommandContext(ctx, r.Binary) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go:86\n    └── setResourceLimits(cmd, maxMemory, maxCPU) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go:169\n        ├── Linux: Setpgid + Pdeathsig\n        └── Unix: Setpgid only",
+      "traceGuide": "## Motivation\n\nWhen executing native binary skills as subprocesses, **proper resource isolation is critical** to prevent runaway processes from consuming system resources or persisting after the parent dies. Without process group isolation, killing the parent process leaves orphaned child processes running. Without resource limits, a misbehaving skill can exhaust CPU or memory. The platform-specific resource limit system solves this by applying OS-level process controls during skill execution.\n\nThe challenge is that **different Unix-like systems provide different isolation mechanisms**. Linux offers `Pdeathsig` (parent death signal) to ensure children die with their parent [8c], while macOS and other Unix systems lack this feature. Both support process groups via `Setpgid` for coordinated cleanup [8b, 8e].\n\n## Details\n\n### Architecture\n\nThe exec runner applies resource limits through **platform-specific implementations** using Go's build tags:\n- `rlimit_linux.go` for Linux systems [8a]\n- `rlimit_unix.go` for non-Linux Unix systems (macOS, BSD) [8d]\n- `rlimit_windows.go` for Windows (no-op currently)\n\nBoth implementations are called from the same point in the exec runner's `Run()` method, right before executing the binary [8a, 8d].\n\n### Linux Implementation\n\nOn Linux, `setResourceLimits()` configures two key protections:\n\n1. **Process group isolation** via `cmd.SysProcAttr.Setpgid = true` [8b] - Places the child in its own process group, allowing the entire group to be killed together\n2. **Parent death signal** via `cmd.SysProcAttr.Pdeathsig = syscall.SIGKILL` [8c] - Ensures the child receives SIGKILL if the parent dies unexpectedly\n\nThe function also prepares rlimit structures for memory and CPU limits, but these aren't yet enforceable via the standard library (requires Go 1.23+ or external tools).\n\n### Unix (Non-Linux) Implementation\n\nOn macOS and other Unix systems, `setResourceLimits()` only configures **process group isolation** [8e]. The `Pdeathsig` feature is Linux-specific and unavailable on these platforms. This means Unix systems rely more heavily on context timeouts and explicit cleanup.\n\n### Current Limitations\n\n**Memory and CPU rlimits are documented but not enforced** in the current implementation. The primary enforcement mechanisms are:\n1. Context timeouts (always enforced)\n2. Process group isolation (Unix/Linux)\n3. Parent death signal (Linux only)\n\nFuture versions will leverage Go 1.23+'s `Prlimit` field for proper rlimit enforcement."
+    }
+  ],
+  "description": "Maps the skill execution system with two runtime types (exec for native binaries, WASI for WebAssembly), environment propagation for session tracking across AI tools, and orchestration layers. Key entry points: unified runner [1a], exec runtime [2b], WASI runtime [3c], session env building [4b], job orchestration [5c], hook integration [6c], and daemon service [7b].",
+  "mermaidDiagram": "graph TB\n    subgraph Runner[\"Unified Runner\"]\n        1a[\"1a: RunWithOptions\u003cbr/\u003eroutes to runtime\"]\n        1b[\"1b: extract workspace\u003cbr/\u003efrom context\"]\n        1c[\"1c: dispatch by\u003cbr/\u003edistribution type\"]\n    end\n    \n    subgraph EnvProp[\"Session Environment\"]\n        4a[\"4a: buildSkillEnv\u003cbr/\u003econstructs environment\"]\n        4b[\"4b: iterate session\u003cbr/\u003evariables\"]\n        4c[\"4c: read from parent\u003cbr/\u003eprocess\"]\n        4d[\"4d: propagate to\u003cbr/\u003echild process\"]\n        4e[\"4e: ResolveSessionID\u003cbr/\u003epriority order\"]\n    end\n    \n    subgraph ExecRuntime[\"Exec Runtime\"]\n        2a[\"2a: Run entry point\u003cbr/\u003enative binary\"]\n        2b[\"2b: create subprocess\u003cbr/\u003ewith context\"]\n        2d[\"2d: inject skill\u003cbr/\u003emetadata\"]\n        2e[\"2e: set command\u003cbr/\u003eenvironment\"]\n        2f[\"2f: apply resource\u003cbr/\u003elimits\"]\n        2g[\"2g: execute binary\u003cbr/\u003eand wait\"]\n    end\n    \n    subgraph WasiRuntime[\"WASI Runtime\"]\n        3a[\"3a: Run entry point\u003cbr/\u003eWASM module\"]\n        3b[\"3b: initialize wazero\u003cbr/\u003eruntime\"]\n        3c[\"3c: compile WASM\u003cbr/\u003emodule\"]\n        3d[\"3d: build module\u003cbr/\u003econfiguration\"]\n        3e[\"3e: inject environment\u003cbr/\u003evariables\"]\n        3g[\"3g: instantiate and\u003cbr/\u003eexecute module\"]\n    end\n    \n    subgraph JobExec[\"Job Executor\"]\n        5a[\"5a: RunSkill entry\u003cbr/\u003epoint\"]\n        5b[\"5b: prepare job\u003cbr/\u003erecord\"]\n        5c[\"5c: execute via\u003cbr/\u003eskillExecutor\"]\n        5d[\"5d: update state\u003cbr/\u003eto running\"]\n        5f[\"5f: persist success\u003cbr/\u003estate\"]\n    end\n    \n    subgraph HookSys[\"Hook System\"]\n        6a[\"6a: Dispatch entry\u003cbr/\u003eroutes events\"]\n        6b[\"6b: execute hook\u003cbr/\u003evia runner\"]\n        6c[\"6c: hook skill\u003cbr/\u003eexecution\"]\n        6d[\"6d: build hook\u003cbr/\u003eenvironment\"]\n        6e[\"6e: propagate session\u003cbr/\u003eto hook\"]\n        6f[\"6f: parse hook\u003cbr/\u003eoutput\"]\n    end\n    \n    subgraph DaemonSvc[\"Daemon Service\"]\n        7a[\"7a: handleRun\u003cbr/\u003evia socket\"]\n        7b[\"7b: execute via\u003cbr/\u003eunified runner\"]\n        7c[\"7c: build daemon\u003cbr/\u003eenvironment\"]\n        7d[\"7d: propagate session\u003cbr/\u003evars\"]\n    end\n    \n    subgraph ResLimits[\"Resource Limits\"]\n        8a[\"8a: Linux limits\u003cbr/\u003ewith Pdeathsig\"]\n        8b[\"8b: set process\u003cbr/\u003egroup isolation\"]\n        8c[\"8c: parent death\u003cbr/\u003esignal\"]\n        8d[\"8d: Unix limits\u003cbr/\u003ebasic isolation\"]\n        8e[\"8e: Unix process\u003cbr/\u003egroup\"]\n    end\n    \n    1b --\u003e|extracts| 1a\n    1c --\u003e|routes| 1a\n    \n    1a --\u003e|calls for exec| 4a\n    1a --\u003e|calls for WASI| 4a\n    4a --\u003e|reads| 4b\n    4b --\u003e|gets value| 4c\n    4c --\u003e|adds to env| 4d\n    4a --\u003e|resolves| 4e\n    \n    4a --\u003e|provides env| 2a\n    1a --\u003e|creates exec runner| 2b\n    2b --\u003e|uses| 2d\n    2d --\u003e|sets| 2e\n    2e --\u003e|applies| 2f\n    2f --\u003e|enforces| 8a\n    2f --\u003e|enforces| 8d\n    2e --\u003e|runs| 2g\n    \n    4a --\u003e|provides env| 3a\n    1a --\u003e|creates WASI runner| 3b\n    3b --\u003e|compiles| 3c\n    3c --\u003e|configures| 3d\n    3d --\u003e|injects| 3e\n    3e --\u003e|executes| 3g\n    \n    5a --\u003e|prepares| 5b\n    5b --\u003e|executes| 5c\n    5c --\u003e|calls| 1a\n    5c --\u003e|updates| 5d\n    5c --\u003e|persists| 5f\n    \n    6a --\u003e|routes| 6b\n    6b --\u003e|executes| 6c\n    6c --\u003e|calls| 1a\n    6c --\u003e|builds| 6d\n    6d --\u003e|propagates| 6e\n    6c --\u003e|parses| 6f\n    \n    7a --\u003e|handles| 7b\n    7b --\u003e|calls| 1a\n    7b --\u003e|builds| 7c\n    7c --\u003e|propagates| 7d\n    \n    8a --\u003e|sets| 8b\n    8b --\u003e|signals| 8c\n    8d --\u003e|sets| 8e\n    \n    style Runner fill:#a5d8ff\n    style EnvProp fill:#ffec99\n    style ExecRuntime fill:#fcc2d7\n    style WasiRuntime fill:#d0bfff\n    style JobExec fill:#b2f2bb\n    style HookSys fill:#ffd8a8\n    style DaemonSvc fill:#99e9f2\n    style ResLimits fill:#eebefa"
+}

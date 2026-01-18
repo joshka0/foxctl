@@ -247,7 +247,6 @@ func TestSwitch(t *testing.T) {
 			return map[string]any{"added": true}, nil
 		}).
 		Run()
-
 	if err != nil {
 		t.Errorf("Switch.Run() error = %v", err)
 	}
@@ -272,7 +271,6 @@ func TestSwitch_Default(t *testing.T) {
 		}).
 		Default("list").
 		Run()
-
 	if err != nil {
 		t.Errorf("Switch.Run() with default error = %v", err)
 	}
@@ -291,7 +289,6 @@ func TestSwitch_Alias(t *testing.T) {
 		}).
 		Alias("ls", "list").
 		Run()
-
 	if err != nil {
 		t.Errorf("Switch.Run() with alias error = %v", err)
 	}

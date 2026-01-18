@@ -13,6 +13,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/skill"
 	"github.com/jkatigb/agentctl/internal/execution"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
 )
 
@@ -345,7 +346,7 @@ func TestAnnotateEphemeral(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	meta, ok := env["meta"].(map[string]any)
+	meta, ok := maputil.AsStringMap(env["meta"])
 	if !ok {
 		t.Fatal("expected meta to be a map")
 	}

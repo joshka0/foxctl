@@ -11,16 +11,16 @@ import "encoding/json"
 // Message represents a message in the Claude Code JSONL format.
 // This is the top-level structure for each line in the JSONL file.
 type Message struct {
-	Type            string           `json:"type"`
-	Subtype         string           `json:"subtype,omitempty"`
-	Role            string           `json:"role,omitempty"`
-	Message         json.RawMessage  `json:"message,omitempty"`
-	Content         json.RawMessage  `json:"content,omitempty"`
-	ToolUse         *ToolUseInfo     `json:"tool_use,omitempty"`
-	ToolResult      *ToolResultInfo  `json:"tool_result,omitempty"`
-	Timestamp       string           `json:"timestamp,omitempty"`
-	CompactMetadata *CompactMetadata `json:"compactMetadata,omitempty"`
-	IsCompactSummary bool            `json:"isCompactSummary,omitempty"` // True for compact continuation messages
+	Type             string           `json:"type"`
+	Subtype          string           `json:"subtype,omitempty"`
+	Role             string           `json:"role,omitempty"`
+	Message          json.RawMessage  `json:"message,omitempty"`
+	Content          json.RawMessage  `json:"content,omitempty"`
+	ToolUse          *ToolUseInfo     `json:"tool_use,omitempty"`
+	ToolResult       *ToolResultInfo  `json:"tool_result,omitempty"`
+	Timestamp        string           `json:"timestamp,omitempty"`
+	CompactMetadata  *CompactMetadata `json:"compactMetadata,omitempty"`
+	IsCompactSummary bool             `json:"isCompactSummary,omitempty"` // True for compact continuation messages
 }
 
 // MessagePayload represents the nested message content in JSONL.
@@ -82,11 +82,11 @@ type CompactMetadata struct {
 type ChunkType string
 
 const (
-	ChunkTypeUserRequest      ChunkType = "user_request"
+	ChunkTypeUserRequest       ChunkType = "user_request"
 	ChunkTypeAssistantResponse ChunkType = "assistant_response"
-	ChunkTypeToolUse          ChunkType = "tool_use"
-	ChunkTypeToolOutput       ChunkType = "tool_output"
-	ChunkTypeError            ChunkType = "error"
-	ChunkTypeCompactBoundary  ChunkType = "compact_boundary"
-	ChunkTypeOther            ChunkType = "other"
+	ChunkTypeToolUse           ChunkType = "tool_use"
+	ChunkTypeToolOutput        ChunkType = "tool_output"
+	ChunkTypeError             ChunkType = "error"
+	ChunkTypeCompactBoundary   ChunkType = "compact_boundary"
+	ChunkTypeOther             ChunkType = "other"
 )

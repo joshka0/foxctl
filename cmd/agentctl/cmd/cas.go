@@ -346,6 +346,7 @@ func newCASUnpinCommand() *cobra.Command {
 
 func newCASRemoveCommand() *cobra.Command {
 	var force bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "rm <digest>",
 		Short: "Remove an object from the store",
@@ -355,6 +356,21 @@ func newCASRemoveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// Check if object exists (for both dry-run and actual delete)
+			if _, err := store.Head(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+
+			if dryRun {
+				result := map[string]any{
+					"digest":  args[0],
+					"dry_run": true,
+					"message": "Would remove object",
+				}
+				return protocol.WriteOK(cmd.OutOrStdout(), "agentctl.cas.rm", result, protocol.WithSource("run"))
+			}
+
 			err = store.Remove(cmd.Context(), args[0])
 			if errors.Is(err, cas.ErrPinned) && force {
 				if unpinErr := store.Unpin(cmd.Context(), args[0]); unpinErr != nil && !errors.Is(unpinErr, cas.ErrNotFound) {
@@ -369,6 +385,7 @@ func newCASRemoveCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "Allow deletion of pinned objects")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be removed without making changes")
 	return cmd
 }
 

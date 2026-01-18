@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"encoding/json"
+
 	"github.com/jkatigb/agentctl/internal/indexing"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/rs/zerolog"
@@ -29,32 +31,7 @@ func NewFactory(
 // Create creates a semantic indexer from an indexer config.
 // The config.Extra field may contain semantic-specific settings.
 func (f *Factory) Create(cfg indexing.IndexerConfig) *Indexer {
-	semConfig := Config{
-		Enabled:      cfg.Enabled,
-		MaxFileKB:    cfg.MaxFileKB,
-		IncludeGlobs: cfg.IncludeGlobs,
-		ExcludeGlobs: cfg.ExcludeGlobs,
-	}
-
-	// Extract semantic-specific config from Extra
-	// Note: JSON-unmarshaled numbers are float64, not int
-	if cfg.Extra != nil {
-		switch v := cfg.Extra["chunk_bytes"].(type) {
-		case int:
-			semConfig.ChunkBytes = v
-		case float64:
-			semConfig.ChunkBytes = int(v)
-		}
-		switch v := cfg.Extra["chunk_overlap_bytes"].(type) {
-		case int:
-			semConfig.ChunkOverlapBytes = v
-		case float64:
-			semConfig.ChunkOverlapBytes = int(v)
-		}
-		if v, ok := cfg.Extra["provider_model"].(string); ok {
-			semConfig.ProviderModel = v
-		}
-	}
+	semConfig := configFromIndexer(cfg)
 
 	// Use no-op provider by default (real providers can be swapped in)
 	provider := NewNoOpProvider(semConfig.ProviderModel, 384)
@@ -64,6 +41,12 @@ func (f *Factory) Create(cfg indexing.IndexerConfig) *Indexer {
 
 // CreateWithProvider creates a semantic indexer with a custom embedding provider.
 func (f *Factory) CreateWithProvider(cfg indexing.IndexerConfig, provider EmbeddingProvider) *Indexer {
+	semConfig := configFromIndexer(cfg)
+
+	return NewIndexer(semConfig, f.memoryStore, provider, f.workspaceRoot, f.logger)
+}
+
+func configFromIndexer(cfg indexing.IndexerConfig) Config {
 	semConfig := Config{
 		Enabled:      cfg.Enabled,
 		MaxFileKB:    cfg.MaxFileKB,
@@ -71,26 +54,35 @@ func (f *Factory) CreateWithProvider(cfg indexing.IndexerConfig, provider Embedd
 		ExcludeGlobs: cfg.ExcludeGlobs,
 	}
 
-	// Note: JSON-unmarshaled numbers are float64, not int
-	if cfg.Extra != nil {
-		switch v := cfg.Extra["chunk_bytes"].(type) {
-		case int:
-			semConfig.ChunkBytes = v
-		case float64:
-			semConfig.ChunkBytes = int(v)
-		}
-		switch v := cfg.Extra["chunk_overlap_bytes"].(type) {
-		case int:
-			semConfig.ChunkOverlapBytes = v
-		case float64:
-			semConfig.ChunkOverlapBytes = int(v)
-		}
-		if v, ok := cfg.Extra["provider_model"].(string); ok {
-			semConfig.ProviderModel = v
-		}
+	if cfg.Extra == nil {
+		return semConfig
 	}
 
-	return NewIndexer(semConfig, f.memoryStore, provider, f.workspaceRoot, f.logger)
+	semConfig.ChunkBytes = extraInt(cfg.Extra, "chunk_bytes")
+	semConfig.ChunkOverlapBytes = extraInt(cfg.Extra, "chunk_overlap_bytes")
+	if v, ok := cfg.Extra["provider_model"].(string); ok {
+		semConfig.ProviderModel = v
+	}
+
+	return semConfig
+}
+
+func extraInt(extra map[string]any, key string) int {
+	switch v := extra[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	case json.Number:
+		if parsed, err := v.Int64(); err == nil {
+			return int(parsed)
+		}
+	}
+	return 0
 }
 
 // RegisterWithHandler registers a semantic indexer with a post-review handler.

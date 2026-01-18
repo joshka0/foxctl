@@ -19,7 +19,7 @@ signature:
     - name: workspace
       type: string
       required: false
-      description: Workspace to process memories for (defaults to cwd)
+      description: Workspace to process memories for (defaults to detected workspace)
     - name: batch_size
       type: integer
       required: false

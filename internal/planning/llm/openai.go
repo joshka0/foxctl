@@ -7,17 +7,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"time"
 )
 
 // OpenAIConfig configures the OpenAI-compatible planner.
 type OpenAIConfig struct {
-	APIKey   string // API key (from env OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY, in that order)
-	BaseURL  string // API base URL (default: https://api.openai.com/v1)
-	Model    string // Model name (default: gpt-4o-mini)
-	Timeout  time.Duration
-	Provider string // Detected provider source: "openai", "groq", "openrouter" (set automatically if not specified)
+	APIKey   string        // API key (must be provided by caller)
+	BaseURL  string        // API base URL (default based on Provider)
+	Model    string        // Model name (default based on Provider)
+	Timeout  time.Duration // Request timeout (default: 60s)
+	Provider string        // Provider: "openai", "groq", "openrouter"
 }
 
 // OpenAIPlanner implements Planner using an OpenAI-compatible API.
@@ -28,31 +27,11 @@ type OpenAIPlanner struct {
 }
 
 // NewOpenAIPlanner creates a new OpenAI-compatible planner.
-// Automatically detects API keys from environment in priority order:
-// OPENROUTER_API_KEY > GROQ_API_KEY > OPENAI_API_KEY
+// The caller must provide APIKey and Provider in the config.
+// BaseURL and Model will be set to provider-specific defaults if not specified.
+// This function does NOT read environment variables (FC/IS compliant).
 func NewOpenAIPlanner(config OpenAIConfig) *OpenAIPlanner {
-	// Cache env var reads once to avoid redundant calls and fragile comparisons
-	envOpenRouter := os.Getenv("OPENROUTER_API_KEY")
-	envGroq := os.Getenv("GROQ_API_KEY")
-	envOpenAI := os.Getenv("OPENAI_API_KEY")
-
-	// Detect API key and provider source if not explicitly set
-	if config.APIKey == "" {
-		// Priority: OpenRouter > Groq > OpenAI
-		switch {
-		case envOpenRouter != "":
-			config.APIKey = envOpenRouter
-			config.Provider = "openrouter"
-		case envGroq != "":
-			config.APIKey = envGroq
-			config.Provider = "groq"
-		case envOpenAI != "":
-			config.APIKey = envOpenAI
-			config.Provider = "openai"
-		}
-	}
-
-	// Set BaseURL based on tracked provider (not fragile API key comparison)
+	// Set BaseURL based on provider if not specified
 	if config.BaseURL == "" {
 		switch config.Provider {
 		case "openrouter":
@@ -64,15 +43,11 @@ func NewOpenAIPlanner(config OpenAIConfig) *OpenAIPlanner {
 		}
 	}
 
-	// Set default model based on tracked provider
+	// Set default model based on provider if not specified
 	if config.Model == "" {
 		switch config.Provider {
 		case "openrouter":
-			// Default to a good general-purpose model via OpenRouter
-			config.Model = os.Getenv("OPENROUTER_MODEL_NAME")
-			if config.Model == "" {
-				config.Model = "openai/gpt-4o-mini"
-			}
+			config.Model = "openai/gpt-4o-mini"
 		case "groq":
 			config.Model = "llama-3.3-70b-versatile"
 		default:
@@ -126,7 +101,7 @@ type openAIResponse struct {
 // Plan implements the Planner interface.
 func (p *OpenAIPlanner) Plan(ctx context.Context, req PlanRequest) (*PlanResult, error) {
 	if p.config.APIKey == "" {
-		return nil, fmt.Errorf("no API key configured (set OPENROUTER_API_KEY, GROQ_API_KEY or OPENAI_API_KEY)")
+		return nil, fmt.Errorf("no API key configured")
 	}
 
 	prompt := buildPrompt(req)

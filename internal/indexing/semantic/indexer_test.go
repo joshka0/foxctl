@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/indexing"
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
 )

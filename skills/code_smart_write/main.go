@@ -6,13 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/diffutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/codeedit"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
@@ -20,31 +20,27 @@ import (
 const command = "code/smart_write"
 
 type input struct {
-	Path         string `json:"path" validate:"required"`
-	Edits        []edit `json:"edits" validate:"required,min=1"`
-	DryRun       bool   `json:"dry_run"`
-	ContextLines int    `json:"context_lines"`
+	Path          string   `json:"path"`  // Single file (backward compat)
+	Paths         []string `json:"paths"` // Multiple files or globs
+	Edits         []edit   `json:"edits" validate:"omitempty,min=1,dive"`
+	DryRun        bool     `json:"dry_run"`
+	ContextLines  int      `json:"context_lines"`
+	CreateBackup  bool     `json:"create_backup"`  // Backup to CAS before editing
+	RestoreDigest string   `json:"restore_digest"` // CAS digest to restore from (undo mode)
 }
 
-type edit struct {
-	Type         string `json:"type"` // "symbol", "lines", "replace"
-	Symbol       string `json:"symbol,omitempty"`
-	StartLine    int    `json:"start_line,omitempty"`
-	EndLine      int    `json:"end_line,omitempty"`
-	Search       string `json:"search,omitempty"`
-	Replace      string `json:"replace,omitempty"`
-	WithinSymbol string `json:"within_symbol,omitempty"`
-	NewCode      string `json:"new_code,omitempty"`
-	All          bool   `json:"all,omitempty"`
+// fileResult holds the result for a single file edit
+type fileResult struct {
+	Path         string   `json:"path"`
+	Edited       bool     `json:"edited"`
+	EditCount    int      `json:"edit_count"`
+	SymbolsFound []string `json:"symbols_found,omitempty"`
+	Diff         string   `json:"diff,omitempty"`
+	BackupDigest string   `json:"backup_digest,omitempty"` // CAS digest for undo
+	Error        string   `json:"error,omitempty"`
 }
 
-// symbolInfo holds info about a found symbol.
-type symbolInfo struct {
-	Name      string
-	Kind      string
-	StartLine int // 0-indexed
-	EndLine   int // 0-indexed
-}
+type edit = codeedit.Edit
 
 func main() {
 	skillmain.Main(command, run)
@@ -56,537 +52,164 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		in.ContextLines = 3
 	}
 
-	// Validate and resolve path
-	absPath, err := rc.PathValidator.ValidatePath(in.Path)
-	if err != nil {
-		return fmt.Errorf("path validation failed: %w", err)
+	// Handle restore mode (undo from CAS backup)
+	if in.RestoreDigest != "" {
+		return handleRestore(ctx, rc, in)
 	}
 
-	// Read original file
-	originalBytes, err := os.ReadFile(absPath)
-	if err != nil {
-		return fmt.Errorf("read file: %w", err)
+	// Validate edits (required for edit mode, not restore mode)
+	if len(in.Edits) == 0 {
+		return skillerr.Arg(
+			"edits is required",
+			skillerr.WithHint("Provide at least one edit operation, or use restore_digest for undo."),
+		)
 	}
-	original := string(originalBytes)
-	lines := strings.Split(original, "\n")
+	if err := codeedit.ValidateEdits(in.Edits); err != nil {
+		return err
+	}
 
-	// Detect language for symbol finding
-	lang := detectLanguage(absPath)
+	// Resolve paths: support single Path, multiple Paths, or globs
+	paths, err := skillmain.ResolvePaths(rc, in.Path, in.Paths)
+	if err != nil {
+		return err
+	}
 
-	// Apply edits
-	result := lines
-	symbolsFound := []string{}
-	editCount := 0
+	if len(paths) == 0 {
+		return skillerr.Arg(
+			"no files specified",
+			skillerr.WithHint("Provide 'path' for a single file or 'paths' for multiple files/globs."),
+		)
+	}
 
-	for _, e := range in.Edits {
-		var edited []string
-		var found []string
-		var applied bool
+	// Process each file
+	results := make([]fileResult, 0, len(paths))
+	totalEdits := 0
+	filesEdited := 0
 
-		switch e.Type {
-		case "symbol":
-			edited, found, applied, err = applySymbolEdit(result, lang, e)
-		case "lines":
-			edited, found, applied, err = applyLinesEdit(result, e)
-		case "replace":
-			edited, found, applied, err = applyReplaceEdit(result, lang, e)
-		default:
-			return fmt.Errorf("unknown edit type: %s", e.Type)
-		}
+	for _, absPath := range paths {
+		relPath := pathutil.RelTo(rc.PathValidator.Workspace(), absPath)
+		result := fileResult{Path: relPath}
 
+		editResult, err := codeedit.ApplyEditsToFile(ctx, rc, absPath, in.Edits, codeedit.FileEditOptions{
+			DryRun:       in.DryRun,
+			CreateBackup: in.CreateBackup,
+			BackupTags:   []string{"backup", "smart_write"},
+			ContextLines: in.ContextLines,
+		})
 		if err != nil {
-			return fmt.Errorf("edit failed: %w", err)
+			var skillErr *skillerr.Error
+			if errors.As(err, &skillErr) {
+				result.Error = skillErr.Error()
+			} else {
+				result.Error = fmt.Sprintf("edit failed: %v", err)
+			}
+			results = append(results, result)
+			continue
 		}
 
-		if applied {
-			result = edited
-			editCount++
-			symbolsFound = append(symbolsFound, found...)
+		result.EditCount = editResult.EditCount
+		result.SymbolsFound = editResult.SymbolsFound
+		result.Diff = editResult.Diff
+		result.BackupDigest = editResult.BackupDigest
+		result.Edited = editResult.Edited
+
+		results = append(results, result)
+		totalEdits += result.EditCount
+		if result.Edited {
+			filesEdited++
 		}
 	}
 
-	modified := strings.Join(result, "\n")
-
-	// Generate unified diff
-	diff, err := diffutil.UnifiedDiff(absPath, original, modified, in.ContextLines)
-	if err != nil {
-		return fmt.Errorf("generate diff: %w", err)
-	}
-
-	// Write file unless dry_run
-	edited := false
-	if !in.DryRun && original != modified {
-		if err := os.WriteFile(absPath, []byte(modified), 0o644); err != nil {
-			return fmt.Errorf("write file: %w", err)
-		}
-		edited = true
-	}
-
-	// Prepare response
-	relPath := pathutil.RelTo(rc.PathValidator.Workspace(), absPath)
-
+	// Build response
 	data := map[string]any{
-		"path":          relPath,
-		"edited":        edited,
-		"edit_count":    editCount,
-		"symbols_found": symbolsFound,
 		"dry_run":       in.DryRun,
+		"total_edits":   totalEdits,
+		"files_edited":  filesEdited,
+		"files_checked": len(paths),
 	}
 
-	// Always include diff for dry_run, optionally for actual edits
-	if in.DryRun || diff != "" {
-		data["diff"] = diff
-	}
-
-	if diff == "" && editCount == 0 {
-		data["message"] = "no changes made"
+	// Single file: flatten result (backward compat)
+	if len(results) == 1 {
+		r := results[0]
+		data["path"] = r.Path
+		data["edited"] = r.Edited
+		data["edit_count"] = r.EditCount
+		data["symbols_found"] = r.SymbolsFound
+		if r.Diff != "" {
+			data["diff"] = r.Diff
+		}
+		if r.Error != "" {
+			data["error"] = r.Error
+		}
+		if r.BackupDigest != "" {
+			data["backup_digest"] = r.BackupDigest
+		}
+	} else {
+		// Multiple files: return array
+		data["results"] = results
+		// Combine all diffs for preview
+		if in.DryRun {
+			var allDiffs []string
+			for _, r := range results {
+				if r.Diff != "" {
+					allDiffs = append(allDiffs, r.Diff)
+				}
+			}
+			if len(allDiffs) > 0 {
+				data["combined_diff"] = strings.Join(allDiffs, "\n")
+			}
+		}
 	}
 
 	return skillout.Emit(rc, command, data)
 }
 
-
-// applySymbolEdit replaces an entire symbol by name.
-func applySymbolEdit(lines []string, lang Language, e edit) ([]string, []string, bool, error) {
-	if e.Symbol == "" {
-		return nil, nil, false, errors.New("symbol name required for type='symbol'")
+// handleRestore restores a file from CAS backup
+func handleRestore(ctx context.Context, rc *skillmain.RunContext, in input) error {
+	// Require exactly one path for restore
+	if in.Path == "" {
+		return skillerr.Arg(
+			"path is required for restore",
+			skillerr.WithHint("Provide the path of the file to restore."),
+		)
 	}
-	if e.NewCode == "" {
-		return nil, nil, false, errors.New("new_code required for type='symbol'")
+
+	// Validate and resolve path
+	absPath, err := skillmain.ValidatePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
-	// Find the symbol
-	symbols := findSymbols(lines, lang)
-	var target *symbolInfo
-	for i := range symbols {
-		if symbols[i].Name == e.Symbol {
-			target = &symbols[i]
-			break
+	// Retrieve content from CAS
+	reader, _, err := rc.CASStore.Get(ctx, in.RestoreDigest)
+	if err != nil {
+		return skillerr.IO(
+			fmt.Sprintf("failed to retrieve backup %s: %v", in.RestoreDigest, err),
+			skillerr.WithHint("Check that the digest is valid and exists in CAS."),
+		)
+	}
+	defer reader.Close()
+
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		return skillerr.WrapIO("read CAS content", err)
+	}
+
+	// Write restored content to file
+	if !in.DryRun {
+		if err := os.WriteFile(absPath, content, 0o644); err != nil {
+			return skillerr.WrapIO("write restored file", err)
 		}
 	}
 
-	if target == nil {
-		return lines, nil, false, fmt.Errorf("symbol not found: %s", e.Symbol)
+	relPath := pathutil.RelTo(rc.PathValidator.Workspace(), absPath)
+	data := map[string]any{
+		"path":           relPath,
+		"restored":       !in.DryRun,
+		"restore_digest": in.RestoreDigest,
+		"dry_run":        in.DryRun,
+		"size":           len(content),
 	}
 
-	// Replace the symbol's lines with new code
-	newCodeLines := strings.Split(e.NewCode, "\n")
-
-	result := make([]string, 0, len(lines)-target.EndLine+target.StartLine+len(newCodeLines))
-	result = append(result, lines[:target.StartLine]...)
-	result = append(result, newCodeLines...)
-	result = append(result, lines[target.EndLine+1:]...)
-
-	return result, []string{e.Symbol}, true, nil
+	return skillout.Emit(rc, command, data)
 }
-
-// applyLinesEdit replaces specific lines.
-func applyLinesEdit(lines []string, e edit) ([]string, []string, bool, error) {
-	if e.StartLine < 1 || e.EndLine < e.StartLine {
-		return nil, nil, false, fmt.Errorf("invalid line range: %d-%d", e.StartLine, e.EndLine)
-	}
-	if e.NewCode == "" {
-		return nil, nil, false, errors.New("new_code required for type='lines'")
-	}
-
-	// Convert to 0-indexed
-	start := e.StartLine - 1
-	end := e.EndLine - 1
-
-	if start >= len(lines) {
-		return nil, nil, false, fmt.Errorf("start_line %d exceeds file length %d", e.StartLine, len(lines))
-	}
-	if end >= len(lines) {
-		end = len(lines) - 1
-	}
-
-	newCodeLines := strings.Split(e.NewCode, "\n")
-
-	result := make([]string, 0, len(lines)-end+start+len(newCodeLines))
-	result = append(result, lines[:start]...)
-	result = append(result, newCodeLines...)
-	result = append(result, lines[end+1:]...)
-
-	found := []string{fmt.Sprintf("lines:%d-%d", e.StartLine, e.EndLine)}
-	return result, found, true, nil
-}
-
-// applyReplaceEdit does search/replace, optionally scoped to a symbol.
-func applyReplaceEdit(lines []string, lang Language, e edit) ([]string, []string, bool, error) {
-	if e.Search == "" {
-		return nil, nil, false, errors.New("search required for type='replace'")
-	}
-
-	startLine := 0
-	endLine := len(lines) - 1
-	scopeName := "file"
-
-	// If scoped to a symbol, find its boundaries
-	if e.WithinSymbol != "" {
-		symbols := findSymbols(lines, lang)
-		var target *symbolInfo
-		for i := range symbols {
-			if symbols[i].Name == e.WithinSymbol {
-				target = &symbols[i]
-				break
-			}
-		}
-		if target == nil {
-			return lines, nil, false, fmt.Errorf("symbol not found: %s", e.WithinSymbol)
-		}
-		startLine = target.StartLine
-		endLine = target.EndLine
-		scopeName = e.WithinSymbol
-	}
-
-	// Apply search/replace within scope
-	result := make([]string, len(lines))
-	copy(result, lines)
-
-	replaced := false
-	for i := startLine; i <= endLine; i++ {
-		if strings.Contains(result[i], e.Search) {
-			if e.All {
-				result[i] = strings.ReplaceAll(result[i], e.Search, e.Replace)
-			} else {
-				result[i] = strings.Replace(result[i], e.Search, e.Replace, 1)
-			}
-			replaced = true
-			if !e.All {
-				break // Only first occurrence
-			}
-		}
-	}
-
-	if !replaced {
-		return lines, nil, false, nil // No matches, not an error
-	}
-
-	return result, []string{scopeName}, true, nil
-}
-
-
-// Language represents a supported programming language.
-type Language string
-
-const (
-	LangGo       Language = "go"
-	LangPython   Language = "python"
-	LangJS       Language = "javascript"
-	LangTS       Language = "typescript"
-	LangGDScript Language = "gdscript"
-	LangGeneric  Language = "generic"
-)
-
-func detectLanguage(path string) Language {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".go":
-		return LangGo
-	case ".py", ".pyw", ".pyi":
-		return LangPython
-	case ".js", ".jsx", ".mjs", ".cjs":
-		return LangJS
-	case ".ts", ".tsx", ".mts", ".cts":
-		return LangTS
-	case ".gd":
-		return LangGDScript
-	default:
-		return LangGeneric
-	}
-}
-
-// findSymbols finds all top-level symbols in the file.
-func findSymbols(lines []string, lang Language) []symbolInfo {
-	switch lang {
-	case LangGo:
-		return findGoSymbols(lines)
-	case LangPython:
-		return findPythonSymbols(lines)
-	case LangJS, LangTS:
-		return findJSSymbols(lines)
-	case LangGDScript:
-		return findGDScriptSymbols(lines)
-	default:
-		return nil
-	}
-}
-
-// Go patterns
-var (
-	goFuncPattern   = regexp.MustCompile(`^func\s+(\w+)`)
-	goMethodPattern = regexp.MustCompile(`^func\s+\([^)]+\)\s+(\w+)`)
-	goTypePattern   = regexp.MustCompile(`^type\s+(\w+)`)
-)
-
-func findGoSymbols(lines []string) []symbolInfo {
-	var symbols []symbolInfo
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		var name, kind string
-
-		// Check for method first (more specific pattern)
-		if match := goMethodPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "method"
-		} else if match := goFuncPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "function"
-		} else if match := goTypePattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "type"
-		}
-
-		if name != "" {
-			endLine := findBraceEnd(lines, i)
-			symbols = append(symbols, symbolInfo{
-				Name:      name,
-				Kind:      kind,
-				StartLine: i,
-				EndLine:   endLine,
-			})
-		}
-	}
-
-	return symbols
-}
-
-// Python patterns
-var (
-	pyFuncPattern  = regexp.MustCompile(`^def\s+(\w+)`)
-	pyClassPattern = regexp.MustCompile(`^class\s+(\w+)`)
-	pyAsyncPattern = regexp.MustCompile(`^async\s+def\s+(\w+)`)
-)
-
-func findPythonSymbols(lines []string) []symbolInfo {
-	var symbols []symbolInfo
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		indent := getIndentLevel(line)
-
-		// Only top-level symbols (no indentation)
-		if indent > 0 {
-			continue
-		}
-
-		var name, kind string
-
-		if match := pyAsyncPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "function"
-		} else if match := pyFuncPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "function"
-		} else if match := pyClassPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "class"
-		}
-
-		if name != "" {
-			endLine := findIndentEnd(lines, i, 0)
-			symbols = append(symbols, symbolInfo{
-				Name:      name,
-				Kind:      kind,
-				StartLine: i,
-				EndLine:   endLine,
-			})
-		}
-	}
-
-	return symbols
-}
-
-// JS/TS patterns
-var (
-	jsFuncPattern      = regexp.MustCompile(`^(?:export\s+)?(?:async\s+)?function\s+(\w+)`)
-	jsArrowPattern     = regexp.MustCompile(`^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(`)
-	jsClassPattern     = regexp.MustCompile(`^(?:export\s+)?class\s+(\w+)`)
-	jsInterfacePattern = regexp.MustCompile(`^(?:export\s+)?interface\s+(\w+)`)
-	jsTypePattern      = regexp.MustCompile(`^(?:export\s+)?type\s+(\w+)`)
-)
-
-func findJSSymbols(lines []string) []symbolInfo {
-	var symbols []symbolInfo
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		var name, kind string
-
-		if match := jsFuncPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "function"
-		} else if match := jsArrowPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "function"
-		} else if match := jsClassPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "class"
-		} else if match := jsInterfacePattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "interface"
-		} else if match := jsTypePattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "type"
-		}
-
-		if name != "" {
-			endLine := findBraceEnd(lines, i)
-			symbols = append(symbols, symbolInfo{
-				Name:      name,
-				Kind:      kind,
-				StartLine: i,
-				EndLine:   endLine,
-			})
-		}
-	}
-
-	return symbols
-}
-
-// GDScript patterns
-var (
-	gdFuncPattern  = regexp.MustCompile(`^func\s+(\w+)`)
-	gdClassPattern = regexp.MustCompile(`^class_name\s+(\w+)`)
-	gdInnerClass   = regexp.MustCompile(`^class\s+(\w+)`)
-)
-
-func findGDScriptSymbols(lines []string) []symbolInfo {
-	var symbols []symbolInfo
-
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		indent := getIndentLevel(line)
-
-		// Only top-level symbols
-		if indent > 0 {
-			continue
-		}
-
-		var name, kind string
-
-		if match := gdFuncPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "function"
-		} else if match := gdClassPattern.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "class"
-		} else if match := gdInnerClass.FindStringSubmatch(trimmed); match != nil {
-			name = match[1]
-			kind = "class"
-		}
-
-		if name != "" {
-			endLine := findIndentEnd(lines, i, 0)
-			symbols = append(symbols, symbolInfo{
-				Name:      name,
-				Kind:      kind,
-				StartLine: i,
-				EndLine:   endLine,
-			})
-		}
-	}
-
-	return symbols
-}
-
-// findBraceEnd finds the closing brace for a block starting at startLine.
-func findBraceEnd(lines []string, startLine int) int {
-	depth := 0
-	foundOpen := false
-	endLine := startLine
-	maxLines := 1000 // Limit to prevent infinite loops
-
-	for i := startLine; i < len(lines) && (i-startLine) < maxLines; i++ {
-		line := lines[i]
-
-		// Count braces, ignoring strings (simple heuristic)
-		inString := false
-		var stringChar rune
-		for j, ch := range line {
-			// Simple string detection
-			if (ch == '"' || ch == '\'' || ch == '`') && (j == 0 || line[j-1] != '\\') {
-				if !inString {
-					inString = true
-					stringChar = ch
-				} else if ch == stringChar {
-					inString = false
-				}
-				continue
-			}
-
-			if inString {
-				continue
-			}
-
-			switch ch {
-			case '{':
-				depth++
-				foundOpen = true
-			case '}':
-				depth--
-				if foundOpen && depth == 0 {
-					return i
-				}
-			}
-		}
-		endLine = i
-	}
-
-	return endLine
-}
-
-// findIndentEnd finds the end of an indentation-based block.
-func findIndentEnd(lines []string, startLine int, baseIndent int) int {
-	endLine := startLine
-	maxLines := 1000
-
-	for i := startLine + 1; i < len(lines) && (i-startLine) < maxLines; i++ {
-		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-
-		// Empty lines don't end blocks
-		if trimmed == "" {
-			endLine = i
-			continue
-		}
-
-		// Comment lines don't end blocks
-		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "//") {
-			endLine = i
-			continue
-		}
-
-		indent := getIndentLevel(line)
-
-		// If we're back to the same or lower indentation, block ended
-		if indent <= baseIndent {
-			break
-		}
-
-		endLine = i
-	}
-
-	return endLine
-}
-
-// getIndentLevel returns the number of leading whitespace characters.
-func getIndentLevel(line string) int {
-	count := 0
-	for _, ch := range line {
-		switch ch {
-		case ' ':
-			count++
-		case '\t':
-			count += 4
-		default:
-			return count
-		}
-	}
-	return count
-}
-
-

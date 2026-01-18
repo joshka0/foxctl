@@ -238,7 +238,7 @@ func (a *DSPyAdapter) Run(ctx context.Context, input EngineInput) (EngineOutput,
 	output := EngineOutput{
 		AssistantText: result,
 		StopReason:    StopReasonEndTurn,
-		Tokens: TokenUsage{
+		Tokens:        TokenUsage{
 			// Token usage would need to be tracked by the LLM wrapper
 			// This is a limitation of dspy-go that we may need to address
 		},

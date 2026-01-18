@@ -4,9 +4,9 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
@@ -30,7 +30,7 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate required fields
 	if in.Role == "" {
-		return fmt.Errorf("role is required")
+		return skillerr.Arg("role is required", skillerr.WithHint("Provide the agent role to analyze."))
 	}
 
 	// Resolve workspace
@@ -40,19 +40,19 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
+		return skillerr.WrapIO("resolve workspace", err)
 	}
 
 	// Open stores
 	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open trajectory store: %w", err)
+		return skillerr.WrapIO("open trajectory store", err)
 	}
 	defer trajStore.Close()
 
 	patternStore, err := optimization.OpenPatternStore(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open pattern store: %w", err)
+		return skillerr.WrapIO("open pattern store", err)
 	}
 	defer patternStore.Close()
 
@@ -70,13 +70,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Get stats first
 	stats, err := optimizer.GetExampleStats(ctx, absWorkspace, in.Role)
 	if err != nil {
-		return fmt.Errorf("get stats: %w", err)
+		return skillerr.WrapRuntime("get stats", err)
 	}
 
 	// Generate examples
 	examples, err := optimizer.GenerateExamples(ctx, absWorkspace, in.Role)
 	if err != nil {
-		return fmt.Errorf("generate examples: %w", err)
+		return skillerr.WrapRuntime("generate examples", err)
 	}
 
 	// Convert to output format

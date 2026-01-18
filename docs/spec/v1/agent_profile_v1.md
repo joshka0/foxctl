@@ -104,6 +104,10 @@ Envelopes from Agent Profile MUST include:
 | `agent/send` | Send message to agent mailbox | Agent v1 |
 | `agent/watch` | Stream agent events | Agent v1 |
 
+**Implementation note (agentctl):** The current skill/tool names use
+`agent.spawn` and `mailbox/manage.*` for execution. The envelope contract
+retains `agent/*` and `mailbox/*`; adapters should map between these forms.
+
 ### 3.2 Spawn Agent
 
 **Command**: `agent/spawn`

@@ -5,12 +5,11 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/hooks"
@@ -64,11 +63,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	}
 	defer store.Close()
 
-	// Derive workspace ID from workspace root
-	workspaceID := in.WorkspaceID
-	if workspaceID == "" {
-		workspaceID = deriveWorkspaceID(in.WorkspaceRoot)
-	}
+	workspaceRoot := hookutil.ResolveWorkspaceRoot(in, "")
+	workspaceID := hookutil.ResolveWorkspaceIDHash(in, workspaceRoot)
 
 	// Get all test statuses for this workspace
 	statuses, err := store.ListByWorkspace(ctx, workspaceID)
@@ -146,7 +142,7 @@ func buildContextString(watchers []WatcherFeedback, cfg FeedbackConfig) string {
 			}
 
 			if f.Message != "" {
-				sb.WriteString(fmt.Sprintf(" (%s)", truncate(f.Message, 100)))
+				sb.WriteString(fmt.Sprintf(" (%s)", skillout.TruncateString(f.Message, 100)))
 			}
 			sb.WriteString("\n")
 		}
@@ -164,24 +160,10 @@ func buildContextString(watchers []WatcherFeedback, cfg FeedbackConfig) string {
 	return sb.String()
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}
-
 func emitOutput(rc *skillmain.RunContext, output hooks.Output, meta map[string]any) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
+	var extras map[string]any
 	if meta != nil {
-		data["meta"] = meta
+		extras = map[string]any{"meta": meta}
 	}
-	return skillout.Emit(rc, "hooks/test_feedback", data)
-}
-
-func deriveWorkspaceID(path string) string {
-	h := sha256.Sum256([]byte(path))
-	return "ws-" + hex.EncodeToString(h[:8])
+	return hookutil.EmitOutput(rc, "hooks/test_feedback", output, extras)
 }

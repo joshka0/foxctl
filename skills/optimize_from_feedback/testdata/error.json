@@ -1,0 +1,8 @@
+{
+  "skill": "optimize/from_feedback",
+  "error": {
+    "code": "EARG",
+    "message": "min_rating must be between 1 and 5",
+    "hint": "Provide a valid rating threshold (e.g., 3.0 for average or above)."
+  }
+}

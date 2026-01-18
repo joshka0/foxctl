@@ -8,6 +8,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution"
 	"github.com/jkatigb/agentctl/internal/observability"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/platform/workspace"
 	"github.com/jkatigb/agentctl/internal/protocol"
 )
@@ -158,7 +159,7 @@ func annotateEphemeral(data []byte) []byte {
 		return data
 	}
 
-	meta, ok := env["meta"].(map[string]any)
+	meta, ok := maputil.AsStringMap(env["meta"])
 	if !ok {
 		meta = make(map[string]any)
 		env["meta"] = meta

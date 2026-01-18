@@ -3,6 +3,8 @@ package handlers
 import (
 	"fmt"
 	"strings"
+
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 )
 
 // CoreHandler handles core actions: ping, scene_tree, node_*, signal_connect, etc.
@@ -39,83 +41,83 @@ func (h *CoreHandler) Validate(in Input) error {
 		// Optional error_limit already has default
 	case ActionNodeInspect:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 	case ActionNodeCreate:
 		if strings.TrimSpace(in.ParentPath) == "" {
-			return fmt.Errorf("parent_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("parent_path is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.NodeType) == "" {
-			return fmt.Errorf("node_type is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_type is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.NodeName) == "" {
-			return fmt.Errorf("node_name is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_name is required for action %q", in.Action))
 		}
 	case ActionNodeSetProp:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.Property) == "" {
-			return fmt.Errorf("property is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("property is required for action %q", in.Action))
 		}
 	case ActionNodeAttachScript:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.ScriptPath) == "" {
-			return fmt.Errorf("script_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("script_path is required for action %q", in.Action))
 		}
 	case ActionSignalConnect:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path (source) is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path (source) is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.SignalName) == "" {
-			return fmt.Errorf("signal_name is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("signal_name is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.TargetPath) == "" {
-			return fmt.Errorf("target_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("target_path is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.MethodName) == "" {
-			return fmt.Errorf("method_name is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("method_name is required for action %q", in.Action))
 		}
 	case ActionNodeDelete:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 	case ActionNodeRename:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.NewName) == "" {
-			return fmt.Errorf("new_name is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("new_name is required for action %q", in.Action))
 		}
 	case ActionNodeReparent:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.NewParentPath) == "" {
-			return fmt.Errorf("new_parent_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("new_parent_path is required for action %q", in.Action))
 		}
 	case ActionClassInfo:
 		if strings.TrimSpace(in.ClassName) == "" {
-			return fmt.Errorf("class_name is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("class_name is required for action %q", in.Action))
 		}
 	case ActionEnsureNode:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 		if strings.TrimSpace(in.NodeType) == "" {
-			return fmt.Errorf("node_type is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_type is required for action %q", in.Action))
 		}
 	case ActionSearchNodes:
 		// All filters are optional
 	case ActionFocusNode:
 		if strings.TrimSpace(in.NodePath) == "" {
-			return fmt.Errorf("node_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("node_path is required for action %q", in.Action))
 		}
 	case ActionRunScene:
 		if strings.TrimSpace(in.ScenePath) == "" {
-			return fmt.Errorf("scene_path is required for action %q", in.Action)
+			return skillerr.Arg(fmt.Sprintf("scene_path is required for action %q", in.Action))
 		}
 	}
 	return nil

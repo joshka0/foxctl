@@ -5,11 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	dstools "github.com/XiaoConstantine/dspy-go/pkg/tools"
 	models "github.com/XiaoConstantine/mcp-go/pkg/model"
+	"github.com/oklog/ulid/v2"
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
+	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 )
 
 // SpawnToolConfig holds configuration for the spawn tool.
@@ -129,7 +136,7 @@ func (r *Registry) executeSpawn(ctx context.Context, args map[string]any, cfg Sp
 	// Parse subagent requests
 	var requestedSubagents []types.SubagentRequest
 	for i, raw := range subagentsRaw {
-		subMap, ok := raw.(map[string]any)
+		subMap, ok := maputil.AsStringMap(raw)
 		if !ok {
 			return errorResult(fmt.Sprintf("requested_subagents[%d] must be an object", i))
 		}
@@ -217,6 +224,132 @@ func (r *Registry) executeSpawn(ctx context.Context, args map[string]any, cfg Sp
 	}
 
 	return successResult(result)
+}
+
+const (
+	defaultSpawnResponseWait = 30 * time.Second
+	spawnResponsePollEvery   = 200 * time.Millisecond
+)
+
+func (r *Registry) spawnMailSender(ctx context.Context, to, subject string, body any) (any, error) {
+	req, ok := body.(types.SpawnRequest)
+	if !ok {
+		var decoded types.SpawnRequest
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal spawn request: %w", err)
+		}
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return nil, fmt.Errorf("decode spawn request: %w", err)
+		}
+		req = decoded
+	}
+
+	return r.sendSpawnRequest(ctx, to, subject, req)
+}
+
+func (r *Registry) sendSpawnRequest(ctx context.Context, to, subject string, req types.SpawnRequest) (any, error) {
+	if r.openMailboxStore == nil {
+		return nil, fmt.Errorf("mailbox store not configured")
+	}
+
+	store, err := r.openMailboxStore(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open mailbox store: %w", err)
+	}
+	defer func() { errspkg.Ignore(store.Close(), "close mailbox store") }()
+
+	requestID := ulid.Make().String()
+	env := envelope.OK("agent.spawn", req)
+	payload, err := json.Marshal(env)
+	if err != nil {
+		return nil, fmt.Errorf("marshal spawn envelope: %w", err)
+	}
+
+	msg := agent.Message{
+		ID:        ulid.Make().String(),
+		FromNS:    r.config.ActorID,
+		ToNS:      to,
+		Type:      agent.MessageTypeCmd,
+		Headers:   map[string]string{"correlation": requestID, "subject": subject},
+		Payload:   payload,
+		VisibleAt: time.Now().Unix(),
+		Timestamp: time.Now().Unix(),
+		SessionID: r.config.SessionID,
+		Workspace: r.config.WorkspaceID,
+		AgentID:   r.config.ActorID,
+	}
+
+	if err := store.Send(ctx, msg); err != nil {
+		return nil, fmt.Errorf("send spawn request: %w", err)
+	}
+
+	if !req.WaitForCompletion {
+		return map[string]any{
+			"status":     "sent",
+			"request_id": requestID,
+			"note":       "Spawn request sent. Reply will arrive in mailbox.",
+		}, nil
+	}
+
+	response, err := r.waitForSpawnResponse(ctx, store, requestID)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func (r *Registry) waitForSpawnResponse(ctx context.Context, store mailbox.Store, requestID string) (any, error) {
+	deadline := time.Now().Add(defaultSpawnResponseWait)
+	ticker := time.NewTicker(spawnResponsePollEvery)
+	defer ticker.Stop()
+
+	for {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("spawn response timeout")
+		}
+
+		messages, err := store.List(ctx, r.config.ActorID, 50)
+		if err != nil {
+			return nil, fmt.Errorf("list mailbox replies: %w", err)
+		}
+		for _, msg := range messages {
+			if msg.Type != agent.MessageTypeReply {
+				continue
+			}
+			if msg.Headers["correlation"] != requestID {
+				continue
+			}
+
+			if err := store.Ack(ctx, msg.ID); err != nil {
+				return nil, fmt.Errorf("ack spawn response: %w", err)
+			}
+			return parseSpawnResponse(msg.Payload)
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func parseSpawnResponse(payload []byte) (any, error) {
+	var env envelope.Envelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return nil, fmt.Errorf("decode spawn response: %w", err)
+	}
+	if err := envelope.Validate(env); err != nil {
+		return nil, fmt.Errorf("invalid spawn response: %w", err)
+	}
+	if env.Status != envelope.StatusOK {
+		return nil, fmt.Errorf("spawn response status: %s", env.Status)
+	}
+	return env.Data, nil
 }
 
 // ValidateSpawnDepth checks if a spawn is allowed given hierarchy constraints.

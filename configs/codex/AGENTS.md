@@ -1,72 +1,175 @@
-# agentctl “hooks” for Codex (prompt emulation)
+# agentctl Integration for Codex
 
-Codex does not support Claude/OpenCode-style hook events (PreToolUse/PostToolUse/Stop). Treat the rules below as “always-on hooks” you must self-apply.
+Codex does not support Claude Code-style hook events (PreToolUse/PostToolUse).
+Apply these rules as self-enforced guidelines.
 
-## 1) Task guard (before edits)
+## Tool Redirections (Self-Enforce)
 
-When you are about to change files (edit/write/multi-edit):
+### File Editing → fs/apply_edit
+**NEVER use sed, awk, or manual file writes.**
 
-- Ensure there is an explicit task for the work.
-  - If none exists, create one (or ask for a title) before editing.
-  - Keep the task description updated as scope changes.
-- Prefer small, reviewable diffs.
-- Do not commit or push unless explicitly requested.
+```bash
+# Get exact text first
+agentctl run code/context_grep --input '{"mode": "line", "file_path": "path/to/file.go", "line_start": 10, "line_end": 30}'
 
-## 2) Smart read (before reading code)
+# Preview change
+agentctl run fs/apply_edit --input '{
+  "path": "path/to/file.go",
+  "edits": [{"search": "exact old text", "replace": "new text"}],
+  "dry_run": true
+}'
 
-When you need to read a code file to answer a question or make a change:
+# Apply (set dry_run: false)
+agentctl run fs/apply_edit --input '{
+  "path": "path/to/file.go",
+  "edits": [{"search": "exact old text", "replace": "new text"}],
+  "dry_run": false
+}'
+```
 
-- Prefer structure-first navigation.
-  - Find symbols/entrypoints first.
-  - Read only the relevant sections, not the entire file.
+### Code Search → code/smart_search or code/semantic_search
+**NEVER use grep/rg/find for code exploration.**
 
-## 3) Smart grep + semantic search (when searching)
+```bash
+# Conceptual search (finds code by meaning)
+agentctl run code/semantic_search --input '{"query": "authentication middleware", "scope": ["symbols"], "limit": 10}'
 
-When you are searching for implementation details:
+# Smart search (combines search + snippet extraction)
+agentctl run code/smart_search --input '{"question": "how does error handling work"}'
 
-- For literal/identifier searches: use a fast text search (and expand to full function/class blocks when a match looks relevant).
-- For conceptual searches (“how does X work”, “where is auth handled”, “what validates paths”): run semantic search and use the results to pick files/symbols to inspect.
+# Pattern search with context (full function bodies)
+agentctl run code/context_ripgrep --input '{"pattern": "func.*Auth", "path": ".", "max_blocks": 10}'
+```
 
-## Skill packs (pick one)
+### File Reading → code/context_grep or fs/read
+**For large files, read specific sections, not entire files.**
 
-Prefer these skill packs over the long list of individual skills:
+```bash
+# Read specific lines
+agentctl run code/context_grep --input '{"mode": "line", "file_path": "path/to/file.go", "line_start": 50, "line_end": 100}'
 
-- `agentctl-all`: single combined entrypoint (use when unsure)
-- `agentctl-core`: files + fast search
-- `agentctl-code`: code analysis + semantic search
-- `agentctl-dev`: tests + CI + change verification
-- `agentctl-orchestrate`: tasks + sessions + inbox
-- `agentctl-integrations`: MCP + OpenAPI + provider sync
-- `agentctl-mobile`: iOS + Android automation
+# Read full file (small files only)
+agentctl run fs/read --input '{"path": "path/to/file.go"}'
+```
 
-## 4) Security scanner (before/after sensitive changes)
+### Web Search → web/search
+**NEVER use raw web fetching without curation.**
 
-When you touch auth, crypto, path validation, network policy, serialization, or anything that could affect the wire contract:
+```bash
+# Basic search (uses Exa/Tavily)
+agentctl run web/search --input '{"query": "React hooks best practices", "max_results": 10}'
 
-- Run a targeted security scan of the changed area (or file) and address high/critical findings.
-- Never log or paste secrets; redact values.
+# Search with content extraction (recommended)
+agentctl run web/search --input '{
+  "query": "OpenAI API authentication",
+  "extract": true,
+  "extract_limit": 3
+}'
+```
 
-## 5) LSP diagnostics + test feedback (after edits)
+### Web Fetch → web/extract
+**Use for extracting content with optional query filtering.**
 
-After code changes:
+```bash
+# Extract content from URL
+agentctl run web/extract --input '{"urls": ["https://docs.example.com/api"]}'
 
-- Run the quickest relevant check first (typecheck/lint for the touched language) and fix errors.
-- If the repo has tests, run the narrowest tests that cover your change, then broaden as needed.
-- If a test/lint command fails: acknowledge it and either fix now (if quick) or record a follow-up task with the error + likely cause.
+# Extract with query filtering
+agentctl run web/extract --input '{
+  "urls": ["https://docs.example.com/api"],
+  "query": "authentication",
+  "max_content_kb": 50
+}'
+```
 
-## 6) Todo sync + stop guard (don’t stop early)
+### Tests → make test-*
+**NEVER use `go test` directly in this repo.**
 
-If you are in the middle of a multi-step task:
+```bash
+make test-short      # Quick tests
+make test-cgo-short  # CGO tests
+make test            # Full tests
+make test-race       # Race detection
+```
 
-- Maintain an explicit checklist and keep exactly one item “in progress”.
-- Do not conclude the session while tasks remain unfinished unless the user explicitly tells you to stop or defer.
+### GitHub CI → agentctl ci
+**NEVER use `gh pr/api/checks` directly.**
 
-## 7) Memory detector + memory prompt (capture learnings)
-
-When a user says “remember”, “gotcha”, “decision”, “note that”, or you discover a reusable fix/pitfall:
-
-- Save it as a short memory entry (1–2 sentences) with a clear name.
+```bash
+agentctl ci checks --pr 123       # Check CI status
+agentctl ci prcomments --pr 123   # Get PR comments
+```
 
 ---
 
-If any of the above rules conflict with a repo-local `AGENTS.md`, the repo-local instructions win for that repository.
+## Skill Packs (Pick One)
+
+For common workflows, use skill packs instead of individual skills:
+
+| Pack | Use Case |
+|------|----------|
+| `$agentctl-all` | Combined entrypoint (when unsure) |
+| `$agentctl-core` | File ops + fast search |
+| `$agentctl-code` | Code analysis + semantic search |
+| `$agentctl-dev` | Tests + CI + verification |
+| `$agentctl-orchestrate` | Tasks + sessions + inbox |
+
+---
+
+## Self-Enforced Behaviors
+
+### 1. Task Guard (Before Edits)
+- Ensure explicit task exists before editing files
+- Create task or ask for title if none exists
+- Keep diffs small and reviewable
+
+### 2. Structure-First Reading
+- Find symbols/entrypoints before reading code
+- Read only relevant sections, not entire files
+- Use `code/context_grep` with line ranges for large files
+
+### 3. Semantic Search for Concepts
+- Literal searches: use `code/context_ripgrep`
+- Conceptual searches: use `code/semantic_search`
+
+### 4. Security Scanner (Sensitive Changes)
+When touching auth, crypto, path validation, serialization:
+```bash
+agentctl run code/security --input '{"path": "internal/auth/"}'
+```
+
+### 5. LSP + Tests After Edits
+- Run typecheck/lint first, fix errors
+- Run narrowest tests, then broaden
+- Acknowledge failures, fix or create follow-up task
+
+### 6. Task Sync + Stop Guard
+- Maintain explicit checklist
+- Keep exactly one item "in progress"
+- Do not conclude with unfinished tasks
+
+### 7. Memory Capture
+When user says "remember", "gotcha", "decision", or you discover a pitfall:
+```bash
+agentctl memory put --name "gotcha-name" --type "gotcha" --summary "Short description"
+```
+
+---
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Search code | `agentctl run code/smart_search --input '{"question": "..."}'` |
+| Read lines | `agentctl run code/context_grep --input '{"mode": "line", "file_path": "...", "line_start": N, "line_end": M}'` |
+| Edit file | `agentctl run fs/apply_edit --input '{"path": "...", "edits": [...], "dry_run": true}'` |
+| Web search | `agentctl run web/search --input '{"query": "...", "extract": true}'` |
+| Web fetch | `agentctl run web/extract --input '{"urls": [...], "query": "..."}'` |
+| Run tests | `make test-short` |
+| CI status | `agentctl ci checks --pr <num>` |
+| Add task | `agentctl todo add --title "..." --description "..."` |
+| Add memory | `agentctl memory put --name "..." --type "gotcha" --summary "..."` |
+
+---
+
+*Repo-local AGENTS.md takes precedence over these global rules.*

@@ -18,6 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	storagents "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 )
@@ -318,11 +319,11 @@ func TestDaemon_AskReplyCorrelation(t *testing.T) {
 	// Verify payload
 	var env envelope.Envelope
 	require.NoError(t, json.Unmarshal(reply.Payload, &env))
-	dataMap, ok := env.Data.(map[string]any)
+	dataMap, ok := maputil.AsStringMap(env.Data)
 	require.True(t, ok)
 	assert.Equal(t, askID, dataMap["ask_id"])
 	// "answer" -> map -> "response" -> "I am fine."
-	answer, ok := dataMap["answer"].(map[string]any)
+	answer, ok := maputil.AsStringMap(dataMap["answer"])
 	require.True(t, ok)
 	assert.Equal(t, "I am fine.", answer["response"])
 }

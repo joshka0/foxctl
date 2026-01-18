@@ -63,6 +63,7 @@ type Config struct {
 	Embedding      EmbeddingSettings `mapstructure:"embedding" json:"embedding"`
 	Indexing       IndexingSettings  `mapstructure:"indexing" json:"indexing"`
 	Database       DatabaseSettings  `mapstructure:"database" json:"database"`
+	LLM            LLMSettings       `mapstructure:"llm" json:"llm"`
 }
 
 // Paths include common on-disk locations rooted at the agentctl home directory.
@@ -99,9 +100,10 @@ type LoggingSettings struct {
 
 // EmbeddingSettings configure embedding provider defaults.
 type EmbeddingSettings struct {
-	Provider   string `mapstructure:"provider" json:"provider"`
-	Model      string `mapstructure:"model" json:"model"`
-	Dimensions int    `mapstructure:"dimensions" json:"dimensions"`
+	Provider   string            `mapstructure:"provider" json:"provider"`
+	Model      string            `mapstructure:"model" json:"model"`
+	Dimensions int               `mapstructure:"dimensions" json:"dimensions"`
+	Models     map[string]string `mapstructure:"models" json:"models"`
 }
 
 // DatabaseSettings configure database driver and connection.
@@ -180,6 +182,37 @@ type PostReviewSettings struct {
 
 	// Indexers lists the configured indexers.
 	Indexers []IndexerSettings `mapstructure:"indexers" json:"indexers"`
+}
+
+// LLMSettings configures LLM providers for planning and agent operations.
+// Environment variables are loaded at config time (FC/IS compliant).
+type LLMSettings struct {
+	// Provider is the preferred LLM provider: openrouter, groq, openai, gemini, anthropic
+	Provider string `mapstructure:"provider" json:"provider"`
+
+	// Model is the model name to use (provider-specific)
+	Model string `mapstructure:"model" json:"model"`
+
+	// APIKey is the API key for the selected provider (from AGENTCTL_LLM_API_KEY or provider-specific vars)
+	APIKey string `mapstructure:"api_key" json:"api_key"`
+
+	// OpenRouterAPIKey is the OpenRouter API key (from OPENROUTER_API_KEY)
+	OpenRouterAPIKey string `mapstructure:"openrouter_api_key" json:"openrouter_api_key"`
+
+	// OpenRouterModel is the model for OpenRouter (from OPENROUTER_MODEL_NAME)
+	OpenRouterModel string `mapstructure:"openrouter_model" json:"openrouter_model"`
+
+	// GroqAPIKey is the Groq API key (from GROQ_API_KEY)
+	GroqAPIKey string `mapstructure:"groq_api_key" json:"groq_api_key"`
+
+	// OpenAIAPIKey is the OpenAI API key (from OPENAI_API_KEY)
+	OpenAIAPIKey string `mapstructure:"openai_api_key" json:"openai_api_key"`
+
+	// GeminiAPIKey is the Gemini API key (from GEMINI_API_KEY)
+	GeminiAPIKey string `mapstructure:"gemini_api_key" json:"gemini_api_key"`
+
+	// AnthropicAPIKey is the Anthropic API key (from ANTHROPIC_API_KEY)
+	AnthropicAPIKey string `mapstructure:"anthropic_api_key" json:"anthropic_api_key"`
 }
 
 // IndexerSettings defines the configuration for a single indexer.
@@ -309,11 +342,11 @@ func applyDefaults(v *viper.Viper, defaultHome string) {
 	v.SetDefault("indexing.post_review.enabled", false)
 	v.SetDefault("indexing.post_review.async", true)
 	v.SetDefault("indexing.post_review.indexers", []map[string]any{})
-	// Database defaults - SQLite by default, Turso/libsql for vector search
-	v.SetDefault("database.driver", "sqlite")
+	// Database defaults - libsql for local-first with optional sync
+	v.SetDefault("database.driver", "libsql")
 	v.SetDefault("database.turso.url", "")
 	v.SetDefault("database.turso.auth_token", "")
-	v.SetDefault("database.vector.enabled", false)
+	v.SetDefault("database.vector.enabled", true)
 	v.SetDefault("database.vector.dimensions", dbdriver.DefaultVectorDimensions)
 	// CAS policy defaults - store always on, expose off by default (hooks/tools)
 	v.SetDefault("cas.store", true)
@@ -360,6 +393,7 @@ func finalizeConfig(cfg Config, home string) Config {
 		cfg.OpenAPI.PluginPath = []string{filepath.Join(cfg.Home, "plugins")}
 	}
 	cfg.OpenAPI.PluginPath = normalizePluginPaths(cfg.OpenAPI.PluginPath, cfg.Home, home)
+	cfg.Embedding.Models = normalizeEmbeddingModels(cfg.Embedding.Models)
 
 	if cfg.InlineOutputKB <= 0 {
 		cfg.InlineOutputKB = DefaultInlineOutputKB
@@ -423,6 +457,35 @@ func finalizeConfig(cfg Config, home string) Config {
 		case "hint":
 			cfg.CAS.Expose = ExposePolicyHint
 		}
+	}
+
+	// LLM API key env var overrides (load once at config time - FC/IS compliant)
+	if key := os.Getenv("AGENTCTL_LLM_API_KEY"); key != "" && cfg.LLM.APIKey == "" {
+		cfg.LLM.APIKey = key
+	}
+	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" && cfg.LLM.OpenRouterAPIKey == "" {
+		cfg.LLM.OpenRouterAPIKey = key
+	}
+	if model := os.Getenv("OPENROUTER_MODEL_NAME"); model != "" && cfg.LLM.OpenRouterModel == "" {
+		cfg.LLM.OpenRouterModel = model
+	}
+	if key := os.Getenv("GROQ_API_KEY"); key != "" && cfg.LLM.GroqAPIKey == "" {
+		cfg.LLM.GroqAPIKey = key
+	}
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" && cfg.LLM.OpenAIAPIKey == "" {
+		cfg.LLM.OpenAIAPIKey = key
+	}
+	if key := os.Getenv("GEMINI_API_KEY"); key != "" && cfg.LLM.GeminiAPIKey == "" {
+		cfg.LLM.GeminiAPIKey = key
+	}
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" && cfg.LLM.AnthropicAPIKey == "" {
+		cfg.LLM.AnthropicAPIKey = key
+	}
+	if provider := os.Getenv("AGENTCTL_LLM_PROVIDER"); provider != "" && cfg.LLM.Provider == "" {
+		cfg.LLM.Provider = provider
+	}
+	if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" && cfg.LLM.Model == "" {
+		cfg.LLM.Model = model
 	}
 
 	return cfg
@@ -500,6 +563,28 @@ func normalizeStringSlice(parts []string) []string {
 		}
 		seen[trimmed] = struct{}{}
 		out = append(out, trimmed)
+	}
+	return out
+}
+
+func normalizeEmbeddingModels(models map[string]string) map[string]string {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(models))
+	for key, value := range models {
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		if normalizedKey == "" {
+			continue
+		}
+		normalizedValue := strings.TrimSpace(value)
+		if normalizedValue == "" {
+			continue
+		}
+		out[normalizedKey] = normalizedValue
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

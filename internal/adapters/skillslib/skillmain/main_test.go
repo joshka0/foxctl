@@ -63,8 +63,8 @@ func TestMainWithCode_ValidationError(t *testing.T) {
 	if !strings.Contains(output, "EVALIDATION") {
 		t.Errorf("output should contain EVALIDATION, got: %s", output)
 	}
-	if !strings.Contains(output, "Path is required") {
-		t.Errorf("output should mention Path is required, got: %s", output)
+	if !strings.Contains(output, "path is required") {
+		t.Errorf("output should mention path is required, got: %s", output)
 	}
 }
 
@@ -178,6 +178,75 @@ func TestRunContext_ShouldTruncate(t *testing.T) {
 			rc := &RunContext{InlineKB: tt.inlineKB, NoCAS: tt.noCAS}
 			if got := rc.ShouldTruncate(tt.dataSize); got != tt.want {
 				t.Errorf("ShouldTruncate(%d) = %v, want %v", tt.dataSize, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFlexString(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{"string", `"123"`, "123", false},
+		{"integer", `123`, "123", false},
+		{"float", `123.456`, "123.456", false},
+		{"negative", `-42`, "-42", false},
+		{"zero", `0`, "0", false},
+		{"empty string", `""`, "", false},
+		{"object", `{}`, "", true},
+		{"array", `[]`, "", true},
+		{"null", `null`, "", false}, // null unmarshals to zero value
+		{"bool", `true`, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var f FlexString
+			err := json.Unmarshal([]byte(tt.input), &f)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for input %s", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if f.String() != tt.want {
+				t.Errorf("got %q, want %q", f.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestFlexStringInStruct(t *testing.T) {
+	type testStruct struct {
+		PR   FlexString `json:"pr"`
+		Name string     `json:"name"`
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"pr as string", `{"pr": "167", "name": "test"}`, "167"},
+		{"pr as int", `{"pr": 167, "name": "test"}`, "167"},
+		{"pr as float", `{"pr": 167.5, "name": "test"}`, "167.5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var s testStruct
+			if err := json.Unmarshal([]byte(tt.input), &s); err != nil {
+				t.Fatalf("unmarshal error: %v", err)
+			}
+			if s.PR.String() != tt.want {
+				t.Errorf("PR = %q, want %q", s.PR.String(), tt.want)
 			}
 		})
 	}

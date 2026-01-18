@@ -186,7 +186,7 @@ func TestWithSpanDataMap_Empty(t *testing.T) {
 
 	ctx := context.Background()
 	_, done, builder := StartSpan(ctx, OpSkillRun,
-		WithSpanDataMap(nil),           // nil map
+		WithSpanDataMap(nil),              // nil map
 		WithSpanDataMap(map[string]any{}), // empty map
 	)
 	defer done(nil)

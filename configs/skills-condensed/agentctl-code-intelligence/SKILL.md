@@ -1,6 +1,6 @@
 ---
 name: agentctl Code Intelligence
-description: Research and analyze code with agentctl - symbols, complexity, semantic search, smart grep. Use when asked to understand code, find functions, research how something works, locate definitions, or explore the codebase.
+description: Research and analyze code with agentctl - symbols, semantic search, smart search. Use when asked to understand code, find functions, research how something works, locate definitions, or explore the codebase.
 ---
 
 # Code Intelligence
@@ -22,11 +22,11 @@ agentctl run fs/tree --input '{"path": "src/", "max_depth": 3}'
 ## Code Search
 
 ```bash
-# Pattern search with ripgrep
-agentctl run text/ripgrep --input '{"pattern": "func.*Handler", "path": ".", "file_type": "go"}'
+# Pattern search
+agentctl run text/grep --input '{"pattern": "func.*Handler", "path": "."}'
 
 # Context-aware search (returns full function bodies)
-agentctl run code/context_ripgrep --input '{"query": "auth", "expand_functions": true}'
+agentctl run code/context_grep --input '{"query": "auth", "expand_functions": true}'
 
 # Smart semantic extraction
 agentctl run code/snippet_extract --input '{"question": "How does auth work?", "candidates": [{"path": "auth/login.go"}]}'
@@ -34,18 +34,6 @@ agentctl run code/snippet_extract --input '{"question": "How does auth work?", "
 # Semantic code search (vector similarity)
 agentctl run code/semantic_search --input '{"query": "error handling middleware", "limit": 10}'
 ```
-
-## Complexity Analysis
-
-```bash
-# Find complexity hotspots
-agentctl run code/complexity --input '{"path": ".", "analysis_mode": "hotspots"}'
-
-# Per-function metrics
-agentctl run code/complexity --input '{"path": "internal/", "analysis_mode": "function"}'
-```
-
-Thresholds: 1-10 simple, 11-20 moderate, 21-50 high (refactor), 51+ critical
 
 ## Pre-Implementation Analysis
 

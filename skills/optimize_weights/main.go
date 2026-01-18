@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
@@ -32,13 +33,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
-		return fmt.Errorf("resolve workspace: %w", err)
+		return skillerr.WrapIO("resolve workspace", err)
 	}
 
 	// Open trajectory store
 	trajStore, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
-		return fmt.Errorf("open trajectory store: %w", err)
+		return skillerr.WrapIO("open trajectory store", err)
 	}
 	defer trajStore.Close()
 
@@ -52,14 +53,17 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	case "learn":
 		return learnWeights(ctx, rc, scorer, absWorkspace)
 	default:
-		return fmt.Errorf("unknown action: %s (use: show, learn)", in.Action)
+		return skillerr.Arg(
+			fmt.Sprintf("unknown action: %s", in.Action),
+			skillerr.WithHint("Use action=show or action=learn."),
+		)
 	}
 }
 
 func showWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimization.LearnableScorer, workspace string) error {
 	weights, err := scorer.GetCurrentWeights(ctx, workspace)
 	if err != nil {
-		return fmt.Errorf("get weights: %w", err)
+		return skillerr.WrapRuntime("get weights", err)
 	}
 
 	return skillout.Emit(rc, command, map[string]any{
@@ -77,7 +81,7 @@ func showWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimiza
 func learnWeights(ctx context.Context, rc *skillmain.RunContext, scorer *optimization.LearnableScorer, workspace string) error {
 	update, err := scorer.LearnFromOutcomes(ctx, workspace)
 	if err != nil {
-		return fmt.Errorf("learn weights: %w", err)
+		return skillerr.WrapRuntime("learn weights", err)
 	}
 
 	return skillout.Emit(rc, command, map[string]any{

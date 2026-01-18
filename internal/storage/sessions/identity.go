@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jkatigb/agentctl/internal/platform/env"
 )
 
 // ActiveSession represents the currently active session identity for a workspace.
@@ -107,7 +109,7 @@ func (m *IdentityManager) GetActive(workspace string) (*ActiveSession, error) {
 	base := workspaceHash(workspace)
 
 	candidates := make([]string, 0, 3)
-	if agentID := strings.TrimSpace(os.Getenv("AGENTCTL_AGENT_ID")); agentID != "" {
+	if agentID := env.GetString("AGENTCTL_AGENT_ID"); agentID != "" {
 		candidates = append(candidates, m.identityPath(workspace, agentID))
 	}
 

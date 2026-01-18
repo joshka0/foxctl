@@ -18,8 +18,10 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/policy"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	sysconfig "github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
+	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/platform/secrets"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
@@ -53,11 +55,23 @@ type Config struct {
 	// WorkspaceID is the workspace identifier for task/mail operations.
 	WorkspaceID string
 
+	// SessionID is the current agent session ID for hook context.
+	SessionID string
+
 	// TaskID associates tool usage with a task.
 	TaskID string
 
 	// EpicID associates tool usage with an epic.
 	EpicID string
+
+	// Depth is the caller's depth in the agent hierarchy.
+	Depth int
+
+	// MaxDepth is the global max depth for the hierarchy.
+	MaxDepth int
+
+	// LocalMaxDepth is the caller's subtree depth limit.
+	LocalMaxDepth int
 
 	// AgentRole identifies the agent role making tool calls.
 	AgentRole string
@@ -70,6 +84,9 @@ type Config struct {
 
 	// ActorID is the mailbox identity for this agent.
 	ActorID string
+
+	// HookDispatcher dispatches PreToolUse/PostToolUse hooks.
+	HookDispatcher hooks.Dispatcher
 
 	// MaxFileSize is the maximum bytes to read from a file.
 	MaxFileSize int64
@@ -243,6 +260,27 @@ func (r *Registry) List() []*dstools.FuncTool {
 	return result
 }
 
+// SetSessionID updates the session ID used for hook context.
+func (r *Registry) SetSessionID(sessionID string) {
+	r.config.SessionID = sessionID
+}
+
+type hookDispatchContextKey struct{}
+
+// WithHookDispatch marks the context as already dispatched through hooks.
+// This prevents double-dispatch when a tool runner wraps the tool call.
+func WithHookDispatch(ctx context.Context) context.Context {
+	return context.WithValue(ctx, hookDispatchContextKey{}, true)
+}
+
+func hooksAlreadyDispatched(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, ok := ctx.Value(hookDispatchContextKey{}).(bool)
+	return ok && v
+}
+
 // wrapWithTelemetry wraps a tool function to record telemetry.
 func (r *Registry) wrapWithTelemetry(
 	name string,
@@ -250,41 +288,176 @@ func (r *Registry) wrapWithTelemetry(
 ) dstools.ToolFunc {
 	return func(ctx context.Context, args map[string]any) (*models.CallToolResult, error) {
 		start := time.Now()
-		r.captureToolEvent(ctx, trajectory.EventKindToolCall, name, "ok", summarizeToolArgs(name, args), "")
-		result, err := fn(ctx, args)
-		duration := time.Since(start)
+		argsForCall := args
+		var result *models.CallToolResult
+		var callErr error
+		var returnErr error
+		executed := false
 
-		call := types.ToolCall{
-			ToolName:  name,
-			Args:      args,
-			Result:    result,
-			Duration:  duration,
-			Timestamp: start,
-		}
-		if err != nil {
-			call.Error = err.Error()
-		}
-		r.recorder.RecordToolCall(call)
-
-		status := "ok"
-		if err != nil {
-			status = "error"
-		} else if result != nil && result.IsError {
-			status = "error"
-		}
-
-		// Check output size and use CAS if needed (only for successful results)
-		if status == "ok" && result != nil && r.config.MaxOutputSize > 0 && r.config.OpenCASStore != nil {
-			if err := r.checkAndOffloadToCAS(ctx, result); err != nil {
-				errspkg.Ignore(err, "tool output CAS offload failed")
+		finalize := func() (*models.CallToolResult, error) {
+			duration := time.Since(start)
+			call := types.ToolCall{
+				ToolName:  name,
+				Args:      argsForCall,
+				Result:    result,
+				Duration:  duration,
+				Timestamp: start,
 			}
+			if callErr != nil {
+				call.Error = callErr.Error()
+			}
+			r.recorder.RecordToolCall(call)
+
+			status := "ok"
+			if callErr != nil {
+				status = "error"
+			} else if result != nil && result.IsError {
+				status = "error"
+			}
+
+			// Check output size and use CAS if needed (only for successful results)
+			if status == "ok" && result != nil && r.config.MaxOutputSize > 0 && r.config.OpenCASStore != nil {
+				if err := r.checkAndOffloadToCAS(ctx, result); err != nil {
+					errspkg.Ignore(err, "tool output CAS offload failed")
+				}
+			}
+
+			dataInline, artifact := summarizeToolResult(name, argsForCall, result, callErr)
+			r.captureToolEvent(ctx, trajectory.EventKindToolResult, name, status, dataInline, artifact)
+
+			if executed {
+				r.dispatchPostToolUse(ctx, name, argsForCall, result, callErr, duration)
+			}
+
+			return result, returnErr
 		}
 
-		dataInline, artifact := summarizeToolResult(name, args, result, err)
-		r.captureToolEvent(ctx, trajectory.EventKindToolResult, name, status, dataInline, artifact)
+		preOutput, err := r.dispatchPreToolUse(ctx, name, argsForCall)
+		if err != nil {
+			callErr = fmt.Errorf("hook error: %w", err)
+			result = errorResult(callErr.Error())
+			r.captureToolEvent(ctx, trajectory.EventKindToolCall, name, "error", summarizeToolArgs(name, argsForCall), "")
+			returnErr = nil
+			return finalize()
+		}
+		if preOutput.Decision.IsBlocking() {
+			callErr = fmt.Errorf("blocked by hook: %s", preOutput.Reason)
+			result = errorResult(callErr.Error())
+			r.captureToolEvent(ctx, trajectory.EventKindToolCall, name, "error", summarizeToolArgs(name, argsForCall), "")
+			returnErr = nil
+			return finalize()
+		}
 
-		return result, err
+		if len(preOutput.UpdatedToolInput) > 0 {
+			var updated map[string]any
+			if err := json.Unmarshal(preOutput.UpdatedToolInput, &updated); err != nil {
+				callErr = fmt.Errorf("hook updated_tool_input invalid: %w", err)
+				result = errorResult(callErr.Error())
+				r.captureToolEvent(ctx, trajectory.EventKindToolCall, name, "error", summarizeToolArgs(name, argsForCall), "")
+				returnErr = nil
+				return finalize()
+			}
+			argsForCall = updated
+		}
+
+		r.captureToolEvent(ctx, trajectory.EventKindToolCall, name, "ok", summarizeToolArgs(name, argsForCall), "")
+		result, callErr = fn(ctx, argsForCall)
+		returnErr = callErr
+		executed = true
+
+		return finalize()
 	}
+}
+
+func (r *Registry) shouldDispatchHooks(ctx context.Context) bool {
+	if r == nil || r.config.HookDispatcher == nil {
+		return false
+	}
+	if hooksAlreadyDispatched(ctx) {
+		return false
+	}
+	return true
+}
+
+func (r *Registry) dispatchPreToolUse(ctx context.Context, toolName string, args map[string]any) (hooks.Output, error) {
+	if !r.shouldDispatchHooks(ctx) {
+		return hooks.NewApprove("no dispatcher", nil), nil
+	}
+
+	toolInput, err := json.Marshal(args)
+	if err != nil {
+		return hooks.Output{}, fmt.Errorf("marshal tool input: %w", err)
+	}
+
+	input := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		ToolName:      toolName,
+		ToolCanonical: toolName,
+		ToolKind:      hooks.ClassifyToolKind(toolName, toolName),
+		ToolInput:     toolInput,
+		SessionID:     r.config.SessionID,
+		ActorID:       r.config.ActorID,
+		WorkspaceID:   r.config.WorkspaceID,
+		WorkspaceRoot: r.config.WorkspaceRoot,
+		TraceID:       r.config.TraceID,
+	}
+
+	result, err := r.config.HookDispatcher.Dispatch(ctx, input)
+	if err != nil {
+		return hooks.Output{}, err
+	}
+	return result.Output, nil
+}
+
+func (r *Registry) dispatchPostToolUse(
+	ctx context.Context,
+	toolName string,
+	args map[string]any,
+	result *models.CallToolResult,
+	callErr error,
+	duration time.Duration,
+) {
+	if !r.shouldDispatchHooks(ctx) {
+		return
+	}
+
+	toolInput, err := json.Marshal(args)
+	if err != nil {
+		return
+	}
+
+	resultSummary, _ := summarizeToolResult(toolName, args, result, callErr)
+	observation := map[string]any{
+		"tool":   toolName,
+		"result": resultSummary,
+	}
+	toolObservation, err := json.Marshal(observation)
+	if err != nil {
+		return
+	}
+
+	input := hooks.Input{
+		Event:           hooks.EventPostToolUse,
+		ToolName:        toolName,
+		ToolCanonical:   toolName,
+		ToolKind:        hooks.ClassifyToolKind(toolName, toolName),
+		ToolInput:       toolInput,
+		ToolObservation: toolObservation,
+		ToolDurationMS:  duration.Milliseconds(),
+		SessionID:       r.config.SessionID,
+		ActorID:         r.config.ActorID,
+		WorkspaceID:     r.config.WorkspaceID,
+		WorkspaceRoot:   r.config.WorkspaceRoot,
+		TraceID:         r.config.TraceID,
+	}
+
+	if callErr != nil {
+		input.ToolError = callErr.Error()
+	} else if result != nil && result.IsError {
+		input.ToolError = extractToolError(result)
+	}
+
+	_, _ = r.config.HookDispatcher.Dispatch(ctx, input)
 }
 
 func (r *Registry) captureToolEvent(ctx context.Context, kind trajectory.EventKind, toolName, status string, dataInline map[string]any, artifact string) {
@@ -468,7 +641,7 @@ func summarizeToolArgs(toolName string, args map[string]any) map[string]any {
 			if v, ok := args["dry_run"].(bool); ok {
 				summary["dry_run"] = v
 			}
-			if v, ok := args["diff_json"].(map[string]any); ok {
+			if v, ok := maputil.AsStringMap(args["diff_json"]); ok {
 				if hunks, ok := v["hunks"].([]any); ok {
 					summary["hunk_count"] = len(hunks)
 				}
@@ -561,6 +734,16 @@ func parseCallToolResult(result *models.CallToolResult) map[string]any {
 		return nil
 	}
 	return parsed
+}
+
+func extractToolError(result *models.CallToolResult) string {
+	if result == nil || len(result.Content) == 0 {
+		return ""
+	}
+	if tc, ok := result.Content[0].(models.TextContent); ok {
+		return tc.Text
+	}
+	return ""
 }
 
 // filterByAllowlist restricts registered tools to those in the allowlist.

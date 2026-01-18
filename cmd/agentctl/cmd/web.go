@@ -12,7 +12,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/web"
 )
 
@@ -64,7 +63,7 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 
 	// Load config
-	cfg, err := config.Load(ctx)
+	cfg, err := loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -81,7 +80,7 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		UIDir:   webUIDir,
 	}
 
-	server, err := web.NewServer(opts, cfg, log)
+	server, err := web.NewServer(ctx, opts, cfg, log)
 	if err != nil {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
@@ -129,6 +128,12 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	case <-ctx.Done():
 		fmt.Fprintf(os.Stderr, "\nContext cancelled, shutting down...\n")
 	}
+
+	// Cancel context to stop persistence goroutines
+	cancel()
+
+	// Wait for console hub persistence goroutines
+	server.ConsoleHub().Wait()
 
 	// Graceful shutdown with timeout
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)

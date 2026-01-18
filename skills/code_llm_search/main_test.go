@@ -397,7 +397,8 @@ func TestRankedCandidateJSON(t *testing.T) {
 func TestDetectAvailableProviders_Fallback(t *testing.T) {
 	// Just test that the function returns at least one provider as fallback
 	// (when no environment variables are set, it defaults to anthropic)
-	providers := detectAvailableProviders()
+	keys := APIKeys{} // Empty keys - should return fallback provider
+	providers := detectAvailableProviders(keys)
 	if len(providers) == 0 {
 		t.Error("expected at least one fallback provider")
 	}

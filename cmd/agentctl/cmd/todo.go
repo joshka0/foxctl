@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -391,7 +390,7 @@ func runTodoSkill(cmd *cobra.Command, payload map[string]any) error {
 }
 
 func runTodoSkillWithFormat(cmd *cobra.Command, payload map[string]any, format, jq string) error {
-	cfg, err := config.Load(cmd.Context())
+	cfg, err := loadConfig(cmd.Context())
 	if err != nil {
 		return err
 	}

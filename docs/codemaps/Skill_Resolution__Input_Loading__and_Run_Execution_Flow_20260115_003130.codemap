@@ -1,0 +1,521 @@
+{
+  "schemaVersion": 1,
+  "id": "Skill_Resolution__Input_Loading__and_Run_Execution_Flow_20260115_003130",
+  "stableId": "7837ba99-dbe1-4df1-bfd0-e79b5dd5bb58",
+  "metadata": {
+    "cascadeId": "7301efca-5883-45cf-be04-10585348bf2c",
+    "generationSource": "generationWithTraces",
+    "generationTimestamp": "2026-01-15T00:31:30+02:00",
+    "mode": "SMART",
+    "originalPrompt": "Explore: skill resolution, input loading, and run execution flow. Start from: cmd/agentctl/cmd/run.go, cmd/agentctl/cmd/skill_helpers.go, internal/runservice/executor.go"
+  },
+  "title": "Skill Resolution, Input Loading, and Run Execution Flow",
+  "traces": [
+    {
+      "id": "1",
+      "title": "CLI Entry to Execution Orchestration",
+      "description": "Command-line interface layer that parses arguments, loads input, resolves skills, and dispatches to execution modes",
+      "locations": [
+        {
+          "id": "1a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 46,
+          "lineContent": "return executeRunCommand(cmd, args, flags)",
+          "title": "CLI command entry point",
+          "description": "RunE handler invokes main execution logic"
+        },
+        {
+          "id": "1b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 62,
+          "lineContent": "data, err := loadSkillInput(cmd, cfg, flags.Input, flags.InputFile)",
+          "title": "Load skill input from various sources",
+          "description": "Handles inline JSON, files, stdin, or CAS digests"
+        },
+        {
+          "id": "1c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 68,
+          "lineContent": "handle, err := findSkill(cfg, skillName)",
+          "title": "Resolve skill by name",
+          "description": "Searches filesystem paths to locate skill manifest and artifact"
+        },
+        {
+          "id": "1d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 76,
+          "lineContent": "opts, err := buildRunOptions(cfg, skillName, flags, data)",
+          "title": "Build execution options",
+          "description": "Constructs RunOptions with workspace, timeout, correlation ID"
+        },
+        {
+          "id": "1e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 105,
+          "lineContent": "executor := runservice.NewExecutor(ctx, cfg, handle, stdout, cmd.ErrOrStderr(), opts)",
+          "title": "Create executor instance",
+          "description": "Instantiates executor with config, skill handle, and options"
+        },
+        {
+          "id": "1f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 111,
+          "lineContent": "if err := executor.ExecuteEphemeral(data); err != nil {",
+          "title": "Dispatch to ephemeral mode",
+          "description": "Fast execution path without job persistence for hooks"
+        },
+        {
+          "id": "1g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 154,
+          "lineContent": "if err := executor.ExecuteSync(job); err != nil {",
+          "title": "Dispatch to sync mode",
+          "description": "Full execution with job lifecycle and state tracking"
+        }
+      ],
+      "traceTextDiagram": "CLI Entry to Execution Orchestration\n├── cobra.Command.RunE handler \u003c-- 1a\n│   └── executeRunCommand() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:57\n│       ├── loadSkillInput() \u003c-- 1b\n│       │   └── handles inline/file/stdin/CAS sources\n│       ├── findSkill() \u003c-- 1c\n│       │   └── resolves skill by name to handle\n│       ├── buildRunOptions() \u003c-- 1d\n│       │   └── constructs RunOptions struct\n│       ├── runservice.NewExecutor() \u003c-- 1e\n│       │   └── creates Executor instance\n│       └── execution dispatch\n│           ├── if opts.Ephemeral \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:110\n│           │   └── executor.ExecuteEphemeral() \u003c-- 1f\n│           └── else (sync mode)\n│               ├── executor.PrepareJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go:129\n│               └── executor.ExecuteSync() \u003c-- 1g",
+      "traceGuide": "## Motivation\n\nWhen a user runs `agentctl run \u003cskill-name\u003e`, the system needs to **locate the skill binary or WebAssembly module**, **load input data from various sources** (inline JSON, files, stdin, or content-addressable storage), and **execute the skill** while tracking its lifecycle. The challenge is supporting multiple execution modes: a **fast ephemeral path** for hooks that skips job persistence (~60% faster), and a **full sync path** with job tracking, state management, and result storage for auditable executions.\n\n## Details\n\n### Command Entry and Orchestration\n\nThe CLI entry point [1a] delegates to `executeRunCommand()` which orchestrates the entire flow. This function coordinates four key setup steps before dispatching to execution:\n\n1. **Input Loading** [1b]: The `loadSkillInput()` function handles multiple input sources through a switch statement - reading from files with `os.ReadFile()`, extracting the `data` field from stdin envelopes, fetching from CAS via `store.Get()` for `sha256:` digests, or using inline JSON directly.\n\n2. **Skill Resolution** [1c]: `findSkill()` searches filesystem paths (environment variables, user directory `~/.agentctl/skills`, builtin paths, and dev paths) to locate the skill's `skill.yaml` manifest and binary/WASM artifact.\n\n3. **Options Building** [1d]: `buildRunOptions()` constructs a `RunOptions` struct containing workspace path, correlation ID (generated via ULID if not provided), timeout (default 2 minutes), and execution mode flags.\n\n4. **Executor Creation** [1e]: `runservice.NewExecutor()` instantiates an executor with the resolved skill handle, output writers, and options.\n\n### Execution Dispatch\n\nThe system branches based on the `--ephemeral` flag [1f, 1g]:\n\n**Ephemeral Mode** [1f]: `ExecuteEphemeral()` provides a fast path that skips job store initialization, state tracking, and trajectory capture. It directly invokes the skill executor, validates the output envelope, annotates it with correlation metadata, and writes to stdout. This is optimized for git hooks and other transient operations where job history isn't needed.\n\n**Sync Mode** [1g]: The full path first calls `PrepareJob()` to create a job record in the database with a unique ID and args hash (for deduplication). Then `ExecuteSync()` updates the job state to \"running\", executes the skill, captures stdout/stderr, writes the result to `\u003cjob-dir\u003e/result.json`, and updates the final state to \"ok\" or \"error\". This provides full auditability and supports features like `--dedupe` to reuse existing job results.\n\nBoth paths ultimately delegate to the same skill execution layer, but sync mode wraps it with **persistent job lifecycle management** while ephemeral mode trades that for **minimal latency**."
+    },
+    {
+      "id": "2",
+      "title": "Skill Resolution via Search Paths",
+      "description": "Skill domain layer that discovers skills by name through filesystem search paths and loads manifests",
+      "locations": [
+        {
+          "id": "2a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 89,
+          "lineContent": "resolver := createSkillResolver(cfg)",
+          "title": "Create resolver with search paths",
+          "description": "Builds resolver from env, user, builtin, and dev paths"
+        },
+        {
+          "id": "2b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 92,
+          "lineContent": "handle, err := resolver.Resolve(requested)",
+          "title": "Resolve skill by name",
+          "description": "Searches configured paths for skill directory"
+        },
+        {
+          "id": "2c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/resolver.go",
+          "lineNumber": 64,
+          "lineContent": "return r.resolveFromSearchPaths(nameOrPath)",
+          "title": "Search through configured paths",
+          "description": "Iterates search paths looking for skill.yaml"
+        },
+        {
+          "id": "2d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/resolver.go",
+          "lineNumber": 180,
+          "lineContent": "manifestPath := filepath.Join(basePath, candidate, \"skill.yaml\")",
+          "title": "Construct manifest path",
+          "description": "Builds path to skill.yaml in candidate directory"
+        },
+        {
+          "id": "2e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 133,
+          "lineContent": "manifest, err := skill.LoadManifest(manifestPath)",
+          "title": "Load and parse manifest",
+          "description": "Reads skill.yaml and validates structure"
+        },
+        {
+          "id": "2f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 140,
+          "lineContent": "artifact, err := skill.ResolveArtifactPath(dir, manifest, skill.ArtifactOptions{",
+          "title": "Resolve artifact path",
+          "description": "Locates executable binary or WASM module based on distribution type"
+        }
+      ],
+      "traceTextDiagram": "Skill Resolution Flow (Trace 2)\n├── findSkill() entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:87\n│   ├── createSkillResolver(cfg) \u003c-- 2a\n│   │   └── builds search paths from:\n│   │       ├── EnvSearchPaths() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/searchpaths.go:10\n│   │       ├── UserSearchPaths() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/searchpaths.go:18\n│   │       ├── BuiltinSearchPaths() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/searchpaths.go:26\n│   │       └── DevSearchPaths() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/searchpaths.go:34\n│   ├── resolver.Resolve(requested) \u003c-- 2b\n│   │   └── resolveFromSearchPaths() \u003c-- 2c\n│   │       └── for each basePath: \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/resolver.go:175\n│   │           └── filepath.Join() \u003c-- 2d\n│   │               └── check skill.yaml exists \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/resolver.go:182\n│   └── loadSkillDir(dir) \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:128\n│       ├── LoadManifest(manifestPath) \u003c-- 2e\n│       │   └── yaml.Unmarshal + validate \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/manifest.go:117\n│       └── ResolveArtifactPath() \u003c-- 2f\n│           └── finds bin/bin-cgo/module.wasm \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/domain/skill/artifact.go:44\n└── returns SkillHandle{Manifest, Paths} \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:149",
+      "traceGuide": "## Motivation\n\nSkills in agentctl are **self-contained executables** (native binaries or WebAssembly modules) that live in directories with a `skill.yaml` manifest. Users invoke them by name like `agentctl run text/grep`, but the system needs to **find the skill directory** by searching multiple filesystem locations. The resolver implements this discovery mechanism, checking environment paths, user directories (`~/.agentctl/skills`), builtin locations (next to the executable), and development paths in priority order [2a].\n\n## Details\n\n### Search Path Construction\n\nThe resolver builds a prioritized list of directories to search [2a]:\n1. **`AGENTCTL_SKILLS_PATH`** environment variable (highest priority)\n2. **User directory** at `~/.agentctl/skills`\n3. **Builtin directory** relative to the agentctl executable\n4. **Development paths** like `./dist/skills` and `./skills`\n\nThis ordering allows users to override builtin skills and supports local development workflows.\n\n### Resolution Algorithm\n\nWhen resolving a skill name like `text/grep` [2b]:\n\n1. **Iterate through search paths** in priority order [2c]\n2. **Construct candidate path** by joining the base path with the skill name [2d]\n3. **Check for `skill.yaml`** in that directory - first match wins [2d]\n4. **Load and parse the manifest** from YAML [2e]\n5. **Resolve the artifact path** - finds `bin`, `bin-cgo`, or `module.wasm` depending on the distribution type [2f]\n\nThe system returns a **`SkillHandle`** containing the parsed manifest, manifest path, and artifact path - everything needed to execute the skill.\n\n### Name Normalization\n\nThe resolver tries both the original name and a normalized version (replacing `/` and `-` with `_`) to handle different naming conventions across platforms."
+    },
+    {
+      "id": "3",
+      "title": "Input Loading from Multiple Sources",
+      "description": "Input handling layer supporting inline JSON, files, stdin envelopes, and CAS digests",
+      "locations": [
+        {
+          "id": "3a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 26,
+          "lineContent": "func loadSkillInput(cmd *cobra.Command, cfg config.Config, inline, file string) ([]byte, error) {",
+          "title": "Input loading entry point",
+          "description": "Handles multiple input sources based on flags"
+        },
+        {
+          "id": "3b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 31,
+          "lineContent": "case file != \"\":\n\t\treturn os.ReadFile(file)",
+          "title": "Load from file path",
+          "description": "Reads input JSON from specified file"
+        },
+        {
+          "id": "3c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 33,
+          "lineContent": "case strings.EqualFold(trimmed, \"stdin\"):\n\t\tdata, err := extractEnvelopeData(cmd.InOrStdin())",
+          "title": "Extract data from stdin envelope",
+          "description": "Parses envelope JSON and extracts data field"
+        },
+        {
+          "id": "3d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 39,
+          "lineContent": "case strings.HasPrefix(trimmed, \"sha256:\"):",
+          "title": "Load from CAS digest",
+          "description": "Retrieves content from content-addressable storage"
+        },
+        {
+          "id": "3e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 49,
+          "lineContent": "rc, _, err := store.Get(ctx, trimmed)",
+          "title": "Fetch from CAS store",
+          "description": "Opens reader for CAS object by digest"
+        },
+        {
+          "id": "3f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go",
+          "lineNumber": 62,
+          "lineContent": "case trimmed != \"\":\n\t\treturn []byte(inline), nil",
+          "title": "Use inline JSON",
+          "description": "Returns inline flag value as input bytes"
+        }
+      ],
+      "traceTextDiagram": "Input Loading Flow (Trace 3)\n└── loadSkillInput() entry \u003c-- 3a\n    ├── Branch: file path provided? \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:31\n    │   └── os.ReadFile(file) \u003c-- 3b\n    ├── Branch: stdin mode? \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:33\n    │   └── extractEnvelopeData() \u003c-- 3c\n    │       └── json.Unmarshal envelope \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:74\n    │           └── extract data field \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:84\n    ├── Branch: CAS digest (sha256:)? \u003c-- 3d\n    │   ├── cas.NewStore() open \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:40\n    │   └── store.Get(digest) \u003c-- 3e\n    │       └── io.ReadAll from CAS \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:53\n    ├── Branch: inline JSON string? \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:62\n    │   └── return []byte(inline) \u003c-- 3f\n    └── Default: empty input \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:64\n        └── return []byte(\"{}\") \u003c-- /Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/skill_helpers.go:65",
+      "traceGuide": "## Motivation\n\nSkills in agentctl can receive input data in multiple ways: as inline JSON strings, from files, from stdin (when piped from another command), or from content-addressable storage (CAS) using digest references. The **input loading system** [3a] provides a unified interface that handles all these sources transparently, allowing users to choose the most convenient method for their workflow without changing how skills are invoked.\n\nThis flexibility is critical because:\n- **Inline JSON** works for simple, short inputs during development\n- **Files** are needed for complex or reusable input payloads\n- **Stdin mode** enables composable pipelines where one skill's output becomes another's input\n- **CAS digests** allow referencing large inputs without passing them inline, reducing overhead\n\n## Details\n\nThe loading logic is implemented as a **switch statement** that branches based on input source flags [3a]. Each branch handles a specific source:\n\n**File loading** [3b] is straightforward—when `--input-file` is provided, the system reads the file path directly using `os.ReadFile`. The special value `\"-\"` reads from stdin as raw bytes.\n\n**Stdin envelope mode** [3c] is more sophisticated. When the input flag equals `\"stdin\"`, the system expects a complete envelope JSON on stdin and extracts only the `data` field. This enables chaining: `agentctl run skill1 | agentctl run skill2 --input stdin` passes skill1's output data as skill2's input.\n\n**CAS digest loading** [3d, 3e] handles inputs prefixed with `sha256:`. The system opens the CAS store, retrieves the object by digest, and reads its contents. This is useful for large inputs that have been previously stored, avoiding repeated transmission of bulky data.\n\n**Inline JSON** [3f] is the default path—any non-empty string that doesn't match the special cases above is treated as literal JSON input bytes.\n\n**Empty default** returns `{}` when no input is specified, providing a valid empty JSON object that skills can safely parse.\n\nAll paths converge to return `[]byte`, providing a consistent interface regardless of source. Error handling is specific to each source type (file not found, invalid CAS digest, malformed envelope JSON, etc.)."
+    },
+    {
+      "id": "4",
+      "title": "Ephemeral Execution (Fast Path)",
+      "description": "Runservice ephemeral mode that skips job persistence for ~60% latency improvement in hook scenarios",
+      "locations": [
+        {
+          "id": "4a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 24,
+          "lineContent": "func (e *Executor) ExecuteEphemeral(input []byte) error {",
+          "title": "Ephemeral execution entry",
+          "description": "Fast path without job store or trajectory capture"
+        },
+        {
+          "id": "4b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 33,
+          "lineContent": "skillExecutor := execution.NewRunnerExecutor()",
+          "title": "Create skill executor",
+          "description": "Instantiates runner adapter for skill execution"
+        },
+        {
+          "id": "4c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 59,
+          "lineContent": "result, err := skillExecutor.Execute(ctx, execution.ExecuteOptions{",
+          "title": "Execute skill directly",
+          "description": "Runs skill without job infrastructure overhead"
+        },
+        {
+          "id": "4d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 77,
+          "lineContent": "return e.handleEphemeralSuccess(result.Stdout)",
+          "title": "Handle success result",
+          "description": "Validates envelope and annotates with ephemeral metadata"
+        },
+        {
+          "id": "4e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 132,
+          "lineContent": "annotated := annotateCorrelationAndJob(stdout, \"\", e.options.CorrelationID)",
+          "title": "Annotate with correlation ID",
+          "description": "Adds correlation metadata to envelope without job ID"
+        },
+        {
+          "id": "4f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go",
+          "lineNumber": 136,
+          "lineContent": "if err := writeEnvelope(e.stdout, annotated); err != nil {",
+          "title": "Write result to stdout",
+          "description": "Outputs annotated envelope to CLI stdout"
+        }
+      ],
+      "traceTextDiagram": "Ephemeral Execution Flow (Fast Path)\n├── ExecuteEphemeral() entry \u003c-- 4a\n│   ├── TryServeCache() (cache read-only check) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:26\n│   ├── NewRunnerExecutor() instantiation \u003c-- 4b\n│   ├── skillExecutor.Execute() call \u003c-- 4c\n│   │   └── RunnerExecutor.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go:21\n│   │       └── runner.RunWithOptions() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go:28\n│   │           └── [exec/wasi runner execution]\n│   ├── handleEphemeralSuccess() \u003c-- 4d\n│   │   ├── json.Unmarshal() validate envelope \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/ephemeral.go:124\n│   │   ├── annotateCorrelationAndJob() \u003c-- 4e\n│   │   └── writeEnvelope() to stdout \u003c-- 4f\n│   └── (skips: job store, trajectory, cache write)",
+      "traceGuide": "## Motivation\n\nWhen running skills via hooks (like git pre-commit hooks), the standard execution path with full job persistence adds **~150ms of overhead** from database operations, state tracking, and trajectory capture. For hooks that need to run quickly and don't require historical job records, this overhead is wasteful. **Ephemeral execution mode** provides a **~60% latency improvement** by skipping all persistence infrastructure while still executing the skill and returning results [4a].\n\nThe key tradeoff: ephemeral mode sacrifices job history and observability for speed. It's designed for transient operations where you care about the immediate result but not about tracking the execution in the job database.\n\n## Details\n\n### Entry Point\n\nEphemeral execution begins when the `--ephemeral` flag is set, causing the executor to call `ExecuteEphemeral()` instead of the standard sync path [4a]. This bypasses job store initialization entirely.\n\n### Execution Flow\n\nThe flow is deliberately minimal:\n\n1. **Cache check** (read-only): Still attempts to serve from cache for deduplication, but skips cache writes to avoid persistence overhead\n2. **Direct execution**: Creates a `RunnerExecutor` [4b] and immediately calls `Execute()` [4c] without any job infrastructure\n3. **Result validation**: Unmarshals the stdout to validate it's a proper envelope structure [4d]\n4. **Metadata annotation**: Adds correlation ID to the envelope meta without a job ID (since no job was created) [4e]\n5. **Output**: Writes the annotated envelope directly to stdout [4f]\n\n### What Gets Skipped\n\nEphemeral mode intentionally avoids:\n- **Job store operations**: No database open, no job record creation, no state transitions (~30-50ms saved)\n- **Trajectory capture**: No execution trace recording for observability (~20ms saved)\n- **Cache writes**: Results aren't persisted to cache (~30ms saved)\n- **Job directory creation**: No filesystem artifacts created\n\n### Environment Propagation\n\nEven in ephemeral mode, the execution still propagates trace context and workspace information to the skill process via environment variables. The `ExtraEnv` parameter allows passing variables like `AGENTCTL_NO_CAS=1` directly to the child process without race conditions from `os.Setenv`.\n\n### Error Handling\n\nErrors are still wrapped in proper envelope format. If the skill returns an error envelope (status=\"error\"), ephemeral mode outputs it directly. If execution fails at the process level, it constructs an error envelope from stderr and the error message."
+    },
+    {
+      "id": "5",
+      "title": "Sync Execution with Job Lifecycle",
+      "description": "Runservice sync mode with full job persistence, state tracking, and result storage",
+      "locations": [
+        {
+          "id": "5a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/cmd/agentctl/cmd/run.go",
+          "lineNumber": 129,
+          "lineContent": "job, isDuplicate, err := executor.PrepareJob(data)",
+          "title": "Prepare job record",
+          "description": "Creates or finds existing job in database"
+        },
+        {
+          "id": "5b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "lineNumber": 39,
+          "lineContent": "job, dup, err := e.jobStore.FindOrPrepareSkillJob(e.ctx, e.handle.Manifest.Metadata.Name, input, e.options.Dedupe)",
+          "title": "Find or create job",
+          "description": "Atomically checks for duplicate or inserts new job"
+        },
+        {
+          "id": "5c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "lineNumber": 129,
+          "lineContent": "func (e *Executor) ExecuteSync(job jobs.Job) error {",
+          "title": "Sync execution entry",
+          "description": "Executes skill with full job lifecycle management"
+        },
+        {
+          "id": "5d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/jobs.go",
+          "lineNumber": 151,
+          "lineContent": "result, runErr := e.jobStore.ExecutePreparedSkill(e.ctx, job.ID, e.handle.ManifestPath, e.handle.ArtifactPath)",
+          "title": "Execute prepared job",
+          "description": "Runs skill and manages state transitions"
+        },
+        {
+          "id": "5e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go",
+          "lineNumber": 183,
+          "lineContent": "return e.executor.ExecutePrepared(ctx, jobID, manifest, artifactPath, data)",
+          "title": "Delegate to executor",
+          "description": "Job store delegates to executor for actual execution"
+        },
+        {
+          "id": "5f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 284,
+          "lineContent": "if err := e.persist.UpdateState(ctx, jobID, types.StateRunning, \"\", \"\"); err != nil {",
+          "title": "Mark job as running",
+          "description": "Updates database state before execution"
+        },
+        {
+          "id": "5g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 228,
+          "lineContent": "stdout, stderr, runErr := e.runSkill(ctx, opts.Manifest, opts.ArtifactPath, opts.Input)",
+          "title": "Execute skill",
+          "description": "Invokes runner to execute skill binary/module"
+        },
+        {
+          "id": "5h",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go",
+          "lineNumber": 394,
+          "lineContent": "if err := e.persist.UpdateState(stateCtx, jobID, types.StateOK, \"\", resultPath); err != nil {",
+          "title": "Mark job complete",
+          "description": "Updates state to OK with result path"
+        }
+      ],
+      "traceTextDiagram": "Sync Execution with Job Lifecycle\n├── CLI run.go\n│   └── executor.PrepareJob(data) \u003c-- 5a\n│       └── runservice/jobs.go\n│           └── jobStore.FindOrPrepareSkillJob() \u003c-- 5b\n│               └── storage/jobs/store.go\n│                   └── executor.FindOrPrepareSkillJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/store.go:197\n│                       └── jobs/executor/executor.go\n│                           └── prepareSkillJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:144\n│                               ├── persist.FindOrInsertJob() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:163\n│                               └── os.WriteFile(input.json) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:181\n├── CLI run.go\n│   └── executor.ExecuteSync(job) \u003c-- 5c\n│       └── runservice/jobs.go\n│           └── jobStore.ExecutePreparedSkill() \u003c-- 5d\n│               └── storage/jobs/store.go\n│                   └── executor.ExecutePrepared() \u003c-- 5e\n│                       └── jobs/executor/executor.go\n│                           └── executeSkill() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:117\n│                               ├── persist.UpdateState(Running) \u003c-- 5f\n│                               ├── runSkill() \u003c-- 5g\n│                               │   └── skillExecutor.Execute() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:318\n│                               │       └── runner.RunWithOptions() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:336\n│                               └── handleSuccess() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:251\n│                                   ├── os.WriteFile(result.json) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/storage/jobs/executor/executor.go:386\n│                                   └── persist.UpdateState(OK) \u003c-- 5h",
+      "traceGuide": "## Motivation\n\nWhen users run `agentctl run \u003cskill\u003e`, the system needs to **track execution state** and **persist results** for auditing, debugging, and deduplication. The sync execution mode implements a **full job lifecycle** where every skill invocation creates a database record, transitions through states (queued → running → ok/error), and stores results to disk. This enables features like:\n\n- **Deduplication**: Reusing results from identical previous runs [5b]\n- **Async execution**: Submitting jobs that run in the background\n- **Job history**: Querying past executions with `agentctl jobs list`\n- **Progress tracking**: Monitoring long-running skills\n\nThe alternative is ephemeral mode (used by hooks), which skips all persistence for ~60% faster execution but loses these capabilities.\n\n## Details\n\n### Job Preparation Phase\n\nThe flow begins when the CLI calls `PrepareJob()` [5a], which delegates to the job store's `FindOrPrepareSkillJob()` [5b]. This method **atomically checks for duplicates** when `--dedupe` is enabled—if a job with the same skill name and input hash exists, it returns the existing job instead of creating a new one [5b].\n\nFor new jobs, the system generates a ULID, computes an args hash from the skill name and input, and inserts a record with state `queued` into the SQLite database. It then creates a job directory under `~/.agentctl/jobs/\u003cjob-id\u003e/` and writes the input JSON to disk [5e]. This directory becomes the workspace for all job-related artifacts.\n\n### Execution Phase\n\nThe CLI then calls `ExecuteSync()` [5c], which delegates through the job store [5d] to the executor's `ExecutePrepared()` method [5e]. The executor first **updates the job state to `running`** in the database [5f], ensuring that concurrent processes can see the job is active.\n\nThe actual skill execution happens in `runSkill()` [5g], which invokes the skill executor interface. This abstraction allows the system to support multiple distribution types (native binaries via `exec`, WebAssembly via `wasi`) without the job store knowing implementation details. The executor captures stdout and stderr, propagates context for cancellation, and handles timeouts.\n\n### Result Handling\n\nAfter execution completes, `handleSuccess()` validates that the skill returned a proper envelope (JSON with `version`, `status`, `command` fields). It writes the result to `result.json` in the job directory and **updates the database state to `ok`** with the result path [5h]. If execution failed, the state transitions to `error` with an error message instead.\n\nThe job store uses a **background context with 5-second timeout** for final state updates to ensure they complete even if the CLI's context was cancelled (e.g., user timeout). This prevents orphaned jobs stuck in `running` state.\n\n### State Transitions\n\nJobs follow a strict state machine:\n- `queued` → `running` (when execution starts) [5f]\n- `running` → `ok` (on success) [5h]\n- `running` → `error` (on failure)\n- `running` → `canceled` (on explicit cancellation)\n\nThe database enforces these transitions, and the job directory accumulates artifacts: `input.json`, `result.json`, `stderr.log`, `progress.ndjson`, and optionally `artifacts.json` for CAS digest tracking."
+    },
+    {
+      "id": "6",
+      "title": "Exec Runner: Native Binary Execution",
+      "description": "Execution layer for native binary skills using os/exec with environment setup and resource limits",
+      "locations": [
+        {
+          "id": "6a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner_adapter.go",
+          "lineNumber": 28,
+          "lineContent": "return RunWithOptions(ctx, RunOptions{",
+          "title": "Runner adapter invocation",
+          "description": "Adapts executor interface to runner implementation"
+        },
+        {
+          "id": "6b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 85,
+          "lineContent": "case \"exec\":\n\t\tr := execrunner.Runner{Manifest: opts.Manifest, Binary: opts.ArtifactPath}",
+          "title": "Create exec runner",
+          "description": "Instantiates runner for native binary execution"
+        },
+        {
+          "id": "6c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 88,
+          "lineContent": "r.Options.Env = buildSkillEnv(os.Environ(), ws, false)",
+          "title": "Build skill environment",
+          "description": "Constructs env vars with workspace and session context"
+        },
+        {
+          "id": "6d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 93,
+          "lineContent": "return r.Run(ctx, opts.Input)",
+          "title": "Execute runner",
+          "description": "Invokes exec runner with context and input"
+        },
+        {
+          "id": "6e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 86,
+          "lineContent": "cmd := exec.CommandContext(ctx, r.Binary)",
+          "title": "Create command",
+          "description": "Constructs os/exec command with context cancellation"
+        },
+        {
+          "id": "6f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 88,
+          "lineContent": "cmd.Stdin = bytes.NewReader(input)",
+          "title": "Set stdin to input",
+          "description": "Pipes skill input as stdin to process"
+        },
+        {
+          "id": "6g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go",
+          "lineNumber": 173,
+          "lineContent": "err := cmd.Run()",
+          "title": "Execute binary",
+          "description": "Runs native binary and waits for completion"
+        }
+      ],
+      "traceTextDiagram": "Exec Runner: Native Binary Execution\n├── RunnerExecutor.Execute() adapter \u003c-- 6a\n│   └── runner.RunWithOptions() dispatcher \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:67\n│       └── Match distribution type \"exec\" \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:84\n│           └── Create execrunner.Runner \u003c-- 6b\n│               └── Build environment vars \u003c-- 6c\n│                   └── execrunner.Run() \u003c-- 6d\n│                       ├── exec.CommandContext() \u003c-- 6e\n│                       ├── Set stdin from input \u003c-- 6f\n│                       ├── Attach stdout/stderr buffers \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go:111\n│                       ├── Apply env vars \u0026 limits \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/exec/exec.go:165\n│                       └── cmd.Run() executes \u003c-- 6g",
+      "traceGuide": "## Motivation\n\nSkills in agentctl can be distributed as either **native binaries** (exec distribution) or **WebAssembly modules** (WASI distribution). The exec runner exists to execute native binary skills in a controlled environment with proper **input/output handling**, **environment variable propagation**, and **resource limits**. When a user runs `agentctl run \u003cskill\u003e`, the system needs to spawn the skill's binary as a subprocess, pipe JSON input via stdin, capture stdout/stderr, and enforce execution policies—all while maintaining context like workspace paths and session IDs for traceability.\n\n## Details\n\n### Execution Flow\n\nThe exec runner is invoked through a **dispatch mechanism** [6a] that routes to the appropriate runner based on the skill's distribution type. When `RunWithOptions` determines the manifest specifies `distribution.type: \"exec\"` [6b], it instantiates an `execrunner.Runner` with the binary path from the resolved artifact.\n\n### Environment Setup\n\nBefore execution, the runner **builds a skill environment** [6c] by starting with the parent process's environment (`os.Environ()`) and augmenting it with:\n- **Workspace context** (`AGENTCTL_WORKSPACE`) so skills can detect git repos and project structure\n- **Session variables** (`AGENTCTL_SESSION_ID`, `CLAUDE_SESSION_ID`, etc.) for trajectory tracking across AI coding tool sessions\n- **Skill metadata** (`SKILL_NAME`, `SKILL_VERSION`) for self-identification\n- **Home directory** and `AGENTCTL_HOME` for configuration access\n\n### Process Execution\n\nThe runner creates an `exec.CommandContext` [6e] to enable **context cancellation** and timeout enforcement. It configures the command with:\n- **Stdin piped from input bytes** [6f]—the skill receives its JSON input envelope via stdin\n- **Stdout/stderr captured to pooled buffers** to minimize allocations across repeated executions\n- **Working directory** set to the workspace for relative path resolution\n- **Resource limits** (memory, CPU) applied via platform-specific syscalls\n\nFinally, `cmd.Run()` [6g] **blocks until the skill process exits**, returning stdout/stderr bytes and any execution error. The runner clones buffer contents before returning them to prevent aliasing with pooled buffers that get reused.\n\n### Design Rationale\n\nThe exec runner uses **buffer pooling** to reduce GC pressure during high-frequency hook executions (like git pre-commit hooks). Buffers larger than 1MB are discarded rather than returned to the pool to prevent memory bloat from occasional large outputs. The environment propagation strategy differs from WASI: exec runners inherit the full parent environment automatically, so session variables pass through without explicit propagation."
+    },
+    {
+      "id": "7",
+      "title": "WASI Runner: WebAssembly Execution",
+      "description": "Execution layer for WASI skills using wazero runtime with sandboxed filesystem and environment",
+      "locations": [
+        {
+          "id": "7a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 95,
+          "lineContent": "case \"wasi\":\n\t\tr := wasirunner.Runner{Manifest: opts.Manifest, ModulePath: opts.ArtifactPath}",
+          "title": "Create WASI runner",
+          "description": "Instantiates runner for WebAssembly module execution"
+        },
+        {
+          "id": "7b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 97,
+          "lineContent": "r.Options.Env = buildSkillEnv(nil, ws, true)",
+          "title": "Build WASI environment",
+          "description": "Starts with empty env, explicitly propagates session vars"
+        },
+        {
+          "id": "7c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go",
+          "lineNumber": 102,
+          "lineContent": "return r.Run(ctx, opts.Input)",
+          "title": "Execute WASI runner",
+          "description": "Invokes WASI runner with context and input"
+        },
+        {
+          "id": "7d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 196,
+          "lineContent": "runtime := wazero.NewRuntime(ctx)",
+          "title": "Create wazero runtime",
+          "description": "Initializes WebAssembly runtime instance"
+        },
+        {
+          "id": "7e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 208,
+          "lineContent": "compiled, err := runtime.CompileModule(ctx, moduleBytes)",
+          "title": "Compile WASM module",
+          "description": "Compiles WebAssembly bytecode for execution"
+        },
+        {
+          "id": "7f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 103,
+          "lineContent": "modConfig := r.buildModuleConfig(input, workDir, stdout, stderr)",
+          "title": "Build module config",
+          "description": "Configures stdin/stdout/stderr and filesystem mounts"
+        },
+        {
+          "id": "7g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go",
+          "lineNumber": 105,
+          "lineContent": "_, runErr := runtime.InstantiateModule(ctx, compiled, modConfig)",
+          "title": "Instantiate and run",
+          "description": "Executes WASM module with configured environment"
+        }
+      ],
+      "traceTextDiagram": "WASI Runner: WebAssembly Execution Flow\n├── RunWithOptions() adapter entry \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:67\n│   └── switch on distribution type \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/runner/runner.go:84\n│       └── case \"wasi\": create runner \u003c-- 7a\n│           ├── buildSkillEnv(nil, ws, true) \u003c-- 7b\n│           └── r.Run(ctx, opts.Input) \u003c-- 7c\n│               ├── validateManifest() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:53\n│               ├── loadModule(modulePath) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:64\n│               ├── prepareWorkDir() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:69\n│               ├── allocateBuffers() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:75\n│               ├── wazero.NewRuntime(ctx) \u003c-- 7d\n│               │   └── wasi_snapshot_preview1.Instantiate() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:200\n│               ├── runtime.CompileModule() \u003c-- 7e\n│               ├── buildModuleConfig() \u003c-- 7f\n│               │   ├── WithStdout/Stderr/Stdin \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:221\n│               │   ├── WithDirMount(workDir) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:226\n│               │   └── WithEnv(k, v) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:230\n│               └── runtime.InstantiateModule() \u003c-- 7g\n│                   └── [WASM module executes]\n└── return stdout, stderr, runErr \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/execution/wasi/wasi.go:110",
+      "traceGuide": "## Motivation\n\nSkills in agentctl can be distributed as either **native binaries** (exec) or **WebAssembly modules** (WASI). WASI skills run in a sandboxed WebAssembly runtime, providing **platform independence** and **security isolation**. The WASI runner executes these `.wasm` modules using the wazero runtime, which is a pure Go WebAssembly implementation requiring no external dependencies.\n\nThe key problem being solved: **how to execute untrusted or cross-platform skill code safely** without requiring native compilation for each target platform, while still providing filesystem access, environment variables, and standard I/O.\n\n## Details\n\n### Execution Entry Point\n\nWhen a skill's manifest specifies `distribution.type: \"wasi\"`, the runner adapter [7a] instantiates a `wasirunner.Runner` with the manifest and module path. Unlike exec runners that inherit the parent process environment, WASI runners **start with an empty environment** [7b] and must explicitly propagate session variables like `AGENTCTL_SESSION_ID` to maintain lineage tracking across the isolation boundary.\n\n### Runtime Initialization\n\nThe execution flow [7c] begins by creating a **wazero runtime** [7d], which is a WebAssembly interpreter written in pure Go. The runtime is configured with WASI preview1 support, providing the WebAssembly module with access to POSIX-like system calls for file I/O, environment variables, and process control.\n\n### Module Compilation\n\nThe `.wasm` file is loaded from disk and **compiled** [7e] into an optimized internal representation. Wazero uses ahead-of-time compilation where possible to improve execution performance compared to pure interpretation.\n\n### Environment Configuration\n\nBefore instantiation, the runner builds a module configuration [7f] that defines the execution environment:\n- **Standard I/O streams** are connected to Go buffers for capturing output\n- **Filesystem mounts** map the workspace directory to `/work` inside the WASM sandbox\n- **Environment variables** include `SKILL_NAME`, `SKILL_VERSION`, workspace path, and propagated session IDs\n\n### Module Execution\n\nFinally, `InstantiateModule()` [7g] loads the compiled module with the configured environment and **executes its `_start` function**. The WASM module reads JSON input from stdin, performs its work, and writes an envelope-formatted result to stdout. The runner captures these streams and returns them as byte arrays, along with any execution errors.\n\n### Isolation Benefits\n\nWASI skills cannot access the host filesystem outside their mounted workspace, cannot make network calls (unless explicitly allowed), and run with deterministic memory limits. This makes them ideal for **untrusted code execution** or **reproducible builds** where platform-specific behavior must be avoided."
+    },
+    {
+      "id": "8",
+      "title": "Result Handling and Output Processing",
+      "description": "Runservice result layer that processes execution output, enforces limits, pins artifacts, and annotates envelopes",
+      "locations": [
+        {
+          "id": "8a",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "lineNumber": 17,
+          "lineContent": "func (e *Executor) HandleResult(jobID string, result []byte) error {",
+          "title": "Result handling entry",
+          "description": "Processes execution result with side effects"
+        },
+        {
+          "id": "8b",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "lineNumber": 23,
+          "lineContent": "result = e.enforceOutputLimit(e.ctx, result, jobID)",
+          "title": "Enforce output size limit",
+          "description": "Truncates large output and stores in CAS"
+        },
+        {
+          "id": "8c",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "lineNumber": 25,
+          "lineContent": "if err := e.handleArtifacts(jobID, result); err != nil {",
+          "title": "Pin artifacts",
+          "description": "Extracts CAS digests and pins them for GC protection"
+        },
+        {
+          "id": "8d",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "lineNumber": 36,
+          "lineContent": "annotated := protocol.AnnotateRunBytes(result, e.options.Workspace, e.handle.Manifest.Metadata.Version)",
+          "title": "Annotate with run metadata",
+          "description": "Adds source=run, workspace, and skill version to meta"
+        },
+        {
+          "id": "8e",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "lineNumber": 37,
+          "lineContent": "annotated = annotateCorrelationAndJob(annotated, jobID, e.options.CorrelationID)",
+          "title": "Add job and correlation IDs",
+          "description": "Injects job_id and correlation_id into envelope meta"
+        },
+        {
+          "id": "8f",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "lineNumber": 47,
+          "lineContent": "if err := e.remember(annotated); err != nil {",
+          "title": "Save to memory if requested",
+          "description": "Persists result to memory store with --remember flag"
+        },
+        {
+          "id": "8g",
+          "path": "/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go",
+          "lineNumber": 52,
+          "lineContent": "return writeEnvelope(e.stdout, annotated)",
+          "title": "Write final output",
+          "description": "Outputs annotated envelope to stdout"
+        }
+      ],
+      "traceTextDiagram": "Result Handling Pipeline (Trace 8)\n└── Executor.HandleResult() entry \u003c-- 8a\n    ├── enforceOutputLimit() \u003c-- 8b\n    │   ├── Check size vs limit \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:66\n    │   ├── If oversized: casStore.Put() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:79\n    │   └── Return wrapped/original result \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:101\n    ├── handleArtifacts() \u003c-- 8c\n    │   ├── Extract CAS digests from result \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/artifacts.go:18\n    │   └── artifacts.Manager.Pin() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/artifacts.go:30\n    ├── protocol.AnnotateRunBytes() \u003c-- 8d\n    │   └── Add source, workspace, skill_version \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/protocol/protocol.go:518\n    ├── annotateCorrelationAndJob() \u003c-- 8e\n    │   └── Add job_id, correlation_id to meta \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/trajectory_meta.go:26\n    ├── trajCapture.CaptureResult() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:39\n    ├── PersistCache() (disabled) \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/cache.go:11\n    ├── remember() \u003c-- 8f\n    │   └── memstore.SaveResult() \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/remember.go:52\n    └── writeEnvelope() \u003c-- 8g\n        └── Write annotated JSON to stdout \u003c-- /Users/jkatigbak/repos/personal/agentctl/internal/runservice/io.go:15",
+      "traceGuide": "## Motivation\n\nWhen a skill executes successfully, its output needs to be **processed, annotated, and persisted** before being returned to the user. The raw execution result is just stdout bytes—the system must enforce size limits (to prevent memory issues), track artifacts (for garbage collection), add metadata (for tracing and debugging), optionally save to memory (for reuse), and finally write the formatted output. Without this pipeline, large outputs would crash the system, artifacts would be prematurely deleted, and results would lack the context needed for debugging distributed workflows.\n\n## Details\n\n### Entry Point and Orchestration\n\nThe `HandleResult` function [8a] coordinates the entire result processing pipeline. It receives the raw execution output and job ID, then orchestrates a series of transformations and side effects before writing the final annotated envelope to stdout.\n\n### Output Size Management\n\nThe **enforceOutputLimit** step [8b] prevents memory exhaustion from large skill outputs. If the result exceeds the configured limit (default 32KB), the system stores the full output in the content-addressable store (CAS) and replaces it with a truncated wrapper envelope containing a digest reference. This happens at `/Users/jkatigbak/repos/personal/agentctl/internal/runservice/result.go:79` where `casStore.Put()` is called. The truncation must happen **before artifact handling** to ensure the truncation digest itself gets pinned.\n\n### Artifact Lifecycle Management\n\nThe `handleArtifacts` function [8c] extracts CAS digest references from the result envelope and **pins them** to prevent garbage collection. Skills often return references to large artifacts (files, datasets) stored in CAS—without pinning, these could be deleted while still in use. The system extracts digests at `artifacts.go:18` and pins them at `artifacts.go:30`.\n\n### Metadata Annotation\n\nResults are annotated with two layers of metadata:\n\n1. **Run metadata** [8d]: Adds `source=\"run\"`, workspace path, and skill version to the envelope's meta section. This happens via `AnnotateRunBytes` which carefully preserves the original data payload bytes to avoid JSON round-trip issues.\n\n2. **Job correlation** [8e]: Injects `job_id` and `correlation_id` into the meta section at `trajectory_meta.go:26`. These IDs enable **distributed tracing** across multi-skill workflows and link results back to their originating jobs.\n\n### Optional Persistence\n\nTwo optional persistence mechanisms run after annotation:\n\n- **Trajectory capture** records the result for session replay and debugging (at `result.go:39`)\n- **Memory storage** [8f] saves the result with a user-provided name when the `--remember` flag is used, enabling result reuse across invocations via `memstore.SaveResult()` at `remember.go:52`\n\n### Final Output\n\nThe `writeEnvelope` function [8g] writes the fully annotated envelope to stdout at `io.go:15`, ensuring a trailing newline for proper line-buffered output. This is the final step that delivers the result to the CLI user or calling process."
+    }
+  ],
+  "description": "This codemap traces the complete skill execution pipeline from CLI invocation through skill resolution, input loading, execution (ephemeral or sync modes), and result handling. Key entry points include CLI orchestration [1a], skill resolution [2b], ephemeral fast path [4a], sync job lifecycle [5c], exec runner [6e], WASI runner [7d], and result annotation [8d].",
+  "mermaidDiagram": "graph TD\n    subgraph CLI[\"CLI Entry \u0026 Orchestration\"]\n        1a[\"1a: executeRunCommand\"]\n        1d[\"1d: buildRunOptions\"]\n        1e[\"1e: NewExecutor\"]\n    end\n\n    subgraph InputLoad[\"Input Loading\"]\n        3a[\"3a: loadSkillInput\"]\n        3b[\"3b: ReadFile\"]\n        3c[\"3c: extractEnvelopeData\"]\n        3d[\"3d: CAS digest\"]\n    end\n\n    subgraph SkillRes[\"Skill Resolution\"]\n        2a[\"2a: createSkillResolver\"]\n        2b[\"2b: Resolve\"]\n        2c[\"2c: resolveFromSearchPaths\"]\n        2e[\"2e: LoadManifest\"]\n        2f[\"2f: ResolveArtifactPath\"]\n    end\n\n    subgraph EphemExec[\"Ephemeral Execution\"]\n        4a[\"4a: ExecuteEphemeral\"]\n        4b[\"4b: NewRunnerExecutor\"]\n        4c[\"4c: Execute skill\"]\n        4d[\"4d: handleEphemeralSuccess\"]\n        4f[\"4f: writeEnvelope\"]\n    end\n\n    subgraph SyncExec[\"Sync Execution\"]\n        5a[\"5a: PrepareJob\"]\n        5b[\"5b: FindOrPrepareSkillJob\"]\n        5c[\"5c: ExecuteSync\"]\n        5f[\"5f: UpdateState Running\"]\n        5g[\"5g: runSkill\"]\n        5h[\"5h: UpdateState OK\"]\n    end\n\n    subgraph Runners[\"Skill Runners\"]\n        6a[\"6a: Exec Runner\"]\n        6e[\"6e: exec.CommandContext\"]\n        6g[\"6g: cmd.Run\"]\n        7a[\"7a: WASI Runner\"]\n        7d[\"7d: wazero.NewRuntime\"]\n        7e[\"7e: CompileModule\"]\n        7g[\"7g: InstantiateModule\"]\n    end\n\n    subgraph ResultProc[\"Result Handling\"]\n        8a[\"8a: HandleResult\"]\n        8b[\"8b: enforceOutputLimit\"]\n        8c[\"8c: handleArtifacts\"]\n        8d[\"8d: AnnotateRunBytes\"]\n        8e[\"8e: annotateCorrelationAndJob\"]\n        8f[\"8f: remember\"]\n        8g[\"8g: writeEnvelope\"]\n    end\n\n    1a --\u003e|loads input from| 3a\n    1a --\u003e|resolves skill| 2a\n    1a --\u003e|builds options| 1d\n    1d --\u003e|creates executor| 1e\n\n    3a --\u003e|file path| 3b\n    3a --\u003e|stdin envelope| 3c\n    3a --\u003e|CAS digest| 3d\n\n    2a --\u003e|searches paths| 2b\n    2b --\u003e|iterates search| 2c\n    2c --\u003e|loads manifest| 2e\n    2e --\u003e|resolves artifact| 2f\n\n    1e --\u003e|executes ephemeral| 4a\n    1e --\u003e|executes sync| 5a\n\n    4a --\u003e|creates executor| 4b\n    4b --\u003e|executes skill| 4c\n    4c --\u003e|dispatches to runner| Runners\n    4d --\u003e|validates envelope| 4f\n    4f --\u003e|writes output| 8a\n\n    5a --\u003e|prepares job| 5b\n    5b --\u003e|creates job record| 5c\n    5c --\u003e|marks running| 5f\n    5f --\u003e|executes skill| 5g\n    5g --\u003e|dispatches to runner| Runners\n    5h --\u003e|marks complete| 8a\n\n    6a --\u003e|creates command| 6e\n    6e --\u003e|executes binary| 6g\n\n    7a --\u003e|creates runtime| 7d\n    7d --\u003e|compiles module| 7e\n    7e --\u003e|instantiates module| 7g\n\n    8a --\u003e|enforces limits| 8b\n    8b --\u003e|pins artifacts| 8c\n    8c --\u003e|annotates run| 8d\n    8d --\u003e|adds correlation| 8e\n    8e --\u003e|saves to memory| 8f\n    8f --\u003e|writes final output| 8g\n\n    style CLI fill:#fcc2d7\n    style InputLoad fill:#ffec99\n    style SkillRes fill:#d0bfff\n    style EphemExec fill:#b2f2bb\n    style SyncExec fill:#a5d8ff\n    style Runners fill:#ffd8a8\n    style ResultProc fill:#99e9f2"
+}

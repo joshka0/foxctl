@@ -3,12 +3,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
@@ -20,7 +22,7 @@ const (
 
 // Input is the skill input schema.
 type Input struct {
-	// Workspace is the workspace to process memories for (optional, defaults to cwd).
+	// Workspace is the workspace to process memories for (optional, defaults to detected workspace).
 	Workspace string `json:"workspace,omitempty"`
 
 	// BatchSize limits how many memories to process per batch.
@@ -36,16 +38,16 @@ type Input struct {
 
 // Output is the skill output.
 type Output struct {
-	Workspace    string         `json:"workspace"`
-	MemoriesFound int           `json:"memories_found"`
-	Embedded     int            `json:"embedded"`
-	Skipped      int            `json:"skipped"`
-	Errors       int            `json:"errors"`
-	Remaining    int            `json:"remaining,omitempty"`
-	BatchCount   int            `json:"batch_count,omitempty"`
-	DurationMs   int64          `json:"duration_ms"`
-	Memories     []MemoryResult `json:"memories,omitempty"`
-	ErrorDetails []string       `json:"error_details,omitempty"`
+	Workspace     string         `json:"workspace"`
+	MemoriesFound int            `json:"memories_found"`
+	Embedded      int            `json:"embedded"`
+	Skipped       int            `json:"skipped"`
+	Errors        int            `json:"errors"`
+	Remaining     int            `json:"remaining,omitempty"`
+	BatchCount    int            `json:"batch_count,omitempty"`
+	DurationMs    int64          `json:"duration_ms"`
+	Memories      []MemoryResult `json:"memories,omitempty"`
+	ErrorDetails  []string       `json:"error_details,omitempty"`
 }
 
 // MemoryResult captures the result of embedding a single memory.
@@ -57,6 +59,28 @@ type MemoryResult struct {
 	Message    string `json:"message,omitempty"`
 }
 
+// formatMemoryContent builds embedding text with date and type prefixes.
+// Format: [Jan 2026] [gotcha] Summary text here
+func formatMemoryContent(entry memory.NamedEntry) string {
+	// Date prefix from creation time
+	dateStr := entry.CreatedAt.Format("Jan 2006")
+
+	// Type prefix (default to "note" if empty)
+	typeStr := entry.Type
+	if typeStr == "" {
+		typeStr = "note"
+	}
+
+	// Content from summary or name
+	content := entry.Summary
+	if content == "" {
+		content = entry.Name
+	}
+
+	// Format: [Jan 2026] [gotcha] Summary
+	return fmt.Sprintf("[%s] [%s] %s", dateStr, typeStr, content)
+}
+
 func main() {
 	skillmain.Main(command, run)
 }
@@ -66,14 +90,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.BatchSize <= 0 {
 		in.BatchSize = defaultBatchMax
 	}
-	if in.Workspace == "" {
-		cwd, err := os.Getwd()
-		if err == nil {
-			in.Workspace = cwd
-		} else {
-			in.Workspace = "default"
-		}
-	}
+	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
 
 	start := time.Now()
 	output := Output{
@@ -88,7 +105,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 
 	// Open memory store
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
 		return skillerr.Runtime("open memory store", skillerr.WithCause(err))
 	}
@@ -115,32 +132,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		return skillout.Emit(rc, command, output)
 	}
 
-	// Initialize embedding provider (prefer Voyage, fall back to Gemini)
-	var provider interface {
-		Embed(ctx context.Context, text string) ([]float32, error)
-		Model() string
-	}
-
-	if voyageKey != "" {
-		model, _ := semantic.ScopeModelRecommendation(semantic.ScopeMemory)
-		vp, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
-			APIKey:        voyageKey,
-			Model:         model,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			return skillerr.Runtime("voyage provider", skillerr.WithCause(err))
-		}
-		provider = vp
-	} else {
-		gp, err := semantic.NewGeminiProvider(semantic.GeminiConfig{
-			APIKey:        geminiKey,
-			RateLimitWait: boolPtr(true),
-		})
-		if err != nil {
-			return skillerr.Runtime("gemini provider", skillerr.WithCause(err))
-		}
-		provider = gp
+	embedder, err := semantic.NewEmbedderFromConfig(
+		semantic.ScopeMemory,
+		rc.Config,
+		semantic.WithVoyageKey(voyageKey),
+		semantic.WithGeminiKey(geminiKey),
+	)
+	if err != nil {
+		return skillerr.Runtime("embedding provider", skillerr.WithCause(err))
 	}
 
 	// Track already embedded memories to skip
@@ -178,17 +177,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 		// Process batch
 		for _, m := range batch {
-			content := m.Summary
-			if content == "" {
-				content = m.Name
-			}
+			// Use enriched content with date and type prefixes
+			content := formatMemoryContent(m)
 			if content == "" {
 				output.Skipped++
 				embeddedNames[m.Name] = true
 				continue
 			}
 
-			embedding, err := provider.Embed(ctx, content)
+			embeddingResult, err := embedder.Embed(ctx, content)
 			if err != nil {
 				output.Errors++
 				output.ErrorDetails = append(output.ErrorDetails, m.Name+": "+err.Error())
@@ -196,7 +193,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 				continue
 			}
 
-			if err := memStore.UpdateEmbedding(ctx, m.Name, in.Workspace, embedding); err != nil {
+			if err := memStore.UpdateEmbedding(ctx, m.Name, in.Workspace, embeddingResult.Vec); err != nil {
 				output.Errors++
 				output.ErrorDetails = append(output.ErrorDetails, m.Name+": update failed: "+err.Error())
 				embeddedNames[m.Name] = true
@@ -226,6 +223,3 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // boolPtr returns a pointer to a bool value.
-func boolPtr(b bool) *bool {
-	return &b
-}

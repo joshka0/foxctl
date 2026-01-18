@@ -2,7 +2,7 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -10,12 +10,15 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
@@ -31,35 +34,48 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-	validPath, err := rc.PathValidator.ValidatePath(in.Path)
+	validPath, err := skillmain.ValidatePath(rc, in.Path)
 	if err != nil {
-		return fmt.Errorf("path validation failed: %w", err)
+		return err
 	}
 
-	info, err := os.Stat(validPath)
+	// Resolve symlinks BEFORE opening to prevent TOCTOU race conditions
+	resolved, err := filepath.EvalSymlinks(validPath)
 	if err != nil {
-		return fmt.Errorf("stat %s: %w", validPath, err)
+		return skillerr.WrapIO("resolve symlink "+validPath, err)
 	}
-	if info.IsDir() {
-		return fmt.Errorf("path %s is a directory", validPath)
+	// Validate the resolved path if it differs from the original
+	if resolved != validPath {
+		if _, err := skillmain.ValidatePath(rc, resolved, skillmain.WithPathMessage("resolved path validation failed")); err != nil {
+			return err
+		}
 	}
 
-	file, err := os.Open(validPath)
+	// Now open the resolved path (safe from symlink changes)
+	file, err := os.Open(resolved)
 	if err != nil {
-		return fmt.Errorf("open %s: %w", validPath, err)
+		return skillerr.WrapIO("open "+resolved, err)
 	}
 	defer func() {
 		errs.Ignore(file.Close(), "close input file")
 	}()
 
+	info, err := file.Stat()
+	if err != nil {
+		return skillerr.WrapIO("stat "+validPath, err)
+	}
+	if info.IsDir() {
+		return skillerr.Validationf("path %s is a directory", validPath)
+	}
+
 	kind := detectKind(validPath)
 	obj, err := rc.CASStore.Put(ctx, file, kind, []string{"fs_read"})
 	if err != nil {
-		return fmt.Errorf("cas put %s: %w", validPath, err)
+		return skillerr.WrapIO("cas put "+validPath, err)
 	}
 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("rewind %s: %w", validPath, err)
+		return skillerr.WrapIO("rewind "+validPath, err)
 	}
 
 	limit := previewLimit(rc, in)
@@ -71,7 +87,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	isText := utf8.Valid(previewBytes)
 	lineCount := 0
 	if isText {
-		lineCount = countLines(previewBytes)
+		lineCount = textutil.CountLinesBytes(previewBytes)
 	}
 
 	data := map[string]any{
@@ -85,9 +101,15 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		"artifact":          obj.Digest,
 		"truncated":         more || obj.Size > int64(len(previewBytes)),
 	}
+	artifact := skillmain.Artifact{Digest: obj.Digest, Size: obj.Size, Kind: obj.Kind}
+	data["cas_hint"] = skillout.DefaultCASHint(artifact)
 	if isText {
-		data["preview"] = string(previewBytes)
+		preview := string(previewBytes)
+		numbered := formatPreviewWithLineNumbers(preview, lineCount)
+		data["preview"] = preview
+		data["preview_raw"] = preview
 		data["preview_line_count"] = lineCount
+		data["preview_numbered"] = numbered
 	}
 	if !isText {
 		data["hint"] = "content stored in CAS; fetch via agentctl cas get <digest>"
@@ -118,21 +140,45 @@ func readPreview(r io.Reader, limit int) ([]byte, bool, error) {
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
 		return buf[:n], false, nil
 	case err != nil:
-		return nil, false, fmt.Errorf("read preview: %w", err)
+		return nil, false, skillerr.WrapIO("read preview", err)
 	default:
 		return buf[:limit], n > limit, nil
 	}
 }
 
-func countLines(b []byte) int {
-	if len(b) == 0 {
-		return 0
+func formatPreviewWithLineNumbers(preview string, lineCount int) string {
+	if preview == "" {
+		return ""
 	}
-	lines := bytes.Count(b, []byte{'\n'})
-	if len(b) > 0 && b[len(b)-1] != '\n' {
-		lines++
+	width := len(strconv.Itoa(lineCount))
+	if width == 0 {
+		width = 1
 	}
-	return lines
+
+	var out strings.Builder
+	reader := bufio.NewReader(strings.NewReader(preview))
+	lineNum := 1
+	for {
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			hasNewline := strings.HasSuffix(line, "\n")
+			if hasNewline {
+				line = strings.TrimSuffix(line, "\n")
+			}
+			fmt.Fprintf(&out, "%*d | %s", width, lineNum, line)
+			if hasNewline {
+				out.WriteString("\n")
+			}
+			lineNum++
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			break
+		}
+	}
+	return out.String()
 }
 
 func detectKind(path string) string {

@@ -11,11 +11,12 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/secretutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/codecontext"
@@ -80,13 +81,7 @@ type Output struct {
 }
 
 // SecretFinding represents a detected secret in the output.
-type SecretFinding struct {
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-	Pattern  string `json:"pattern"`
-	Severity string `json:"severity"`
-	Masked   string `json:"masked"`
-}
+type SecretFinding = secretutil.Finding
 
 // CandidateInfo describes a candidate file.
 type CandidateInfo struct {
@@ -183,7 +178,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		Mode:            renderMode,
 	})
 	if err != nil {
-		return fmt.Errorf("collect evidence: %w", err)
+		return skillerr.WrapRuntime("collect evidence", err)
 	}
 
 	out.Evidence = evidence
@@ -191,7 +186,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	out.Stats.SnippetsFound = evidence.Stats.SnippetsExtracted
 
 	// Scan evidence for secrets
-	secretFindings, hasHighSeverity := scanForSecrets(ctx, evidence, logger)
+	secretFindings, hasHighSeverity := secretutil.ScanEvidence(ctx, evidence, logger, guard.ModeBlock)
 	out.SecretFindings = secretFindings
 
 	// Block if high-severity secrets detected
@@ -216,15 +211,15 @@ type autoSelectResult struct {
 // autoSelectFiles uses retrieval.Generator to find relevant files.
 func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, logger zerolog.Logger) (*autoSelectResult, error) {
 	// Open memory store for retrieval
-	memStore, err := memory.Open(ctx, rc.Config.Storage.Root, rc.Config.Paths.CAS)
+	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
-		return nil, fmt.Errorf("open memory store: %w", err)
+		return nil, skillerr.WrapIO("open memory store", err)
 	}
 	defer func() { errs.Ignore(memStore.Close(), "close memory store") }()
 
 	// Create embedding provider (optional - retrieval falls back to ripgrep)
 	var embedProvider semantic.EmbeddingProvider
-	embedder, err := semantic.NewEmbedder(semantic.ScopeSymbols)
+	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeSymbols, rc.Config)
 	if err == nil {
 		embedProvider = &embedderAdapter{embedder: embedder}
 	} else {
@@ -236,20 +231,20 @@ func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string
 
 	// Generate candidates
 	result, err := gen.Generate(ctx, rc.Workspace, query, retrieval.Options{
-		MaxTotalCandidates:   maxFiles,
-		MaxSymbolCandidates:  maxFiles,
+		MaxTotalCandidates:    maxFiles,
+		MaxSymbolCandidates:   maxFiles,
 		MaxSemanticCandidates: maxFiles / 2,
-		MaxRipgrepCandidates: maxFiles,
-		EnableSymbols:        true,
-		EnableSemantic:       embedProvider != nil,
-		EnableRipgrep:        true,
-		MinTotalCandidates:   3,
-		SymbolWeight:         1.0,
-		SemanticWeight:       0.8,
-		RipgrepWeight:        0.6,
+		MaxRipgrepCandidates:  maxFiles,
+		EnableSymbols:         true,
+		EnableSemantic:        embedProvider != nil,
+		EnableRipgrep:         true,
+		MinTotalCandidates:    3,
+		SymbolWeight:          1.0,
+		SemanticWeight:        0.8,
+		RipgrepWeight:         0.6,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("generate candidates: %w", err)
+		return nil, skillerr.WrapRuntime("generate candidates", err)
 	}
 
 	// Convert to codecontext.Candidate
@@ -323,42 +318,4 @@ func (a *embedderAdapter) Model() string {
 
 func (a *embedderAdapter) Dimensions() int {
 	return a.embedder.Dimensions()
-}
-
-// scanForSecrets scans all evidence snippets for secrets.
-// Returns the findings and whether any high-severity secrets were detected.
-func scanForSecrets(ctx context.Context, evidence *codecontext.Evidence, logger zerolog.Logger) ([]SecretFinding, bool) {
-	if evidence == nil || len(evidence.Snippets) == 0 {
-		return nil, false
-	}
-
-	scanner := guard.New(guard.Opts{Mode: guard.ModeBlock})
-	var findings []SecretFinding
-	hasHighSeverity := false
-
-	for _, snippet := range evidence.Snippets {
-		result := scanner.ScanString(ctx, snippet.File, snippet.Text)
-
-		if result.HasFindings() {
-			for _, f := range result.Findings {
-				findings = append(findings, SecretFinding{
-					File:     snippet.File,
-					Line:     snippet.StartLine + f.Line - 1, // Adjust to absolute line number
-					Pattern:  f.Pattern,
-					Severity: string(f.Severity),
-					Masked:   f.Masked,
-				})
-
-				if f.Severity == guard.SeverityHigh {
-					hasHighSeverity = true
-				}
-			}
-		}
-	}
-
-	if len(findings) > 0 {
-		logger.Debug().Int("count", len(findings)).Bool("high_severity", hasHighSeverity).Msg("secrets detected in evidence")
-	}
-
-	return findings, hasHighSeverity
 }

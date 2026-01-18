@@ -1,0 +1,193 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: code/context_grep
+  version: 0.2.0
+  description: "Search for patterns and return surrounding code blocks with multi-mode support (ripgrep, ast-grep, line expansion)"
+  tags: ["code", "search", "context", "ast", "function", "grep"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/code_context_grep/code_context_grep
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: code/context_grep
+  parameters:
+    # Common options
+    - name: mode
+      type: string
+      required: false
+      description: "Search mode: 'ripgrep' (regex), 'ast' (structural), or 'line' (expansion). Auto-detected if not specified."
+      enum: ["ripgrep", "ast", "line"]
+    - name: path
+      type: string
+      required: false
+      description: "Directory or file to search (default .)"
+    - name: max_blocks
+      type: integer
+      required: false
+      default: 50
+      description: "Maximum number of code blocks to return"
+    - name: max_block_lines
+      type: integer
+      required: false
+      default: 400
+      description: "Maximum lines per code block"
+
+    # Ripgrep mode options
+    - name: pattern
+      type: string
+      required: false
+      description: "Regex pattern to search for (ripgrep mode)"
+    - name: case_insensitive
+      type: boolean
+      required: false
+      description: "Case insensitive search"
+      default: false
+    - name: glob
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Include glob patterns (e.g., ['*.go', '*.py'])"
+    - name: glob_not
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Exclude glob patterns (e.g., ['vendor/*', 'node_modules/*'])"
+    - name: max_matches
+      type: integer
+      required: false
+      default: 10000
+      description: "Maximum number of raw matches to process"
+    - name: hidden
+      type: boolean
+      required: false
+      default: false
+      description: "Search hidden files and directories"
+
+    # AST-grep mode options
+    - name: ast_pattern
+      type: string
+      required: false
+      description: "Structural pattern for ast-grep (triggers ast mode)"
+    - name: language
+      type: string
+      required: false
+      description: "Language for ast-grep (go, python, javascript, typescript, etc.)"
+    - name: ast_rule
+      type: string
+      required: false
+      description: "Inline YAML rule content for ast-grep"
+
+    # Line expansion mode options
+    - name: file_path
+      type: string
+      required: false
+      description: "File path for line expansion mode"
+    - name: line_start
+      type: integer
+      required: false
+      description: "Start line number for expansion (1-indexed)"
+    - name: line_end
+      type: integer
+      required: false
+      description: "End line number for expansion (1-indexed)"
+    - name: expand_to
+      type: string
+      required: false
+      description: "Expansion target: 'function', 'block', or 'class'"
+      enum: ["function", "block", "class"]
+
+  returns:
+    - name: mode
+      type: string
+      description: "Search mode used (ripgrep, ast, or line)"
+    - name: pattern
+      type: string
+    - name: ast_pattern
+      type: string
+    - name: match_count
+      type: integer
+      description: "Total number of matches found"
+    - name: block_count
+      type: integer
+      description: "Number of code blocks returned"
+    - name: files_touched
+      type: integer
+    - name: preview
+      type: array
+      description: "Preview of matched blocks with file, start/end lines, symbol info"
+    - name: blocks
+      type: array
+      description: "Full code blocks with source"
+    - name: artifact
+      type: string
+      description: "CAS digest of full block data (NDJSON)"
+  help:
+    short: "Multi-mode code search with context expansion (ripgrep, ast-grep, line range)"
+    long: |
+      Use this skill to search code and get meaningful code units.
+
+      Three search modes:
+
+      **Ripgrep mode** (default):
+      - Regex pattern search using ripgrep
+      - Fast, line-oriented searching
+      - Matches are expanded to containing function/method/class
+
+      **AST-grep mode** (structural):
+      - Triggered by ast_pattern or ast_rule
+      - Uses ast-grep for structural pattern matching
+      - More precise than regex for refactoring patterns
+      - Example: Find all calls to a function with specific args
+
+      **Line expansion mode**:
+      - Triggered by file_path + line_start/line_end
+      - Expands specific line ranges to function boundaries
+      - Useful for getting full context around a known location
+
+      Supported languages with function/method detection:
+      - Go: func, method, type declarations
+      - Python: def, async def, class (indentation-based)
+      - JavaScript/TypeScript: function, arrow functions, class, interface, type
+      - GDScript: func, class_name, inner class (indentation-based)
+
+      For unsupported languages, falls back to blank-line delimited blocks.
+    workflows:
+      - id: ripgrep-search
+        description: "Search for functions using a regex pattern"
+        example_input:
+          pattern: "PathValidator"
+          path: "."
+          glob: ["*.go"]
+          max_blocks: 20
+      - id: ast-grep-search
+        description: "Find all function calls with specific structure"
+        example_input:
+          ast_pattern: "fmt.Errorf($ERR)"
+          language: "go"
+          path: "."
+      - id: line-expansion
+        description: "Expand lines 50-60 to their containing function"
+        example_input:
+          file_path: "internal/auth/handler.go"
+          line_start: 50
+          line_end: 60
+      - id: ast-rule-search
+        description: "Use ast-grep YAML rule for complex patterns"
+        example_input:
+          ast_rule: |
+            id: find-error-handling
+            language: go
+            rule:
+              pattern: if err != nil { $BODY }
+          path: "."
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: true

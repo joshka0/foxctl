@@ -10,14 +10,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hookutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
-	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
 	"github.com/jkatigb/agentctl/internal/hooks/toolutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/graph"
-	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
 // Mode controls task_guard behavior.
@@ -40,7 +39,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Skip non-write operations using cross-platform detection
 	// Supports CC tools (Edit, Write, etc.), canonical tools (edit.*, fs.write_*), and explicit tool_kind
 	if !toolutil.IsWriteOperation(in.ToolName, in.ToolCanonical, string(in.ToolKind)) {
-		return emitOutput(rc, hooks.NewApprove("non-write operation", nil))
+		return hookutil.EmitOutput(rc, "hooks/task_guard", hooks.NewApprove("non-write operation", nil), nil)
 	}
 
 	// Determine mode from environment
@@ -49,28 +48,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 		mode = ModeStrict
 	}
 
-	// Resolve workspace ID from WorkspaceRoot
-	workspaceID := in.WorkspaceID
+	workspaceRoot := hookutil.ResolveWorkspaceRoot(in, "")
+	workspaceID := hookutil.ResolveWorkspaceID(in, workspaceRoot)
 	if workspaceID == "" {
-		workspaceID = in.WorkspaceRoot
-	}
-	if workspaceID == "" {
-		var wdErr error
-		workspaceID, wdErr = os.Getwd()
-		if wdErr != nil {
-			return fmt.Errorf("failed to determine workspace directory: %w", wdErr)
-		}
+		return fmt.Errorf("failed to determine workspace directory")
 	}
 
 	// Open task store
-	store, err := tasks.Open(ctx, paths.StorageRoot)
+	store, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)
 	if err != nil {
 		return fmt.Errorf("open task store: %w", err)
 	}
-	defer store.Close()
+	defer cleanup()
 
 	// Generate default title from tool + file path
-	defaultTitle := deriveTaskTitle(in)
+	defaultTitle := deriveTaskTitle(in, workspaceRoot)
 
 	// Get scope path from tool input using cross-platform path extraction
 	scopePath := pathutil.ExtractPath(in.ToolInput)
@@ -153,12 +145,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 		}
 	}
 
-	return emitOutput(rc, output)
+	return hookutil.EmitOutput(rc, "hooks/task_guard", output, nil)
 }
 
 // deriveTaskTitle generates a task title from the hook input.
 // Format: "<tool> <relative/path>" or "<tool> operation" if no path.
-func deriveTaskTitle(in hooks.Input) string {
+func deriveTaskTitle(in hooks.Input, workspaceRoot string) string {
 	filePath := pathutil.ExtractPath(in.ToolInput)
 	if filePath == "" {
 		toolName := in.ToolName
@@ -172,7 +164,7 @@ func deriveTaskTitle(in hooks.Input) string {
 	}
 
 	// Make path relative to workspace using pathutil
-	filePath = pathutil.RelativePath(filePath, in.WorkspaceRoot)
+	filePath = pathutil.RelativePath(filePath, workspaceRoot)
 
 	toolName := in.ToolName
 	if toolName == "" {
@@ -182,13 +174,6 @@ func deriveTaskTitle(in hooks.Input) string {
 		toolName = "tool"
 	}
 	return fmt.Sprintf("%s %s", toolName, filePath)
-}
-
-func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
-	data := map[string]any{
-		"hook_output": output,
-	}
-	return skillout.Emit(rc, "hooks/task_guard", data)
 }
 
 // createModifiedEdge creates a graph edge from task to file when modified.

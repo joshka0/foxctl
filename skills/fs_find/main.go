@@ -10,10 +10,13 @@ import (
 	"strings"
 	"time"
 
+	fshelpers "github.com/jkatigb/agentctl/internal/adapters/skillslib/fs"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/fsutil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/pathutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
 const command = "fs/find"
@@ -60,14 +63,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 
 	// Resolve workspace and search path
-	workspace := rc.PathValidator.Workspace()
-	searchPath := workspace
-	if in.Path != "" {
-		validated, err := rc.PathValidator.ValidatePath(in.Path)
-		if err != nil {
-			return fmt.Errorf("path validation failed: %w", err)
-		}
-		searchPath = validated
+	workspace, searchPath, err := skillmain.ResolvePath(rc, in.Path)
+	if err != nil {
+		return err
 	}
 
 	// Parse time filter
@@ -75,16 +73,21 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.ModifiedSince != "" {
 		parsed, err := parseTimeFilter(in.ModifiedSince)
 		if err != nil {
-			return fmt.Errorf("invalid modified_since: %w", err)
+			return err
 		}
 		modifiedSince = parsed
 	}
 
 	// Walk directory tree and collect matching files
 	var results []fileResult
-	err := filepath.WalkDir(searchPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
+	err = filepath.WalkDir(searchPath, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
 			return nil // Skip files/dirs we can't read
+		}
+
+		// Skip symlinks to avoid cycles and inconsistent behavior
+		if fsutil.IsSymlinkMode(d.Type()) {
+			return nil
 		}
 
 		// Check depth limit
@@ -99,7 +102,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		}
 
 		// Skip hidden files/directories
-		if !in.Hidden && strings.HasPrefix(d.Name(), ".") {
+		if fshelpers.ShouldSkipHidden(d.Name(), in.Hidden) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -172,21 +175,19 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("directory walk failed: %w", err)
+		return skillerr.WrapIO("directory walk failed", err)
 	}
 
 	// Sort results
 	sortResults(results, in.SortBy)
 
 	// Limit results
-	if len(results) > in.MaxResults {
-		results = results[:in.MaxResults]
-	}
+	results = sliceutil.Limit(results, in.MaxResults)
 
 	// Prepare preview and persist full results if truncated
 	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, results, rc.MaxPreview, "fs_find", true)
 	if err != nil {
-		return err
+		return skillerr.WrapIO("preview and persist results", err)
 	}
 
 	// Build response
@@ -199,21 +200,20 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Query != "" {
 		data["query"] = in.Query
 	}
-	if previewResult.Artifact != nil && previewResult.Artifact.Digest != "" {
-		data["artifact"] = previewResult.Artifact.Digest
-	}
+	skillout.AddArtifact(data, previewResult.Artifact)
 
 	return skillout.Emit(rc, command, data)
 }
 
 func parseTimeFilter(since string) (time.Time, error) {
 	now := time.Now()
+	hint := "Use Nd, Nw, Nm, or Ny (e.g., \"7d\")."
 
 	if strings.HasSuffix(since, "d") {
 		days := strings.TrimSuffix(since, "d")
 		var d int
 		if _, err := fmt.Sscanf(days, "%d", &d); err != nil {
-			return time.Time{}, err
+			return time.Time{}, skillerr.WrapValidation("modified_since must be in form Nd, Nw, Nm, or Ny", err, skillerr.WithHint(hint))
 		}
 		return now.AddDate(0, 0, -d), nil
 	}
@@ -221,7 +221,7 @@ func parseTimeFilter(since string) (time.Time, error) {
 		weeks := strings.TrimSuffix(since, "w")
 		var w int
 		if _, err := fmt.Sscanf(weeks, "%d", &w); err != nil {
-			return time.Time{}, err
+			return time.Time{}, skillerr.WrapValidation("modified_since must be in form Nd, Nw, Nm, or Ny", err, skillerr.WithHint(hint))
 		}
 		return now.AddDate(0, 0, -w*7), nil
 	}
@@ -229,7 +229,7 @@ func parseTimeFilter(since string) (time.Time, error) {
 		months := strings.TrimSuffix(since, "m")
 		var m int
 		if _, err := fmt.Sscanf(months, "%d", &m); err != nil {
-			return time.Time{}, err
+			return time.Time{}, skillerr.WrapValidation("modified_since must be in form Nd, Nw, Nm, or Ny", err, skillerr.WithHint(hint))
 		}
 		return now.AddDate(0, -m, 0), nil
 	}
@@ -237,12 +237,12 @@ func parseTimeFilter(since string) (time.Time, error) {
 		years := strings.TrimSuffix(since, "y")
 		var y int
 		if _, err := fmt.Sscanf(years, "%d", &y); err != nil {
-			return time.Time{}, err
+			return time.Time{}, skillerr.WrapValidation("modified_since must be in form Nd, Nw, Nm, or Ny", err, skillerr.WithHint(hint))
 		}
 		return now.AddDate(-y, 0, 0), nil
 	}
 
-	return time.Time{}, fmt.Errorf("invalid time format: use Nd, Nw, Nm, or Ny")
+	return time.Time{}, skillerr.Validation("modified_since must be in form Nd, Nw, Nm, or Ny", skillerr.WithHint(hint))
 }
 
 func fuzzyScore(query, path, name string) (float64, []string) {
@@ -344,4 +344,3 @@ func getFileType(d fs.DirEntry) string {
 	}
 	return "file"
 }
-

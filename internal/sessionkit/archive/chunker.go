@@ -14,6 +14,8 @@ import (
 const (
 	// DefaultMaxChunkSize is the default max chunk size (tokens approximation).
 	DefaultMaxChunkSize = 4000
+	// DefaultCodexWindowTokens is the default token estimate per Codex window.
+	DefaultCodexWindowTokens = 30000
 	// DefaultMaxPreviewLen is the default max preview length.
 	DefaultMaxPreviewLen = 200
 )
@@ -21,7 +23,6 @@ const (
 // Chunk reads a JSONL file and creates chunks and context windows.
 // This function handles incremental archival by allowing skipping already processed chunks.
 func Chunk(reader *claudejsonl.Reader, opts ChunkOptions) (ChunkResult, error) {
-
 	var chunks []storage.SessionChunk
 	var windows []storage.ContextWindow
 	chunkIndex := 0
@@ -114,6 +115,18 @@ func Chunk(reader *claudejsonl.Reader, opts ChunkOptions) (ChunkResult, error) {
 
 		chunks = append(chunks, chunk)
 		windowMsgCount++
+
+		// Check MaxChunks limit (0 = unlimited)
+		if opts.MaxChunks > 0 && len(chunks) >= opts.MaxChunks {
+			// Return early with continuation info
+			return ChunkResult{
+				Chunks:          chunks,
+				Windows:         windows,
+				HasMore:         true,
+				NextChunkIndex:  chunkIndex + 1,
+				NextWindowIndex: windowIndex,
+			}, nil
+		}
 
 		// If this is a compact_boundary, close the current window and start a new one
 		if isCompactBoundary {

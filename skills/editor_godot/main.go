@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
@@ -49,7 +50,10 @@ func main() {
 func run(ctx context.Context, rc *skillmain.RunContext, in handlers.Input) error {
 	// Validate
 	if strings.TrimSpace(in.Action) == "" {
-		return fmt.Errorf("action is required")
+		return skillerr.Arg(
+			"action is required",
+			skillerr.WithHint("Provide a valid action from editor/godot --examples."),
+		)
 	}
 	// Apply defaults
 	if in.Host == "" {
@@ -76,7 +80,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in handlers.Input) error
 	if !ok {
 		actions := handlers.AllActions()
 		sort.Strings(actions)
-		return fmt.Errorf("unknown action: %q (valid: %s)", in.Action, strings.Join(actions, ", "))
+		return skillerr.Arg(
+			fmt.Sprintf("unknown action: %q", in.Action),
+			skillerr.WithHint("Valid actions: "+strings.Join(actions, ", ")),
+		)
 	}
 
 	// Validate action-specific required fields
@@ -115,7 +122,7 @@ func callPlugin(ctx context.Context, host string, port int, timeout time.Duratio
 
 	reqBody, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, skillerr.WrapRuntime("marshal request", err)
 	}
 
 	httpCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -123,20 +130,18 @@ func callPlugin(ctx context.Context, host string, port int, timeout time.Duratio
 
 	httpReq, err := http.NewRequestWithContext(httpCtx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, skillerr.WrapRuntime("create request", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	httpResp, err := client.Do(httpReq)
 	if err != nil {
-		// Provide actionable error for connection failures
-		return nil, &bridgeError{
-			code:    "EBRIDGE_UNAVAILABLE",
-			message: fmt.Sprintf("cannot connect to GodotAIBridge at %s:%d", host, port),
-			hint:    "Ensure Godot Editor is running with the GodotAIBridge plugin enabled. The plugin should be listening on the specified host:port.",
-			cause:   err,
-		}
+		return nil, skillerr.Runtime(
+			fmt.Sprintf("cannot connect to GodotAIBridge at %s:%d", host, port),
+			skillerr.WithCause(err),
+			skillerr.WithHint("Ensure Godot Editor is running with the GodotAIBridge plugin enabled. The plugin should be listening on the specified host:port."),
+		)
 	}
 	defer func() {
 		errs.Ignore(httpResp.Body.Close(), "close plugin response body")
@@ -145,54 +150,36 @@ func callPlugin(ctx context.Context, host string, port int, timeout time.Duratio
 	if httpResp.StatusCode != http.StatusOK {
 		// Error body read; error is not actionable in error path.
 		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 1024)) //nolint:errcheck
-		return nil, &bridgeError{
-			code:    "EBRIDGE_HTTP",
-			message: fmt.Sprintf("plugin returned HTTP %d", httpResp.StatusCode),
-			hint:    fmt.Sprintf("Response: %s", string(body)),
-		}
+		return nil, skillerr.Runtime(
+			fmt.Sprintf("plugin returned HTTP %d", httpResp.StatusCode),
+			skillerr.WithHint(fmt.Sprintf("Response: %s", string(body))),
+		)
 	}
 
 	var resp PluginResponse
 	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
-		return nil, fmt.Errorf("decode plugin response: %w", err)
+		return nil, skillerr.WrapParse("decode plugin response", err)
 	}
 
 	return &resp, nil
 }
 
-// bridgeError represents a connection or protocol error with the plugin.
-type bridgeError struct {
-	code    string
-	message string
-	hint    string
-	cause   error
-}
-
-func (e *bridgeError) Error() string {
-	if e.cause != nil {
-		return fmt.Sprintf("%s: %v", e.message, e.cause)
-	}
-	return e.message
-}
-
 func emitPluginError(rc *skillmain.RunContext, pe *PluginError) error {
-	data := map[string]any{
-		"hint":    pe.Hint,
-		"code":    pe.Code,
-		"message": pe.Message,
+	err := skillerr.Runtime(pe.Message, skillerr.WithHint(pe.Hint))
+	if pe.Code != "" {
+		skillerr.WithData("code", pe.Code)(err)
 	}
 	if pe.Details != nil {
-		data["details"] = pe.Details
+		skillerr.WithData("details", pe.Details)(err)
 	}
-	// Return error to let skillmain emit error envelope
-	return fmt.Errorf("%s: %s", pe.Code, pe.Message)
+	return err
 }
 
 func emitSuccess(ctx context.Context, rc *skillmain.RunContext, action string, data any, handler handlers.Handler) error {
 	// Serialize data to check size
 	dataBytes, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("marshal data: %w", err)
+		return skillerr.WrapRuntime("marshal data", err)
 	}
 
 	result := map[string]any{
@@ -214,7 +201,7 @@ func emitSuccess(ctx context.Context, rc *skillmain.RunContext, action string, d
 		// Store in CAS
 		obj, err := rc.CASStore.Put(ctx, bytes.NewReader(dataBytes), "application/json", []string{"godot", action})
 		if err != nil {
-			return fmt.Errorf("cas put: %w", err)
+			return skillerr.WrapIO("cas put", err)
 		}
 
 		result["artifact"] = obj.Digest
@@ -222,9 +209,8 @@ func emitSuccess(ctx context.Context, rc *skillmain.RunContext, action string, d
 
 		// Remove full result, keep only summary
 		delete(result, "result")
-		result["hint"] = "Full result stored in CAS; fetch via: agentctl cas get " + obj.Digest
+		result["hint"] = skillout.FormatCASHint("result", obj.Digest)
 	}
 
 	return skillout.Emit(rc, skillName, result)
 }
-

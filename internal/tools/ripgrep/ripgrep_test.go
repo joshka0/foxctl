@@ -76,7 +76,7 @@ func TestBuildArgs(t *testing.T) {
 				Hidden:  true,
 			},
 			jsonOutput: true,
-			wantArgs: []string{"--hidden"},
+			wantArgs:   []string{"--hidden"},
 		},
 		{
 			name: "file types",
@@ -103,7 +103,7 @@ func TestBuildArgs(t *testing.T) {
 				ExcludeGlobs: []string{"vendor", "*.min.js"},
 			},
 			jsonOutput: true,
-			wantArgs: []string{"--glob", "!vendor", "--glob", "!*.min.js"},
+			wantArgs:   []string{"--glob", "!vendor", "--glob", "!*.min.js"},
 		},
 		{
 			name: "default excludes when none specified",
@@ -120,7 +120,7 @@ func TestBuildArgs(t *testing.T) {
 				NoDefaultExcludes: true,
 			},
 			jsonOutput: true,
-			dontWant: []string{"!.git", "!node_modules"},
+			dontWant:   []string{"!.git", "!node_modules"},
 		},
 		{
 			name: "files with matches mode",
@@ -292,7 +292,7 @@ func helper() {
 	// helper function
 }
 `
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -330,9 +330,9 @@ func TestFilesWithMatches_Integration(t *testing.T) {
 	file2 := filepath.Join(tmpDir, "file2.go")
 	file3 := filepath.Join(tmpDir, "file3.txt")
 
-	_ = os.WriteFile(file1, []byte("func main() {}"), 0644)
-	_ = os.WriteFile(file2, []byte("func helper() {}"), 0644)
-	_ = os.WriteFile(file3, []byte("no match here"), 0644)
+	_ = os.WriteFile(file1, []byte("func main() {}"), 0o644)
+	_ = os.WriteFile(file2, []byte("func helper() {}"), 0o644)
+	_ = os.WriteFile(file3, []byte("no match here"), 0o644)
 
 	ctx := context.Background()
 
@@ -357,7 +357,7 @@ func TestSearchJSON_NoMatches(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "test.go")
-	_ = os.WriteFile(testFile, []byte("nothing here"), 0644)
+	_ = os.WriteFile(testFile, []byte("nothing here"), 0o644)
 
 	ctx := context.Background()
 

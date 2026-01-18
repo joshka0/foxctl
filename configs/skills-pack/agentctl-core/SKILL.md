@@ -29,11 +29,11 @@ agentctl run fs/find --input '{"path": ".", "pattern": "*.go", "type": "file"}'
 ```
 
 ### 3) Search
-Use `text/ripgrep` for fast literal search and `code/context_ripgrep` when you want whole functions/blocks.
+Use `text/grep` for fast literal search and `code/context_grep` when you want whole functions/blocks.
 
 ```bash
-agentctl run text/ripgrep --input '{"pattern": "PathValidator", "path": "."}'
-agentctl run code/context_ripgrep --input '{"pattern": "PathValidator", "path": ".", "expand_functions": true}'
+agentctl run text/grep --input '{"pattern": "PathValidator", "path": "."}'
+agentctl run code/context_grep --input '{"pattern": "PathValidator", "path": ".", "expand_functions": true}'
 ```
 
 ### 4) JSON plumbing
