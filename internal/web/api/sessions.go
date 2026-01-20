@@ -1,13 +1,17 @@
 package api
 
 import (
+	"compress/gzip"
+	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/sessionkit/claudejsonl"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
@@ -247,7 +251,16 @@ func handlePersistedSessionMessages(w http.ResponseWriter, r *http.Request, cfg 
 	}
 	defer store.Close()
 
-	// Get turns (messages)
+	// Get session first to have archive path available
+	session, err := store.Get(r.Context(), sessionID)
+	if err != nil {
+		log.Error().Err(err).Str("session_id", sessionID).Msg("failed to get session")
+		httpError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	archivePath := session.RawJSONLPath
+
+	// Get turns (messages) from database
 	opts := storage.SessionTurnListOptions{
 		Limit:  limit,
 		Offset: offset,
@@ -259,39 +272,63 @@ func handlePersistedSessionMessages(w http.ResponseWriter, r *http.Request, cfg 
 		return
 	}
 
-	// Convert turns to message format
-	messages := make([]map[string]any, 0, len(turns))
-	for _, t := range turns {
-		msg := map[string]any{
-			"id":              t.ID,
-			"turn_index":      t.TurnIndex,
-			"role":            t.Role,
-			"content_preview": t.ContentPreview,
-			"timestamp":       t.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-			"has_error":       t.HasError,
-		}
-		if len(t.ToolCalls) > 0 {
-			msg["tool_calls"] = t.ToolCalls
-		}
-		if len(t.FilesTouched) > 0 {
-			msg["files_touched"] = t.FilesTouched
-		}
-		if t.ErrorMessage != "" {
-			msg["error_message"] = t.ErrorMessage
-		}
-		messages = append(messages, msg)
-	}
+	var messages []map[string]any
+	var total int
 
-	// Get session for archive path
-	session, err := store.Get(r.Context(), sessionID)
-	archivePath := ""
-	if err == nil && session.ID != "" {
-		archivePath = session.RawJSONLPath
+	if len(turns) > 0 {
+		// Convert turns to message format matching GUI's SessionMessage interface
+		messages = make([]map[string]any, 0, len(turns))
+		for _, t := range turns {
+			// Map role to type expected by GUI
+			msgType := t.Role
+			if msgType == "human" {
+				msgType = "user"
+			}
+
+			msg := map[string]any{
+				"index":     t.TurnIndex,
+				"type":      msgType,
+				"timestamp": t.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
+				"uuid":      t.ID,
+			}
+
+			// Provide content in format GUI can use
+			// GUI checks: msg.summary, msg.message?.content, msg.error, msg.raw
+			if t.ContentPreview != "" {
+				msg["summary"] = t.ContentPreview
+			}
+
+			if t.HasError {
+				msg["error"] = t.ErrorMessage
+			}
+
+			// Include tool calls as structured data
+			if len(t.ToolCalls) > 0 {
+				msg["tool_calls"] = t.ToolCalls
+			}
+			if len(t.FilesTouched) > 0 {
+				msg["files_touched"] = t.FilesTouched
+			}
+
+			messages = append(messages, msg)
+		}
+		total = len(messages)
+	} else if archivePath != "" {
+		// Fallback: read from raw JSONL archive file
+		messages, total, err = readMessagesFromArchive(archivePath, offset, limit)
+		if err != nil {
+			log.Warn().Err(err).Str("path", archivePath).Msg("failed to read archive, returning empty")
+			messages = []map[string]any{}
+			total = 0
+		}
+	} else {
+		messages = []map[string]any{}
+		total = 0
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"messages": messages,
-		"total":    len(messages),
+		"total":    total,
 		"limit":    limit,
 		"offset":   offset,
 		"path":     archivePath,
@@ -342,6 +379,98 @@ func handleSessionContextWindows(w http.ResponseWriter, r *http.Request, cfg con
 		"context_windows": resp,
 		"count":           len(resp),
 	})
+}
+
+// readMessagesFromArchive reads messages from a gzipped JSONL archive file.
+// Returns messages for the given offset/limit, total count, and any error.
+func readMessagesFromArchive(archivePath string, offset, limit int) ([]map[string]any, int, error) {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer file.Close()
+
+	var reader *claudejsonl.Reader
+	if strings.HasSuffix(archivePath, ".gz") {
+		gzReader, err := gzip.NewReader(file)
+		if err != nil {
+			return nil, 0, err
+		}
+		defer gzReader.Close()
+		reader = claudejsonl.NewReader(gzReader)
+	} else {
+		reader = claudejsonl.NewReader(file)
+	}
+
+	var messages []map[string]any
+	index := 0
+	collected := 0
+
+	for {
+		rm, err := reader.Next()
+		if err != nil {
+			return nil, 0, err
+		}
+		if rm == nil {
+			break // EOF
+		}
+
+		// Apply offset/limit
+		if index >= offset && collected < limit {
+			msg := convertJSONLMessageToGUIFormat(rm, index)
+			messages = append(messages, msg)
+			collected++
+		}
+
+		index++
+
+		// If we've collected enough and are past the limit, we could stop early
+		// but we need total count, so continue to count all messages
+	}
+
+	return messages, index, nil
+}
+
+// convertJSONLMessageToGUIFormat converts a claudejsonl.ReadMessage to the GUI's expected format.
+func convertJSONLMessageToGUIFormat(rm *claudejsonl.ReadMessage, index int) map[string]any {
+	m := rm.Message
+
+	// Map type to what GUI expects
+	msgType := m.Type
+	if msgType == "human" {
+		msgType = "user"
+	}
+
+	msg := map[string]any{
+		"index":     index,
+		"type":      msgType,
+		"timestamp": m.Timestamp,
+	}
+
+	// Include the raw message content for the GUI to process
+	// GUI expects message.content to be an array of content blocks
+	if len(m.Message) > 0 {
+		var nested map[string]any
+		if err := json.Unmarshal(m.Message, &nested); err == nil {
+			msg["message"] = nested
+		}
+	}
+
+	// Also include content if present at top level
+	if len(m.Content) > 0 {
+		var content any
+		if err := json.Unmarshal(m.Content, &content); err == nil {
+			// If message doesn't have content, wrap it
+			if msg["message"] == nil {
+				msg["message"] = map[string]any{
+					"role":    m.Role,
+					"content": content,
+				}
+			}
+		}
+	}
+
+	return msg
 }
 
 // sessionToResponse converts a storage.Session to SessionResponse.

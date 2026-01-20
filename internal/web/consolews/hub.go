@@ -31,12 +31,16 @@ func getAllowedOrigins() []string {
 	}
 }
 
+// RunnerFactory creates a Runner for a new session.
+type RunnerFactory func(session *Session) Runner
+
 // Hub manages WebSocket connections for console sessions.
 type Hub struct {
-	mu          sync.RWMutex
-	sessions    map[string]*Session
-	log         zerolog.Logger
-	persistence *PersistenceAdapter
+	mu            sync.RWMutex
+	sessions      map[string]*Session
+	log           zerolog.Logger
+	persistence   *PersistenceAdapter
+	runnerFactory RunnerFactory
 
 	// ctx is the hub's lifecycle context - cancelled on shutdown.
 	ctx context.Context
@@ -62,6 +66,11 @@ func (h *Hub) Wait() {
 // SetPersistence sets the persistence adapter for saving sessions.
 func (h *Hub) SetPersistence(p *PersistenceAdapter) {
 	h.persistence = p
+}
+
+// SetRunnerFactory sets the factory for creating LLM runners for sessions.
+func (h *Hub) SetRunnerFactory(f RunnerFactory) {
+	h.runnerFactory = f
 }
 
 // GetSession returns an existing session by ID.
@@ -95,6 +104,15 @@ func (h *Hub) CreateSession(cfg SessionConfig) *Session {
 
 	h.sessions[cfg.ID] = session
 	h.log.Info().Str("session_id", cfg.ID).Str("workspace", cfg.Workspace).Msg("console session created")
+
+	// Set runner if factory is configured
+	if h.runnerFactory != nil {
+		runner := h.runnerFactory(session)
+		if runner != nil {
+			session.SetRunner(runner)
+			h.log.Debug().Str("session_id", cfg.ID).Msg("console runner attached")
+		}
+	}
 
 	// Persist session if adapter is configured
 	if h.persistence != nil {

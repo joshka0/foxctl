@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useSessions, useSessionMessages } from "@/api/hooks";
+import { useSessions, useSessionMessages, useWorkspaces } from "@/api/hooks";
 import { updateSessionMessage, getSessionMessages } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,9 +58,16 @@ export function SessionsPage() {
   const limit = 20;
   const messageLimit = 50;
 
+  const { data: workspacesData } = useWorkspaces();
+  const currentWorkspace =
+    workspacesData?.current ||
+    workspacesData?.workspaces?.find((ws) => ws.is_active)?.path ||
+    workspacesData?.workspaces?.[0]?.path;
+
   const { data: sessionsData, isLoading, refetch, isFetching } = useSessions({
     limit,
     offset: page * limit,
+    workspace: currentWorkspace,
   });
 
   const { data: messagesData, refetch: refetchMessages } = useSessionMessages(

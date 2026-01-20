@@ -277,6 +277,15 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 		}
 		conditions = append(conditions, "("+strings.Join(tagConditions, " OR ")+")")
 	}
+	if len(opts.Statuses) > 0 {
+		// Match any of the specified statuses
+		placeholders := make([]string, len(opts.Statuses))
+		for i, status := range opts.Statuses {
+			placeholders[i] = "?"
+			args = append(args, status)
+		}
+		conditions = append(conditions, "status IN ("+strings.Join(placeholders, ", ")+")")
+	}
 
 	query := `
 		SELECT id, workspace_path, project_name, git_branch, claude_version,
@@ -2432,12 +2441,14 @@ func scanSession(row scannable) (Session, error) {
 	var parentSessionID, agentID, agentType, status sql.NullString
 	var keyQuestions sql.NullString
 	var contentHash sql.NullString
+	// Nullable string fields that might be NULL in database
+	var projectName, gitBranch, claudeVersion, rawJSONLPath sql.NullString
 
 	err := row.Scan(
-		&session.ID, &session.WorkspacePath, &session.ProjectName, &session.GitBranch, &session.ClaudeVersion,
+		&session.ID, &session.WorkspacePath, &projectName, &gitBranch, &claudeVersion,
 		&startedAt, &endedAt, &summary, &accomplished, &decisions, &gotchas, &userInsights,
 		&tags, &keyFiles, &toolsPattern, &session.MessageCount, &session.UserTurns,
-		&session.ToolInvocations, &session.TotalTokens, &session.RawJSONLPath, &contentHash, &embedding, &embeddingModel,
+		&session.ToolInvocations, &session.TotalTokens, &rawJSONLPath, &contentHash, &embedding, &embeddingModel,
 		&createdAt, &updatedAt, &parentSessionID, &agentID, &agentType, &status, &keyQuestions,
 	)
 	if err != nil {
@@ -2506,6 +2517,20 @@ func scanSession(row scannable) (Session, error) {
 	}
 	if contentHash.Valid {
 		session.ContentHash = contentHash.String
+	}
+
+	// Nullable basic fields
+	if projectName.Valid {
+		session.ProjectName = projectName.String
+	}
+	if gitBranch.Valid {
+		session.GitBranch = gitBranch.String
+	}
+	if claudeVersion.Valid {
+		session.ClaudeVersion = claudeVersion.String
+	}
+	if rawJSONLPath.Valid {
+		session.RawJSONLPath = rawJSONLPath.String
 	}
 
 	// Lineage fields

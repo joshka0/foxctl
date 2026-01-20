@@ -1,4 +1,4 @@
-import { useInsights, useTasks } from "@/api/hooks";
+import { useInsights, useTasks, useWorkspaces } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,14 @@ import { WorkspaceFilter } from "@/components/WorkspaceFilter";
 import { RefreshCw, TrendingUp, GitBranch, AlertTriangle } from "lucide-react";
 
 export function InsightsPage() {
-  const { data: insights, isLoading, refetch, isFetching } = useInsights();
+  const { data: workspacesData } = useWorkspaces();
+  const currentWorkspace =
+    workspacesData?.current ||
+    workspacesData?.workspaces?.find((ws) => ws.is_active)?.path ||
+    workspacesData?.workspaces?.[0]?.path;
+  const { data: insights, isLoading, refetch, isFetching } = useInsights({
+    workspace: currentWorkspace,
+  });
   const { data: tasksData } = useTasks({ limit: 200 });
 
   // Create a map of task IDs to titles

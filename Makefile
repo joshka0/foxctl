@@ -249,7 +249,7 @@ endif
 		outdir="dist/skills/$(SKILL)"; \
 		mkdir -p "$$outdir"; \
 		if ls "$$dir"/*.go >/dev/null 2>&1; then \
-			$(GO_CMD) build -o "$$outdir/bin" "./$$dir"; \
+			$(GO_CMD) build -trimpath -ldflags="-s -w" -o "$$outdir/bin" "./$$dir"; \
 		fi; \
 		if [ -f "$$dir/module.wasm" ]; then \
 			cp "$$dir/module.wasm" "$$outdir/module.wasm"; \
@@ -282,7 +282,7 @@ skills-build:
 			echo " - $$name"; \
 			mkdir -p "$$outdir"; \
 			if ls "$$dir"/*.go >/dev/null 2>&1; then \
-				$(GO_CMD) build -o "$$outdir/bin" "./$$dir"; \
+				$(GO_CMD) build -trimpath -ldflags="-s -w" -o "$$outdir/bin" "./$$dir"; \
 			fi; \
 			if [ -f "$$dir/module.wasm" ]; then \
 				cp "$$dir/module.wasm" "$$outdir/module.wasm"; \
@@ -302,7 +302,7 @@ skills-build-cgo:
 			mkdir -p "$$outdir"; \
 			if ls "$$dir"/*.go >/dev/null 2>&1; then \
 				echo " - $$name (cgo)"; \
-				$(GO_CMD_CGO) build -tags=libsqlite3 -o "$$outdir/bin-cgo" "./$$dir"; \
+				$(GO_CMD_CGO) build -tags=libsqlite3 -trimpath -ldflags="-s -w" -o "$$outdir/bin-cgo" "./$$dir"; \
 			fi; \
 		done
 

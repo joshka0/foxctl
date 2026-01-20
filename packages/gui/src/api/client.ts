@@ -88,9 +88,11 @@ export async function getJobDetail(
 // Tasks
 export async function getTasks(params?: {
   limit?: number;
+  workspace?: string;
 }): Promise<{ tasks: import("../types").TaskSummary[]; stats: import("../types").TaskStats }> {
   const searchParams = new URLSearchParams();
   if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.workspace) searchParams.set("workspace", params.workspace);
   const query = searchParams.toString();
   return request(`/api/tasks${query ? `?${query}` : ""}`);
 }
@@ -122,18 +124,25 @@ export async function getStats(): Promise<import("../types").JobStats> {
 }
 
 // Insights
-export async function getInsights(): Promise<import("../types").InsightsData> {
-  return request("/api/insights");
+export async function getInsights(params?: {
+  workspace?: string;
+}): Promise<import("../types").InsightsData> {
+  const searchParams = new URLSearchParams();
+  if (params?.workspace) searchParams.set("workspace", params.workspace);
+  const query = searchParams.toString();
+  return request(`/api/insights${query ? `?${query}` : ""}`);
 }
 
 // Mailbox
 export async function getMailbox(params?: {
   actor?: string;
+  all?: boolean;
   limit?: number;
   workspace?: string;
 }): Promise<{ messages: import("../types").MailboxMessage[] }> {
   const searchParams = new URLSearchParams();
   if (params?.actor) searchParams.set("actor", params.actor);
+  if (params?.all) searchParams.set("all", "true");
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.workspace) searchParams.set("workspace_id", params.workspace);
   const query = searchParams.toString();
@@ -156,11 +165,13 @@ export async function getReservations(params?: {
 export async function getBlackboard(params?: {
   ns?: string;
   topic?: string;
+  all?: boolean;
   limit?: number;
 }): Promise<{ records: import("../types").BlackboardRecord[] }> {
   const searchParams = new URLSearchParams();
   if (params?.ns) searchParams.set("ns", params.ns);
   if (params?.topic) searchParams.set("topic", params.topic);
+  if (params?.all) searchParams.set("all", "true");
   if (params?.limit) searchParams.set("limit", String(params.limit));
   const query = searchParams.toString();
   return request(`/api/blackboard${query ? `?${query}` : ""}`);
@@ -261,6 +272,7 @@ export async function switchWorkspace(workspace: string): Promise<void> {
 export async function getSessions(params?: {
   limit?: number;
   offset?: number;
+  workspace?: string;
 }): Promise<{
   sessions: import("../types").Session[];
   total: number;
@@ -270,6 +282,7 @@ export async function getSessions(params?: {
   const searchParams = new URLSearchParams();
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.workspace) searchParams.set("workspace", params.workspace);
   const query = searchParams.toString();
   return request(`/api/sessions${query ? `?${query}` : ""}`);
 }

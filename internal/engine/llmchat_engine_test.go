@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/hooks"
 )
 
 func TestLLMChatEngine_BuildMessages(t *testing.T) {
@@ -357,5 +359,398 @@ func TestBaseURLForProvider(t *testing.T) {
 				t.Errorf("baseURLForProvider(%q) = %q, want %q", tt.provider, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- LLMChatEngine Hook Tests ---
+
+func TestLLMChatEngine_Run_WithHooks(t *testing.T) {
+	callCount := 0
+	var hookCalls []string
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+
+		if callCount == 1 {
+			// First call: return tool call
+			resp := oaiResponse{
+				ID: "test-123",
+				Choices: []struct {
+					Message      oaiMessage `json:"message"`
+					FinishReason string     `json:"finish_reason"`
+				}{
+					{
+						Message: oaiMessage{
+							Role: "assistant",
+							ToolCalls: []oaiToolCall{
+								{
+									ID:   "call_123",
+									Type: "function",
+									Function: oaiFunction{
+										Name:      "get_data",
+										Arguments: `{"id":"123"}`,
+									},
+								},
+							},
+						},
+						FinishReason: "tool_calls",
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		// Second call: return final response
+		resp := oaiResponse{
+			ID: "test-456",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "Here is the data."},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	// Create mock dispatcher that tracks calls
+	dispatcher := &MockHookDispatcher{
+		DispatchFn: func(ctx context.Context, input hooks.Input) (hooks.Result, error) {
+			hookCalls = append(hookCalls, string(input.Event))
+			return hooks.Result{Output: hooks.NewApprove("ok", nil)}, nil
+		},
+	}
+
+	// Create mock tool executor
+	mockExecutor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			return `{"data":"test"}`, nil
+		},
+	}
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:         "test-key",
+			BaseURL:        "http://mock",
+			Model:          "test-model",
+			MaxIterations:  10,
+			HookDispatcher: dispatcher,
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}), // ToolRunner without dispatcher
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Get the data"}},
+		Tools:    []ToolDef{{Name: "get_data", Description: "Get data"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if output.AssistantText != "Here is the data." {
+		t.Errorf("unexpected response: %s", output.AssistantText)
+	}
+
+	// Verify hooks were called in correct order
+	if len(hookCalls) < 2 {
+		t.Fatalf("expected at least 2 hook calls, got %d: %v", len(hookCalls), hookCalls)
+	}
+	if hookCalls[0] != "PreToolUse" {
+		t.Errorf("expected first hook to be PreToolUse, got %s", hookCalls[0])
+	}
+	if hookCalls[1] != "PostToolUse" {
+		t.Errorf("expected second hook to be PostToolUse, got %s", hookCalls[1])
+	}
+}
+
+func TestLLMChatEngine_Run_HookBlocks(t *testing.T) {
+	callCount := 0
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+
+		if callCount == 1 {
+			// First call: return tool call
+			resp := oaiResponse{
+				ID: "test-123",
+				Choices: []struct {
+					Message      oaiMessage `json:"message"`
+					FinishReason string     `json:"finish_reason"`
+				}{
+					{
+						Message: oaiMessage{
+							Role: "assistant",
+							ToolCalls: []oaiToolCall{
+								{
+									ID:   "call_blocked",
+									Type: "function",
+									Function: oaiFunction{
+										Name:      "dangerous_tool",
+										Arguments: `{}`,
+									},
+								},
+							},
+						},
+						FinishReason: "tool_calls",
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		// Second call: return final response (after seeing blocked result)
+		resp := oaiResponse{
+			ID: "test-456",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "Tool was blocked by policy."},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	// Create dispatcher that blocks the tool
+	dispatcher := &MockHookDispatcher{
+		DispatchFn: func(ctx context.Context, input hooks.Input) (hooks.Result, error) {
+			if input.Event == hooks.EventPreToolUse {
+				return hooks.Result{Output: hooks.NewBlock("security policy")}, nil
+			}
+			return hooks.Result{Output: hooks.NewNone()}, nil
+		},
+	}
+
+	// Executor that should NOT be called
+	executorCalled := false
+	mockExecutor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			executorCalled = true
+			return "should not see this", nil
+		},
+	}
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:         "test-key",
+			BaseURL:        "http://mock",
+			Model:          "test-model",
+			MaxIterations:  10,
+			HookDispatcher: dispatcher,
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
+	}
+
+	output, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Do something dangerous"}},
+		Tools:    []ToolDef{{Name: "dangerous_tool", Description: "Dangerous"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify executor was NOT called due to hook block
+	if executorCalled {
+		t.Error("executor should not have been called when hook blocks")
+	}
+
+	// Verify the tool result shows blocked
+	if len(output.ToolResults) != 1 {
+		t.Fatalf("expected 1 tool result, got %d", len(output.ToolResults))
+	}
+	if !output.ToolResults[0].IsError {
+		t.Error("expected tool result to be an error")
+	}
+	if output.ToolResults[0].Content != "Blocked by hook: security policy" {
+		t.Errorf("expected blocked message, got: %s", output.ToolResults[0].Content)
+	}
+}
+
+func TestLLMChatEngine_Run_HookUpdatesInput(t *testing.T) {
+	callCount := 0
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+
+		if callCount == 1 {
+			// First call: return tool call
+			resp := oaiResponse{
+				ID: "test-123",
+				Choices: []struct {
+					Message      oaiMessage `json:"message"`
+					FinishReason string     `json:"finish_reason"`
+				}{
+					{
+						Message: oaiMessage{
+							Role: "assistant",
+							ToolCalls: []oaiToolCall{
+								{
+									ID:   "call_modified",
+									Type: "function",
+									Function: oaiFunction{
+										Name:      "process_data",
+										Arguments: `{"value":"original"}`,
+									},
+								},
+							},
+						},
+						FinishReason: "tool_calls",
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		// Second call: return final response
+		resp := oaiResponse{
+			ID: "test-456",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message:      oaiMessage{Role: "assistant", Content: "Processed with modified args."},
+					FinishReason: "stop",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	// Create dispatcher that modifies tool input
+	dispatcher := &MockHookDispatcher{
+		DispatchFn: func(ctx context.Context, input hooks.Input) (hooks.Result, error) {
+			if input.Event == hooks.EventPreToolUse {
+				out := hooks.NewApprove("modified", nil)
+				out.UpdatedToolInput = json.RawMessage(`{"value":"modified_by_hook"}`)
+				return hooks.Result{Output: out}, nil
+			}
+			return hooks.Result{Output: hooks.NewNone()}, nil
+		},
+	}
+
+	// Executor that captures received args
+	var receivedArgs json.RawMessage
+	mockExecutor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			receivedArgs = args
+			return "ok", nil
+		},
+	}
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:         "test-key",
+			BaseURL:        "http://mock",
+			Model:          "test-model",
+			MaxIterations:  10,
+			HookDispatcher: dispatcher,
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
+	}
+
+	_, err := engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Process data"}},
+		Tools:    []ToolDef{{Name: "process_data", Description: "Process"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify hook modified the args
+	if string(receivedArgs) != `{"value":"modified_by_hook"}` {
+		t.Errorf("expected modified args, got: %s", string(receivedArgs))
+	}
+}
+
+func TestLLMChatEngine_SetHookContext(t *testing.T) {
+	var receivedInput hooks.Input
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := oaiResponse{
+			ID: "test-123",
+			Choices: []struct {
+				Message      oaiMessage `json:"message"`
+				FinishReason string     `json:"finish_reason"`
+			}{
+				{
+					Message: oaiMessage{
+						Role: "assistant",
+						ToolCalls: []oaiToolCall{
+							{
+								ID:       "call_ctx",
+								Type:     "function",
+								Function: oaiFunction{Name: "test_tool", Arguments: `{}`},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+
+	dispatcher := &MockHookDispatcher{
+		DispatchFn: func(ctx context.Context, input hooks.Input) (hooks.Result, error) {
+			if input.Event == hooks.EventPreToolUse {
+				receivedInput = input
+			}
+			// Block to end the test quickly
+			return hooks.Result{Output: hooks.NewBlock("test")}, nil
+		},
+	}
+
+	mockExecutor := &MockToolExecutor{}
+
+	engine := &LLMChatEngine{
+		config: LLMChatConfig{
+			APIKey:         "test-key",
+			BaseURL:        "http://mock",
+			Model:          "test-model",
+			MaxIterations:  10,
+			HookDispatcher: dispatcher,
+		},
+		client:     &http.Client{Transport: &handlerTransport{handler: handler}},
+		toolRunner: NewToolRunner(mockExecutor, nil, ToolRunnerConfig{}),
+	}
+
+	// Set hook context
+	engine.SetHookContext(HookContext{
+		SessionID:     "session-test-123",
+		ActorID:       "actor-test-456",
+		WorkspaceID:   "ws-test-789",
+		WorkspaceRoot: "/test/workspace",
+	})
+
+	_, _ = engine.Run(context.Background(), EngineInput{
+		Messages: []Message{{Role: RoleUser, Content: "Test"}},
+		Tools:    []ToolDef{{Name: "test_tool"}},
+	})
+
+	// Verify context was passed to hooks
+	if receivedInput.SessionID != "session-test-123" {
+		t.Errorf("expected session-test-123, got %s", receivedInput.SessionID)
+	}
+	if receivedInput.ActorID != "actor-test-456" {
+		t.Errorf("expected actor-test-456, got %s", receivedInput.ActorID)
+	}
+	if receivedInput.WorkspaceID != "ws-test-789" {
+		t.Errorf("expected ws-test-789, got %s", receivedInput.WorkspaceID)
+	}
+	if receivedInput.WorkspaceRoot != "/test/workspace" {
+		t.Errorf("expected /test/workspace, got %s", receivedInput.WorkspaceRoot)
 	}
 }

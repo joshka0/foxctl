@@ -42,13 +42,20 @@ func BlackboardListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFu
 
 		ns := r.URL.Query().Get("ns")
 		topic := r.URL.Query().Get("topic")
-
-		// Default namespace if not provided
-		if ns == "" {
-			ns = "default"
+		all := parseBool(r.URL.Query().Get("all"))
+		if ns == "*" || topic == "*" {
+			all = true
 		}
-		if topic == "" {
-			topic = "*"
+
+		if ns == "*" {
+			ns = ""
+		}
+		if topic == "*" {
+			topic = ""
+		}
+
+		if !all && ns == "" {
+			ns = "default"
 		}
 
 		// Open blackboard store
@@ -60,12 +67,13 @@ func BlackboardListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFu
 		}
 		defer store.Close()
 
-		// Use Search or ListByTopic
+		// Use Search for wildcard queries, ListByTopic for specific topic
 		var records []agent.BlackboardRecord
-		if topic != "*" {
+		if topic != "" && ns != "" {
 			records, err = store.ListByTopic(r.Context(), ns, topic, limit)
 		} else {
-			records, err = store.Search(r.Context(), ns, "", limit)
+			// Search handles wildcard cases (empty ns and/or topic)
+			records, err = store.Search(r.Context(), ns, topic, limit)
 		}
 		if err != nil {
 			log.Error().Err(err).Msg("failed to list blackboard records")

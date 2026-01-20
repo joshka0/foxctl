@@ -12,6 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/jkatigb/agentctl/internal/calibration"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
@@ -121,14 +122,15 @@ type AnchorInfo struct {
 
 // Output defines the skill output.
 type Output struct {
-	HookOutput       HookOutput             `json:"hook_output"`
-	SnapshotID       string                 `json:"snapshot_id,omitempty"`
-	SnapshotAge      string                 `json:"snapshot_age,omitempty"`
-	ItemsRestored    int                    `json:"items_restored"`
-	KeyQuestions     []string               `json:"key_questions,omitempty"`
-	SearchResults    []SemanticSearchResult `json:"search_results,omitempty"`
-	RelevantMemories []MemoryResult         `json:"relevant_memories,omitempty"`
-	Anchor           *AnchorInfo            `json:"anchor,omitempty"`
+	HookOutput         HookOutput             `json:"hook_output"`
+	SnapshotID         string                 `json:"snapshot_id,omitempty"`
+	SnapshotAge        string                 `json:"snapshot_age,omitempty"`
+	ItemsRestored      int                    `json:"items_restored"`
+	KeyQuestions       []string               `json:"key_questions,omitempty"`
+	SearchResults      []SemanticSearchResult `json:"search_results,omitempty"`
+	RelevantMemories   []MemoryResult         `json:"relevant_memories,omitempty"`
+	Anchor             *AnchorInfo            `json:"anchor,omitempty"`
+	CalibrationProfile bool                   `json:"calibration_profile,omitempty"` // Whether calibration profile was injected
 }
 
 const command = "session/restore"
@@ -287,8 +289,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// Fetch session anchor (epic/goal)
 	anchor := fetchAnchor(ctx, input.Workspace, sessionID)
 
+	// Load calibration profile for user preference injection
+	var calibProfile *calibration.Profile
+	if memStore != nil {
+		calibProfile, _ = calibration.LoadProfile(ctx, memStore, input.Workspace)
+	}
+
 	// Format context for injection (with todo-based search results, memories, files modified, and related context)
-	contextStr := formatContextWithSearch(snapshot, input.Trigger, searchQueries, searchResults, relevantMemories, filesModified, similarSessions, similarWindows, anchor)
+	contextStr := formatContextWithSearch(snapshot, input.Trigger, searchQueries, searchResults, relevantMemories, filesModified, similarSessions, similarWindows, anchor, calibProfile)
 	snapshotAge := formatAge(snapshot.Timestamp)
 
 	// Build output
@@ -302,13 +310,14 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 				"AGENTCTL_SNAPSHOT_ID":      snapshot.SnapshotID,
 			},
 		},
-		SnapshotID:       snapshot.SnapshotID,
-		SnapshotAge:      snapshotAge,
-		ItemsRestored:    countItems(snapshot),
-		KeyQuestions:     searchQueries, // Now based on pending todos
-		SearchResults:    searchResults,
-		RelevantMemories: relevantMemories,
-		Anchor:           anchor,
+		SnapshotID:         snapshot.SnapshotID,
+		SnapshotAge:        snapshotAge,
+		ItemsRestored:      countItems(snapshot),
+		KeyQuestions:       searchQueries, // Now based on pending todos
+		SearchResults:      searchResults,
+		RelevantMemories:   relevantMemories,
+		Anchor:             anchor,
+		CalibrationProfile: calibProfile != nil,
 	}
 
 	// Clear pending restore flag after successful restore
@@ -526,13 +535,19 @@ func searchRelevantMemories(ctx context.Context, query, workspace string, limit 
 }
 
 // formatContextWithSearch formats the context including todo-based search results, files modified, and related context.
-func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries []string, searchResults []SemanticSearchResult, memories []MemoryResult, filesModified []string, similarSessions []SimilarSession, similarWindows []SimilarContextWindow, anchor *AnchorInfo) string {
+func formatContextWithSearch(snap SessionSnapshot, trigger string, todoQueries []string, searchResults []SemanticSearchResult, memories []MemoryResult, filesModified []string, similarSessions []SimilarSession, similarWindows []SimilarContextWindow, anchor *AnchorInfo, calibProfile *calibration.Profile) string {
 	// Start with the base context, wrapped in clear delimiters
 	var sb strings.Builder
 
 	// Opening delimiter - makes it clear this is system-injected context after compaction
 	sb.WriteString("<session-restore>\n")
 	sb.WriteString("<!-- Auto-injected after context compaction. This is NOT part of the user's message. -->\n\n")
+
+	// User calibration profile (inject first for agent calibration)
+	if calibProfile != nil {
+		sb.WriteString(calibration.FormatForInjection(calibProfile))
+		sb.WriteString("\n\n")
+	}
 
 	sb.WriteString("## Session Continuity Context\n\n")
 	sb.WriteString(fmt.Sprintf("*Restored after %s (snapshot from %s ago)*\n\n", trigger, formatAge(snap.Timestamp)))

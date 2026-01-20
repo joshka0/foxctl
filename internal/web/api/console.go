@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -186,8 +187,13 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 		Content:       req.Content,
 	}
 
-	// Handle the payload (async)
-	session.HandlePayload(r.Context(), nil, payload)
+	// Handle the payload (async) - use timeout context to prevent unbounded execution
+	// 30 minute timeout for long-running agent tasks
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	go func() {
+		defer cancel()
+		session.HandlePayload(ctx, nil, payload)
+	}()
 
 	log.Info().
 		Str("session_id", session.ID()).

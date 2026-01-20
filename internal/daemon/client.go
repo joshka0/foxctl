@@ -118,6 +118,100 @@ func (c *Client) Shutdown() error {
 	return nil
 }
 
+// AgentSpawn spawns a new agent via the daemon.
+func (c *Client) AgentSpawn(params AgentSpawnParams) (*AgentSpawnResult, error) {
+	resp, err := c.call("agent.spawn", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result AgentSpawnResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// AgentList lists active agent sessions.
+func (c *Client) AgentList() (*AgentListResult, error) {
+	resp, err := c.call("agent.list", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result AgentListResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// AgentStatus gets the status of an agent session.
+func (c *Client) AgentStatus(sessionID string) (*AgentStatusResult, error) {
+	params := AgentStatusParams{SessionID: sessionID}
+	resp, err := c.call("agent.status", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result AgentStatusResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// AgentKill terminates an agent session.
+func (c *Client) AgentKill(sessionID string) (*AgentKillResult, error) {
+	params := AgentKillParams{SessionID: sessionID}
+	resp, err := c.call("agent.kill", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result AgentKillResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
 // connect establishes a connection to the daemon socket.
 func (c *Client) connect() (net.Conn, error) {
 	conn, err := net.DialTimeout("unix", c.socketPath, 2*time.Second)

@@ -6,13 +6,13 @@ import * as api from "./client";
 export const queryKeys = {
   jobs: (params?: { state?: string; limit?: number }) => ["jobs", params] as const,
   jobDetail: (id: string) => ["jobs", id] as const,
-  tasks: (params?: { limit?: number }) => ["tasks", params] as const,
+  tasks: (params?: { limit?: number; workspace?: string }) => ["tasks", params] as const,
   agents: (params?: { state?: string; limit?: number }) => ["agents", params] as const,
   stats: () => ["stats"] as const,
-  insights: () => ["insights"] as const,
-  mailbox: (params?: { actor?: string; limit?: number; workspace?: string }) => ["mailbox", params] as const,
+  insights: (params?: { workspace?: string }) => ["insights", params] as const,
+  mailbox: (params?: { actor?: string; all?: boolean; limit?: number; workspace?: string }) => ["mailbox", params] as const,
   reservations: (params?: { workspace?: string }) => ["reservations", params] as const,
-  blackboard: (params?: { ns?: string; topic?: string; limit?: number }) => ["blackboard", params] as const,
+  blackboard: (params?: { ns?: string; topic?: string; all?: boolean; limit?: number }) => ["blackboard", params] as const,
   sqlite: {
     databases: () => ["sqlite", "databases"] as const,
     tables: (db: string) => ["sqlite", "tables", db] as const,
@@ -23,7 +23,7 @@ export const queryKeys = {
   search: (params: { q: string; limit?: number; rerank?: boolean; scope?: string; workspace?: string }) =>
     ["search", params] as const,
   workspaces: () => ["workspaces"] as const,
-  sessions: (params?: { limit?: number; offset?: number }) => ["sessions", params] as const,
+  sessions: (params?: { limit?: number; offset?: number; workspace?: string }) => ["sessions", params] as const,
   session: (id: string) => ["sessions", id] as const,
   sessionMessages: (id: string, params?: { limit?: number; offset?: number }) => ["sessions", id, "messages", params] as const,
   sessionSearch: (params: { pattern: string; limit?: number }) => ["sessions", "search", params] as const,
@@ -50,7 +50,7 @@ export function useJobDetail(id: string) {
 }
 
 // Tasks
-export function useTasks(params?: { limit?: number }) {
+export function useTasks(params?: { limit?: number; workspace?: string }) {
   return useQuery({
     queryKey: queryKeys.tasks(params),
     queryFn: () => api.getTasks(params),
@@ -73,15 +73,15 @@ export function useStats() {
 }
 
 // Insights
-export function useInsights() {
+export function useInsights(params?: { workspace?: string }) {
   return useQuery({
-    queryKey: queryKeys.insights(),
-    queryFn: api.getInsights,
+    queryKey: queryKeys.insights(params),
+    queryFn: () => api.getInsights(params),
   });
 }
 
 // Mailbox
-export function useMailbox(params?: { actor?: string; limit?: number; workspace?: string }) {
+export function useMailbox(params?: { actor?: string; all?: boolean; limit?: number; workspace?: string }) {
   return useQuery({
     queryKey: queryKeys.mailbox(params),
     queryFn: () => api.getMailbox(params),
@@ -99,7 +99,7 @@ export function useReservations(params?: { workspace?: string }) {
 }
 
 // Blackboard
-export function useBlackboard(params?: { ns?: string; topic?: string; limit?: number }) {
+export function useBlackboard(params?: { ns?: string; topic?: string; all?: boolean; limit?: number }) {
   return useQuery({
     queryKey: queryKeys.blackboard(params),
     queryFn: () => api.getBlackboard(params),
@@ -170,7 +170,7 @@ export function useWorkspaces() {
 }
 
 // Sessions
-export function useSessions(params?: { limit?: number; offset?: number }) {
+export function useSessions(params?: { limit?: number; offset?: number; workspace?: string }) {
   return useQuery({
     queryKey: queryKeys.sessions(params),
     queryFn: () => api.getSessions(params),

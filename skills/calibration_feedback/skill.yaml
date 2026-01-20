@@ -1,0 +1,52 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: calibration/feedback
+  version: 0.1.0
+  description: "Generate actionable user insights and communication suggestions from calibration profile"
+  tags: ["calibration", "profile", "feedback", "insights"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: calibration/feedback
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path"
+    - name: format
+      type: string
+      required: false
+      description: "Output format: full (default), tips, or summary"
+  returns:
+    - name: found
+      type: boolean
+      description: "Whether a calibration profile exists"
+    - name: insights
+      type: array
+      description: "Actionable insights about communication patterns"
+    - name: expertise_summary
+      type: object
+      description: "Summary of expertise areas (strong, learning, gaps)"
+    - name: trends
+      type: array
+      description: "Detected preference trends over time"
+    - name: tips
+      type: array
+      description: "Communication tips for better interaction"
+    - name: status
+      type: string
+      description: "Status: ok, no_profile, error"
+    - name: message
+      type: string
+      description: "Human-readable status message"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

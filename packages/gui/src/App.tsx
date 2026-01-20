@@ -14,6 +14,7 @@ import {
   CodemapsPage,
   AgentsPage,
   ConsolePage,
+  BlackboardPage,
 } from "@/pages";
 
 function App() {
@@ -32,7 +33,7 @@ function App() {
           <Route path="sessions" element={<SessionsPage />} />
           <Route path="agents" element={<AgentsPage />} />
           <Route path="reservations" element={<PlaceholderPage title="Reservations" />} />
-          <Route path="blackboard" element={<PlaceholderPage title="Blackboard" />} />
+          <Route path="blackboard" element={<BlackboardPage />} />
           <Route path="sqlite" element={<SQLitePage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="codemaps" element={<CodemapsPage />} />

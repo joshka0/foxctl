@@ -187,7 +187,7 @@ type PostReviewSettings struct {
 // LLMSettings configures LLM providers for planning and agent operations.
 // Environment variables are loaded at config time (FC/IS compliant).
 type LLMSettings struct {
-	// Provider is the preferred LLM provider: openrouter, groq, openai, gemini, anthropic
+	// Provider is the preferred LLM provider: cerebras, openrouter, groq, openai, gemini, anthropic
 	Provider string `mapstructure:"provider" json:"provider"`
 
 	// Model is the model name to use (provider-specific)
@@ -195,6 +195,10 @@ type LLMSettings struct {
 
 	// APIKey is the API key for the selected provider (from AGENTCTL_LLM_API_KEY or provider-specific vars)
 	APIKey string `mapstructure:"api_key" json:"api_key"`
+
+	// CerebrasAPIKey is the Cerebras API key (from CEREBRAS_API_KEY)
+	// Cerebras is preferred for background tasks due to low cost (~$0.10/M tokens)
+	CerebrasAPIKey string `mapstructure:"cerebras_api_key" json:"cerebras_api_key"`
 
 	// OpenRouterAPIKey is the OpenRouter API key (from OPENROUTER_API_KEY)
 	OpenRouterAPIKey string `mapstructure:"openrouter_api_key" json:"openrouter_api_key"`
@@ -518,6 +522,9 @@ func finalizeConfig(cfg Config, home string) Config {
 	// LLM API key env var overrides (load once at config time - FC/IS compliant)
 	if key := os.Getenv("AGENTCTL_LLM_API_KEY"); key != "" && cfg.LLM.APIKey == "" {
 		cfg.LLM.APIKey = key
+	}
+	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" && cfg.LLM.CerebrasAPIKey == "" {
+		cfg.LLM.CerebrasAPIKey = key
 	}
 	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" && cfg.LLM.OpenRouterAPIKey == "" {
 		cfg.LLM.OpenRouterAPIKey = key

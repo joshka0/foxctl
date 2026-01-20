@@ -293,6 +293,7 @@ type SessionListOptions struct {
 	WorkspacePath string
 	ProjectName   string
 	Tags          []string
+	Statuses      []string // Filter by status (e.g., "running", "ok", "error")
 	Limit         int
 	Offset        int
 }

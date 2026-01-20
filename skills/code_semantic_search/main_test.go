@@ -196,7 +196,7 @@ func TestEmbeddingModelConfig_UsesOverrides(t *testing.T) {
 		},
 	}
 
-	codeModel, memoryModel, textModel := embeddingModelConfig("voyage", cfg)
+	codeModel, memoryModel, textModel, _ := embeddingModelConfig("voyage", cfg)
 	if codeModel != "voyage-code-3" {
 		t.Fatalf("code model = %q, want voyage-code-3", codeModel)
 	}
@@ -215,7 +215,7 @@ func TestEmbeddingModelConfig_GeminiFallback(t *testing.T) {
 		},
 	}
 
-	codeModel, memoryModel, textModel := embeddingModelConfig("gemini", cfg)
+	codeModel, memoryModel, textModel, _ := embeddingModelConfig("gemini", cfg)
 	if codeModel != "gemini-embedding-001" {
 		t.Fatalf("code model = %q, want gemini-embedding-001", codeModel)
 	}

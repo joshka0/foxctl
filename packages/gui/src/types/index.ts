@@ -98,12 +98,15 @@ export interface GraphNode {
 export interface MailboxMessage {
   id: string;
   sender: string;
+  recipient: string;
   subject: string;
   body: string;
   kind: string;
   priority: number;
   status: string;
   created_at: string;
+  stream?: string;
+  task_id?: string;
 }
 
 export interface Reservation {
@@ -121,6 +124,9 @@ export interface BlackboardRecord {
   ts: number;
   ttl_sec: number;
   payload: string;
+  cas_ref?: string;
+  lease_by?: string;
+  lease_exp?: number;
 }
 
 export type DatabaseDriver = "sqlite" | "turso" | "libsql";

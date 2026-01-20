@@ -32,6 +32,10 @@ const (
 	// Best model: voyage-3.5 (good general-purpose, $0.06/1M tokens).
 	ScopeCodemaps EmbeddingScope = "codemaps"
 
+	// ScopeFileSummaries is for file-level summaries used in tree search.
+	// Best model: voyage-code-3 (optimized for code retrieval).
+	ScopeFileSummaries EmbeddingScope = "file_summaries"
+
 	// ScopeDefault is the fallback scope for unspecified content.
 	ScopeDefault EmbeddingScope = "default"
 )
@@ -59,6 +63,11 @@ func ScopeModelRecommendation(scope EmbeddingScope) (model string, isCodeModel b
 
 	switch scope {
 	case ScopeSymbols:
+		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_CODE"); env != "" {
+			return env, true
+		}
+		return "voyage-code-3", true
+	case ScopeFileSummaries:
 		if env := os.Getenv("AGENTCTL_EMBEDDING_MODEL_CODE"); env != "" {
 			return env, true
 		}
@@ -110,6 +119,7 @@ func ScopePricePerMillionTokens(scope EmbeddingScope) float64 {
 func AllScopes() []EmbeddingScope {
 	return []EmbeddingScope{
 		ScopeSymbols,
+		ScopeFileSummaries,
 		ScopeMemory,
 		ScopeTasks,
 		ScopeSessions,

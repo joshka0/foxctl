@@ -3,8 +3,13 @@
 package fsutil
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 var extensionLanguages = map[string]string{
@@ -222,4 +227,119 @@ func IsBinaryFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	_, ok := binaryExtensions[ext]
 	return ok
+}
+
+// FindFilesMatchingGlob finds files in root matching a glob pattern, excluding files matching exclude patterns.
+// Uses filepath.Walk for traversal and doublestar for pattern matching.
+func FindFilesMatchingGlob(root, pattern string, excludePatterns []string) ([]string, error) {
+	var files []string
+
+	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk %s: %w", path, err)
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return fmt.Errorf("rel %s: %w", path, err)
+		}
+
+		relSlash := filepath.ToSlash(rel)
+
+		// Check include pattern
+		matched, err := doublestar.Match(pattern, relSlash)
+		if err != nil {
+			return fmt.Errorf("match pattern %q for %q: %w", pattern, rel, err)
+		}
+		if !matched {
+			return nil
+		}
+
+		// Check exclude patterns
+		for _, excl := range excludePatterns {
+			excluded, err := doublestar.Match(excl, relSlash)
+			if err != nil {
+				return fmt.Errorf("match exclude pattern %q for %q: %w", excl, rel, err)
+			}
+			if excluded {
+				return nil
+			}
+		}
+
+		files = append(files, rel)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+
+	return files, nil
+}
+
+// FindFilesRespectingGitignore finds files matching a glob pattern while respecting .gitignore.
+// It uses `git ls-files` to get tracked files, then filters by the glob pattern.
+// Falls back to FindFilesMatchingGlob if not in a git repository.
+func FindFilesRespectingGitignore(root, pattern string, excludePatterns []string) ([]string, error) {
+	// Check if we're in a git repo
+	gitCmd := exec.Command("git", "-C", root, "rev-parse", "--git-dir")
+	if err := gitCmd.Run(); err != nil {
+		// Not a git repo, fall back to regular glob
+		return FindFilesMatchingGlob(root, pattern, excludePatterns)
+	}
+
+	// Use git ls-files to get all tracked + untracked (but not ignored) files
+	// --cached: tracked files
+	// --others: untracked files
+	// --exclude-standard: respect .gitignore
+	cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard")
+	output, err := cmd.Output()
+	if err != nil {
+		// Git command failed, fall back to regular glob
+		return FindFilesMatchingGlob(root, pattern, excludePatterns)
+	}
+
+	var files []string
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Normalize to forward slashes for pattern matching
+		relSlash := filepath.ToSlash(line)
+
+		// Check include pattern
+		matched, err := doublestar.Match(pattern, relSlash)
+		if err != nil {
+			return nil, fmt.Errorf("match pattern %q for %q: %w", pattern, line, err)
+		}
+		if !matched {
+			continue
+		}
+
+		// Check exclude patterns
+		excluded := false
+		for _, excl := range excludePatterns {
+			ex, err := doublestar.Match(excl, relSlash)
+			if err != nil {
+				return nil, fmt.Errorf("match exclude pattern %q for %q: %w", excl, line, err)
+			}
+			if ex {
+				excluded = true
+				break
+			}
+		}
+		if excluded {
+			continue
+		}
+
+		// Normalize to OS-native path separators and canonical form
+		normalized := filepath.Clean(filepath.FromSlash(line))
+		files = append(files, normalized)
+	}
+
+	return files, nil
 }

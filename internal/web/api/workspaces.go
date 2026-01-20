@@ -6,12 +6,41 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
+
+// workspaceState tracks the currently selected workspace for the web server.
+var (
+	currentWorkspaceMu sync.RWMutex
+	currentWorkspace   string
+)
+
+// GetCurrentWorkspace returns the currently selected workspace, falling back to cwd.
+func GetCurrentWorkspace() string {
+	currentWorkspaceMu.RLock()
+	ws := currentWorkspace
+	currentWorkspaceMu.RUnlock()
+
+	if ws != "" {
+		return ws
+	}
+	if pwd, err := os.Getwd(); err == nil {
+		return pwd
+	}
+	return ""
+}
+
+// SetCurrentWorkspace sets the current workspace.
+func SetCurrentWorkspace(path string) {
+	currentWorkspaceMu.Lock()
+	currentWorkspace = path
+	currentWorkspaceMu.Unlock()
+}
 
 // WorkspaceInfo represents workspace information.
 type WorkspaceInfo struct {
@@ -90,20 +119,17 @@ func listWorkspaces(ctx context.Context, store *sessions.Store, cfg config.Confi
 		}
 	}
 
-	// Determine current workspace
-	currentWorkspace := ""
-	if pwd, err := os.Getwd(); err == nil {
-		currentWorkspace = pwd
-	}
+	// Determine current workspace (use selected workspace if set)
+	activeWorkspace := GetCurrentWorkspace()
 
 	// Convert to slice
 	workspaces := make([]WorkspaceInfo, 0, len(workspaceMap))
 	for _, info := range workspaceMap {
-		info.IsActive = info.Path == currentWorkspace
+		info.IsActive = info.Path == activeWorkspace
 		workspaces = append(workspaces, *info)
 	}
 
-	return workspaces, currentWorkspace, nil
+	return workspaces, activeWorkspace, nil
 }
 
 // WorkspaceSwitchHandler returns a handler for POST /api/workspaces/switch.
@@ -165,10 +191,9 @@ func WorkspaceSwitchHandler(cfg config.Config, log zerolog.Logger) http.HandlerF
 			return
 		}
 
-		// Note: In a web server context, we can't actually change the working directory
-		// for the server process. This endpoint is informational - the client should
-		// use this to filter/scope API calls by workspace.
-		log.Info().Str("workspace", path).Msg("workspace switch requested")
+		// Store the workspace selection in server-side state
+		SetCurrentWorkspace(path)
+		log.Info().Str("workspace", path).Msg("workspace switched")
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":        true,

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useCodemaps, useCodemap } from "@/api/hooks";
+import { useCodemaps, useCodemap, useWorkspaces } from "@/api/hooks";
 import { deleteCodemap } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,12 +47,20 @@ export function CodemapsPage() {
 
   const limit = 20;
 
+  const { data: workspacesData } = useWorkspaces();
+  const currentWorkspace =
+    workspacesData?.current ||
+    workspacesData?.workspaces?.find((ws) => ws.is_active)?.path ||
+    workspacesData?.workspaces?.[0]?.path;
+
   const { data: codemapsData, isLoading, refetch, isFetching } = useCodemaps({
     limit,
+    workspace: currentWorkspace,
   });
 
   const { data: codemapDetail, isLoading: isLoadingDetail } = useCodemap(
-    selectedCodemapId || ""
+    selectedCodemapId || "",
+    currentWorkspace
   );
 
   const formatDate = (dateStr?: string) => {

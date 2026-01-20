@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useTasks } from "@/api/hooks";
+import { useTasks, useWorkspaces } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,16 @@ const statusConfig: Record<string, { variant: "default" | "success" | "warning" 
 };
 
 export function TasksPage() {
-  const { data, isLoading, refetch, isFetching } = useTasks({ limit: 100 });
+  const { data: workspacesData } = useWorkspaces();
+  const currentWorkspace =
+    workspacesData?.current ||
+    workspacesData?.workspaces?.find((ws) => ws.is_active)?.path ||
+    workspacesData?.workspaces?.[0]?.path;
+
+  const { data, isLoading, refetch, isFetching } = useTasks({
+    limit: 100,
+    workspace: currentWorkspace,
+  });
 
   const tasks = data?.tasks || [];
   const stats = data?.stats || { total: 0, pending: 0, in_progress: 0, completed: 0 };

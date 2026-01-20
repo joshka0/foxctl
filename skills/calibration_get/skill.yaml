@@ -1,0 +1,46 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: calibration/get
+  version: 0.1.0
+  description: "Retrieve user calibration profile for injection or detailed lookup"
+  tags: ["calibration", "profile", "hooks", "session"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: calibration/get
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path"
+    - name: format
+      type: string
+      required: false
+      description: "Output format: compact (default), detailed, or both"
+  returns:
+    - name: found
+      type: boolean
+      description: "Whether a calibration profile exists"
+    - name: profile
+      type: object
+      description: "Full profile object (if found)"
+    - name: compact
+      type: string
+      description: "Compact profile representation for injection"
+    - name: detailed
+      type: string
+      description: "Detailed profile representation"
+    - name: hook_output
+      type: object
+      description: "Hook output for context injection"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: workdir
+  pure: false

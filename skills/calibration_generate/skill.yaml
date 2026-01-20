@@ -1,0 +1,77 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: calibration/generate
+  version: 0.1.0
+  description: "Analyze sessions to generate/update user calibration profile"
+  tags: ["calibration", "profile", "analysis", "llm"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 32
+signature:
+  command: calibration/generate
+  parameters:
+    - name: workspace
+      type: string
+      required: false
+      description: "Project workspace path"
+    - name: session_ids
+      type: array
+      required: false
+      description: "Specific session IDs to analyze"
+    - name: scope
+      type: string
+      required: false
+      description: "Analysis scope: recent (5 sessions), all, or incremental (default)"
+    - name: max_windows
+      type: integer
+      required: false
+      description: "Maximum context windows to analyze per run (default: 50)"
+    - name: force
+      type: boolean
+      required: false
+      description: "Re-analyze windows even if already processed"
+    - name: dry_run
+      type: boolean
+      required: false
+      description: "Skip LLM extraction and persistence"
+  returns:
+    - name: profile_id
+      type: string
+      description: "The profile identifier"
+    - name: workspace
+      type: string
+      description: "The workspace path"
+    - name: windows_analyzed
+      type: integer
+      description: "Number of context windows analyzed"
+    - name: windows_skipped
+      type: integer
+      description: "Number of windows skipped (already analyzed)"
+    - name: signals_extracted
+      type: integer
+      description: "Total signals extracted from all windows"
+    - name: profile_changed
+      type: boolean
+      description: "Whether the profile was updated"
+    - name: changes
+      type: array
+      description: "List of profile changes"
+    - name: status
+      type: string
+      description: "Status: ok, no_sessions, dry_run, error"
+    - name: message
+      type: string
+      description: "Human-readable status message"
+    - name: provider
+      type: string
+      description: "LLM provider used for extraction"
+capabilities:
+  network: "egress"
+  filesystem:
+    - type: workdir
+  pure: false

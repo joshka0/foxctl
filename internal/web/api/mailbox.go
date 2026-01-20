@@ -48,7 +48,8 @@ func MailboxListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc 
 		if actor == "" {
 			actor = r.URL.Query().Get("actor")
 		}
-		if actor == "" {
+		all := parseBool(r.URL.Query().Get("all"))
+		if actor == "" && !all {
 			actor = agent.BroadcastRecipient
 		}
 

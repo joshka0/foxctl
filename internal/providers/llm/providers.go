@@ -1,9 +1,16 @@
 package llm
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Provider describes a single LLM backend configuration.
@@ -188,4 +195,131 @@ func envOrDefault(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+// FileSummaryProviders returns providers for fast file summary generation.
+// Priority: Devstral (technical/direct) -> Cerebras -> Groq.
+// Uses low temperature (0.0) for consistent, deterministic summaries.
+func FileSummaryProviders() []Provider {
+	var providers []Provider
+
+	// Devstral is best for technical code summaries - direct and precise
+	providers = appendOpenRouterProviders(
+		providers,
+		"mistralai/devstral-2512:free",
+		256,
+	)
+
+	// Cerebras as fast fallback
+	providers = appendAPIProvider(
+		providers,
+		"CEREBRAS_API_KEY",
+		"cerebras",
+		"https://api.cerebras.ai/v1/chat/completions",
+		envOrDefault("CEREBRAS_MODEL", "llama-3.3-70b"),
+		256,
+	)
+
+	// Groq as another fallback
+	providers = appendAPIProvider(
+		providers,
+		"GROQ_API_KEY",
+		"groq",
+		"https://api.groq.com/openai/v1/chat/completions",
+		envOrDefault("GROQ_MODEL", "llama-3.3-70b-versatile"),
+		256,
+	)
+
+	return providers
+}
+
+// FileSummaryTemperature is the temperature for file summary generation.
+// Set to 0.0 for consistent, deterministic outputs.
+const FileSummaryTemperature = 0.0
+
+// SummaryLLM implements the retrieval.SummaryLLM interface for file summaries.
+type SummaryLLM struct {
+	provider Provider
+}
+
+// NewSummaryLLM creates a new SummaryLLM from a provider.
+// Returns nil if the provider cannot be used for summaries.
+func NewSummaryLLM(provider Provider) *SummaryLLM {
+	if provider.IsCLI {
+		// CLI providers not supported for file summaries (too slow)
+		return nil
+	}
+	return &SummaryLLM{
+		provider: provider,
+	}
+}
+
+// GenerateSummary implements the retrieval.SummaryLLM interface.
+func (s *SummaryLLM) GenerateSummary(ctx context.Context, prompt string) (string, error) {
+	// Build request body
+	reqBody := map[string]any{
+		"model": s.provider.Model,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"temperature": FileSummaryTemperature,
+		"max_tokens":  256,
+	}
+
+	reqJSON, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequestWithContext(ctx, "POST", s.provider.Endpoint, bytes.NewReader(reqJSON))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.provider.APIKey)
+
+	// OpenRouter-specific headers
+	if strings.Contains(s.provider.Endpoint, "openrouter.ai") {
+		req.Header.Set("HTTP-Referer", "https://github.com/jkatigb/agentctl")
+		req.Header.Set("X-Title", "agentctl")
+	}
+
+	// Execute request with timeout
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var respData struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.Unmarshal(body, &respData); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+
+	if len(respData.Choices) == 0 {
+		return "", fmt.Errorf("no choices in response")
+	}
+
+	return strings.TrimSpace(respData.Choices[0].Message.Content), nil
 }

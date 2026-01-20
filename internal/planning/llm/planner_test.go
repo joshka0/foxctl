@@ -96,6 +96,7 @@ func TestParseResponse_EmptyTasks(t *testing.T) {
 // This is only used in tests - the imperative shell.
 func configFromEnv() ProviderConfig {
 	return ProviderConfig{
+		CerebrasAPIKey:   os.Getenv("CEREBRAS_API_KEY"),
 		OpenRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
 		OpenRouterModel:  os.Getenv("OPENROUTER_MODEL"),
 		GroqAPIKey:       os.Getenv("GROQ_API_KEY"),

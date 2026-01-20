@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 )
 
 func TestSemanticIndexCommand_Init(t *testing.T) {
@@ -201,9 +203,9 @@ func TestFindFilesMatchingGlob(t *testing.T) {
 	}
 
 	// Test ** glob
-	files, err := findFilesMatchingGlob(tmpDir, "**/*.go", nil)
+	files, err := fsutil.FindFilesMatchingGlob(tmpDir, "**/*.go", nil)
 	if err != nil {
-		t.Fatalf("findFilesMatchingGlob failed: %v", err)
+		t.Fatalf("fsutil.FindFilesMatchingGlob failed: %v", err)
 	}
 
 	if len(files) < 3 {
@@ -236,9 +238,9 @@ func TestFindFilesMatchingGlob_SimplePattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, err := findFilesMatchingGlob(tmpDir, "*.txt", nil)
+	files, err := fsutil.FindFilesMatchingGlob(tmpDir, "*.txt", nil)
 	if err != nil {
-		t.Fatalf("findFilesMatchingGlob failed: %v", err)
+		t.Fatalf("fsutil.FindFilesMatchingGlob failed: %v", err)
 	}
 
 	if len(files) != 2 {

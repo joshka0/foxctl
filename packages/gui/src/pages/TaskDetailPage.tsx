@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { useTasks } from "@/api/hooks";
+import { useTasks, useWorkspaces } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,10 +14,18 @@ const statusConfig: Record<string, { variant: "default" | "success" | "warning" 
 
 export function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { data: workspacesData } = useWorkspaces();
+  const currentWorkspace =
+    workspacesData?.current ||
+    workspacesData?.workspaces?.find((ws) => ws.is_active)?.path ||
+    workspacesData?.workspaces?.[0]?.path;
+
   // TODO: Add dedicated single-task API endpoint (GET /api/tasks/:id) to avoid
   // fetching all tasks. Currently we need all tasks for dependency resolution,
   // but the main task lookup could be optimized with a dedicated endpoint.
-  const { data, isLoading, refetch, isFetching } = useTasks();
+  const { data, isLoading, refetch, isFetching } = useTasks({
+    workspace: currentWorkspace,
+  });
 
   const task = data?.tasks?.find((t) => t.id === id);
 

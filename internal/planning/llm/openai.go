@@ -34,6 +34,8 @@ func NewOpenAIPlanner(config OpenAIConfig) *OpenAIPlanner {
 	// Set BaseURL based on provider if not specified
 	if config.BaseURL == "" {
 		switch config.Provider {
+		case "cerebras":
+			config.BaseURL = "https://api.cerebras.ai/v1"
 		case "openrouter":
 			config.BaseURL = "https://openrouter.ai/api/v1"
 		case "groq":
@@ -46,6 +48,8 @@ func NewOpenAIPlanner(config OpenAIConfig) *OpenAIPlanner {
 	// Set default model based on provider if not specified
 	if config.Model == "" {
 		switch config.Provider {
+		case "cerebras":
+			config.Model = "llama3.1-8b" // Fastest, cheapest for background tasks
 		case "openrouter":
 			config.Model = "openai/gpt-4o-mini"
 		case "groq":
@@ -173,7 +177,7 @@ func (p *OpenAIPlanner) Available() bool {
 	return p.config.APIKey != ""
 }
 
-// Provider returns the provider name (e.g., "groq", "openrouter", or "openai").
+// Provider returns the provider name (e.g., "cerebras", "groq", "openrouter", or "openai").
 // Uses the explicitly tracked provider source, falling back to BaseURL detection for backward compatibility.
 func (p *OpenAIPlanner) Provider() string {
 	// Prefer explicitly tracked provider
@@ -183,6 +187,8 @@ func (p *OpenAIPlanner) Provider() string {
 	// Fallback to BaseURL detection for backward compatibility with callers
 	// that construct OpenAIConfig with explicit BaseURL but no Provider field
 	switch p.config.BaseURL {
+	case "https://api.cerebras.ai/v1":
+		return "cerebras"
 	case "https://api.groq.com/openai/v1":
 		return "groq"
 	case "https://openrouter.ai/api/v1":

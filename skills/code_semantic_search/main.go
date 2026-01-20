@@ -12,6 +12,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"os"
@@ -33,6 +36,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
+	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -87,7 +91,7 @@ const (
 
 // Input is the expected JSON input.
 type Input struct {
-	Query          string   `json:"query" validate:"required"`
+	Query          string   `json:"query,omitempty"` // Empty query with format=tree returns full repo tree
 	Scope          []string `json:"scope,omitempty"`           // ["symbols", "sessions", "memories", "tasks"]
 	Workspace      string   `json:"workspace,omitempty"`       // Workspace path (defaults to cwd)
 	Limit          int      `json:"limit,omitempty"`           // Default: 20
@@ -111,6 +115,12 @@ type Input struct {
 	Timeline      bool     `json:"timeline,omitempty"`       // Enrich session results with timeline data
 	TimelineLimit int      `json:"timeline_limit,omitempty"` // Max sessions to fetch timeline for (default: 3)
 	TimelineTypes []string `json:"timeline_types,omitempty"` // Learning types to include (default: all)
+
+	// Tree format options (when format="tree")
+	TreeDepth             int  `json:"tree_depth,omitempty"`               // Max directory depth for tree (default: 2)
+	TreeMaxChildren       int  `json:"tree_max_children,omitempty"`        // Max children per directory node (default: 10)
+	TreeIncludeSummaries  *bool `json:"tree_include_summaries,omitempty"`  // Include file summaries in tree (default: true, use ptr to detect explicit false)
+	TreeMaxMissingSummaries int `json:"tree_max_missing_summaries,omitempty"` // Max summaries to generate lazily (default: 20)
 }
 
 // Output is the JSON output.
@@ -122,6 +132,7 @@ type Output struct {
 	Stats        SearchStats       `json:"stats"`
 	Summary      *SynthesisSummary `json:"summary,omitempty"`   // Present when summarize=true
 	TreeText     string            `json:"tree_text,omitempty"` // Present when format=tree
+	Tree         *retrieval.TreeOutput `json:"tree,omitempty"`  // Structured tree output when format=tree
 }
 
 // SynthesisSummary contains the LLM-generated synthesis of search results.
@@ -238,6 +249,28 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		in.IncludeContext = &defaultTrue
 	}
 
+	// Handle empty query - return full repo tree if format=tree
+	if in.Query == "" {
+		if in.Format != "tree" {
+			return skillerr.Validationf("query is required (or use format=tree for full repo tree)")
+		}
+		// Validate and canonicalize workspace before full scan
+		workspacePath := in.Workspace
+		if absPath, err := filepath.Abs(workspacePath); err == nil {
+			workspacePath = absPath
+		}
+		// Validate workspace with PathValidator to prevent unauthorized scans
+		if _, err := policy.NewPathValidator(workspacePath, []string{rc.Config.Home}); err != nil {
+			return skillerr.WrapArg("invalid workspace path", err)
+		}
+		in.Workspace = workspacePath
+		out, err := buildFullRepoTree(ctx, rc.Logger, rc.Config, &in)
+		if err != nil {
+			return err
+		}
+		return skillout.Emit(rc, Command, out)
+	}
+
 	// Validate scope values
 	validScopes := map[string]bool{ScopeSymbols: true, ScopeSessions: true, ScopeMemories: true, ScopeTasks: true, ScopeCodemaps: true}
 	for _, s := range in.Scope {
@@ -313,10 +346,11 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 	// Model selection is configurable via EMBEDDING_MODEL_CODE, EMBEDDING_MODEL_MEMORY, EMBEDDING_MODEL_TEXT
 	var scopedEmb scopedEmbeddings
 	var embedProvider semantic.EmbeddingProvider // Keep for backward compat with some functions
-	var codeModel, memoryModel, textModel string
+	var fileSummaryProvider semantic.EmbeddingProvider
+	var codeModel, memoryModel, textModel, fileSummaryModel string
 
 	if providerName != "" {
-		codeModel, memoryModel, textModel = embeddingModelConfig(providerName, cfg)
+		codeModel, memoryModel, textModel, fileSummaryModel = embeddingModelConfig(providerName, cfg)
 
 		start := time.Now()
 		var embErr error
@@ -339,6 +373,36 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 		}
 	} else {
 		out.Stats.Hint = "no embedding API key set; set VOYAGE_API_KEY or GEMINI_API_KEY for vector search"
+	}
+
+	var fileSummaryEmbedding []float32
+	if providerName != "" && in.Format == "tree" {
+		if fileSummaryModel == codeModel && len(scopedEmb.code) > 0 {
+			fileSummaryEmbedding = scopedEmb.code
+			fileSummaryProvider = embedProvider
+		} else if fileSummaryModel == memoryModel && len(scopedEmb.memory) > 0 {
+			fileSummaryEmbedding = scopedEmb.memory
+		} else if fileSummaryModel == textModel && len(scopedEmb.text) > 0 {
+			fileSummaryEmbedding = scopedEmb.text
+		}
+
+		if fileSummaryProvider == nil && strings.TrimSpace(fileSummaryModel) != "" {
+			provider, err := createProviderWithModel(fileSummaryModel, cfg, voyageKey, geminiKey)
+			if err != nil {
+				logger.Debug().Err(err).Msg("file summary embedding provider unavailable")
+			} else {
+				fileSummaryProvider = provider
+			}
+		}
+
+		if len(fileSummaryEmbedding) == 0 && fileSummaryProvider != nil {
+			embedding, err := fileSummaryProvider.Embed(searchCtx, in.Query)
+			if err != nil {
+				logger.Debug().Err(err).Msg("file summary embedding failed")
+			} else {
+				fileSummaryEmbedding = embedding
+			}
+		}
 	}
 
 	// Use appropriate embedding per scope
@@ -620,7 +684,63 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 
 	// Render tree view if requested
 	if in.Format == "tree" {
-		out.TreeText = renderResultsAsTree(fusedResults)
+		treeOpts := retrieval.TreeOptions{
+			Depth:       in.TreeDepth,
+			MaxChildren: in.TreeMaxChildren,
+		}
+		// Apply defaults if not set (note: Depth=0 means unlimited, don't override)
+		if treeOpts.MaxChildren == 0 {
+			treeOpts.MaxChildren = 10
+		}
+		// Default to including summaries unless explicitly set to false
+		if in.TreeIncludeSummaries == nil || *in.TreeIncludeSummaries {
+			treeOpts.IncludeSummaries = true
+		}
+
+		// Convert results to file entries first
+		entries := resultsToFileEntries(fusedResults)
+
+		// Fetch file_summary entries for broader tree coverage
+		summaryLimit := treeOpts.MaxChildren * 4
+		if summaryLimit < 50 {
+			summaryLimit = 50
+		}
+		fileSummaryEntries, err := fetchFileSummaryEntries(
+			ctx,
+			cfg,
+			workspaceID,
+			in.Query,
+			fileSummaryEmbedding,
+			summaryLimit,
+			logger,
+		)
+		if err != nil {
+			logger.Debug().Err(err).Msg("file summary search error")
+		} else {
+			entries = retrieval.MergeFileEntries(fileSummaryEntries, entries)
+		}
+
+		// Enrich entries with summaries if enabled
+		maxMissing := in.TreeMaxMissingSummaries
+		if maxMissing == 0 {
+			maxMissing = 20 // Default: generate up to 20 summaries
+		}
+		if treeOpts.IncludeSummaries && maxMissing > 0 {
+			generated, err := enrichEntriesWithSummaries(ctx, cfg, workspaceID, entries, maxMissing, fileSummaryProvider, logger)
+			if err != nil {
+				logger.Debug().Err(err).Msg("summary enrichment error")
+			}
+			logger.Debug().Int("generated", generated).Int("entries", len(entries)).Msg("enriched tree entries with summaries")
+		}
+
+		// Generate root summary from top file summaries
+		rootSummary := generateRootSummary(ctx, cfg, workspaceID, entries, fileSummaryProvider, logger)
+
+		// Build tree from enriched entries
+		builder := retrieval.NewTreeBuilder(treeOpts)
+		treeOutput := builder.Build(entries, rootSummary)
+		out.Tree = treeOutput
+		out.TreeText = builder.RenderText(treeOutput)
 	}
 
 	return out, nil
@@ -644,10 +764,11 @@ type scopedEmbeddings struct {
 
 // embeddingModelConfig returns the models to use for different scope categories.
 // Configuration priority: config overrides > embedding.model fallback.
-func embeddingModelConfig(providerName string, cfg config.Config) (codeModel, memoryModel, textModel string) {
+func embeddingModelConfig(providerName string, cfg config.Config) (codeModel, memoryModel, textModel, fileSummaryModel string) {
 	codeModel = semantic.ResolveModelForScope(semantic.ScopeSymbols, cfg)
 	memoryModel = semantic.ResolveModelForScope(semantic.ScopeMemory, cfg)
 	textModel = semantic.ResolveModelForScope(semantic.ScopeTasks, cfg)
+	fileSummaryModel = semantic.ResolveModelForScope(semantic.ScopeFileSummaries, cfg)
 
 	if providerName == "gemini" {
 		model := "gemini-embedding-001"
@@ -663,9 +784,10 @@ func embeddingModelConfig(providerName string, cfg config.Config) (codeModel, me
 		codeModel = model
 		memoryModel = model
 		textModel = model
+		fileSummaryModel = model
 	}
 
-	return codeModel, memoryModel, textModel
+	return codeModel, memoryModel, textModel, fileSummaryModel
 }
 
 // createProviderWithModel creates an embedding provider with a specific model.
@@ -2025,95 +2147,404 @@ func parseSynthesisResponse(content string) (*SynthesisSummary, error) {
 	return &summary, nil
 }
 
-// renderResultsAsTree builds a tree visualization from result file paths.
-// Groups files by directory structure and renders with ASCII tree characters.
-func renderResultsAsTree(results []Result) string {
-	// Extract unique paths from results (only symbol results have paths)
-	pathSet := make(map[string]bool)
+// newSummaryLLM creates a new LLM client for file summaries.
+// Returns nil if no provider is available.
+func newSummaryLLM(logger zerolog.Logger) retrieval.SummaryLLM {
+	providers := llmproviders.FileSummaryProviders()
+	if len(providers) == 0 {
+		return nil
+	}
+	llm := llmproviders.NewSummaryLLM(providers[0])
+	if llm == nil {
+		logger.Debug().Str("provider", providers[0].Name).Msg("summary LLM unavailable")
+		return nil
+	}
+	return llm
+}
+
+// resultsToFileEntries converts search results to file entries for tree building.
+// Deduplicates by path, keeping the highest scoring entry for each path.
+func resultsToFileEntries(results []Result) []retrieval.FileEntry {
+	var entries []retrieval.FileEntry
+	seen := make(map[string]bool)
+
 	for _, r := range results {
-		if r.Path != "" {
-			pathSet[r.Path] = true
+		if r.Path == "" {
+			continue
+		}
+		// Deduplicate by path (keep highest score - results are already sorted by score)
+		if seen[r.Path] {
+			continue
+		}
+		seen[r.Path] = true
+
+		score := r.FinalScore
+		if score <= 0 {
+			score = r.Similarity
+		}
+		entries = append(entries, retrieval.FileEntry{
+			Path:    r.Path,
+			Score:   score,
+			Summary: r.Summary,
+		})
+	}
+
+	return entries
+}
+
+// fetchFileSummaryEntries searches file_summary entries for tree coverage.
+func fetchFileSummaryEntries(
+	ctx context.Context,
+	cfg config.Config,
+	workspaceID string,
+	query string,
+	queryEmbedding []float32,
+	limit int,
+	logger zerolog.Logger,
+) ([]retrieval.FileEntry, error) {
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open memory store: %w", err)
+	}
+	defer memStore.Close()
+
+	entries, err := retrieval.SearchFileSummaries(ctx, memStore, workspaceID, query, queryEmbedding, limit)
+	if err != nil {
+		logger.Debug().Err(err).Msg("file summary search failed")
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+// buildFullRepoTree scans the workspace and returns a tree of all code files.
+// Used when query is empty to provide a full repository overview.
+func buildFullRepoTree(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *Input) (*Output, error) {
+	// Scan workspace for code files
+	var entries []retrieval.FileEntry
+	err := filepath.WalkDir(in.Workspace, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip hidden directories and common non-code directories
+		if d.IsDir() {
+			name := d.Name()
+			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" || name == "__pycache__" || name == "dist" || name == "build" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Only include code files
+		ext := strings.ToLower(filepath.Ext(path))
+		codeExts := map[string]bool{
+			".go": true, ".py": true, ".js": true, ".ts": true, ".tsx": true, ".jsx": true,
+			".rs": true, ".rb": true, ".java": true, ".c": true, ".cpp": true, ".h": true,
+			".cs": true, ".php": true, ".swift": true, ".kt": true, ".scala": true,
+			".sh": true, ".bash": true, ".zsh": true, ".yaml": true, ".yml": true, ".toml": true,
+			".json": true, ".md": true, ".sql": true, ".graphql": true, ".proto": true,
+		}
+		if !codeExts[ext] {
+			return nil
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(in.Workspace, path)
+		if err != nil {
+			return nil
+		}
+
+		entries = append(entries, retrieval.FileEntry{
+			Path:  relPath,
+			Score: 1.0, // All files equally relevant for full repo tree
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan workspace: %w", err)
+	}
+
+	// Apply tree options
+	treeOpts := retrieval.TreeOptions{
+		Depth:       in.TreeDepth,
+		MaxChildren: in.TreeMaxChildren,
+	}
+	if treeOpts.MaxChildren == 0 {
+		treeOpts.MaxChildren = 50 // Higher default for full repo
+	}
+	if in.TreeIncludeSummaries == nil || *in.TreeIncludeSummaries {
+		treeOpts.IncludeSummaries = true
+	}
+
+	// Enrich with summaries if enabled
+	maxMissing := in.TreeMaxMissingSummaries
+	if maxMissing == 0 {
+		maxMissing = 50 // Higher default for full repo
+	}
+	if treeOpts.IncludeSummaries && maxMissing > 0 {
+		_, err := enrichEntriesWithSummaries(ctx, cfg, in.Workspace, entries, maxMissing, nil, logger)
+		if err != nil {
+			logger.Debug().Err(err).Msg("failed to enrich summaries")
 		}
 	}
 
-	if len(pathSet) == 0 {
-		return "(no file paths in results)"
+	// Build tree
+	builder := retrieval.NewTreeBuilder(treeOpts)
+
+	// Generate root summary from top entries
+	rootSummary := generateRootSummary(ctx, cfg, in.Workspace, entries, nil, logger)
+
+	tree := builder.Build(entries, rootSummary)
+	treeText := builder.RenderText(tree)
+
+	return &Output{
+		Query:    "(full repository)",
+		Results:  []Result{},
+		TreeText: treeText,
+		Tree:     tree,
+		Stats: SearchStats{
+			TotalResults:    len(entries),
+			SourceCounts:    map[string]int{"files": len(entries)},
+			SourceLatencies: map[string]int{},
+		},
+	}, nil
+}
+
+// extractGoFileMetadata extracts package name, doc comment, and top symbols from a Go file.
+// Returns populated FileSummaryInput or minimal input if extraction fails.
+func extractGoFileMetadata(workspace, filePath string) symbol.FileSummaryInput {
+	input := symbol.FileSummaryInput{FilePath: filePath}
+
+	// Only process Go files
+	if !strings.HasSuffix(filePath, ".go") {
+		return input
 	}
 
-	// Sort paths for consistent output
-	paths := make([]string, 0, len(pathSet))
-	for p := range pathSet {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
-
-	// Build tree structure: map of path components to children
-	type treeNode struct {
-		children map[string]*treeNode
-		isFile   bool
+	// Construct full path
+	fullPath := filepath.Join(workspace, filePath)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return input
 	}
 
-	root := &treeNode{children: make(map[string]*treeNode)}
+	// Parse the file
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, fullPath, content, parser.ParseComments)
+	if err != nil {
+		return input
+	}
 
-	for _, path := range paths {
-		parts := strings.Split(path, "/")
-		current := root
-		for i, part := range parts {
-			if current.children[part] == nil {
-				current.children[part] = &treeNode{
-					children: make(map[string]*treeNode),
-					isFile:   i == len(parts)-1,
+	// Extract package name
+	if f.Name != nil {
+		input.Package = f.Name.Name
+	}
+
+	// Extract package doc or first comment
+	if f.Doc != nil {
+		input.PackageDoc = strings.TrimSpace(f.Doc.Text())
+	} else if len(f.Comments) > 0 && f.Comments[0] != nil {
+		input.FirstComment = strings.TrimSpace(f.Comments[0].Text())
+	}
+
+	// Extract top exported symbols (functions, types, vars, consts)
+	var symbols []string
+	for _, decl := range f.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Name != nil && ast.IsExported(d.Name.Name) {
+				symbols = append(symbols, d.Name.Name)
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					if s.Name != nil && ast.IsExported(s.Name.Name) {
+						symbols = append(symbols, s.Name.Name)
+					}
+				case *ast.ValueSpec:
+					for _, name := range s.Names {
+						if ast.IsExported(name.Name) {
+							symbols = append(symbols, name.Name)
+						}
+					}
 				}
 			}
-			current = current.children[part]
+		}
+		// Limit to top 10 symbols
+		if len(symbols) >= 10 {
+			break
+		}
+	}
+	input.TopSymbols = symbols
+
+	return input
+}
+
+// enrichEntriesWithSummaries fetches or generates summaries for file entries.
+// Uses cached summaries when available, generates new ones up to maxNew limit.
+// Returns the number of summaries that were generated (not cached).
+func enrichEntriesWithSummaries(
+	ctx context.Context,
+	cfg config.Config,
+	workspace string,
+	entries []retrieval.FileEntry,
+	maxNew int,
+	embedProvider semantic.EmbeddingProvider,
+	logger zerolog.Logger,
+) (int, error) {
+	if len(entries) == 0 || maxNew <= 0 {
+		return 0, nil
+	}
+
+	// Open memory store
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	if err != nil {
+		return 0, fmt.Errorf("open memory store: %w", err)
+	}
+	defer memStore.Close()
+
+	// Create LLM client for file summaries (Devstral via OpenRouter)
+	llmClient := newSummaryLLM(logger)
+	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace, logger)
+
+	// Collect file paths that need summaries
+	var paths []string
+	pathToIdx := make(map[string]int)
+	for i, entry := range entries {
+		if entry.Summary == "" {
+			paths = append(paths, entry.Path)
+			pathToIdx[entry.Path] = i
 		}
 	}
 
-	// Render tree recursively
-	var sb strings.Builder
-	sb.WriteString(".\n")
+	if len(paths) == 0 {
+		return 0, nil
+	}
 
-	var renderNode func(node *treeNode, prefix string)
-	renderNode = func(node *treeNode, prefix string) {
-		// Get sorted children
-		names := make([]string, 0, len(node.children))
-		for name := range node.children {
-			names = append(names, name)
+	// Try to get existing summaries first
+	existingSummaries, err := gen.GetSummaries(ctx, paths)
+	if err != nil {
+		logger.Debug().Err(err).Msg("failed to get existing summaries")
+	}
+
+	// Apply cached summaries
+	for path, summary := range existingSummaries {
+		if idx, ok := pathToIdx[path]; ok {
+			entries[idx].Summary = summary
+			delete(pathToIdx, path) // Remove from paths needing generation
 		}
-		sort.Strings(names)
+	}
 
-		for i, name := range names {
-			child := node.children[name]
-			isLast := i == len(names)-1
+	// Count how many still need generation
+	needsGeneration := len(pathToIdx)
+	if needsGeneration == 0 {
+		return 0, nil
+	}
 
-			connector := "├── "
-			if isLast {
-				connector = "└── "
-			}
+	// Cap at maxNew
+	toGenerate := needsGeneration
+	if toGenerate > maxNew {
+		toGenerate = maxNew
+	}
 
-			suffix := ""
-			if !child.isFile {
-				suffix = "/"
-			}
+	// Build inputs for generation with file metadata
+	inputs := make([]symbol.FileSummaryInput, 0, toGenerate)
+	generated := 0
+	for path := range pathToIdx {
+		if generated >= toGenerate {
+			break
+		}
+		// Extract package, symbols, and doc comments for better LLM prompts
+		input := extractGoFileMetadata(workspace, path)
+		inputs = append(inputs, input)
+		generated++
+	}
 
-			sb.WriteString(prefix + connector + name + suffix + "\n")
+	// Generate summaries (uses Devstral via OpenRouter, falls back to deterministic)
+	created, err := gen.BatchCreateSummaries(ctx, inputs, toGenerate)
+	if err != nil {
+		logger.Debug().Err(err).Msg("batch summary generation error")
+	}
 
-			if !child.isFile {
-				newPrefix := prefix
-				if isLast {
-					newPrefix += "    "
-				} else {
-					newPrefix += "│   "
+	// Fetch newly created summaries
+	if created > 0 {
+		var newPaths []string
+		for _, input := range inputs {
+			newPaths = append(newPaths, input.FilePath)
+		}
+		newSummaries, err := gen.GetSummaries(ctx, newPaths)
+		if err == nil {
+			for path, summary := range newSummaries {
+				if idx, ok := pathToIdx[path]; ok {
+					entries[idx].Summary = summary
 				}
-				renderNode(child, newPrefix)
 			}
 		}
 	}
 
-	renderNode(root, "")
-	sb.WriteString(fmt.Sprintf("\n📂 %d related files", len(paths)))
+	// Backfill embeddings for existing file summaries missing vectors.
+	if embedProvider != nil && maxNew > 0 {
+		backfilled, err := gen.BackfillEmbeddings(ctx, maxNew)
+		if err != nil {
+			logger.Debug().Err(err).Msg("summary embedding backfill error")
+		} else if backfilled > 0 {
+			logger.Debug().Int("backfilled", backfilled).Msg("summary embedding backfill complete")
+		}
+	}
 
-	return sb.String()
+	return created, nil
+}
+
+// generateRootSummary creates a summary for the tree root based on top file summaries.
+// Uses the FileSummaryGenerator's root summary generation (deterministic fallback).
+func generateRootSummary(
+	ctx context.Context,
+	cfg config.Config,
+	workspace string,
+	entries []retrieval.FileEntry,
+	embedProvider semantic.EmbeddingProvider,
+	logger zerolog.Logger,
+) string {
+	if len(entries) == 0 {
+		return ""
+	}
+
+	// Collect top file summaries (already sorted by score)
+	var topSummaries []string
+	for _, entry := range entries {
+		if entry.Summary != "" {
+			topSummaries = append(topSummaries, entry.Summary)
+			if len(topSummaries) >= 5 { // Use top 5 summaries
+				break
+			}
+		}
+	}
+
+	if len(topSummaries) == 0 {
+		return ""
+	}
+
+	// Open memory store for FileSummaryGenerator
+	memStore, err := memory.OpenWithConfig(ctx, cfg)
+	if err != nil {
+		logger.Debug().Err(err).Msg("failed to open memory store for root summary")
+		return ""
+	}
+	defer memStore.Close()
+
+	// Create generator with LLM client for root summary
+	llmClient := newSummaryLLM(logger)
+	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace, logger)
+
+	// Generate root summary
+	rootSummary, err := gen.GenerateRootSummary(ctx, topSummaries)
+	if err != nil {
+		logger.Debug().Err(err).Msg("failed to generate root summary")
+		return ""
+	}
+
+	return rootSummary
 }
 
 // fetchTimelines retrieves timeline data for the top N session results.

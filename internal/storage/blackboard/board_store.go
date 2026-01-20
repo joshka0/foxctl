@@ -100,8 +100,14 @@ func (s *boardSQLStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]
 	query := `
 		SELECT id, workspace_id, task_id, stream, sender, recipient, kind, priority, ack_required, status, subject, body, created_at
 		FROM board_messages
-		WHERE workspace_id = ? AND (recipient = ? OR recipient = '*')`
-	args := []any{filter.WorkspaceID, filter.ActorID}
+		WHERE workspace_id = ?`
+	args := []any{filter.WorkspaceID}
+
+	// Filter by recipient unless ActorID is empty (show all)
+	if filter.ActorID != "" {
+		query += ` AND (recipient = ? OR recipient = '*')`
+		args = append(args, filter.ActorID)
+	}
 
 	if filter.TaskID != "" {
 		query += ` AND (task_id = ? OR task_id = '')`

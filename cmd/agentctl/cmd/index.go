@@ -13,8 +13,12 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/protocol"
+	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage/dbdriver"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
@@ -185,6 +189,7 @@ Remote sync:
 		newIndexStatusCommand(),
 		newIndexSyncCommand(),
 		newIndexGitDiffCommand(),
+		newIndexFileSummariesCommand(),
 	)
 	return cmd
 }
@@ -397,7 +402,7 @@ func runIndexDryRun(cmd *cobra.Command, workspace string, scopes []string, glob 
 		}
 
 		if scope == "symbols" {
-			files, err := findFilesMatchingGlob(workspace, glob, exclude)
+			files, err := fsutil.FindFilesMatchingGlob(workspace, glob, exclude)
 			if err != nil {
 				info["error"] = err.Error()
 			} else {
@@ -512,7 +517,7 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 		return 0, fmt.Errorf("create voyage provider: %w", err)
 	}
 
-	files, err := findFilesMatchingGlob(workspace, glob, exclude)
+	files, err := fsutil.FindFilesMatchingGlob(workspace, glob, exclude)
 	if err != nil {
 		return 0, fmt.Errorf("find files: %w", err)
 	}
@@ -1422,6 +1427,425 @@ func getGitDiffFiles(ctx context.Context, repoPath, base, head string) ([]string
 	}
 
 	return files, nil
+}
+
+func newIndexFileSummariesCommand() *cobra.Command {
+	var workspace string
+	var force bool
+	var dryRun bool
+	var batchSize int
+	var glob string
+	var exclude []string
+
+	cmd := &cobra.Command{
+		Use:   "file-summaries",
+		Short: "Generate LLM-powered file summaries for semantic search",
+		Long: `Generate short, search-friendly file summaries using an LLM.
+
+These summaries describe what each source file does and are used by
+semantic search to provide context about files in the codebase.
+Summaries are cached by symbol hash and only regenerated when exported
+symbols change (not comments or implementation details).
+
+Automatically respects .gitignore - files in node_modules, vendor,
+.git, and other ignored directories are skipped.
+
+Requires an LLM provider (Devstral via OpenRouter, Cerebras, or Groq).
+Set OPENROUTER_API_KEY, CEREBRAS_API_KEY, or GROQ_API_KEY.
+
+Provider priority:
+  1. Devstral via OpenRouter (best for code summaries)
+  2. Cerebras (fast)
+  3. Groq (fast)`,
+		Example: `  # Generate file summaries for files missing them
+  agentctl index file-summaries
+
+  # Force regenerate all file summaries
+  agentctl index file-summaries --force
+
+  # Process specific file types
+  agentctl index file-summaries --glob '**/*.go'
+
+  # Dry run to see what would be processed
+  agentctl index file-summaries --dry-run`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexSummaries(cmd, workspace, force, dryRun, batchSize, glob, exclude)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().BoolVar(&force, "force", false, "Force regenerate all summaries (ignore cache)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be processed without making changes")
+	cmd.Flags().IntVar(&batchSize, "batch-size", 50, "Number of files to process per batch")
+	cmd.Flags().StringVar(&glob, "glob", "**/*.{go,ts,tsx,js,jsx,py,rs,java}", "Glob pattern for files to process")
+	cmd.Flags().StringSliceVar(&exclude, "exclude", []string{"*_test.go"}, "Glob patterns to exclude (gitignore is respected automatically)")
+
+	return cmd
+}
+
+func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool, batchSize int, glob string, exclude []string) error {
+	ctx := cmd.Context()
+	start := time.Now()
+
+	// Validate batchSize to prevent infinite loop
+	if batchSize <= 0 {
+		return fmt.Errorf("batch-size must be positive, got %d", batchSize)
+	}
+
+	// Resolve workspace
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	// Load config
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Find files to process (respects .gitignore)
+	files, err := fsutil.FindFilesRespectingGitignore(absWorkspace, glob, exclude)
+	if err != nil {
+		return fmt.Errorf("find files: %w", err)
+	}
+
+	if len(files) == 0 {
+		data := map[string]any{
+			"workspace":   absWorkspace,
+			"files_found": 0,
+			"message":     "no files matched the glob pattern",
+		}
+		env := protocol.OK("index.file-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	// Open memory store
+	storageDir := filepath.Join(cfg.Home, "storage")
+	casDir := cfg.Paths.CAS
+	if casDir == "" {
+		casDir = filepath.Join(cfg.Home, "cas")
+	}
+
+	store, err := memory.Open(ctx, storageDir, casDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
+
+	// Filter to files needing summaries (unless force)
+	var filesToProcess []string
+	var skippedCount int
+
+	for _, f := range files {
+		if !force {
+			// Check if summary exists and is current
+			entryName := symbol.FileSummaryEntryName(absWorkspace, f)
+			entry, err := store.Get(ctx, entryName, absWorkspace)
+			if err == nil {
+				// Summary exists - check if digest matches
+				var result symbol.FileSummaryResult
+				if err := json.Unmarshal(entry.Result, &result); err == nil {
+					// Build input to compute current digest
+					input, inputErr := buildFileSummaryInput(absWorkspace, f)
+					if inputErr == nil {
+						currentDigest := symbol.ComputeFileSummaryDigest(input)
+						if result.Digest == currentDigest {
+							skippedCount++
+							continue // Summary is current
+						}
+					}
+					// If input error, fall through to process the file (will error during processing)
+				}
+			}
+		}
+		filesToProcess = append(filesToProcess, f)
+	}
+
+	if dryRun {
+		data := map[string]any{
+			"dry_run":          true,
+			"workspace":        absWorkspace,
+			"files_found":      len(files),
+			"files_to_process": len(filesToProcess),
+			"files_skipped":    skippedCount,
+			"force":            force,
+			"files":            filesToProcess,
+		}
+		env := protocol.OK("index.file-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	if len(filesToProcess) == 0 {
+		data := map[string]any{
+			"workspace":     absWorkspace,
+			"files_found":   len(files),
+			"files_skipped": skippedCount,
+			"processed":     0,
+			"message":       "all files already have current summaries",
+			"duration_ms":   time.Since(start).Milliseconds(),
+		}
+		env := protocol.OK("index.file-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	// Get LLM provider
+	providers := llmproviders.FileSummaryProviders()
+	if len(providers) == 0 {
+		return fmt.Errorf("no LLM providers available - set OPENROUTER_API_KEY, CEREBRAS_API_KEY, or GROQ_API_KEY")
+	}
+
+	llm := llmproviders.NewSummaryLLM(providers[0])
+	if llm == nil {
+		return fmt.Errorf("failed to create LLM provider")
+	}
+
+	fmt.Fprintf(os.Stderr, "Using LLM provider: %s (%s)\n", providers[0].Name, providers[0].Model)
+	fmt.Fprintf(os.Stderr, "Processing %d files (skipped %d with current summaries)...\n", len(filesToProcess), skippedCount)
+
+	// Get optional embedding provider
+	var embedProvider semantic.EmbeddingProvider
+	if key := os.Getenv("VOYAGE_API_KEY"); key != "" {
+		provider, err := semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey: key,
+			Model:  "voyage-code-3",
+		})
+		if err == nil {
+			embedProvider = provider
+		}
+	}
+
+	// Create summary generator
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	generator := retrieval.NewFileSummaryGenerator(store, llm, embedProvider, absWorkspace, logger)
+
+	// Process files in batches
+	var processed, errors int
+	results := make([]map[string]any, 0)
+
+	for i := 0; i < len(filesToProcess); i += batchSize {
+		end := i + batchSize
+		if end > len(filesToProcess) {
+			end = len(filesToProcess)
+		}
+		batch := filesToProcess[i:end]
+
+		fmt.Fprintf(os.Stderr, "  Batch %d-%d of %d...\n", i+1, end, len(filesToProcess))
+
+		for _, f := range batch {
+			input, inputErr := buildFileSummaryInput(absWorkspace, f)
+			if inputErr != nil {
+				results = append(results, map[string]any{
+					"file":   f,
+					"status": "error",
+					"error":  inputErr.Error(),
+				})
+				errors++
+				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", f, inputErr)
+				continue
+			}
+
+			summary, cached, err := generator.GetOrCreateSummary(ctx, input)
+			if err != nil {
+				results = append(results, map[string]any{
+					"file":   f,
+					"status": "error",
+					"error":  err.Error(),
+				})
+				errors++
+				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", f, err)
+				continue
+			}
+
+			if !cached {
+				results = append(results, map[string]any{
+					"file":    f,
+					"status":  "generated",
+					"summary": summary,
+				})
+				processed++
+				fmt.Fprintf(os.Stderr, "    [generated] %s\n", f)
+			} else {
+				results = append(results, map[string]any{
+					"file":   f,
+					"status": "cached",
+				})
+			}
+		}
+	}
+
+	data := map[string]any{
+		"workspace":     absWorkspace,
+		"provider":      providers[0].Name,
+		"model":         providers[0].Model,
+		"files_found":   len(files),
+		"files_skipped": skippedCount,
+		"processed":     processed,
+		"errors":        errors,
+		"force":         force,
+		"results":       results,
+		"duration_ms":   time.Since(start).Milliseconds(),
+	}
+
+	env := protocol.OK("index.file-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+// buildFileSummaryInput builds a FileSummaryInput from a file path.
+func buildFileSummaryInput(workspace, relPath string) (symbol.FileSummaryInput, error) {
+	fullPath := filepath.Join(workspace, relPath)
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		return symbol.FileSummaryInput{}, fmt.Errorf("read file %s: %w", relPath, err)
+	}
+
+	input := symbol.FileSummaryInput{
+		FilePath:    relPath,
+		SymbolsHash: symbol.ComputeSymbolsHash(content, relPath), // Hash symbols for cache invalidation
+	}
+
+	// Extract package name for Go files
+	if strings.HasSuffix(relPath, ".go") {
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "package ") {
+				input.Package = strings.TrimPrefix(line, "package ")
+				break
+			}
+		}
+	}
+
+	// Extract first comment block (simplified)
+	input.FirstComment = extractFirstCommentForSummary(string(content))
+
+	// Extract top symbols (simplified)
+	input.TopSymbols = extractTopSymbolsForSummary(string(content), relPath)
+
+	return input, nil
+}
+
+// extractFirstCommentForSummary extracts the first comment block.
+func extractFirstCommentForSummary(content string) string {
+	lines := strings.Split(content, "\n")
+	var comment strings.Builder
+	inBlock := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" && comment.Len() == 0 {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "/*") {
+			inBlock = true
+			trimmed = strings.TrimPrefix(trimmed, "/*")
+		}
+		if inBlock {
+			if idx := strings.Index(trimmed, "*/"); idx >= 0 {
+				comment.WriteString(strings.TrimSpace(trimmed[:idx]))
+				break
+			}
+			comment.WriteString(strings.TrimSpace(trimmed))
+			comment.WriteString(" ")
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "//") {
+			comment.WriteString(strings.TrimSpace(strings.TrimPrefix(trimmed, "//")))
+			comment.WriteString(" ")
+			continue
+		}
+
+		if comment.Len() > 0 || !strings.HasPrefix(trimmed, "package") {
+			break
+		}
+	}
+
+	result := strings.TrimSpace(comment.String())
+	if len(result) > 200 {
+		result = result[:200]
+	}
+	return result
+}
+
+// extractTopSymbolsForSummary extracts top-level symbol names.
+func extractTopSymbolsForSummary(content string, path string) []string {
+	var symbols []string
+	lines := strings.Split(content, "\n")
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Go functions/types
+		if strings.HasPrefix(trimmed, "func ") {
+			if name := extractGoFuncNameForSummary(trimmed); name != "" && name[0] >= 'A' && name[0] <= 'Z' {
+				symbols = append(symbols, name)
+			}
+		} else if strings.HasPrefix(trimmed, "type ") {
+			parts := strings.Fields(strings.TrimPrefix(trimmed, "type "))
+			if len(parts) > 0 && len(parts[0]) > 0 && parts[0][0] >= 'A' && parts[0][0] <= 'Z' {
+				symbols = append(symbols, parts[0])
+			}
+		}
+
+		// TypeScript/JavaScript exports
+		if (strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx") ||
+			strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".jsx")) &&
+			strings.HasPrefix(trimmed, "export ") {
+			if name := extractTSExportNameForSummary(trimmed); name != "" {
+				symbols = append(symbols, name)
+			}
+		}
+
+		if len(symbols) >= 10 {
+			break
+		}
+	}
+
+	return symbols
+}
+
+func extractGoFuncNameForSummary(line string) string {
+	line = strings.TrimPrefix(line, "func ")
+	if strings.HasPrefix(line, "(") {
+		idx := strings.Index(line, ")")
+		if idx >= 0 {
+			line = strings.TrimSpace(line[idx+1:])
+		}
+	}
+	idx := strings.Index(line, "(")
+	if idx > 0 {
+		return line[:idx]
+	}
+	return ""
+}
+
+func extractTSExportNameForSummary(line string) string {
+	line = strings.TrimPrefix(line, "export ")
+	line = strings.TrimPrefix(line, "default ")
+
+	if strings.HasPrefix(line, "function ") {
+		line = strings.TrimPrefix(line, "function ")
+		idx := strings.Index(line, "(")
+		if idx > 0 {
+			return line[:idx]
+		}
+	}
+	if strings.HasPrefix(line, "const ") || strings.HasPrefix(line, "let ") || strings.HasPrefix(line, "var ") {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			return strings.TrimSuffix(parts[1], ":")
+		}
+	}
+	if strings.HasPrefix(line, "class ") || strings.HasPrefix(line, "interface ") || strings.HasPrefix(line, "type ") {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			return strings.TrimSuffix(parts[1], "{")
+		}
+	}
+	return ""
 }
 
 func init() {

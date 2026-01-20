@@ -11,3 +11,4 @@ export { SessionsPage } from "./SessionsPage";
 export { CodemapsPage } from "./CodemapsPage";
 export { AgentsPage } from "./AgentsPage";
 export { ConsolePage } from "./ConsolePage";
+export { BlackboardPage } from "./BlackboardPage";

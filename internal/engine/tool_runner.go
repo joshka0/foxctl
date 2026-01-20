@@ -47,6 +47,10 @@ type ToolRunnerConfig struct {
 
 	// ActorID is the actor identifier for hook context.
 	ActorID string
+
+	// ActionExecutor processes hook output actions. Optional - actions are
+	// skipped if nil.
+	ActionExecutor hooks.ActionExecutor
 }
 
 // DefaultToolRunnerConfig returns sensible defaults.
@@ -124,7 +128,26 @@ func (r *ToolRunner) Execute(ctx context.Context, call ToolCall) (ToolResult, er
 	}
 
 	// 4. Dispatch PostToolUse hook
-	_ = r.dispatchPostToolUse(ctx, call, toolResult, durationMS)
+	postOutput := r.dispatchPostToolUse(ctx, call, toolResult, durationMS)
+
+	// 5. Process hook actions
+	if r.config.ActionExecutor != nil && len(postOutput.Actions) > 0 {
+		hookInput := hooks.Input{
+			Event:         hooks.EventPostToolUse,
+			ToolName:      call.Name,
+			SessionID:     r.config.SessionID,
+			ActorID:       r.config.ActorID,
+			WorkspaceID:   r.config.WorkspaceID,
+			WorkspaceRoot: r.config.Workspace,
+		}
+
+		injectedCtx, _ := r.config.ActionExecutor.Execute(ctx, postOutput.Actions, hookInput)
+
+		// Append injected context to tool result if present
+		if injectedCtx != "" {
+			toolResult.Content = toolResult.Content + "\n\n---\n" + injectedCtx
+		}
+	}
 
 	return toolResult, nil
 }
@@ -215,6 +238,13 @@ func WithToolRunnerSession(sessionID string) ToolRunnerOption {
 func WithToolRunnerActor(actorID string) ToolRunnerOption {
 	return func(c *ToolRunnerConfig) {
 		c.ActorID = actorID
+	}
+}
+
+// WithActionExecutor sets the action executor for processing hook actions.
+func WithActionExecutor(executor hooks.ActionExecutor) ToolRunnerOption {
+	return func(c *ToolRunnerConfig) {
+		c.ActionExecutor = executor
 	}
 }
 

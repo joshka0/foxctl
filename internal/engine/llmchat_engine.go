@@ -14,6 +14,14 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// HookContext provides context for hook dispatch from LLMChatEngine.
+type HookContext struct {
+	SessionID     string
+	ActorID       string
+	WorkspaceID   string
+	WorkspaceRoot string
+}
+
 // LLMChatEngine implements AgentEngine using OpenAI-compatible chat completions.
 // Supports OpenRouter, Groq, OpenAI, and other compatible providers.
 type LLMChatEngine struct {
@@ -21,6 +29,7 @@ type LLMChatEngine struct {
 	client      *http.Client
 	toolRunner  *ToolRunner
 	rlmExecutor *RLMToolExecutor // For tracking RLM context queries
+	hookContext HookContext
 	logger      zerolog.Logger
 }
 
@@ -52,6 +61,10 @@ type LLMChatConfig struct {
 
 	// HookDispatcher for pre/post tool use hooks (optional).
 	HookDispatcher hooks.Dispatcher
+
+	// ActionExecutor processes hook output actions. Optional - actions are
+	// skipped if nil.
+	ActionExecutor hooks.ActionExecutor
 
 	// Logger for structured logging.
 	Logger zerolog.Logger
@@ -140,6 +153,11 @@ func (e *LLMChatEngine) IsStatelessMode() bool {
 	return e.config.StatelessMode
 }
 
+// SetHookContext sets the context used for hook dispatch.
+func (e *LLMChatEngine) SetHookContext(ctx HookContext) {
+	e.hookContext = ctx
+}
+
 // Run implements AgentEngine.
 func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {
 	// Reset RLM query counter at start of turn
@@ -204,17 +222,70 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				}
 				output.ToolCalls = append(output.ToolCalls, toolCall)
 
-				// Execute tool
 				var result ToolResult
-				if e.toolRunner != nil {
-					result, _ = e.toolRunner.Execute(ctx, toolCall)
-				} else {
+				start := time.Now()
+
+				// 1. Dispatch PreToolUse hook
+				preOutput, err := e.dispatchPreToolUse(ctx, toolCall)
+				if err != nil {
+					e.logger.Warn().Err(err).Str("tool", toolCall.Name).Msg("PreToolUse hook error")
+				}
+
+				// Check if blocked by hook
+				if preOutput.Decision.IsBlocking() {
 					result = ToolResult{
 						ToolCallID: tc.ID,
-						Content:    fmt.Sprintf("Tool %q not available", tc.Function.Name),
+						Content:    fmt.Sprintf("Blocked by hook: %s", preOutput.Reason),
 						IsError:    true,
 					}
+				} else {
+					// Use updated args if hook modified them
+					execArgs := toolCall.Arguments
+					if len(preOutput.UpdatedToolInput) > 0 {
+						execArgs = preOutput.UpdatedToolInput
+					}
+
+					// 2. Execute tool
+					if e.toolRunner != nil {
+						// Create a modified call with potentially updated args
+						execCall := ToolCall{
+							ID:        toolCall.ID,
+							Name:      toolCall.Name,
+							Arguments: execArgs,
+						}
+						result, _ = e.toolRunner.Execute(ctx, execCall)
+					} else {
+						result = ToolResult{
+							ToolCallID: tc.ID,
+							Content:    fmt.Sprintf("Tool %q not available", tc.Function.Name),
+							IsError:    true,
+						}
+					}
 				}
+
+				// 3. Dispatch PostToolUse hook
+				durationMS := time.Since(start).Milliseconds()
+				postOutput := e.dispatchPostToolUse(ctx, toolCall, result, durationMS)
+
+				// 4. Process hook actions
+				if e.config.ActionExecutor != nil && len(postOutput.Actions) > 0 {
+					hookInput := hooks.Input{
+						Event:         hooks.EventPostToolUse,
+						ToolName:      toolCall.Name,
+						SessionID:     e.hookContext.SessionID,
+						ActorID:       e.hookContext.ActorID,
+						WorkspaceID:   e.hookContext.WorkspaceID,
+						WorkspaceRoot: e.hookContext.WorkspaceRoot,
+					}
+
+					injectedCtx, _ := e.config.ActionExecutor.Execute(ctx, postOutput.Actions, hookInput)
+
+					// Append injected context to tool result if present
+					if injectedCtx != "" {
+						result.Content = result.Content + "\n\n---\n" + injectedCtx
+					}
+				}
+
 				output.ToolResults = append(output.ToolResults, result)
 
 				// Add tool result to messages
@@ -446,9 +517,79 @@ type oaiResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// Hook dispatch methods
+
+// dispatchPreToolUse dispatches the PreToolUse hook before tool execution.
+// Returns the merged output from all matching hooks.
+func (e *LLMChatEngine) dispatchPreToolUse(ctx context.Context, call ToolCall) (hooks.Output, error) {
+	if e.config.HookDispatcher == nil {
+		return hooks.NewApprove("no dispatcher", nil), nil
+	}
+
+	input := hooks.Input{
+		Event:         hooks.EventPreToolUse,
+		ToolName:      call.Name,
+		ToolCanonical: call.Name,
+		ToolKind:      hooks.ClassifyToolKind(call.Name, call.Name),
+		ToolInput:     call.Arguments,
+		SessionID:     e.hookContext.SessionID,
+		ActorID:       e.hookContext.ActorID,
+		WorkspaceID:   e.hookContext.WorkspaceID,
+		WorkspaceRoot: e.hookContext.WorkspaceRoot,
+	}
+
+	result, err := e.config.HookDispatcher.Dispatch(ctx, input)
+	if err != nil {
+		e.logger.Warn().Err(err).Str("tool", call.Name).Msg("PreToolUse hook dispatch failed")
+		return hooks.NewApprove("hook error (fail-open)", nil), nil
+	}
+	return result.Output, nil
+}
+
+// dispatchPostToolUse dispatches the PostToolUse hook after tool execution.
+func (e *LLMChatEngine) dispatchPostToolUse(ctx context.Context, call ToolCall, result ToolResult, durationMS int64) hooks.Output {
+	if e.config.HookDispatcher == nil {
+		return hooks.NewNone()
+	}
+
+	// Prepare observation (what goes back to LLM)
+	observation, _ := json.Marshal(map[string]any{
+		"content":  result.Content,
+		"is_error": result.IsError,
+	})
+
+	input := hooks.Input{
+		Event:           hooks.EventPostToolUse,
+		ToolName:        call.Name,
+		ToolCanonical:   call.Name,
+		ToolKind:        hooks.ClassifyToolKind(call.Name, call.Name),
+		ToolInput:       call.Arguments,
+		ToolObservation: observation,
+		ToolDurationMS:  durationMS,
+		SessionID:       e.hookContext.SessionID,
+		ActorID:         e.hookContext.ActorID,
+		WorkspaceID:     e.hookContext.WorkspaceID,
+		WorkspaceRoot:   e.hookContext.WorkspaceRoot,
+	}
+
+	if result.IsError {
+		input.ToolError = result.Content
+	}
+
+	hookResult, err := e.config.HookDispatcher.Dispatch(ctx, input)
+	if err != nil {
+		e.logger.Warn().Err(err).Str("tool", call.Name).Msg("PostToolUse hook dispatch failed")
+		return hooks.NewNone()
+	}
+	return hookResult.Output
+}
+
 // Helper functions
 
 func detectProvider() (apiKey, provider string) {
+	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
+		return key, "cerebras"
+	}
 	if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
 		return key, "openrouter"
 	}
@@ -463,6 +604,8 @@ func detectProvider() (apiKey, provider string) {
 
 func baseURLForProvider(provider string) string {
 	switch provider {
+	case "cerebras":
+		return "https://api.cerebras.ai/v1"
 	case "openrouter":
 		return "https://openrouter.ai/api/v1"
 	case "groq":
@@ -476,11 +619,16 @@ func baseURLForProvider(provider string) string {
 
 func defaultModelForProvider(provider string) string {
 	switch provider {
+	case "cerebras":
+		if model := os.Getenv("CEREBRAS_MODEL"); model != "" {
+			return model
+		}
+		return "zai-glm-4.7"
 	case "openrouter":
 		if model := os.Getenv("OPENROUTER_MODEL"); model != "" {
 			return model
 		}
-		return "openai/gpt-4o-mini"
+		return "mistralai/devstral-2512:free"
 	case "groq":
 		return "llama-3.3-70b-versatile"
 	default:

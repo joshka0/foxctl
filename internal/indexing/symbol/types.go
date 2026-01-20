@@ -24,6 +24,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 )
 
 // SymbolType is the memory entry type for symbol entries.
@@ -37,6 +44,11 @@ const CallEdgeType = "code_symbol_call"
 // FileMetaType is the memory entry type for file freshness tracking.
 // Maps to the conceptual `file_meta` table in code_symbol_index_and_swe_grep.md §3.3.
 const FileMetaType = "code_symbol_file_meta"
+
+// FileSummaryType is the memory entry type for file-level summaries.
+// Used by the semantic search tree ("smart TOC") feature.
+// Entry names follow the format: "file://<workspace>/<file_path>"
+const FileSummaryType = "file_summary"
 
 // Kind represents the kind of code symbol.
 type Kind string
@@ -291,4 +303,263 @@ func UnmarshalFileMeta(data []byte) (*FileMeta, error) {
 		return nil, err
 	}
 	return &result, nil
+}
+
+// FileSummaryResult is the structured metadata stored in NamedEntry.Result
+// for file_summary entries. These entries are used by the semantic search tree
+// ("smart TOC") feature to provide file-level descriptions.
+type FileSummaryResult struct {
+	// FilePath is the relative path within the workspace.
+	FilePath string `json:"file_path"`
+
+	// Package is the package/module name (language-dependent).
+	Package string `json:"package,omitempty"`
+
+	// Symbols is the list of top exported symbol names in the file.
+	Symbols []string `json:"symbols,omitempty"`
+
+	// Digest is the sha256 hash of the summary generation inputs.
+	// Used for cache invalidation.
+	Digest string `json:"digest"`
+
+	// Language is the detected programming language.
+	Language string `json:"language,omitempty"`
+
+	// LineCount is the number of lines in the file.
+	LineCount int `json:"line_count,omitempty"`
+}
+
+// FileSummaryEntryName generates the canonical name for a file summary entry.
+// Format: file://<workspace>/<file_path>
+//
+// This name is used as the unique key in named memory for file summary entries
+// with type="file_summary". Compatible with extractFilePath in retrieval package.
+func FileSummaryEntryName(workspace, filePath string) string {
+	return fmt.Sprintf("file://%s/%s", workspace, filePath)
+}
+
+// FileSummaryInput represents the inputs used to generate a file summary.
+// The digest of this struct (JSON-encoded) serves as the cache key.
+type FileSummaryInput struct {
+	// FilePath is the relative path within the workspace.
+	FilePath string `json:"file_path"`
+
+	// SymbolsHash is the sha256 hash of the file's exported symbols.
+	// This ensures regeneration only when structural content changes
+	// (functions added/removed/renamed), not comments or implementation details.
+	SymbolsHash string `json:"symbols_hash"`
+
+	// Package is the package/module name.
+	Package string `json:"package,omitempty"`
+
+	// PackageDoc is the package-level documentation comment.
+	PackageDoc string `json:"package_doc,omitempty"`
+
+	// FirstComment is the first comment block in the file.
+	FirstComment string `json:"first_comment,omitempty"`
+
+	// TopSymbols are the top N exported symbol signatures.
+	TopSymbols []string `json:"top_symbols,omitempty"`
+}
+
+// ComputeFileSummaryDigest computes a digest of the summary inputs for caching.
+func ComputeFileSummaryDigest(input FileSummaryInput) string {
+	data, _ := json.Marshal(input)
+	return ComputeDigest(data)
+}
+
+// ComputeSymbolsHash extracts exported symbols from file content and returns a hash.
+// This hash changes only when the file's structural content changes (symbols added/
+// removed/renamed), not when comments or implementation details change.
+func ComputeSymbolsHash(content []byte, filePath string) string {
+	symbols := ExtractSymbolSignatures(content, filePath)
+	// Sort for consistent hashing
+	sort.Strings(symbols)
+	data, _ := json.Marshal(symbols)
+	return ComputeDigest(data)
+}
+
+// ExtractSymbolSignatures extracts exported symbol signatures from file content.
+// Returns a list of "name:kind" strings for each exported symbol.
+func ExtractSymbolSignatures(content []byte, filePath string) []string {
+	ext := filepath.Ext(filePath)
+	switch ext {
+	case ".go":
+		return extractGoSymbolSignatures(content)
+	case ".ts", ".tsx", ".js", ".jsx":
+		return extractJSSymbolSignatures(content)
+	case ".py":
+		return extractPythonSymbolSignatures(content)
+	default:
+		return extractGenericSymbolSignatures(content)
+	}
+}
+
+// MarshalFileSummaryResult serializes a FileSummaryResult to JSON bytes.
+func MarshalFileSummaryResult(result FileSummaryResult) ([]byte, error) {
+	return json.Marshal(result)
+}
+
+// UnmarshalFileSummaryResult deserializes a FileSummaryResult from JSON bytes.
+func UnmarshalFileSummaryResult(data []byte) (*FileSummaryResult, error) {
+	var result FileSummaryResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// extractGoSymbolSignatures extracts exported symbol signatures from Go source.
+// Uses the Go AST parser for accurate extraction.
+func extractGoSymbolSignatures(content []byte) []string {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", content, 0) // No comments needed
+	if err != nil {
+		return nil
+	}
+
+	var symbols []string
+
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d.Name == nil || !ast.IsExported(d.Name.Name) {
+				continue
+			}
+			kind := "func"
+			if d.Recv != nil {
+				kind = "method"
+			}
+			// Include signature for methods to differentiate receivers
+			sig := d.Name.Name
+			if d.Recv != nil && len(d.Recv.List) > 0 {
+				sig = goExprString(d.Recv.List[0].Type) + "." + d.Name.Name
+			}
+			symbols = append(symbols, sig+":"+kind)
+
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					if !ast.IsExported(s.Name.Name) {
+						continue
+					}
+					kind := "type"
+					switch s.Type.(type) {
+					case *ast.StructType:
+						kind = "struct"
+					case *ast.InterfaceType:
+						kind = "interface"
+					}
+					symbols = append(symbols, s.Name.Name+":"+kind)
+
+				case *ast.ValueSpec:
+					for _, name := range s.Names {
+						if !ast.IsExported(name.Name) {
+							continue
+						}
+						kind := d.Tok.String() // "const" or "var"
+						symbols = append(symbols, name.Name+":"+kind)
+					}
+				}
+			}
+		}
+	}
+
+	return symbols
+}
+
+// goExprString converts a Go AST expression to a string (for receiver types).
+func goExprString(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.StarExpr:
+		return "*" + goExprString(e.X)
+	default:
+		return ""
+	}
+}
+
+// extractJSSymbolSignatures extracts exported symbols from JS/TS source.
+func extractJSSymbolSignatures(content []byte) []string {
+	var symbols []string
+	lines := strings.Split(string(content), "\n")
+
+	// Patterns for exports
+	exportFunc := regexp.MustCompile(`^export\s+(?:async\s+)?function\s+(\w+)`)
+	exportConst := regexp.MustCompile(`^export\s+(?:const|let|var)\s+(\w+)`)
+	exportClass := regexp.MustCompile(`^export\s+(?:abstract\s+)?class\s+(\w+)`)
+	exportInterface := regexp.MustCompile(`^export\s+(?:interface|type)\s+(\w+)`)
+	exportDefault := regexp.MustCompile(`^export\s+default\s+(?:function|class)\s+(\w+)`)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		if m := exportFunc.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":function")
+		} else if m := exportConst.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":const")
+		} else if m := exportClass.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":class")
+		} else if m := exportInterface.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":type")
+		} else if m := exportDefault.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":default")
+		}
+	}
+
+	return symbols
+}
+
+// extractPythonSymbolSignatures extracts public symbols from Python source.
+func extractPythonSymbolSignatures(content []byte) []string {
+	var symbols []string
+	lines := strings.Split(string(content), "\n")
+
+	funcDef := regexp.MustCompile(`^def\s+(\w+)\s*\(`)
+	classDef := regexp.MustCompile(`^class\s+(\w+)`)
+
+	for _, line := range lines {
+		// Only top-level definitions (no leading whitespace)
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			continue
+		}
+
+		if m := funcDef.FindStringSubmatch(line); m != nil {
+			name := m[1]
+			if !strings.HasPrefix(name, "_") { // Public only
+				symbols = append(symbols, name+":function")
+			}
+		} else if m := classDef.FindStringSubmatch(line); m != nil {
+			name := m[1]
+			if !strings.HasPrefix(name, "_") { // Public only
+				symbols = append(symbols, name+":class")
+			}
+		}
+	}
+
+	return symbols
+}
+
+// extractGenericSymbolSignatures extracts symbols using generic patterns.
+// Fallback for unsupported languages.
+func extractGenericSymbolSignatures(content []byte) []string {
+	var symbols []string
+	lines := strings.Split(string(content), "\n")
+
+	// Generic patterns that work across many languages
+	funcPattern := regexp.MustCompile(`(?:func|function|def|fn)\s+([A-Z]\w*)`)
+	typePattern := regexp.MustCompile(`(?:type|class|struct|interface)\s+([A-Z]\w*)`)
+
+	for _, line := range lines {
+		if m := funcPattern.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":function")
+		}
+		if m := typePattern.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":type")
+		}
+	}
+
+	return symbols
 }

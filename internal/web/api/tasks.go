@@ -27,6 +27,8 @@ type TaskResponse struct {
 	Notes       string   `json:"notes,omitempty"`
 	Gotchas     string   `json:"gotchas,omitempty"`
 	SessionID   string   `json:"session_id,omitempty"`
+	PageRank float64 `json:"pagerank"`
+	Priority int     `json:"priority"`
 }
 
 // TaskStats provides summary statistics for tasks.
@@ -107,6 +109,7 @@ func TasksListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 				Notes:       t.Notes,
 				Gotchas:     t.Gotchas,
 				SessionID:   t.SessionID,
+			PageRank:    t.PageRank,
 			}
 			if t.CompletedAt != nil {
 				tr.CompletedAt = t.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -204,6 +207,7 @@ func TaskDetailHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			Notes:       task.Notes,
 			Gotchas:     task.Gotchas,
 			SessionID:   task.SessionID,
+		PageRank:    task.PageRank,
 		}
 		if task.CompletedAt != nil {
 			tr.CompletedAt = task.CompletedAt.Format("2006-01-02T15:04:05Z07:00")

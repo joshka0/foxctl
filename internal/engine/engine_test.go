@@ -591,3 +591,135 @@ func TestToolRunner_Execute_SessionContext(t *testing.T) {
 		t.Errorf("expected test.tool, got %s", receivedInput.ToolName)
 	}
 }
+
+// --- MockActionExecutor for testing ---
+
+type MockActionExecutor struct {
+	ExecuteFn func(ctx context.Context, actions []hooks.Action, input hooks.Input) (string, error)
+	Calls     []struct {
+		Actions []hooks.Action
+		Input   hooks.Input
+	}
+}
+
+func (m *MockActionExecutor) Execute(ctx context.Context, actions []hooks.Action, input hooks.Input) (string, error) {
+	m.Calls = append(m.Calls, struct {
+		Actions []hooks.Action
+		Input   hooks.Input
+	}{Actions: actions, Input: input})
+
+	if m.ExecuteFn != nil {
+		return m.ExecuteFn(ctx, actions, input)
+	}
+	return "", nil
+}
+
+func TestToolRunner_Execute_ActionExecutor(t *testing.T) {
+	executor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			return "tool result", nil
+		},
+	}
+
+	// Dispatcher returns actions in PostToolUse
+	dispatcher := &MockHookDispatcher{
+		DispatchFn: func(ctx context.Context, input hooks.Input) (hooks.Result, error) {
+			if input.Event == hooks.EventPostToolUse {
+				out := hooks.NewNone()
+				out.Actions = []hooks.Action{
+					{Type: hooks.ActionInjectContext, Text: "Injected by hook"},
+					{Type: hooks.ActionRunSkill, Skill: "memory/store"},
+				}
+				return hooks.Result{Output: out}, nil
+			}
+			return hooks.Result{Output: hooks.NewApprove("ok", nil)}, nil
+		},
+	}
+
+	actionExec := &MockActionExecutor{
+		ExecuteFn: func(ctx context.Context, actions []hooks.Action, input hooks.Input) (string, error) {
+			// Return injected context
+			for _, a := range actions {
+				if a.Type == hooks.ActionInjectContext {
+					return a.Text, nil
+				}
+			}
+			return "", nil
+		},
+	}
+
+	cfg := DefaultToolRunnerConfig()
+	cfg.ActionExecutor = actionExec
+	cfg.SessionID = "session-123"
+	cfg.ActorID = "actor:test"
+
+	runner := NewToolRunner(executor, dispatcher, cfg)
+
+	call := ToolCall{
+		ID:        "call-1",
+		Name:      "test.tool",
+		Arguments: json.RawMessage(`{}`),
+	}
+
+	result, err := runner.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify action executor was called
+	if len(actionExec.Calls) != 1 {
+		t.Fatalf("expected 1 action executor call, got %d", len(actionExec.Calls))
+	}
+
+	// Verify actions were passed
+	if len(actionExec.Calls[0].Actions) != 2 {
+		t.Errorf("expected 2 actions, got %d", len(actionExec.Calls[0].Actions))
+	}
+
+	// Verify context was injected into result
+	if !strings.Contains(result.Content, "tool result") {
+		t.Errorf("expected original result, got: %s", result.Content)
+	}
+	if !strings.Contains(result.Content, "Injected by hook") {
+		t.Errorf("expected injected context, got: %s", result.Content)
+	}
+}
+
+func TestToolRunner_Execute_ActionExecutor_NoActions(t *testing.T) {
+	executor := &MockToolExecutor{
+		ExecuteFn: func(ctx context.Context, name string, args json.RawMessage) (string, error) {
+			return "tool result", nil
+		},
+	}
+
+	// Dispatcher returns no actions
+	dispatcher := &MockHookDispatcher{}
+
+	actionExec := &MockActionExecutor{}
+
+	cfg := DefaultToolRunnerConfig()
+	cfg.ActionExecutor = actionExec
+
+	runner := NewToolRunner(executor, dispatcher, cfg)
+
+	call := ToolCall{
+		ID:        "call-1",
+		Name:      "test.tool",
+		Arguments: json.RawMessage(`{}`),
+	}
+
+	result, err := runner.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Action executor should not be called when no actions
+	if len(actionExec.Calls) != 0 {
+		t.Errorf("expected 0 action executor calls, got %d", len(actionExec.Calls))
+	}
+
+	// Result should be unchanged
+	if result.Content != "tool result" {
+		t.Errorf("expected 'tool result', got: %s", result.Content)
+	}
+}

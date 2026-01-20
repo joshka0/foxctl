@@ -168,6 +168,9 @@ type AgentConfig struct {
 	// TaskID is the optional task scope.
 	TaskID string `json:"task_id,omitempty"`
 
+	// Prompt is the specific task/instruction for the agent.
+	Prompt string `json:"prompt,omitempty"`
+
 	// TeamID is the optional team this agent belongs to.
 	TeamID string `json:"team_id,omitempty"`
 

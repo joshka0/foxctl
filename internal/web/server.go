@@ -3,10 +3,13 @@ package web
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/consoleapp"
+	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/web/api"
 	"github.com/jkatigb/agentctl/internal/web/consolews"
@@ -32,6 +35,10 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 	persistence := consolews.NewPersistenceAdapter(cfg.Storage.Root, log)
 	consoleHub.SetPersistence(persistence)
 
+	// Set up runner factory for console sessions (LLM integration)
+	runnerFactory := createConsoleRunnerFactory(cfg, log)
+	consoleHub.SetRunnerFactory(runnerFactory)
+
 	s := &Server{
 		opts:       opts,
 		cfg:        cfg,
@@ -41,6 +48,50 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 	}
 
 	return s, nil
+}
+
+// createConsoleRunnerFactory creates a factory function that creates LLM runners for console sessions.
+func createConsoleRunnerFactory(cfg config.Config, log zerolog.Logger) consolews.RunnerFactory {
+	// Load .env file to get API keys
+	config.LoadDotEnv()
+
+	// Debug: check if API key is available
+	groqKey := os.Getenv("GROQ_API_KEY")
+	orKey := os.Getenv("OPENROUTER_API_KEY")
+	log.Info().
+		Bool("groq_key_present", groqKey != "").
+		Bool("openrouter_key_present", orKey != "").
+		Msg("console runner factory initialized, .env loaded")
+
+	return func(session *consolews.Session) consolews.Runner {
+		log.Info().Str("session", session.ID()).Msg("creating console runner for session")
+
+		// Create LLM engine config
+		engineCfg := engine.LLMChatConfig{
+			MaxIterations: 20,
+			Temperature:   0.0,
+			MaxTokens:     4096,
+			Logger:        log.With().Str("session", session.ID()).Logger(),
+		}
+
+		// Create the engine (auto-detects API keys)
+		llmEngine, err := engine.NewLLMChatEngine(engineCfg)
+		if err != nil {
+			log.Warn().Err(err).Msg("failed to create LLM engine for console - no API key?")
+			return nil
+		}
+
+		log.Info().Str("session", session.ID()).Msg("LLM engine created for console session")
+
+		// Create console runner
+		runner := consoleapp.NewRunner(consoleapp.RunnerConfig{
+			Engine: llmEngine,
+			Tools:  nil, // No tools for now - pure chat
+			Logger: log.With().Str("session", session.ID()).Logger(),
+		})
+
+		return runner
+	}
 }
 
 // Run starts the SSE hub event loop. Call in a goroutine.

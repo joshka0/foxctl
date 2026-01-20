@@ -86,12 +86,43 @@ func (s *sqlStore) Search(ctx context.Context, ns, topic string, limit int) ([]a
 		limit = 20
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
-		FROM blackboard
-		WHERE ns = ? AND topic = ?
-		ORDER BY ts DESC
-		LIMIT ?`, ns, topic, limit)
+	var rows *sql.Rows
+	var err error
+
+	// Handle wildcard queries
+	switch {
+	case ns == "" && topic == "":
+		// All records across all namespaces
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
+			FROM blackboard
+			ORDER BY ts DESC
+			LIMIT ?`, limit)
+	case ns == "":
+		// All records matching topic across all namespaces
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
+			FROM blackboard
+			WHERE topic = ?
+			ORDER BY ts DESC
+			LIMIT ?`, topic, limit)
+	case topic == "":
+		// All records in the namespace
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
+			FROM blackboard
+			WHERE ns = ?
+			ORDER BY ts DESC
+			LIMIT ?`, ns, limit)
+	default:
+		// Specific namespace and topic
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT id, ns, topic, ts, ttl_sec, payload, cas_ref, lease
+			FROM blackboard
+			WHERE ns = ? AND topic = ?
+			ORDER BY ts DESC
+			LIMIT ?`, ns, topic, limit)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("blackboard: search: %w", err)
 	}
@@ -338,13 +369,19 @@ type scanner interface {
 func scanRecord(s scanner) (agent.BlackboardRecord, error) {
 	var record agent.BlackboardRecord
 	var payloadJSON string
+	var casRef sql.NullString
 	var leaseJSON sql.NullString
-	if err := s.Scan(&record.ID, &record.NS, &record.Topic, &record.TS, &record.TTLSec, &payloadJSON, &record.CASRef, &leaseJSON); err != nil {
+	if err := s.Scan(&record.ID, &record.NS, &record.Topic, &record.TS, &record.TTLSec, &payloadJSON, &casRef, &leaseJSON); err != nil {
 		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: scan: %w", err)
 	}
 
 	// Set payload as RawMessage
 	record.Payload = json.RawMessage(payloadJSON)
+
+	// Set CAS ref if present
+	if casRef.Valid {
+		record.CASRef = casRef.String
+	}
 
 	// Parse lease if present
 	if leaseJSON.Valid && leaseJSON.String != "null" && leaseJSON.String != "" {
@@ -361,13 +398,19 @@ func scanRecord(s scanner) (agent.BlackboardRecord, error) {
 func scanRecordFromRows(rows *sql.Rows) (agent.BlackboardRecord, error) {
 	var record agent.BlackboardRecord
 	var payloadJSON string
+	var casRef sql.NullString
 	var leaseJSON sql.NullString
-	if err := rows.Scan(&record.ID, &record.NS, &record.Topic, &record.TS, &record.TTLSec, &payloadJSON, &record.CASRef, &leaseJSON); err != nil {
+	if err := rows.Scan(&record.ID, &record.NS, &record.Topic, &record.TS, &record.TTLSec, &payloadJSON, &casRef, &leaseJSON); err != nil {
 		return agent.BlackboardRecord{}, fmt.Errorf("blackboard: scan: %w", err)
 	}
 
 	// Set payload as RawMessage
 	record.Payload = json.RawMessage(payloadJSON)
+
+	// Set CAS ref if present
+	if casRef.Valid {
+		record.CASRef = casRef.String
+	}
 
 	// Parse lease if present
 	if leaseJSON.Valid && leaseJSON.String != "null" && leaseJSON.String != "" {

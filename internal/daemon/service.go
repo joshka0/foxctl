@@ -17,14 +17,27 @@ import (
 	"sync/atomic"
 	"time"
 
+	"log/slog"
+
+	"github.com/jkatigb/agentctl/internal/agent/runtime"
+	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/context/updater"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
+	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/sessionkit/summary"
+	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
+	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
+	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/rs/zerolog"
@@ -69,10 +82,33 @@ type Service struct {
 	summaryWorker *summary.Worker
 	summaryCtx    context.Context
 	summaryCancel context.CancelFunc
+
+	// Context updater worker (proactive context surfacing)
+	contextUpdater       *updater.Worker
+	contextUpdaterCtx    context.Context
+	contextUpdaterCancel context.CancelFunc
+
+	// File summary worker (background LLM summaries)
+	fileSummaryWorker       *filesummary.Worker
+	fileSummaryWorkerCtx    context.Context
+	fileSummaryWorkerCancel context.CancelFunc
+	fileSummaryMemoryStore  storage.MemoryStore // Memory store for file summary worker (close on shutdown)
+
+	// Agent orchestration
+	agentRuntime       *runtime.Runtime
+	agentOverseer      *runtime.Overseer
+	agentCtx           context.Context
+	agentCancel        context.CancelFunc
+	agentSessionStore  *sessions.Store        // Session store for agent persistence (close on shutdown)
+	agentMailboxStore  mailbox.Store          // Mailbox store for agent messaging (close on shutdown)
+	agentBoardStore    blackboard.BoardStore  // Blackboard store for agent coordination (close on shutdown)
 }
 
 // NewService creates a new daemon service.
 func NewService(cfg config.Config, opts ServiceOptions) (*Service, error) {
+	// Load environment variables from .env files
+	config.LoadDotEnv()
+
 	// Create connection pool and set as global
 	pool := sqliteutil.NewPool()
 	sqliteutil.SetGlobalPool(pool)
@@ -133,6 +169,24 @@ func (s *Service) Run(ctx context.Context) error {
 		fmt.Fprintf(os.Stderr, "warning: summary worker failed to start: %v\n", err)
 	}
 
+	// Start background context updater worker
+	if err := s.startContextUpdater(ctx); err != nil {
+		// Log but don't fail daemon startup - worker is optional
+		fmt.Fprintf(os.Stderr, "warning: context updater failed to start: %v\n", err)
+	}
+
+	// Start background file summary worker
+	if err := s.startFileSummaryWorker(ctx); err != nil {
+		// Log but don't fail daemon startup - worker is optional
+		fmt.Fprintf(os.Stderr, "warning: file summary worker failed to start: %v\n", err)
+	}
+
+	// Start agent orchestration (runtime + overseer)
+	if err := s.startAgentOrchestration(ctx); err != nil {
+		// Log but don't fail daemon startup - orchestration is optional
+		fmt.Fprintf(os.Stderr, "warning: agent orchestration failed to start: %v\n", err)
+	}
+
 	// Accept connections
 	go s.acceptLoop(ctx)
 
@@ -179,6 +233,55 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 	if s.summaryCancel != nil {
 		s.summaryCancel()
+	}
+
+	// Stop context updater worker
+	if s.contextUpdater != nil {
+		s.contextUpdater.Stop()
+	}
+	if s.contextUpdaterCancel != nil {
+		s.contextUpdaterCancel()
+	}
+
+	// Stop file summary worker
+	if s.fileSummaryWorker != nil {
+		if err := s.fileSummaryWorker.Stop(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: file summary worker stop error: %v\n", err)
+		}
+	}
+	if s.fileSummaryWorkerCancel != nil {
+		s.fileSummaryWorkerCancel()
+	}
+
+	// Stop agent orchestration
+	if s.agentCancel != nil {
+		s.agentCancel()
+	}
+	// Kill all running agent sessions
+	if s.agentRuntime != nil {
+		for _, session := range s.agentRuntime.List() {
+			_ = s.agentRuntime.Kill(session.ID)
+		}
+	}
+
+	// Close file summary worker memory store
+	if s.fileSummaryMemoryStore != nil {
+		s.fileSummaryMemoryStore.Close()
+		s.fileSummaryMemoryStore = nil
+	}
+
+	// Close agent orchestration stores
+	if s.agentSessionStore != nil {
+		s.agentSessionStore.Close()
+		s.agentSessionStore = nil
+	}
+	if s.agentMailboxStore != nil {
+		s.agentMailboxStore.Close()
+		s.agentMailboxStore = nil
+	}
+	if s.agentBoardStore != nil {
+		s.agentBoardStore.Close()
+		s.agentBoardStore = nil
 	}
 
 	// Close shared resources
@@ -302,6 +405,29 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 			})
 		}()
 		return
+	case "agent.spawn":
+		result, err := s.handleAgentSpawn(ctx, req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "ESPAWN", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "agent.list":
+		resp.Result = s.handleAgentList()
+	case "agent.status":
+		result, err := s.handleAgentStatus(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "ESTATUS", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "agent.kill":
+		result, err := s.handleAgentKill(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "EKILL", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
 	default:
 		resp.Error = &Error{Code: "EMETHOD", Message: fmt.Sprintf("unknown method: %s", req.Method)}
 	}
@@ -628,6 +754,491 @@ func (s *Service) startSummaryWorker(ctx context.Context) error {
 
 	s.summaryWorker = worker
 	return nil
+}
+
+// startContextUpdater initializes and starts the background context updater worker.
+func (s *Service) startContextUpdater(ctx context.Context) error {
+	// Check if cheap LLM providers are available
+	if !updater.Available(s.cfg) {
+		// No providers configured - skip worker silently
+		fmt.Fprintf(os.Stderr, "context updater: skipped (no LLM providers configured)\n")
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "context updater: LLM providers available, starting...\n")
+
+	// Create slog logger from zerolog-style output
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	// Open session store for session provider
+	sessionStore, err := sessions.OpenFromConfig(ctx, s.cfg)
+	if err != nil {
+		return fmt.Errorf("open session store: %w", err)
+	}
+
+	// Open memory store for context finder
+	memoryStore, err := memory.OpenWithConfig(ctx, s.cfg)
+	if err != nil {
+		sessionStore.Close()
+		return fmt.Errorf("open memory store: %w", err)
+	}
+
+	// Open contextbuffer store for context injector
+	// This is the preferred approach - contextbuffer is designed for hook context injection
+	ctxBufferStore, err := contextbuffer.Open(ctx, s.cfg.Storage.Root)
+	if err != nil {
+		sessionStore.Close()
+		memoryStore.Close()
+		return fmt.Errorf("open context buffer: %w", err)
+	}
+
+	// Get workspace (use opts.Workspace if set, or default to empty for all workspaces)
+	workspace := s.opts.Workspace
+
+	// Create embedding provider for semantic memory search
+	// Pass API keys from environment since config doesn't store them
+	var embedder semantic.EmbeddingProvider
+	embedder, err = semantic.NewProviderForScope(
+		semantic.ScopeMemory,
+		s.cfg,
+		semantic.WithVoyageKey(os.Getenv("VOYAGE_API_KEY")),
+		semantic.WithGeminiKey(os.Getenv("GEMINI_API_KEY")),
+	)
+	if err != nil {
+		logger.Warn("embedding provider not available, using text search", "error", err)
+		embedder = nil // Fall back to text search
+	} else {
+		logger.Info("semantic search enabled", "provider", embedder.Model())
+	}
+
+	// Create adapters
+	sessionAdapter := updater.NewSessionStoreAdapter(sessionStore, workspace)
+	memoryAdapter := updater.NewMemoryStoreAdapter(memoryStore, embedder, workspace, logger)
+	sessionLearningsAdapter := updater.NewSessionLearningsAdapter(sessionStore, workspace)
+
+	// Create combined finder (no codemap searcher for now)
+	finder := updater.NewCombinedFinder(memoryAdapter, sessionLearningsAdapter, nil)
+
+	// Create context buffer injector and wrap in Injector
+	ctxBufferInjector := updater.NewContextBufferInjector(ctxBufferStore, workspace)
+	injector := updater.NewInjector(ctxBufferInjector, updater.DefaultInjectorConfig())
+
+	// Create worker with real providers
+	worker, err := updater.NewWorkerFromConfig(updater.DaemonConfig{
+		Config:   s.cfg,
+		Logger:   logger,
+		Sessions: sessionAdapter,
+		Finder:   finder,
+		Injector: injector,
+	})
+	if err != nil {
+		sessionStore.Close()
+		memoryStore.Close()
+		ctxBufferStore.Close()
+		return fmt.Errorf("create context updater: %w", err)
+	}
+	if worker == nil {
+		// No LLM available
+		sessionStore.Close()
+		memoryStore.Close()
+		ctxBufferStore.Close()
+		return nil
+	}
+
+	// Create cancellable context for worker
+	s.contextUpdaterCtx, s.contextUpdaterCancel = context.WithCancel(ctx)
+
+	// Start the worker in a goroutine
+	go func() {
+		if err := worker.Start(s.contextUpdaterCtx); err != nil && err != context.Canceled {
+			fmt.Fprintf(os.Stderr, "context updater error: %v\n", err)
+		}
+	}()
+
+	s.contextUpdater = worker
+	fmt.Fprintf(os.Stderr, "context updater: started successfully\n")
+	return nil
+}
+
+// startFileSummaryWorker initializes and starts the background file summary worker.
+func (s *Service) startFileSummaryWorker(ctx context.Context) error {
+	// Check if we have a workspace
+	workspace := s.opts.Workspace
+	if workspace == "" {
+		fmt.Fprintf(os.Stderr, "file summary worker: skipped (no workspace)\n")
+		return nil
+	}
+
+	// Check if LLM providers are available for summarization
+	// Use FileSummaryProviders which prioritizes Devstral for code summaries
+	providers := llmproviders.FileSummaryProviders()
+	if len(providers) == 0 {
+		fmt.Fprintf(os.Stderr, "file summary worker: skipped (no LLM providers configured)\n")
+		return nil
+	}
+
+	// Get the cheap/fast LLM for summaries
+	llm := llmproviders.NewSummaryLLM(providers[0])
+	if llm == nil {
+		fmt.Fprintf(os.Stderr, "file summary worker: skipped (no LLM available)\n")
+		return nil
+	}
+
+	// Open memory store (store in Service for cleanup on shutdown)
+	memoryStore, err := memory.Open(ctx, s.cfg.Storage.Root, s.cfg.Paths.CAS)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	s.fileSummaryMemoryStore = memoryStore
+
+	// Get embedding provider (optional) with config-aware model selection
+	var embedProvider semantic.EmbeddingProvider
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if voyageKey != "" || geminiKey != "" {
+		provider, err := semantic.NewProviderForScope(
+			semantic.ScopeFileSummaries,
+			s.cfg,
+			semantic.WithVoyageKey(voyageKey),
+			semantic.WithGeminiKey(geminiKey),
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "file summary worker: embedding provider unavailable: %v\n", err)
+		} else {
+			embedProvider = provider
+		}
+	}
+
+	// Create worker (uses default logger and observability events)
+	workerCfg := filesummary.DefaultWorkerConfig()
+
+	worker := filesummary.NewWorker(
+		workerCfg,
+		memoryStore,
+		llm,
+		embedProvider,
+		workspace,
+		nil, // Use default logger
+	)
+
+	// Create cancellable context for worker
+	s.fileSummaryWorkerCtx, s.fileSummaryWorkerCancel = context.WithCancel(ctx)
+
+	// Start the worker
+	if err := worker.Start(s.fileSummaryWorkerCtx); err != nil {
+		s.fileSummaryWorkerCancel()
+		s.fileSummaryMemoryStore.Close()
+		s.fileSummaryMemoryStore = nil
+		return fmt.Errorf("start file summary worker: %w", err)
+	}
+
+	s.fileSummaryWorker = worker
+	fmt.Fprintf(os.Stderr, "file summary worker: started for %s\n", workspace)
+	return nil
+}
+
+// startAgentOrchestration initializes the agent runtime and overseer.
+func (s *Service) startAgentOrchestration(ctx context.Context) error {
+	// Determine LLM configuration
+	// Priority: CEREBRAS > OPENROUTER > GROQ > GEMINI
+	var llmProvider, llmAPIKey, llmModel string
+
+	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
+		llmProvider = "cerebras"
+		llmAPIKey = key
+		llmModel = os.Getenv("CEREBRAS_MODEL")
+		if llmModel == "" {
+			llmModel = "zai-glm-4.7"
+		}
+	} else if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
+		llmProvider = "openrouter"
+		llmAPIKey = key
+		llmModel = os.Getenv("OPENROUTER_MODEL")
+		if llmModel == "" {
+			llmModel = "mistralai/devstral-2512:free"
+		}
+	} else if key := os.Getenv("GROQ_API_KEY"); key != "" {
+		llmProvider = "groq"
+		llmAPIKey = key
+		llmModel = "llama-3.1-70b-versatile"
+	} else if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+		llmProvider = "gemini"
+		llmAPIKey = key
+		llmModel = "gemini-2.0-flash"
+	}
+
+	if llmAPIKey == "" {
+		fmt.Fprintf(os.Stderr, "agent orchestration: skipped (no LLM API key configured)\n")
+		return nil
+	}
+
+	// Create cancellable context
+	s.agentCtx, s.agentCancel = context.WithCancel(ctx)
+
+	// Open sessions store for persistence (store in Service for cleanup on shutdown)
+	sessionStore, err := sessions.OpenFromConfig(ctx, s.cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent orchestration: session store open failed: %v\n", err)
+		// Continue without persistence - agents will be in-memory only
+		sessionStore = nil
+	}
+	s.agentSessionStore = sessionStore
+
+	// Open mailbox store for inter-agent messaging (store in Service for cleanup on shutdown)
+	var mailboxStore runtime.MailboxStore
+	if mb, err := mailbox.Open(ctx, s.cfg.Storage.Root); err != nil {
+		fmt.Fprintf(os.Stderr, "agent orchestration: mailbox store open failed: %v\n", err)
+	} else {
+		s.agentMailboxStore = mb
+		mailboxStore = mb
+	}
+
+	// Open blackboard store for workspace coordination (store in Service for cleanup on shutdown)
+	var boardStore runtime.BoardStore
+	if bb, err := blackboard.OpenBoardStore(ctx, s.cfg.Storage.Root); err != nil {
+		fmt.Fprintf(os.Stderr, "agent orchestration: board store open failed: %v\n", err)
+	} else {
+		s.agentBoardStore = bb
+		boardStore = bb
+	}
+
+	// Create memory store opener for agent tools
+	openMemoryStore := func(ctx context.Context) (storage.MemoryStore, error) {
+		return memory.OpenWithConfig(ctx, s.cfg)
+	}
+
+	// Load hook configuration and create dispatcher for agent tools
+	var hookDispatcher hooks.Dispatcher
+	hookCfg, err := hooks.LoadConfigWithDefaults(s.opts.Workspace)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent orchestration: hook config load failed: %v\n", err)
+		hookCfg = hooks.EmptyConfig()
+	}
+	hookDispatcher = hooks.NewDispatcherWithRegistry(hookCfg, s.cfg.Paths.Skills)
+
+	// Create runtime config
+	runtimeCfg := runtime.Config{
+		DefaultMaxIterations: 50,
+		DefaultTimeout:       30 * time.Minute,
+		LLMProvider:          llmProvider,
+		LLMModel:             llmModel,
+		LLMAPIKey:            llmAPIKey,
+		WorkspaceRoot:        s.opts.Workspace,
+		DefaultMaxDepth:      3,
+		OpenMemoryStore:      openMemoryStore,
+		SessionStore:         sessionStore,
+		MailboxStore:         mailboxStore,
+		BoardStore:           boardStore,
+		HookDispatcher:       hookDispatcher,
+	}
+
+	// Create runtime
+	s.agentRuntime = runtime.NewRuntime(runtimeCfg)
+
+	// Recover stale sessions from previous daemon run
+	if sessionStore != nil {
+		if err := s.agentRuntime.RecoverSessions(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "agent orchestration: session recovery failed: %v\n", err)
+		}
+	}
+
+	// Create overseer config
+	overseerCfg := runtime.OverseerConfig{
+		MaxDepth:            3,
+		MaxConcurrentAgents: 10,
+	}
+
+	// Create overseer
+	s.agentOverseer = runtime.NewOverseer(s.agentRuntime, overseerCfg)
+
+	fmt.Fprintf(os.Stderr, "agent orchestration: started (provider=%s, model=%s)\n", llmProvider, llmModel)
+	return nil
+}
+
+// --- Agent RPC Handlers ---
+
+// AgentSpawnParams are the parameters for agent.spawn.
+type AgentSpawnParams struct {
+	Role        string `json:"role"`
+	AgentID     string `json:"agent_id,omitempty"` // Agent config ID for session filtering
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	EpicID      string `json:"epic_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+}
+
+// AgentSpawnResult is the result of spawning an agent.
+type AgentSpawnResult struct {
+	SessionID string `json:"session_id"`
+	ActorID   string `json:"actor_id"`
+	Status    string `json:"status"`
+}
+
+func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
+	if s.agentRuntime == nil {
+		return nil, errors.New("agent orchestration not initialized")
+	}
+
+	var p AgentSpawnParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if p.Role == "" {
+		return nil, errors.New("role is required")
+	}
+
+	// Create agent config
+	cfg := types.AgentConfig{
+		Role:        types.AgentRole(p.Role),
+		ActorID:     p.AgentID, // Use agent config ID as actor ID for session filtering
+		WorkspaceID: p.WorkspaceID,
+		EpicID:      p.EpicID,
+		TaskID:      p.TaskID,
+		Prompt:      p.Prompt,
+	}
+
+	// Spawn the agent
+	session, err := s.agentRuntime.Spawn(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("spawn agent: %w", err)
+	}
+
+	return &AgentSpawnResult{
+		SessionID: session.ID,
+		ActorID:   session.Config.ActorID,
+		Status:    string(session.Status),
+	}, nil
+}
+
+// AgentListResult is the result of listing agents.
+type AgentListResult struct {
+	Sessions []AgentSessionInfo `json:"sessions"`
+	Count    int                `json:"count"`
+}
+
+// AgentSessionInfo is summary info about an agent session.
+type AgentSessionInfo struct {
+	SessionID  string    `json:"session_id"`
+	ActorID    string    `json:"actor_id"`
+	Role       string    `json:"role"`
+	Status     string    `json:"status"`
+	StartedAt  time.Time `json:"started_at"`
+	Iterations int       `json:"iterations"`
+}
+
+func (s *Service) handleAgentList() *AgentListResult {
+	if s.agentRuntime == nil {
+		return &AgentListResult{Sessions: []AgentSessionInfo{}, Count: 0}
+	}
+
+	sessions := s.agentRuntime.List()
+	result := &AgentListResult{
+		Sessions: make([]AgentSessionInfo, 0, len(sessions)),
+		Count:    len(sessions),
+	}
+
+	for _, session := range sessions {
+		info := AgentSessionInfo{
+			SessionID:  session.ID,
+			ActorID:    session.Config.ActorID,
+			Role:       string(session.Config.Role),
+			Status:     string(session.Status),
+			StartedAt:  session.StartedAt,
+			Iterations: session.Iterations,
+		}
+		result.Sessions = append(result.Sessions, info)
+	}
+
+	return result
+}
+
+// AgentStatusParams are the parameters for agent.status.
+type AgentStatusParams struct {
+	SessionID string `json:"session_id"`
+}
+
+// AgentStatusResult is the detailed status of an agent session.
+type AgentStatusResult struct {
+	SessionID  string     `json:"session_id"`
+	ActorID    string     `json:"actor_id"`
+	Role       string     `json:"role"`
+	Status     string     `json:"status"`
+	StartedAt  time.Time  `json:"started_at"`
+	EndedAt    *time.Time `json:"ended_at,omitempty"`
+	Iterations int        `json:"iterations"`
+	Summary    string     `json:"summary,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	Children   []string   `json:"children,omitempty"`
+}
+
+func (s *Service) handleAgentStatus(params json.RawMessage) (*AgentStatusResult, error) {
+	if s.agentRuntime == nil {
+		return nil, errors.New("agent orchestration not initialized")
+	}
+
+	var p AgentStatusParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if p.SessionID == "" {
+		return nil, errors.New("session_id is required")
+	}
+
+	session, ok := s.agentRuntime.Get(p.SessionID)
+	if !ok {
+		return nil, fmt.Errorf("session not found: %s", p.SessionID)
+	}
+
+	return &AgentStatusResult{
+		SessionID:  session.ID,
+		ActorID:    session.Config.ActorID,
+		Role:       string(session.Config.Role),
+		Status:     string(session.Status),
+		StartedAt:  session.StartedAt,
+		EndedAt:    session.EndedAt,
+		Iterations: session.Iterations,
+		Summary:    session.Summary,
+		Error:      session.Error,
+		Children:   session.Children,
+	}, nil
+}
+
+// AgentKillParams are the parameters for agent.kill.
+type AgentKillParams struct {
+	SessionID string `json:"session_id"`
+}
+
+// AgentKillResult is the result of killing an agent.
+type AgentKillResult struct {
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+}
+
+func (s *Service) handleAgentKill(params json.RawMessage) (*AgentKillResult, error) {
+	if s.agentRuntime == nil {
+		return nil, errors.New("agent orchestration not initialized")
+	}
+
+	var p AgentKillParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if p.SessionID == "" {
+		return nil, errors.New("session_id is required")
+	}
+
+	if err := s.agentRuntime.Kill(p.SessionID); err != nil {
+		return nil, err
+	}
+
+	return &AgentKillResult{
+		SessionID: p.SessionID,
+		Status:    "killed",
+	}, nil
 }
 
 // exec is a minimal process starter (avoiding os/exec import cycle issues).

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/rs/zerolog"
@@ -137,7 +137,7 @@ func runSemanticIndexInit(cmd *cobra.Command, workspace, glob string, exclude []
 	}
 
 	// Find files matching glob, excluding specified patterns
-	files, err := findFilesMatchingGlob(absWorkspace, glob, exclude)
+	files, err := fsutil.FindFilesMatchingGlob(absWorkspace, glob, exclude)
 	if err != nil {
 		return writeSemanticError(cmd, semantic.ErrCodeCASResolveError, fmt.Sprintf("find files: %v", err))
 	}
@@ -353,53 +353,6 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 	return indexer, cleanup, nil
 }
 
-func findFilesMatchingGlob(root, pattern string, excludePatterns []string) ([]string, error) {
-	var files []string
-
-	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return fmt.Errorf("walk %s: %w", path, err)
-		}
-		if info.IsDir() {
-			return nil
-		}
-
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return fmt.Errorf("rel %s: %w", path, err)
-		}
-
-		relSlash := filepath.ToSlash(rel)
-
-		// Check include pattern
-		matched, err := doublestar.Match(pattern, relSlash)
-		if err != nil {
-			return fmt.Errorf("match pattern %q for %q: %w", pattern, rel, err)
-		}
-		if !matched {
-			return nil
-		}
-
-		// Check exclude patterns
-		for _, excl := range excludePatterns {
-			excluded, err := doublestar.Match(excl, relSlash)
-			if err != nil {
-				return fmt.Errorf("match exclude pattern %q for %q: %w", excl, rel, err)
-			}
-			if excluded {
-				return nil
-			}
-		}
-
-		files = append(files, rel)
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
-
-	return files, nil
-}
 
 func writeSemanticResult(cmd *cobra.Command, command string, result *semantic.JobResult, workspace string, start time.Time) error {
 	data := map[string]any{
