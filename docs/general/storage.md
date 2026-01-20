@@ -14,6 +14,8 @@ flowchart TD
         SESS[(sessions.db)]
         TRAJ[(trajectory.db)]
         AGENT[(agents.db)]
+        COMP[(companion.db)]
+        CTXVAR[(contextvar.db)]
     end
 
     subgraph Cache["~/.agentctl/cache/"]
@@ -45,6 +47,8 @@ flowchart TD
 | `sessions.db` | Session lineage | `sessions`, `context_windows` |
 | `trajectory.db` | Agent audit trail | `trajectories`, `trajectory_events` |
 | `agents.db` | Agent registry | `agents` |
+| `companion.db` | Companion conversation memory | `companion_turns`, `companion_day_summaries`, `companion_history` |
+| `contextvar.db` | RLM context variables | `context_vars` |
 
 ### Cache (`~/.agentctl/cache/`)
 
@@ -172,6 +176,84 @@ CREATE TABLE context_windows (
 CREATE INDEX idx_sessions_workspace ON sessions(workspace);
 CREATE INDEX idx_sessions_status ON sessions(status);
 CREATE INDEX idx_windows_session ON context_windows(session_id);
+```
+
+### companion.db
+
+```sql
+-- L0: Raw conversation turns
+CREATE TABLE companion_turns (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,              -- 'user', 'assistant'
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- L1: Daily compressed summaries
+CREATE TABLE companion_day_summaries (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    date TEXT NOT NULL,              -- YYYY-MM-DD
+    summary TEXT NOT NULL,
+    topics TEXT,                     -- JSON array
+    mood TEXT,
+    message_count INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(conversation_id, date)
+);
+
+-- L2: Distilled relationship history
+CREATE TABLE companion_history (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL UNIQUE,
+    history TEXT NOT NULL,           -- Distilled context
+    topics TEXT,                     -- JSON array
+    preferences TEXT,                -- JSON object
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Compression cursor tracking
+CREATE TABLE companion_memory_state (
+    conversation_id TEXT PRIMARY KEY,
+    last_summarized_at DATETIME,
+    last_distilled_at DATETIME
+);
+
+CREATE INDEX idx_turns_conv ON companion_turns(conversation_id);
+CREATE INDEX idx_turns_created ON companion_turns(created_at);
+CREATE INDEX idx_summaries_conv ON companion_day_summaries(conversation_id);
+CREATE INDEX idx_summaries_date ON companion_day_summaries(date);
+```
+
+### contextvar.db
+
+```sql
+CREATE TABLE context_vars (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    scope TEXT NOT NULL,             -- 'global', 'conversation', 'turn'
+    key TEXT NOT NULL,
+    value_json TEXT,                 -- Inline JSON for small values
+    value_cas TEXT,                  -- CAS digest for large values (>64KB)
+    content_type TEXT DEFAULT 'json',
+    sequence_num INTEGER,
+    source TEXT,                     -- Producer (tool, skill, user)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME,             -- TTL expiration
+    access_count INTEGER DEFAULT 0,
+    last_access DATETIME,
+    embedding BLOB,                  -- Optional semantic embedding
+    embedding_model TEXT,
+    UNIQUE(conversation_id, scope, key)
+);
+
+CREATE INDEX idx_context_vars_conv ON context_vars(conversation_id);
+CREATE INDEX idx_context_vars_scope ON context_vars(scope);
+CREATE INDEX idx_context_vars_expires ON context_vars(expires_at);
+CREATE INDEX idx_context_vars_key ON context_vars(key);
 ```
 
 ---

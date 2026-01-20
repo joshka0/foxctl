@@ -134,6 +134,9 @@ func TestRunOverseer_Spawn(t *testing.T) {
 
 	if !spawnResp.Accepted {
 		t.Logf("Spawn error: %s", spawnResp.Reason)
+		for i, denied := range spawnResp.DeniedAgents {
+			t.Logf("Denied[%d]: role=%s task=%s reason=%s", i, denied.Role, denied.Task, denied.Reason)
+		}
 	}
 	require.True(t, spawnResp.Accepted)
 	require.NotEmpty(t, spawnResp.SpawnedAgents)

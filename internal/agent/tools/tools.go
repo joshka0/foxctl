@@ -24,6 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	"github.com/jkatigb/agentctl/internal/platform/secrets"
 	"github.com/jkatigb/agentctl/internal/storage"
+	"github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -42,6 +43,7 @@ type Registry struct {
 	openBlackboardStore func(context.Context) (blackboard.Store, error)
 	openMailboxStore    func(context.Context) (mailbox.Store, error)
 	openCASStore        func(context.Context) (storage.CASStore, error)
+	openAgentsStore     func(context.Context) (agents.Store, error)
 
 	trajMu sync.Mutex
 	trajID string
@@ -125,6 +127,9 @@ type Config struct {
 
 	// OpenMailboxStore provides access to the mailbox store.
 	OpenMailboxStore func(context.Context) (mailbox.Store, error)
+
+	// OpenAgentsStore provides access to the agents store for resolving agent references.
+	OpenAgentsStore func(context.Context) (agents.Store, error)
 }
 
 // TelemetryRecorder records tool usage for observability.
@@ -204,6 +209,7 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 		openBlackboardStore: cfg.OpenBlackboardStore,
 		openMailboxStore:    cfg.OpenMailboxStore,
 		openCASStore:        cfg.OpenCASStore,
+		openAgentsStore:     cfg.OpenAgentsStore,
 	}
 
 	// Register all V1 tools

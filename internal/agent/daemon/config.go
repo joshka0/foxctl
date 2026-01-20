@@ -51,4 +51,15 @@ type Options struct {
 
 	// AgentFactory allows injecting a custom agent for testing.
 	AgentFactory func(context.Context, agent.Agent, *tools.Registry) (agents.Agent, error)
+
+	// EnableCompanionMemory enables L0/L1/L2 conversation memory for agents.
+	// When enabled, the daemon injects memory context into prompts and stores turns.
+	EnableCompanionMemory bool
+
+	// CompanionMode selects the memory configuration for conversation memory.
+	// Values: "" (default), "standard", "roleplay"
+	// - "standard": Default memory config (40K tokens, 24h vivid window)
+	// - "roleplay": Extended memory for roleplay/chat (50K tokens, 48h vivid window)
+	// Only applies when EnableCompanionMemory is true.
+	CompanionMode string
 }

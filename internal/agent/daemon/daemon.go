@@ -2,9 +2,11 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -18,12 +20,14 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/optimization"
 	"github.com/jkatigb/agentctl/internal/agent/tools"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/storage"
 	storagents "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 )
@@ -34,14 +38,17 @@ import (
 const messageLeaseDuration = 30 * time.Second
 
 type daemonStores struct {
-	agentStore   storagents.Store
-	mailboxStore mailbox.Store
-	tasksStore   tasks.Store
-	boardStore   blackboard.BoardStore
-	bbStore      blackboard.Store
+	agentStore          storagents.Store
+	mailboxStore        mailbox.Store
+	tasksStore          tasks.Store
+	boardStore          blackboard.BoardStore
+	bbStore             blackboard.Store
+	companionMemory     *companion.ConversationMemory   // nil if disabled
+	companionMemoryDB   *sql.DB                         // need to close this too
+	compressionDaemon   *companion.CompressionDaemon    // nil if disabled
 }
 
-func openDaemonStores(ctx context.Context, root string) (*daemonStores, error) {
+func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonStores, error) {
 	stores := &daemonStores{}
 
 	agentStore, err := storagents.Open(ctx, root)
@@ -78,12 +85,85 @@ func openDaemonStores(ctx context.Context, root string) (*daemonStores, error) {
 	}
 	stores.bbStore = bbStore
 
+	// Open companion memory if enabled
+	if opts.EnableCompanionMemory {
+		dbPath := filepath.Join(root, "companion.db")
+		db, err := sqliteutil.OpenDB(ctx, dbPath, nil) // schema managed by NewConversationMemory
+		if err != nil {
+			stores.Close()
+			return nil, fmt.Errorf("open companion db: %w", err)
+		}
+		stores.companionMemoryDB = db
+
+		// Select memory configuration based on companion mode
+		var memCfg companion.MemoryConfig
+		switch opts.CompanionMode {
+		case "roleplay":
+			// Extended memory for roleplay/chat companions
+			// - 48h vivid window for extended conversation memory
+			// - 100 turn limit for active sessions
+			// - 50K total tokens for rich context
+			memCfg = companion.RoleplayMemoryConfig()
+			log.Info().Msg("companion memory enabled (roleplay mode)")
+		default:
+			// Standard companion memory config
+			memCfg = companion.DefaultMemoryConfig()
+			log.Info().Msg("companion memory enabled (standard mode)")
+		}
+
+		// Create memory options
+		memOpts := []companion.MemoryOption{companion.WithMemoryConfig(memCfg)}
+
+		// Create summarizer if LLM is configured (enables L1/L2 compression)
+		enableCompression := false
+		if opts.LLMAPIKey != "" && opts.LLMProvider != "" {
+			summarizer := companion.NewLLMSummarizer(companion.LLMSummarizerConfig{
+				Provider: opts.LLMProvider,
+				APIKey:   opts.LLMAPIKey,
+				Model:    opts.LLMModel,
+				Logger:   log.Logger,
+			})
+			memOpts = append(memOpts, companion.WithSummarizer(summarizer))
+			enableCompression = true
+			log.Info().Str("provider", opts.LLMProvider).Msg("companion memory summarizer enabled")
+		}
+
+		companionMem, err := companion.NewConversationMemory(db, memOpts...)
+		if err != nil {
+			stores.Close()
+			return nil, fmt.Errorf("create companion memory: %w", err)
+		}
+		stores.companionMemory = companionMem
+
+		// Start compression daemon for L0→L1→L2 compression
+		if enableCompression {
+			stores.compressionDaemon = companion.NewCompressionDaemon(companion.DaemonConfig{
+				Memory:         companionMem,
+				DB:             db,
+				DailyInterval:  1 * time.Hour, // Check for daily compression every hour
+				WeeklyInterval: 6 * time.Hour, // Check for weekly distillation every 6 hours
+				Logger:         log.Logger,
+			})
+			stores.compressionDaemon.Start(ctx)
+			log.Info().Msg("companion compression daemon started")
+		} else {
+			log.Info().Msg("companion memory summarizer not configured; compression daemon disabled")
+		}
+	}
+
 	return stores, nil
 }
 
 func (s *daemonStores) Close() {
 	if s == nil {
 		return
+	}
+	// Stop compression daemon first (it uses memory and db)
+	if s.compressionDaemon != nil {
+		s.compressionDaemon.Stop()
+	}
+	if s.companionMemoryDB != nil {
+		_ = s.companionMemoryDB.Close()
 	}
 	if s.bbStore != nil {
 		_ = s.bbStore.Close()
@@ -105,7 +185,7 @@ func (s *daemonStores) Close() {
 // Run starts the agent daemon.
 func Run(ctx context.Context, opts Options) error {
 	// 1. Open stores
-	stores, err := openDaemonStores(ctx, opts.StorageRoot)
+	stores, err := openDaemonStores(ctx, opts.StorageRoot, opts)
 	if err != nil {
 		return err
 	}
@@ -177,28 +257,30 @@ func Run(ctx context.Context, opts Options) error {
 
 	// 7. Enter poll loop
 	return runPollLoop(ctx, pollDeps{
-		opts:         opts,
-		logger:       logger,
-		agentRecord:  agentRecord,
-		agentStore:   stores.agentStore,
-		mailboxStore: stores.mailboxStore,
-		dedupeStore:  dedupeStore,
-		dspyAgent:    dspyAgent,
-		cancelCtx:    cancelCtx,
-		optCtx:       optCtx,
+		opts:            opts,
+		logger:          logger,
+		agentRecord:     agentRecord,
+		agentStore:      stores.agentStore,
+		mailboxStore:    stores.mailboxStore,
+		dedupeStore:     dedupeStore,
+		dspyAgent:       dspyAgent,
+		cancelCtx:       cancelCtx,
+		optCtx:          optCtx,
+		companionMemory: stores.companionMemory,
 	})
 }
 
 type pollDeps struct {
-	opts         Options
-	logger       zerolog.Logger
-	agentRecord  agent.Agent
-	agentStore   storagents.Store
-	mailboxStore mailbox.Store
-	dedupeStore  DedupeStore
-	dspyAgent    agents.Agent
-	cancelCtx    *CancelContext
-	optCtx       *OptimizationContext
+	opts            Options
+	logger          zerolog.Logger
+	agentRecord     agent.Agent
+	agentStore      storagents.Store
+	mailboxStore    mailbox.Store
+	dedupeStore     DedupeStore
+	dspyAgent       agents.Agent
+	cancelCtx       *CancelContext
+	optCtx          *OptimizationContext
+	companionMemory *companion.ConversationMemory
 }
 
 func initOptimization(ctx context.Context, opts Options) (*OptimizationContext, func()) {
@@ -263,6 +345,12 @@ func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, sto
 		},
 		OpenCASStore: func(ctx context.Context) (storage.CASStore, error) {
 			return cas.OpenDefault(ctx, opts.StorageRoot)
+		},
+		OpenMailboxStore: func(ctx context.Context) (mailbox.Store, error) {
+			return mailbox.Open(ctx, opts.StorageRoot)
+		},
+		OpenAgentsStore: func(ctx context.Context) (storagents.Store, error) {
+			return storagents.Open(ctx, opts.StorageRoot)
 		},
 	}
 }
@@ -332,63 +420,214 @@ func runPollLoop(ctx context.Context, deps pollDeps) error {
 	pollTicker := time.NewTicker(deps.opts.PollInterval)
 	defer pollTicker.Stop()
 
-	deps.logger.Info().Msg("daemon started")
+	// Setup proactive think ticker if in proactive mode
+	var thinkTicker *time.Ticker
+	if deps.agentRecord.ExecMode == agent.ModeProactive {
+		interval := time.Duration(deps.agentRecord.ThinkInterval) * time.Second
+		if interval <= 0 {
+			interval = 60 * time.Second
+		}
+		thinkTicker = time.NewTicker(interval)
+		defer thinkTicker.Stop()
+		deps.logger.Info().Dur("think_interval", interval).Msg("proactive mode enabled")
+	}
+
+	deps.logger.Info().
+		Str("exec_mode", string(deps.agentRecord.ExecMode)).
+		Int("max_iterations", deps.agentRecord.MaxIterations).
+		Int("max_auto_turns", deps.agentRecord.MaxAutoTurns).
+		Msg("daemon started")
 
 	for {
+		// Build select cases dynamically based on mode
 		select {
 		case <-ctx.Done():
 			_ = deps.agentStore.UpdateState(context.Background(), deps.opts.AgentID, agent.StateStopped) //nolint:errcheck
 			return ctx.Err()
 
 		case <-pollTicker.C:
-			currentAgent, err := deps.agentStore.Get(ctx, deps.opts.AgentID)
-			if err != nil {
-				deps.logger.Error().Err(err).Msg("failed to get agent state")
-				continue
+			if err := processPollTick(ctx, deps); err != nil {
+				if err == errAgentStopped {
+					return nil
+				}
+				// Continue on other errors
 			}
-			if currentAgent.State == agent.StateStopped {
-				deps.logger.Info().Msg("agent state is stopped, exiting daemon")
-				return nil
-			}
+		}
 
-			messages, err := deps.mailboxStore.Poll(ctx, deps.agentRecord.Namespace, messageLeaseDuration, deps.opts.MaxPollMessages)
-			if err != nil {
-				deps.logger.Error().Err(err).Msg("poll failed")
-				continue
-			}
-
-			for _, msg := range messages {
-				processed, err := deps.dedupeStore.IsProcessed(ctx, deps.opts.AgentID, msg.ID)
-				if err != nil {
-					deps.logger.Warn().Err(err).Str("msg_id", msg.ID).Msg("dedupe check failed, nacking for retry")
-					if nackErr := deps.mailboxStore.Nack(ctx, msg.ID, messageLeaseDuration); nackErr != nil {
-						deps.logger.Error().Err(nackErr).Str("msg_id", msg.ID).Msg("failed to nack message")
-					}
-					continue
+		// Check proactive tick separately (Go doesn't allow dynamic select)
+		if thinkTicker != nil {
+			select {
+			case <-thinkTicker.C:
+				if err := runProactiveThink(ctx, deps); err != nil {
+					deps.logger.Warn().Err(err).Msg("proactive think failed")
 				}
-				if processed {
-					deps.logger.Debug().Str("msg_id", msg.ID).Msg("duplicate message, acking")
-					_ = deps.mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
-					continue
-				}
-
-				if isMessageExpired(msg) {
-					deps.logger.Warn().Str("msg_id", msg.ID).Msg("message expired, acking without processing")
-					_ = deps.mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
-					continue
-				}
-
-				procErr := processMessage(ctx, deps.logger, msg, deps.dspyAgent, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx)
-				if procErr != nil {
-					deps.logger.Error().Err(procErr).Str("msg_id", msg.ID).Msg("processing failed")
-					_ = deps.mailboxStore.Nack(ctx, msg.ID, backoffDuration(msg.Attempt)) //nolint:errcheck
-				} else {
-					_ = deps.dedupeStore.MarkProcessed(ctx, deps.opts.AgentID, msg.ID) //nolint:errcheck
-					_ = deps.mailboxStore.Ack(ctx, msg.ID)                             //nolint:errcheck
-				}
+			default:
+				// Non-blocking check
 			}
 		}
 	}
+}
+
+var errAgentStopped = errors.New("agent stopped")
+
+func processPollTick(ctx context.Context, deps pollDeps) error {
+	currentAgent, err := deps.agentStore.Get(ctx, deps.opts.AgentID)
+	if err != nil {
+		deps.logger.Error().Err(err).Msg("failed to get agent state")
+		return err
+	}
+	if currentAgent.State == agent.StateStopped {
+		deps.logger.Info().Msg("agent state is stopped, exiting daemon")
+		return errAgentStopped
+	}
+
+	messages, err := deps.mailboxStore.Poll(ctx, deps.agentRecord.Namespace, messageLeaseDuration, deps.opts.MaxPollMessages)
+	if err != nil {
+		deps.logger.Error().Err(err).Msg("poll failed")
+		return err
+	}
+
+	for _, msg := range messages {
+		processed, err := deps.dedupeStore.IsProcessed(ctx, deps.opts.AgentID, msg.ID)
+		if err != nil {
+			deps.logger.Warn().Err(err).Str("msg_id", msg.ID).Msg("dedupe check failed, nacking for retry")
+			if nackErr := deps.mailboxStore.Nack(ctx, msg.ID, messageLeaseDuration); nackErr != nil {
+				deps.logger.Error().Err(nackErr).Str("msg_id", msg.ID).Msg("failed to nack message")
+			}
+			continue
+		}
+		if processed {
+			deps.logger.Debug().Str("msg_id", msg.ID).Msg("duplicate message, acking")
+			_ = deps.mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
+			continue
+		}
+
+		if isMessageExpired(msg) {
+			deps.logger.Warn().Str("msg_id", msg.ID).Msg("message expired, acking without processing")
+			_ = deps.mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
+			continue
+		}
+
+		procErr := processMessage(ctx, deps.logger, msg, deps.dspyAgent, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx, deps.companionMemory, deps.opts.AgentID)
+		if procErr != nil {
+			deps.logger.Error().Err(procErr).Str("msg_id", msg.ID).Msg("processing failed")
+			_ = deps.mailboxStore.Nack(ctx, msg.ID, backoffDuration(msg.Attempt)) //nolint:errcheck
+		} else {
+			if err := deps.dedupeStore.MarkProcessed(ctx, deps.opts.AgentID, msg.ID); err != nil {
+				deps.logger.Warn().Err(err).Str("msg_id", msg.ID).Msg("failed to mark message processed")
+			}
+			_ = deps.mailboxStore.Ack(ctx, msg.ID) //nolint:errcheck
+
+			// For autonomous mode: check if agent wants to continue working
+			// This runs after successful message processing
+			if deps.agentRecord.ExecMode == agent.ModeAutonomous || deps.agentRecord.ExecMode == agent.ModeProactive {
+				runAutonomousContinuation(ctx, deps, msg)
+			}
+		}
+	}
+
+	return nil
+}
+
+// runAutonomousContinuation allows the agent to continue working across multiple turns
+// without needing a new external message. Used for autonomous and proactive modes.
+func runAutonomousContinuation(ctx context.Context, deps pollDeps, lastMsg agent.Message) {
+	maxTurns := deps.agentRecord.MaxAutoTurns
+	if maxTurns <= 1 {
+		return // Autonomous continuation disabled
+	}
+
+	// For now, we implement a simple continuation strategy:
+	// Send a self-continuation message asking the agent to continue if there's more work
+	for turn := 1; turn < maxTurns; turn++ {
+		deps.logger.Debug().Int("turn", turn+1).Int("max_turns", maxTurns).Msg("autonomous continuation")
+
+		// Check if we should continue (agent can signal via blackboard or task completion)
+		// For MVP: run a "continue" prompt and let the agent decide if there's more work
+		continuePrompt := "Continue working on the previous task if there is more to do. If the task is complete, respond with 'TASK_COMPLETE'. Do not repeat already completed work."
+
+		input := map[string]any{
+			"task": continuePrompt,
+		}
+
+		timeout := 10 * time.Minute
+		turnCtx, cancel := context.WithTimeout(ctx, timeout)
+		resultMap, err := deps.dspyAgent.Execute(turnCtx, input)
+		cancel()
+
+		if err != nil {
+			deps.logger.Debug().Err(err).Msg("autonomous continuation failed, stopping")
+			break
+		}
+
+		// Check if agent signaled completion
+		result := extractResult(resultMap)
+		if containsTaskComplete(result) {
+			deps.logger.Debug().Msg("agent signaled task complete, stopping continuation")
+			break
+		}
+	}
+}
+
+// runProactiveThink runs a periodic "think" cycle for proactive agents.
+// This allows the agent to check if there's work to do and initiate it.
+func runProactiveThink(ctx context.Context, deps pollDeps) error {
+	deps.logger.Debug().Msg("running proactive think cycle")
+
+	// Proactive prompt: ask agent to check for work
+	thinkPrompt := `You are in proactive mode. Check if there is any work that needs to be done:
+1. Review any pending tasks or todos
+2. Check for any issues that need attention
+3. Look for opportunities to help
+
+If there is work to do, start working on the highest priority item.
+If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
+
+	input := map[string]any{
+		"task": thinkPrompt,
+	}
+
+	timeout := 5 * time.Minute
+	turnCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	resultMap, err := deps.dspyAgent.Execute(turnCtx, input)
+	if err != nil {
+		return fmt.Errorf("proactive think execution: %w", err)
+	}
+
+	result := extractResult(resultMap)
+	if containsNoWork(result) {
+		deps.logger.Debug().Msg("proactive think: no work needed")
+		return nil
+	}
+
+	deps.logger.Info().Msg("proactive think: initiated work")
+
+	// If work was started, allow autonomous continuation
+	if deps.agentRecord.MaxAutoTurns > 1 {
+		// Create a synthetic message for continuation tracking
+		syntheticMsg := agent.Message{
+			ID:     ulid.Make().String(),
+			FromNS: deps.agentRecord.Namespace,
+			ToNS:   deps.agentRecord.Namespace,
+			Type:   agent.MessageTypeCmd,
+		}
+		runAutonomousContinuation(ctx, deps, syntheticMsg)
+	}
+
+	return nil
+}
+
+// containsTaskComplete checks if the agent signaled task completion.
+func containsTaskComplete(result string) bool {
+	return len(result) > 0 && (result == "TASK_COMPLETE" ||
+		len(result) < 100 && (result == "Task completed" || result == "Done" || result == "Complete"))
+}
+
+// containsNoWork checks if the proactive agent found no work to do.
+func containsNoWork(result string) bool {
+	return result == "NO_WORK_NEEDED" || result == "No work needed"
 }
 
 func processMessage(
@@ -400,10 +639,12 @@ func processMessage(
 	policy agent.Policy,
 	optCtx *OptimizationContext,
 	cancelCtx *CancelContext,
+	companionMemory *companion.ConversationMemory,
+	agentID string, // needed for conversation scoping
 ) error {
 	switch msg.Type {
 	case agent.MessageTypeAsk:
-		return handleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx)
+		return handleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx, companionMemory, agentID)
 	case agent.MessageTypeCmd:
 		return handleCmd(ctx, logger, msg, dspyAgent, policy, optCtx)
 	case agent.MessageTypeEvent:
@@ -411,7 +652,7 @@ func processMessage(
 	case agent.MessageTypeReply:
 		logger.Info().Str("msg_id", msg.ID).Msg("received reply")
 	case agent.MessageTypeConsoleAsk:
-		return handleConsoleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx, cancelCtx)
+		return handleConsoleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx, cancelCtx, companionMemory, agentID)
 	case agent.MessageTypeConsoleCmd:
 		return handleConsoleCmd(ctx, logger, msg, cancelCtx)
 	case agent.MessageTypeConsoleReply, agent.MessageTypeConsoleEvent:
@@ -435,9 +676,15 @@ type noopRecorder struct{}
 func (r *noopRecorder) RecordToolCall(call types.ToolCall) {}
 
 func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.Registry, daemonOpts Options) (agents.Agent, error) {
+	// Resolve max iterations: agent record takes precedence, else default to 10
+	maxIterations := agentRecord.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = 10
+	}
+
 	// Create options
 	opts := []react.Option{
-		react.WithMaxIterations(10),
+		react.WithMaxIterations(maxIterations),
 		react.WithTimeout(10 * time.Minute),
 	}
 
@@ -503,8 +750,12 @@ func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.R
 		// OpenRouter provides access to multiple models via OpenAI-compatible API
 		llm, err = llms.NewOpenAICompatible("openrouter", core.ModelID(model),
 			"https://openrouter.ai/api", llms.WithAPIKey(apiKey))
+	case "cerebras":
+		// Cerebras uses OpenAI-compatible API (requires /v1 path)
+		llm, err = llms.NewOpenAICompatible("cerebras", core.ModelID(model),
+			"https://api.cerebras.ai/v1", llms.WithAPIKey(apiKey))
 	default:
-		return nil, fmt.Errorf("unsupported LLM provider: %q (supported: gemini, openai, anthropic, groq, openrouter)", provider)
+		return nil, fmt.Errorf("unsupported LLM provider: %q (supported: gemini, openai, anthropic, groq, openrouter, cerebras)", provider)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create LLM: %w", err)

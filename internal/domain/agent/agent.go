@@ -20,11 +20,25 @@ const (
 	StateError State = "error"
 )
 
+// ExecutionMode defines how an agent processes work.
+type ExecutionMode string
+
+const (
+	// ModeReactive means agent only responds to incoming messages (default).
+	ModeReactive ExecutionMode = "reactive"
+	// ModeAutonomous means agent can continue working across multiple turns.
+	ModeAutonomous ExecutionMode = "autonomous"
+	// ModeProactive means agent can initiate work on its own.
+	ModeProactive ExecutionMode = "proactive"
+)
+
 // Agent represents an autonomous actor in the multi-agent system.
 type Agent struct {
 	ID          string    `json:"id"`
 	ParentID    string    `json:"parent_id,omitempty"`
 	Namespace   string    `json:"ns"`
+	Name        string    `json:"name,omitempty"`        // Human name (e.g., "Luna", "Atlas")
+	Slug        string    `json:"slug,omitempty"`        // Human-readable handle for referencing (e.g., "researcher", "companion")
 	Role        string    `json:"role,omitempty"`
 	Prompt      string    `json:"prompt,omitempty"`
 	SkillsAllow []string  `json:"skills_allow"`
@@ -38,6 +52,12 @@ type Agent struct {
 	LLMProvider string `json:"llm_provider,omitempty"` // gemini|openai|anthropic|groq|openrouter
 	LLMModel    string `json:"llm_model,omitempty"`    // Model ID (e.g., claude-haiku-4-5)
 	LLMAPIKey   string `json:"llm_api_key,omitempty"`  // API key (or env var name like $GROQ_API_KEY)
+
+	// Execution mode configuration
+	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`       // reactive|autonomous|proactive (default: reactive)
+	MaxIterations int           `json:"max_iterations,omitempty"`  // Max tool calls per turn (default: 10)
+	MaxAutoTurns  int           `json:"max_auto_turns,omitempty"`  // Max autonomous turns per session (default: 1)
+	ThinkInterval int           `json:"think_interval,omitempty"`  // Seconds between proactive think cycles (default: 60)
 }
 
 // Policy defines execution constraints and capabilities for an agent.

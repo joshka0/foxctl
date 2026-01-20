@@ -22,6 +22,8 @@ type Store interface {
 	Create(ctx context.Context, a agent.Agent) error
 	Get(ctx context.Context, id string) (agent.Agent, error)
 	GetByNamespace(ctx context.Context, ns string) (agent.Agent, error)
+	GetBySlug(ctx context.Context, slug string) (agent.Agent, error)
+	Resolve(ctx context.Context, ref string) (agent.Agent, error) // Resolve slug, name, or ID
 	List(ctx context.Context, limit int) ([]agent.Agent, error)
 	ListByParent(ctx context.Context, parentID string, limit int) ([]agent.Agent, error)
 	UpdateState(ctx context.Context, id string, state agent.State) error
@@ -60,12 +62,19 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 		return fmt.Errorf("agents: marshal skills_allow: %w", err)
 	}
 
+	// Convert empty strings to NULL for optional unique fields
+	var slugVal interface{}
+	if a.Slug != "" {
+		slugVal = a.Slug
+	}
+
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO agents (id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.ParentID, a.Namespace, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
+		INSERT INTO agents (id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.ParentID, a.Namespace, a.Name, slugVal, a.Role, a.Prompt, string(skillsJSON), string(policyJSON), a.ShareBB, a.State,
 		sqlutil.FormatTimestamp(a.CreatedAt), sqlutil.FormatTimestamp(a.HeartbeatAt),
-		a.LLMProvider, a.LLMModel, a.LLMAPIKey)
+		a.LLMProvider, a.LLMModel, a.LLMAPIKey,
+		string(a.ExecMode), a.MaxIterations, a.MaxAutoTurns, a.ThinkInterval)
 	if err != nil {
 		return fmt.Errorf("agents: create: %w", err)
 	}
@@ -74,15 +83,17 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 
 func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
 		FROM agents WHERE id = ?`, id)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
 	var created string
-	var parentID, role, prompt, heartbeat sql.NullString
+	var parentID, name, slug, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
+	var execMode sql.NullString
+	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -90,6 +101,8 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	}
 
 	a.ParentID = parentID.String
+	a.Name = name.String
+	a.Slug = slug.String
 	a.Role = role.String
 	a.Prompt = prompt.String
 
@@ -121,20 +134,28 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	a.LLMModel = llmModel.String
 	a.LLMAPIKey = llmAPIKey.String
 
+	// Set execution mode fields
+	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.MaxIterations = int(maxIterations.Int64)
+	a.MaxAutoTurns = int(maxAutoTurns.Int64)
+	a.ThinkInterval = int(thinkInterval.Int64)
+
 	return a, nil
 }
 
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
 		FROM agents WHERE ns = ?`, ns)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
 	var created string
-	var parentID, role, prompt, heartbeat sql.NullString
+	var parentID, name, slug, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
+	var execMode sql.NullString
+	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -142,6 +163,8 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 	}
 
 	a.ParentID = parentID.String
+	a.Name = name.String
+	a.Slug = slug.String
 	a.Role = role.String
 	a.Prompt = prompt.String
 
@@ -173,7 +196,138 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 	a.LLMModel = llmModel.String
 	a.LLMAPIKey = llmAPIKey.String
 
+	// Set execution mode fields
+	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.MaxIterations = int(maxIterations.Int64)
+	a.MaxAutoTurns = int(maxAutoTurns.Int64)
+	a.ThinkInterval = int(thinkInterval.Int64)
+
 	return a, nil
+}
+
+func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
+		FROM agents WHERE slug = ?`, slug)
+
+	var a agent.Agent
+	var skillsJSON, policyJSON string
+	var created string
+	var parentID, name, slugVal, role, prompt, heartbeat sql.NullString
+	var llmProvider, llmModel, llmAPIKey sql.NullString
+	var execMode sql.NullString
+	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return agent.Agent{}, ErrNotFound
+		}
+		return agent.Agent{}, fmt.Errorf("agents: get by slug: %w", err)
+	}
+
+	a.ParentID = parentID.String
+	a.Name = name.String
+	a.Slug = slugVal.String
+	a.Role = role.String
+	a.Prompt = prompt.String
+
+	// Parse skills_allow
+	if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
+		return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: %w", err)
+	}
+
+	// Parse policy
+	if err := json.Unmarshal([]byte(policyJSON), &a.Policy); err != nil {
+		return agent.Agent{}, fmt.Errorf("agents: unmarshal policy: %w", err)
+	}
+
+	// Parse timestamps
+	var err error
+	a.CreatedAt, err = sqlutil.ScanTimestamp(created)
+	if err != nil {
+		return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
+	}
+	if heartbeat.Valid && heartbeat.String != "" {
+		a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
+		if err != nil {
+			return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
+		}
+	}
+
+	// Set LLM fields
+	a.LLMProvider = llmProvider.String
+	a.LLMModel = llmModel.String
+	a.LLMAPIKey = llmAPIKey.String
+
+	// Set execution mode fields
+	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.MaxIterations = int(maxIterations.Int64)
+	a.MaxAutoTurns = int(maxAutoTurns.Int64)
+	a.ThinkInterval = int(thinkInterval.Int64)
+
+	return a, nil
+}
+
+// Resolve looks up an agent by slug, name, or ID (in that order).
+func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error) {
+	// Try slug first (most common for human-friendly references)
+	a, err := s.GetBySlug(ctx, ref)
+	if err == nil {
+		return a, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return agent.Agent{}, err
+	}
+
+	// Try by name (case-insensitive)
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
+		FROM agents WHERE LOWER(name) = LOWER(?) LIMIT 1`, ref)
+
+	var skillsJSON, policyJSON string
+	var created string
+	var parentID, name, slugVal, role, prompt, heartbeat sql.NullString
+	var llmProvider, llmModel, llmAPIKey sql.NullString
+	var execMode sql.NullString
+	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
+	scanErr := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slugVal, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval)
+	if scanErr == nil {
+		a.ParentID = parentID.String
+		a.Name = name.String
+		a.Slug = slugVal.String
+		a.Role = role.String
+		a.Prompt = prompt.String
+		if err := json.Unmarshal([]byte(skillsJSON), &a.SkillsAllow); err != nil {
+			return agent.Agent{}, fmt.Errorf("agents: unmarshal skills_allow: %w", err)
+		}
+		if err := json.Unmarshal([]byte(policyJSON), &a.Policy); err != nil {
+			return agent.Agent{}, fmt.Errorf("agents: unmarshal policy: %w", err)
+		}
+		var err error
+		a.CreatedAt, err = sqlutil.ScanTimestamp(created)
+		if err != nil {
+			return agent.Agent{}, fmt.Errorf("agents: scan created_at: %w", err)
+		}
+		if heartbeat.Valid && heartbeat.String != "" {
+			a.HeartbeatAt, err = sqlutil.ScanTimestamp(heartbeat.String)
+			if err != nil {
+				return agent.Agent{}, fmt.Errorf("agents: scan heartbeat_at: %w", err)
+			}
+		}
+		a.LLMProvider = llmProvider.String
+		a.LLMModel = llmModel.String
+		a.LLMAPIKey = llmAPIKey.String
+		a.ExecMode = agent.ExecutionMode(execMode.String)
+		a.MaxIterations = int(maxIterations.Int64)
+		a.MaxAutoTurns = int(maxAutoTurns.Int64)
+		a.ThinkInterval = int(thinkInterval.Int64)
+		return a, nil
+	}
+	if !errors.Is(scanErr, sql.ErrNoRows) {
+		return agent.Agent{}, fmt.Errorf("agents: resolve by name: %w", scanErr)
+	}
+
+	// Finally try by ID
+	return s.Get(ctx, ref)
 }
 
 func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
@@ -181,7 +335,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
 		FROM agents
 		ORDER BY created_at DESC
 		LIMIT ?`, limit)
@@ -208,7 +362,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 		limit = 100
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, parent_id, ns, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
 		FROM agents
 		WHERE parent_id = ?
 		ORDER BY created_at DESC
@@ -284,6 +438,8 @@ CREATE TABLE IF NOT EXISTS agents (
 	id           TEXT PRIMARY KEY,
 	parent_id    TEXT,
 	ns           TEXT UNIQUE NOT NULL,
+	name         TEXT,
+	slug         TEXT UNIQUE,
 	role         TEXT,
 	prompt       TEXT,
 	skills_allow TEXT NOT NULL,
@@ -304,17 +460,31 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 		return fmt.Errorf("agents: migrate: %w", err)
 	}
 
-	// Migration for existing databases: add LLM columns if they don't exist
+	// Migration for existing databases: add columns if they don't exist
+	// Note: SQLite doesn't support UNIQUE constraint in ALTER TABLE, so we add columns first
+	// then create unique indexes separately
 	alterStmts := []string{
 		"ALTER TABLE agents ADD COLUMN llm_provider TEXT",
 		"ALTER TABLE agents ADD COLUMN llm_model TEXT",
 		"ALTER TABLE agents ADD COLUMN llm_api_key TEXT",
+		"ALTER TABLE agents ADD COLUMN name TEXT",
+		"ALTER TABLE agents ADD COLUMN slug TEXT",
+		"ALTER TABLE agents ADD COLUMN exec_mode TEXT",
+		"ALTER TABLE agents ADD COLUMN max_iterations INTEGER",
+		"ALTER TABLE agents ADD COLUMN max_auto_turns INTEGER",
+		"ALTER TABLE agents ADD COLUMN think_interval INTEGER",
 	}
 	for _, stmt := range alterStmts {
 		// SQLite will error if column already exists, which is fine
 		_, err := db.ExecContext(ctx, stmt)
 		errs.Ignore(err, "ALTER TABLE may fail if column exists")
 	}
+
+	// Create indexes (unique index for slug enforces uniqueness)
+	_, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_agents_slug ON agents(slug)")
+	errs.Ignore(err, "CREATE INDEX may fail if index exists")
+	_, err = db.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_slug_unique ON agents(slug) WHERE slug IS NOT NULL")
+	errs.Ignore(err, "CREATE UNIQUE INDEX may fail if index exists")
 
 	return nil
 }
@@ -323,13 +493,17 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	var a agent.Agent
 	var skillsJSON, policyJSON string
 	var created string
-	var parentID, role, prompt, heartbeat sql.NullString
+	var parentID, name, slug, role, prompt, heartbeat sql.NullString
 	var llmProvider, llmModel, llmAPIKey sql.NullString
-	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey); err != nil {
+	var execMode sql.NullString
+	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
+	if err := rows.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
 		return agent.Agent{}, fmt.Errorf("agents: scan: %w", err)
 	}
 
 	a.ParentID = parentID.String
+	a.Name = name.String
+	a.Slug = slug.String
 	a.Role = role.String
 	a.Prompt = prompt.String
 
@@ -360,6 +534,12 @@ func scanAgent(rows *sql.Rows) (agent.Agent, error) {
 	a.LLMProvider = llmProvider.String
 	a.LLMModel = llmModel.String
 	a.LLMAPIKey = llmAPIKey.String
+
+	// Set execution mode fields
+	a.ExecMode = agent.ExecutionMode(execMode.String)
+	a.MaxIterations = int(maxIterations.Int64)
+	a.MaxAutoTurns = int(maxAutoTurns.Int64)
+	a.ThinkInterval = int(thinkInterval.Int64)
 
 	return a, nil
 }

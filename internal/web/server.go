@@ -127,6 +127,30 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/codemaps", api.CodemapsListHandler(s.cfg, s.log))
 	mux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
 
+	// --- Companion (RLM Mobile Backend) ---
+	mux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log))
+	mux.HandleFunc("/api/companion/context", api.CompanionContextSetHandler(s.cfg, s.log))
+	// Context routes with path params (GET, DELETE for specific conversation/key)
+	mux.HandleFunc("/api/companion/context/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			api.CompanionContextGetHandler(s.cfg, s.log).ServeHTTP(w, r)
+		case http.MethodDelete:
+			// Check if this is a clear (no key) or delete specific key
+			path := strings.TrimPrefix(r.URL.Path, "/api/companion/context/")
+			parts := strings.Split(path, "/")
+			if len(parts) == 1 || (len(parts) > 1 && parts[1] == "") {
+				// Clear conversation: DELETE /api/companion/context/:id?clear=true
+				api.CompanionContextClearHandler(s.cfg, s.log).ServeHTTP(w, r)
+			} else {
+				// Delete key: DELETE /api/companion/context/:id/:key
+				api.CompanionContextDeleteHandler(s.cfg, s.log).ServeHTTP(w, r)
+			}
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// --- Static UI (optional) ---
 	if s.opts.UIDir != "" {
 		fs := http.FileServer(http.Dir(s.opts.UIDir))

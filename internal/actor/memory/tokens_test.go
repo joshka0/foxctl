@@ -184,6 +184,29 @@ func TestTruncateToFit(t *testing.T) {
 	}
 }
 
+func TestTruncateToFitWithMarginTail(t *testing.T) {
+	text := "abcdefghijkl"
+	gotText, gotTruncated := TruncateToFitWithMargin(text, 2, 1.0, true)
+
+	if gotText != "...hijkl" {
+		t.Errorf("TruncateToFitWithMargin tail = %q, want %q", gotText, "...hijkl")
+	}
+	if !gotTruncated {
+		t.Error("expected truncation")
+	}
+}
+
+func TestNewTokenBudgetWithMargin(t *testing.T) {
+	b := NewTokenBudgetWithMargin(100, 1.0)
+
+	if b.Total != 100 {
+		t.Errorf("Total = %d, want 100", b.Total)
+	}
+	if b.Remaining != 100 {
+		t.Errorf("Remaining = %d, want 100", b.Remaining)
+	}
+}
+
 func TestTokenBudget(t *testing.T) {
 	t.Run("new budget", func(t *testing.T) {
 		b := NewTokenBudget(100)

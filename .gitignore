@@ -125,3 +125,8 @@ pr*.txt
 # OpenCode
 .opencode/
 .fastembed_cache/
+
+# Compiled test binaries
+*_test
+!*_test.go
+!*_test/

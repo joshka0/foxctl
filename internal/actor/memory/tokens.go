@@ -17,6 +17,20 @@ const (
 	SafetyMargin = 0.8
 )
 
+func normalizeMargin(margin float64) float64 {
+	if margin <= 0 || margin > 1 {
+		return SafetyMargin
+	}
+	return margin
+}
+
+func effectiveBudget(budget int, margin float64) int {
+	if budget <= 0 {
+		return 0
+	}
+	return int(float64(budget) * normalizeMargin(margin))
+}
+
 // EstimateTokens estimates the number of tokens in text.
 //
 // Uses a simple heuristic: ~4 characters per token.
@@ -34,14 +48,14 @@ func EstimateTokensWithOverhead(text string, overhead int) int {
 // Uses 80% of budget as safety margin.
 func FitsInBudget(text string, budget int) bool {
 	estimated := EstimateTokens(text)
-	effectiveBudget := int(float64(budget) * SafetyMargin)
-	return estimated <= effectiveBudget
+	effective := effectiveBudget(budget, SafetyMargin)
+	return estimated <= effective
 }
 
 // RemainingBudget calculates remaining tokens in budget.
 func RemainingBudget(used, budget int) int {
-	effectiveBudget := int(float64(budget) * SafetyMargin)
-	remaining := effectiveBudget - used
+	effective := effectiveBudget(budget, SafetyMargin)
+	remaining := effective - used
 	if remaining < 0 {
 		return 0
 	}
@@ -52,15 +66,27 @@ func RemainingBudget(used, budget int) int {
 // Returns the truncated text and whether truncation occurred.
 // Uses rune-aware truncation to avoid corrupting multi-byte UTF-8 characters.
 func TruncateToFit(text string, budget int) (string, bool) {
-	if FitsInBudget(text, budget) {
+	return TruncateToFitWithMargin(text, budget, SafetyMargin, false)
+}
+
+// TruncateToFitTail truncates text to fit within token budget, keeping the tail.
+func TruncateToFitTail(text string, budget int) (string, bool) {
+	return TruncateToFitWithMargin(text, budget, SafetyMargin, true)
+}
+
+// TruncateToFitWithMargin truncates text with a custom safety margin.
+// When fromTail is true, the tail of the text is preserved.
+func TruncateToFitWithMargin(text string, budget int, margin float64, fromTail bool) (string, bool) {
+	if text == "" {
 		return text, false
 	}
 
-	// Calculate max characters
-	effectiveBudget := int(float64(budget) * SafetyMargin)
-	maxChars := effectiveBudget * CharsPerToken
+	effective := effectiveBudget(budget, margin)
+	if EstimateTokens(text) <= effective {
+		return text, false
+	}
 
-	// Guard very small budgets
+	maxChars := effective * CharsPerToken
 	if maxChars <= 3 {
 		return "...", true
 	}
@@ -69,7 +95,6 @@ func TruncateToFit(text string, budget int) (string, bool) {
 		return text, false
 	}
 
-	// Truncate at rune boundary to avoid corrupting UTF-8
 	runes := []rune(text)
 	maxRunes := maxChars - 3 // Reserve space for ellipsis
 	if maxRunes >= len(runes) {
@@ -77,6 +102,10 @@ func TruncateToFit(text string, budget int) (string, bool) {
 	}
 	if maxRunes <= 0 {
 		return "...", true
+	}
+
+	if fromTail {
+		return "..." + string(runes[len(runes)-maxRunes:]), true
 	}
 
 	return string(runes[:maxRunes]) + "...", true
@@ -87,22 +116,29 @@ type TokenBudget struct {
 	Total     int
 	Used      int
 	Remaining int
+	Margin    float64
 }
 
 // NewTokenBudget creates a new token budget.
 func NewTokenBudget(total int) *TokenBudget {
-	effective := int(float64(total) * SafetyMargin)
+	return NewTokenBudgetWithMargin(total, SafetyMargin)
+}
+
+// NewTokenBudgetWithMargin creates a new token budget with a custom safety margin.
+func NewTokenBudgetWithMargin(total int, margin float64) *TokenBudget {
+	effective := effectiveBudget(total, margin)
 	return &TokenBudget{
 		Total:     total,
 		Used:      0,
 		Remaining: effective,
+		Margin:    normalizeMargin(margin),
 	}
 }
 
 // Add adds tokens to the used count.
 func (b *TokenBudget) Add(tokens int) {
 	b.Used += tokens
-	b.Remaining = int(float64(b.Total)*SafetyMargin) - b.Used
+	b.Remaining = effectiveBudget(b.Total, b.Margin) - b.Used
 	if b.Remaining < 0 {
 		b.Remaining = 0
 	}
@@ -128,7 +164,7 @@ func (b *TokenBudget) CanFitText(text string) bool {
 // Reset resets the budget.
 func (b *TokenBudget) Reset() {
 	b.Used = 0
-	b.Remaining = int(float64(b.Total) * SafetyMargin)
+	b.Remaining = effectiveBudget(b.Total, b.Margin)
 }
 
 // UsagePercent returns the percentage of budget used.

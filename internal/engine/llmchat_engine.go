@@ -17,10 +17,11 @@ import (
 // LLMChatEngine implements AgentEngine using OpenAI-compatible chat completions.
 // Supports OpenRouter, Groq, OpenAI, and other compatible providers.
 type LLMChatEngine struct {
-	config     LLMChatConfig
-	client     *http.Client
-	toolRunner *ToolRunner
-	logger     zerolog.Logger
+	config      LLMChatConfig
+	client      *http.Client
+	toolRunner  *ToolRunner
+	rlmExecutor *RLMToolExecutor // For tracking RLM context queries
+	logger      zerolog.Logger
 }
 
 // LLMChatConfig configures the LLM chat engine.
@@ -54,6 +55,22 @@ type LLMChatConfig struct {
 
 	// Logger for structured logging.
 	Logger zerolog.Logger
+
+	// StatelessMode enables RLM (Recursive Language Model) mode.
+	// In this mode:
+	// - Each turn only includes system prompt + current user message
+	// - No conversation history is appended
+	// - Context is queried via rlm_context_* tools
+	// - Ideal for mobile/companion apps with predictable latency
+	StatelessMode bool
+
+	// RLMSystemPromptSuffix is appended to the system prompt in StatelessMode.
+	// Use this to include RLM-specific instructions for context querying.
+	RLMSystemPromptSuffix string
+
+	// RequireContextQuery blocks completion if no context was queried in StatelessMode.
+	// Useful for enforcing context-aware responses.
+	RequireContextQuery bool
 }
 
 // DefaultLLMChatConfig returns sensible defaults.
@@ -112,8 +129,24 @@ func (e *LLMChatEngine) SetToolRunner(runner *ToolRunner) {
 	e.toolRunner = runner
 }
 
+// SetRLMExecutor sets the RLM tool executor for context query tracking.
+// Required for StatelessMode with RequireContextQuery enabled.
+func (e *LLMChatEngine) SetRLMExecutor(executor *RLMToolExecutor) {
+	e.rlmExecutor = executor
+}
+
+// IsStatelessMode returns true if the engine is in RLM stateless mode.
+func (e *LLMChatEngine) IsStatelessMode() bool {
+	return e.config.StatelessMode
+}
+
 // Run implements AgentEngine.
 func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {
+	// Reset RLM query counter at start of turn
+	if e.rlmExecutor != nil {
+		e.rlmExecutor.ResetQueryCount()
+	}
+
 	// Build initial messages
 	messages := e.buildMessages(input)
 	tools := e.buildTools(input.Tools)
@@ -199,6 +232,16 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		// No tool calls - this is the final response
 		output.AssistantText = choice.Message.Content
 		output.StopReason = mapFinishReason(choice.FinishReason)
+
+		// In StatelessMode with RequireContextQuery, verify context was queried
+		if e.config.StatelessMode && e.config.RequireContextQuery {
+			if e.rlmExecutor == nil || e.rlmExecutor.QueryCount() == 0 {
+				output.StopReason = StopReasonError
+				output.Error = "RLM mode requires at least one context query before responding"
+				return output, nil
+			}
+		}
+
 		return output, nil
 	}
 }
@@ -207,15 +250,41 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 func (e *LLMChatEngine) buildMessages(input EngineInput) []oaiMessage {
 	var messages []oaiMessage
 
+	// Build system prompt
+	systemPrompt := input.SystemPrompt
+	if e.config.StatelessMode && e.config.RLMSystemPromptSuffix != "" {
+		if systemPrompt != "" {
+			systemPrompt += "\n\n" + e.config.RLMSystemPromptSuffix
+		} else {
+			systemPrompt = e.config.RLMSystemPromptSuffix
+		}
+	}
+
 	// Add system prompt if provided
-	if input.SystemPrompt != "" {
+	if systemPrompt != "" {
 		messages = append(messages, oaiMessage{
 			Role:    "system",
-			Content: input.SystemPrompt,
+			Content: systemPrompt,
 		})
 	}
 
-	// Convert input messages
+	// In StatelessMode, only include the current user message (last message)
+	// No conversation history is accumulated
+	if e.config.StatelessMode {
+		// Find the last user message
+		for i := len(input.Messages) - 1; i >= 0; i-- {
+			if input.Messages[i].Role == RoleUser {
+				messages = append(messages, oaiMessage{
+					Role:    "user",
+					Content: input.Messages[i].Content,
+				})
+				break
+			}
+		}
+		return messages
+	}
+
+	// Normal mode: Convert all input messages
 	for _, msg := range input.Messages {
 		oaiMsg := oaiMessage{
 			Role:    msg.Role,
@@ -398,6 +467,8 @@ func baseURLForProvider(provider string) string {
 		return "https://openrouter.ai/api/v1"
 	case "groq":
 		return "https://api.groq.com/openai/v1"
+	case "cerebras":
+		return "https://api.cerebras.ai/v1"
 	default:
 		return "https://api.openai.com/v1"
 	}

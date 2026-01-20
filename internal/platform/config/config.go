@@ -213,6 +213,62 @@ type LLMSettings struct {
 
 	// AnthropicAPIKey is the Anthropic API key (from ANTHROPIC_API_KEY)
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key" json:"anthropic_api_key"`
+
+	// CerebrasAPIKey is the Cerebras API key (from CEREBRAS_API_KEY)
+	CerebrasAPIKey string `mapstructure:"cerebras_api_key" json:"cerebras_api_key"`
+
+	// CerebrasModel is the model for Cerebras (from CEREBRAS_MODEL)
+	CerebrasModel string `mapstructure:"cerebras_model" json:"cerebras_model"`
+}
+
+// ResolveAPIKey returns the API key for the given provider.
+// It checks the provider-specific key first, then falls back to the generic APIKey.
+func (l LLMSettings) ResolveAPIKey(provider string) string {
+	// Check provider-specific key first
+	switch provider {
+	case "openrouter":
+		if l.OpenRouterAPIKey != "" {
+			return l.OpenRouterAPIKey
+		}
+	case "groq":
+		if l.GroqAPIKey != "" {
+			return l.GroqAPIKey
+		}
+	case "openai":
+		if l.OpenAIAPIKey != "" {
+			return l.OpenAIAPIKey
+		}
+	case "gemini":
+		if l.GeminiAPIKey != "" {
+			return l.GeminiAPIKey
+		}
+	case "anthropic":
+		if l.AnthropicAPIKey != "" {
+			return l.AnthropicAPIKey
+		}
+	case "cerebras":
+		if l.CerebrasAPIKey != "" {
+			return l.CerebrasAPIKey
+		}
+	}
+	// Fall back to generic API key
+	return l.APIKey
+}
+
+// ResolveModel returns the model for the given provider.
+// It checks the provider-specific model first, then falls back to the generic Model.
+func (l LLMSettings) ResolveModel(provider string) string {
+	switch provider {
+	case "openrouter":
+		if l.OpenRouterModel != "" {
+			return l.OpenRouterModel
+		}
+	case "cerebras":
+		if l.CerebrasModel != "" {
+			return l.CerebrasModel
+		}
+	}
+	return l.Model
 }
 
 // IndexerSettings defines the configuration for a single indexer.
@@ -480,6 +536,12 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" && cfg.LLM.AnthropicAPIKey == "" {
 		cfg.LLM.AnthropicAPIKey = key
+	}
+	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" && cfg.LLM.CerebrasAPIKey == "" {
+		cfg.LLM.CerebrasAPIKey = key
+	}
+	if model := os.Getenv("CEREBRAS_MODEL"); model != "" && cfg.LLM.CerebrasModel == "" {
+		cfg.LLM.CerebrasModel = model
 	}
 	if provider := os.Getenv("AGENTCTL_LLM_PROVIDER"); provider != "" && cfg.LLM.Provider == "" {
 		cfg.LLM.Provider = provider

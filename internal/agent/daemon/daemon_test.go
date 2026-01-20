@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -15,12 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/jkatigb/agentctl/internal/agent/tools"
+	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
 	"github.com/jkatigb/agentctl/internal/platform/maputil"
 	storagents "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
 func TestBackoffDuration(t *testing.T) {
@@ -599,4 +602,134 @@ func TestDaemon_Heartbeat(t *testing.T) {
 
 	// Verify heartbeat updated (already confirmed above, but assert for clarity)
 	assert.True(t, a.HeartbeatAt.After(initialHeartbeat), "heartbeat should update: initial %v, current %v", initialHeartbeat, a.HeartbeatAt)
+}
+
+func TestDaemon_CompanionMemory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping daemon test in short mode")
+	}
+	root := t.TempDir()
+	ctx := context.Background()
+
+	// Init agent store and create companion agent
+	as, err := storagents.Open(ctx, root)
+	require.NoError(t, err)
+
+	agentID := ulid.Make().String()
+	a := agent.Agent{
+		ID:        agentID,
+		Namespace: "actor:agent:" + agentID,
+		Role:      "companion", // Companion role triggers memory
+		State:     agent.StateStarting,
+		Prompt:    "You are a friendly companion.",
+		ShareBB:   "scoped",
+	}
+	err = as.Create(ctx, a)
+	require.NoError(t, err)
+	require.NoError(t, as.Close())
+
+	// Setup fake LLM with responses
+	fakeLLM := NewFakeLLM()
+	fakeLLM.Responses = []string{
+		"thought: I will greet the user.\naction: <action><tool_name>Finish</tool_name><arguments><arg key=\"result\">Hello! Nice to meet you, John!</arg></arguments></action>\nanswer: Hello! Nice to meet you, John!",
+	}
+
+	opts := Options{
+		AgentID:               agentID,
+		StorageRoot:           root,
+		PollInterval:          10 * time.Millisecond,
+		HeartbeatInterval:     100 * time.Millisecond,
+		MaxPollMessages:       10,
+		UseMemoryDedupe:       true,
+		EnableCompanionMemory: true, // Enable companion memory
+		AgentFactory: func(ctx context.Context, a agent.Agent, r *tools.Registry) (agents.Agent, error) {
+			dspyAgent := react.NewReActAgent(a.ID, a.Role)
+			sig := core.NewSignature(
+				[]core.InputField{
+					{Field: core.NewField("task", core.WithDescription("task"))},
+				},
+				[]core.OutputField{
+					{Field: core.NewField("result", core.WithDescription("result"))},
+				},
+			)
+			if err := dspyAgent.Initialize(fakeLLM, sig); err != nil {
+				return nil, err
+			}
+			return dspyAgent, nil
+		},
+	}
+
+	// Open mailbox and send ask message
+	ms, err := mailbox.Open(ctx, root)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, ms.Close()) }()
+
+	callerNS := "caller:test"
+	askID := ulid.Make().String()
+	askData := agent.AskData{
+		AskID:    askID,
+		Question: "Hi, my name is John!",
+	}
+	payload, err := json.Marshal(envelope.Envelope{
+		Version: 1,
+		Status:  "ok",
+		Command: "agent.ask",
+		Data:    askData,
+	})
+	require.NoError(t, err)
+
+	msg := agent.Message{
+		ID:        ulid.Make().String(),
+		FromNS:    callerNS,
+		ToNS:      "actor:agent:" + agentID,
+		Type:      agent.MessageTypeAsk,
+		Timestamp: time.Now().Unix(),
+		Headers:   map[string]string{"correlation": askID},
+		Payload:   payload,
+	}
+	err = ms.Send(ctx, msg)
+	require.NoError(t, err)
+
+	// Run daemon
+	daemonCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- Run(daemonCtx, opts) }()
+
+	// Wait for reply
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		replies, err := ms.List(context.Background(), callerNS, 10)
+		require.NoError(t, err)
+		if len(replies) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for reply")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	err = <-errCh
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Errorf("daemon run error: %v", err)
+	}
+
+	// Verify conversation turns were stored in companion memory
+	dbPath := filepath.Join(root, "companion.db")
+	db, err := sqliteutil.OpenDB(ctx, dbPath, nil)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mem, err := companion.NewConversationMemory(db)
+	require.NoError(t, err)
+
+	// Composite conversation ID: agentID:callerNS
+	conversationID := agentID + ":" + callerNS
+	stats, err := mem.GetStats(ctx, conversationID)
+	require.NoError(t, err)
+
+	// Should have at least 2 turns (user + assistant)
+	assert.GreaterOrEqual(t, stats.TotalTurns, 2, "expected at least 2 turns (user + assistant)")
 }

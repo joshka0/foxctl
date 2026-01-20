@@ -156,6 +156,10 @@ semantic_search → snippet_extract → counsel
 
 ## Environment
 
+Environment variables are loaded from `~/repos/personal/agentctl/.env` by the config loader. This .env file is **not** in this worktree - it's in the main agentctl repo and shared across all worktrees. When running daemon agents or testing locally, either:
+1. Source the .env: `source ~/repos/personal/agentctl/.env`
+2. Or run from the main repo where the config loader auto-loads it
+
 ### Required
 
 | Variable | Purpose |
@@ -315,3 +319,5 @@ make ts-dev-gui  # Web GUI at http://localhost:5173
 | Sessions | [docs/general/sessions.md](../docs/general/sessions.md) |
 | Storage | [docs/general/storage.md](../docs/general/storage.md) |
 | Gotchas | [docs/general/gotchas.md](../docs/general/gotchas.md) |
+| Companion Memory | [docs/general/companion-memory.md](../docs/general/companion-memory.md) |
+| RLM Context | [docs/general/rlm-context.md](../docs/general/rlm-context.md) |

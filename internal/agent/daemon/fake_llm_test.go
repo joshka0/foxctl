@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -11,12 +12,18 @@ import (
 // Uses atomic operations for CallIndex to avoid races when dspy-go
 // reflects over this struct for error formatting.
 type FakeLLM struct {
-	Responses []string
-	Errors    map[int]error
-	callIndex atomic.Int32
+	Responses       []string
+	Errors          map[int]error
+	callIndex       atomic.Int32
+	mu              sync.Mutex
+	CapturedPrompts []string // Captures all prompts for verification
 }
 
 func (f *FakeLLM) Generate(ctx context.Context, prompt string, opts ...core.GenerateOption) (*core.LLMResponse, error) {
+	f.mu.Lock()
+	f.CapturedPrompts = append(f.CapturedPrompts, prompt)
+	f.mu.Unlock()
+
 	idx := int(f.callIndex.Load())
 
 	if err, ok := f.Errors[idx]; ok {

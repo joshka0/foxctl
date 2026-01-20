@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/daemon"
+	"github.com/jkatigb/agentctl/internal/agent/prompts"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
@@ -90,16 +91,28 @@ var agentCmdCmd = &cobra.Command{
 
 // Flags for agent spawn
 var (
-	spawnParentNS    string
-	spawnRole        string
-	spawnPromptFile  string
-	spawnSkillsAllow string
-	spawnPolicyFile  string
-	spawnShareBB     string
-	spawnLLMProvider string
-	spawnLLMModel    string
-	spawnLLMAPIKey   string
-	spawnDryRun      bool
+	spawnParentNS      string
+	spawnName          string
+	spawnSlug          string
+	spawnRole          string
+	spawnPromptFile    string
+	spawnSkillsAllow   string
+	spawnPolicyFile    string
+	spawnShareBB       string
+	spawnLLMProvider   string
+	spawnLLMModel      string
+	spawnLLMAPIKey     string
+	spawnExecMode      string
+	spawnMaxIterations int
+	spawnMaxAutoTurns  int
+	spawnThinkInterval int
+	spawnDryRun        bool
+	spawnChat          bool // Convenience flag for chat/roleplay companions
+)
+
+// Flags for agent run
+var (
+	runCompanionMode string // "standard" or "roleplay"
 )
 
 // Flags for agent kill
@@ -139,6 +152,8 @@ func init() {
 
 	// Spawn flags
 	agentSpawnCmd.Flags().StringVar(&spawnParentNS, "ns", "", "Parent namespace (optional)")
+	agentSpawnCmd.Flags().StringVar(&spawnName, "name", "", "Human name for the agent (e.g., 'Luna', 'Atlas')")
+	agentSpawnCmd.Flags().StringVar(&spawnSlug, "slug", "", "Human-readable handle for referencing (e.g., 'researcher', 'companion')")
 	agentSpawnCmd.Flags().StringVar(&spawnRole, "role", "", "Agent role")
 	agentSpawnCmd.Flags().StringVar(&spawnPromptFile, "prompt-file", "", "Path to prompt file")
 	agentSpawnCmd.Flags().StringVar(&spawnSkillsAllow, "skills-allow", "", "Comma-separated list of allowed skills")
@@ -147,7 +162,15 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnLLMProvider, "llm-provider", "", "LLM provider (gemini|openai|anthropic|groq|openrouter)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMModel, "llm-model", "", "LLM model ID (e.g., claude-haiku-4-5)")
 	agentSpawnCmd.Flags().StringVar(&spawnLLMAPIKey, "llm-api-key", "", "LLM API key (or env var like $GROQ_API_KEY)")
+	agentSpawnCmd.Flags().StringVar(&spawnExecMode, "exec-mode", "reactive", "Execution mode (reactive|autonomous|proactive)")
+	agentSpawnCmd.Flags().IntVar(&spawnMaxIterations, "max-iterations", 10, "Max tool calls per turn")
+	agentSpawnCmd.Flags().IntVar(&spawnMaxAutoTurns, "max-auto-turns", 1, "Max autonomous turns per session (only for autonomous/proactive modes)")
+	agentSpawnCmd.Flags().IntVar(&spawnThinkInterval, "think-interval", 60, "Seconds between proactive think cycles (only for proactive mode)")
 	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
+	agentSpawnCmd.Flags().BoolVar(&spawnChat, "chat", false, "Convenience flag for chat/roleplay companions (sets role=companion, exec-mode=reactive, max-iterations=3)")
+
+	// Run flags
+	agentRunCmd.Flags().StringVar(&runCompanionMode, "companion-mode", "", "Memory mode for conversation memory: standard (40K tokens) or roleplay (50K tokens)")
 
 	// Kill flags
 	agentKillCmd.Flags().BoolVar(&killGraceful, "graceful", true, "Graceful shutdown")
@@ -161,6 +184,7 @@ func init() {
 	// Ask flags
 	agentAskCmd.Flags().String("question", "", "The question to ask (required)")
 	agentAskCmd.Flags().String("kind", "context", "Ask kind: context|secret|approval|toolhint|other")
+	agentAskCmd.Flags().String("conversation-id", "", "Conversation ID for memory continuity (default: unique per call)")
 	agentAskCmd.Flags().Bool("wait", false, "Wait for reply before returning")
 	agentAskCmd.Flags().Duration("timeout", 5*time.Minute, "Timeout for --wait")
 	agentAskCmd.Flags().BoolVar(&askDryRun, "dry-run", false, "Preview what would be sent without sending the message")
@@ -178,6 +202,23 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
+	// Apply chat/roleplay companion defaults if --chat flag is set
+	// These can be overridden by explicit flags
+	if spawnChat {
+		if spawnRole == "" {
+			spawnRole = "companion"
+		}
+		if spawnExecMode == "reactive" && !cmd.Flags().Changed("exec-mode") {
+			spawnExecMode = "reactive" // Confirm reactive for chat
+		}
+		if spawnMaxIterations == 10 && !cmd.Flags().Changed("max-iterations") {
+			spawnMaxIterations = 3 // Minimal tool use for chat
+		}
+		if spawnMaxAutoTurns == 1 && !cmd.Flags().Changed("max-auto-turns") {
+			spawnMaxAutoTurns = 1 // No autonomous continuation for natural chat
+		}
+	}
+
 	// Load prompt
 	var prompt string
 	if spawnPromptFile != "" {
@@ -186,6 +227,11 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read prompt file: %v", err))
 		}
 		prompt = string(data)
+	}
+	if prompt == "" && spawnRole != "" {
+		if defaultPrompt, ok := prompts.DefaultPrompt(spawnRole); ok {
+			prompt = defaultPrompt
+		}
 	}
 
 	// Parse skills allow
@@ -239,30 +285,42 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 
 	// Spawn agent
 	req := agentmanager.SpawnRequest{
-		ParentNS:    spawnParentNS,
-		Role:        spawnRole,
-		Prompt:      prompt,
-		SkillsAllow: skillsAllow,
-		Policy:      policy,
-		ShareBB:     spawnShareBB,
-		LLMProvider: spawnLLMProvider,
-		LLMModel:    spawnLLMModel,
-		LLMAPIKey:   llmAPIKey,
+		ParentNS:      spawnParentNS,
+		Name:          spawnName,
+		Slug:          spawnSlug,
+		Role:          spawnRole,
+		Prompt:        prompt,
+		SkillsAllow:   skillsAllow,
+		Policy:        policy,
+		ShareBB:       spawnShareBB,
+		LLMProvider:   spawnLLMProvider,
+		LLMModel:      spawnLLMModel,
+		LLMAPIKey:     llmAPIKey,
+		ExecMode:      agent.ExecutionMode(spawnExecMode),
+		MaxIterations: spawnMaxIterations,
+		MaxAutoTurns:  spawnMaxAutoTurns,
+		ThinkInterval: spawnThinkInterval,
 	}
 
 	// Dry-run mode: show what would be spawned
 	if spawnDryRun {
 		data := map[string]any{
-			"dry_run":      true,
-			"would_spawn":  true,
-			"parent_ns":    req.ParentNS,
-			"role":         req.Role,
-			"skills_allow": req.SkillsAllow,
-			"share_bb":     req.ShareBB,
-			"llm_provider": req.LLMProvider,
-			"llm_model":    req.LLMModel,
-			"has_prompt":   len(req.Prompt) > 0,
-			"has_policy":   req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
+			"dry_run":        true,
+			"would_spawn":    true,
+			"parent_ns":      req.ParentNS,
+			"name":           req.Name,
+			"slug":           req.Slug,
+			"role":           req.Role,
+			"skills_allow":   req.SkillsAllow,
+			"share_bb":       req.ShareBB,
+			"llm_provider":   req.LLMProvider,
+			"llm_model":      req.LLMModel,
+			"exec_mode":      string(req.ExecMode),
+			"max_iterations": req.MaxIterations,
+			"max_auto_turns": req.MaxAutoTurns,
+			"think_interval": req.ThinkInterval,
+			"has_prompt":     len(req.Prompt) > 0,
+			"has_policy":     req.Policy.CPU > 0 || req.Policy.MemoryMB > 0 || req.Policy.Timeout != "",
 		}
 		return writeOK(cmd, "agent/spawn", data, "run", nil)
 	}
@@ -377,7 +435,7 @@ func runAgentKill(cmd *cobra.Command, args []string) error {
 func runAgentInfo(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
-	agentID := args[0]
+	agentRef := args[0] // Can be ID, slug, or name
 
 	// Open agent store
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
@@ -386,8 +444,8 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
 
-	// Get agent
-	a, err := agentStore.Get(ctx, agentID)
+	// Get agent (supports slug, name, or ID)
+	a, err := agentStore.Resolve(ctx, agentRef)
 	if err != nil {
 		code := string(protocol.ErrorCodeERuntime)
 		msg := fmt.Sprintf("failed to get agent: %v", err)
@@ -657,14 +715,62 @@ func filterAgentsByState(list []agent.Agent, stateFilter string) ([]agent.Agent,
 func runAgentRun(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
-	agentID := args[0]
+	agentRef := args[0] // Can be ID, slug, or name
+
+	// Resolve LLM provider - use config or auto-detect from available keys
+	provider := cfg.LLM.Provider
+	if provider == "" {
+		// Auto-detect provider based on available API keys
+		// Priority: cerebras > groq > openrouter > gemini > anthropic > openai
+		switch {
+		case cfg.LLM.CerebrasAPIKey != "":
+			provider = "cerebras"
+		case cfg.LLM.GroqAPIKey != "":
+			provider = "groq"
+		case cfg.LLM.OpenRouterAPIKey != "":
+			provider = "openrouter"
+		case cfg.LLM.GeminiAPIKey != "":
+			provider = "gemini"
+		case cfg.LLM.AnthropicAPIKey != "":
+			provider = "anthropic"
+		case cfg.LLM.OpenAIAPIKey != "":
+			provider = "openai"
+		default:
+			provider = "gemini" // fallback default
+		}
+	}
+
+	// Load agent to check role for companion memory (supports slug, name, or ID)
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return fmt.Errorf("open agent store: %w", err)
+	}
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
+
+	agentRecord, err := agentStore.Resolve(ctx, agentRef)
+	if err != nil {
+		return fmt.Errorf("resolve agent %q: %w", agentRef, err)
+	}
+
+	// Determine companion mode: use flag if set, else auto-detect based on role
+	companionMode := runCompanionMode
+	enableCompanionMemory := runCompanionMode != "" || agentRecord.Role == "companion"
+	if runCompanionMode == "" && agentRecord.Role == "companion" {
+		// Default to roleplay mode for companion agents
+		companionMode = "roleplay"
+	}
 
 	opts := daemon.Options{
-		AgentID:           agentID,
-		StorageRoot:       cfg.Storage.Root,
-		PollInterval:      500 * time.Millisecond,
-		HeartbeatInterval: 10 * time.Second,
-		MaxPollMessages:   10,
+		AgentID:               agentRecord.ID, // Use resolved ID
+		StorageRoot:           cfg.Storage.Root,
+		PollInterval:          500 * time.Millisecond,
+		HeartbeatInterval:     10 * time.Second,
+		MaxPollMessages:       10,
+		LLMProvider:           provider,
+		LLMModel:              cfg.LLM.ResolveModel(provider),
+		LLMAPIKey:             cfg.LLM.ResolveAPIKey(provider),
+		EnableCompanionMemory: enableCompanionMemory,
+		CompanionMode:         companionMode,
 	}
 
 	return daemon.Run(ctx, opts)
@@ -690,6 +796,10 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("get timeout flag: %w", err)
 	}
+	conversationID, err := cmd.Flags().GetString("conversation-id")
+	if err != nil {
+		return fmt.Errorf("get conversation-id flag: %w", err)
+	}
 
 	// Open mailbox store
 	mailboxStore, err := mailbox.Open(ctx, cfg.Storage.Root)
@@ -698,13 +808,13 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { errs.Ignore(mailboxStore.Close(), "close mailbox store") }()
 
-	// Get agent to find its namespace
+	// Get agent to find its namespace (supports slug, name, or ID)
 	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err))
 	}
 	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
-	agentRecord, err := agentStore.Get(ctx, agentID)
+	agentRecord, err := agentStore.Resolve(ctx, agentID)
 	if err != nil {
 		return writeErrorEnvelope(cmd, "agent/ask", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err))
 	}
@@ -712,9 +822,10 @@ func runAgentAsk(cmd *cobra.Command, args []string) error {
 	// Build ask message
 	askID := ulid.Make().String()
 	askData := agent.AskData{
-		AskID:    askID,
-		Kind:     kind,
-		Question: question,
+		AskID:          askID,
+		Kind:           kind,
+		Question:       question,
+		ConversationID: conversationID,
 	}
 	payload, err := json.Marshal(envelope.OK("agent.ask", askData))
 	if err != nil {

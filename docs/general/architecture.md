@@ -99,6 +99,26 @@ Persistence layer.
 | `cas` | Content-addressable storage (SHA-256) |
 | `vector` | Vector embeddings (Voyage AI) |
 | `jobs` | Async job execution |
+| `contextvar` | RLM context variables with TTL and scopes |
+
+### `internal/companion/`
+Companion agent infrastructure for long-form conversations.
+
+| Package | Purpose |
+|---------|---------|
+| `memory.go` | L0/L1/L2 conversation memory with compression |
+| `daemon.go` | Background compression daemon |
+| `actor.go` | Mailbox actor for companion agents |
+| `evolving_personality.go` | Dynamic personality adaptation |
+| `service.go` | RLM chat service |
+
+### `internal/engine/`
+LLM engine and tool execution.
+
+| File | Purpose |
+|------|---------|
+| `rlm_tools.go` | RLM context tools (put, query, list, personality) |
+| `types.go` | Tool definitions and executor interfaces |
 
 ### `internal/platform/`
 Infrastructure utilities.
