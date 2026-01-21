@@ -162,10 +162,11 @@ func (a *CompanionActor) OnMailReceived(ctx context.Context, msg *actor.Message)
 	if err := json.Unmarshal(msg.Body, &payload); err != nil {
 		// If not JSON, treat the body as plain text message
 		payload.Message = string(msg.Body)
-	} else if payload.Message == "" && len(msg.Body) > 0 {
-		// JSON parsed but Message field is empty - fall back to raw body
-		// This preserves legacy/plain text bodies wrapped in JSON
-		payload.Message = string(msg.Body)
+	} else if payload.Message == "" {
+		// JSON parsed successfully but Message field is empty.
+		// This is intentional: valid JSON like {"personality":"friendly"} should NOT
+		// be treated as a chat message. Return an error so callers can handle it.
+		return fmt.Errorf("parsed JSON has no message field")
 	}
 
 	if payload.Message == "" {

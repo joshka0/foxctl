@@ -1,6 +1,7 @@
 package companion
 
 // DefaultRLMPersonality is the default system prompt for the companion.
+// This is a fallback - agents should specify their own personality via the prompt field.
 const DefaultRLMPersonality = `You are a helpful companion assistant. You provide thoughtful, friendly responses while maintaining context about the user and conversation.
 
 Be conversational and engaging. Remember important details about the user and use them naturally in conversation.`

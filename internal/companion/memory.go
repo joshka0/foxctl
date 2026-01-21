@@ -519,12 +519,18 @@ func (m *ConversationMemory) formatHistory(h *DistilledHistory) string {
 // RunDailyCompression compresses yesterday's turns into a summary.
 // Should be called by a daily cron/daemon.
 func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversationID string) error {
+	// Check summarizer without holding lock for the whole operation
+	m.mu.Lock()
 	if m.summarizer == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("no summarizer configured")
 	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	summarizer := m.summarizer
+	db := m.db
+	memoryStore := m.memoryStore
+	embedder := m.embedder
+	workspace := m.workspace
+	m.mu.Unlock()
 
 	now := time.Now()
 	loc := now.Location()
@@ -534,9 +540,9 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 	// Get yesterday's date in local time
 	yesterday := startOfYesterday.Format("2006-01-02")
 
-	// Check if already summarized
+	// Check if already summarized (DB query doesn't need lock)
 	var count int
-	err := m.db.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM companion_day_summaries
 		WHERE conversation_id = ? AND date = ?
 	`, conversationID, yesterday).Scan(&count)
@@ -547,9 +553,8 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 		return nil // Already summarized
 	}
 
-	// Get yesterday's turns (local midnight boundary)
-
-	rows, err := m.db.QueryContext(ctx, `
+	// Get yesterday's turns (local midnight boundary) - DB query doesn't need lock
+	rows, err := db.QueryContext(ctx, `
 		SELECT id, conversation_id, role, content, token_count, created_at
 		FROM companion_turns
 		WHERE conversation_id = ? AND created_at >= ? AND created_at < ?
@@ -573,8 +578,8 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 		return nil // No turns to summarize
 	}
 
-	// Create summary
-	summary, err := m.summarizer.SummarizeDay(ctx, turns)
+	// Create summary - this is the slow LLM call, done without holding lock
+	summary, err := summarizer.SummarizeDay(ctx, turns)
 	if err != nil {
 		return fmt.Errorf("summarize day: %w", err)
 	}
@@ -584,8 +589,8 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 	summary.ID = generateID()
 	summary.TurnCount = len(turns)
 
-	// Store summary
-	_, err = m.db.ExecContext(ctx, `
+	// Store summary - DB operations don't need the memory lock
+	_, err = db.ExecContext(ctx, `
 		INSERT INTO companion_day_summaries
 		(id, conversation_id, date, turn_count, summary, topics, mood, key_moments, token_count, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -597,7 +602,8 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 	}
 
 	// Store in named_memory for semantic search (if memory store configured)
-	if m.memoryStore != nil && m.workspace != "" {
+	// These operations use local copies captured earlier, no lock needed
+	if memoryStore != nil && workspace != "" {
 		// Build rich summary text for embedding
 		summaryText := summary.Summary
 		if len(summary.Topics) > 0 {
@@ -616,10 +622,10 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 		// Memory name for storage and embedding update
 		memoryName := fmt.Sprintf("companion:summary:%s:%s", conversationID, summary.Date)
 
-		_, saveErr := m.memoryStore.SaveResult(ctx, storage.MemorySaveOptions{
+		_, saveErr := memoryStore.SaveResult(ctx, storage.MemorySaveOptions{
 			Name:      memoryName,
 			Type:      "companion_summary",
-			Workspace: m.workspace,
+			Workspace: workspace,
 			SessionID: conversationID, // Use conversation_id as session for filtering
 			Summary:   summaryText,
 			Result:    resultData,
@@ -632,7 +638,7 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 
 		// Generate and store embedding for vector search (if embedder configured)
 		// Use dated summary format for better temporal search context
-		if m.embedder != nil && saveErr == nil {
+		if embedder != nil && saveErr == nil {
 			// Parse date for display (e.g., "[Jan 2, 2006]")
 			dateForDisplay := summary.Date
 			if parsedDate, parseErr := time.Parse("2006-01-02", summary.Date); parseErr == nil {
@@ -640,14 +646,14 @@ func (m *ConversationMemory) RunDailyCompression(ctx context.Context, conversati
 			}
 			datedSummary := fmt.Sprintf("[%s] %s", dateForDisplay, summaryText)
 
-			if embedding, embErr := m.embedder.Embed(ctx, datedSummary); embErr == nil && len(embedding.Vec) > 0 {
-				_ = m.memoryStore.UpdateEmbedding(ctx, memoryName, m.workspace, embedding.Vec)
+			if embedding, embErr := embedder.Embed(ctx, datedSummary); embErr == nil && len(embedding.Vec) > 0 {
+				_ = memoryStore.UpdateEmbedding(ctx, memoryName, workspace, embedding.Vec)
 			}
 		}
 	}
 
-	// Update cursor
-	_, err = m.db.ExecContext(ctx, `
+	// Update cursor - DB operation doesn't need lock
+	_, err = db.ExecContext(ctx, `
 		UPDATE companion_memory_state
 		SET last_summarized_date = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE conversation_id = ?
@@ -1015,4 +1021,108 @@ func (m *ConversationMemory) Export(ctx context.Context, conversationID string) 
 	export["stats"] = stats
 
 	return json.MarshalIndent(export, "", "  ")
+}
+
+// ConversationSummary represents a conversation for listing.
+type ConversationSummary struct {
+	ID           string `json:"id"`
+	Name         string `json:"name,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+	MessageCount int    `json:"message_count"`
+	LastMessage  string `json:"last_message,omitempty"`
+}
+
+// ListConversations returns all conversations with their summaries.
+func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) ([]ConversationSummary, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 50
+	}
+
+	// Get distinct conversation IDs with stats
+	query := `
+		SELECT
+			conversation_id,
+			COUNT(*) as message_count,
+			MIN(created_at) as created_at,
+			MAX(created_at) as updated_at
+		FROM companion_turns
+		GROUP BY conversation_id
+		ORDER BY MAX(created_at) DESC
+		LIMIT ?
+	`
+
+	rows, err := m.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var conversations []ConversationSummary
+	for rows.Next() {
+		var conv ConversationSummary
+		var createdAt, updatedAt string
+		if err := rows.Scan(&conv.ID, &conv.MessageCount, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		// Parse timestamps and convert to ISO 8601 for frontend compatibility
+		conv.CreatedAt = parseAndFormatTimestamp(createdAt)
+		conv.UpdatedAt = parseAndFormatTimestamp(updatedAt)
+		conversations = append(conversations, conv)
+	}
+
+	// Get last message for each conversation
+	for i := range conversations {
+		lastMsgQuery := `
+			SELECT content FROM companion_turns
+			WHERE conversation_id = ?
+			ORDER BY created_at DESC
+			LIMIT 1
+		`
+		var lastMsg string
+		if err := m.db.QueryRowContext(ctx, lastMsgQuery, conversations[i].ID).Scan(&lastMsg); err == nil {
+			// Truncate to first 100 chars
+			if len(lastMsg) > 100 {
+				lastMsg = lastMsg[:100] + "..."
+			}
+			conversations[i].LastMessage = lastMsg
+		}
+	}
+
+	return conversations, nil
+}
+
+// parseAndFormatTimestamp attempts to parse various timestamp formats and returns ISO 8601.
+// Handles Go's default time format (with monotonic clock) and other common formats.
+func parseAndFormatTimestamp(ts string) string {
+	if ts == "" {
+		return ""
+	}
+
+	// Try various formats
+	formats := []string{
+		// Go default format with monotonic clock (remove m=+... suffix first)
+		"2006-01-02 15:04:05.999999 -0700 MST",
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05Z",
+	}
+
+	// Strip monotonic clock reading if present (e.g., "m=+123.456")
+	if idx := strings.Index(ts, " m="); idx > 0 {
+		ts = ts[:idx]
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, ts); err == nil {
+			return t.UTC().Format(time.RFC3339)
+		}
+	}
+
+	// If all parsing fails, return original (better than empty)
+	return ts
 }

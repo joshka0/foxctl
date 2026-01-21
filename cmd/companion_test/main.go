@@ -158,22 +158,30 @@ func main() {
 			// Special formatting for personality profile
 			if v.Key == "personality/profile" {
 				fmt.Printf("  • %s [%s]: <personality profile>\n", v.Key, v.Scope)
-				if profile, ok := v.Value.(map[string]interface{}); ok {
-					if dims, ok := profile["dimensions"].([]interface{}); ok {
-						fmt.Println("    Personality Dimensions:")
-						for _, d := range dims {
-							if dim, ok := d.(map[string]interface{}); ok {
-								name := dim["name"]
-								value := dim["value"]
-								fmt.Printf("      - %s: %.2f\n", name, value)
-							}
+				profile, ok := v.Value.(map[string]interface{})
+				if !ok || profile == nil {
+					continue
+				}
+				dims, ok := profile["dimensions"].([]interface{})
+				if ok && dims != nil {
+					fmt.Println("    Personality Dimensions:")
+					for _, d := range dims {
+						dim, ok := d.(map[string]interface{})
+						if !ok || dim == nil {
+							continue
 						}
+						name, nameOk := dim["name"].(string)
+						value, valueOk := dim["value"].(float64)
+						if !nameOk || !valueOk {
+							continue
+						}
+						fmt.Printf("      - %s: %.2f\n", name, value)
 					}
-					if traits, ok := profile["learned_traits"].([]interface{}); ok && len(traits) > 0 {
-						fmt.Println("    Learned Traits:")
-						for _, t := range traits {
-							fmt.Printf("      - %v\n", t)
-						}
+				}
+				if traits, ok := profile["learned_traits"].([]interface{}); ok && len(traits) > 0 {
+					fmt.Println("    Learned Traits:")
+					for _, t := range traits {
+						fmt.Printf("      - %v\n", t)
 					}
 				}
 			} else {

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"errors"
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -9,6 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
 // CompanionChatHandler returns a handler for POST /api/companion/chat.
@@ -46,9 +50,20 @@ func CompanionChatHandler(cfg config.Config, log zerolog.Logger) http.HandlerFun
 		}
 		defer store.Close()
 
-		// Create service
+		// Open companion memory database for memory context injection
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, err := sqliteutil.OpenDB(r.Context(), dbPath, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = memoryDB.Close() }()
+
+		// Create service with memory enabled
 		svc := companion.NewService(store, companion.ServiceConfig{
-			Logger: log,
+			Logger:   log,
+			MemoryDB: memoryDB,
 		})
 
 		// Execute chat
@@ -203,7 +218,7 @@ func CompanionContextDeleteHandler(cfg config.Config, log zerolog.Logger) http.H
 		// Delete context
 		err = svc.DeleteContext(r.Context(), conversationID, key, scope)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if errors.Is(err, contextvar.ErrNotFound) {
 				httpError(w, http.StatusNotFound, "context variable not found")
 				return
 			}
@@ -273,6 +288,231 @@ func CompanionContextClearHandler(cfg config.Config, log zerolog.Logger) http.Ha
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":            true,
 			"deleted_count": count,
+		})
+	}
+}
+
+// CompanionConversationsHandler returns a handler for GET /api/companion/conversations.
+// Lists all conversations.
+func CompanionConversationsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Parse limit from query
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+				limit = parsed
+			}
+		}
+
+		// Open context store
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		// Open companion memory database
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, err := sqliteutil.OpenDB(r.Context(), dbPath, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = memoryDB.Close() }()
+
+		// Create service with memory DB
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:   log,
+			MemoryDB: memoryDB,
+		})
+
+		// List conversations
+		conversations, err := svc.ListConversations(r.Context(), limit)
+		if err != nil {
+			log.Error().Err(err).Msg("list conversations failed")
+			httpError(w, http.StatusInternalServerError, "list conversations failed: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"conversations": conversations,
+		})
+	}
+}
+
+// CompanionMemoryStatsHandler returns a handler for GET /api/companion/memory/:id/stats.
+// Gets memory stats for a conversation.
+func CompanionMemoryStatsHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Extract conversation_id from path
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/memory/"), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] != "stats" {
+			httpError(w, http.StatusBadRequest, "invalid path, expected /api/companion/memory/:id/stats")
+			return
+		}
+		conversationID := parts[0]
+
+		// Open context store
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		// Open companion memory database
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, err := sqliteutil.OpenDB(r.Context(), dbPath, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = memoryDB.Close() }()
+
+		// Create service with memory DB
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:   log,
+			MemoryDB: memoryDB,
+		})
+
+		// Get stats
+		stats, err := svc.GetMemoryStats(r.Context(), conversationID)
+		if err != nil {
+			log.Error().Err(err).Msg("get memory stats failed")
+			httpError(w, http.StatusInternalServerError, "get memory stats failed: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, stats)
+	}
+}
+
+// CompanionMemoryContextHandler returns a handler for GET /api/companion/memory/:id/context.
+// Gets formatted memory context for a conversation.
+func CompanionMemoryContextHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Extract conversation_id from path
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/memory/"), "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] != "context" {
+			httpError(w, http.StatusBadRequest, "invalid path, expected /api/companion/memory/:id/context")
+			return
+		}
+		conversationID := parts[0]
+
+		// Open context store
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		// Open companion memory database
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, err := sqliteutil.OpenDB(r.Context(), dbPath, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = memoryDB.Close() }()
+
+		// Create service with memory DB
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:   log,
+			MemoryDB: memoryDB,
+		})
+
+		// Get context
+		context, err := svc.GetMemoryContext(r.Context(), conversationID)
+		if err != nil {
+			log.Error().Err(err).Msg("get memory context failed")
+			httpError(w, http.StatusInternalServerError, "get memory context failed: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"context": context,
+		})
+	}
+}
+
+// CompanionMemoryClearHandler returns a handler for DELETE /api/companion/memory/:id.
+// Clears all memory for a conversation.
+func CompanionMemoryClearHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		// Extract conversation_id from path
+		path := r.URL.Path
+		parts := strings.Split(strings.TrimPrefix(path, "/api/companion/memory/"), "/")
+		if len(parts) == 0 || parts[0] == "" {
+			httpError(w, http.StatusBadRequest, "conversation_id is required in path")
+			return
+		}
+		conversationID := parts[0]
+
+		// Open context store
+		store, err := contextvar.Open(r.Context(), cfg.Storage.Root)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open context store")
+			httpError(w, http.StatusInternalServerError, "failed to open context store")
+			return
+		}
+		defer store.Close()
+
+		// Open companion memory database
+		dbPath := filepath.Join(cfg.Storage.Root, "companion.db")
+		memoryDB, err := sqliteutil.OpenDB(r.Context(), dbPath, nil)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to open companion memory database")
+			httpError(w, http.StatusInternalServerError, "failed to open companion memory database")
+			return
+		}
+		defer func() { _ = memoryDB.Close() }()
+
+		// Create service with memory DB
+		svc := companion.NewService(store, companion.ServiceConfig{
+			Logger:   log,
+			MemoryDB: memoryDB,
+		})
+
+		// Clear memory
+		err = svc.ClearMemory(r.Context(), conversationID)
+		if err != nil {
+			log.Error().Err(err).Msg("clear memory failed")
+			httpError(w, http.StatusInternalServerError, "clear memory failed: "+err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": true,
 		})
 	}
 }

@@ -610,8 +610,6 @@ func baseURLForProvider(provider string) string {
 		return "https://openrouter.ai/api/v1"
 	case "groq":
 		return "https://api.groq.com/openai/v1"
-	case "cerebras":
-		return "https://api.cerebras.ai/v1"
 	default:
 		return "https://api.openai.com/v1"
 	}

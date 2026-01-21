@@ -20,6 +20,7 @@ type CompressionDaemon struct {
 	logger           zerolog.Logger
 	stopCh           chan struct{}
 	doneCh           chan struct{}
+	doneOnce         sync.Once // Ensures doneCh is only closed once
 	wg               sync.WaitGroup
 	mu               sync.Mutex
 	lastDailyRun     time.Time
@@ -73,7 +74,7 @@ func (d *CompressionDaemon) Start(ctx context.Context) {
 			Bool("memory_nil", d.memory == nil).
 			Bool("db_nil", d.db == nil).
 			Msg("compression daemon missing dependencies; not starting")
-		close(d.doneCh) // Ensure doneCh is closed on early failure
+		d.doneOnce.Do(func() { close(d.doneCh) }) // Ensure doneCh is closed on early failure
 		return
 	}
 	d.wg.Add(2)
@@ -85,7 +86,7 @@ func (d *CompressionDaemon) Start(ctx context.Context) {
 func (d *CompressionDaemon) Stop() {
 	close(d.stopCh)
 	d.wg.Wait()
-	close(d.doneCh)
+	d.doneOnce.Do(func() { close(d.doneCh) })
 }
 
 // runDailyLoop runs daily compression periodically.

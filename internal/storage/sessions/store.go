@@ -2481,6 +2481,9 @@ func scanSession(row scannable) (Session, error) {
 	}
 
 	// Assign nullable strings
+	if projectName.Valid {
+		session.ProjectName = projectName.String
+	}
 	if summary.Valid {
 		session.Summary = summary.String
 	}

@@ -218,9 +218,6 @@ type LLMSettings struct {
 	// AnthropicAPIKey is the Anthropic API key (from ANTHROPIC_API_KEY)
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key" json:"anthropic_api_key"`
 
-	// CerebrasAPIKey is the Cerebras API key (from CEREBRAS_API_KEY)
-	CerebrasAPIKey string `mapstructure:"cerebras_api_key" json:"cerebras_api_key"`
-
 	// CerebrasModel is the model for Cerebras (from CEREBRAS_MODEL)
 	CerebrasModel string `mapstructure:"cerebras_model" json:"cerebras_model"`
 }

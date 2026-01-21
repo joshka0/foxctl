@@ -394,9 +394,9 @@ func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input Contex
 			// Vector similarity search
 			results, err := e.memoryStore.SearchSimilar(ctx, e.workspace, embedding, limit*2)
 			if err == nil {
-				// Filter by conversation ID (SessionID)
+				// Filter by conversation ID (SessionID) - only include exact matches
 				for _, r := range results {
-					if r.Entry.SessionID == e.conversationID || r.Entry.SessionID == "" {
+					if r.Entry.SessionID == e.conversationID {
 						memories = append(memories, r)
 					}
 					if len(memories) >= limit {
@@ -411,13 +411,10 @@ func (e *RLMToolExecutor) executeSemanticQuery(ctx context.Context, input Contex
 	if len(memories) == 0 {
 		results, err := e.memoryStore.Search(ctx, e.workspace, input.SemanticQuery, limit*2)
 		if err == nil {
-			// Filter by conversation ID and companion types
+			// Filter by conversation ID and companion types - only include exact matches
 			for _, r := range results {
-				if r.Entry.SessionID == e.conversationID || r.Entry.SessionID == "" {
-					isCompanionMemory := r.Entry.Type == "companion_summary" || r.Entry.Type == "companion_history"
-					if isCompanionMemory || r.Entry.SessionID == e.conversationID {
-						memories = append(memories, r)
-					}
+				if r.Entry.SessionID == e.conversationID {
+					memories = append(memories, r)
 				}
 				if len(memories) >= limit {
 					break

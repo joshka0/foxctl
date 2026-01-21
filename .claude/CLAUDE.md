@@ -335,8 +335,8 @@ make ts-dev-gui  # Web GUI at http://localhost:5173
 
 ## Links
 
-| Topic        | Document                                                        |
-| ------------ | --------------------------------------------------------------- |
+| Topic            | Document                                                                |
+| ---------------- | ----------------------------------------------------------------------- |
 | Architecture     | [docs/general/architecture.md](../docs/general/architecture.md)         |
 | Skills           | [docs/general/skills.md](../docs/general/skills.md)                     |
 | Hooks            | [docs/general/hooks.md](../docs/general/hooks.md)                       |

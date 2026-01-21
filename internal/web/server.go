@@ -180,6 +180,7 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Companion (RLM Mobile Backend) ---
 	mux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log))
+	mux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
 	mux.HandleFunc("/api/companion/context", api.CompanionContextSetHandler(s.cfg, s.log))
 	// Context routes with path params (GET, DELETE for specific conversation/key)
 	mux.HandleFunc("/api/companion/context/", func(w http.ResponseWriter, r *http.Request) {
@@ -197,6 +198,35 @@ func (s *Server) Handler() http.Handler {
 				// Delete key: DELETE /api/companion/context/:id/:key
 				api.CompanionContextDeleteHandler(s.cfg, s.log).ServeHTTP(w, r)
 			}
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	// Memory routes with path params
+	mux.HandleFunc("/api/companion/memory/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/companion/memory/")
+		parts := strings.Split(path, "/")
+		if len(parts) < 1 || parts[0] == "" {
+			http.Error(w, "conversation_id required", http.StatusBadRequest)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			if len(parts) >= 2 {
+				switch parts[1] {
+				case "stats":
+					api.CompanionMemoryStatsHandler(s.cfg, s.log).ServeHTTP(w, r)
+				case "context":
+					api.CompanionMemoryContextHandler(s.cfg, s.log).ServeHTTP(w, r)
+				default:
+					http.Error(w, "unknown memory endpoint", http.StatusNotFound)
+				}
+			} else {
+				http.Error(w, "invalid memory path", http.StatusBadRequest)
+			}
+		case http.MethodDelete:
+			api.CompanionMemoryClearHandler(s.cfg, s.log).ServeHTTP(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}

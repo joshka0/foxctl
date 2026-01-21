@@ -435,3 +435,161 @@ export async function deleteConsole(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+// ============================================================================
+// Companion API
+// ============================================================================
+
+export interface CompanionChatRequest {
+  conversation_id: string;
+  message: string;
+  personality?: string;
+  require_context_query?: boolean;
+}
+
+export interface CompanionChatResponse {
+  response: string;
+  conversation_id: string;
+  context_queries: number;
+  tools_used: string[];
+  token_usage: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+  duration_ms: number;
+  error?: string;
+}
+
+export interface CompanionContextVariable {
+  id: string;
+  key: string;
+  value: unknown;
+  scope: string;
+  created_at: string;
+  updated_at: string;
+  access_count: number;
+}
+
+export interface CompanionContextResponse {
+  conversation_id: string;
+  variables: CompanionContextVariable[];
+  total_count: number;
+}
+
+export interface CompanionMemoryStats {
+  conversation_id?: string;
+  total_turns: number;
+  today_turns?: number;
+  day_summaries: number;
+  has_history?: boolean;
+  has_distilled_history?: boolean; // Backend uses this name
+  oldest_turn?: string;
+  newest_turn?: string;
+  total_characters?: number;
+  estimated_tokens?: number;
+}
+
+export interface CompanionConversation {
+  id: string;
+  name?: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  last_message?: string;
+}
+
+// Chat with companion
+export async function companionChat(
+  req: CompanionChatRequest
+): Promise<CompanionChatResponse> {
+  return request("/api/companion/chat", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+// Get context variables for a conversation
+export async function getCompanionContext(
+  conversationId: string
+): Promise<CompanionContextResponse> {
+  return request(`/api/companion/context/${encodeURIComponent(conversationId)}`);
+}
+
+// Set a context variable
+export async function setCompanionContext(body: {
+  conversation_id: string;
+  key: string;
+  value: unknown;
+  scope?: string;
+  ttl_seconds?: number;
+}): Promise<{ id: string; key: string; scope: string }> {
+  return request("/api/companion/context", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// Delete a context variable
+export async function deleteCompanionContext(
+  conversationId: string,
+  key: string,
+  scope?: string
+): Promise<void> {
+  const params = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+  return requestVoid(
+    `/api/companion/context/${encodeURIComponent(conversationId)}/${encodeURIComponent(key)}${params}`,
+    { method: "DELETE" }
+  );
+}
+
+// Clear all context for a conversation
+export async function clearCompanionContext(
+  conversationId: string
+): Promise<{ ok: boolean; deleted_count: number }> {
+  return request(
+    `/api/companion/context/${encodeURIComponent(conversationId)}?clear=true`,
+    { method: "DELETE" }
+  );
+}
+
+// Get memory stats for a conversation
+export async function getCompanionMemoryStats(
+  conversationId: string
+): Promise<CompanionMemoryStats> {
+  return request(`/api/companion/memory/${encodeURIComponent(conversationId)}/stats`);
+}
+
+// Get memory context (formatted for display)
+export async function getCompanionMemoryContext(
+  conversationId: string
+): Promise<{ context: string }> {
+  return request(`/api/companion/memory/${encodeURIComponent(conversationId)}/context`);
+}
+
+// Export memory for debugging
+export async function exportCompanionMemory(
+  conversationId: string
+): Promise<unknown> {
+  return request(`/api/companion/memory/${encodeURIComponent(conversationId)}/export`);
+}
+
+// Clear memory for a conversation
+export async function clearCompanionMemory(
+  conversationId: string
+): Promise<{ ok: boolean }> {
+  return request(
+    `/api/companion/memory/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE" }
+  );
+}
+
+// List conversations (if endpoint exists)
+export async function getCompanionConversations(params?: {
+  limit?: number;
+}): Promise<{ conversations: CompanionConversation[] }> {
+  const searchParams = new URLSearchParams();
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  const query = searchParams.toString();
+  return request(`/api/companion/conversations${query ? `?${query}` : ""}`);
+}

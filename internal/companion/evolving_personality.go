@@ -144,18 +144,26 @@ func (e *EvolvingPersonality) ApplyFeedback(ctx context.Context, feedback Person
 		return err
 	}
 
-	// Apply dimension adjustment
+	// Apply dimension adjustment only for explicit increase/decrease directions.
+	// "note" and other non-actionable directions should not modify dimension values.
 	if feedback.Dimension != "" {
 		for i := range profile.Dimensions {
 			if profile.Dimensions[i].Name == feedback.Dimension {
-				delta := feedback.Amount
-				if delta == 0 {
-					delta = 0.1 // Default subtle adjustment
+				switch feedback.Direction {
+				case "increase":
+					delta := feedback.Amount
+					if delta == 0 {
+						delta = 0.1 // Default subtle adjustment
+					}
+					profile.Dimensions[i].Value = clamp(profile.Dimensions[i].Value+delta, 0, 1)
+				case "decrease":
+					delta := feedback.Amount
+					if delta == 0 {
+						delta = 0.1 // Default subtle adjustment
+					}
+					profile.Dimensions[i].Value = clamp(profile.Dimensions[i].Value-delta, 0, 1)
+				// "note" and other directions: do not modify dimension value
 				}
-				if feedback.Direction == "decrease" {
-					delta = -delta
-				}
-				profile.Dimensions[i].Value = clamp(profile.Dimensions[i].Value+delta, 0, 1)
 				break
 			}
 		}

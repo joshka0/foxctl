@@ -564,3 +564,137 @@ export function useDeleteConsole() {
     },
   });
 }
+
+// ============================================================================
+// Companion API Hooks
+// ============================================================================
+
+export const companionQueryKeys = {
+  context: (conversationId: string) => ["companion", "context", conversationId] as const,
+  memoryStats: (conversationId: string) => ["companion", "memory", conversationId, "stats"] as const,
+  memoryContext: (conversationId: string) => ["companion", "memory", conversationId, "context"] as const,
+  conversations: (params?: { limit?: number }) => ["companion", "conversations", params] as const,
+};
+
+// Companion chat mutation
+export function useCompanionChat() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.companionChat,
+    onSuccess: (_, variables) => {
+      // Invalidate context after chat (may have changed)
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.context(variables.conversation_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.memoryStats(variables.conversation_id),
+      });
+    },
+  });
+}
+
+// Get context variables for a conversation
+export function useCompanionContext(conversationId: string | null) {
+  return useQuery({
+    queryKey: companionQueryKeys.context(conversationId || ""),
+    queryFn: () => api.getCompanionContext(conversationId!),
+    enabled: !!conversationId,
+  });
+}
+
+// Set context variable mutation
+export function useSetCompanionContext() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.setCompanionContext,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.context(variables.conversation_id),
+      });
+    },
+  });
+}
+
+// Delete context variable mutation
+export function useDeleteCompanionContext() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ conversationId, key, scope }: { conversationId: string; key: string; scope?: string }) =>
+      api.deleteCompanionContext(conversationId, key, scope),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.context(variables.conversationId),
+      });
+    },
+  });
+}
+
+// Clear all context mutation
+export function useClearCompanionContext() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.clearCompanionContext,
+    onSuccess: (_, conversationId) => {
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.context(conversationId),
+      });
+    },
+  });
+}
+
+// Get memory stats
+export function useCompanionMemoryStats(conversationId: string | null) {
+  return useQuery({
+    queryKey: companionQueryKeys.memoryStats(conversationId || ""),
+    queryFn: () => api.getCompanionMemoryStats(conversationId!),
+    enabled: !!conversationId,
+  });
+}
+
+// Get formatted memory context
+export function useCompanionMemoryContext(conversationId: string | null) {
+  return useQuery({
+    queryKey: companionQueryKeys.memoryContext(conversationId || ""),
+    queryFn: () => api.getCompanionMemoryContext(conversationId!),
+    enabled: !!conversationId,
+  });
+}
+
+// Clear memory mutation
+export function useClearCompanionMemory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: api.clearCompanionMemory,
+    onSuccess: (_, conversationId) => {
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.memoryStats(conversationId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.memoryContext(conversationId),
+      });
+    },
+  });
+}
+
+// List conversations
+export function useCompanionConversations(params?: { limit?: number }) {
+  return useQuery({
+    queryKey: companionQueryKeys.conversations(params),
+    queryFn: () => api.getCompanionConversations(params),
+  });
+}
+
+// Export types for components
+export type {
+  CompanionChatRequest,
+  CompanionChatResponse,
+  CompanionContextVariable,
+  CompanionContextResponse,
+  CompanionMemoryStats,
+  CompanionConversation
+} from "./client";

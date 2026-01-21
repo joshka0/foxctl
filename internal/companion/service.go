@@ -103,20 +103,26 @@ func NewService(store contextvar.Store, cfg ServiceConfig) *Service {
 	}
 
 	// Initialize conversation memory if DB provided
+	cfg.Logger.Debug().Bool("memorydb_provided", cfg.MemoryDB != nil).Msg("Checking MemoryDB")
 	if cfg.MemoryDB != nil {
+		cfg.Logger.Debug().Msg("MemoryDB is set, initializing conversation memory")
 		var opts []MemoryOption
 		if cfg.MemoryConfig != nil {
 			opts = append(opts, WithMemoryConfig(*cfg.MemoryConfig))
 		}
 
-		// Create LLM summarizer
-		summarizer := NewLLMSummarizer(LLMSummarizerConfig{
-			Provider: cfg.LLMProvider,
-			APIKey:   cfg.LLMAPIKey,
-			Model:    cfg.LLMModel,
-			Logger:   cfg.Logger,
-		})
-		opts = append(opts, WithSummarizer(summarizer))
+		// Create LLM summarizer only if credentials are available
+		if cfg.LLMProvider != "" && cfg.LLMAPIKey != "" {
+			summarizer := NewLLMSummarizer(LLMSummarizerConfig{
+				Provider: cfg.LLMProvider,
+				APIKey:   cfg.LLMAPIKey,
+				Model:    cfg.LLMModel,
+				Logger:   cfg.Logger,
+			})
+			opts = append(opts, WithSummarizer(summarizer))
+		} else {
+			cfg.Logger.Warn().Msg("LLM credentials not configured - summarization disabled")
+		}
 
 		// Add memory store for semantic search if configured
 		if cfg.MemoryStore != nil && cfg.MemoryWorkspace != "" {
@@ -139,9 +145,11 @@ func NewService(store contextvar.Store, cfg ServiceConfig) *Service {
 			cfg.Logger.Warn().Err(err).Msg("Failed to initialize conversation memory")
 		} else {
 			svc.memory = memory
+			cfg.Logger.Debug().Msg("Conversation memory initialized successfully")
 		}
 	}
 
+	cfg.Logger.Debug().Bool("memory_enabled", svc.memory != nil).Msg("Service created")
 	return svc
 }
 
@@ -241,6 +249,16 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	// Build input with evolving personality
 	basePersonality := req.Personality
 	if basePersonality == "" {
+		// Try to load stored base personality for this conversation
+		if stored, err := s.contextStore.GetByKey(ctx, req.ConversationID, contextvar.ScopeGlobal, "personality/base"); err == nil {
+			var personality string
+			if err := json.Unmarshal(stored.ValueJSON, &personality); err == nil && personality != "" {
+				basePersonality = personality
+				s.logger.Debug().Str("personality", basePersonality[:min(50, len(basePersonality))]).Msg("Using stored base personality")
+			}
+		}
+	}
+	if basePersonality == "" {
 		basePersonality = s.config.DefaultPersonality
 	}
 
@@ -253,13 +271,19 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	// Include conversation memory context if available
+	s.logger.Debug().Bool("memory_available", s.memory != nil).Str("conversation_id", req.ConversationID).Msg("Checking memory for chat")
 	if s.memory != nil {
 		memoryContext, err := s.memory.GetContext(ctx, req.ConversationID)
 		if err != nil {
 			s.logger.Warn().Err(err).Msg("Failed to get memory context")
 		} else if memoryContext != "" {
+			s.logger.Debug().Int("context_len", len(memoryContext)).Msg("Memory context retrieved, injecting into prompt")
 			systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + memoryContext
+		} else {
+			s.logger.Debug().Msg("Memory context is empty")
 		}
+	} else {
+		s.logger.Debug().Msg("Memory is nil, skipping context injection")
 	}
 
 	input := engine.EngineInput{
@@ -303,35 +327,29 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		resp.Error = output.Error
 	}
 
-	// Store conversation turns in memory (async to not block response)
+	// Store conversation turns in memory (synchronous to ensure DB isn't closed prematurely)
 	if s.memory != nil && resp.Error == "" {
-		go func() {
-			// Use a short-lived context for background storage
-			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
+		// Store user turn
+		userTurn := ConversationTurn{
+			ConversationID: req.ConversationID,
+			Role:           "user",
+			Content:        req.Message,
+			CreatedAt:      start,
+		}
+		if err := s.memory.AppendTurn(ctx, userTurn); err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to store user turn")
+		}
 
-			// Store user turn
-			userTurn := ConversationTurn{
-				ConversationID: req.ConversationID,
-				Role:           "user",
-				Content:        req.Message,
-				CreatedAt:      start,
-			}
-			if err := s.memory.AppendTurn(bgCtx, userTurn); err != nil {
-				s.logger.Warn().Err(err).Msg("Failed to store user turn")
-			}
-
-			// Store assistant turn
-			assistantTurn := ConversationTurn{
-				ConversationID: req.ConversationID,
-				Role:           "assistant",
-				Content:        output.AssistantText,
-				CreatedAt:      time.Now(),
-			}
-			if err := s.memory.AppendTurn(bgCtx, assistantTurn); err != nil {
-				s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
-			}
-		}()
+		// Store assistant turn
+		assistantTurn := ConversationTurn{
+			ConversationID: req.ConversationID,
+			Role:           "assistant",
+			Content:        output.AssistantText,
+			CreatedAt:      time.Now(),
+		}
+		if err := s.memory.AppendTurn(ctx, assistantTurn); err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
+		}
 	}
 
 	return resp, nil
@@ -527,4 +545,12 @@ func (s *Service) ClearMemory(ctx context.Context, conversationID string) error 
 		return fmt.Errorf("memory features not enabled")
 	}
 	return s.memory.Clear(ctx, conversationID)
+}
+
+// ListConversations returns all conversations.
+func (s *Service) ListConversations(ctx context.Context, limit int) ([]ConversationSummary, error) {
+	if s.memory == nil {
+		return nil, fmt.Errorf("memory features not enabled")
+	}
+	return s.memory.ListConversations(ctx, limit)
 }

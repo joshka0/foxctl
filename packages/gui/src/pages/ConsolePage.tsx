@@ -1,306 +1,301 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select } from "@/components/ui/select";
-import {
-  useConsoleWebSocket,
-  useConsoles,
-  useCreateConsole,
-  useDeleteConsole,
-  type ConsoleMessage,
-} from "@/api/hooks";
 import { cn } from "@/lib/utils";
+import { useCompanionConversations } from "@/api/hooks";
+import { CompanionChat, MemoryStats, ContextViewer } from "@/components/companion";
 import {
-  Send,
-  Square,
   Plus,
-  Trash2,
-  Wifi,
-  WifiOff,
+  MessageSquare,
+  PanelRightClose,
+  PanelRight,
+  Search,
+  Sparkles,
   Loader2,
-  RefreshCw,
-  User,
-  Bot,
-  AlertCircle,
 } from "lucide-react";
 
-interface ConsoleSession {
-  id: string;
-  workspace?: string;
-  profile?: string;
-  created?: string;
-  message_count?: number;
-  client_count?: number;
-}
-
 export function ConsolePage() {
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [inputValue, setInputValue] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Fetch available console sessions
-  const { data: consolesData, isLoading: isLoadingConsoles } = useConsoles({ limit: 50 });
-  const createConsole = useCreateConsole();
-  const deleteConsole = useDeleteConsole();
+  // Fetch conversations
+  const { data: conversationsData, isLoading: isLoadingConversations } = useCompanionConversations({
+    limit: 50,
+  });
 
-  // WebSocket connection
-  const {
-    connected,
-    connecting,
-    error,
-    messages,
-    inflight,
-    sendMessage,
-    cancel,
-    clearMessages,
-    reconnect,
-  } = useConsoleWebSocket(selectedSessionId);
+  const conversations = conversationsData?.conversations ?? [];
 
-  // Auto-scroll to bottom when new messages arrive
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Filter conversations by search
+  const filteredConversations = conversations.filter((conv) => {
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
+    return (
+      conv.id.toLowerCase().includes(query) ||
+      conv.name?.toLowerCase().includes(query) ||
+      conv.last_message?.toLowerCase().includes(query)
+    );
+  });
 
-  // Handle send message
-  const handleSend = () => {
-    if (!inputValue.trim() || !connected) return;
-    sendMessage(inputValue.trim());
-    setInputValue("");
+  // Create new conversation
+  const handleNewConversation = () => {
+    // Generate a new conversation ID
+    const newId = crypto.randomUUID();
+    setSelectedConversationId(newId);
   };
-
-  // Handle key press
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  // Create new session
-  const handleCreateSession = async () => {
-    try {
-      const result = await createConsole.mutateAsync({
-        workspace: window.location.pathname,
-        profile: "explorer",
-      });
-      if (result?.id) {
-        setSelectedSessionId(result.id);
-      }
-    } catch (err) {
-      console.error("Failed to create console session:", err);
-    }
-  };
-
-  // Delete session
-  const handleDeleteSession = async () => {
-    if (!selectedSessionId) return;
-    try {
-      await deleteConsole.mutateAsync(selectedSessionId);
-      setSelectedSessionId(null);
-    } catch (err) {
-      console.error("Failed to delete console session:", err);
-    }
-  };
-
-  const sessions: ConsoleSession[] = consolesData?.sessions || [];
 
   return (
-    <div className="h-full flex flex-col gap-4 p-4">
-      {/* Header with session selection */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Select
-            value={selectedSessionId || ""}
-            onChange={(e) => setSelectedSessionId(e.target.value || null)}
-            className="w-64"
-          >
-            <option value="">
-              {isLoadingConsoles ? "Loading sessions..." : "Select a session..."}
-            </option>
-            {sessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.id.slice(0, 8)}... ({session.workspace || "default"})
-              </option>
-            ))}
-          </Select>
-
-          <Button variant="outline" size="icon" onClick={handleCreateSession} title="Create new session">
-            <Plus className="h-4 w-4" />
-          </Button>
-
-          {selectedSessionId && (
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleDeleteSession}
-              title="Delete session"
-              className="text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
+    <div className="h-full flex">
+      {/* Left Panel: Conversations List */}
+      <div className="w-72 border-r flex flex-col bg-muted/30">
+        {/* Header */}
+        <div className="p-4 border-b space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-purple-500" />
+              Companion
+            </h2>
+            <Button variant="ghost" size="icon" onClick={handleNewConversation} title="New conversation">
+              <Plus className="h-4 w-4" />
             </Button>
-          )}
+          </div>
+
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search conversations..."
+              className="pl-8 h-8 text-sm"
+            />
+          </div>
         </div>
 
-        {/* Connection status */}
-        <div className="flex items-center gap-2">
-          {connecting ? (
-            <Badge variant="outline" className="gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Connecting...
-            </Badge>
-          ) : connected ? (
-            <Badge variant="default" className="gap-1 bg-green-600">
-              <Wifi className="h-3 w-3" />
-              Connected
-            </Badge>
+        {/* Conversations List */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {isLoadingConversations ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : filteredConversations.length === 0 ? (
+            <div className="text-center py-8 px-4">
+              <MessageSquare className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+              <p className="text-sm text-muted-foreground">
+                {searchQuery ? "No matching conversations" : "No conversations yet"}
+              </p>
+              <Button variant="link" size="sm" onClick={handleNewConversation} className="mt-2">
+                Start a new conversation
+              </Button>
+            </div>
           ) : (
-            <Badge variant="destructive" className="gap-1">
-              <WifiOff className="h-3 w-3" />
-              Disconnected
-            </Badge>
-          )}
-
-          {!connected && selectedSessionId && (
-            <Button variant="ghost" size="sm" onClick={reconnect} title="Reconnect">
-              <RefreshCw className="h-4 w-4" />
-            </Button>
+            filteredConversations.map((conv) => (
+              <ConversationItem
+                key={conv.id}
+                conversation={conv}
+                isSelected={selectedConversationId === conv.id}
+                onClick={() => setSelectedConversationId(conv.id)}
+              />
+            ))
           )}
         </div>
       </div>
 
-      {/* Error display */}
-      {error && (
-        <div className="flex items-center gap-2 rounded-md bg-destructive/10 p-3 text-destructive">
-          <AlertCircle className="h-4 w-4" />
-          <span className="text-sm">{error}</span>
-        </div>
-      )}
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {selectedConversationId ? (
+          <>
+            {/* Chat Header */}
+            <div className="h-14 border-b px-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-full bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
+                  <Sparkles className="h-4 w-4 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-sm">Companion Chat</h3>
+                  <p className="text-xs text-muted-foreground font-mono">
+                    {selectedConversationId.slice(0, 8)}...
+                  </p>
+                </div>
+              </div>
 
-      {/* Chat area */}
-      <Card className="flex-1 flex flex-col overflow-hidden">
-        <CardHeader className="flex-shrink-0 flex flex-row items-center justify-between py-3">
-          <CardTitle className="text-lg">Console</CardTitle>
-          {messages.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={clearMessages}>
-              Clear
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent className="flex-1 overflow-y-auto p-4">
-          {!selectedSessionId ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              Select or create a session to start chatting
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowSidebar(!showSidebar)}
+                title={showSidebar ? "Hide sidebar" : "Show sidebar"}
+              >
+                {showSidebar ? (
+                  <PanelRightClose className="h-4 w-4" />
+                ) : (
+                  <PanelRight className="h-4 w-4" />
+                )}
+              </Button>
             </div>
-          ) : messages.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">
-              No messages yet. Send a message to start.
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
-      {/* Input area */}
-      <div className="flex items-center gap-2">
-        <Input
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={handleKeyPress}
-          placeholder={
-            !selectedSessionId
-              ? "Select a session first..."
-              : !connected
-              ? "Waiting for connection..."
-              : "Type a message..."
-          }
-          disabled={!selectedSessionId || !connected}
-          className="flex-1"
-        />
+            {/* Chat + Sidebar */}
+            <div className="flex-1 flex min-h-0">
+              {/* Chat */}
+              <div className="flex-1 min-w-0">
+                <CompanionChat
+                  conversationId={selectedConversationId}
+                  className="h-full"
+                />
+              </div>
 
-        {inflight ? (
-          <Button variant="destructive" onClick={cancel} title="Cancel request">
-            <Square className="h-4 w-4 mr-2" />
-            Cancel
-          </Button>
+              {/* Right Sidebar */}
+              {showSidebar && (
+                <div className="w-80 border-l overflow-y-auto p-4 space-y-4 bg-muted/20">
+                  <MemoryStats conversationId={selectedConversationId} />
+                  <ContextViewer conversationId={selectedConversationId} />
+                </div>
+              )}
+            </div>
+          </>
         ) : (
-          <Button
-            onClick={handleSend}
-            disabled={!inputValue.trim() || !connected || !selectedSessionId}
-            title="Send message"
-          >
-            <Send className="h-4 w-4 mr-2" />
-            Send
-          </Button>
+          // Empty state
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center space-y-4 max-w-md px-4">
+              <div className="h-16 w-16 mx-auto rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20 flex items-center justify-center">
+                <Sparkles className="h-8 w-8 text-purple-500" />
+              </div>
+              <div>
+                <h2 className="text-xl font-semibold mb-2">Welcome to Companion</h2>
+                <p className="text-muted-foreground">
+                  Your AI companion remembers context across conversations using a tiered memory system.
+                  Start a new conversation or select an existing one to continue.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 items-center">
+                <Button onClick={handleNewConversation}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Conversation
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  or select a conversation from the sidebar
+                </p>
+              </div>
+
+              {/* Feature highlights */}
+              <div className="grid grid-cols-3 gap-4 pt-4 border-t">
+                <FeatureCard
+                  title="L0: Vivid"
+                  description="Recent conversation turns"
+                  color="green"
+                />
+                <FeatureCard
+                  title="L1: Summaries"
+                  description="Daily compressed context"
+                  color="blue"
+                />
+                <FeatureCard
+                  title="L2: History"
+                  description="Long-term relationship"
+                  color="purple"
+                />
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
   );
 }
 
-// Message bubble component
-function MessageBubble({ message }: { message: ConsoleMessage }) {
-  const isUser = message.role === "user";
-  const isSystem = message.role === "system";
+// Conversation list item
+interface ConversationItemProps {
+  conversation: {
+    id: string;
+    name?: string;
+    created_at: string;
+    updated_at: string;
+    message_count: number;
+    last_message?: string;
+  };
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function ConversationItem({ conversation, isSelected, onClick }: ConversationItemProps) {
+  const displayName = conversation.name || conversation.id.slice(0, 8);
+  const updatedAt = new Date(conversation.updated_at);
+  const isToday = updatedAt.toDateString() === new Date().toDateString();
+  const timeString = isToday
+    ? updatedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : updatedAt.toLocaleDateString([], { month: "short", day: "numeric" });
 
   return (
-    <div
+    <button
+      onClick={onClick}
+      aria-label={`Open conversation ${conversation.name || 'untitled'}`}
       className={cn(
-        "flex gap-3",
-        isUser ? "flex-row-reverse" : "flex-row"
+        "w-full p-3 rounded-lg text-left transition-colors",
+        isSelected
+          ? "bg-primary text-primary-foreground"
+          : "hover:bg-muted/50"
       )}
     >
-      {/* Avatar */}
-      <div
-        className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : isSystem
-            ? "bg-muted text-muted-foreground"
-            : "bg-secondary text-secondary-foreground"
-        )}
-      >
-        {isUser ? (
-          <User className="h-4 w-4" />
-        ) : (
-          <Bot className="h-4 w-4" />
-        )}
-      </div>
-
-      {/* Message content */}
-      <div
-        className={cn(
-          "flex max-w-[80%] flex-col gap-1 rounded-lg px-4 py-2",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : isSystem
-            ? "bg-muted text-muted-foreground"
-            : "bg-secondary text-secondary-foreground"
-        )}
-      >
-        <div className="whitespace-pre-wrap break-words text-sm">
-          {message.content}
-          {message.isStreaming && (
-            <span className="ml-1 inline-block animate-pulse">...</span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-sm truncate">{displayName}</span>
+            {conversation.message_count > 0 && (
+              <Badge
+                variant={isSelected ? "secondary" : "outline"}
+                className="text-xs h-4 shrink-0"
+              >
+                {conversation.message_count}
+              </Badge>
+            )}
+          </div>
+          {conversation.last_message && (
+            <p
+              className={cn(
+                "text-xs truncate mt-0.5",
+                isSelected ? "text-primary-foreground/70" : "text-muted-foreground"
+              )}
+            >
+              {conversation.last_message}
+            </p>
           )}
         </div>
-        <div
+        <span
           className={cn(
-            "text-xs",
-            isUser ? "text-primary-foreground/70" : "text-muted-foreground"
+            "text-xs shrink-0",
+            isSelected ? "text-primary-foreground/70" : "text-muted-foreground"
           )}
         >
-          {new Date(message.timestamp).toLocaleTimeString()}
-        </div>
+          {timeString}
+        </span>
       </div>
+    </button>
+  );
+}
+
+// Feature card for empty state
+function FeatureCard({
+  title,
+  description,
+  color,
+}: {
+  title: string;
+  description: string;
+  color: "green" | "blue" | "purple";
+}) {
+  const colorClasses = {
+    green: "text-green-600",
+    blue: "text-blue-600",
+    purple: "text-purple-600",
+  };
+
+  return (
+    <div className="text-center">
+      <h4 className={cn("text-xs font-semibold", colorClasses[color])}>{title}</h4>
+      <p className="text-xs text-muted-foreground mt-1">{description}</p>
     </div>
   );
 }
+
+export default ConsolePage;
