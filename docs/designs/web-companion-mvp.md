@@ -48,7 +48,7 @@ Semantic Retrieval + LLM
 ```
 
 - Chat LLM: hosted provider (Groq/Cerebras/agent-hosted).
-- Vision: Gemini 3.0 Flash for image understanding.
+- Vision + image generation: Gemini 3.0 Flash.
 - STT/TTS: Groq for audio notes and playback.
 
 ---
@@ -68,9 +68,11 @@ Semantic Retrieval + LLM
 
 ## MVP Scope
 
-- Chat + streaming responses.
+- Chat + dialogue streaming responses (SSE/WS).
 - Image upload + vision caption -> embed -> recall.
 - Audio note upload -> STT -> embed -> recall.
+- Character creation (name, avatar, base mood, emotion set).
+- Background/scene selection (per character or per mood).
 - Approvals queue (optional if not used).
 - Settings: consents, model status, data export/reset.
 
@@ -86,6 +88,23 @@ Semantic Retrieval + LLM
 
 ---
 
+## Character + Emotion System (Web)
+
+- Character profile: name, avatar, short backstory, voice, base mood.
+- Emotion set (8): neutral, joy, sadness, anger, fear, surprise, disgust, playful.
+- Emotion selection: if streamed text includes emoji, map to the 8-state set and strip the emoji from rendered text.
+- Fallbacks: if no emoji is present, optionally classify with Gemini 3.0 Flash or default to neutral; allow manual override.
+- Streaming UX: start in neutral and update emotion as soon as a mapped emoji appears.
+
+## Background + Scene
+
+- User-selectable backgrounds for the companion panel.
+- Optional auto-switching by emotion, with a per-user toggle.
+- Background choice stored with character profile.
+- Optional: generate backgrounds via Gemini 3.0 Flash and cache per user.
+
+---
+
 ## Presence Model (Web)
 
 - Presence is tied to an open tab and active session only.
@@ -98,12 +117,17 @@ Semantic Retrieval + LLM
 
 - POST /companion/chat
 - POST /companion/context
+- GET /companion/character
+- PUT /companion/character
+- GET /companion/backgrounds
 - POST /sync/turns
 - POST /sync/attachments
 - POST /vision/describe
 - POST /speech/stt
 - POST /speech/tts (optional)
 - GET /consents, PATCH /consents/{id}
+
+Note: `/companion/chat` supports SSE or WS streaming for dialogue.
 
 ## API Payloads (Phase 0)
 

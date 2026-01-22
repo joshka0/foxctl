@@ -195,6 +195,33 @@ Each turn builds a compact context bundle from local semantic recall.
 If the embedder is unavailable, fall back to recency + keyword recall and
 explicitly mark the response as a degraded-recall turn.
 
+### Companion Prompt Contract (Consistency Rules)
+
+- Always include a concise user preferences block in every prompt.
+- Preference precedence: user preferences override persona defaults unless safety or consent requires otherwise.
+- Always include the companion profile (name, voice, backstory, relationship tone).
+- Persona lock: core traits and relationship tone stay stable unless the user updates the profile.
+- Always include active consents, budget limits, and DND windows.
+- Consent scoping: list required approvals before proposing actions.
+- Always include freshness markers (timestamp, timezone, coarse location if allowed).
+- Always include a memory status flag (normal vs degraded recall).
+- Memory confidence: include a confidence marker and ask a clarifying question below threshold.
+- Memory provenance tags: label recalled facts by memory_type (pinned, episodic, semantic, inferred, external) and source id.
+- Privacy scope: exclude sensitive categories without consent and never surface deleted memories.
+- Never claim actions were performed without a corresponding approval or tool result.
+- Use the user's preferred verbosity and formality settings by default.
+- Include a prompt_contract_version to keep clients aligned.
+
+### Memory Types (Provenance Glossary)
+
+| Memory Type | Description |
+|------------|-------------|
+| **Pinned** | User-affirmed facts or explicitly saved items. |
+| **Episodic** | Time-bound events from conversation history. |
+| **Semantic** | Generalized preferences or knowledge learned over time. |
+| **Inferred** | Model-inferred hypotheses; must be labeled as uncertain. |
+| **External** | Facts from tools or external services with a source id. |
+
 ### Embedder Lifecycle Policy
 
 - Download on first run with hash verification and version pinning.
