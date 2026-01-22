@@ -4,7 +4,7 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/jkatigb/agentctl)](https://goreportcard.com/report/github.com/jkatigb/agentctl)
 ![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)
-[![Go Version](https://img.shields.io/badge/go-1.22+-blue.svg)](https://golang.org/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org/dl/)
 
 **agentctl** provides infrastructure for AI coding assistants: discoverable skills,
 persistent memory, hook-based context injection, semantic code search, and
@@ -236,6 +236,8 @@ flowchart LR
 
 ### Active Hooks
 
+> **Canonical source:** [docs/general/hooks.md](docs/general/hooks.md)
+
 | Event | Hook | Purpose |
 |-------|------|---------|
 | PreToolUse | `semantic-search` | Vector search on Grep/Glob |
@@ -246,6 +248,7 @@ flowchart LR
 | SessionStart | `session-restore` | Restore context on resume |
 | PreCompact | `session-summarize` | Extract learnings before compaction |
 | Stop | `todo-continuation` | Block stop if tasks remain |
+| UserPromptSubmit | `skill-advisor` | Suggest skills based on prompt |
 
 ---
 

@@ -3,6 +3,8 @@
 > Quick links: [README](../README.md) | [AGENTS.md](../AGENTS.md) |
 > [Detailed docs](../docs/general/)
 
+---
+
 ## Session Start / Post-Compaction
 
 Get oriented with the codebase tree:
@@ -23,9 +25,36 @@ Also read: `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`
 Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 ```
 
-## **Detailed:** [docs/general/architecture.md](../docs/general/architecture.md)
+---
+
+## Command Patterns
+
+agentctl has two command styles:
+
+| Style | Pattern | When to Use |
+|-------|---------|-------------|
+| **Skill invocation** | `agentctl run <skill> --input '<json>'` | Full skill with JSON input/output |
+| **Convenience commands** | `agentctl <noun> <verb> [flags]` | Quick CLI access to common operations |
+
+**Examples:**
+```bash
+# Skill invocation (programmatic, JSON I/O)
+agentctl run code/semantic_search --input '{"query": "auth", "limit": 10}'
+agentctl run todo/manage --input '{"action": "list"}'
+
+# Convenience commands (interactive, flags)
+agentctl todo list -f table
+agentctl memory search "auth"
+agentctl ci status --pr 123
+```
+
+Many convenience commands wrap skills internally. **Prefer convenience commands** for interactive use; **prefer skill invocation** for scripting.
+
+---
 
 ## Hooks
+
+> **Canonical source:** [docs/general/hooks.md](../docs/general/hooks.md)
 
 | Event            | Hook                       | Purpose                         |
 | ---------------- | -------------------------- | ------------------------------- |
@@ -38,8 +67,6 @@ Claude Code → Hooks → agentctl skills → SQLite/CAS → JSON envelope
 | PreCompact       | `session-summarize`        | Extract learnings via LLM       |
 | Stop             | `todo-continuation`        | Block stop if tasks remain      |
 | UserPromptSubmit | `skill-advisor`            | Suggest skills based on prompt  |
-
-**Detailed:** [docs/general/hooks.md](../docs/general/hooks.md)
 
 ### Human-in-the-Loop
 
@@ -69,16 +96,16 @@ agentctl todo add --title "Task" --description "Details"
 agentctl todo list -f table
 agentctl todo complete --id <id>
 
-# Skills
-agentctl run <skill> --input '<json>'
-agentctl run <skill> -f table
-agentctl skills list
-
 # Memory
 agentctl memory put --name "gotcha-x" --type "gotcha" --summary "..."
 agentctl memory search "query"
-# Date-based search: "January gotchas", "recent decisions", "last week debugging"
-# Activity search: "feature sessions", "bug-fix work", "refactoring"
+
+# Skills (run any skill)
+agentctl run <skill> --input '<json>'
+agentctl skills list
+
+# Code search
+agentctl run code/semantic_search --input '{"query": "auth", "limit": 10}'
 
 # CI
 agentctl ci status --pr 123
@@ -86,263 +113,55 @@ agentctl ci comments --pr 123
 
 # Codemap
 agentctl codemap generate "trace auth flow"
+
+# Observability
+agentctl run obs/logs --input '{}'
+agentctl run obs/logs --input '{"errors_only": true, "since": "1h"}'
 ```
 
 ---
 
 ## Agent Orchestration
 
-Spawn autonomous agents via the daemon for research, coding, or other tasks.
-
-### Basic Usage
+Spawn autonomous agents via the daemon.
 
 ```bash
 # Simple research agent
 agentctl agent spawn --role researcher --prompt "Find all hook implementations"
 
-# With iteration and context limits
-agentctl agent spawn \
-  --role researcher \
-  --prompt "Analyze the storage layer architecture" \
-  --exec-mode autonomous \
-  --max-iterations 20 \
-  --max-context-tokens 30000
+# With limits
+agentctl agent spawn --role coder --prompt "Analyze storage" \
+  --exec-mode autonomous --max-iterations 20
 
-# Using a prompt file
-agentctl agent spawn --role coder --prompt-file task.txt
+# Session management
+agentctl agent list
+agentctl agent kill <session-id>
 ```
 
 ### Key Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--prompt` | - | Inline prompt text |
-| `--prompt-file` | - | Path to prompt file (mutually exclusive with --prompt) |
-| `--role` | - | Agent role (overseer, researcher, coder, planner, reviewer) |
-| `--exec-mode` | reactive | Execution mode: reactive, autonomous, proactive |
+| `--role` | - | overseer, researcher, coder, planner, reviewer |
+| `--exec-mode` | reactive | reactive, autonomous, proactive |
 | `--max-iterations` | 10 | Max tool calls per turn |
-| `--max-context-tokens` | 0 | Context budget (0=no limit). Stops when exceeded |
+| `--max-context-tokens` | 0 | Context budget (0=no limit) |
 | `--max-auto-turns` | 1 | Max autonomous continuations |
-| `--llm-provider` | cerebras | LLM provider override |
-| `--llm-model` | - | Model override |
 
-### Context Tracking
-
-The engine logs per-iteration context usage to stderr:
-```
-[CONTEXT] iter=1 msgs=2 prompt_tokens=1092 completion_tokens=144 total=1236 finish=tool_calls
-[CONTEXT] iter=5 msgs=13 prompt_tokens=12820 completion_tokens=1676 total=14496 finish=stop
-```
-
-When `--max-context-tokens` is set and exceeded:
-```
-[CONTEXT] budget exceeded: 10040 > 10000 limit, stopping
-```
-
-### Session Management
-
-```bash
-# List recent sessions
-agentctl sessions list
-
-# List running agents
-agentctl agent list
-
-# Kill an agent
-agentctl agent kill <session-id>
-```
-
-### Session Continuation
-
-Continue a previous agent session with additional context:
-
-```bash
-# Resume a session with follow-up prompt
-agentctl agent resume <session-id> --prompt "Based on what you found, tell me more about X"
-```
-
-The resume command:
-- Loads previous session turns from database
-- Includes conversation history in the continuation prompt
-- Links sessions via `session_edges` table (edge_type: "continues")
-- Creates a new session that builds on the previous context
-
-### Multi-Agent with Overseer
-
-Spawn an overseer to coordinate multiple agents:
-
-```bash
-# Overseer coordinates subagents
-agentctl agent spawn --role overseer --prompt "Coordinate a codebase analysis:
-1. Spawn a researcher to find all API endpoints
-2. Spawn a coder to document any undocumented endpoints
-3. Wait for both to complete and summarize findings"
-
-# View agent hierarchy
-agentctl agent hierarchy
-```
-
-Overseer agents have special tools:
-- `agent_spawn` - Spawn subagents (validates depth limits)
-- `agent_list` - List active sessions
-- `agent_kill` - Terminate agents
-- `agent_hierarchy` - View agent tree
-- `agent_wait` - Wait for children to complete
-
----
-
-## Code Intelligence Tools
-
-### Search & Extract
-
-```bash
-# Tree view - hierarchical overview with LLM-generated summaries
-agentctl run code/semantic_search --input '{"format": "tree"}'  # Full repo
-agentctl run code/semantic_search --input '{"query": "storage", "format": "tree", "limit": 20}'
-
-# Semantic search - find code by meaning
-agentctl run code/semantic_search --input '{"query": "auth middleware", "limit": 10}'
-
-# Timeline search - search sessions and see what happened (chunk summaries + learnings)
-agentctl run code/semantic_search --input '{"query": "database issues", "scope": ["sessions"], "timeline": true}'
-
-# Smart search - auto-find candidates + extract snippets (all-in-one)
-agentctl run code/smart_search --input '{"query": "error handling patterns"}'
-
-# Snippet extract - extract from known files
-agentctl run code/snippet_extract --input '{
-  "query": "validation logic",
-  "candidates": [{"path": "internal/auth/validate.go", "line": 25}]
-}'
-
-# Context ripgrep - full function bodies matching pattern
-agentctl run code/context_ripgrep --input '{"pattern": "func.*Auth", "path": "."}'
-```
-
-### Codemaps
-
-```bash
-# Generate new codemap (AI-powered)
-agentctl run codemap/generate --input '{"query": "trace session lifecycle"}'
-
-# Get existing codemap by ID
-agentctl run codemap/get --input '{"id": "01KES88RGGVWG0T33WY7NH3AFR"}'
-
-# List codemaps
-agentctl run codemap/list --input '{"limit": 10}'
-
-# Check if codemap is stale
-agentctl run codemap/check --input '{"id": "01KES..."}'
-```
-
-### Analysis
-
-```bash
-# Complexity analysis
-agentctl run code/complexity --input '{"path": "internal/auth/"}'
-
-# Security scan
-agentctl run code/security --input '{"path": "."}'
-
-# Extract symbols
-agentctl run code/symbols --input '{"path": "internal/auth/handler.go"}'
-
-# Import analysis
-agentctl run code/imports --input '{"path": ".", "mode": "graph"}'
-```
-
-### Observability
-
-```bash
-# Recent events (last 20)
-agentctl run obs/logs --input '{}'
-
-# Errors only
-agentctl run obs/logs --input '{"errors_only": true}'
-
-# Filter by skill with stats
-agentctl run obs/logs --input '{"command": "code/semantic_search", "stats": true}'
-
-# Events from last hour
-agentctl run obs/logs --input '{"since": "1h", "limit": 50}'
-```
-
-### Pipeline Pattern
-
-```
-semantic_search → snippet_extract → counsel
-   "where"           "what"          "meaning"
-```
-
-| Skill                  | When to Use                               |
-| ---------------------- | ----------------------------------------- |
-| `code/semantic_search` | Find code by concept/meaning              |
-| `code/smart_search`    | Don't know which files - search + extract |
-| `code/snippet_extract` | Have file list - just extract snippets    |
-| `code/context_ripgrep` | Regex pattern - need full function bodies |
-| `codemap/generate`     | Need AI-traced code relationships         |
-| `codemap/get`          | Retrieve previously generated map         |
-| `obs/logs`             | Query observability events with filters   |
-
-**Detailed:** [docs/general/skills.md](../docs/general/skills.md)
+**Full details:** [AGENTS.md](../AGENTS.md#agent-orchestration)
 
 ---
 
 ## Environment
 
-Environment variables are loaded from `~/repos/personal/agentctl/.env` by the config loader. This .env file is **not** in this worktree - it's in the main agentctl repo and shared across all worktrees. When running daemon agents or testing locally, either:
-1. Source the .env: `source ~/repos/personal/agentctl/.env`
-2. Or run from the main repo where the config loader auto-loads it
+Environment variables are loaded from `<repo-root>/.env` by the config loader (gitignored, shared across worktrees).
 
-### Required
+| Variable         | Required | Purpose               |
+| ---------------- | -------- | --------------------- |
+| `VOYAGE_API_KEY` | Yes      | Vector embeddings     |
+| `ANTHROPIC_API_KEY` | No    | Codemap generation    |
 
-| Variable         | Purpose                       |
-| ---------------- | ----------------------------- |
-| `VOYAGE_API_KEY` | Vector embeddings (1024 dims) |
-
-### Optional
-
-| Variable                   | Default       | Purpose                              |
-| -------------------------- | ------------- | ------------------------------------ |
-| `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                         |
-| `ANTHROPIC_API_KEY`        | -             | Codemap generation                   |
-| `TAVILY_API_KEY`           | -             | Web search (Tavily provider)         |
-| `EXA_API_KEY`              | -             | Web search (Exa provider)            |
-| `PERPLEXITY_API_KEY`       | -             | Web search (Perplexity provider)     |
-| `AGENTCTL_SEMANTIC_RERANK` | `0`           | Enable reranking                     |
-| `AGENTCTL_OBS_DIR`         | -             | Observability (use `$HOME`, not `~`) |
-
-### Embedding Models (Voyage AI)
-
-| Scope      | Model            | Use   |
-| ---------- | ---------------- | ----- |
-| `symbols`  | `voyage-code-3`  | Code  |
-| `memory`   | `voyage-3-large` | Text  |
-| `codemaps` | `voyage-3.5`     | Mixed |
-
----
-
-## Storage
-
-| Path                              | Purpose            |
-| --------------------------------- | ------------------ |
-| `~/.agentctl/storage/memory.db`   | Memories, codemaps |
-| `~/.agentctl/storage/tasks.db`    | Tasks              |
-| `~/.agentctl/storage/sessions.db` | Sessions           |
-| `~/.agentctl/cas/sha256/`         | Large artifacts    |
-
-**Detailed:** [docs/general/storage.md](../docs/general/storage.md)
-
----
-
-## Development
-
-```bash
-make build           # Pure Go
-make build-cgo       # With CGO (Turso)
-make skills-install  # Build + install skills
-make test            # Run tests
-```
+**Full list:** [README.md](../README.md#environment-setup)
 
 ---
 
@@ -351,68 +170,33 @@ make test            # Run tests
 ### CGO Build
 
 ```bash
-# Correct
-make build-cgo
-
-# Wrong - duplicate SQLite symbols
-CGO_ENABLED=1 go build ./...
+make build-cgo  # Correct - includes -tags=libsqlite3
+# Never: CGO_ENABLED=1 go build ./...  (duplicate SQLite symbols)
 ```
 
 ### Skill Binary Location
 
 ```bash
-# Correct
-go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
-
-# Wrong - loader won't find it
-go build -o ./my_skill ./skills/my_skill
-```
-
-### Building Skills After Edits
-
-```bash
-# Correct - use make target (builds AND installs)
-make skill SKILL=session_restore
-
-# Wrong - just builds, doesn't install properly
-go build -o ~/.agentctl/skills/session_restore/bin ./skills/session_restore/
+make skill SKILL=my_skill  # Correct - builds AND installs
+# Binary must be at ~/.agentctl/skills/my/skill/bin
 ```
 
 ### Skills Must Load .env
 
 ```go
 import "github.com/jkatigb/agentctl/internal/platform/config"
-
 func main() {
     config.LoadDotEnv() // BEFORE os.Getenv()
 }
 ```
 
-### API Keys via Config (FC/IS Pattern)
-
-Never use `os.Getenv` directly for API keys. Use Config struct fields instead:
+### API Keys via Config
 
 ```go
-// Wrong - direct env access scattered throughout code
-apiKey := os.Getenv("VOYAGE_API_KEY")
-
-// Correct - use Config loaded once at startup
+// Wrong: os.Getenv("VOYAGE_API_KEY")
+// Correct:
 cfg, _ := config.Load(ctx)
-apiKey := cfg.Embedding.VoyageAPIKey  // For Voyage
-apiKey := cfg.Search.TavilyAPIKey     // For Tavily
-apiKey := cfg.Search.ExaAPIKey        // For Exa
-apiKey := cfg.LLM.ResolveAPIKey("anthropic")  // For LLM providers
-```
-
-For skills, API keys are available via `RunContext.Config`:
-
-```go
-func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
-    // Access via rc.Config
-    if rc.Config.Search.ExaAPIKey != "" {
-        // use Exa
-    }
-}
+apiKey := cfg.Embedding.VoyageAPIKey
 ```
 
 ### Memory Path
@@ -436,10 +220,7 @@ if strings.HasSuffix(path, ".gz") {
 
 ### Mailbox Replies Must Not Be Auto-Acked
 
-```text
-Do not ack MessageTypeReply in the daemon poller.
-Replies are for the caller to consume; acking there drops async replies.
-```
+Replies are for the caller to consume; acking in daemon poller drops async replies.
 
 **All gotchas:** [docs/general/gotchas.md](../docs/general/gotchas.md)
 
@@ -470,21 +251,24 @@ semantic_search → snippet_extract → counsel
   "where"           "what"          "meaning"
 ```
 
+| Skill                  | When to Use                               |
+| ---------------------- | ----------------------------------------- |
+| `code/semantic_search` | Find code by concept/meaning              |
+| `code/smart_search`    | Don't know which files - search + extract |
+| `code/snippet_extract` | Have file list - just extract snippets    |
+| `code/context_ripgrep` | Regex pattern - need full function bodies |
+| `codemap/generate`     | Need AI-traced code relationships         |
+
 ---
 
-## GUI/TUI
+## Storage
 
-```bash
-make ts-dev-gui  # Web GUI at http://localhost:5173
-```
-
-| Key | TUI View |
-| --- | -------- |
-| 1   | Jobs     |
-| 2   | Tasks    |
-| 3   | Insights |
-| 4   | Mailbox  |
-| 5   | Search   |
+| Path                              | Purpose            |
+| --------------------------------- | ------------------ |
+| `~/.agentctl/storage/memory.db`   | Memories, codemaps |
+| `~/.agentctl/storage/tasks.db`    | Tasks              |
+| `~/.agentctl/storage/sessions.db` | Sessions           |
+| `~/.agentctl/cas/sha256/`         | Large artifacts    |
 
 ---
 

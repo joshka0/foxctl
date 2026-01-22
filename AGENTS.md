@@ -21,12 +21,12 @@ contributors
 
 1. **Start with a tree** — `agentctl run code/semantic_search --input '{"query": "your task", "format": "tree"}'`
 2. **Envelope contract is sacred** — never change `meta.*` fields without spec
-   updates
+   updates (downstream tooling relies on stable envelope shape; breaking it breaks hooks, GUIs, and golden tests)
 3. **WASI = `network:"none"`** — Core v1 mandates isolation
 4. **Large outputs → CAS** — use `data.summary` + `data.artifact`
 5. **Check gotchas first** — read
    [docs/general/gotchas.md](docs/general/gotchas.md)
-6. **`--dry-run` required** for state-changing commands
+6. **`--dry-run` required** for state-changing commands (writes to DB, modifies workspace, creates CAS artifacts, spawns agents, edits tasks)
 
 ---
 
@@ -83,7 +83,9 @@ agentctl run code/semantic_search --input '{"query": "storage memory", "format":
 - Root summary synthesizing the codebase area
 
 **Tree options:**
-- `tree_depth: 0` — unlimited depth (default: 2)
+- `tree_depth: 1` — root level only
+- `tree_depth: 2` — two levels (default)
+- `tree_depth: 0` — unlimited depth (special case: 0 means "no limit")
 - `tree_max_children: 50` — max items per directory
 - `tree_include_summaries: false` — disable summaries for faster output
 
@@ -132,7 +134,7 @@ All I/O uses canonical envelopes:
 
 ### Large Outputs
 
-Use CAS for large results:
+Use CAS for large results (threshold: **64KB** or large blobs):
 
 ```json
 {
@@ -263,7 +265,7 @@ Find code by meaning, not just text matching.
 agentctl run code/semantic_search --input '{"query": "database connection pooling"}'
 
 # With scope filter (symbols, sessions, memory, codemaps)
-agentctl run code/semantic_search --input '{"query": "auth", "scopes": ["symbols"]}'
+agentctl run code/semantic_search --input '{"query": "auth", "scope": ["symbols"]}'
 
 # Limit results
 agentctl run code/semantic_search --input '{"query": "error handling", "limit": 5}'
@@ -432,7 +434,7 @@ Always include `data.hint` to help users fix the problem.
 
 ```yaml
 Project: agentctl
-Language: Go 1.24+ (CGO off by default)
+Language: Go 1.25+ (CGO off by default)
 CLI: Cobra + Viper
 I/O: JSON envelopes (version: 1)
   Storage: SQLite + CAS (~/.agentctl/)
