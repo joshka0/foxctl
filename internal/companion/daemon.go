@@ -13,18 +13,18 @@ import (
 // CompressionDaemon runs periodic memory compression for all conversations.
 // It summarizes yesterday's turns daily and distills old summaries weekly.
 type CompressionDaemon struct {
-	memory           *ConversationMemory
-	db               *sql.DB
-	dailyInterval    time.Duration
-	weeklyInterval   time.Duration
-	logger           zerolog.Logger
-	stopCh           chan struct{}
-	doneCh           chan struct{}
-	doneOnce         sync.Once // Ensures doneCh is only closed once
-	wg               sync.WaitGroup
-	mu               sync.Mutex
-	lastDailyRun     time.Time
-	lastWeeklyRun    time.Time
+	memory         *ConversationMemory
+	db             *sql.DB
+	dailyInterval  time.Duration
+	weeklyInterval time.Duration
+	logger         zerolog.Logger
+	stopCh         chan struct{}
+	doneCh         chan struct{}
+	doneOnce       sync.Once // Ensures doneCh is only closed once
+	wg             sync.WaitGroup
+	mu             sync.Mutex
+	lastDailyRun   time.Time
+	lastWeeklyRun  time.Time
 }
 
 // DaemonConfig configures the compression daemon.

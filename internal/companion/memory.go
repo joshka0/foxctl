@@ -29,9 +29,9 @@ import (
 type ConversationMemory struct {
 	db          *sql.DB
 	summarizer  ConversationSummarizer
-	memoryStore storage.MemoryStore  // Optional: for semantic search integration
-	workspace   string               // Workspace for semantic search scoping
-	embedder    *semantic.Embedder   // Optional: for generating embeddings on summaries
+	memoryStore storage.MemoryStore // Optional: for semantic search integration
+	workspace   string              // Workspace for semantic search scoping
+	embedder    *semantic.Embedder  // Optional: for generating embeddings on summaries
 	config      MemoryConfig
 	mu          sync.RWMutex
 }

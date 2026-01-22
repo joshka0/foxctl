@@ -9,15 +9,33 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
+	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
+	"github.com/XiaoConstantine/dspy-go/pkg/core"
+	"github.com/XiaoConstantine/dspy-go/pkg/llms"
+	models "github.com/XiaoConstantine/mcp-go/pkg/model"
 	"github.com/rs/zerolog"
 
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/contextvar"
+)
+
+// EngineType selects the execution engine for the companion service.
+type EngineType string
+
+const (
+	// EngineTypeLLMChat uses LLMChatEngine for OpenAI-compatible execution.
+	EngineTypeLLMChat EngineType = "llmchat"
+
+	// EngineTypeDSPy uses DSPy ReAct agent for structured reasoning.
+	EngineTypeDSPy EngineType = "dspy"
 )
 
 // Service is the companion chat service.
@@ -30,7 +48,7 @@ type Service struct {
 
 // ServiceConfig configures the companion service.
 type ServiceConfig struct {
-	// LLMProvider is the LLM provider: "openrouter", "groq", "openai"
+	// LLMProvider is the LLM provider: "openrouter", "groq", "openai", "cerebras"
 	LLMProvider string
 
 	// LLMAPIKey is the API key for the LLM provider.
@@ -51,6 +69,17 @@ type ServiceConfig struct {
 	// Timeout is the request timeout.
 	Timeout time.Duration
 
+	// ExecMode is the default execution mode: "reactive", "autonomous", or "proactive".
+	// - reactive: Direct LLM response with tool calls as needed (default)
+	// - autonomous: Multi-turn context gathering before responding
+	// - proactive: Like autonomous but can initiate work on its own
+	ExecMode agent.ExecutionMode
+
+	// EngineType selects the execution engine: "llmchat" (default) or "dspy".
+	// - llmchat: Uses LLMChatEngine for OpenAI-compatible streaming
+	// - dspy: Uses DSPy ReAct agent for structured reasoning
+	EngineType EngineType
+
 	// MemoryDB is the database for conversation memory (optional).
 	// If nil, memory features are disabled.
 	MemoryDB *sql.DB
@@ -70,8 +99,34 @@ type ServiceConfig struct {
 	// using the configured embedding provider (VOYAGE_API_KEY from .env).
 	Config *config.Config
 
+	// HookDispatcher for pre/post tool use hooks (optional).
+	// When set, hooks will be invoked around tool execution.
+	HookDispatcher hooks.Dispatcher
+
+	// ActionExecutor processes hook output actions (optional).
+	// When set, hook actions (inject_context, enqueue_context, etc.) will be processed.
+	ActionExecutor hooks.ActionExecutor
+
+	// HookContext provides context for hook dispatch.
+	HookContext HookContext
+
 	// Logger for structured logging.
 	Logger zerolog.Logger
+}
+
+// HookContext provides context for hook dispatch in companion sessions.
+type HookContext struct {
+	// SessionID is the session identifier for the chat.
+	SessionID string
+
+	// ActorID is the agent/actor identifier.
+	ActorID string
+
+	// WorkspaceID is the workspace identifier.
+	WorkspaceID string
+
+	// WorkspaceRoot is the filesystem path to the workspace.
+	WorkspaceRoot string
 }
 
 // DefaultServiceConfig returns sensible defaults.
@@ -161,11 +216,22 @@ type ChatRequest struct {
 	// Message is the user's message.
 	Message string `json:"message"`
 
+	// Context is additional request context for this turn.
+	Context map[string]any `json:"context,omitempty"`
+
 	// Personality overrides the default system prompt.
 	Personality string `json:"personality,omitempty"`
 
 	// RequireContextQuery overrides the service default.
 	RequireContextQuery *bool `json:"require_context_query,omitempty"`
+
+	// ExecMode overrides the service default execution mode.
+	// Use "autonomous" for multi-turn context gathering before responding.
+	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
+
+	// EngineType overrides the service default engine type.
+	// Use "dspy" for DSPy ReAct agent execution.
+	EngineType EngineType `json:"engine_type,omitempty"`
 }
 
 // ChatResponse is the response from the companion.
@@ -210,6 +276,29 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		return nil, fmt.Errorf("message is required")
 	}
 
+	// Determine effective exec mode and engine type
+	execMode := s.config.ExecMode
+	if req.ExecMode != "" {
+		execMode = req.ExecMode
+	}
+	if execMode == "" {
+		execMode = agent.ModeReactive
+	}
+
+	engineType := s.config.EngineType
+	if req.EngineType != "" {
+		engineType = req.EngineType
+	}
+	if engineType == "" {
+		engineType = EngineTypeLLMChat
+	}
+
+	s.logger.Debug().
+		Str("exec_mode", string(execMode)).
+		Str("engine_type", string(engineType)).
+		Str("conversation_id", req.ConversationID).
+		Msg("Processing chat request")
+
 	// Create RLM tool executor
 	rlmExecutor := engine.NewRLMToolExecutor(s.contextStore, req.ConversationID)
 
@@ -218,6 +307,41 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		rlmExecutor.SetMemoryStore(s.config.MemoryStore, s.config.MemoryWorkspace)
 	}
 
+	// Build system prompt
+	systemPrompt, err := s.buildSystemPrompt(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("build system prompt: %w", err)
+	}
+
+	// For autonomous/proactive modes, add thinking phase instructions
+	if execMode == agent.ModeAutonomous || execMode == agent.ModeProactive {
+		systemPrompt = s.addAutonomousInstructions(systemPrompt, execMode)
+	}
+
+	var resp *ChatResponse
+
+	// Route to appropriate engine
+	switch engineType {
+	case EngineTypeDSPy:
+		resp, err = s.chatWithDSPy(ctx, req, rlmExecutor, systemPrompt, execMode, start)
+	default:
+		resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, start)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Store conversation turns in memory
+	s.storeConversationTurns(ctx, req, resp, start)
+
+	return resp, nil
+}
+
+// chatWithLLMChat executes using the LLMChatEngine.
+// The passedPrompt parameter provides the base system prompt (e.g., from overseer).
+// This is used as the foundation for the evolving personality system.
+func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, passedPrompt string, start time.Time) (*ChatResponse, error) {
 	// Create LLM engine in stateless mode
 	engineCfg := engine.LLMChatConfig{
 		Provider:              s.config.LLMProvider,
@@ -228,6 +352,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		StatelessMode:         true,
 		RLMSystemPromptSuffix: RLMContextInstructions,
 		RequireContextQuery:   s.config.RequireContextQuery,
+		HookDispatcher:        s.config.HookDispatcher,
+		ActionExecutor:        s.config.ActionExecutor,
 		Logger:                s.logger,
 	}
 
@@ -241,13 +367,31 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		return nil, fmt.Errorf("create engine: %w", err)
 	}
 
+	// Set hook context for dispatch (uses conversation ID as session if not set)
+	hookCtx := engine.HookContext{
+		SessionID:     s.config.HookContext.SessionID,
+		ActorID:       s.config.HookContext.ActorID,
+		WorkspaceID:   s.config.HookContext.WorkspaceID,
+		WorkspaceRoot: s.config.HookContext.WorkspaceRoot,
+	}
+	if hookCtx.SessionID == "" {
+		hookCtx.SessionID = req.ConversationID
+	}
+	llmEngine.SetHookContext(hookCtx)
+
 	// Set up tool runner with RLM tools
 	toolRunner := engine.NewToolRunner(rlmExecutor, nil, engine.DefaultToolRunnerConfig())
 	llmEngine.SetToolRunner(toolRunner)
 	llmEngine.SetRLMExecutor(rlmExecutor)
 
 	// Build input with evolving personality
+	// Priority: req.Personality > passedPrompt (from parent/overseer) > stored > default
 	basePersonality := req.Personality
+	if basePersonality == "" && passedPrompt != "" {
+		// Use the prompt passed from parent function (e.g., from overseer or buildSystemPrompt)
+		basePersonality = passedPrompt
+		s.logger.Debug().Str("personality", basePersonality[:min(50, len(basePersonality))]).Msg("Using passed base prompt")
+	}
 	if basePersonality == "" {
 		// Try to load stored base personality for this conversation
 		if stored, err := s.contextStore.GetByKey(ctx, req.ConversationID, contextvar.ScopeGlobal, "personality/base"); err == nil {
@@ -263,11 +407,13 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	// Use evolving personality to build dynamic system prompt
+	var systemPrompt string
 	evolvingPersonality := NewEvolvingPersonality(s.contextStore, req.ConversationID)
-	systemPrompt, err := evolvingPersonality.BuildSystemPrompt(ctx, basePersonality)
-	if err != nil {
+	if newPrompt, err := evolvingPersonality.BuildSystemPrompt(ctx, basePersonality); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to build evolving system prompt, using base")
 		systemPrompt = basePersonality
+	} else {
+		systemPrompt = newPrompt
 	}
 
 	// Include conversation memory context if available
@@ -314,45 +460,360 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	}
 
 	// Collect tools used
-	toolNames := make(map[string]bool)
+	toolNames := make(map[string]struct{})
 	for _, tc := range output.ToolCalls {
-		toolNames[tc.Name] = true
+		toolNames[tc.Name] = struct{}{}
 	}
 	for name := range toolNames {
 		resp.ToolsUsed = append(resp.ToolsUsed, name)
 	}
+	sort.Strings(resp.ToolsUsed)
 
 	// Check for errors
 	if output.StopReason == engine.StopReasonError {
 		resp.Error = output.Error
 	}
 
-	// Store conversation turns in memory (synchronous to ensure DB isn't closed prematurely)
-	if s.memory != nil && resp.Error == "" {
-		// Store user turn
-		userTurn := ConversationTurn{
-			ConversationID: req.ConversationID,
-			Role:           "user",
-			Content:        req.Message,
-			CreatedAt:      start,
-		}
-		if err := s.memory.AppendTurn(ctx, userTurn); err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to store user turn")
-		}
+	// Note: Conversation turns are stored by the Chat() entry point via storeConversationTurns()
+	// to avoid duplicate entries.
 
-		// Store assistant turn
-		assistantTurn := ConversationTurn{
-			ConversationID: req.ConversationID,
-			Role:           "assistant",
-			Content:        output.AssistantText,
-			CreatedAt:      time.Now(),
+	return resp, nil
+}
+
+// chatWithDSPy executes using the DSPy ReAct agent.
+func (s *Service) chatWithDSPy(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, execMode agent.ExecutionMode, start time.Time) (*ChatResponse, error) {
+	// Initialize LLM factory
+	llms.EnsureFactory()
+
+	// Create LLM based on provider
+	llm, err := s.createDSPyLLM(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("create dspy llm: %w", err)
+	}
+
+	// Create DSPy ReAct agent
+	agentID := fmt.Sprintf("companion:%s", req.ConversationID)
+	maxIterations := s.config.MaxIterations
+	if maxIterations <= 0 {
+		maxIterations = 10
+	}
+
+	dspyAgent := react.NewReActAgent(agentID, "companion",
+		react.WithMaxIterations(maxIterations),
+		react.WithTimeout(s.config.Timeout),
+	)
+
+	// Convert RLM tools to dspy-go tools
+	for _, toolDef := range rlmExecutor.List() {
+		tool := &dspyRLMTool{
+			def:      toolDef,
+			executor: rlmExecutor,
 		}
-		if err := s.memory.AppendTurn(ctx, assistantTurn); err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
+		if err := dspyAgent.RegisterTool(tool); err != nil {
+			s.logger.Warn().Err(err).Str("tool", toolDef.Name).Msg("Failed to register tool")
 		}
 	}
 
+	// Build signature with system prompt as instruction
+	sig := core.NewSignature(
+		[]core.InputField{
+			{Field: core.NewField("task", core.WithDescription("The user's message to respond to"))},
+		},
+		[]core.OutputField{
+			{Field: core.NewField("result", core.WithDescription("Your response to the user"))},
+		},
+	).WithInstruction(systemPrompt)
+
+	if err := dspyAgent.Initialize(llm, sig); err != nil {
+		return nil, fmt.Errorf("initialize dspy agent: %w", err)
+	}
+
+	// Execute
+	input := map[string]any{
+		"task": req.Message,
+	}
+
+	resultMap, err := dspyAgent.Execute(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("dspy execute: %w", err)
+	}
+
+	// Extract result
+	result := extractDSPyResult(resultMap)
+
+	// Build response
+	resp := &ChatResponse{
+		ConversationID: req.ConversationID,
+		Response:       result,
+		ContextQueries: rlmExecutor.QueryCount(),
+		DurationMS:     time.Since(start).Milliseconds(),
+	}
+
+	// Note: DSPy doesn't provide detailed token usage, but we could add it later
 	return resp, nil
+}
+
+// createDSPyLLM creates a dspy-go LLM based on the configured provider.
+// Accepts a context for proper cancellation and timeout propagation.
+func (s *Service) createDSPyLLM(ctx context.Context) (core.LLM, error) {
+	provider := s.config.LLMProvider
+	model := s.config.LLMModel
+	apiKey := s.config.LLMAPIKey
+
+	switch provider {
+	case "gemini":
+		return llms.NewGeminiLLM(apiKey, core.ModelID(model))
+	case "openai":
+		return llms.NewOpenAILLM(core.ModelID(model), llms.WithAPIKey(apiKey))
+	case "anthropic":
+		config := core.ProviderConfig{Name: "anthropic", APIKey: apiKey}
+		return llms.NewAnthropicLLMFromConfig(ctx, config, core.ModelID(model))
+	case "groq":
+		return llms.NewOpenAICompatible("groq", core.ModelID(model),
+			"https://api.groq.com/openai", llms.WithAPIKey(apiKey))
+	case "openrouter":
+		return llms.NewOpenAICompatible("openrouter", core.ModelID(model),
+			"https://openrouter.ai/api", llms.WithAPIKey(apiKey))
+	case "cerebras":
+		// Note: Use base URL without /v1 - dspy-go appends /v1/chat/completions
+		return llms.NewOpenAICompatible("cerebras", core.ModelID(model),
+			"https://api.cerebras.ai", llms.WithAPIKey(apiKey))
+	default:
+		return nil, fmt.Errorf("unsupported LLM provider: %q", provider)
+	}
+}
+
+// buildSystemPrompt constructs the system prompt with personality and memory context.
+func (s *Service) buildSystemPrompt(ctx context.Context, req ChatRequest) (string, error) {
+	basePersonality := req.Personality
+	if basePersonality == "" {
+		// Try to load stored base personality for this conversation
+		if stored, err := s.contextStore.GetByKey(ctx, req.ConversationID, contextvar.ScopeGlobal, "personality/base"); err == nil {
+			var personality string
+			if err := json.Unmarshal(stored.ValueJSON, &personality); err == nil && personality != "" {
+				basePersonality = personality
+				s.logger.Debug().Str("personality", basePersonality[:min(50, len(basePersonality))]).Msg("Using stored base personality")
+			}
+		}
+	}
+	if basePersonality == "" {
+		basePersonality = s.config.DefaultPersonality
+	}
+
+	// Use evolving personality to build dynamic system prompt
+	evolvingPersonality := NewEvolvingPersonality(s.contextStore, req.ConversationID)
+	systemPrompt, err := evolvingPersonality.BuildSystemPrompt(ctx, basePersonality)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to build evolving system prompt, using base")
+		systemPrompt = basePersonality
+	}
+
+	// Include conversation memory context if available
+	s.logger.Debug().Bool("memory_available", s.memory != nil).Str("conversation_id", req.ConversationID).Msg("Checking memory for chat")
+	if s.memory != nil {
+		memoryContext, err := s.memory.GetContext(ctx, req.ConversationID)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to get memory context")
+		} else if memoryContext != "" {
+			s.logger.Debug().Int("context_len", len(memoryContext)).Msg("Memory context retrieved, injecting into prompt")
+			systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + memoryContext
+		} else {
+			s.logger.Debug().Msg("Memory context is empty")
+		}
+	} else {
+		s.logger.Debug().Msg("Memory is nil, skipping context injection")
+	}
+
+	if len(req.Context) > 0 {
+		ctxJSON, err := json.Marshal(req.Context)
+		if err != nil {
+			s.logger.Warn().Err(err).Msg("Failed to marshal request context")
+		} else if len(ctxJSON) > 0 {
+			systemPrompt = systemPrompt + "\n\n# Request Context\n" + string(ctxJSON)
+		}
+	}
+
+	return systemPrompt, nil
+}
+
+// addAutonomousInstructions adds thinking phase instructions for autonomous/proactive modes.
+func (s *Service) addAutonomousInstructions(systemPrompt string, execMode agent.ExecutionMode) string {
+	var instructions string
+
+	switch execMode {
+	case agent.ModeAutonomous:
+		instructions = `
+
+## Autonomous Mode Instructions
+
+Before responding to the user, you should:
+1. **Gather Context**: Use available tools to query relevant information (memories, context variables, semantic search)
+2. **Think Through**: Consider what information would help you give a better response
+3. **Then Respond**: Only after gathering necessary context, provide your response
+
+Take your time to think and gather information. The user expects a thoughtful, well-informed response.`
+
+	case agent.ModeProactive:
+		instructions = `
+
+## Proactive Mode Instructions
+
+You operate in proactive mode, which means:
+1. **Anticipate Needs**: Think about what the user might need beyond their explicit request
+2. **Gather Context**: Proactively query memories and context to understand the full picture
+3. **Suggest Actions**: If you notice relevant information or opportunities, bring them up
+4. **Think Ahead**: Consider follow-up questions or related topics the user might benefit from
+
+Be thorough in your information gathering and don't hesitate to make helpful suggestions.`
+	}
+
+	return systemPrompt + instructions
+}
+
+// storeConversationTurns saves the conversation to memory.
+func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, resp *ChatResponse, start time.Time) {
+	if s.memory == nil || resp.Error != "" {
+		return
+	}
+
+	// Store user turn
+	userTurn := ConversationTurn{
+		ConversationID: req.ConversationID,
+		Role:           "user",
+		Content:        req.Message,
+		CreatedAt:      start,
+	}
+	if err := s.memory.AppendTurn(ctx, userTurn); err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to store user turn")
+	}
+
+	// Store assistant turn
+	assistantTurn := ConversationTurn{
+		ConversationID: req.ConversationID,
+		Role:           "assistant",
+		Content:        resp.Response,
+		CreatedAt:      time.Now(),
+	}
+	if err := s.memory.AppendTurn(ctx, assistantTurn); err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
+	}
+}
+
+// dspyRLMTool wraps an RLM tool for use with dspy-go.
+// Implements core.Tool interface from dspy-go.
+type dspyRLMTool struct {
+	def      engine.ToolDef
+	executor *engine.RLMToolExecutor
+}
+
+func (t *dspyRLMTool) Name() string {
+	return t.def.Name
+}
+
+func (t *dspyRLMTool) Description() string {
+	return t.def.Description
+}
+
+func (t *dspyRLMTool) Metadata() *core.ToolMetadata {
+	return &core.ToolMetadata{
+		Name:        t.def.Name,
+		Description: t.def.Description,
+		InputSchema: t.InputSchema(),
+	}
+}
+
+func (t *dspyRLMTool) CanHandle(_ context.Context, intent string) bool {
+	// RLM tools can handle any intent that mentions their name
+	return intent == t.def.Name
+}
+
+func (t *dspyRLMTool) Execute(ctx context.Context, params map[string]interface{}) (core.ToolResult, error) {
+	args, err := json.Marshal(params)
+	if err != nil {
+		return core.ToolResult{}, fmt.Errorf("marshal args: %w", err)
+	}
+	result, err := t.executor.Execute(ctx, t.def.Name, args)
+	if err != nil {
+		return core.ToolResult{}, err
+	}
+	return core.ToolResult{
+		Data: result,
+	}, nil
+}
+
+func (t *dspyRLMTool) Validate(_ map[string]interface{}) error {
+	// RLM tools handle validation internally
+	return nil
+}
+
+func (t *dspyRLMTool) InputSchema() models.InputSchema {
+	var schema map[string]interface{}
+	if err := json.Unmarshal(t.def.Parameters, &schema); err != nil {
+		return models.InputSchema{
+			Type: "object",
+		}
+	}
+
+	// Build a set of required field names
+	requiredSet := make(map[string]bool)
+	if req, ok := schema["required"].([]interface{}); ok {
+		for _, r := range req {
+			if s, ok := r.(string); ok {
+				requiredSet[s] = true
+			}
+		}
+	}
+
+	// Extract properties if present
+	properties := make(map[string]models.ParameterSchema)
+	if props, ok := schema["properties"].(map[string]interface{}); ok {
+		for name, prop := range props {
+			if propMap, ok := prop.(map[string]interface{}); ok {
+				param := models.ParameterSchema{
+					Required: requiredSet[name],
+				}
+				if typ, ok := propMap["type"].(string); ok {
+					param.Type = typ
+				}
+				if d, ok := propMap["description"].(string); ok {
+					param.Description = d
+				}
+				properties[name] = param
+			}
+		}
+	}
+
+	return models.InputSchema{
+		Type:       "object",
+		Properties: properties,
+	}
+}
+
+// extractDSPyResult extracts the response from DSPy execution output.
+func extractDSPyResult(resultMap map[string]any) string {
+	if resultMap == nil {
+		return "Task completed"
+	}
+
+	// Priority order: result, answer, output, thought
+	for _, key := range []string{"result", "answer", "output", "thought"} {
+		if r, ok := resultMap[key].(string); ok && r != "" {
+			return r
+		}
+	}
+
+	// Last resort: format the map but exclude internal ReAct fields
+	cleaned := make(map[string]any)
+	for k, v := range resultMap {
+		if k == "action" || k == "observation" || k == "conversation_context" {
+			continue
+		}
+		cleaned[k] = v
+	}
+	if len(cleaned) > 0 {
+		return fmt.Sprintf("%v", cleaned)
+	}
+	return "Task completed"
 }
 
 // SetContext stores a context variable for a conversation.

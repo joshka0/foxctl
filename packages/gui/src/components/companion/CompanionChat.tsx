@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from "react";
+import type { KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useCompanionChat } from "@/api/hooks";
 import {
   Send,
-  Square,
   User,
   Bot,
   Loader2,
@@ -53,6 +53,12 @@ export function CompanionChat({
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const chatMutation = useCompanionChat();
+
+  // Reset state when conversation changes
+  useEffect(() => {
+    setMessages([]);
+    setInputValue("");
+  }, [conversationId]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -104,11 +110,13 @@ export function CompanionChat({
           contextQueries: response.context_queries,
           toolsUsed: response.tools_used,
           durationMs: response.duration_ms,
-          tokenUsage: {
-            input: response.token_usage.input_tokens,
-            output: response.token_usage.output_tokens,
-            total: response.token_usage.total_tokens,
-          },
+          tokenUsage: response.token_usage
+            ? {
+                input: response.token_usage.input_tokens ?? 0,
+                output: response.token_usage.output_tokens ?? 0,
+                total: response.token_usage.total_tokens ?? 0,
+              }
+            : undefined,
         },
       };
 
@@ -135,7 +143,7 @@ export function CompanionChat({
   };
 
   // Handle key press
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -180,21 +188,18 @@ export function CompanionChat({
             rows={1}
           />
 
-          {chatMutation.isPending ? (
-            <Button variant="destructive" disabled title="Processing...">
-              <Square className="h-4 w-4 mr-2" />
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              onClick={handleSend}
-              disabled={!inputValue.trim()}
-              title="Send message"
-            >
+          <Button
+            onClick={handleSend}
+            disabled={chatMutation.isPending || !inputValue.trim()}
+            title={chatMutation.isPending ? "Processing..." : "Send message"}
+          >
+            {chatMutation.isPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
               <Send className="h-4 w-4 mr-2" />
-              Send
-            </Button>
-          )}
+            )}
+            {chatMutation.isPending ? "Sending..." : "Send"}
+          </Button>
         </div>
       </div>
     </div>

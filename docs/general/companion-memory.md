@@ -124,7 +124,8 @@ User Message
 │     ---                                 │
 │     Question: {question}"               │
 │                                         │
-│ 5. DSPy Execute                         │
+│ 5. LLMChatEngine Execute (reactive)     │
+│    - Or DSPy ReAct (autonomous)         │
 │                                         │
 │ 6. Store assistant turn (on success)    │
 └─────────────────────────────────────────┘

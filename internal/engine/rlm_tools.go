@@ -658,12 +658,12 @@ func formatQueryResult(variables []contextvar.Variable) (string, error) {
 		}
 
 		results[i] = map[string]interface{}{
-			"key":         v.Key,
-			"value":       value,
-			"scope":       string(v.Scope),
-			"created_at":  v.CreatedAt.Format(time.RFC3339),
-			"updated_at":  v.UpdatedAt.Format(time.RFC3339),
-			"source":      v.Source,
+			"key":          v.Key,
+			"value":        value,
+			"scope":        string(v.Scope),
+			"created_at":   v.CreatedAt.Format(time.RFC3339),
+			"updated_at":   v.UpdatedAt.Format(time.RFC3339),
+			"source":       v.Source,
 			"access_count": v.AccessCount,
 		}
 

@@ -33,6 +33,7 @@ var version = "dev"
 type EventBuilder struct {
 	event     *WideEvent
 	startTime time.Time
+	persist   *persistConfig // Optional persistence configuration
 }
 
 // NewEvent creates a new EventBuilder for the specified operation.

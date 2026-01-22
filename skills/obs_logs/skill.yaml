@@ -1,0 +1,104 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: obs/logs
+  version: 0.1.0
+  description: "Query and browse observability logs (wide events)"
+  tags: ["observability", "debugging", "logs", "monitoring"]
+distribution:
+  type: exec
+  exec:
+    entry: skills/obs_logs/obs_logs
+io:
+  format: JSON
+  inline_output_kb: 64
+signature:
+  command: obs_logs
+  parameters:
+    - name: limit
+      type: integer
+      required: false
+      description: "Maximum number of events to return (default: 20, max: 500)"
+    - name: operation
+      type: string
+      required: false
+      description: "Filter by operation (e.g., skill.run, hook.execute)"
+    - name: command
+      type: string
+      required: false
+      description: "Filter by command/skill name (e.g., code/semantic_search)"
+    - name: status
+      type: string
+      required: false
+      description: "Filter by status (ok, error, canceled)"
+    - name: component
+      type: string
+      required: false
+      description: "Filter by component (cli, web, hook, skill, job)"
+    - name: since
+      type: string
+      required: false
+      description: "Only events after this RFC3339 timestamp or duration (e.g., '1h', '30m')"
+    - name: stats
+      type: boolean
+      required: false
+      description: "Include aggregate statistics"
+    - name: errors_only
+      type: boolean
+      required: false
+      description: "Only show events with errors"
+  help:
+    short: "Query and browse observability logs"
+    long: |
+      Use obs/logs to inspect recent observability events without navigating
+      to the observability directory.
+
+      Features:
+      - List recent events with filters
+      - Filter by operation, command, status, component
+      - Time-based filtering (since)
+      - Aggregate statistics
+      - Error-only mode for quick debugging
+
+      Example commands:
+        agentctl run obs/logs
+        agentctl run obs/logs --input '{"limit": 50}'
+        agentctl run obs/logs --input '{"errors_only": true}'
+        agentctl run obs/logs --input '{"command": "code/semantic_search", "stats": true}'
+        agentctl run obs/logs --input '{"since": "1h"}'
+    workflows:
+      - id: recent
+        description: "View recent events"
+        example_input: {}
+      - id: errors
+        description: "View recent errors"
+        example_input:
+          errors_only: true
+          limit: 50
+      - id: skill-stats
+        description: "Stats for a specific skill"
+        example_input:
+          command: "code/semantic_search"
+          stats: true
+returns:
+  - name: events
+    type: array
+    description: "List of wide events matching filters"
+  - name: count
+    type: integer
+    description: "Number of events returned"
+  - name: total_scanned
+    type: integer
+    description: "Total events scanned"
+  - name: stats
+    type: object
+    description: "Aggregate statistics (if requested)"
+  - name: summary
+    type: string
+    description: "Human-readable summary"
+capabilities:
+  network: "none"
+  filesystem:
+    - type: home
+      path: ".agentctl/observability"
+  pure: true

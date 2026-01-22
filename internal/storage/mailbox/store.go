@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -20,6 +21,7 @@ type Store interface {
 	Close() error
 	Send(ctx context.Context, msg agent.Message) error
 	Poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int) ([]agent.Message, error)
+	PollByTypes(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int, types []agent.MessageType) ([]agent.Message, error)
 	Ack(ctx context.Context, messageID string) error
 	Nack(ctx context.Context, messageID string, visibilityTimeout time.Duration) error
 	List(ctx context.Context, agentNS string, limit int) ([]agent.Message, error)
@@ -73,6 +75,14 @@ func (s *sqlStore) Send(ctx context.Context, msg agent.Message) error {
 }
 
 func (s *sqlStore) Poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int) ([]agent.Message, error) {
+	return s.poll(ctx, agentNS, leaseDuration, maxMessages, nil)
+}
+
+func (s *sqlStore) PollByTypes(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int, types []agent.MessageType) ([]agent.Message, error) {
+	return s.poll(ctx, agentNS, leaseDuration, maxMessages, types)
+}
+
+func (s *sqlStore) poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int, types []agent.MessageType) ([]agent.Message, error) {
 	if maxMessages <= 0 {
 		maxMessages = 1
 	}
@@ -89,12 +99,24 @@ func (s *sqlStore) Poll(ctx context.Context, agentNS string, leaseDuration time.
 	}()
 
 	now := time.Now().Unix()
-	rows, err := tx.QueryContext(ctx, `
+	query := `
 		SELECT id, from_ns, to_ns, type, ttl_ms, headers, payload, visible_at, attempt, ts, session_id, workspace, agent_id
 		FROM mailbox
-		WHERE to_ns = ? AND visible_at <= ?
+		WHERE to_ns = ? AND visible_at <= ?`
+	args := []any{agentNS, now}
+	if len(types) > 0 {
+		placeholders := strings.TrimRight(strings.Repeat("?,", len(types)), ",")
+		query += " AND type IN (" + placeholders + ")"
+		for _, msgType := range types {
+			args = append(args, string(msgType))
+		}
+	}
+	query += `
 		ORDER BY ts ASC
-		LIMIT ?`, agentNS, now, maxMessages)
+		LIMIT ?`
+	args = append(args, maxMessages)
+
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("mailbox: poll: %w", err)
 	}

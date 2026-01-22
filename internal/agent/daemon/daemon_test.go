@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -82,7 +83,7 @@ func setupDaemon(t *testing.T) (context.Context, string, Options, *FakeLLM) {
 		}
 	}()
 
-	// Create agent
+	// Create agent - use autonomous mode to ensure DSPy path is used (where AgentFactory applies)
 	agentID := ulid.Make().String()
 	a := agent.Agent{
 		ID:        agentID,
@@ -91,6 +92,7 @@ func setupDaemon(t *testing.T) (context.Context, string, Options, *FakeLLM) {
 		State:     agent.StateStarting, // Run will transition to Running
 		Prompt:    "You are a coder.",
 		ShareBB:   "scoped",
+		ExecMode:  agent.ModeAutonomous, // Use DSPy path so FakeLLM is used
 	}
 	err = as.Create(ctx, a)
 	require.NoError(t, err)
@@ -345,9 +347,10 @@ func TestDaemon_EndToEnd_SpawnAskReplyStop(t *testing.T) {
 
 	mgr := agentmanager.New(agentStore, mailStore)
 	spawnResp, err := mgr.Spawn(ctx, agentmanager.SpawnRequest{
-		Role:    "coder",
-		Prompt:  "You are a coder.",
-		ShareBB: "scoped",
+		Role:     "coder",
+		Prompt:   "You are a coder.",
+		ShareBB:  "scoped",
+		ExecMode: agent.ModeAutonomous, // Use DSPy path so FakeLLM is used
 	})
 	require.NoError(t, err)
 
@@ -608,6 +611,10 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping daemon test in short mode")
 	}
+	// This test requires companion.Service which needs a real LLM API key
+	if os.Getenv("AGENTCTL_LLM_API_KEY") == "" && os.Getenv("CEREBRAS_API_KEY") == "" {
+		t.Skip("skipping companion memory test: requires LLM API key (set AGENTCTL_LLM_API_KEY or CEREBRAS_API_KEY)")
+	}
 	root := t.TempDir()
 	ctx := context.Background()
 
@@ -623,6 +630,7 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 		State:     agent.StateStarting,
 		Prompt:    "You are a friendly companion.",
 		ShareBB:   "scoped",
+		// Uses reactive mode (default) to go through companion.Service path
 	}
 	err = as.Create(ctx, a)
 	require.NoError(t, err)

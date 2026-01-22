@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math"
 	"path/filepath"
 	"sort"
@@ -409,8 +408,7 @@ func (s *Store) DeleteByNamePrefix(ctx context.Context, workspace, namePrefix st
 		if err := sqlutil.ScanJSON(digests, &arr); err != nil {
 			// Log JSON parse error but continue processing to remain resilient
 			// This can indicate corrupted digest entries which may cause CAS leaks
-			log.Printf("memory: warning: failed to parse digests JSON for workspace=%q prefix=%q digests=%q: %v",
-				workspace, namePrefix, digests, err)
+			logger.Warn().Str("workspace", workspace).Str("prefix", namePrefix).Str("digests", digests).Err(err).Msg("failed to parse digests JSON")
 			continue
 		}
 		allDigests = append(allDigests, arr...)
@@ -499,6 +497,7 @@ CREATE TABLE IF NOT EXISTS named_memory (
 	name TEXT NOT NULL,
 	type TEXT NOT NULL,
 	workspace TEXT NOT NULL,
+	session_id TEXT,
 	summary TEXT,
 	result BLOB NOT NULL,
 	digests TEXT NOT NULL,
@@ -514,6 +513,29 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 		return fmt.Errorf("memory: migrate: %w", err)
 	}
 
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS embedding_metadata (
+			workspace TEXT PRIMARY KEY,
+			provider TEXT NOT NULL,
+			model TEXT NOT NULL,
+			dimensions INTEGER NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`); err != nil {
+		return fmt.Errorf("memory: create embedding metadata: %w", err)
+	}
+
+	// Add session_id column for pre-migration databases.
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE named_memory ADD COLUMN session_id TEXT;
+	`); err != nil {
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+			return fmt.Errorf("memory: add session_id column: %w", err)
+		}
+	}
+
 	// Add embedding column for vector search support (optional, requires CGO + vector build tag)
 	// This column will remain NULL unless vector functionality is enabled and used
 	if _, err := db.ExecContext(ctx, `
@@ -527,31 +549,10 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 		}
 	}
 
-	// Add session_id column for cross-scope session tracking (any AI tool)
-	if _, err := db.ExecContext(ctx, `ALTER TABLE named_memory ADD COLUMN session_id TEXT`); err != nil {
-		errMsg := strings.ToLower(err.Error())
-		if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
-			return fmt.Errorf("memory: add session_id column: %w", err)
-		}
-	}
-	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_memory_session ON named_memory(session_id)`); err != nil {
-		return fmt.Errorf("memory: create session_id index: %w", err)
-	}
-
-	// Create embedding_metadata table to track provider/model/dimensions per workspace
-	// This enables detection of dimension mismatches if embedding models change
-	metadataDDL := `
-CREATE TABLE IF NOT EXISTS embedding_metadata (
-	workspace TEXT PRIMARY KEY,
-	provider TEXT NOT NULL,
-	model TEXT NOT NULL,
-	dimensions INTEGER NOT NULL,
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
-);
-`
-	if _, err := db.ExecContext(ctx, metadataDDL); err != nil {
-		return fmt.Errorf("memory: create embedding_metadata: %w", err)
+	if _, err := db.ExecContext(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_named_memory_session ON named_memory(session_id);
+	`); err != nil {
+		return fmt.Errorf("memory: add session index: %w", err)
 	}
 
 	return nil

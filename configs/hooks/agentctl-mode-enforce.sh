@@ -143,7 +143,7 @@ case "$TOOL" in
       '{query: $query, scope: ["symbols"], workspace: $workspace, limit: 20}')
     PREFIX="**[Agentctl Mode] Semantic Search via code/semantic_search**
 > Direct: \`agentctl run code/semantic_search --input '{\"query\": \"concept\", \"scope\": [\"symbols\"], \"limit\": 10}'\`
-> Scopes: \`symbols\`, \`memory\`, \`codemaps\`. Uses vector embeddings."
+> Scopes: \`symbols\`, \`memories\`, \`codemaps\`. Uses vector embeddings."
     ;;
 
   Read)
@@ -188,7 +188,7 @@ case "$TOOL" in
     [[ -z "$symbols_formatted" ]] && symbols_formatted="  (no symbols found)"
 
     # Check for relevant gotchas
-    gotchas_result=$($AGENTCTL_BIN run code/semantic_search --input "$(jq -nc --arg q "$file_basename gotchas" '{query: $q, scope: ["memory"], limit: 3}')" 2>/dev/null || echo '{}')
+    gotchas_result=$($AGENTCTL_BIN run code/semantic_search --input "$(jq -nc --arg q "$file_basename gotchas" '{query: $q, scope: ["memories"], limit: 3}')" 2>/dev/null || echo '{}')
     gotchas_formatted=$(echo "$gotchas_result" | jq -r '.data.results[:2] | map("- **" + .name + "**: " + (.snippet // .summary // ""  | split("\n")[0])) | join("\n")' 2>/dev/null || echo "")
     
     GOTCHAS_SECTION=""

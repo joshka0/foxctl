@@ -33,10 +33,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/policy"
 	"github.com/jkatigb/agentctl/internal/indexing/rerank"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
+	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/jkatigb/agentctl/internal/indexing/symbol"
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage"
@@ -91,7 +91,7 @@ const (
 
 // Input is the expected JSON input.
 type Input struct {
-	Query          string   `json:"query,omitempty"` // Empty query with format=tree returns full repo tree
+	Query          string   `json:"query,omitempty"`           // Empty query with format=tree returns full repo tree
 	Scope          []string `json:"scope,omitempty"`           // ["symbols", "sessions", "memories", "tasks"]
 	Workspace      string   `json:"workspace,omitempty"`       // Workspace path (defaults to cwd)
 	Limit          int      `json:"limit,omitempty"`           // Default: 20
@@ -117,22 +117,22 @@ type Input struct {
 	TimelineTypes []string `json:"timeline_types,omitempty"` // Learning types to include (default: all)
 
 	// Tree format options (when format="tree")
-	TreeDepth             int  `json:"tree_depth,omitempty"`               // Max directory depth for tree (default: 2)
-	TreeMaxChildren       int  `json:"tree_max_children,omitempty"`        // Max children per directory node (default: 10)
-	TreeIncludeSummaries  *bool `json:"tree_include_summaries,omitempty"`  // Include file summaries in tree (default: true, use ptr to detect explicit false)
-	TreeMaxMissingSummaries int `json:"tree_max_missing_summaries,omitempty"` // Max summaries to generate lazily (default: 20)
+	TreeDepth               int   `json:"tree_depth,omitempty"`                 // Max directory depth for tree (default: 2)
+	TreeMaxChildren         int   `json:"tree_max_children,omitempty"`          // Max children per directory node (default: 10)
+	TreeIncludeSummaries    *bool `json:"tree_include_summaries,omitempty"`     // Include file summaries in tree (default: true, use ptr to detect explicit false)
+	TreeMaxMissingSummaries int   `json:"tree_max_missing_summaries,omitempty"` // Max summaries to generate lazily (default: 20)
 }
 
 // Output is the JSON output.
 type Output struct {
-	Query        string            `json:"query"`
-	Results      []Result          `json:"results"`
-	ContextHints []ContextHint     `json:"context_hints,omitempty"`
-	Timelines    []SessionTimeline `json:"timelines,omitempty"` // Present when timeline=true
-	Stats        SearchStats       `json:"stats"`
-	Summary      *SynthesisSummary `json:"summary,omitempty"`   // Present when summarize=true
-	TreeText     string            `json:"tree_text,omitempty"` // Present when format=tree
-	Tree         *retrieval.TreeOutput `json:"tree,omitempty"`  // Structured tree output when format=tree
+	Query        string                `json:"query"`
+	Results      []Result              `json:"results"`
+	ContextHints []ContextHint         `json:"context_hints,omitempty"`
+	Timelines    []SessionTimeline     `json:"timelines,omitempty"` // Present when timeline=true
+	Stats        SearchStats           `json:"stats"`
+	Summary      *SynthesisSummary     `json:"summary,omitempty"`   // Present when summarize=true
+	TreeText     string                `json:"tree_text,omitempty"` // Present when format=tree
+	Tree         *retrieval.TreeOutput `json:"tree,omitempty"`      // Structured tree output when format=tree
 }
 
 // SynthesisSummary contains the LLM-generated synthesis of search results.

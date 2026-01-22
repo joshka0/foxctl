@@ -27,6 +27,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/engine"
 	"github.com/jkatigb/agentctl/internal/hooks"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -233,7 +234,7 @@ func (a *AgentActor) initializeLLM(cfg AgentActorConfig) error {
 		model = os.Getenv("AGENTCTL_LLM_MODEL")
 	}
 	if model == "" {
-		model = defaultModelForProvider(provider)
+		model = llmproviders.DefaultModelForProvider(provider)
 	}
 
 	// Resolve API key: config → env
@@ -468,24 +469,6 @@ func (r *registryToolExecutor) List() []engine.ToolDef {
 // buildAgentSignature creates the signature for the agent based on its role.
 func buildAgentSignature(role agenttypes.AgentRole) *core.Signature {
 	return agentprompt.BuildSignature(role)
-}
-
-// defaultModelForProvider returns the default model for a given LLM provider.
-func defaultModelForProvider(provider string) string {
-	switch provider {
-	case "openai":
-		return "gpt-4.1-mini" // Also available: gpt-4.1-nano for lighter tasks
-	case "gemini", "":
-		return "gemini-2.0-flash"
-	case "anthropic":
-		return "claude-haiku-4-5"
-	case "groq":
-		return "llama-3.1-70b-versatile"
-	case "openrouter":
-		return "anthropic/claude-haiku-4-5"
-	default:
-		return "gemini-2.0-flash"
-	}
 }
 
 // onStart is called when the actor starts.

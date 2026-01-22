@@ -61,6 +61,7 @@ type Config struct {
 	Logging        LoggingSettings   `mapstructure:"logging" json:"logging"`
 	OpenAPI        OpenAPISettings   `mapstructure:"openapi" json:"openapi"`
 	Embedding      EmbeddingSettings `mapstructure:"embedding" json:"embedding"`
+	Search         SearchSettings    `mapstructure:"search" json:"search"`
 	Indexing       IndexingSettings  `mapstructure:"indexing" json:"indexing"`
 	Database       DatabaseSettings  `mapstructure:"database" json:"database"`
 	LLM            LLMSettings       `mapstructure:"llm" json:"llm"`
@@ -104,6 +105,26 @@ type EmbeddingSettings struct {
 	Model      string            `mapstructure:"model" json:"model"`
 	Dimensions int               `mapstructure:"dimensions" json:"dimensions"`
 	Models     map[string]string `mapstructure:"models" json:"models"`
+
+	// VoyageAPIKey is the Voyage AI API key (from VOYAGE_API_KEY)
+	// Required for embeddings with voyage-code-3, voyage-3-large, etc.
+	VoyageAPIKey string `mapstructure:"voyage_api_key" json:"voyage_api_key"`
+}
+
+// SearchSettings configure web search provider API keys.
+// These are used by the web_search skill and MCP server.
+type SearchSettings struct {
+	// TavilyAPIKey is the Tavily API key (from TAVILY_API_KEY)
+	// Used for web search, extract, crawl, and map operations.
+	TavilyAPIKey string `mapstructure:"tavily_api_key" json:"tavily_api_key"`
+
+	// ExaAPIKey is the Exa API key (from EXA_API_KEY)
+	// Used for code search and general web search.
+	ExaAPIKey string `mapstructure:"exa_api_key" json:"exa_api_key"`
+
+	// PerplexityAPIKey is the Perplexity API key (from PERPLEXITY_API_KEY)
+	// Used for the "ask" tool for question answering.
+	PerplexityAPIKey string `mapstructure:"perplexity_api_key" json:"perplexity_api_key"`
 }
 
 // DatabaseSettings configure database driver and connection.
@@ -552,6 +573,22 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" && cfg.LLM.Model == "" {
 		cfg.LLM.Model = model
+	}
+
+	// Embedding API key env var overrides (FC/IS compliant)
+	if key := os.Getenv("VOYAGE_API_KEY"); key != "" && cfg.Embedding.VoyageAPIKey == "" {
+		cfg.Embedding.VoyageAPIKey = key
+	}
+
+	// Search API key env var overrides (FC/IS compliant)
+	if key := os.Getenv("TAVILY_API_KEY"); key != "" && cfg.Search.TavilyAPIKey == "" {
+		cfg.Search.TavilyAPIKey = key
+	}
+	if key := os.Getenv("EXA_API_KEY"); key != "" && cfg.Search.ExaAPIKey == "" {
+		cfg.Search.ExaAPIKey = key
+	}
+	if key := os.Getenv("PERPLEXITY_API_KEY"); key != "" && cfg.Search.PerplexityAPIKey == "" {
+		cfg.Search.PerplexityAPIKey = key
 	}
 
 	return cfg

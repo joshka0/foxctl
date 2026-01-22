@@ -5,6 +5,8 @@ package types
 
 import (
 	"time"
+
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 )
 
 // AgentRole defines the type of agent (coder, planner, reviewer, etc.).
@@ -22,6 +24,11 @@ const (
 	RoleFixer AgentRole = "fixer"
 	// RoleVerifier is a verification agent for CoVe (Chain of Verification) claims.
 	RoleVerifier AgentRole = "verifier"
+	// RoleResearcher is a research agent for information gathering and analysis.
+	RoleResearcher AgentRole = "researcher"
+	// RoleOverseer is a coordination agent that manages agent hierarchies.
+	// It handles spawn requests, enforces depth limits, and coordinates multi-agent workflows.
+	RoleOverseer AgentRole = "overseer"
 )
 
 // AgentStatus represents the current state of an agent session.
@@ -196,6 +203,16 @@ type AgentConfig struct {
 	// MaxIterations limits the number of ReAct iterations.
 	MaxIterations int `json:"max_iterations,omitempty"`
 
+	// MaxContextTokens limits context size. When exceeded, the engine stops.
+	// Set to 0 to use runtime default.
+	MaxContextTokens int `json:"max_context_tokens,omitempty"`
+
+	// ExecMode controls whether the agent runs in autonomous/proactive mode.
+	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
+
+	// MaxAutoTurns limits the number of autonomous continuations.
+	MaxAutoTurns int `json:"max_auto_turns,omitempty"`
+
 	// Timeout is the maximum execution time.
 	Timeout time.Duration `json:"timeout,omitempty,format:units"`
 
@@ -323,6 +340,12 @@ type SubagentRequest struct {
 
 	// LocalMaxDepth is the requested subtree depth limit.
 	LocalMaxDepth int `json:"local_max_depth,omitempty"`
+
+	// LLMProvider specifies which LLM provider to use (e.g., "cerebras", "openrouter", "groq").
+	LLMProvider string `json:"llm_provider,omitempty"`
+
+	// LLMModel specifies the model name.
+	LLMModel string `json:"llm_model,omitempty"`
 }
 
 // SpawnResponse is the overseer's response to a spawn request.

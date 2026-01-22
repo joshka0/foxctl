@@ -7,7 +7,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 
@@ -51,9 +50,9 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 		cfg.VectorDimensions = dbdriver.GetDefaultVectorDimensions()
 	}
 
-	// Create migration function that uses configured dimensions and default model
+	// Create migration function that uses configured dimensions.
 	migrate := func(ctx context.Context, db *sql.DB) error {
-		return migrateTursoWithDimensions(ctx, db, cfg.VectorDimensions, DefaultEmbeddingModel)
+		return migrateTursoWithDimensions(ctx, db, cfg.VectorDimensions)
 	}
 
 	db, err := dbdriver.OpenDB(ctx, dbdriver.Config{
@@ -91,7 +90,7 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 		if err := store.CreateVectorIndex(ctx); err != nil {
 			// Non-fatal: log warning but continue with full-table scan fallback
 			// Vector index creation may fail on older libsql versions
-			log.Printf("[WARN] memory: vector index creation failed (will use ORDER BY fallback): %v", err)
+			logger.Warn().Err(err).Msg("vector index creation failed (will use ORDER BY fallback)")
 		}
 	}
 
@@ -100,28 +99,35 @@ func OpenTurso(ctx context.Context, cfg dbdriver.TursoConfig) (*TursoStore, erro
 
 // validateDimensions checks that stored metadata dimensions match config.
 func (s *TursoStore) validateDimensions(ctx context.Context, expectedDims int) error {
-	var storedDims int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT dimensions FROM embedding_metadata WHERE table_name = 'named_memory' LIMIT 1
-	`).Scan(&storedDims)
-
-	if err == sql.ErrNoRows {
-		// No metadata yet, this is fine for first run
-		return nil
-	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT dimensions FROM embedding_metadata
+	`)
 	if err != nil {
 		// Table might not exist yet (pre-migration), skip validation
 		return nil
 	}
+	defer func() {
+		errs.Ignore(rows.Close(), "close embedding_metadata rows")
+	}()
 
-	if storedDims != expectedDims {
-		return fmt.Errorf("memory: dimension mismatch: stored=%d, config=%d (recreate database or update config)", storedDims, expectedDims)
+	for rows.Next() {
+		var storedDims int
+		if scanErr := rows.Scan(&storedDims); scanErr != nil {
+			return nil
+		}
+		if storedDims != expectedDims {
+			return fmt.Errorf("memory: dimension mismatch: stored=%d, config=%d (recreate database or update config)", storedDims, expectedDims)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil
 	}
 	return nil
 }
 
-// migrateTursoWithDimensions runs migrations with configurable vector dimensions and model.
-func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int, model string) error {
+// migrateTursoWithDimensions runs migrations with configurable vector dimensions.
+// Parameters: ctx (context), db (database connection), dimensions (vector size).
+func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int) error {
 	// Create embedding_metadata table to track provider/model/dimensions per workspace
 	// This enables detection of dimension mismatches if embedding models change
 	_, err := db.ExecContext(ctx, `
@@ -160,20 +166,6 @@ func migrateTursoWithDimensions(ctx context.Context, db *sql.DB, dimensions int,
 	`, dimensions)
 	if _, err = db.ExecContext(ctx, memoryQuery); err != nil {
 		return fmt.Errorf("create named_memory table: %w", err)
-	}
-
-	// Record metadata for named_memory embedding column (including model for provenance)
-	now := timeutil.NowUTC().Format("2006-01-02T15:04:05Z")
-	_, err = db.ExecContext(ctx, `
-		INSERT INTO embedding_metadata (table_name, column_name, dimensions, model, created_at, updated_at)
-		VALUES ('named_memory', 'embedding', ?, ?, ?, ?)
-		ON CONFLICT(table_name) DO UPDATE SET
-			dimensions = excluded.dimensions,
-			model = excluded.model,
-			updated_at = excluded.updated_at
-	`, dimensions, model, now, now)
-	if err != nil {
-		return fmt.Errorf("insert memory metadata: %w", err)
 	}
 
 	// Create indexes

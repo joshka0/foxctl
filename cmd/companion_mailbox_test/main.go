@@ -90,7 +90,7 @@ func main() {
 
 	// Open named memory store for semantic search integration
 	casDir := filepath.Join(tmpDir, "cas")
-	if err := os.MkdirAll(casDir, 0755); err != nil {
+	if err := os.MkdirAll(casDir, 0o755); err != nil {
 		log.Fatal().Err(err).Msg("Failed to create CAS directory")
 	}
 	memoryStore, err := memory.Open(ctx, tmpDir, casDir)
@@ -101,9 +101,9 @@ func main() {
 
 	// Configure memory for companion conversations
 	memoryConfig := companion.DefaultMemoryConfig()
-	memoryConfig.VividWindowHours = 24  // Keep today's turns vivid
-	memoryConfig.VividMaxTurns = 20     // Last 20 turns in full
-	memoryConfig.RecentWindowDays = 7   // Summarize last week
+	memoryConfig.VividWindowHours = 24 // Keep today's turns vivid
+	memoryConfig.VividMaxTurns = 20    // Last 20 turns in full
+	memoryConfig.RecentWindowDays = 7  // Summarize last week
 
 	// Create companion executor with memory enabled
 	// Embedder is created internally from config (uses VOYAGE_API_KEY from .env)

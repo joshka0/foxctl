@@ -307,3 +307,78 @@ func TestMailboxMessageTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestMailboxPollByTypes(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	store, err := Open(ctx, tmpDir)
+	if err != nil {
+		t.Fatalf("failed to open store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().Unix()
+	msgs := []agent.Message{
+		{
+			ID:        "ask-msg",
+			FromNS:    "sender",
+			ToNS:      "receiver",
+			Type:      agent.MessageTypeAsk,
+			TTLMS:     300000,
+			VisibleAt: now,
+			Timestamp: now,
+		},
+		{
+			ID:        "reply-msg",
+			FromNS:    "sender",
+			ToNS:      "receiver",
+			Type:      agent.MessageTypeReply,
+			TTLMS:     300000,
+			VisibleAt: now,
+			Timestamp: now,
+		},
+		{
+			ID:        "cmd-msg",
+			FromNS:    "sender",
+			ToNS:      "receiver",
+			Type:      agent.MessageTypeCmd,
+			TTLMS:     300000,
+			VisibleAt: now,
+			Timestamp: now,
+		},
+	}
+
+	for _, msg := range msgs {
+		if err := store.Send(ctx, msg); err != nil {
+			t.Fatalf("failed to send message: %v", err)
+		}
+	}
+
+	filtered, err := store.PollByTypes(ctx, "receiver", time.Second, 10, []agent.MessageType{
+		agent.MessageTypeAsk,
+		agent.MessageTypeCmd,
+	})
+	if err != nil {
+		t.Fatalf("poll by types failed: %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(filtered))
+	}
+	for _, msg := range filtered {
+		if msg.Type == agent.MessageTypeReply {
+			t.Fatalf("unexpected reply message in filtered poll")
+		}
+	}
+
+	replies, err := store.PollByTypes(ctx, "receiver", time.Second, 10, []agent.MessageType{agent.MessageTypeReply})
+	if err != nil {
+		t.Fatalf("poll replies failed: %v", err)
+	}
+	if len(replies) != 1 {
+		t.Fatalf("expected 1 reply message, got %d", len(replies))
+	}
+	if replies[0].Type != agent.MessageTypeReply {
+		t.Fatalf("expected reply message, got %s", replies[0].Type)
+	}
+}

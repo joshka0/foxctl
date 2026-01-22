@@ -567,8 +567,15 @@ type mcpServerOptions struct {
 }
 
 func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
-	// Initialize backend configurations from environment
-	initBackendConfigs()
+	// Load config (includes .env loading)
+	config.LoadDotEnv()
+	cfg, err := config.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Initialize backend configurations from config
+	initBackendConfigs(cfg.Search)
 
 	// Load config file if provided
 	if opts.configFile != "" {
@@ -780,34 +787,34 @@ func isDaemonRunning(pidFile string) (int, string, bool) {
 	return pid, addr, true
 }
 
-func initBackendConfigs() {
+func initBackendConfigs(search config.SearchSettings) {
 	// Tavily (stdio via npx)
-	if key := os.Getenv("TAVILY_API_KEY"); key != "" {
+	if search.TavilyAPIKey != "" {
 		backends.configs["tavily"] = mcpServerConfig{
 			Command: "npx",
 			Args:    []string{"-y", "tavily-mcp@latest"},
-			Env:     map[string]string{"TAVILY_API_KEY": key},
+			Env:     map[string]string{"TAVILY_API_KEY": search.TavilyAPIKey},
 		}
 	}
 
 	// Exa (HTTP)
-	if key := os.Getenv("EXA_API_KEY"); key != "" {
+	if search.ExaAPIKey != "" {
 		backends.configs["exa"] = mcpServerConfig{
 			URL: "https://mcp.exa.ai/mcp",
 			Headers: map[string]string{
 				"Accept":        "application/json, text/event-stream",
-				"Authorization": "Bearer " + key,
+				"Authorization": "Bearer " + search.ExaAPIKey,
 			},
 		}
 	}
 
 	// Perplexity (stdio via npx)
-	if key := os.Getenv("PERPLEXITY_API_KEY"); key != "" {
+	if search.PerplexityAPIKey != "" {
 		backends.configs["perplexity"] = mcpServerConfig{
 			Command: "npx",
 			Args:    []string{"-y", "@perplexity-ai/mcp-server"},
 			Env: map[string]string{
-				"PERPLEXITY_API_KEY":    key,
+				"PERPLEXITY_API_KEY":    search.PerplexityAPIKey,
 				"PERPLEXITY_TIMEOUT_MS": "600000",
 			},
 		}

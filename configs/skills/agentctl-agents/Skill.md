@@ -27,10 +27,35 @@ Three depth controls prevent runaway spawning:
 
 ## Agent Roles
 
-- `planner` - Task decomposition and planning
-- `coder` - Code implementation
-- `reviewer` - Code review
-- `researcher` - Information gathering
+| Role | Purpose | Special Capabilities |
+|------|---------|---------------------|
+| `overseer` | Coordinate multi-agent workflows | agent_spawn, agent_list, agent_kill, agent_hierarchy, agent_wait |
+| `planner` | Task decomposition and planning | todo.add, todo.query, graph management |
+| `coder` | Code implementation | fs_write_file, edit tools |
+| `reviewer` | Code review (read-only) | Read/search tools, no write access |
+| `researcher` | Information gathering | Search, memory, session recall |
+| `verifier` | Validate claims and results | verification tools |
+| `fixer` | Apply targeted fixes | Limited write scope |
+
+### Overseer Role
+
+The overseer is a special coordination agent that manages agent hierarchies:
+
+```bash
+# Spawn an overseer to coordinate a multi-agent task
+agentctl agent spawn --role overseer --prompt "Coordinate a codebase analysis:
+1. Spawn a researcher to find all API endpoints
+2. Spawn a coder to document any undocumented endpoints
+3. Wait for both to complete and summarize findings"
+```
+
+**Overseer-specific tools:**
+- `agent_spawn` - Request spawning of subagents (validates depth limits)
+- `agent_list` - List all active agent sessions
+- `agent_status` - Get detailed status of an agent
+- `agent_kill` - Terminate an agent session
+- `agent_hierarchy` - View the full agent tree
+- `agent_wait` - Wait for all children to complete
 
 ## Spawn Request (via agent.spawn tool)
 
@@ -68,6 +93,51 @@ Overseer validates each spawn request:
 - `resource_exhausted` - Too many concurrent agents
 - `policy_violation` - Custom policy denied spawn
 
+## CLI Agent Spawn
+
+Spawn agents directly via CLI:
+
+```bash
+# Basic spawn with inline prompt
+agentctl agent spawn --role researcher --prompt "Find all hook implementations"
+
+# With context budget (stops if exceeded)
+agentctl agent spawn \
+  --role researcher \
+  --prompt "Analyze codebase structure" \
+  --exec-mode autonomous \
+  --max-iterations 20 \
+  --max-context-tokens 30000
+
+# From prompt file
+agentctl agent spawn --role coder --prompt-file task.txt
+```
+
+### Key Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--prompt` | - | Inline prompt text |
+| `--prompt-file` | - | Path to prompt file |
+| `--role` | - | Agent role (researcher, coder, planner, reviewer) |
+| `--exec-mode` | reactive | Execution mode: reactive, autonomous, proactive |
+| `--max-iterations` | 10 | Max tool calls per turn |
+| `--max-context-tokens` | 0 | Context budget in tokens (0=no limit) |
+| `--max-auto-turns` | 1 | Max autonomous continuations |
+| `--llm-provider` | cerebras | LLM provider override |
+| `--llm-model` | - | Model override |
+
+### Context Budget
+
+The `--max-context-tokens` flag prevents runaway context accumulation:
+
+```
+[CONTEXT] iter=4 msgs=11 prompt_tokens=10040 ... finish=tool_calls
+[CONTEXT] budget exceeded: 10040 > 10000 limit, stopping
+```
+
+When exceeded, the session stops with `status=error` and `StopReasonContextBudget`.
+
 ## Session Management
 
 Each agent runs in a session with:
@@ -75,7 +145,31 @@ Each agent runs in a session with:
 - Unique session ID (ULID)
 - Actor ID (`actor:<role>:<id>`)
 - Parent-child tracking
-- Status tracking (running, completed, failed)
+- Status tracking (running, completed, failed, error)
+
+### Turn Persistence
+
+Agent sessions automatically persist turns to `session_turns` table:
+
+```sql
+-- Each turn stores:
+session_id, turn_index, role, content_preview, tool_calls, tokens_used
+```
+
+### Session Continuation
+
+Resume a previous session with additional context:
+
+```bash
+# Continue a session
+agentctl agent resume <session-id> --prompt "Based on your findings, tell me more about X"
+```
+
+The resume command:
+- Loads previous turns from `session_turns` table
+- Builds prompt including "PREVIOUS CONVERSATION:" context
+- Creates linked session via `session_edges` (edge_type: "continues")
+- New session inherits workspace context from original
 
 ## Hierarchy Queries
 
@@ -85,8 +179,18 @@ Get agent tree structure:
 # List all active sessions
 agentctl agent list
 
-# Get hierarchy from session
-agentctl agent hierarchy --session <session-id>
+# Show full agent hierarchy (all roots)
+agentctl agent hierarchy
+
+# Show hierarchy from specific session
+agentctl agent hierarchy <session-id>
+```
+
+Example output:
+```
+● actor:system:overseer [overseer] depth=0 session=01KFGX...
+  └─ ● actor:researcher:01KFGY... [researcher] depth=1 session=01KFGY...
+  └─ ✓ actor:coder:01KFGZ... [coder] depth=1 session=01KFGZ...
 ```
 
 ## Concurrency Controls

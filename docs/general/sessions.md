@@ -226,14 +226,57 @@ Sessions stored in `~/.agentctl/storage/sessions.db`:
 ```sql
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY,
-    agent_id TEXT,
-    workspace TEXT,
-    parent_session_id TEXT,
-    status TEXT,  -- running, ok, error, canceled
+    workspace_path TEXT,
+    project_name TEXT,
+    git_branch TEXT,
+    claude_version TEXT,
     started_at DATETIME,
     ended_at DATETIME,
-    anchor TEXT,
+    summary TEXT,
+    accomplished TEXT,           -- JSON array
+    decisions TEXT,              -- JSON array
+    gotchas TEXT,                -- JSON array
+    user_insights TEXT,          -- JSON array
+    key_questions TEXT,          -- JSON array (semantic search queries)
+    tags TEXT,                   -- JSON array
+    key_files TEXT,              -- JSON array
+    tools_pattern TEXT,
+    message_count INTEGER,
+    user_turns INTEGER,
+    tool_invocations INTEGER,
+    total_tokens INTEGER,
+    raw_jsonl_path TEXT,
+    content_hash TEXT,
+    embedding BLOB,
+    embedding_model TEXT,
+    created_at DATETIME,
+    updated_at DATETIME,
+    -- Lineage fields
+    parent_session_id TEXT,
+    agent_id TEXT,               -- AI agent identifier (default: "agentctl")
+    agent_type TEXT,             -- Source system (claude, codex, opencode)
+    status TEXT,                 -- running, ok, error, canceled
+    -- Agent execution context (new in session persistence)
+    prompt TEXT,                 -- Original prompt/task for agent sessions
+    prompt_hash TEXT,            -- SHA256 hash for correlation with wide events
+    llm_provider TEXT,           -- LLM provider (cerebras, openrouter, etc.)
+    llm_model TEXT,              -- Model name
+    -- Restore flag
+    pending_restore_at DATETIME,
     FOREIGN KEY (parent_session_id) REFERENCES sessions(id)
+);
+
+CREATE TABLE session_turns (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    turn_index INTEGER NOT NULL,
+    role TEXT NOT NULL,          -- user, assistant, system
+    content_preview TEXT,        -- First 500 chars
+    content_cas_digest TEXT,     -- CAS digest for full content
+    tool_calls TEXT,             -- JSON array of tool calls
+    tokens_used INTEGER,
+    created_at DATETIME,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
 
 CREATE TABLE context_windows (
@@ -246,7 +289,36 @@ CREATE TABLE context_windows (
     created_at DATETIME,
     FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
+
+CREATE TABLE session_edges (
+    id TEXT PRIMARY KEY,
+    from_session TEXT NOT NULL,
+    to_session TEXT NOT NULL,
+    edge_type TEXT NOT NULL,     -- continues, forked_from
+    created_at DATETIME,
+    FOREIGN KEY (from_session) REFERENCES sessions(id),
+    FOREIGN KEY (to_session) REFERENCES sessions(id)
+);
 ```
+
+### Agent Execution Context Fields
+
+For daemon agent sessions, additional fields track execution context:
+
+| Field | Description |
+|-------|-------------|
+| `prompt` | Original prompt/task given to the agent |
+| `prompt_hash` | SHA256 hash of prompt for correlation with wide events |
+| `llm_provider` | LLM provider used (cerebras, openrouter, anthropic, etc.) |
+| `llm_model` | Specific model name |
+
+### Turn Persistence
+
+Agent sessions persist each turn to `session_turns` with:
+- `content_preview` - First 500 chars for quick display
+- `content_cas_digest` - CAS reference to full content
+- `tool_calls` - JSON array of tool invocations
+- `tokens_used` - Token count for context budget tracking
 
 ---
 

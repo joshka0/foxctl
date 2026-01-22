@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
+	"os"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
+	"github.com/rs/zerolog"
 )
+
+var logger = zerolog.New(os.Stderr).With().Str("component", "dbutil").Timestamp().Logger()
 
 // ScanTimestamps scans multiple RFC3339Nano timestamp strings from a row.
 // Returns parsed times in the same order as the input strings.
@@ -35,7 +38,7 @@ func ScanTimestampsMust(timestamps ...string) []time.Time {
 		result[i] = timeutil.MustParseRFC3339Nano(ts)
 		// Validate timestamps at database boundary to catch corruption early
 		if result[i].IsZero() && ts != "" {
-			log.Printf("dbutil: WARNING - zero time detected from non-empty timestamp %q (possible database corruption)", ts)
+			logger.Warn().Str("timestamp", ts).Msg("zero time detected from non-empty timestamp (possible database corruption)")
 		}
 	}
 	return result
@@ -57,7 +60,7 @@ func ScanJSONArray(jsonStr string) ([]string, error) {
 func ScanJSONArrayMust(jsonStr string) []string {
 	var result []string
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		log.Printf("dbutil: WARNING - failed to unmarshal JSON array: %v (data: %q)", err, jsonStr)
+		logger.Warn().Err(err).Str("data", jsonStr).Msg("failed to unmarshal JSON array")
 		return nil
 	}
 	return result

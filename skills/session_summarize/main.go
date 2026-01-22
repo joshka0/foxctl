@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hashutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
@@ -38,6 +38,9 @@ const (
 	summaryQueueDBName = "summary_queue.db"
 	summaryQueueTable  = "summary_queue_jobs"
 )
+
+// logger is the package-level observability logger, initialized in run().
+var logger *obs.Logger
 
 // Input defines the skill input parameters.
 type Input struct {
@@ -302,6 +305,11 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply timeout
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
+
+	// Initialize package logger
+	logger = obs.NewLogger(
+		obs.WithLogCommand("session/summarize"),
+	)
 
 	if in.MaxTokens <= 0 {
 		in.MaxTokens = defaultMaxTokens
@@ -604,7 +612,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 					Dimensions: embeddingResult.Dims,
 				}
 				if err := sessionStore.SetEmbeddingMetadata(ctx, meta); err != nil {
-					log.Printf("[WARN] session_summarize: failed to set embedding metadata: %v", err)
+					logger.Warn("failed to set embedding metadata", obs.Err(err))
 				}
 			}
 		}
@@ -1739,14 +1747,14 @@ func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input, 
 		// Generate new embedding
 		result, err := embedder.Embed(ctx, embeddingText)
 		if err != nil {
-			log.Printf("warning: failed to embed session %s: %v", sess.ID, err)
+			logger.Warn("failed to embed session", obs.Str("session_id", sess.ID), obs.Err(err))
 			continue
 		}
 
 		// Serialize and update session with new embedding
 		embeddingBytes := vector.SerializeF32(result.Vec)
 		if err := sessionStore.SetEmbedding(ctx, sess.ID, embeddingBytes, expectedModel); err != nil {
-			log.Printf("warning: failed to update session %s embedding: %v", sess.ID, err)
+			logger.Warn("failed to update session embedding", obs.Str("session_id", sess.ID), obs.Err(err))
 			continue
 		}
 		output.SessionsReembedded++
@@ -1774,7 +1782,7 @@ func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input, 
 			windowText := buildWindowEmbeddingTextFromWindow(win)
 			result, err := embedder.Embed(ctx, windowText)
 			if err != nil {
-				log.Printf("warning: failed to embed window %s: %v", win.ID, err)
+				logger.Warn("failed to embed window", obs.Str("window_id", win.ID), obs.Err(err))
 				continue
 			}
 
@@ -1783,7 +1791,7 @@ func reembedAll(ctx context.Context, sessionStore *sessions.Store, input Input, 
 
 			// Update window embedding only (summary unchanged)
 			if err := sessionStore.SetContextWindowEmbedding(ctx, win.ID, embeddingBytes, expectedModel); err != nil {
-				log.Printf("warning: failed to update window %s embedding: %v", win.ID, err)
+				logger.Warn("failed to update window embedding", obs.Str("window_id", win.ID), obs.Err(err))
 				continue
 			}
 			output.WindowsReembedded++
@@ -1953,19 +1961,19 @@ func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, s
 
 			payload, err := decodeWindowQueuePayload(job.Payload)
 			if err != nil {
-				log.Printf("[WARN] session_summarize: invalid queue payload: %v", err)
+				logger.Warn("invalid queue payload", obs.Str("job_id", job.ID), obs.Err(err))
 				_ = queueStore.Fail(ctx, job.ID, fmt.Sprintf("decode payload: %v", err))
 				continue
 			}
 			if payload.SessionID != "" && payload.SessionID != session.ID {
-				log.Printf("[WARN] session_summarize: queue payload session mismatch: %s", payload.SessionID)
+				logger.Warn("queue payload session mismatch", obs.Str("payload_session", payload.SessionID), obs.Str("expected_session", session.ID))
 				_ = queueStore.Fail(ctx, job.ID, "session mismatch")
 				continue
 			}
 
 			window, err := sessionStore.GetContextWindow(ctx, session.ID, payload.WindowIndex)
 			if err != nil {
-				log.Printf("[WARN] session_summarize: missing window %d: %v", payload.WindowIndex, err)
+				logger.Warn("missing window", obs.Int("window_index", payload.WindowIndex), obs.Err(err))
 				_ = queueStore.Fail(ctx, job.ID, fmt.Sprintf("get window %d: %v", payload.WindowIndex, err))
 				continue
 			}
@@ -2021,7 +2029,7 @@ func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, s
 			batchCount++
 			for _, jobID := range jobIDs {
 				if err := queueStore.Complete(ctx, jobID); err != nil {
-					log.Printf("[WARN] session_summarize: failed to complete queue job %s: %v", jobID, err)
+					logger.Warn("failed to complete queue job", obs.Str("job_id", jobID), obs.Err(err))
 				}
 			}
 		}
@@ -2034,7 +2042,7 @@ func summarizeWindowsQueued(ctx context.Context, sessionStore *sessions.Store, s
 			batchCount++
 			for _, jobID := range jobIDsForced {
 				if err := queueStore.Complete(ctx, jobID); err != nil {
-					log.Printf("[WARN] session_summarize: failed to complete queue job %s: %v", jobID, err)
+					logger.Warn("failed to complete queue job", obs.Str("job_id", jobID), obs.Err(err))
 				}
 			}
 		}
@@ -2716,7 +2724,7 @@ func summarizeWindowChunkGroups(ctx context.Context, providers []LLMProvider, gr
 	for _, group := range groups {
 		summary, model, err := summarizeWindowChunk(ctx, providers, group.Meta, group.Content)
 		if err != nil {
-			log.Printf("[WARN] session_summarize: chunk summary failed for window %d: %v", group.Meta.WindowIndex, err)
+			logger.Warn("chunk summary failed", obs.Int("window_index", group.Meta.WindowIndex), obs.Err(err))
 			continue
 		}
 		summary = strings.TrimSpace(summary)
@@ -2904,7 +2912,7 @@ func embedChunkSummaries(ctx context.Context, sessionStore *sessions.Store, embe
 			chunk.Embedding = embeddingBytes
 			chunk.EmbeddingModel = result.Model
 			if _, err := sessionStore.SaveChunk(ctx, chunk); err != nil {
-				log.Printf("[WARN] session_summarize: failed to update chunk %d embedding: %v", chunk.ChunkIndex, err)
+				logger.Warn("failed to update chunk embedding", obs.Int("chunk_index", chunk.ChunkIndex), obs.Err(err))
 			}
 		}
 	}
@@ -3123,7 +3131,7 @@ func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID s
 			newSummaries := summarizeWindowChunkGroups(ctx, chunkProviders, missingGroups)
 			if len(newSummaries) > 0 {
 				if err := sessionStore.SaveChunkSummaries(ctx, buildChunkSummaryRecords(sessionID, newSummaries)); err != nil {
-					log.Printf("[WARN] session_summarize: failed to persist chunk summaries for window %d: %v", window.WindowIndex, err)
+					logger.Warn("failed to persist chunk summaries", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 				}
 				chunkSummaries = append(chunkSummaries, newSummaries...)
 			}
@@ -3140,7 +3148,7 @@ func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID s
 			}
 			summary, err := summarizeWindowFromSummaries(ctx, providers, window.WindowIndex, chunkSummaries, meta, summaryHint)
 			if err != nil {
-				log.Printf("[WARN] session_summarize: LLM failed for window %d: %v", window.WindowIndex, err)
+				logger.Warn("LLM failed for window", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 			}
 			if isPlaceholderSummary(summary) {
 				summary = ""
@@ -3148,7 +3156,7 @@ func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID s
 			if summary == "" && len(contentParts) > 0 {
 				summary, err = summarizeWindowContent(ctx, providers, window.WindowIndex, strings.Join(contentParts, "\n"), meta, summaryHint)
 				if err != nil {
-					log.Printf("[WARN] session_summarize: LLM failed for window %d: %v", window.WindowIndex, err)
+					logger.Warn("LLM failed for window content", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 				}
 			}
 			summary = strings.TrimSpace(summary)
@@ -3173,7 +3181,7 @@ func processBatch(ctx context.Context, sessionStore *sessions.Store, sessionID s
 			if result, err := embedder.Embed(ctx, embeddingText); err == nil && len(result.Vec) > 0 {
 				embeddingBytes := vector.SerializeF32(result.Vec)
 				if err := sessionStore.SetContextWindowEmbedding(ctx, window.ID, embeddingBytes, result.Model); err != nil {
-					log.Printf("[WARN] session_summarize: failed to set window %s embedding: %v", window.ID, err)
+					logger.Warn("failed to set window embedding", obs.Str("window_id", window.ID), obs.Err(err))
 				} else {
 					embedded++
 				}

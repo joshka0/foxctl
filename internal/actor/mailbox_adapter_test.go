@@ -40,6 +40,29 @@ func (m *mockMailboxStore) Poll(_ context.Context, agentNS string, _ time.Durati
 	return result, nil
 }
 
+func (m *mockMailboxStore) PollByTypes(ctx context.Context, agentNS string, lease time.Duration, maxMessages int, types []agent.MessageType) ([]agent.Message, error) {
+	if len(types) == 0 {
+		return m.Poll(ctx, agentNS, lease, maxMessages)
+	}
+	allowed := make(map[agent.MessageType]struct{}, len(types))
+	for _, msgType := range types {
+		allowed[msgType] = struct{}{}
+	}
+	var result []agent.Message
+	for _, msg := range m.messages {
+		if msg.ToNS == agentNS {
+			if _, ok := allowed[msg.Type]; !ok {
+				continue
+			}
+			result = append(result, msg)
+			if len(result) >= maxMessages {
+				break
+			}
+		}
+	}
+	return result, nil
+}
+
 func (m *mockMailboxStore) Ack(_ context.Context, messageID string) error {
 	m.acked = append(m.acked, messageID)
 	return nil

@@ -180,6 +180,16 @@ starting → running → stopped|error
 
 ---
 
+## API Server v1 (Draft)
+
+See `docs/general/api-server.md`.
+
+### Skill Execution
+- POST /api/v1/skills/run returns the raw skill envelope in data.envelope.
+- Skill envelopes keep Protocol v1 invariants (meta.ts, status, error).
+
+---
+
 ## Related Documentation
 
 - [Architecture](architecture.md) - System design overview

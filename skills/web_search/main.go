@@ -86,10 +86,10 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		provider = os.Getenv("AGENTCTL_SEARCH_PROVIDER")
 	}
 	if provider == "" {
-		// Check which API keys are available
-		if os.Getenv("EXA_API_KEY") != "" {
+		// Check which API keys are available from config
+		if rc.Config.Search.ExaAPIKey != "" {
 			provider = "exa"
-		} else if os.Getenv("TAVILY_API_KEY") != "" {
+		} else if rc.Config.Search.TavilyAPIKey != "" {
 			provider = "tavily"
 		} else {
 			return skillerr.Arg(
@@ -104,9 +104,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	switch provider {
 	case "exa":
-		results, err = searchExa(ctx, in)
+		results, err = searchExa(ctx, in, rc.Config.Search.ExaAPIKey)
 	case "tavily":
-		results, err = searchTavily(ctx, in)
+		results, err = searchTavily(ctx, in, rc.Config.Search.TavilyAPIKey)
 	default:
 		return skillerr.Arg(
 			fmt.Sprintf("unknown provider: %s", provider),
@@ -153,8 +153,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 }
 
 // searchExa performs a search using Exa API.
-func searchExa(ctx context.Context, in Input) ([]SearchResult, error) {
-	apiKey := os.Getenv("EXA_API_KEY")
+func searchExa(ctx context.Context, in Input, apiKey string) ([]SearchResult, error) {
 	if apiKey == "" {
 		return nil, skillerr.Arg(
 			"EXA_API_KEY not set",
@@ -233,8 +232,7 @@ func searchExa(ctx context.Context, in Input) ([]SearchResult, error) {
 }
 
 // searchTavily performs a search using Tavily API.
-func searchTavily(ctx context.Context, in Input) ([]SearchResult, error) {
-	apiKey := os.Getenv("TAVILY_API_KEY")
+func searchTavily(ctx context.Context, in Input, apiKey string) ([]SearchResult, error) {
 	if apiKey == "" {
 		return nil, skillerr.Arg(
 			"TAVILY_API_KEY not set",

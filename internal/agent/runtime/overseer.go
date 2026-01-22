@@ -153,11 +153,14 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 			WorkspaceID:   "", // Will be inherited from runtime
 			EpicID:        req.EpicID,
 			TaskID:        "",              // Can be set by caller or plan
+			Prompt:        sub.Task,        // Pass the task as the agent's prompt
 			RootActorID:   OverseerActorID, // Always the tree root
 			ParentActorID: req.CallerActorID,
 			Depth:         childDepth,
 			MaxDepth:      childMaxDepth,
 			LocalMaxDepth: childLocalMaxDepth,
+			LLMProvider:   sub.LLMProvider, // Pass LLM config from spawn request
+			LLMModel:      sub.LLMModel,
 		}
 
 		// Spawn the child session
@@ -202,9 +205,9 @@ func (o *Overseer) HandleSpawnRequest(ctx context.Context, req types.SpawnReques
 }
 
 // SpawnOverseerAgent spawns the root overseer agent session.
-func (o *Overseer) SpawnOverseerAgent(ctx context.Context, epicID string) (*Session, error) {
+func (o *Overseer) SpawnOverseerAgent(ctx context.Context, epicID string, prompt string) (*Session, error) {
 	cfg := types.AgentConfig{
-		Role:          types.RolePlanner, // Overseer uses planner role
+		Role:          types.RoleOverseer, // Overseer uses its dedicated role
 		ActorID:       OverseerActorID,
 		EpicID:        epicID,
 		RootActorID:   OverseerActorID,
@@ -212,6 +215,7 @@ func (o *Overseer) SpawnOverseerAgent(ctx context.Context, epicID string) (*Sess
 		Depth:         0,
 		MaxDepth:      o.config.MaxDepth,
 		LocalMaxDepth: o.config.MaxDepth,
+		Prompt:        prompt,
 	}
 
 	return o.runtime.Spawn(ctx, cfg)

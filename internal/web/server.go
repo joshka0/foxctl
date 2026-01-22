@@ -111,79 +111,78 @@ func (s *Server) ConsoleHub() *consolews.Hub {
 
 // Handler returns the HTTP handler for the server.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
+	apiMux := http.NewServeMux()
 
 	// --- Health ---
-	mux.HandleFunc("/api/health", api.StatusHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/health", api.StatusHandler(s.cfg, s.log))
 
 	// --- SSE Events ---
-	mux.HandleFunc("/api/events", sse.Handler(s.sseHub, s.log))
+	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub, s.log))
 
 	// --- Jobs (Phase 2) ---
-	mux.HandleFunc("/api/jobs", api.JobsListHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/jobs/", api.JobDetailHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/jobs", api.JobsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/jobs/", api.JobDetailHandler(s.cfg, s.log))
 
 	// --- CAS (Phase 2) ---
-	mux.HandleFunc("/api/cas/", api.CASHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/cas/", api.CASHandler(s.cfg, s.log))
 
 	// --- Workspaces ---
-	mux.HandleFunc("/api/workspaces", api.WorkspacesHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/workspaces/switch", api.WorkspaceSwitchHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/workspaces", api.WorkspacesHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/workspaces/switch", api.WorkspaceSwitchHandler(s.cfg, s.log))
 
 	// --- Skills (Phase 4) ---
-	mux.HandleFunc("/api/skills", api.SkillsListHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/skills/schema", api.SkillsSchemaHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/skills/run", api.SkillsRunHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/skills", api.SkillsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/skills/schema", api.SkillsSchemaHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/skills/run", api.SkillsRunHandler(s.cfg, s.log))
 	// Skill detail: /api/skills/{category}/{name} - must come after specific routes
-	mux.HandleFunc("/api/skills/", api.SkillDetailHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/skills/", api.SkillDetailHandler(s.cfg, s.log))
 
 	// --- Console (Phase 6-8) ---
-	mux.HandleFunc("/api/console/sessions", api.ConsoleSessionsHandler(s.consoleHub, s.cfg, s.log))
-	mux.HandleFunc("/api/console/sessions/", api.ConsoleSessionDetailHandler(s.consoleHub, s.cfg, s.log))
-	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleHub, s.log))
+	apiMux.HandleFunc("/api/console/sessions", api.ConsoleSessionsHandler(s.consoleHub, s.cfg, s.log))
+	apiMux.HandleFunc("/api/console/sessions/", api.ConsoleSessionDetailHandler(s.consoleHub, s.cfg, s.log))
 
 	// --- Tasks (Phase 11) ---
-	mux.HandleFunc("/api/tasks", api.TasksListHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/tasks/", api.TaskDetailHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/tasks", api.TasksListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/tasks/", api.TaskDetailHandler(s.cfg, s.log))
 
 	// --- Sessions (Phase 11) ---
-	mux.HandleFunc("/api/sessions", api.SessionsListHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/sessions/", api.SessionDetailHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/sessions", api.SessionsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/sessions/", api.SessionDetailHandler(s.cfg, s.log))
 
 	// --- Agents (Phase 11) ---
-	mux.HandleFunc("/api/agents", api.AgentsListHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/agents/", api.AgentDetailHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/agents", api.AgentsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/agents/", api.AgentDetailHandler(s.cfg, s.log))
 
 	// --- Stats & Insights (Phase 11) ---
-	mux.HandleFunc("/api/stats", api.StatsHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/insights", api.InsightsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/stats", api.StatsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/insights", api.InsightsHandler(s.cfg, s.log))
 
 	// --- Mailbox (Phase 11) ---
-	mux.HandleFunc("/api/mailbox", api.MailboxListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/mailbox", api.MailboxListHandler(s.cfg, s.log))
 
 	// --- Reservations (Phase 11) ---
-	mux.HandleFunc("/api/reservations", api.ReservationsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/reservations", api.ReservationsListHandler(s.cfg, s.log))
 
 	// --- Blackboard (Phase 11) ---
-	mux.HandleFunc("/api/blackboard", api.BlackboardListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/blackboard", api.BlackboardListHandler(s.cfg, s.log))
 
 	// --- SQLite Browser (Phase 11) ---
-	mux.HandleFunc("/api/sqlite", api.SQLiteHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/sqlite/", api.SQLiteHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/sqlite", api.SQLiteHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/sqlite/", api.SQLiteHandler(s.cfg, s.log))
 
 	// --- Search (Phase 11) ---
-	mux.HandleFunc("/api/search", api.SearchHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/search", api.SearchHandler(s.cfg, s.log))
 
 	// --- Codemaps (Phase 11) ---
-	mux.HandleFunc("/api/codemaps", api.CodemapsListHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/codemaps", api.CodemapsListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/codemaps/", api.CodemapDetailHandler(s.cfg, s.log))
 
 	// --- Companion (RLM Mobile Backend) ---
-	mux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
-	mux.HandleFunc("/api/companion/context", api.CompanionContextSetHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/companion/context", api.CompanionContextSetHandler(s.cfg, s.log))
 	// Context routes with path params (GET, DELETE for specific conversation/key)
-	mux.HandleFunc("/api/companion/context/", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("/api/companion/context/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			api.CompanionContextGetHandler(s.cfg, s.log).ServeHTTP(w, r)
@@ -203,7 +202,7 @@ func (s *Server) Handler() http.Handler {
 		}
 	})
 	// Memory routes with path params
-	mux.HandleFunc("/api/companion/memory/", func(w http.ResponseWriter, r *http.Request) {
+	apiMux.HandleFunc("/api/companion/memory/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/companion/memory/")
 		parts := strings.Split(path, "/")
 		if len(parts) < 1 || parts[0] == "" {
@@ -226,11 +225,22 @@ func (s *Server) Handler() http.Handler {
 				http.Error(w, "invalid memory path", http.StatusBadRequest)
 			}
 		case http.MethodDelete:
+			// DELETE requires exactly /api/companion/memory/{conversation_id}
+			if len(parts) != 1 {
+				http.Error(w, "DELETE only supports /api/companion/memory/{conversation_id}", http.StatusBadRequest)
+				return
+			}
 			api.CompanionMemoryClearHandler(s.cfg, s.log).ServeHTTP(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+
+	// Route legacy /api and wrapped /api/v1 to the same handlers.
+	mux := http.NewServeMux()
+	mux.Handle("/api/", apiMux)
+	mux.Handle("/api/v1/", wrapV1(apiMux))
+	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleHub, s.log))
 
 	// --- Static UI (optional) ---
 	if s.opts.UIDir != "" {

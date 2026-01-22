@@ -11,12 +11,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
+	"github.com/jkatigb/agentctl/internal/platform/config"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
@@ -28,6 +29,13 @@ import (
 )
 
 const command = "calibration/generate"
+
+func init() {
+	config.LoadDotEnv() // Load .env before API keys are read
+}
+
+// logger is the package-level observability logger.
+var logger *obs.Logger
 
 // Input represents the skill input parameters.
 type Input struct {
@@ -91,6 +99,9 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Initialize package logger
+	logger = obs.NewLogger(obs.WithLogCommand(command))
+
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
@@ -186,7 +197,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		// Get context windows for this session
 		windows, err := sessionStore.GetContextWindows(ctx, session.ID)
 		if err != nil {
-			log.Printf("[WARN] calibration/generate: failed to get windows for session %s: %v", session.ID, err)
+			logger.Warn("failed to get windows for session", obs.Str("session_id", session.ID), obs.Err(err))
 			continue
 		}
 
@@ -198,7 +209,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			// Build window content
 			content, err := buildWindowContent(ctx, sessionStore, session.ID, window)
 			if err != nil {
-				log.Printf("[WARN] calibration/generate: failed to build content for window %d: %v", window.WindowIndex, err)
+				logger.Warn("failed to build content for window", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 				continue
 			}
 
@@ -218,7 +229,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 			// Extract signals via LLM
 			llmSignals, provider, err := extractSignals(ctx, providers, session.ID, window.WindowIndex, content)
 			if err != nil {
-				log.Printf("[WARN] calibration/generate: LLM extraction failed for window %d: %v", window.WindowIndex, err)
+				logger.Warn("LLM extraction failed for window", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 				continue
 			}
 

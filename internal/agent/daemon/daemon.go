@@ -26,6 +26,7 @@ import (
 	storagents "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
 	"github.com/jkatigb/agentctl/internal/storage/cas"
+	"github.com/jkatigb/agentctl/internal/storage/contextvar"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
@@ -38,14 +39,15 @@ import (
 const messageLeaseDuration = 30 * time.Second
 
 type daemonStores struct {
-	agentStore          storagents.Store
-	mailboxStore        mailbox.Store
-	tasksStore          tasks.Store
-	boardStore          blackboard.BoardStore
-	bbStore             blackboard.Store
-	companionMemory     *companion.ConversationMemory   // nil if disabled
-	companionMemoryDB   *sql.DB                         // need to close this too
-	compressionDaemon   *companion.CompressionDaemon    // nil if disabled
+	agentStore        storagents.Store
+	mailboxStore      mailbox.Store
+	tasksStore        tasks.Store
+	boardStore        blackboard.BoardStore
+	bbStore           blackboard.Store
+	contextvarStore   contextvar.Store               // for companion service RLM context
+	companionMemory   *companion.ConversationMemory  // nil if disabled
+	companionMemoryDB *sql.DB                        // need to close this too
+	compressionDaemon *companion.CompressionDaemon   // nil if disabled
 }
 
 func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonStores, error) {
@@ -84,6 +86,14 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 		return nil, fmt.Errorf("open blackboard store: %w", err)
 	}
 	stores.bbStore = bbStore
+
+	// Open contextvar store for companion service RLM context
+	contextvarStore, err := contextvar.Open(ctx, root)
+	if err != nil {
+		stores.Close()
+		return nil, fmt.Errorf("open contextvar store: %w", err)
+	}
+	stores.contextvarStore = contextvarStore
 
 	// Open companion memory if enabled
 	if opts.EnableCompanionMemory {
@@ -165,6 +175,9 @@ func (s *daemonStores) Close() {
 	if s.companionMemoryDB != nil {
 		_ = s.companionMemoryDB.Close()
 	}
+	if s.contextvarStore != nil {
+		_ = s.contextvarStore.Close()
+	}
 	if s.bbStore != nil {
 		_ = s.bbStore.Close()
 	}
@@ -212,27 +225,82 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("update agent state: %w", err)
 	}
 
-	// 4. Initialize tool registry + DSPy runtime
+	// 4. Initialize agent engine
+	// - Default (reactive mode): LLMChatEngine via companion.Service
+	// - Autonomous/Proactive modes: DSPy ReAct (needs tool loop)
 	traceID := ulid.Make().String()
 	recorder := &noopRecorder{}
 
-	toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores)
-	toolsCfg.FilesystemPolicy = mapFilesystemPolicy(agentRecord.Policy)
-
-	registry, err := tools.NewRegistry(toolsCfg, recorder)
-	if err != nil {
-		return fmt.Errorf("create tools registry: %w", err)
-	}
-
-	// Create DSPy agent
 	var dspyAgent agents.Agent
-	if opts.AgentFactory != nil {
-		dspyAgent, err = opts.AgentFactory(ctx, agentRecord, registry)
+	var companionSvc *companion.Service
+
+	useDSPy := agentRecord.ExecMode == agent.ModeAutonomous || agentRecord.ExecMode == agent.ModeProactive
+
+	if useDSPy {
+		// Autonomous/proactive agents use DSPy ReAct for tool calling
+		log.Info().Str("exec_mode", string(agentRecord.ExecMode)).Msg("using DSPy ReAct agent")
+
+		toolsCfg := buildToolsConfig(opts, agentRecord, traceID, stores)
+		toolsCfg.FilesystemPolicy = mapFilesystemPolicy(agentRecord.Policy)
+
+		registry, err := tools.NewRegistry(toolsCfg, recorder)
+		if err != nil {
+			return fmt.Errorf("create tools registry: %w", err)
+		}
+
+		if opts.AgentFactory != nil {
+			dspyAgent, err = opts.AgentFactory(ctx, agentRecord, registry)
+		} else {
+			dspyAgent, err = createAgent(ctx, agentRecord, registry, opts)
+		}
+		if err != nil {
+			return fmt.Errorf("create dspy agent: %w", err)
+		}
 	} else {
-		dspyAgent, err = createAgent(ctx, agentRecord, registry, opts)
-	}
-	if err != nil {
-		return fmt.Errorf("create dspy agent: %w", err)
+		// Default: use LLMChatEngine via companion.Service
+		log.Info().Msg("using LLMChatEngine via companion service")
+
+		// Resolve LLM configuration - default to cerebras
+		provider := agentRecord.LLMProvider
+		if provider == "" {
+			provider = opts.LLMProvider
+		}
+		if provider == "" {
+			provider = "cerebras" // Default to cerebras for companion agents
+		}
+
+		model := agentRecord.LLMModel
+		if model == "" {
+			model = opts.LLMModel
+		}
+		if model == "" && provider == "cerebras" {
+			model = "llama3.1-8b" // Default cerebras model
+		}
+
+		apiKey := agentRecord.LLMAPIKey
+		if apiKey == "" {
+			apiKey = opts.LLMAPIKey
+		}
+		if apiKey == "" {
+			return fmt.Errorf("LLM API key required for companion service (set AGENTCTL_LLM_API_KEY or provider-specific key)")
+		}
+
+		log.Info().
+			Str("provider", provider).
+			Str("model", model).
+			Msg("companion service LLM config")
+
+		companionSvc = companion.NewService(stores.contextvarStore, companion.ServiceConfig{
+			LLMProvider:        provider,
+			LLMAPIKey:          apiKey,
+			LLMModel:           model,
+			DefaultPersonality: agentRecord.Prompt,
+			MaxIterations:      agentRecord.MaxIterations,
+			Timeout:            90 * time.Second,
+			ExecMode:           agentRecord.ExecMode,
+			Logger:             log.Logger,
+			MemoryDB:           stores.companionMemoryDB,
+		})
 	}
 
 	// 5. Start heartbeat ticker
@@ -264,6 +332,7 @@ func Run(ctx context.Context, opts Options) error {
 		mailboxStore:    stores.mailboxStore,
 		dedupeStore:     dedupeStore,
 		dspyAgent:       dspyAgent,
+		companionSvc:    companionSvc,
 		cancelCtx:       cancelCtx,
 		optCtx:          optCtx,
 		companionMemory: stores.companionMemory,
@@ -277,7 +346,8 @@ type pollDeps struct {
 	agentStore      storagents.Store
 	mailboxStore    mailbox.Store
 	dedupeStore     DedupeStore
-	dspyAgent       agents.Agent
+	dspyAgent       agents.Agent // nil for companion agents
+	companionSvc    *companion.Service // non-nil for companion agents
 	cancelCtx       *CancelContext
 	optCtx          *OptimizationContext
 	companionMemory *companion.ConversationMemory
@@ -481,7 +551,17 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 		return errAgentStopped
 	}
 
-	messages, err := deps.mailboxStore.Poll(ctx, deps.agentRecord.Namespace, messageLeaseDuration, deps.opts.MaxPollMessages)
+	pollTypes := []agent.MessageType{
+		agent.MessageTypeAsk,
+		agent.MessageTypeCmd,
+		agent.MessageTypeEvent,
+		agent.MessageTypeReply,
+		agent.MessageTypeConsoleAsk,
+		agent.MessageTypeConsoleCmd,
+		agent.MessageTypeConsoleReply,
+		agent.MessageTypeConsoleEvent,
+	}
+	messages, err := deps.mailboxStore.PollByTypes(ctx, deps.agentRecord.Namespace, messageLeaseDuration, deps.opts.MaxPollMessages, pollTypes)
 	if err != nil {
 		deps.logger.Error().Err(err).Msg("poll failed")
 		return err
@@ -508,7 +588,7 @@ func processPollTick(ctx context.Context, deps pollDeps) error {
 			continue
 		}
 
-		procErr := processMessage(ctx, deps.logger, msg, deps.dspyAgent, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx, deps.companionMemory, deps.opts.AgentID)
+		procErr := processMessage(ctx, deps.logger, msg, deps.dspyAgent, deps.companionSvc, deps.mailboxStore, currentAgent.Policy, deps.optCtx, deps.cancelCtx, deps.companionMemory, deps.opts.AgentID)
 		if procErr != nil {
 			deps.logger.Error().Err(procErr).Str("msg_id", msg.ID).Msg("processing failed")
 			_ = deps.mailboxStore.Nack(ctx, msg.ID, backoffDuration(msg.Attempt)) //nolint:errcheck
@@ -635,6 +715,7 @@ func processMessage(
 	logger zerolog.Logger,
 	msg agent.Message,
 	dspyAgent agents.Agent,
+	companionSvc *companion.Service,
 	mailboxStore mailbox.Store,
 	policy agent.Policy,
 	optCtx *OptimizationContext,
@@ -644,15 +725,15 @@ func processMessage(
 ) error {
 	switch msg.Type {
 	case agent.MessageTypeAsk:
-		return handleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx, companionMemory, agentID)
+		return handleAsk(ctx, logger, msg, dspyAgent, companionSvc, mailboxStore, policy, optCtx, companionMemory, agentID)
 	case agent.MessageTypeCmd:
-		return handleCmd(ctx, logger, msg, dspyAgent, policy, optCtx)
+		return handleCmd(ctx, logger, msg, dspyAgent, companionSvc, policy, optCtx, agentID)
 	case agent.MessageTypeEvent:
 		return handleEvent(ctx, logger, msg)
 	case agent.MessageTypeReply:
 		logger.Info().Str("msg_id", msg.ID).Msg("received reply")
 	case agent.MessageTypeConsoleAsk:
-		return handleConsoleAsk(ctx, logger, msg, dspyAgent, mailboxStore, policy, optCtx, cancelCtx, companionMemory, agentID)
+		return handleConsoleAsk(ctx, logger, msg, dspyAgent, companionSvc, mailboxStore, policy, optCtx, cancelCtx, companionMemory, agentID)
 	case agent.MessageTypeConsoleCmd:
 		return handleConsoleCmd(ctx, logger, msg, cancelCtx)
 	case agent.MessageTypeConsoleReply, agent.MessageTypeConsoleEvent:
@@ -751,9 +832,9 @@ func createAgent(ctx context.Context, agentRecord agent.Agent, registry *tools.R
 		llm, err = llms.NewOpenAICompatible("openrouter", core.ModelID(model),
 			"https://openrouter.ai/api", llms.WithAPIKey(apiKey))
 	case "cerebras":
-		// Cerebras uses OpenAI-compatible API (requires /v1 path)
+		// Cerebras uses OpenAI-compatible API (dspy-go appends /v1/chat/completions)
 		llm, err = llms.NewOpenAICompatible("cerebras", core.ModelID(model),
-			"https://api.cerebras.ai/v1", llms.WithAPIKey(apiKey))
+			"https://api.cerebras.ai", llms.WithAPIKey(apiKey))
 	default:
 		return nil, fmt.Errorf("unsupported LLM provider: %q (supported: gemini, openai, anthropic, groq, openrouter, cerebras)", provider)
 	}

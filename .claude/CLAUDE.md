@@ -90,6 +90,107 @@ agentctl codemap generate "trace auth flow"
 
 ---
 
+## Agent Orchestration
+
+Spawn autonomous agents via the daemon for research, coding, or other tasks.
+
+### Basic Usage
+
+```bash
+# Simple research agent
+agentctl agent spawn --role researcher --prompt "Find all hook implementations"
+
+# With iteration and context limits
+agentctl agent spawn \
+  --role researcher \
+  --prompt "Analyze the storage layer architecture" \
+  --exec-mode autonomous \
+  --max-iterations 20 \
+  --max-context-tokens 30000
+
+# Using a prompt file
+agentctl agent spawn --role coder --prompt-file task.txt
+```
+
+### Key Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--prompt` | - | Inline prompt text |
+| `--prompt-file` | - | Path to prompt file (mutually exclusive with --prompt) |
+| `--role` | - | Agent role (overseer, researcher, coder, planner, reviewer) |
+| `--exec-mode` | reactive | Execution mode: reactive, autonomous, proactive |
+| `--max-iterations` | 10 | Max tool calls per turn |
+| `--max-context-tokens` | 0 | Context budget (0=no limit). Stops when exceeded |
+| `--max-auto-turns` | 1 | Max autonomous continuations |
+| `--llm-provider` | cerebras | LLM provider override |
+| `--llm-model` | - | Model override |
+
+### Context Tracking
+
+The engine logs per-iteration context usage to stderr:
+```
+[CONTEXT] iter=1 msgs=2 prompt_tokens=1092 completion_tokens=144 total=1236 finish=tool_calls
+[CONTEXT] iter=5 msgs=13 prompt_tokens=12820 completion_tokens=1676 total=14496 finish=stop
+```
+
+When `--max-context-tokens` is set and exceeded:
+```
+[CONTEXT] budget exceeded: 10040 > 10000 limit, stopping
+```
+
+### Session Management
+
+```bash
+# List recent sessions
+agentctl sessions list
+
+# List running agents
+agentctl agent list
+
+# Kill an agent
+agentctl agent kill <session-id>
+```
+
+### Session Continuation
+
+Continue a previous agent session with additional context:
+
+```bash
+# Resume a session with follow-up prompt
+agentctl agent resume <session-id> --prompt "Based on what you found, tell me more about X"
+```
+
+The resume command:
+- Loads previous session turns from database
+- Includes conversation history in the continuation prompt
+- Links sessions via `session_edges` table (edge_type: "continues")
+- Creates a new session that builds on the previous context
+
+### Multi-Agent with Overseer
+
+Spawn an overseer to coordinate multiple agents:
+
+```bash
+# Overseer coordinates subagents
+agentctl agent spawn --role overseer --prompt "Coordinate a codebase analysis:
+1. Spawn a researcher to find all API endpoints
+2. Spawn a coder to document any undocumented endpoints
+3. Wait for both to complete and summarize findings"
+
+# View agent hierarchy
+agentctl agent hierarchy
+```
+
+Overseer agents have special tools:
+- `agent_spawn` - Spawn subagents (validates depth limits)
+- `agent_list` - List active sessions
+- `agent_kill` - Terminate agents
+- `agent_hierarchy` - View agent tree
+- `agent_wait` - Wait for children to complete
+
+---
+
 ## Code Intelligence Tools
 
 ### Search & Extract
@@ -150,6 +251,22 @@ agentctl run code/symbols --input '{"path": "internal/auth/handler.go"}'
 agentctl run code/imports --input '{"path": ".", "mode": "graph"}'
 ```
 
+### Observability
+
+```bash
+# Recent events (last 20)
+agentctl run obs/logs --input '{}'
+
+# Errors only
+agentctl run obs/logs --input '{"errors_only": true}'
+
+# Filter by skill with stats
+agentctl run obs/logs --input '{"command": "code/semantic_search", "stats": true}'
+
+# Events from last hour
+agentctl run obs/logs --input '{"since": "1h", "limit": 50}'
+```
+
 ### Pipeline Pattern
 
 ```
@@ -165,6 +282,7 @@ semantic_search → snippet_extract → counsel
 | `code/context_ripgrep` | Regex pattern - need full function bodies |
 | `codemap/generate`     | Need AI-traced code relationships         |
 | `codemap/get`          | Retrieve previously generated map         |
+| `obs/logs`             | Query observability events with filters   |
 
 **Detailed:** [docs/general/skills.md](../docs/general/skills.md)
 
@@ -188,6 +306,9 @@ Environment variables are loaded from `~/repos/personal/agentctl/.env` by the co
 | -------------------------- | ------------- | ------------------------------------ |
 | `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                         |
 | `ANTHROPIC_API_KEY`        | -             | Codemap generation                   |
+| `TAVILY_API_KEY`           | -             | Web search (Tavily provider)         |
+| `EXA_API_KEY`              | -             | Web search (Exa provider)            |
+| `PERPLEXITY_API_KEY`       | -             | Web search (Perplexity provider)     |
 | `AGENTCTL_SEMANTIC_RERANK` | `0`           | Enable reranking                     |
 | `AGENTCTL_OBS_DIR`         | -             | Observability (use `$HOME`, not `~`) |
 
@@ -267,6 +388,33 @@ func main() {
 }
 ```
 
+### API Keys via Config (FC/IS Pattern)
+
+Never use `os.Getenv` directly for API keys. Use Config struct fields instead:
+
+```go
+// Wrong - direct env access scattered throughout code
+apiKey := os.Getenv("VOYAGE_API_KEY")
+
+// Correct - use Config loaded once at startup
+cfg, _ := config.Load(ctx)
+apiKey := cfg.Embedding.VoyageAPIKey  // For Voyage
+apiKey := cfg.Search.TavilyAPIKey     // For Tavily
+apiKey := cfg.Search.ExaAPIKey        // For Exa
+apiKey := cfg.LLM.ResolveAPIKey("anthropic")  // For LLM providers
+```
+
+For skills, API keys are available via `RunContext.Config`:
+
+```go
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+    // Access via rc.Config
+    if rc.Config.Search.ExaAPIKey != "" {
+        // use Exa
+    }
+}
+```
+
 ### Memory Path
 
 ```go
@@ -284,6 +432,13 @@ if strings.HasSuffix(path, ".gz") {
     gzReader, err := gzip.NewReader(file)
     // ...
 }
+```
+
+### Mailbox Replies Must Not Be Auto-Acked
+
+```text
+Do not ack MessageTypeReply in the daemon poller.
+Replies are for the caller to consume; acking there drops async replies.
 ```
 
 **All gotchas:** [docs/general/gotchas.md](../docs/general/gotchas.md)

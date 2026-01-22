@@ -52,13 +52,11 @@ if [[ "$prompt" =~ ^[[:space:]]*@(strict|agentctl) ]]; then
   DB_PATH="${AGENTCTL_HOME:-$HOME/.agentctl}/storage/tasks.db"
   mkdir -p "$(dirname "$DB_PATH")" 2>/dev/null || true
 
-  # Escape workspace for SQL safety:
-  # 1. Reject NUL bytes which could bypass escaping
-  # 2. Escape single quotes by doubling them (standard SQLite escaping)
-  if [[ "$WORKSPACE" == *$'\0'* ]]; then
-    echo '{"decision":"approve"}' && exit 0
-  fi
+  # Escape workspace for SQL safety (single quotes doubled for SQLite)
+  # Note: NUL bytes cannot reach here - jq rejects invalid JSON, and bash
+  # variables cannot contain NUL bytes anyway
   WORKSPACE_SAFE="${WORKSPACE//\'/\'\'}"
+
 
   # Ensure table exists (idempotent)
   sqlite3 "$DB_PATH" "

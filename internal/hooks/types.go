@@ -172,12 +172,16 @@ type Input struct {
 	ActorID       string `json:"actor_id,omitempty"`       // e.g. actor:agent:coder-1
 	WorkspaceID   string `json:"workspace_id,omitempty"`   // stable workspace key (e.g. hashed)
 	WorkspaceRoot string `json:"workspace_root,omitempty"` // absolute path (when available)
+	Cwd            string `json:"cwd,omitempty"`             // current working directory (Claude Code)
+	PermissionMode string `json:"permission_mode,omitempty"` // permission mode (normal, etc.)
+	HookEventName  string `json:"hook_event_name,omitempty"` // hook event name from Claude Code
 
 	// Provider capabilities - helps hooks decide inject vs enqueue
 	Provider *ProviderCapabilities `json:"provider,omitempty"`
 
 	// Session/turn identity
 	SessionID      string `json:"session_id,omitempty"`      // durable session identity
+	TranscriptPath string `json:"transcript_path,omitempty"` // path to conversation transcript file
 	TurnID         string `json:"turn_id,omitempty"`         // current turn correlation (engine-generated)
 	TraceID        string `json:"trace_id,omitempty"`        // request trace
 	CorrelationID  string `json:"correlation_id,omitempty"`  // e.g. ask_id/cmd_id/tool_call_id
@@ -201,14 +205,33 @@ type Input struct {
 	// PostToolUse observation (what would be appended back to the LLM loop).
 	// This should already be "safe": large outputs pointerized to artifact refs.
 	ToolObservation json.RawMessage `json:"tool_observation,omitempty"`
-	ToolError       string          `json:"tool_error,omitempty"`
-	ToolDurationMS  int64           `json:"tool_duration_ms,omitempty"`
+	// ToolResponse is an alias for ToolObservation (Claude Code uses this field name).
+	ToolResponse   json.RawMessage `json:"tool_response,omitempty"`
+	ToolError      string          `json:"tool_error,omitempty"`
+	ToolDurationMS int64           `json:"tool_duration_ms,omitempty"`
 
 	// Adapter-specific metadata (e.g. provider/platform info).
 	Meta map[string]any `json:"meta,omitempty"`
 
 	// Hook-specific config from hooks.yaml
 	HookConfig map[string]any `json:"hook_config,omitempty"`
+}
+
+// Normalize ensures ToolObservation and ToolResponse are mirrored.
+// Call this after unmarshaling Input from JSON if you need both fields populated.
+// NOTE: We intentionally do NOT implement UnmarshalJSON on Input because it would
+// break structs that embed Input (e.g., HookInput in skills).
+// - Claude Code uses tool_response
+// - Other providers may use tool_observation
+func (i *Input) Normalize() {
+	// If ToolResponse is set but ToolObservation is empty, copy it
+	if len(i.ToolResponse) > 0 && len(i.ToolObservation) == 0 {
+		i.ToolObservation = i.ToolResponse
+	}
+	// If ToolObservation is set but ToolResponse is empty, copy it
+	if len(i.ToolObservation) > 0 && len(i.ToolResponse) == 0 {
+		i.ToolResponse = i.ToolObservation
+	}
 }
 
 // MailboxMessage is the durable queue message (leased mailbox store).

@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
@@ -24,6 +24,9 @@ import (
 )
 
 const commandName = "epic/complete"
+
+// logger is the package-level observability logger.
+var logger *obs.Logger
 
 // Input defines the skill input.
 type Input struct {
@@ -63,6 +66,9 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Initialize package logger
+	logger = obs.NewLogger(obs.WithLogCommand(commandName))
+
 	cfg := rc.Config
 
 	workspaceID := workspaceutil.Resolve(rc.Workspace, "", rc.Workspace)
@@ -172,7 +178,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if !in.SkipLearnings && sessionID != "" {
 		extracted, err := extractLearnings(ctx, cfg, epic.ID, workspaceID)
 		if err != nil {
-			log.Printf("[WARN] failed to extract learnings: %v", err)
+			logger.Warn("failed to extract learnings", obs.Err(err))
 		} else {
 			learnings = extracted.Learnings
 			decisions = extracted.Decisions
@@ -216,7 +222,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 
 	// Clear active epic
 	if err := store.ClearActiveEpic(ctx, workspaceID, sessionID); err != nil {
-		log.Printf("[WARN] failed to clear active epic: %v", err)
+		logger.Warn("failed to clear active epic", obs.Err(err))
 	}
 
 	output := Output{
@@ -312,7 +318,7 @@ func persistGotchas(ctx context.Context, cfg config.Config, epicID, workspace st
 
 	memStore, cleanup, err := sessionkit.OpenMemory(ctx, cfg)
 	if err != nil {
-		log.Printf("[WARN] failed to open memory store: %v", err)
+		logger.Warn("failed to open memory store", obs.Err(err))
 		return
 	}
 	defer cleanup()
@@ -329,7 +335,7 @@ func persistGotchas(ctx context.Context, cfg config.Config, epicID, workspace st
 		}
 
 		if _, err := memStore.Save(ctx, entry); err != nil {
-			log.Printf("[WARN] failed to persist gotcha: %v", err)
+			logger.Warn("failed to persist gotcha", obs.Str("name", name), obs.Err(err))
 		}
 	}
 }

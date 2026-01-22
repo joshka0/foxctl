@@ -73,6 +73,11 @@ List: `agentctl skills list`
 |-------|---------|
 | `memory/query` | Query gotchas/decisions/patterns by file or semantic search |
 
+### Observability
+| Skill | Purpose |
+|-------|---------|
+| `obs/logs` | Query wide events (filter by operation, command, status, component) |
+
 ### Integrations
 | Skill | Purpose |
 |-------|---------|
@@ -92,6 +97,37 @@ List: `agentctl skills list`
 |-------|---------|
 | `plan/sync`, `plan/analyze_deps` | Plan file management |
 | `optimize/bootstrap`, `optimize/reflect` | DSPy optimization |
+
+### Agent Orchestration
+| Command | Purpose |
+|---------|---------|
+| `agentctl agent spawn` | Spawn autonomous agents |
+| `agentctl agent list` | List running agents |
+| `agentctl agent kill <id>` | Terminate an agent |
+| `agentctl agent resume <id>` | Continue a previous session |
+| `agentctl agent hierarchy` | Show agent tree structure |
+| `agentctl sessions list` | List agent sessions |
+
+**Roles:** `overseer` (coordinator), `researcher`, `coder`, `planner`, `reviewer`
+
+**Key spawn flags:**
+- `--prompt "..."` - Inline prompt text
+- `--role overseer|researcher|coder|planner|reviewer` - Agent role
+- `--max-iterations 20` - Tool call limit
+- `--max-context-tokens 30000` - Context budget (stops when exceeded)
+- `--exec-mode autonomous` - Enable tool calling loop
+
+**Multi-agent with overseer:**
+```bash
+# Overseer coordinates subagents
+agentctl agent spawn --role overseer --prompt "Spawn researcher and coder to analyze X"
+```
+
+**Session continuation:**
+```bash
+# Resume with follow-up
+agentctl agent resume <session-id> --prompt "Based on your findings, explain X"
+```
 
 ## Direct CLI Shortcuts
 
@@ -119,4 +155,7 @@ agentctl run ci/checks --pr 123
 agentctl todo add --title "Implement feature X"
 agentctl todo list -f table
 agentctl todo complete --id <id> --notes "Done"
+
+# Debug recent errors
+agentctl run obs/logs --input '{"errors_only": true, "since": "1h"}'
 ```

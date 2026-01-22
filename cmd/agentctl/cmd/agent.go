@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jkatigb/agentctl/internal/agent/daemon"
+	agentdaemon "github.com/jkatigb/agentctl/internal/agent/daemon"
 	"github.com/jkatigb/agentctl/internal/agent/prompts"
+	"github.com/jkatigb/agentctl/internal/daemon"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
@@ -89,12 +90,34 @@ var agentCmdCmd = &cobra.Command{
 	RunE:  runAgentCmd,
 }
 
+var agentResumeCmd = &cobra.Command{
+	Use:   "resume <session-id>",
+	Short: "Continue a previous agent session",
+	Long:  "Resume a previous session with an additional prompt. Loads the conversation history and continues.",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentResume,
+}
+
+var agentHierarchyCmd = &cobra.Command{
+	Use:   "hierarchy [session-id]",
+	Short: "Show agent hierarchy tree",
+	Long:  "Display the agent hierarchy tree starting from a session or all roots.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runAgentHierarchy,
+}
+
+// Flags for agent resume
+var (
+	resumePrompt string
+)
+
 // Flags for agent spawn
 var (
 	spawnParentNS      string
 	spawnName          string
 	spawnSlug          string
 	spawnRole          string
+	spawnPrompt        string
 	spawnPromptFile    string
 	spawnSkillsAllow   string
 	spawnPolicyFile    string
@@ -102,11 +125,12 @@ var (
 	spawnLLMProvider   string
 	spawnLLMModel      string
 	spawnLLMAPIKey     string
-	spawnExecMode      string
-	spawnMaxIterations int
-	spawnMaxAutoTurns  int
-	spawnThinkInterval int
-	spawnDryRun        bool
+	spawnExecMode         string
+	spawnMaxIterations    int
+	spawnMaxContextTokens int
+	spawnMaxAutoTurns     int
+	spawnThinkInterval    int
+	spawnDryRun           bool
 	spawnChat          bool // Convenience flag for chat/roleplay companions
 )
 
@@ -149,13 +173,20 @@ func init() {
 	agentCmd.AddCommand(agentRunCmd)
 	agentCmd.AddCommand(agentAskCmd)
 	agentCmd.AddCommand(agentCmdCmd)
+	agentCmd.AddCommand(agentResumeCmd)
+	agentCmd.AddCommand(agentHierarchyCmd)
+
+	// Resume flags
+	agentResumeCmd.Flags().StringVar(&resumePrompt, "prompt", "", "Additional prompt for the continuation (required)")
+	_ = agentResumeCmd.MarkFlagRequired("prompt")
 
 	// Spawn flags
 	agentSpawnCmd.Flags().StringVar(&spawnParentNS, "ns", "", "Parent namespace (optional)")
 	agentSpawnCmd.Flags().StringVar(&spawnName, "name", "", "Human name for the agent (e.g., 'Luna', 'Atlas')")
 	agentSpawnCmd.Flags().StringVar(&spawnSlug, "slug", "", "Human-readable handle for referencing (e.g., 'researcher', 'companion')")
 	agentSpawnCmd.Flags().StringVar(&spawnRole, "role", "", "Agent role")
-	agentSpawnCmd.Flags().StringVar(&spawnPromptFile, "prompt-file", "", "Path to prompt file")
+	agentSpawnCmd.Flags().StringVar(&spawnPrompt, "prompt", "", "Inline prompt text (mutually exclusive with --prompt-file)")
+	agentSpawnCmd.Flags().StringVar(&spawnPromptFile, "prompt-file", "", "Path to prompt file (mutually exclusive with --prompt)")
 	agentSpawnCmd.Flags().StringVar(&spawnSkillsAllow, "skills-allow", "", "Comma-separated list of allowed skills")
 	agentSpawnCmd.Flags().StringVar(&spawnPolicyFile, "policy", "", "Path to policy JSON file")
 	agentSpawnCmd.Flags().StringVar(&spawnShareBB, "share-bb", "scoped", "Blackboard sharing mode (all|scoped|none)")
@@ -164,6 +195,7 @@ func init() {
 	agentSpawnCmd.Flags().StringVar(&spawnLLMAPIKey, "llm-api-key", "", "LLM API key (or env var like $GROQ_API_KEY)")
 	agentSpawnCmd.Flags().StringVar(&spawnExecMode, "exec-mode", "reactive", "Execution mode (reactive|autonomous|proactive)")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxIterations, "max-iterations", 10, "Max tool calls per turn")
+	agentSpawnCmd.Flags().IntVar(&spawnMaxContextTokens, "max-context-tokens", 0, "Max context tokens before stopping (0=no limit)")
 	agentSpawnCmd.Flags().IntVar(&spawnMaxAutoTurns, "max-auto-turns", 1, "Max autonomous turns per session (only for autonomous/proactive modes)")
 	agentSpawnCmd.Flags().IntVar(&spawnThinkInterval, "think-interval", 60, "Seconds between proactive think cycles (only for proactive mode)")
 	agentSpawnCmd.Flags().BoolVar(&spawnDryRun, "dry-run", false, "Preview what would be spawned without creating the agent")
@@ -219,9 +251,14 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Load prompt
+	// Load prompt (--prompt and --prompt-file are mutually exclusive)
 	var prompt string
-	if spawnPromptFile != "" {
+	if spawnPrompt != "" && spawnPromptFile != "" {
+		return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), "--prompt and --prompt-file are mutually exclusive")
+	}
+	if spawnPrompt != "" {
+		prompt = spawnPrompt
+	} else if spawnPromptFile != "" {
 		data, err := os.ReadFile(spawnPromptFile)
 		if err != nil {
 			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("failed to read prompt file: %v", err))
@@ -234,6 +271,88 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Resolve LLM API key (support $ENV_VAR syntax)
+	llmAPIKey := spawnLLMAPIKey
+	if strings.HasPrefix(llmAPIKey, "$") {
+		llmAPIKey = os.Getenv(strings.TrimPrefix(llmAPIKey, "$"))
+	}
+
+	// Try daemon client first (new runtime with tools like session.recall, memory.query)
+	daemonClient := daemon.NewClient()
+	if daemonClient.IsRunning() {
+		// Guard against unsupported flags in daemon mode
+		var unsupportedFlags []string
+		if spawnSkillsAllow != "" {
+			unsupportedFlags = append(unsupportedFlags, "--skills-allow")
+		}
+		if spawnPolicyFile != "" {
+			unsupportedFlags = append(unsupportedFlags, "--policy")
+		}
+		if spawnShareBB != "scoped" {
+			unsupportedFlags = append(unsupportedFlags, "--share-bb")
+		}
+		if spawnParentNS != "" {
+			unsupportedFlags = append(unsupportedFlags, "--ns")
+		}
+		if spawnThinkInterval != 60 {
+			unsupportedFlags = append(unsupportedFlags, "--think-interval")
+		}
+		if len(unsupportedFlags) > 0 {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG),
+				fmt.Sprintf("flags not supported in daemon mode: %s (use direct spawn instead)", strings.Join(unsupportedFlags, ", ")))
+		}
+
+		params := daemon.AgentSpawnParams{
+			Role:             spawnRole,
+			Prompt:           prompt,
+			Name:             spawnName,
+			Slug:             spawnSlug,
+			MaxIterations:    spawnMaxIterations,
+			MaxContextTokens: spawnMaxContextTokens,
+			ExecMode:         spawnExecMode,
+			MaxAutoTurns:     spawnMaxAutoTurns,
+			LLMProvider:      spawnLLMProvider,
+			LLMModel:         spawnLLMModel,
+			LLMAPIKey:        llmAPIKey,
+		}
+
+		// Dry-run mode: show what would be spawned via daemon
+		if spawnDryRun {
+			data := map[string]any{
+				"dry_run":        true,
+				"would_spawn":    true,
+				"via_daemon":     true,
+				"role":           params.Role,
+				"name":           params.Name,
+				"slug":           params.Slug,
+				"llm_provider":   params.LLMProvider,
+				"llm_model":      params.LLMModel,
+				"exec_mode":      params.ExecMode,
+				"max_iterations": params.MaxIterations,
+				"max_auto_turns": params.MaxAutoTurns,
+				"has_prompt":     len(params.Prompt) > 0,
+			}
+			return writeOK(cmd, "agent/spawn", data, "run", nil)
+		}
+
+		result, err := daemonClient.AgentSpawn(params)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeERuntime), fmt.Sprintf("daemon spawn failed: %v", err))
+		}
+
+		// Write success envelope
+		data := map[string]any{
+			"session_id": result.SessionID,
+			"actor_id":   result.ActorID,
+			"status":     result.Status,
+			"role":       result.Role,
+			"ns":         result.NS,
+			"via_daemon": true,
+		}
+		return writeOK(cmd, "agent/spawn", data, "run", nil)
+	}
+
+	// Fall back to old agentmanager (legacy, does not have new tools)
 	// Parse skills allow
 	var skillsAllow []string
 	if spawnSkillsAllow != "" {
@@ -277,12 +396,6 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	// Create manager
 	mgr := agentmanager.New(agentStore, mailboxStore)
 
-	// Resolve LLM API key (support $ENV_VAR syntax)
-	llmAPIKey := spawnLLMAPIKey
-	if strings.HasPrefix(llmAPIKey, "$") {
-		llmAPIKey = os.Getenv(strings.TrimPrefix(llmAPIKey, "$"))
-	}
-
 	// Spawn agent
 	req := agentmanager.SpawnRequest{
 		ParentNS:      spawnParentNS,
@@ -307,6 +420,7 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		data := map[string]any{
 			"dry_run":        true,
 			"would_spawn":    true,
+			"via_daemon":     false,
 			"parent_ns":      req.ParentNS,
 			"name":           req.Name,
 			"slug":           req.Slug,
@@ -332,9 +446,10 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 
 	// Write success envelope
 	data := map[string]any{
-		"agent_id": resp.AgentID,
-		"ns":       resp.NS,
-		"role":     resp.Role,
+		"agent_id":   resp.AgentID,
+		"ns":         resp.NS,
+		"role":       resp.Role,
+		"via_daemon": false,
 	}
 
 	return writeOK(cmd, "agent/spawn", data, "run", nil)
@@ -717,8 +832,23 @@ func runAgentRun(cmd *cobra.Command, args []string) error {
 	cfg := config.MustFromContext(ctx)
 	agentRef := args[0] // Can be ID, slug, or name
 
-	// Resolve LLM provider - use config or auto-detect from available keys
-	provider := cfg.LLM.Provider
+	// Load agent first to check its LLM provider (supports slug, name, or ID)
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return fmt.Errorf("open agent store: %w", err)
+	}
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
+
+	agentRecord, err := agentStore.Resolve(ctx, agentRef)
+	if err != nil {
+		return fmt.Errorf("resolve agent %q: %w", agentRef, err)
+	}
+
+	// Resolve LLM provider - use agent's provider first, then config, then auto-detect
+	provider := agentRecord.LLMProvider
+	if provider == "" {
+		provider = cfg.LLM.Provider
+	}
 	if provider == "" {
 		// Auto-detect provider based on available API keys
 		// Priority: cerebras > groq > openrouter > gemini > anthropic > openai
@@ -740,27 +870,20 @@ func runAgentRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Load agent to check role for companion memory (supports slug, name, or ID)
-	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
-	if err != nil {
-		return fmt.Errorf("open agent store: %w", err)
-	}
-	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
-
-	agentRecord, err := agentStore.Resolve(ctx, agentRef)
-	if err != nil {
-		return fmt.Errorf("resolve agent %q: %w", agentRef, err)
-	}
-
 	// Determine companion mode: use flag if set, else auto-detect based on role
 	companionMode := runCompanionMode
-	enableCompanionMemory := runCompanionMode != "" || agentRecord.Role == "companion"
-	if runCompanionMode == "" && agentRecord.Role == "companion" {
-		// Default to roleplay mode for companion agents
-		companionMode = "roleplay"
+	// Enable memory for all roles by default - memory provides context continuity across requests
+	enableCompanionMemory := true
+	if runCompanionMode == "" {
+		// Default to roleplay mode for companion agents, standard for others
+		if agentRecord.Role == "companion" {
+			companionMode = "roleplay"
+		} else {
+			companionMode = "standard"
+		}
 	}
 
-	opts := daemon.Options{
+	opts := agentdaemon.Options{
 		AgentID:               agentRecord.ID, // Use resolved ID
 		StorageRoot:           cfg.Storage.Root,
 		PollInterval:          500 * time.Millisecond,
@@ -773,7 +896,7 @@ func runAgentRun(cmd *cobra.Command, args []string) error {
 		CompanionMode:         companionMode,
 	}
 
-	return daemon.Run(ctx, opts)
+	return agentdaemon.Run(ctx, opts)
 }
 
 func runAgentAsk(cmd *cobra.Command, args []string) error {
@@ -1023,4 +1146,96 @@ func waitForReply(ctx context.Context, store mailbox.Store, out io.Writer, calle
 		}
 	}
 	return fmt.Errorf("timeout waiting for reply to ask_id=%s", askID)
+}
+
+func runAgentResume(cmd *cobra.Command, args []string) error {
+	sessionID := args[0]
+
+	if resumePrompt == "" {
+		return writeErrorEnvelope(cmd, "agent/resume", string(protocol.ErrorCodeEARG), "--prompt is required")
+	}
+
+	// Try daemon client first
+	daemonClient := daemon.NewClient()
+	if daemonClient.IsRunning() {
+		params := daemon.AgentResumeParams{
+			SessionID: sessionID,
+			Prompt:    resumePrompt,
+		}
+
+		result, err := daemonClient.AgentResume(params)
+		if err != nil {
+			return writeErrorEnvelope(cmd, "agent/resume", string(protocol.ErrorCodeEIO), err.Error())
+		}
+
+		return writeOK(cmd, "agent/resume", map[string]any{
+			"session_id":     result.SessionID,
+			"actor_id":       result.ActorID,
+			"status":         result.Status,
+			"from_session":   sessionID,
+			"via_daemon":     true,
+		}, "resume", nil)
+	}
+
+	return writeErrorEnvelope(cmd, "agent/resume", string(protocol.ErrorCodeESkillDown), "daemon not running - agent resume requires the daemon")
+}
+
+func runAgentHierarchy(cmd *cobra.Command, args []string) error {
+	var sessionID string
+	if len(args) > 0 {
+		sessionID = args[0]
+	}
+
+	daemonClient := daemon.NewClient()
+	if !daemonClient.IsRunning() {
+		return writeErrorEnvelope(cmd, "agent/hierarchy", string(protocol.ErrorCodeESkillDown), "daemon not running")
+	}
+
+	result, err := daemonClient.AgentHierarchy(sessionID)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/hierarchy", string(protocol.ErrorCodeEIO), err.Error())
+	}
+
+	if len(result.Nodes) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "No agent hierarchy found")
+		return nil
+	}
+
+	// Print tree
+	for _, node := range result.Nodes {
+		printHierarchyNode(cmd, node, 0)
+	}
+
+	return nil
+}
+
+func printHierarchyNode(cmd *cobra.Command, node daemon.HierarchyNode, depth int) {
+	prefix := ""
+	if depth > 0 {
+		prefix = strings.Repeat("  ", depth-1) + "└─ "
+	}
+
+	status := node.Status
+	switch status {
+	case "running":
+		status = "●" // Running indicator
+	case "ok":
+		status = "✓"
+	case "error":
+		status = "✗"
+	default:
+		status = "○"
+	}
+
+	// Safely truncate SessionID to prevent panic on short/empty strings
+	safeSession := node.SessionID
+	if len(safeSession) >= 8 {
+		safeSession = safeSession[:8]
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "%s%s %s [%s] depth=%d session=%s\n",
+		prefix, status, node.ActorID, node.Role, node.Depth, safeSession)
+
+	for _, child := range node.Children {
+		printHierarchyNode(cmd, child, depth+1)
+	}
 }

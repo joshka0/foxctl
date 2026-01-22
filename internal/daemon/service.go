@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,14 +18,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"log/slog"
-
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
+	"github.com/oklog/ulid/v2"
 	"github.com/jkatigb/agentctl/internal/agent/types"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/context/updater"
-	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
+	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/indexing/filesummary"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/lsp/gopls"
@@ -95,13 +96,13 @@ type Service struct {
 	fileSummaryMemoryStore  storage.MemoryStore // Memory store for file summary worker (close on shutdown)
 
 	// Agent orchestration
-	agentRuntime       *runtime.Runtime
-	agentOverseer      *runtime.Overseer
-	agentCtx           context.Context
-	agentCancel        context.CancelFunc
-	agentSessionStore  *sessions.Store        // Session store for agent persistence (close on shutdown)
-	agentMailboxStore  mailbox.Store          // Mailbox store for agent messaging (close on shutdown)
-	agentBoardStore    blackboard.BoardStore  // Blackboard store for agent coordination (close on shutdown)
+	agentRuntime      *runtime.Runtime
+	agentOverseer     *runtime.Overseer
+	agentCtx          context.Context
+	agentCancel       context.CancelFunc
+	agentSessionStore *sessions.Store       // Session store for agent persistence (close on shutdown)
+	agentMailboxStore mailbox.Store         // Mailbox store for agent messaging (close on shutdown)
+	agentBoardStore   blackboard.BoardStore // Blackboard store for agent coordination (close on shutdown)
 }
 
 // NewService creates a new daemon service.
@@ -425,6 +426,20 @@ func (s *Service) handleConnection(ctx context.Context, conn net.Conn) {
 		result, err := s.handleAgentKill(req.Params)
 		if err != nil {
 			resp.Error = &Error{Code: "EKILL", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "agent.resume":
+		result, err := s.handleAgentResume(ctx, req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "ERESUME", Message: err.Error()}
+		} else {
+			resp.Result = result
+		}
+	case "agent.hierarchy":
+		result, err := s.handleAgentHierarchy(req.Params)
+		if err != nil {
+			resp.Error = &Error{Code: "EHIERARCHY", Message: err.Error()}
 		} else {
 			resp.Result = result
 		}
@@ -940,33 +955,9 @@ func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 
 // startAgentOrchestration initializes the agent runtime and overseer.
 func (s *Service) startAgentOrchestration(ctx context.Context) error {
-	// Determine LLM configuration
-	// Priority: CEREBRAS > OPENROUTER > GROQ > GEMINI
-	var llmProvider, llmAPIKey, llmModel string
-
-	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
-		llmProvider = "cerebras"
-		llmAPIKey = key
-		llmModel = os.Getenv("CEREBRAS_MODEL")
-		if llmModel == "" {
-			llmModel = "zai-glm-4.7"
-		}
-	} else if key := os.Getenv("OPENROUTER_API_KEY"); key != "" {
-		llmProvider = "openrouter"
-		llmAPIKey = key
-		llmModel = os.Getenv("OPENROUTER_MODEL")
-		if llmModel == "" {
-			llmModel = "mistralai/devstral-2512:free"
-		}
-	} else if key := os.Getenv("GROQ_API_KEY"); key != "" {
-		llmProvider = "groq"
-		llmAPIKey = key
-		llmModel = "llama-3.1-70b-versatile"
-	} else if key := os.Getenv("GEMINI_API_KEY"); key != "" {
-		llmProvider = "gemini"
-		llmAPIKey = key
-		llmModel = "gemini-2.0-flash"
-	}
+	// Determine LLM configuration from centralized config
+	// Priority: configured provider > CEREBRAS > OPENROUTER > GROQ > GEMINI
+	llmProvider, llmAPIKey, llmModel := s.resolveLLMConfig()
 
 	if llmAPIKey == "" {
 		fmt.Fprintf(os.Stderr, "agent orchestration: skipped (no LLM API key configured)\n")
@@ -1017,6 +1008,14 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 	}
 	hookDispatcher = hooks.NewDispatcherWithRegistry(hookCfg, s.cfg.Paths.Skills)
 
+	// Create action executor for processing hook output actions
+	// Use concrete store fields (not runtime interface variables) for full interface compliance
+	actionExecutor := hooks.NewExecutor(hooks.ExecutorConfig{
+		MailboxStore: s.agentMailboxStore,
+		BoardStore:   s.agentBoardStore,
+		FailOpen:     true, // Don't block on action errors
+	})
+
 	// Create runtime config
 	runtimeCfg := runtime.Config{
 		DefaultMaxIterations: 50,
@@ -1031,6 +1030,7 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 		MailboxStore:         mailboxStore,
 		BoardStore:           boardStore,
 		HookDispatcher:       hookDispatcher,
+		ActionExecutor:       actionExecutor,
 	}
 
 	// Create runtime
@@ -1066,6 +1066,21 @@ type AgentSpawnParams struct {
 	EpicID      string `json:"epic_id,omitempty"`
 	TaskID      string `json:"task_id,omitempty"`
 	Prompt      string `json:"prompt,omitempty"`
+
+	// Agent metadata
+	Name string `json:"name,omitempty"`
+	Slug string `json:"slug,omitempty"`
+
+	// Execution config
+	MaxIterations    int    `json:"max_iterations,omitempty"`
+	MaxContextTokens int    `json:"max_context_tokens,omitempty"` // Context budget (0=no limit)
+	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "proactive"
+	MaxAutoTurns     int    `json:"max_auto_turns,omitempty"`
+
+	// LLM override
+	LLMProvider string `json:"llm_provider,omitempty"`
+	LLMModel    string `json:"llm_model,omitempty"`
+	LLMAPIKey   string `json:"llm_api_key,omitempty"`
 }
 
 // AgentSpawnResult is the result of spawning an agent.
@@ -1073,6 +1088,8 @@ type AgentSpawnResult struct {
 	SessionID string `json:"session_id"`
 	ActorID   string `json:"actor_id"`
 	Status    string `json:"status"`
+	Role      string `json:"role"`
+	NS        string `json:"ns,omitempty"` // Namespace for mailbox routing
 }
 
 func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) (*AgentSpawnResult, error) {
@@ -1089,14 +1106,50 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 		return nil, errors.New("role is required")
 	}
 
+	// Generate actor ID if not provided
+	actorID := p.AgentID
+	if actorID == "" {
+		actorID = "actor:" + p.Role + ":" + ulid.Make().String()
+	}
+
 	// Create agent config
 	cfg := types.AgentConfig{
 		Role:        types.AgentRole(p.Role),
-		ActorID:     p.AgentID, // Use agent config ID as actor ID for session filtering
+		ActorID:     actorID,
 		WorkspaceID: p.WorkspaceID,
 		EpicID:      p.EpicID,
 		TaskID:      p.TaskID,
 		Prompt:      p.Prompt,
+	}
+
+	// Apply execution config if provided
+	if p.MaxIterations > 0 {
+		cfg.MaxIterations = p.MaxIterations
+	}
+	if p.MaxContextTokens > 0 {
+		cfg.MaxContextTokens = p.MaxContextTokens
+	}
+	if p.ExecMode != "" {
+		switch p.ExecMode {
+		case string(agent.ModeReactive), string(agent.ModeAutonomous), string(agent.ModeProactive):
+			cfg.ExecMode = agent.ExecutionMode(p.ExecMode)
+		default:
+			return nil, fmt.Errorf("invalid exec_mode: %s", p.ExecMode)
+		}
+	}
+	if p.MaxAutoTurns > 0 {
+		cfg.MaxAutoTurns = p.MaxAutoTurns
+	}
+
+	// Apply LLM override if provided
+	if p.LLMProvider != "" {
+		cfg.LLMProvider = p.LLMProvider
+	}
+	if p.LLMModel != "" {
+		cfg.LLMModel = p.LLMModel
+	}
+	if p.LLMAPIKey != "" {
+		cfg.LLMAPIKey = p.LLMAPIKey
 	}
 
 	// Spawn the agent
@@ -1109,7 +1162,123 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 		SessionID: session.ID,
 		ActorID:   session.Config.ActorID,
 		Status:    string(session.Status),
+		Role:      string(session.Config.Role),
+		NS:        session.Config.ActorID, // Use ActorID as namespace for mailbox
 	}, nil
+}
+
+// AgentResumeParams are the parameters for agent.resume.
+type AgentResumeParams struct {
+	SessionID string `json:"session_id"`
+	Prompt    string `json:"prompt"`
+}
+
+// AgentResumeResult is the result of resuming an agent session.
+type AgentResumeResult struct {
+	SessionID   string `json:"session_id"`
+	ActorID     string `json:"actor_id"`
+	Status      string `json:"status"`
+	FromSession string `json:"from_session"`
+}
+
+func (s *Service) handleAgentResume(ctx context.Context, params json.RawMessage) (*AgentResumeResult, error) {
+	if s.agentRuntime == nil {
+		return nil, errors.New("agent orchestration not initialized")
+	}
+
+	var p AgentResumeParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("parse params: %w", err)
+	}
+
+	if p.SessionID == "" {
+		return nil, errors.New("session_id is required")
+	}
+	if p.Prompt == "" {
+		return nil, errors.New("prompt is required")
+	}
+
+	session, err := s.agentRuntime.Resume(ctx, p.SessionID, p.Prompt)
+	if err != nil {
+		return nil, fmt.Errorf("resume session: %w", err)
+	}
+
+	return &AgentResumeResult{
+		SessionID:   session.ID,
+		ActorID:     session.Config.ActorID,
+		Status:      string(session.Status),
+		FromSession: p.SessionID,
+	}, nil
+}
+
+func (s *Service) handleAgentHierarchy(params json.RawMessage) (*AgentHierarchyResult, error) {
+	if s.agentRuntime == nil {
+		return nil, errors.New("agent orchestration not initialized")
+	}
+
+	var p AgentHierarchyParams
+	if len(params) > 0 {
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("parse params: %w", err)
+		}
+	}
+
+	// Get the overseer from runtime
+	overseer, ok := s.agentRuntime.GetSpawnHandler().(*runtime.Overseer)
+	if !ok || overseer == nil {
+		// No overseer - return flat list of sessions as root nodes
+		sessions := s.agentRuntime.List()
+		nodes := make([]HierarchyNode, 0, len(sessions))
+		for _, sess := range sessions {
+			nodes = append(nodes, HierarchyNode{
+				SessionID: sess.ID,
+				ActorID:   sess.Config.ActorID,
+				Role:      string(sess.Config.Role),
+				Depth:     sess.Config.Depth,
+				Status:    string(sess.Status),
+				Children:  []HierarchyNode{},
+			})
+		}
+		return &AgentHierarchyResult{Nodes: nodes}, nil
+	}
+
+	// If session ID specified, return hierarchy for that session
+	if p.SessionID != "" {
+		node := overseer.GetHierarchy(p.SessionID)
+		if node == nil {
+			return &AgentHierarchyResult{Nodes: []HierarchyNode{}}, nil
+		}
+		return &AgentHierarchyResult{Nodes: []HierarchyNode{convertHierarchyNode(node)}}, nil
+	}
+
+	// Return all root sessions (depth 0)
+	sessions := s.agentRuntime.List()
+	nodes := make([]HierarchyNode, 0)
+	for _, sess := range sessions {
+		if sess.Config.Depth == 0 {
+			node := overseer.GetHierarchy(sess.ID)
+			if node != nil {
+				nodes = append(nodes, convertHierarchyNode(node))
+			}
+		}
+	}
+
+	return &AgentHierarchyResult{Nodes: nodes}, nil
+}
+
+func convertHierarchyNode(node *runtime.HierarchyNode) HierarchyNode {
+	children := make([]HierarchyNode, 0, len(node.Children))
+	for _, child := range node.Children {
+		children = append(children, convertHierarchyNode(child))
+	}
+	return HierarchyNode{
+		SessionID: node.SessionID,
+		ActorID:   node.ActorID,
+		Role:      string(node.Role),
+		Depth:     node.Depth,
+		Status:    string(node.Status),
+		Children:  children,
+	}
 }
 
 // AgentListResult is the result of listing agents.
@@ -1275,4 +1444,37 @@ func (e *exec) Start() error {
 
 	_, err := os.StartProcess(e.Path, e.Args, attr)
 	return err
+}
+
+// resolveLLMConfig returns the LLM provider, API key, and model from centralized config.
+// Priority: configured provider > cerebras > openrouter > groq > gemini
+func (s *Service) resolveLLMConfig() (provider, apiKey, model string) {
+	llm := s.cfg.LLM
+
+	// If a provider is explicitly configured, use it
+	if llm.Provider != "" {
+		provider = llm.Provider
+		apiKey = llm.ResolveAPIKey(provider)
+		model = llm.ResolveModel(provider)
+		if model == "" {
+			model = llmproviders.DefaultModelForProvider(provider)
+		}
+		return
+	}
+
+	// Auto-detect from available API keys (priority order)
+	providers := []string{"cerebras", "openrouter", "groq", "gemini"}
+	for _, p := range providers {
+		if key := llm.ResolveAPIKey(p); key != "" {
+			provider = p
+			apiKey = key
+			model = llm.ResolveModel(p)
+			if model == "" {
+				model = llmproviders.DefaultModelForProvider(p)
+			}
+			return
+		}
+	}
+
+	return "", "", ""
 }

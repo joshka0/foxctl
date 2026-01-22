@@ -1,0 +1,601 @@
+openapi: 3.1.0
+info:
+  title: agentctl API
+  version: 1.0.0-draft
+  description: |
+    Draft HTTP API for local-only usage.
+    Non-skill endpoints return a light envelope. Skill endpoints return the skill
+    envelope inside data.envelope.
+servers:
+  - url: http://127.0.0.1:{port}/api/v1
+    description: Local dev
+    variables:
+      port:
+        default: "8090"
+security: []  # Local-only API, no authentication required
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Optional API key for future authentication
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        data:
+          type: object
+          additionalProperties: true
+        error:
+          $ref: '#/components/schemas/Error'
+        meta:
+          $ref: '#/components/schemas/Meta'
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        hint:
+          type: string
+    Meta:
+      type: object
+      properties:
+        request_id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+          format: int64
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    Name:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+    Digest:
+      name: digest
+      in: path
+      required: true
+      schema:
+        type: string
+    Key:
+      name: key
+      in: path
+      required: true
+      schema:
+        type: string
+    Dep:
+      name: dep
+      in: path
+      required: true
+      schema:
+        type: string
+    ConversationId:
+      name: conversation_id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    OkEnvelope:
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
+    BinaryArtifact:
+      description: CAS artifact
+      content:
+        application/octet-stream:
+          schema:
+            type: string
+            format: binary
+    SSE:
+      description: Server-sent events stream
+      content:
+        text/event-stream:
+          schema:
+            type: string
+paths:
+  /health:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /status:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /stats:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /insights:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /workspaces:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /workspaces/switch:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /skills:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /skills/schema:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /skills/run:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /skills/{name}:
+    parameters:
+      - $ref: '#/components/parameters/Name'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /skills/{name}/run:
+    parameters:
+      - $ref: '#/components/parameters/Name'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /jobs:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /jobs/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /cas:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /cas/{digest}:
+    parameters:
+      - $ref: '#/components/parameters/Digest'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/BinaryArtifact'
+    head:
+      responses:
+        '200':
+          description: Artifact exists
+  /cas/{digest}/pin:
+    parameters:
+      - $ref: '#/components/parameters/Digest'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /agents:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /agents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    patch:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /agents/{id}/start:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /agents/{id}/stop:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /agents/{id}/sessions:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /sessions:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /sessions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /sessions/{id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /sessions/{id}/context-windows:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /sessions/{id}/restore:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /sessions/recall:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /memories:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /memories/{name}:
+    parameters:
+      - $ref: '#/components/parameters/Name'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    patch:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /memories/search:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /memories/stats:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /contextvars:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /contextvars/query:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /contextvars/{key}:
+    parameters:
+      - $ref: '#/components/parameters/Key'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /tasks:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /tasks/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    patch:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /tasks/{id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /tasks/{id}/uncomplete:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /tasks/{id}/dependencies:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /tasks/{id}/dependencies/{dep}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - $ref: '#/components/parameters/Dep'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /tasks/graph:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /overseer/recommendations:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /overseer/run:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /overseer/weights:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /blackboard:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /blackboard/{id}/lease:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /blackboard/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /mailbox:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /mailbox/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /reservations:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /reservations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /hooks:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /hooks/reload:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /hooks/validate:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /hooks/run:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /search:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /codemaps:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /codemaps/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /codemaps/search:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /codemaps/generate:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/chat:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/conversations:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/context:
+    post:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/context/{conversation_id}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/context/{conversation_id}/{key}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/Key'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/memory/{conversation_id}/stats:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/memory/{conversation_id}/context:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /companion/memory/{conversation_id}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    delete:
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /events:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/responses/SSE'
+  /ws/console/{id}:
+    servers:
+      - url: http://127.0.0.1:{port}
+        description: Local dev
+        variables:
+          port:
+            default: "8090"
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      responses:
+        '101':
+          description: Switching Protocols (websocket)

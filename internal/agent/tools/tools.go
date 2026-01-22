@@ -237,6 +237,12 @@ func NewRegistry(cfg Config, recorder TelemetryRecorder) (*Registry, error) {
 	if err := r.registerBBTools(); err != nil {
 		return nil, err
 	}
+	if err := r.registerSessionTools(); err != nil {
+		return nil, err
+	}
+	if err := r.registerMemoryTools(); err != nil {
+		return nil, err
+	}
 
 	// Apply allowlist filtering if configured
 	if len(cfg.Allowlist) > 0 {

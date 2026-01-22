@@ -324,5 +324,7 @@ func (NopExecutor) Execute(ctx context.Context, actions []Action, input Input) (
 	return "", nil
 }
 
-var _ ActionExecutor = (*DefaultExecutor)(nil)
-var _ ActionExecutor = NopExecutor{}
+var (
+	_ ActionExecutor = (*DefaultExecutor)(nil)
+	_ ActionExecutor = NopExecutor{}
+)

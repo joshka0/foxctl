@@ -132,7 +132,6 @@ func main() {
 			ConversationID: conversationID,
 			Message:        message,
 		})
-
 		if err != nil {
 			log.Error().Err(err).Msg("Chat failed")
 			continue

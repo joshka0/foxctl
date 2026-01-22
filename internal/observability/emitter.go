@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-
-	"github.com/rs/zerolog"
 )
 
 // WideEventFileName is the NDJSON file for wide events.
@@ -40,6 +38,12 @@ func getSampler() Sampler {
 // This function is safe to call from any goroutine.
 // Errors are logged but not returned - observability is best-effort.
 func Emit(ctx context.Context, event *WideEvent) {
+	EmitWithConfig(ctx, event, nil)
+}
+
+// EmitWithConfig writes a WideEvent with custom persistence configuration.
+// If config is nil, uses the default NDJSON persistence.
+func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig) {
 	if event == nil {
 		return
 	}
@@ -59,10 +63,8 @@ func Emit(ctx context.Context, event *WideEvent) {
 		}
 	}
 
-	// Write the event
-	if err := WriteEvent(ctx, WideEventFileName, event); err != nil {
-		logEmitError("emit", event.Operation, err)
-	}
+	// Use custom persistence if configured, otherwise default NDJSON
+	persistEvent(ctx, event, config)
 }
 
 // EmitSync writes a WideEvent synchronously, bypassing sampling.
@@ -82,6 +84,7 @@ func EmitSync(ctx context.Context, event *WideEvent) error {
 
 // EmitBuilder is a convenience function that builds and emits an event.
 // It applies sampling based on the configured sampler.
+// Persist config from the builder (via WithPersistence/WithPersistenceFile) is honored.
 func EmitBuilder(ctx context.Context, builder *EventBuilder, status Status, duration int64) {
 	if builder == nil {
 		return
@@ -91,7 +94,8 @@ func EmitBuilder(ctx context.Context, builder *EventBuilder, status Status, dura
 	event.Status = status
 	event.DurationMS = duration
 
-	Emit(ctx, event)
+	// Pass builder's persist config to honor WithPersistence/WithPersistenceFile
+	EmitWithConfig(ctx, event, builder.PersistConfig())
 }
 
 // WideEventWriter provides a structured way to write wide events.
@@ -173,12 +177,3 @@ func (w *WideEventWriter) Close() error {
 	return w.file.Close()
 }
 
-func logEmitError(op, operation string, err error) {
-	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	log.Warn().
-		Str("component", "observability").
-		Str("op", op).
-		Str("operation", operation).
-		Err(err).
-		Msg("wide event emit failed")
-}

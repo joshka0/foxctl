@@ -5,7 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,7 +19,10 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/sqlutil"
 	"github.com/jkatigb/agentctl/internal/storage/vector"
+	"github.com/rs/zerolog"
 )
+
+var logger = zerolog.New(os.Stderr).With().Str("component", "sessions").Timestamp().Logger()
 
 // Ensure Store implements storage.SessionStore.
 var _ storage.SessionStore = (*Store)(nil)
@@ -187,8 +190,9 @@ INSERT INTO sessions (
 	started_at, ended_at, summary, accomplished, decisions, gotchas,
 	tags, key_files, tools_pattern, message_count, user_turns,
 	tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-	created_at, updated_at, parent_session_id, agent_id, agent_type, status
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	created_at, updated_at, parent_session_id, agent_id, agent_type, status,
+	prompt, prompt_hash, llm_provider, llm_model
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	workspace_path = excluded.workspace_path,
 	project_name = excluded.project_name,
@@ -215,7 +219,11 @@ ON CONFLICT(id) DO UPDATE SET
 	parent_session_id = excluded.parent_session_id,
 	agent_id = excluded.agent_id,
 	agent_type = excluded.agent_type,
-	status = excluded.status
+	status = excluded.status,
+	prompt = COALESCE(excluded.prompt, sessions.prompt),
+	prompt_hash = COALESCE(excluded.prompt_hash, sessions.prompt_hash),
+	llm_provider = COALESCE(excluded.llm_provider, sessions.llm_provider),
+	llm_model = COALESCE(excluded.llm_model, sessions.llm_model)
 `,
 		session.ID, session.WorkspacePath, session.ProjectName, session.GitBranch, session.ClaudeVersion,
 		sqlutil.FormatTimestamp(session.StartedAt), sqlutil.FormatTimestamp(session.EndedAt),
@@ -224,6 +232,7 @@ ON CONFLICT(id) DO UPDATE SET
 		session.ToolInvocations, session.TotalTokens, session.RawJSONLPath, session.ContentHash, session.Embedding, session.EmbeddingModel,
 		sqlutil.FormatTimestamp(session.CreatedAt), sqlutil.FormatTimestamp(session.UpdatedAt),
 		parentSessionID, session.AgentID, session.AgentType, session.Status,
+		session.Prompt, session.PromptHash, session.LLMProvider, session.LLMModel,
 	)
 	if err != nil {
 		return Session{}, fmt.Errorf("sessions: save: %w", err)
@@ -238,7 +247,8 @@ func (s *Store) Get(ctx context.Context, id string) (Session, error) {
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
 		WHERE id = ?`, id)
 	return scanSession(row)
@@ -292,7 +302,8 @@ func (s *Store) List(ctx context.Context, opts ListOptions) ([]Session, error) {
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions`
 
 	if len(conditions) > 0 {
@@ -339,7 +350,8 @@ func (s *Store) Search(ctx context.Context, query string, limit int) ([]Session,
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
 		WHERE LOWER(summary) LIKE ?
 			OR LOWER(tags) LIKE ?
@@ -461,7 +473,8 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
 			WHERE workspace_path = ? AND embedding IS NOT NULL AND LENGTH(embedding) > 0
 			ORDER BY started_at DESC`, workspace)
@@ -472,7 +485,8 @@ func (s *Store) SearchSimilar(ctx context.Context, workspace string, queryEmbedd
 				started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 				tags, key_files, tools_pattern, message_count, user_turns,
 				tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+				created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+				prompt, prompt_hash, llm_provider, llm_model
 			FROM sessions
 			WHERE embedding IS NOT NULL AND LENGTH(embedding) > 0
 			ORDER BY started_at DESC`)
@@ -539,7 +553,8 @@ func (s *Store) FindByContentHash(ctx context.Context, contentHash string) (*Ses
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
 		WHERE content_hash = ? AND summary != '' AND summary IS NOT NULL
 		ORDER BY created_at DESC
@@ -581,7 +596,8 @@ func (s *Store) GetActive(ctx context.Context, workspace, agentID string) (*Sess
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ? AND status = ?
 		ORDER BY started_at DESC
@@ -677,7 +693,8 @@ func (s *Store) GetPendingRestore(ctx context.Context, workspace string) (*Sessi
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
 		WHERE workspace_path = ? AND pending_restore_at IS NOT NULL AND pending_restore_at > ?
 		ORDER BY pending_restore_at DESC LIMIT 1`
@@ -708,7 +725,8 @@ func (s *Store) FindLastSession(ctx context.Context, workspace, agentID string, 
 			started_at, ended_at, summary, accomplished, decisions, gotchas, user_insights,
 			tags, key_files, tools_pattern, message_count, user_turns,
 			tool_invocations, total_tokens, raw_jsonl_path, content_hash, embedding, embedding_model,
-			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions
+			created_at, updated_at, parent_session_id, agent_id, agent_type, status, key_questions,
+			prompt, prompt_hash, llm_provider, llm_model
 		FROM sessions
 		WHERE workspace_path = ? AND agent_id = ?`
 
@@ -782,8 +800,9 @@ func (s *Store) GetAncestorChain(ctx context.Context, sessionID string, maxDepth
 		SELECT s.id, s.workspace_path, s.project_name, s.git_branch, s.claude_version,
 			s.started_at, s.ended_at, s.summary, s.accomplished, s.decisions, s.gotchas, s.user_insights,
 			s.tags, s.key_files, s.tools_pattern, s.message_count, s.user_turns,
-			s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.embedding, s.embedding_model,
-			s.created_at, s.updated_at, s.parent_session_id, s.agent_id, s.status, s.key_questions
+			s.tool_invocations, s.total_tokens, s.raw_jsonl_path, s.content_hash, s.embedding, s.embedding_model,
+			s.created_at, s.updated_at, s.parent_session_id, s.agent_id, s.agent_type, s.status, s.key_questions,
+			s.prompt, s.prompt_hash, s.llm_provider, s.llm_model
 		FROM sessions s
 		JOIN ancestors a ON s.id = a.id
 		ORDER BY a.depth ASC`, sessionID, maxDepth)
@@ -870,11 +889,12 @@ func (s *Store) SaveTurn(ctx context.Context, turn SessionTurn) (SessionTurn, er
 
 	_, err = s.db.ExecContext(ctx, `
 INSERT INTO session_turns (
-	id, session_id, turn_index, role, content_preview, tool_calls, files_touched,
+	id, session_id, turn_index, role, content_preview, content_cas_digest, tool_calls, files_touched,
 	has_error, error_type, error_message, resolution, tokens_used, timestamp, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	content_preview = excluded.content_preview,
+	content_cas_digest = COALESCE(excluded.content_cas_digest, content_cas_digest),
 	tool_calls = excluded.tool_calls,
 	files_touched = excluded.files_touched,
 	has_error = excluded.has_error,
@@ -883,7 +903,7 @@ ON CONFLICT(id) DO UPDATE SET
 	resolution = excluded.resolution,
 	tokens_used = excluded.tokens_used
 `,
-		turn.ID, turn.SessionID, turn.TurnIndex, turn.Role, turn.ContentPreview,
+		turn.ID, turn.SessionID, turn.TurnIndex, turn.Role, turn.ContentPreview, turn.ContentCASDigest,
 		toolCallsJSON, filesTouchedJSON, hasError, turn.ErrorType, turn.ErrorMessage,
 		turn.Resolution, turn.TokensUsed, sqlutil.FormatTimestamp(turn.Timestamp),
 		sqlutil.FormatTimestamp(turn.CreatedAt),
@@ -991,7 +1011,7 @@ func (s *Store) GetTurns(ctx context.Context, sessionID string, opts TurnListOpt
 	}
 
 	query := `
-		SELECT id, session_id, turn_index, role, content_preview, tool_calls, files_touched,
+		SELECT id, session_id, turn_index, role, content_preview, content_cas_digest, tool_calls, files_touched,
 			has_error, error_type, error_message, resolution, tokens_used, timestamp, created_at
 		FROM session_turns
 		WHERE ` + strings.Join(conditions, " AND ") + `
@@ -1855,7 +1875,7 @@ func (s *Store) ValidateDimensions(ctx context.Context, expectedDims int) error 
 func (s *Store) validateDimensionsOnOpen(ctx context.Context) {
 	cfg, err := config.Load(ctx)
 	if err != nil {
-		log.Printf("[WARN] sessions: failed to load config for dimension validation: %v", err)
+		logger.Warn().Err(err).Msg("failed to load config for dimension validation")
 		return
 	}
 
@@ -1865,7 +1885,7 @@ func (s *Store) validateDimensionsOnOpen(ctx context.Context) {
 	}
 
 	if err := s.ValidateDimensions(ctx, expectedDims); err != nil {
-		log.Printf("[WARN] %v", err)
+		logger.Warn().Err(err).Msg("dimension validation warning")
 	}
 }
 
@@ -2046,12 +2066,12 @@ func boolToInt(b bool) int {
 func scanTurn(row scannable) (SessionTurn, error) {
 	var turn SessionTurn
 	var timestamp, createdAt sql.NullString
-	var contentPreview, toolCalls, filesTouched sql.NullString
+	var contentPreview, contentCASDigest, toolCalls, filesTouched sql.NullString
 	var errorType, errorMessage, resolution sql.NullString
 	var hasError int
 
 	err := row.Scan(
-		&turn.ID, &turn.SessionID, &turn.TurnIndex, &turn.Role, &contentPreview,
+		&turn.ID, &turn.SessionID, &turn.TurnIndex, &turn.Role, &contentPreview, &contentCASDigest,
 		&toolCalls, &filesTouched, &hasError, &errorType, &errorMessage,
 		&resolution, &turn.TokensUsed, &timestamp, &createdAt,
 	)
@@ -2066,6 +2086,9 @@ func scanTurn(row scannable) (SessionTurn, error) {
 
 	if contentPreview.Valid {
 		turn.ContentPreview = contentPreview.String
+	}
+	if contentCASDigest.Valid {
+		turn.ContentCASDigest = contentCASDigest.String
 	}
 	if errorType.Valid {
 		turn.ErrorType = errorType.String
@@ -2306,7 +2329,7 @@ CREATE INDEX IF NOT EXISTS idx_session_edges_workspace ON session_edges(workspac
 		if _, err := db.ExecContext(ctx, idx); err != nil {
 			// Ignore if index already exists
 			if !strings.Contains(err.Error(), "already exists") {
-				log.Printf("sessions: warning: failed to create lineage index: %v", err)
+				logger.Warn().Err(err).Msg("failed to create lineage index")
 			}
 		}
 	}
@@ -2388,7 +2411,7 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	}
 	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_chunk_summaries_range ON session_chunk_summaries(session_id, window_index, chunk_index_min, chunk_index_max)"); err != nil {
 		if !strings.Contains(err.Error(), "already exists") {
-			log.Printf("sessions: warning: failed to create chunk summaries range index: %v", err)
+			logger.Warn().Err(err).Msg("failed to create chunk summaries range index")
 		}
 	}
 
@@ -2404,7 +2427,7 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	}
 	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_content_hash ON sessions(content_hash)"); err != nil {
 		if !strings.Contains(err.Error(), "already exists") {
-			log.Printf("sessions: warning: failed to create content_hash index: %v", err)
+			logger.Warn().Err(err).Msg("failed to create content_hash index")
 		}
 	}
 
@@ -2420,7 +2443,36 @@ CREATE INDEX IF NOT EXISTS idx_context_windows_ended ON session_context_windows(
 	}
 	if _, err := db.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_sessions_pending_restore ON sessions(workspace_path, pending_restore_at) WHERE pending_restore_at IS NOT NULL"); err != nil {
 		if !strings.Contains(err.Error(), "already exists") {
-			log.Printf("sessions: warning: failed to create pending_restore index: %v", err)
+			logger.Warn().Err(err).Msg("failed to create pending_restore index")
+		}
+	}
+
+	// Add agent execution context columns (prompt, prompt_hash, llm_provider, llm_model)
+	for _, col := range []struct{ name, typ string }{
+		{"prompt", "TEXT"},
+		{"prompt_hash", "TEXT"},
+		{"llm_provider", "TEXT"},
+		{"llm_model", "TEXT"},
+	} {
+		var colCount int
+		row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = ?", col.name)
+		if err := row.Scan(&colCount); err == nil && colCount == 0 {
+			if _, err := db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE sessions ADD COLUMN %s %s", col.name, col.typ)); err != nil {
+				if !strings.Contains(err.Error(), "duplicate column") {
+					return fmt.Errorf("sessions: add %s column: %w", col.name, err)
+				}
+			}
+		}
+	}
+
+	// Add content_cas_digest column to session_turns for full content storage
+	var turnsCASDigestCount int
+	row = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('session_turns') WHERE name = 'content_cas_digest'")
+	if err := row.Scan(&turnsCASDigestCount); err == nil && turnsCASDigestCount == 0 {
+		if _, err := db.ExecContext(ctx, "ALTER TABLE session_turns ADD COLUMN content_cas_digest TEXT"); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return fmt.Errorf("sessions: add content_cas_digest column: %w", err)
+			}
 		}
 	}
 
@@ -2441,6 +2493,8 @@ func scanSession(row scannable) (Session, error) {
 	var parentSessionID, agentID, agentType, status sql.NullString
 	var keyQuestions sql.NullString
 	var contentHash sql.NullString
+// Nullable string fields for agent sessions
+	var prompt, promptHash, llmProvider, llmModel sql.NullString
 	// Nullable string fields that might be NULL in database
 	var projectName, gitBranch, claudeVersion, rawJSONLPath sql.NullString
 
@@ -2450,6 +2504,7 @@ func scanSession(row scannable) (Session, error) {
 		&tags, &keyFiles, &toolsPattern, &session.MessageCount, &session.UserTurns,
 		&session.ToolInvocations, &session.TotalTokens, &rawJSONLPath, &contentHash, &embedding, &embeddingModel,
 		&createdAt, &updatedAt, &parentSessionID, &agentID, &agentType, &status, &keyQuestions,
+		&prompt, &promptHash, &llmProvider, &llmModel,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -2554,6 +2609,20 @@ func scanSession(row scannable) (Session, error) {
 		session.Status = status.String
 	} else {
 		session.Status = StatusOK // default
+	}
+
+	// Agent execution context
+	if prompt.Valid {
+		session.Prompt = prompt.String
+	}
+	if promptHash.Valid {
+		session.PromptHash = promptHash.String
+	}
+	if llmProvider.Valid {
+		session.LLMProvider = llmProvider.String
+	}
+	if llmModel.Valid {
+		session.LLMModel = llmModel.String
 	}
 
 	return session, nil

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/hashutil"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillerr"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
@@ -29,6 +29,9 @@ import (
 )
 
 const commandName = "session/extract_learnings"
+
+// logger is the package-level observability logger.
+var logger *obs.Logger
 
 // Input defines the skill input parameters.
 type Input struct {
@@ -143,6 +146,9 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Initialize package logger
+	logger = obs.NewLogger(obs.WithLogCommand(commandName))
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
@@ -216,7 +222,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Persist learnings to memory store
 	persistedCount, err := persistLearnings(ctx, rc, session.ID, session.WorkspacePath, in.EpicID, llmResp)
 	if err != nil {
-		log.Printf("[WARN] failed to persist some learnings: %v", err)
+		logger.Warn("failed to persist some learnings", obs.Err(err))
 	}
 
 	output := Output{
@@ -821,7 +827,7 @@ func processWindowBatch(
 		// Extract learnings via LLM
 		resp, _, err := extractFromContent(ctx, providers, windowContent, maxTokens)
 		if err != nil {
-			log.Printf("[WARN] extract_learnings: LLM failed for window %d: %v", window.WindowIndex, err)
+			logger.Warn("LLM failed for window", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 			continue
 		}
 
@@ -1106,7 +1112,7 @@ func persistWindowLearnings(
 		Summary:   fmt.Sprintf("learnings extracted from window %d", window.WindowIndex),
 		SessionID: sessionID,
 	}); err != nil {
-		log.Printf("[WARN] extract_learnings: failed to save marker for window %d: %v", window.WindowIndex, err)
+		logger.Warn("failed to save marker", obs.Int("window_index", window.WindowIndex), obs.Err(err))
 	}
 	// Generate marker embedding for lookup
 	if embedder != nil {

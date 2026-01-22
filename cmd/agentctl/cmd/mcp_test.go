@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
 func TestGetArgs(t *testing.T) {
@@ -94,13 +95,14 @@ func TestExtractLibraryID(t *testing.T) {
 }
 
 func TestInitBackendConfigs(t *testing.T) {
-	// Set env for test
-	t.Setenv("TAVILY_API_KEY", "test-key")
-
 	// Reset backends
 	backends.configs = make(map[string]mcpServerConfig)
 
-	initBackendConfigs()
+	// Pass SearchSettings directly instead of using env vars
+	searchSettings := config.SearchSettings{
+		TavilyAPIKey: "test-key",
+	}
+	initBackendConfigs(searchSettings)
 
 	// Check tavily was configured
 	if cfg, ok := backends.configs["tavily"]; !ok {

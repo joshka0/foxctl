@@ -226,7 +226,8 @@ func (r *Registry) agentAsk(ctx context.Context, args map[string]any) (*models.C
 func (r *Registry) waitForAgentReply(ctx context.Context, store interface {
 	List(ctx context.Context, agentNS string, limit int) ([]agent.Message, error)
 	Ack(ctx context.Context, messageID string) error
-}, askID string) (map[string]any, error) {
+}, askID string,
+) (map[string]any, error) {
 	deadline := time.Now().Add(defaultAgentAskTimeout)
 	ticker := time.NewTicker(agentAskPollInterval)
 	defer ticker.Stop()
@@ -285,4 +286,3 @@ func (r *Registry) waitForAgentReply(ctx context.Context, store interface {
 		}
 	}
 }
-

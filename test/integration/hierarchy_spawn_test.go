@@ -45,7 +45,7 @@ func TestHierarchySpawn(t *testing.T) {
 	defer cancel()
 
 	// Spawn the overseer agent
-	session, err := overseer.SpawnOverseerAgent(ctx, "test-epic")
+	session, err := overseer.SpawnOverseerAgent(ctx, "test-epic", "Coordinate a test hierarchy")
 	if err != nil {
 		t.Fatalf("Failed to spawn overseer: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestOverseerConcurrencyLimit(t *testing.T) {
 	ctx := context.Background()
 
 	// Spawn overseer (counts as 1)
-	session, err := overseer.SpawnOverseerAgent(ctx, "test-epic")
+	session, err := overseer.SpawnOverseerAgent(ctx, "test-epic", "Test concurrency limits")
 	if err != nil {
 		t.Fatalf("Failed to spawn overseer: %v", err)
 	}

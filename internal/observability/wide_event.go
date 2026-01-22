@@ -71,6 +71,7 @@ const (
 	ComponentHook  = "hook"
 	ComponentSkill = "skill"
 	ComponentJob   = "job"
+	ComponentAgent = "agent"
 )
 
 // Operation constants for common operations.
@@ -83,4 +84,12 @@ const (
 	OpHTTPRequest  = "http.request"
 	OpSessionStart = "session.start"
 	OpSessionEnd   = "session.end"
+
+	// Agent orchestration operations
+	OpAgentSpawn     = "agent.spawn"
+	OpAgentWait      = "agent.wait"
+	OpAgentComplete  = "agent.complete"
+	OpAgentKill      = "agent.kill"
+	OpAgentIteration = "agent.iteration"
+	OpAgentTool      = "agent.tool"
 )

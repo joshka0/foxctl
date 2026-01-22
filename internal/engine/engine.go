@@ -92,6 +92,9 @@ const (
 
 	// StopReasonMaxIterations means the iteration limit was reached.
 	StopReasonMaxIterations StopReason = "max_iterations"
+
+	// StopReasonContextBudget means the context token budget was exceeded.
+	StopReasonContextBudget StopReason = "context_budget"
 )
 
 // Message is a conversation message.

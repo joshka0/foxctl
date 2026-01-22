@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -15,6 +16,9 @@ import (
 )
 
 const skillName = "hooks/context_drain"
+
+// logger is the package-level observability logger.
+var logger *obs.Logger
 
 // Input for the context_drain skill.
 type Input struct {
@@ -35,6 +39,9 @@ func main() {
 }
 
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+	// Initialize package logger
+	logger = obs.NewLogger(obs.WithLogCommand(skillName))
+
 	start := time.Now()
 
 	// Validate required fields
@@ -88,7 +95,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 		pruned, err = store.PruneExpired(ctx, 24*time.Hour)
 		if err != nil {
 			// Non-fatal, just log
-			fmt.Printf("warn: prune failed: %v\n", err)
+			logger.Warn("prune failed", obs.Err(err))
 		}
 	}
 

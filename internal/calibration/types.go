@@ -72,11 +72,11 @@ type WorkingPattern struct {
 
 // CognitionProfile captures how the user thinks and processes information.
 type CognitionProfile struct {
-	MentalModel     string   `json:"mental_model"`      // visual|sequential|hierarchical|associative
-	LearningStyle   string   `json:"learning_style"`    // examples-first|theory-first|hands-on|reading
-	ProblemApproach string   `json:"problem_approach"`  // top-down|bottom-up|middle-out
-	DecisionStyle   string   `json:"decision_style"`    // analytical|intuitive|collaborative
-	Motivations     []string `json:"motivations"`       // speed|correctness|elegance|learning|pragmatism
+	MentalModel     string   `json:"mental_model"`     // visual|sequential|hierarchical|associative
+	LearningStyle   string   `json:"learning_style"`   // examples-first|theory-first|hands-on|reading
+	ProblemApproach string   `json:"problem_approach"` // top-down|bottom-up|middle-out
+	DecisionStyle   string   `json:"decision_style"`   // analytical|intuitive|collaborative
+	Motivations     []string `json:"motivations"`      // speed|correctness|elegance|learning|pragmatism
 	Confidence      float32  `json:"confidence"`
 	Signals         []Signal `json:"signals,omitempty"`
 }
@@ -91,8 +91,8 @@ type ExpertiseMap struct {
 
 // Domain represents an area of expertise or learning.
 type Domain struct {
-	Name        string    `json:"name"`         // e.g., "Go concurrency", "React hooks"
-	Level       string    `json:"level"`        // expert|proficient|familiar|learning|novice
+	Name        string    `json:"name"`  // e.g., "Go concurrency", "React hooks"
+	Level       string    `json:"level"` // expert|proficient|familiar|learning|novice
 	LastSeen    time.Time `json:"last_seen"`
 	SignalCount int       `json:"signal_count"`
 }
@@ -118,7 +118,7 @@ type Snapshot struct {
 
 // PreferenceChange records a single preference change.
 type PreferenceChange struct {
-	Dimension     string `json:"dimension"`      // e.g., communication.verbosity
+	Dimension     string `json:"dimension"` // e.g., communication.verbosity
 	PreviousValue string `json:"previous_value"`
 	NewValue      string `json:"new_value"`
 	Reason        string `json:"reason,omitempty"` // Evidence for the change

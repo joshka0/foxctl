@@ -17,10 +17,10 @@ import (
 // Executor manages companion actors and their lifecycle.
 // It provides a simple API for spawning companion agents that listen to mailboxes.
 type Executor struct {
-	contextStore contextvar.Store
-	boardStore   blackboard.BoardStore
+	contextStore  contextvar.Store
+	boardStore    blackboard.BoardStore
 	serviceConfig ServiceConfig
-	logger       zerolog.Logger
+	logger        zerolog.Logger
 
 	mu       sync.RWMutex
 	actors   map[string]*CompanionActor
@@ -249,11 +249,11 @@ func (e *Executor) DirectMessage(ctx context.Context, namespace, message string)
 
 // ActorInfo contains information about a companion actor.
 type ActorInfo struct {
-	Namespace   string       `json:"namespace"`
-	Name        string       `json:"name"`
-	State       actor.State  `json:"state"`
-	WorkspaceID string       `json:"workspace_id,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
+	Namespace   string      `json:"namespace"`
+	Name        string      `json:"name"`
+	State       actor.State `json:"state"`
+	WorkspaceID string      `json:"workspace_id,omitempty"`
+	CreatedAt   time.Time   `json:"created_at"`
 }
 
 // Info returns information about all companion actors.

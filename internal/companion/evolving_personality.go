@@ -14,9 +14,9 @@ import (
 type PersonalityDimension struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
-	Value       float64 `json:"value"`       // 0.0 to 1.0
-	MinLabel    string  `json:"min_label"`   // e.g., "formal"
-	MaxLabel    string  `json:"max_label"`   // e.g., "casual"
+	Value       float64 `json:"value"`     // 0.0 to 1.0
+	MinLabel    string  `json:"min_label"` // e.g., "formal"
+	MaxLabel    string  `json:"max_label"` // e.g., "casual"
 }
 
 // DefaultPersonalityDimensions returns the default personality configuration.
@@ -162,7 +162,7 @@ func (e *EvolvingPersonality) ApplyFeedback(ctx context.Context, feedback Person
 						delta = 0.1 // Default subtle adjustment
 					}
 					profile.Dimensions[i].Value = clamp(profile.Dimensions[i].Value-delta, 0, 1)
-				// "note" and other directions: do not modify dimension value
+					// "note" and other directions: do not modify dimension value
 				}
 				break
 			}

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/observability"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -29,7 +31,7 @@ type LLMChatEngine struct {
 	client      *http.Client
 	toolRunner  *ToolRunner
 	rlmExecutor *RLMToolExecutor // For tracking RLM context queries
-	hookContext HookContext
+	hookContext HookContext      // Context for hook dispatch
 	logger      zerolog.Logger
 }
 
@@ -49,6 +51,11 @@ type LLMChatConfig struct {
 
 	// MaxIterations limits the tool call loop.
 	MaxIterations int
+
+	// MaxContextTokens limits context size before stopping. When prompt tokens
+	// exceed this limit, the engine stops with StopReasonContextBudget.
+	// Set to 0 to disable (default).
+	MaxContextTokens int
 
 	// Timeout is the HTTP request timeout.
 	Timeout time.Duration
@@ -99,12 +106,20 @@ func DefaultLLMChatConfig() LLMChatConfig {
 // NewLLMChatEngine creates a new LLM chat engine.
 // Auto-detects provider from environment if not specified.
 func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
-	// Auto-detect provider and API key
-	if cfg.APIKey == "" {
+	// Resolve API key: if provider is specified, get key for that provider
+	if cfg.APIKey == "" && cfg.Provider != "" {
+		cfg.APIKey = apiKeyForProvider(cfg.Provider)
+		// Error if explicit provider but no key found - don't auto-detect
+		if cfg.APIKey == "" {
+			return nil, fmt.Errorf("no API key configured for provider %q (set the appropriate env var)", cfg.Provider)
+		}
+	}
+	// Fall back to auto-detect only if no provider specified
+	if cfg.APIKey == "" && cfg.Provider == "" {
 		cfg.APIKey, cfg.Provider = detectProvider()
 	}
 	if cfg.APIKey == "" {
-		return nil, fmt.Errorf("no API key configured (set OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY)")
+		return nil, fmt.Errorf("no API key configured (set CEREBRAS_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY)")
 	}
 
 	// Set base URL based on provider
@@ -114,7 +129,7 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 
 	// Set default model based on provider
 	if cfg.Model == "" {
-		cfg.Model = defaultModelForProvider(cfg.Provider)
+		cfg.Model = llmproviders.DefaultModelForProvider(cfg.Provider)
 	}
 
 	// Apply defaults
@@ -148,18 +163,26 @@ func (e *LLMChatEngine) SetRLMExecutor(executor *RLMToolExecutor) {
 	e.rlmExecutor = executor
 }
 
+// SetHookContext sets the hook context for dispatch.
+func (e *LLMChatEngine) SetHookContext(ctx HookContext) {
+	e.hookContext = ctx
+}
+
 // IsStatelessMode returns true if the engine is in RLM stateless mode.
 func (e *LLMChatEngine) IsStatelessMode() bool {
 	return e.config.StatelessMode
 }
 
-// SetHookContext sets the context used for hook dispatch.
-func (e *LLMChatEngine) SetHookContext(ctx HookContext) {
-	e.hookContext = ctx
-}
-
 // Run implements AgentEngine.
 func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {
+	e.logger.Debug().
+		Str("provider", e.config.Provider).
+		Str("model", e.config.Model).
+		Bool("stateless", e.config.StatelessMode).
+		Int("input_messages", len(input.Messages)).
+		Int("input_tools", len(input.Tools)).
+		Msg("LLMChatEngine.Run started")
+
 	// Reset RLM query counter at start of turn
 	if e.rlmExecutor != nil {
 		e.rlmExecutor.ResetQueryCount()
@@ -173,6 +196,8 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 	iteration := 0
 
 	for {
+		iterStart := time.Now()
+
 		// Check iteration limit
 		iteration++
 		if iteration > e.config.MaxIterations {
@@ -190,14 +215,77 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 
 		// Call LLM
 		resp, err := e.callLLM(ctx, messages, tools)
+		iterDuration := time.Since(iterStart)
 		if err != nil {
 			output.StopReason = StopReasonError
 			output.Error = err.Error()
 			return output, nil
 		}
 
+		// Log response details with context tracking
+		if len(resp.Choices) > 0 {
+			finishReason := resp.Choices[0].FinishReason
+			promptTokens := resp.Usage.PromptTokens
+			completionTokens := resp.Usage.CompletionTokens
+			totalTokens := promptTokens + completionTokens
+
+			// Per-iteration context tracking (stderr for visibility)
+			fmt.Fprintf(os.Stderr, "[CONTEXT] iter=%d msgs=%d prompt_tokens=%d completion_tokens=%d total=%d finish=%s\n",
+				iteration, len(messages), promptTokens, completionTokens, totalTokens, finishReason)
+
+			// Emit structured wide event for observability
+			observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+				WithComponent(observability.ComponentAgent).
+				WithSession(e.hookContext.SessionID, e.hookContext.ActorID).
+				WithWorkspace(e.hookContext.WorkspaceID).
+				WithData("iteration", iteration).
+				WithData("message_count", len(messages)).
+				WithData("prompt_tokens", promptTokens).
+				WithData("completion_tokens", completionTokens).
+				WithData("total_tokens", totalTokens).
+				WithData("finish_reason", finishReason).
+				WithData("tool_calls", len(resp.Choices[0].Message.ToolCalls)).
+				WithData("provider", e.config.Provider).
+				WithData("model", e.config.Model).
+				Success(iterDuration))
+
+			e.logger.Debug().
+				Int("tools_count", len(tools)).
+				Int("tool_calls", len(resp.Choices[0].Message.ToolCalls)).
+				Int("content_len", len(resp.Choices[0].Message.Content)).
+				Str("finish_reason", finishReason).
+				Int("prompt_tokens", promptTokens).
+				Int("completion_tokens", completionTokens).
+				Msg("LLM response received")
+		} else {
+			e.logger.Warn().Msg("LLM returned no choices")
+		}
+
 		// Track tokens
 		output.Tokens.Add(resp.Usage.PromptTokens, resp.Usage.CompletionTokens)
+
+		// Check context budget (stop before next iteration if exceeded)
+		if e.config.MaxContextTokens > 0 && resp.Usage.PromptTokens > e.config.MaxContextTokens {
+			fmt.Fprintf(os.Stderr, "[CONTEXT] budget exceeded: %d > %d limit, stopping\n",
+				resp.Usage.PromptTokens, e.config.MaxContextTokens)
+
+			observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+				WithComponent(observability.ComponentAgent).
+				WithSession(e.hookContext.SessionID, e.hookContext.ActorID).
+				WithData("iteration", iteration).
+				WithData("budget_exceeded", true).
+				WithData("prompt_tokens", resp.Usage.PromptTokens).
+				WithData("budget_limit", e.config.MaxContextTokens).
+				Canceled(iterDuration))
+
+			output.StopReason = StopReasonContextBudget
+			output.Error = fmt.Sprintf("context budget exceeded (%d tokens > %d limit)", resp.Usage.PromptTokens, e.config.MaxContextTokens)
+			// Still capture any assistant text from this response
+			if len(resp.Choices) > 0 && resp.Choices[0].Message.Content != "" {
+				output.AssistantText = resp.Choices[0].Message.Content
+			}
+			return output, nil
+		}
 
 		// Check for tool calls
 		if len(resp.Choices) == 0 {
@@ -586,6 +674,23 @@ func (e *LLMChatEngine) dispatchPostToolUse(ctx context.Context, call ToolCall, 
 
 // Helper functions
 
+// apiKeyForProvider returns the API key for a specific provider.
+// Only includes providers that have full support (baseURL, defaultModel, detectProvider).
+func apiKeyForProvider(provider string) string {
+	switch provider {
+	case "cerebras":
+		return os.Getenv("CEREBRAS_API_KEY")
+	case "openrouter":
+		return os.Getenv("OPENROUTER_API_KEY")
+	case "groq":
+		return os.Getenv("GROQ_API_KEY")
+	case "openai":
+		return os.Getenv("OPENAI_API_KEY")
+	default:
+		return ""
+	}
+}
+
 func detectProvider() (apiKey, provider string) {
 	if key := os.Getenv("CEREBRAS_API_KEY"); key != "" {
 		return key, "cerebras"
@@ -612,25 +717,6 @@ func baseURLForProvider(provider string) string {
 		return "https://api.groq.com/openai/v1"
 	default:
 		return "https://api.openai.com/v1"
-	}
-}
-
-func defaultModelForProvider(provider string) string {
-	switch provider {
-	case "cerebras":
-		if model := os.Getenv("CEREBRAS_MODEL"); model != "" {
-			return model
-		}
-		return "zai-glm-4.7"
-	case "openrouter":
-		if model := os.Getenv("OPENROUTER_MODEL"); model != "" {
-			return model
-		}
-		return "mistralai/devstral-2512:free"
-	case "groq":
-		return "llama-3.3-70b-versatile"
-	default:
-		return "gpt-4o-mini"
 	}
 }
 

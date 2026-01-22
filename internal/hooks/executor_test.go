@@ -47,15 +47,19 @@ func (m *MockContextBuffer) Enqueue(ctx context.Context, params contextbuffer.En
 	}
 	return &contextbuffer.Entry{ID: "test-entry-id", Source: params.Source, Text: params.Text}, nil
 }
+
 func (m *MockContextBuffer) Drain(ctx context.Context, params contextbuffer.DrainParams) (*contextbuffer.DrainResult, error) {
 	return &contextbuffer.DrainResult{}, nil
 }
+
 func (m *MockContextBuffer) Peek(ctx context.Context, params contextbuffer.DrainParams) (*contextbuffer.DrainResult, error) {
 	return &contextbuffer.DrainResult{}, nil
 }
+
 func (m *MockContextBuffer) PruneExpired(ctx context.Context, maxConsumedAge time.Duration) (int, error) {
 	return 0, nil
 }
+
 func (m *MockContextBuffer) Count(ctx context.Context, workspaceID, sessionID string) (int, error) {
 	return 0, nil
 }
@@ -75,13 +79,18 @@ func (m *MockMailboxStore) Send(ctx context.Context, msg agent.Message) error {
 	}
 	return nil
 }
+
 func (m *MockMailboxStore) Poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int) ([]agent.Message, error) {
 	return nil, nil
 }
-func (m *MockMailboxStore) Ack(ctx context.Context, messageID string) error   { return nil }
+func (m *MockMailboxStore) PollByTypes(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int, types []agent.MessageType) ([]agent.Message, error) {
+	return nil, nil
+}
+func (m *MockMailboxStore) Ack(ctx context.Context, messageID string) error { return nil }
 func (m *MockMailboxStore) Nack(ctx context.Context, messageID string, visibilityTimeout time.Duration) error {
 	return nil
 }
+
 func (m *MockMailboxStore) List(ctx context.Context, agentNS string, limit int) ([]agent.Message, error) {
 	return nil, nil
 }
@@ -89,6 +98,7 @@ func (m *MockMailboxStore) Delete(ctx context.Context, messageID string) error {
 func (m *MockMailboxStore) ListBySession(ctx context.Context, sessionID string, limit int) ([]agent.Message, error) {
 	return nil, nil
 }
+
 func (m *MockMailboxStore) ListByWorkspace(ctx context.Context, workspace string, limit int) ([]agent.Message, error) {
 	return nil, nil
 }
@@ -110,12 +120,15 @@ func (m *MockBoardStore) SendMessage(ctx context.Context, msg *agent.BoardMessag
 	}
 	return nil
 }
+
 func (m *MockBoardStore) Inbox(ctx context.Context, filter agent.InboxFilter) ([]agent.BoardMessage, error) {
 	return nil, nil
 }
+
 func (m *MockBoardStore) MarkSurfaced(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
 	return 0, nil
 }
+
 func (m *MockBoardStore) MarkRead(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
 	m.ClaimedIDs = append(m.ClaimedIDs, messageIDs...)
 	if m.MarkReadFn != nil {
@@ -123,9 +136,11 @@ func (m *MockBoardStore) MarkRead(ctx context.Context, workspaceID, actorID stri
 	}
 	return len(messageIDs), nil
 }
+
 func (m *MockBoardStore) AckMessages(ctx context.Context, workspaceID, actorID string, messageIDs []string) (int, error) {
 	return 0, nil
 }
+
 func (m *MockBoardStore) CountMessagesByTask(ctx context.Context, workspaceID, taskID string) (admin, overseer, total int, err error) {
 	return 0, 0, 0, nil
 }
@@ -133,12 +148,15 @@ func (m *MockBoardStore) Reserve(ctx context.Context, res *agent.FileReservation
 func (m *MockBoardStore) CheckConflicts(ctx context.Context, workspaceID string, paths []string, holder string, mode agent.ReservationMode) ([]agent.ReservationConflict, error) {
 	return nil, nil
 }
+
 func (m *MockBoardStore) Release(ctx context.Context, workspaceID, actorID string, paths []string) (int, error) {
 	return 0, nil
 }
+
 func (m *MockBoardStore) ReleaseByID(ctx context.Context, reservationIDs []string) (int, error) {
 	return 0, nil
 }
+
 func (m *MockBoardStore) ListReservations(ctx context.Context, workspaceID string) ([]agent.FileReservation, error) {
 	return nil, nil
 }

@@ -353,7 +353,6 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 	return indexer, cleanup, nil
 }
 
-
 func writeSemanticResult(cmd *cobra.Command, command string, result *semantic.JobResult, workspace string, start time.Time) error {
 	data := map[string]any{
 		"summary":  result.Summary,

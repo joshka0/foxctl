@@ -11,6 +11,7 @@ import (
 	agenttypes "github.com/jkatigb/agentctl/internal/agent/types"
 	agentdomain "github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 )
 
 func TestAgentActorConfig(t *testing.T) {
@@ -46,18 +47,18 @@ func TestDefaultModelForProvider(t *testing.T) {
 	}{
 		{"gemini", "gemini-2.0-flash"},
 		{"", "gemini-2.0-flash"},
-		{"openai", "gpt-4.1-mini"},
-		{"anthropic", "claude-haiku-4-5"},
-		{"groq", "llama-3.1-70b-versatile"},
-		{"openrouter", "anthropic/claude-haiku-4-5"},
+		{"openai", "gpt-4o-mini"},
+		{"anthropic", "claude-3-5-haiku-20241022"},
+		{"groq", "llama-3.3-70b-versatile"},
+		{"openrouter", "mistralai/devstral-2512:free"},
 		{"unknown", "gemini-2.0-flash"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.provider, func(t *testing.T) {
-			got := defaultModelForProvider(tt.provider)
+			got := llmproviders.DefaultModelForProvider(tt.provider)
 			if got != tt.want {
-				t.Errorf("defaultModelForProvider(%q) = %q, want %q", tt.provider, got, tt.want)
+				t.Errorf("DefaultModelForProvider(%q) = %q, want %q", tt.provider, got, tt.want)
 			}
 		})
 	}

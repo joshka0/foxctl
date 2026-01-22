@@ -17,7 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
 )
 
-func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, companionMemory *companion.ConversationMemory, agentID string) error {
+func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, companionSvc *companion.Service, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, companionMemory *companion.ConversationMemory, agentID string) error {
 	// 1. Parse payload envelope
 	var env struct {
 		Data agent.AskData `json:"data"`
@@ -27,129 +27,132 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 	}
 	askData := env.Data
 
-	// 2. Derive conversation ID - use explicit ID if provided, else composite key
-	// Explicit ConversationID enables memory continuity across CLI/API calls
+	// 2. Derive conversation ID - use explicit ID if provided, else use agentID
+	// This ensures memory continuity across all callers (CLI, API, etc.)
 	conversationID := askData.ConversationID
 	if conversationID == "" {
-		conversationID = fmt.Sprintf("%s:%s", agentID, msg.FromNS)
+		conversationID = agentID
 	}
 
-	// 3. Inject memory context if available
-	var memoryContext string
-	if companionMemory != nil {
-		memCtx, err := companionMemory.GetContext(ctx, conversationID)
-		if err != nil {
-			logger.Warn().Err(err).Msg("failed to get memory context")
-		} else if memCtx != "" {
-			memoryContext = memCtx
-			logger.Debug().Int("context_len", len(memCtx)).Msg("injected memory context")
-		}
+	var result string
+	var durationMS int64
+	var err error
 
-		// Store user turn BEFORE processing (valid context regardless of outcome)
-		if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
-			ConversationID: conversationID,
-			Role:           "user",
-			Content:        askData.Question,
-		}); err != nil {
-			logger.Warn().Err(err).Msg("failed to store user turn")
-		}
-	}
-
-	// 4. Build prompt from ask with memory context
-	prompt := fmt.Sprintf("Question: %s\nContext: %v", askData.Question, askData.Context)
-	if memoryContext != "" {
-		prompt = fmt.Sprintf("## Conversation Memory\n%s\n\n---\n\n%s", memoryContext, prompt)
-	}
-
-	// 4a. Inject tool hints from optimization (if enabled)
-	var hintsPrompt string
-	if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
-		hints, err := optCtx.Collector.GetHints(ctx, optCtx.AgentRole, askData.Question)
-		if err == nil && len(hints) > 0 {
-			hintsPrompt = optCtx.Collector.FormatHintsForPrompt(hints)
-			logger.Debug().Int("hint_count", len(hints)).Msg("injected tool hints from patterns")
-		}
-	}
-
-	// 5. Execute DSPy turn
-	// dspy-go agents.Agent.Execute takes map[string]any
-	taskPrompt := prompt
-	if hintsPrompt != "" {
-		taskPrompt = prompt + "\n" + hintsPrompt
-	}
-	input := map[string]any{
-		"task": taskPrompt,
-	}
-
-	// Apply turn timeout from policy
 	timeout := 10 * time.Minute // default
 	if policy.Timeout != "" {
 		if d, err := time.ParseDuration(policy.Timeout); err == nil {
 			timeout = d
 		}
 	}
-	turnCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 
-	startTime := time.Now()
-	resultMap, err := dspyAgent.Execute(turnCtx, input)
-	durationMS := time.Since(startTime).Milliseconds()
+	// Use companion service (LLMChatEngine) if available, else fall back to DSPy
+	if companionSvc != nil {
+		// Use LLMChatEngine via companion.Service
+		logger.Debug().Str("conversation_id", conversationID).Msg("using companion service for ask")
 
-	// Record pattern for optimization (success or failure)
-	if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
-		success := err == nil
-		// Note: In a full implementation, we'd extract actual tool names from the execution trace
-		// For now, record a generic pattern based on the task context
-		if recordErr := optCtx.Collector.RecordToolCall(ctx, optCtx.AgentRole, askData.Question, "dspy_ask", success, durationMS); recordErr != nil {
-			logger.Warn().Err(recordErr).Msg("failed to record optimization pattern")
-		}
-	}
+		turnCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
 
-	if err != nil {
-		return fmt.Errorf("dspy execution failed: %w", err)
-	}
-
-	// Extract result from ReAct output
-	// The ReAct module returns: thought, action, observation, and our custom result field
-	var result string
-	if resultMap != nil {
-		// Priority order: result (from our signature), answer, thought (agent's reasoning)
-		if r, ok := resultMap["result"].(string); ok && r != "" {
-			result = r
-		} else if r, ok := resultMap["answer"].(string); ok && r != "" {
-			result = r
-		} else if r, ok := resultMap["output"].(string); ok && r != "" {
-			result = r
-		} else if r, ok := resultMap["thought"].(string); ok && r != "" {
-			// Use thought field as fallback - this contains the agent's reasoning
-			result = r
-		} else {
-			// Last resort: format the map but exclude internal ReAct fields
-			cleaned := make(map[string]any)
-			for k, v := range resultMap {
-				// Skip internal ReAct control fields
-				if k == "action" || k == "observation" || k == "conversation_context" {
-					continue
-				}
-				cleaned[k] = v
-			}
-			if len(cleaned) > 0 {
-				result = fmt.Sprintf("%v", cleaned)
-			} else {
-				result = "Task completed"
-			}
-		}
-	}
-
-	// Store assistant turn on success (user turn was already stored)
-	if companionMemory != nil && result != "" {
-		if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
+		startTime := time.Now()
+		resp, chatErr := companionSvc.Chat(turnCtx, companion.ChatRequest{
 			ConversationID: conversationID,
-			Role:           "assistant",
-			Content:        result,
-		}); err != nil {
-			logger.Warn().Err(err).Msg("failed to store assistant turn")
+			Message:        askData.Question,
+			Context:        askData.Context,
+		})
+		durationMS = time.Since(startTime).Milliseconds()
+
+		if chatErr != nil {
+			return fmt.Errorf("companion chat failed: %w", chatErr)
 		}
+		result = resp.Response
+
+		logger.Debug().
+			Int("context_queries", resp.ContextQueries).
+			Int64("duration_ms", durationMS).
+			Msg("companion chat completed")
+	} else if dspyAgent != nil {
+		// Fall back to DSPy ReAct
+		// 3. Inject memory context if available
+		var memoryContext string
+		if companionMemory != nil {
+			memCtx, err := companionMemory.GetContext(ctx, conversationID)
+			if err != nil {
+				logger.Warn().Err(err).Msg("failed to get memory context")
+			} else if memCtx != "" {
+				memoryContext = memCtx
+				logger.Debug().Int("context_len", len(memCtx)).Msg("injected memory context")
+			}
+
+			// Store user turn BEFORE processing (valid context regardless of outcome)
+			if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
+				ConversationID: conversationID,
+				Role:           "user",
+				Content:        askData.Question,
+			}); err != nil {
+				logger.Warn().Err(err).Msg("failed to store user turn")
+			}
+		}
+
+		// 4. Build prompt from ask with memory context
+		prompt := fmt.Sprintf("Question: %s\nContext: %v", askData.Question, askData.Context)
+		if memoryContext != "" {
+			prompt = fmt.Sprintf("## Conversation Memory\n%s\n\n---\n\n%s", memoryContext, prompt)
+		}
+
+		// 4a. Inject tool hints from optimization (if enabled)
+		var hintsPrompt string
+		if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
+			hints, err := optCtx.Collector.GetHints(ctx, optCtx.AgentRole, askData.Question)
+			if err == nil && len(hints) > 0 {
+				hintsPrompt = optCtx.Collector.FormatHintsForPrompt(hints)
+				logger.Debug().Int("hint_count", len(hints)).Msg("injected tool hints from patterns")
+			}
+		}
+
+		// 5. Execute DSPy turn
+		taskPrompt := prompt
+		if hintsPrompt != "" {
+			taskPrompt = prompt + "\n" + hintsPrompt
+		}
+		input := map[string]any{
+			"task": taskPrompt,
+		}
+
+		// Apply turn timeout from policy
+		turnCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		startTime := time.Now()
+		resultMap, execErr := dspyAgent.Execute(turnCtx, input)
+		durationMS = time.Since(startTime).Milliseconds()
+
+		// Record pattern for optimization (success or failure)
+		if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
+			success := execErr == nil
+			if recordErr := optCtx.Collector.RecordToolCall(ctx, optCtx.AgentRole, askData.Question, "dspy_ask", success, durationMS); recordErr != nil {
+				logger.Warn().Err(recordErr).Msg("failed to record optimization pattern")
+			}
+		}
+
+		if execErr != nil {
+			return fmt.Errorf("dspy execution failed: %w", execErr)
+		}
+
+		// Extract result from ReAct output
+		result = extractResult(resultMap)
+
+		// Store assistant turn on success (user turn was already stored)
+		if companionMemory != nil && result != "" {
+			if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
+				ConversationID: conversationID,
+				Role:           "assistant",
+				Content:        result,
+			}); err != nil {
+				logger.Warn().Err(err).Msg("failed to store assistant turn")
+			}
+		}
+	} else {
+		return fmt.Errorf("no agent engine available (neither companion service nor dspy agent)")
 	}
 
 	// 6. Build reply payload
@@ -163,7 +166,7 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 		return fmt.Errorf("marshal reply envelope: %w", err)
 	}
 
-	// 5. Send reply with correlation
+	// 7. Send reply with correlation
 	replyMsg := agent.Message{
 		ID:        ulid.Make().String(),
 		FromNS:    msg.ToNS,   // we are the sender now
@@ -178,7 +181,7 @@ func handleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 	return mailboxStore.Send(ctx, replyMsg)
 }
 
-func handleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, policy agent.Policy, optCtx *OptimizationContext) error {
+func handleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, companionSvc *companion.Service, policy agent.Policy, optCtx *OptimizationContext, agentID string) error {
 	var env struct {
 		Data agent.CmdData `json:"data"`
 	}
@@ -187,15 +190,28 @@ func handleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 	}
 	cmdData := env.Data
 
+	timeout := 10 * time.Minute // default
+	if policy.Timeout != "" {
+		if d, err := time.ParseDuration(policy.Timeout); err == nil {
+			timeout = d
+		}
+	}
+
+	conversationID := agentID
+	if conversationID == "" {
+		conversationID = msg.ToNS
+	}
+
 	switch cmdData.Action {
 	case "run_skill":
 		// Invoke skill via runner (future)
 		return fmt.Errorf("run_skill not yet implemented")
 	case "run_turn", "do_work":
-		// Execute DSPy turn with cmdData.Args as context
 		prompt := fmt.Sprintf("Command: %s\nArgs: %v", cmdData.Action, cmdData.Args)
+		if cmdData.Skill != "" {
+			prompt = fmt.Sprintf("Command: %s\nSkill: %s\nArgs: %v", cmdData.Action, cmdData.Skill, cmdData.Args)
+		}
 
-		// Inject tool hints from optimization (if enabled)
 		var hintsPrompt string
 		if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
 			hints, err := optCtx.Collector.GetHints(ctx, optCtx.AgentRole, prompt)
@@ -209,17 +225,27 @@ func handleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 		if hintsPrompt != "" {
 			taskPrompt = prompt + "\n" + hintsPrompt
 		}
+
+		if companionSvc != nil {
+			turnCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+
+			if _, chatErr := companionSvc.Chat(turnCtx, companion.ChatRequest{
+				ConversationID: conversationID,
+				Message:        taskPrompt,
+			}); chatErr != nil {
+				return fmt.Errorf("companion chat failed: %w", chatErr)
+			}
+			return nil
+		}
+		if dspyAgent == nil {
+			return fmt.Errorf("no agent engine available")
+		}
+
 		input := map[string]any{
 			"task": taskPrompt,
 		}
 
-		// Apply turn timeout from policy
-		timeout := 10 * time.Minute // default
-		if policy.Timeout != "" {
-			if d, err := time.ParseDuration(policy.Timeout); err == nil {
-				timeout = d
-			}
-		}
 		turnCtx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
@@ -227,7 +253,6 @@ func handleCmd(ctx context.Context, logger zerolog.Logger, msg agent.Message, ds
 		_, err := dspyAgent.Execute(turnCtx, input)
 		durationMS := time.Since(startTime).Milliseconds()
 
-		// Record pattern for optimization (success or failure)
 		if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
 			success := err == nil
 			if recordErr := optCtx.Collector.RecordToolCall(ctx, optCtx.AgentRole, prompt, "dspy_cmd", success, durationMS); recordErr != nil {
@@ -271,8 +296,8 @@ func backoffDuration(attempt int) time.Duration {
 }
 
 // handleConsoleAsk handles console.ask messages from interactive console sessions.
-// It executes the prompt via DSPy and sends console.reply with the response.
-func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, cancelCtx *CancelContext, companionMemory *companion.ConversationMemory, agentID string) error {
+// It executes the prompt via companion service or DSPy and sends console.reply with the response.
+func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Message, dspyAgent agents.Agent, companionSvc *companion.Service, mailboxStore mailbox.Store, policy agent.Policy, optCtx *OptimizationContext, cancelCtx *CancelContext, companionMemory *companion.ConversationMemory, agentID string) error {
 	// 1. Parse payload envelope
 	var env struct {
 		Data agent.ConsoleAskData `json:"data"`
@@ -289,37 +314,15 @@ func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Mess
 
 	logger.Info().Msg("handling console.ask")
 
-	// 2. Derive conversation ID using composite key (agentID:consoleID) for proper scoping
-	// For console sessions, use consoleID as the channel identifier
-	conversationID := fmt.Sprintf("%s:%s", agentID, askData.ConsoleID)
+	// 2. Derive conversation ID - use agentID for memory continuity
+	// Console sessions share memory with the agent by default
+	conversationID := agentID
 
-	// 3. Inject memory context if available
-	var memoryContext string
-	if companionMemory != nil {
-		memCtx, err := companionMemory.GetContext(ctx, conversationID)
-		if err != nil {
-			logger.Warn().Err(err).Msg("failed to get memory context")
-		} else if memCtx != "" {
-			memoryContext = memCtx
-			logger.Debug().Int("context_len", len(memCtx)).Msg("injected memory context")
-		}
-
-		// Store user turn BEFORE processing (valid context regardless of outcome)
-		if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
-			ConversationID: conversationID,
-			Role:           "user",
-			Content:        askData.Prompt,
-		}); err != nil {
-			logger.Warn().Err(err).Msg("failed to store user turn")
-		}
-	}
-
-	// 4. Create cancellable context
+	// 3. Create cancellable context
 	var execCtx context.Context
 	var cancel context.CancelFunc
 
-	// Apply turn timeout from policy
-	timeout := 10 * time.Minute // default
+	timeout := 10 * time.Minute
 	if policy.Timeout != "" {
 		if d, err := time.ParseDuration(policy.Timeout); err == nil {
 			timeout = d
@@ -328,88 +331,135 @@ func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Mess
 	execCtx, cancel = context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Register cancel func if we have a cancel context
 	if cancelCtx != nil {
 		cancelCtx.Register(askData.AskID, cancel)
 		defer cancelCtx.Unregister(askData.AskID)
 	}
 
-	// 5. Build prompt with memory context
-	prompt := askData.Prompt
-	if len(askData.Context) > 0 {
-		prompt = fmt.Sprintf("Context: %v\n\n%s", askData.Context, prompt)
-	}
-	if memoryContext != "" {
-		prompt = fmt.Sprintf("## Conversation Memory\n%s\n\n---\n\n%s", memoryContext, prompt)
-	}
-
-	// Inject tool hints from optimization (if enabled)
-	var hintsPrompt string
-	if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
-		hints, err := optCtx.Collector.GetHints(ctx, optCtx.AgentRole, prompt)
-		if err == nil && len(hints) > 0 {
-			hintsPrompt = optCtx.Collector.FormatHintsForPrompt(hints)
-			logger.Debug().Int("hint_count", len(hints)).Msg("injected tool hints from patterns")
-		}
-	}
-
-	taskPrompt := prompt
-	if hintsPrompt != "" {
-		taskPrompt = prompt + "\n" + hintsPrompt
-	}
-	input := map[string]any{
-		"task": taskPrompt,
-	}
-
-	// 4. Execute DSPy turn
-	startTime := time.Now()
-	resultMap, err := dspyAgent.Execute(execCtx, input)
-	durationMS := time.Since(startTime).Milliseconds()
-
-	// Record pattern for optimization
-	if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
-		success := err == nil
-		if recordErr := optCtx.Collector.RecordToolCall(ctx, optCtx.AgentRole, prompt, "console_ask", success, durationMS); recordErr != nil {
-			logger.Warn().Err(recordErr).Msg("failed to record optimization pattern")
-		}
-	}
-
-	// 5. Build response and status
 	var response string
 	var status string
+	var durationMS int64
 
-	if err != nil {
-		if ctx.Err() == context.Canceled || execCtx.Err() == context.Canceled {
-			response = "Cancelled by user"
-			status = "cancelled"
-			logger.Info().Msg("console ask cancelled")
-		} else if execCtx.Err() == context.DeadlineExceeded {
-			response = "Request timed out"
-			status = "error"
-			logger.Warn().Msg("console ask timed out")
+	// Use companion service (LLMChatEngine) if available, else fall back to DSPy
+	if companionSvc != nil {
+		logger.Debug().Str("conversation_id", conversationID).Msg("using companion service for console ask")
+
+		startTime := time.Now()
+		resp, chatErr := companionSvc.Chat(execCtx, companion.ChatRequest{
+			ConversationID: conversationID,
+			Message:        askData.Prompt,
+			Context:        askData.Context,
+		})
+		durationMS = time.Since(startTime).Milliseconds()
+
+		if chatErr != nil {
+			if execCtx.Err() == context.Canceled {
+				response = "Cancelled by user"
+				status = "cancelled"
+			} else if execCtx.Err() == context.DeadlineExceeded {
+				response = "Request timed out"
+				status = "error"
+			} else {
+				response = fmt.Sprintf("Error: %v", chatErr)
+				status = "error"
+			}
 		} else {
-			response = fmt.Sprintf("Error: %v", err)
-			status = "error"
-			logger.Error().Err(err).Msg("console ask failed")
+			response = resp.Response
+			status = "ok"
+			logger.Debug().
+				Int("context_queries", resp.ContextQueries).
+				Int64("duration_ms", durationMS).
+				Msg("companion console ask completed")
+		}
+	} else if dspyAgent != nil {
+		// Fall back to DSPy ReAct
+		var memoryContext string
+		if companionMemory != nil {
+			memCtx, err := companionMemory.GetContext(ctx, conversationID)
+			if err != nil {
+				logger.Warn().Err(err).Msg("failed to get memory context")
+			} else if memCtx != "" {
+				memoryContext = memCtx
+				logger.Debug().Int("context_len", len(memCtx)).Msg("injected memory context")
+			}
+
+			if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
+				ConversationID: conversationID,
+				Role:           "user",
+				Content:        askData.Prompt,
+			}); err != nil {
+				logger.Warn().Err(err).Msg("failed to store user turn")
+			}
+		}
+
+		prompt := askData.Prompt
+		if len(askData.Context) > 0 {
+			prompt = fmt.Sprintf("Context: %v\n\n%s", askData.Context, prompt)
+		}
+		if memoryContext != "" {
+			prompt = fmt.Sprintf("## Conversation Memory\n%s\n\n---\n\n%s", memoryContext, prompt)
+		}
+
+		var hintsPrompt string
+		if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
+			hints, err := optCtx.Collector.GetHints(ctx, optCtx.AgentRole, prompt)
+			if err == nil && len(hints) > 0 {
+				hintsPrompt = optCtx.Collector.FormatHintsForPrompt(hints)
+				logger.Debug().Int("hint_count", len(hints)).Msg("injected tool hints from patterns")
+			}
+		}
+
+		taskPrompt := prompt
+		if hintsPrompt != "" {
+			taskPrompt = prompt + "\n" + hintsPrompt
+		}
+		input := map[string]any{
+			"task": taskPrompt,
+		}
+
+		startTime := time.Now()
+		resultMap, err := dspyAgent.Execute(execCtx, input)
+		durationMS = time.Since(startTime).Milliseconds()
+
+		if optCtx != nil && optCtx.Enabled && optCtx.Collector != nil {
+			success := err == nil
+			if recordErr := optCtx.Collector.RecordToolCall(ctx, optCtx.AgentRole, prompt, "console_ask", success, durationMS); recordErr != nil {
+				logger.Warn().Err(recordErr).Msg("failed to record optimization pattern")
+			}
+		}
+
+		if err != nil {
+			if ctx.Err() == context.Canceled || execCtx.Err() == context.Canceled {
+				response = "Cancelled by user"
+				status = "cancelled"
+			} else if execCtx.Err() == context.DeadlineExceeded {
+				response = "Request timed out"
+				status = "error"
+			} else {
+				response = fmt.Sprintf("Error: %v", err)
+				status = "error"
+			}
+		} else {
+			response = extractResult(resultMap)
+			status = "ok"
+		}
+
+		if companionMemory != nil && status == "ok" && response != "" {
+			if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
+				ConversationID: conversationID,
+				Role:           "assistant",
+				Content:        response,
+			}); err != nil {
+				logger.Warn().Err(err).Msg("failed to store assistant turn")
+			}
 		}
 	} else {
-		response = extractResult(resultMap)
-		status = "ok"
-		logger.Info().Int64("duration_ms", durationMS).Msg("console ask completed")
+		return fmt.Errorf("no agent engine available")
 	}
 
-	// Store assistant turn on success (user turn was already stored)
-	if companionMemory != nil && status == "ok" && response != "" {
-		if err := companionMemory.AppendTurn(ctx, companion.ConversationTurn{
-			ConversationID: conversationID,
-			Role:           "assistant",
-			Content:        response,
-		}); err != nil {
-			logger.Warn().Err(err).Msg("failed to store assistant turn")
-		}
-	}
+	logger.Info().Str("status", status).Int64("duration_ms", durationMS).Msg("console ask completed")
 
-	// 7. Build console.reply payload
+	// Build console.reply payload
 	replyData := agent.ConsoleReplyData{
 		AskID:    askData.AskID,
 		Response: response,
@@ -424,13 +474,12 @@ func handleConsoleAsk(ctx context.Context, logger zerolog.Logger, msg agent.Mess
 		return fmt.Errorf("marshal console reply envelope: %w", err)
 	}
 
-	// 7. Send reply
 	replyMsg := agent.Message{
 		ID:        ulid.Make().String(),
 		FromNS:    msg.ToNS,
 		ToNS:      msg.FromNS,
 		Type:      agent.MessageTypeConsoleReply,
-		TTLMS:     300000, // 5 min
+		TTLMS:     300000,
 		Headers:   map[string]string{"correlation": askData.AskID, "console_id": askData.ConsoleID},
 		Payload:   replyPayload,
 		VisibleAt: time.Now().Unix(),

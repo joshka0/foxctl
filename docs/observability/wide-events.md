@@ -92,13 +92,13 @@ Each line in the NDJSON file is a `WideEvent`:
 |-------|------|-------------|
 | `service` | string | Always "agentctl" |
 | `version` | string | Build version |
-| `component` | string | "cli", "web", "hook", "skill", "job" |
+| `component` | string | "cli", "web", "hook", "skill", "job", "agent" |
 
 #### Operation Context
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `operation` | string | "skill.run", "hook.execute", "job.submit", etc. |
+| `operation` | string | "skill.run", "hook.execute", "job.submit", "agent.spawn", etc. |
 | `command` | string | Skill/hook/command name |
 | `subtype` | string | Additional classification |
 
@@ -135,7 +135,40 @@ Each line in the NDJSON file is a `WideEvent`:
 
 ## Usage Examples
 
-### Building Events
+### Using skillslib/obs (Recommended for Skills)
+
+The `skillslib/obs` package provides a clean API for skills to emit wide events
+without importing internal packages directly:
+
+```go
+import "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
+
+// Start a span for an operation
+ctx, done, span := obs.StartSpan(ctx, "skill.run",
+    obs.WithCommand("code/snippet_extract"),
+    obs.WithWorkspace(workspaceID),
+)
+defer func() { done(err) }()
+
+// Add data during operation
+span.WithData("files", fileCount)
+span.WithData("cache_hit", false)
+
+// Span is automatically completed when done() is called
+```
+
+For structured logging within skills, use `obs.Logger`:
+
+```go
+log := obs.NewLogger("my/skill")
+log.Info("processing files", obs.Int("count", 10), obs.Str("path", path))
+log.Warn("slow operation", obs.Duration("elapsed", elapsed))
+log.Error("failed", obs.Err(err))
+```
+
+### Building Events (Internal)
+
+For internal packages, use `internal/observability` directly:
 
 ```go
 import "github.com/jkatigb/agentctl/internal/observability"
@@ -240,6 +273,51 @@ jq -c 'select(.operation == "skill.run" and .duration_ms > 1000)' wide_events.nd
 jq -s 'group_by(.command) | map({command: .[0].command, count: length})' wide_events.ndjson
 ```
 
+## Agent Orchestration Events
+
+Agent operations emit structured wide events for debugging multi-agent workflows.
+
+### Operation Types
+
+| Operation | Description | Key Data Fields |
+|-----------|-------------|-----------------|
+| `agent.spawn` | Agent spawn request | `role`, `task_len`, `spawned_session`, `spawned_actor`, `spawned_depth` |
+| `agent.wait` | Waiting for child agents | `timeout_seconds`, `children_count`, `children_ids`, `all_completed` |
+| `agent.iteration` | LLM iteration in agent loop | `iteration`, `prompt_tokens`, `completion_tokens`, `finish_reason`, `tool_calls` |
+| `agent.complete` | Agent session completed | `final_status`, `total_iterations`, `result_artifact` |
+| `agent.kill` | Agent terminated | `kill_reason` |
+
+### Example: Tracing Agent Hierarchies
+
+```bash
+# Find all spawn events for a session
+jq -c 'select(.operation == "agent.spawn" and .session_id == "01KFH...")' wide_events.ndjson
+
+# Get iteration token usage for troubleshooting
+jq -c 'select(.operation == "agent.iteration") | {iter: .data.iteration, tokens: .data.total_tokens, finish: .data.finish_reason}' wide_events.ndjson
+
+# Find agents that hit context budget
+jq -c 'select(.operation == "agent.iteration" and .data.budget_exceeded == true)' wide_events.ndjson
+
+# Trace spawn → wait → complete for an overseer
+jq -c 'select(.session_id == "01KFH..." and .operation | startswith("agent."))' wide_events.ndjson
+```
+
+### Agent Data Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `data.role` | string | Agent role (coder, researcher, overseer) |
+| `data.task_len` | int | Length of task prompt in characters |
+| `data.iteration` | int | Current iteration number |
+| `data.prompt_tokens` | int | Tokens in prompt |
+| `data.completion_tokens` | int | Tokens in response |
+| `data.finish_reason` | string | LLM finish reason (stop, tool_calls) |
+| `data.tool_calls` | int | Number of tool calls in response |
+| `data.children_count` | int | Number of child agents being waited on |
+| `data.spawned_session` | string | Session ID of spawned agent |
+| `data.result_artifact` | string | CAS digest of agent output (for replay) |
+
 ## Migration from Narrow Events
 
 The existing `SweGrepEvent` and other narrow events continue to work. Wide
@@ -330,3 +408,25 @@ Example cron job for daily pruning:
 # Prune events older than 7 days
 0 2 * * * agentctl observability prune --older-than 7d
 ```
+
+## Persistence Options
+
+By default, wide events are written to NDJSON files. For events that need
+queryability, you can enable SQL persistence with different modes:
+
+| Mode | Description |
+|------|-------------|
+| `PersistDefault` | NDJSON file (default) |
+| `PersistSQL` | Direct SQLite write for high-value events |
+| `PersistHybrid` | NDJSON + background SQLite sync (recommended for queryable events) |
+
+See [persistence.md](persistence.md) for full details on configuring persistence
+modes, background sync, and querying events via SQLite.
+
+## Related Documents
+
+| Document | Description |
+|----------|-------------|
+| [persistence.md](persistence.md) | SQLite persistence and hybrid mode configuration |
+| [events.md](events.md) | Legacy narrow events format |
+| [../general/skills.md](../general/skills.md) | Skill development guide including observability |

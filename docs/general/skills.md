@@ -113,6 +113,13 @@ flowchart LR
 | `ci/comments` | PR review comments | `{"pr": 123, "source": "coderabbit"}` |
 | `git/status` | Git status | `{}` |
 
+### Observability
+
+| Skill | Description | Input |
+|-------|-------------|-------|
+| `obs/logs` | Query and browse wide events | `{"limit": 20, "errors_only": true}` |
+| `obs/replay` | Reconstruct events from trace ID | `{"trace_id": "...", "include_data": true}` |
+
 ---
 
 ## Skill Manifest Format
@@ -263,3 +270,75 @@ go build -o ~/.agentctl/skills/my/skill/bin ./skills/my_skill
 ```
 
 See [gotchas.md](gotchas.md) for more common pitfalls.
+
+---
+
+## Observability
+
+Skills should use the `skillslib/obs` package to emit wide events and structured
+logs. This provides proper observability without importing internal packages.
+
+### Span-Based Instrumentation
+
+```go
+import "github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
+
+func main() {
+    config.LoadDotEnv()
+
+    ctx := context.Background()
+
+    // Start a span for the skill execution
+    ctx, done, span := obs.StartSpan(ctx, "skill.run",
+        obs.WithCommand("my/skill"),
+        obs.WithComponent(obs.ComponentSkill),
+    )
+
+    var err error
+    defer func() { done(err) }()  // Emits wide event with status
+
+    // Add data during execution
+    span.WithData("input_count", len(items))
+
+    // ... do work ...
+
+    span.WithData("processed", count)
+    span.WithData("cache_hit", cacheHit)
+}
+```
+
+### Structured Logging
+
+For detailed logs during execution:
+
+```go
+log := obs.NewLogger("my/skill")
+
+log.Info("processing started", obs.Int("items", len(items)))
+log.Debug("cache lookup", obs.Str("key", cacheKey))
+log.Warn("slow operation", obs.Duration("elapsed", elapsed))
+log.Error("failed to process", obs.Err(err), obs.Str("file", path))
+```
+
+### Persistence Modes
+
+For high-value events that need queryability:
+
+```go
+// SQL persistence for critical events
+ctx, done, span := obs.StartSpan(ctx, "skill.run",
+    obs.WithCommand("session/summarize"),
+    obs.WithPersistence(obs.PersistSQL),
+)
+
+// Hybrid persistence (recommended for queryable events)
+ctx, done, span := obs.StartSpan(ctx, "skill.run",
+    obs.WithCommand("codemap/generate"),
+    obs.WithPersistence(obs.PersistHybrid),
+)
+```
+
+See [../observability/wide-events.md](../observability/wide-events.md) for
+complete observability documentation and
+[../observability/persistence.md](../observability/persistence.md) for
+persistence options.

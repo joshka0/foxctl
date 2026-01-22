@@ -47,7 +47,7 @@ func main() {
 
 	// Create named memory store for semantic search integration
 	casDir := filepath.Join(tmpDir, "cas")
-	if err := os.MkdirAll(casDir, 0755); err != nil {
+	if err := os.MkdirAll(casDir, 0o755); err != nil {
 		fmt.Printf("Failed to create CAS directory: %v\n", err)
 		os.Exit(1)
 	}
@@ -60,9 +60,9 @@ func main() {
 
 	// Create memory store with custom config for testing
 	cfg := companion.DefaultMemoryConfig()
-	cfg.VividWindowHours = 1  // 1 hour for testing
-	cfg.VividMaxTurns = 5     // Keep last 5 turns vivid
-	cfg.RecentWindowDays = 1  // 1 day for testing
+	cfg.VividWindowHours = 1 // 1 hour for testing
+	cfg.VividMaxTurns = 5    // Keep last 5 turns vivid
+	cfg.RecentWindowDays = 1 // 1 day for testing
 
 	companionMemory, err := companion.NewConversationMemory(db,
 		companion.WithMemoryConfig(cfg),

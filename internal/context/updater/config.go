@@ -43,8 +43,8 @@ func DefaultConfig() Config {
 		TurnWindowSize: 5,
 
 		// Thresholds
-		DriftThreshold: 0.7,  // 30% drift triggers search
-		ConfidenceMin:  0.8,  // Only inject high-confidence results
+		DriftThreshold: 0.7, // 30% drift triggers search
+		ConfidenceMin:  0.8, // Only inject high-confidence results
 
 		// Short-term memory
 		MemorySize: 50,

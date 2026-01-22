@@ -437,9 +437,9 @@ func (a *ContextBufferInjector) SendMessage(ctx context.Context, sessionID, work
 		SessionID:   sessionID,
 		Source:      stream, // e.g., "context-updater"
 		Text:        string(payload),
-		Priority:    2,              // Normal priority
+		Priority:    2,               // Normal priority
 		TTL:         5 * time.Minute, // Context valid for 5 minutes
-		Dedupe:      true,           // Avoid duplicate context
+		Dedupe:      true,            // Avoid duplicate context
 	}
 
 	_, err := a.store.Enqueue(ctx, params)

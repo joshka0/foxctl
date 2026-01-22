@@ -178,7 +178,6 @@ func (s *sqlStore) Put(ctx context.Context, params PutParams) (*Variable, error)
 			WHERE conversation_id = ? AND scope = ? AND key = ?
 		`, string(valueJSON), nowMS, expiresAtMS, params.Source,
 			params.ConversationID, string(params.Scope), params.Key)
-
 		if err != nil {
 			return nil, fmt.Errorf("contextvar: upsert update: %w", err)
 		}
@@ -200,7 +199,6 @@ func (s *sqlStore) Put(ctx context.Context, params PutParams) (*Variable, error)
 	`, id, params.ConversationID, string(params.Scope), params.Key,
 		string(valueJSON), params.ContentType, seqNum, params.Source,
 		nowMS, nowMS, expiresAtMS)
-
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			return nil, fmt.Errorf("%w: %s", ErrConflict, params.Key)

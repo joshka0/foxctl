@@ -20,6 +20,7 @@ type spanOpts struct {
 	workspaceID string
 	jobID       string
 	data        map[string]any
+	persist     *persistConfig // Persistence configuration
 }
 
 // WithSpanTraceID sets a specific trace ID for the span.
@@ -132,6 +133,28 @@ func WithSpanMailbox(mailboxMsgID string) SpanOpt {
 	return WithSpanData(ArtifactMailbox, mailboxMsgID)
 }
 
+// WithSpanPersistence sets the persistence mode for the span's event.
+// Use PersistSQL for high-value events that need queryability.
+// Use PersistHybrid for events that need both fast writes and queryability.
+func WithSpanPersistence(mode PersistenceMode) SpanOpt {
+	return func(o *spanOpts) {
+		if o.persist == nil {
+			o.persist = &persistConfig{}
+		}
+		o.persist.mode = mode
+	}
+}
+
+// WithSpanPersistenceFile sets a custom NDJSON filename for the span's event.
+func WithSpanPersistenceFile(name string) SpanOpt {
+	return func(o *spanOpts) {
+		if o.persist == nil {
+			o.persist = &persistConfig{}
+		}
+		o.persist.fileName = name
+	}
+}
+
 // StartSpan starts a span "now" and returns:
 //   - a context with trace ID attached
 //   - a done(err) func that emits one WideEvent on exit
@@ -191,20 +214,25 @@ func StartSpanAt(ctx context.Context, startedAt time.Time, op string, opts ...Sp
 	if len(o.data) > 0 {
 		b = b.WithDataMap(o.data)
 	}
+	if o.persist != nil {
+		b.persist = o.persist
+	}
 
 	// Fill missing business context from env/context.
 	b = b.EnrichFromEnv().EnrichFromContext(ctx)
 
 	done := func(err error) {
 		dur := time.Since(startedAt)
+		var event *WideEvent
 		switch {
 		case err == nil:
-			Emit(ctx, b.Success(dur))
+			event = b.Success(dur)
 		case errors.Is(err, context.Canceled):
-			Emit(ctx, b.Canceled(dur))
+			event = b.Canceled(dur)
 		default:
-			Emit(ctx, b.Error(err, dur))
+			event = b.Error(err, dur)
 		}
+		EmitWithConfig(ctx, event, b.persist)
 	}
 
 	return ctx, done, b

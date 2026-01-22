@@ -590,6 +590,13 @@ export function useCompanionChat() {
       queryClient.invalidateQueries({
         queryKey: companionQueryKeys.memoryStats(variables.conversation_id),
       });
+      queryClient.invalidateQueries({
+        queryKey: companionQueryKeys.memoryContext(variables.conversation_id),
+      });
+      // Also invalidate conversations list (message count, last_message updated)
+      queryClient.invalidateQueries({
+        queryKey: ["companion", "conversations"],
+      });
     },
   });
 }

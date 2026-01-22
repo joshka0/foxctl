@@ -1,0 +1,518 @@
+// Package observability provides wide event observability with configurable persistence.
+//
+// Persistence Options:
+//
+// Events can be persisted in multiple ways:
+//   - NDJSON file (default): Fast append-only writes to $AGENTCTL_OBS_DIR/events/wide_events.ndjson
+//   - SQLite: Direct writes to $AGENTCTL_OBS_DIR/events.db for queryability
+//   - Hybrid: NDJSON + background SQLite sync (recommended for high-value events)
+//
+// The hybrid approach provides the best of both worlds:
+//   - Fast NDJSON writes on the hot path (no blocking)
+//   - Background goroutine syncs NDJSON to SQLite for querying
+//   - Full replay capability from NDJSON files
+//   - Rich querying via SQLite
+//
+// Usage:
+//
+//	// Use default persistence (NDJSON only)
+//	obs.Emit(ctx, event.Success(duration))
+//
+//	// Enable SQL persistence for high-value events
+//	obs.Emit(ctx, event.
+//	    WithPersistence(obs.PersistSQL).
+//	    Success(duration))
+//
+//	// Write to a custom NDJSON file
+//	obs.Emit(ctx, event.
+//	    WithPersistenceFile("skill_runs").
+//	    Success(duration))
+package observability
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/rs/zerolog"
+	_ "modernc.org/sqlite" // CGO-free SQLite driver
+)
+
+// PersistenceMode determines how an event is persisted.
+type PersistenceMode int
+
+const (
+	// PersistDefault uses the global default (NDJSON file).
+	PersistDefault PersistenceMode = iota
+	// PersistNDJSON writes to the default NDJSON file.
+	PersistNDJSON
+	// PersistSQL writes directly to SQLite (blocking).
+	PersistSQL
+	// PersistHybrid writes to NDJSON immediately, queues for SQLite sync.
+	PersistHybrid
+	// PersistNone disables persistence (still sampled/logged).
+	PersistNone
+)
+
+// String returns the string representation of a PersistenceMode.
+func (m PersistenceMode) String() string {
+	switch m {
+	case PersistDefault:
+		return "default"
+	case PersistNDJSON:
+		return "ndjson"
+	case PersistSQL:
+		return "sql"
+	case PersistHybrid:
+		return "hybrid"
+	case PersistNone:
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
+// persistConfig holds the persistence configuration for an event.
+type persistConfig struct {
+	mode     PersistenceMode
+	fileName string // Custom NDJSON filename (without extension)
+}
+
+// WithPersistence sets the persistence mode for the event.
+// Use PersistSQL for high-value events that need queryability.
+// Use PersistHybrid for events that need both fast writes and queryability.
+func (b *EventBuilder) WithPersistence(mode PersistenceMode) *EventBuilder {
+	if b.persist == nil {
+		b.persist = &persistConfig{}
+	}
+	b.persist.mode = mode
+	return b
+}
+
+// WithPersistenceFile sets a custom NDJSON filename for the event.
+// The file will be created at $AGENTCTL_OBS_DIR/events/<name>.ndjson.
+func (b *EventBuilder) WithPersistenceFile(name string) *EventBuilder {
+	if b.persist == nil {
+		b.persist = &persistConfig{}
+	}
+	b.persist.fileName = name
+	return b
+}
+
+// PersistConfig returns the builder's persistence configuration.
+// Returns nil if no persistence options were set.
+func (b *EventBuilder) PersistConfig() *persistConfig {
+	if b == nil {
+		return nil
+	}
+	return b.persist
+}
+
+// ---------------------------------------------------------------------------
+// SQLite Persistence
+// ---------------------------------------------------------------------------
+
+// EventStore provides SQLite-backed event persistence.
+type EventStore struct {
+	db     *sql.DB
+	mu     sync.Mutex
+	closed bool
+}
+
+// OpenEventStore opens or creates the events SQLite database.
+func OpenEventStore(ctx context.Context, obsDir string) (*EventStore, error) {
+	dbPath := filepath.Join(obsDir, "events.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create schema
+	if err := createEventSchema(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return &EventStore{db: db}, nil
+}
+
+func createEventSchema(ctx context.Context, db *sql.DB) error {
+	schema := `
+	CREATE TABLE IF NOT EXISTS wide_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		span_id TEXT NOT NULL UNIQUE,
+		trace_id TEXT NOT NULL,
+		parent_id TEXT,
+		ts TEXT NOT NULL,
+		service TEXT NOT NULL,
+		version TEXT,
+		component TEXT,
+		operation TEXT NOT NULL,
+		command TEXT,
+		subtype TEXT,
+		session_id TEXT,
+		agent_id TEXT,
+		workspace_id TEXT,
+		job_id TEXT,
+		status TEXT NOT NULL,
+		duration_ms INTEGER,
+		error_type TEXT,
+		error_code TEXT,
+		error_message TEXT,
+		retriable INTEGER,
+		data TEXT,
+		created_at TEXT DEFAULT (datetime('now'))
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_wide_events_trace_id ON wide_events(trace_id);
+	CREATE INDEX IF NOT EXISTS idx_wide_events_ts ON wide_events(ts);
+	CREATE INDEX IF NOT EXISTS idx_wide_events_operation ON wide_events(operation);
+	CREATE INDEX IF NOT EXISTS idx_wide_events_command ON wide_events(command);
+	CREATE INDEX IF NOT EXISTS idx_wide_events_status ON wide_events(status);
+	CREATE INDEX IF NOT EXISTS idx_wide_events_session_id ON wide_events(session_id);
+	CREATE INDEX IF NOT EXISTS idx_wide_events_workspace_id ON wide_events(workspace_id);
+	`
+	_, err := db.ExecContext(ctx, schema)
+	return err
+}
+
+// Insert writes a WideEvent to the database.
+func (s *EventStore) Insert(ctx context.Context, event *WideEvent) error {
+	if s == nil || event == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil
+	}
+
+	dataJSON, err := json.Marshal(event.Data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event.Data: %w", err)
+	}
+	var retriable *int
+	if event.Retriable != nil {
+		v := 0
+		if *event.Retriable {
+			v = 1
+		}
+		retriable = &v
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO wide_events (
+			span_id, trace_id, parent_id, ts, service, version, component,
+			operation, command, subtype, session_id, agent_id, workspace_id, job_id,
+			status, duration_ms, error_type, error_code, error_message, retriable, data
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.SpanID, event.TraceID, event.ParentID,
+		event.Ts.Format(time.RFC3339Nano), event.Service, event.Version, event.Component,
+		event.Operation, event.Command, event.Subtype,
+		event.SessionID, event.AgentID, event.WorkspaceID, event.JobID,
+		string(event.Status), event.DurationMS,
+		event.ErrorType, event.ErrorCode, event.ErrorMessage, retriable,
+		string(dataJSON),
+	)
+	return err
+}
+
+// Close closes the database connection.
+func (s *EventStore) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	return s.db.Close()
+}
+
+// ---------------------------------------------------------------------------
+// Hybrid Sync (NDJSON → SQLite)
+// ---------------------------------------------------------------------------
+
+// SyncConfig configures the background NDJSON to SQLite sync.
+type SyncConfig struct {
+	// Interval between sync runs.
+	Interval time.Duration
+	// BatchSize is the maximum number of events to sync per run.
+	BatchSize int
+}
+
+// DefaultSyncConfig returns the default sync configuration.
+func DefaultSyncConfig() SyncConfig {
+	return SyncConfig{
+		Interval:  30 * time.Second,
+		BatchSize: 100,
+	}
+}
+
+// Syncer synchronizes NDJSON events to SQLite in the background.
+type Syncer struct {
+	store  *EventStore
+	config SyncConfig
+	logger zerolog.Logger
+
+	mu       sync.Mutex
+	running  bool
+	stopCh   chan struct{}
+	doneCh   chan struct{}
+	lastSync time.Time
+	offset   int64 // File offset for incremental sync
+}
+
+// NewSyncer creates a new background syncer.
+func NewSyncer(store *EventStore, config SyncConfig) *Syncer {
+	return &Syncer{
+		store:  store,
+		config: config,
+		logger: zerolog.New(os.Stderr).With().Str("component", "obs-syncer").Timestamp().Logger(),
+	}
+}
+
+// Start begins background synchronization.
+func (s *Syncer) Start() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.running {
+		return
+	}
+
+	s.running = true
+	s.stopCh = make(chan struct{})
+	s.doneCh = make(chan struct{})
+
+	go s.run()
+}
+
+// Stop stops the background syncer and waits for it to finish.
+func (s *Syncer) Stop() {
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+	close(s.stopCh)
+	s.mu.Unlock()
+
+	<-s.doneCh
+
+	// Reset running flag so Start() can be called again
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
+}
+
+func (s *Syncer) run() {
+	defer close(s.doneCh)
+
+	ticker := time.NewTicker(s.config.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopCh:
+			// Final sync before exit
+			s.syncOnce()
+			return
+		case <-ticker.C:
+			s.syncOnce()
+		}
+	}
+}
+
+func (s *Syncer) syncOnce() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	dir := getObsDir()
+	if dir == "" {
+		return
+	}
+
+	ndjsonPath := filepath.Join(dir, "events", WideEventFileName+".ndjson")
+	synced, err := s.syncFile(ctx, ndjsonPath)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("sync failed")
+		return
+	}
+
+	if synced > 0 {
+		s.logger.Debug().Int("synced", synced).Msg("synced events to SQLite")
+	}
+	s.lastSync = time.Now()
+}
+
+func (s *Syncer) syncFile(ctx context.Context, path string) (int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+
+	// Seek to last known offset
+	if s.offset > 0 {
+		if _, err := f.Seek(s.offset, 0); err != nil {
+			// Reset offset if seek fails
+			s.offset = 0
+		}
+	}
+
+	dec := json.NewDecoder(f)
+	synced := 0
+
+	for synced < s.config.BatchSize {
+		// Capture position before decode to handle partial records
+		pos, _ := f.Seek(0, io.SeekCurrent)
+
+		var event WideEvent
+		if err := dec.Decode(&event); err != nil {
+			// Check for partial record errors (EOF, unexpected EOF, syntax errors)
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				// Seek back to position before partial record for retry later
+				_, _ = f.Seek(pos, io.SeekStart)
+				break
+			}
+			if _, ok := err.(*json.SyntaxError); ok {
+				// Partial JSON - seek back and retry later
+				_, _ = f.Seek(pos, io.SeekStart)
+				break
+			}
+			// Other errors - log and break
+			s.logger.Warn().Err(err).Msg("decode error")
+			break
+		}
+
+		if err := s.store.Insert(ctx, &event); err != nil {
+			s.logger.Warn().Err(err).Str("span_id", event.SpanID).Msg("insert failed")
+			continue
+		}
+		synced++
+	}
+
+	// Update offset from current file position
+	s.offset, _ = f.Seek(0, io.SeekCurrent)
+
+	return synced, nil
+}
+
+// ---------------------------------------------------------------------------
+// Global Persistence Manager
+// ---------------------------------------------------------------------------
+
+var (
+	globalStore  *EventStore
+	globalSyncer *Syncer
+	globalMu     sync.Mutex
+	globalInit   sync.Once
+)
+
+// InitPersistence initializes the global persistence layer.
+// Call this once at startup if you want SQLite persistence.
+func InitPersistence(ctx context.Context) error {
+	var initErr error
+	globalInit.Do(func() {
+		dir := getObsDir()
+		if dir == "" {
+			return
+		}
+
+		store, err := OpenEventStore(ctx, dir)
+		if err != nil {
+			initErr = err
+			return
+		}
+		globalStore = store
+
+		syncer := NewSyncer(store, DefaultSyncConfig())
+		syncer.Start()
+		globalSyncer = syncer
+	})
+	return initErr
+}
+
+// ClosePersistence shuts down the global persistence layer.
+// After calling this, InitPersistence can be called again to re-initialize.
+func ClosePersistence() error {
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	if globalSyncer != nil {
+		globalSyncer.Stop()
+		globalSyncer = nil
+	}
+	if globalStore != nil {
+		err := globalStore.Close()
+		globalStore = nil
+		// Reset sync.Once to allow re-initialization
+		globalInit = sync.Once{}
+		return err
+	}
+	// Reset sync.Once even if store was nil (in case init was called but failed)
+	globalInit = sync.Once{}
+	return nil
+}
+
+// persistEvent handles the persistence based on event configuration.
+func persistEvent(ctx context.Context, event *WideEvent, config *persistConfig) {
+	if event == nil {
+		return
+	}
+
+	mode := PersistDefault
+	fileName := WideEventFileName
+	if config != nil {
+		mode = config.mode
+		if config.fileName != "" {
+			fileName = config.fileName
+		}
+	}
+
+	switch mode {
+	case PersistNone:
+		return
+
+	case PersistSQL:
+		if globalStore != nil {
+			if err := globalStore.Insert(ctx, event); err != nil {
+				logPersistError("sql", event.Operation, err)
+			}
+		}
+
+	case PersistHybrid:
+		// Write to NDJSON first (fast path)
+		if err := WriteEvent(ctx, fileName, event); err != nil {
+			logPersistError("ndjson", event.Operation, err)
+		}
+		// SQLite sync happens in background via Syncer
+
+	case PersistDefault, PersistNDJSON:
+		if err := WriteEvent(ctx, fileName, event); err != nil {
+			logPersistError("ndjson", event.Operation, err)
+		}
+	}
+}
+
+func logPersistError(mode, operation string, err error) {
+	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	log.Warn().
+		Str("component", "observability").
+		Str("mode", mode).
+		Str("operation", operation).
+		Err(err).
+		Msg("persistence failed")
+}

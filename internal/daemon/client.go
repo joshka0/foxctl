@@ -212,6 +212,73 @@ func (c *Client) AgentKill(sessionID string) (*AgentKillResult, error) {
 	return &result, nil
 }
 
+// AgentResume continues a previous agent session.
+func (c *Client) AgentResume(params AgentResumeParams) (*AgentResumeResult, error) {
+	resp, err := c.call("agent.resume", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result AgentResumeResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
+// AgentHierarchyParams are the parameters for agent.hierarchy.
+type AgentHierarchyParams struct {
+	SessionID string `json:"session_id,omitempty"` // Optional, defaults to all roots
+}
+
+// AgentHierarchyResult is the result of an agent hierarchy query.
+type AgentHierarchyResult struct {
+	Nodes []HierarchyNode `json:"nodes"`
+}
+
+// HierarchyNode represents a node in the agent hierarchy tree.
+type HierarchyNode struct {
+	SessionID string          `json:"session_id"`
+	ActorID   string          `json:"actor_id"`
+	Role      string          `json:"role"`
+	Depth     int             `json:"depth"`
+	Status    string          `json:"status"`
+	Children  []HierarchyNode `json:"children,omitempty"`
+}
+
+// AgentHierarchy gets the agent hierarchy tree.
+func (c *Client) AgentHierarchy(sessionID string) (*AgentHierarchyResult, error) {
+	params := AgentHierarchyParams{SessionID: sessionID}
+	resp, err := c.call("agent.hierarchy", params)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+	}
+
+	var result AgentHierarchyResult
+	payload, err := marshalResult(resp.Result)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal result: %w", err)
+	}
+
+	return &result, nil
+}
+
 // connect establishes a connection to the daemon socket.
 func (c *Client) connect() (net.Conn, error) {
 	conn, err := net.DialTimeout("unix", c.socketPath, 2*time.Second)

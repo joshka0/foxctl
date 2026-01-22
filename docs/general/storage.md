@@ -16,6 +16,7 @@ flowchart TD
         AGENT[(agents.db)]
         COMP[(companion.db)]
         CTXVAR[(contextvar.db)]
+        MBOX[(mailbox.db)]
     end
 
     subgraph Cache["~/.agentctl/cache/"]
@@ -49,6 +50,7 @@ flowchart TD
 | `agents.db` | Agent registry | `agents` |
 | `companion.db` | Companion conversation memory | `companion_turns`, `companion_day_summaries`, `companion_history` |
 | `contextvar.db` | RLM context variables | `context_vars` |
+| `mailbox.db` | Inter-agent messaging | `mailbox` |
 
 ### Cache (`~/.agentctl/cache/`)
 
@@ -149,33 +151,31 @@ CREATE INDEX idx_tasks_workspace ON tasks(workspace);
 
 ### sessions.db
 
+See [sessions.md](sessions.md) for full schema details.
+
+Key tables:
+- `sessions` - Session records with lineage, agent execution context
+- `session_turns` - Per-turn persistence for agent sessions
+- `context_windows` - Compaction window records
+- `session_edges` - Session lineage graph (continues, forked_from)
+
+Notable fields for daemon agents:
+- `prompt`, `prompt_hash` - Original task for correlation with wide events
+- `llm_provider`, `llm_model` - LLM configuration
+- Turn content stored in CAS via `content_cas_digest`
+
 ```sql
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT,
-    workspace TEXT,
-    parent_session_id TEXT,
-    status TEXT DEFAULT 'running',  -- running, ok, error, canceled
-    anchor TEXT,
-    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    ended_at DATETIME,
-    FOREIGN KEY (parent_session_id) REFERENCES sessions(id)
-);
+-- Core session query
+SELECT id, status, prompt, llm_provider, started_at
+FROM sessions
+WHERE workspace_path = ?
+ORDER BY started_at DESC;
 
-CREATE TABLE context_windows (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    window_number INTEGER NOT NULL,
-    chunk_count INTEGER DEFAULT 0,
-    raw_jsonl_path TEXT,
-    summary TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES sessions(id)
-);
-
-CREATE INDEX idx_sessions_workspace ON sessions(workspace);
-CREATE INDEX idx_sessions_status ON sessions(status);
-CREATE INDEX idx_windows_session ON context_windows(session_id);
+-- Session turns with CAS content
+SELECT turn_index, role, content_preview, content_cas_digest, tool_calls
+FROM session_turns
+WHERE session_id = ?
+ORDER BY turn_index;
 ```
 
 ### companion.db

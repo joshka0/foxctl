@@ -8,3 +8,36 @@
   - Critical: envelope.go time.Now(), planning/llm env reads, indexing/semantic env reads
   - High: consolews detached goroutine, actor timestamps, codemap fs ops, daemon warmup race
   - See AGENTS.md "Engineering Principles" section for guidance
+- 2026-01-21 [gotcha]: Agent daemon exec_mode routing
+  - reactive (default) → LLMChatEngine via companion.Service (cerebras default)
+  - autonomous/proactive → DSPy ReAct (requires: gemini, openai, anthropic, groq, openrouter)
+  - "unsupported LLM provider: cerebras" means agent has exec_mode=autonomous but uses cerebras
+  - Fix: Change to exec_mode=reactive OR use DSPy-supported provider
+  - See docs/general/agent-daemon.md for details
+- 2026-01-21 [fix]: code_search tool grep timeout
+  - simpleGrep() in runtime.go now has 30s timeout to prevent hanging on large codebases
+  - Previously could hang indefinitely when searching large repos
+- 2026-01-21 [feature]: Context budget for agents
+  - `--max-context-tokens` flag stops agent when prompt tokens exceed limit
+  - Logs: `[CONTEXT] budget exceeded: 10040 > 10000 limit, stopping`
+  - Session ends with status=error and StopReasonContextBudget
+  - Use to prevent runaway context accumulation and API costs
+- 2026-01-21 [feature]: --prompt flag for agent spawn
+  - `agentctl agent spawn --prompt "inline text"` now supported
+  - Mutually exclusive with --prompt-file
+- 2026-01-21 [feature]: Session continuation for agents
+  - `agentctl agent resume <session-id> --prompt "follow-up question"`
+  - Turns now persisted to session_turns table during agent execution
+  - New sessions linked via session_edges (edge_type: "continues")
+  - Enables multi-phase research and follow-up conversations
+- 2026-01-21 [feature]: Overseer role for multi-agent coordination
+  - `agentctl agent spawn --role overseer --prompt "Coordinate task X"`
+  - Overseer agents get special tools: agent_spawn, agent_list, agent_kill, agent_hierarchy, agent_wait
+  - Can spawn subagents subject to depth limits and policies
+  - `agentctl agent hierarchy` shows the agent tree
+  - Also added RoleResearcher for information gathering agents
+- 2026-01-22 [feature]: Session persistence for agent prompts and turns
+  - New session fields: prompt, prompt_hash, llm_provider, llm_model
+  - prompt_hash (SHA256) enables correlation with wide events task_hash
+  - Turn content stored in CAS via content_cas_digest for large responses
+  - Query sessions by prompt: SELECT * FROM sessions WHERE prompt LIKE '%search%'

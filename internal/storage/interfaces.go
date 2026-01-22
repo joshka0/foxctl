@@ -247,6 +247,11 @@ type Session struct {
 	AgentID         string `json:"agent_id,omitempty"`   // AI agent identifier (default: "agentctl")
 	AgentType       string `json:"agent_type,omitempty"` // Source system (claude, codex, opencode)
 	Status          string `json:"status,omitempty"`     // ok, error, canceled
+	// Agent execution context
+	Prompt      string `json:"prompt,omitempty"`       // Original prompt/task for agent sessions
+	PromptHash  string `json:"prompt_hash,omitempty"`  // SHA256 hash for correlation with wide events
+	LLMProvider string `json:"llm_provider,omitempty"` // LLM provider (cerebras, openrouter, etc.)
+	LLMModel    string `json:"llm_model,omitempty"`    // Model name
 	// Pending restore flag for post-compact context injection
 	PendingRestoreAt *time.Time `json:"pending_restore_at,omitempty"`
 }
@@ -311,6 +316,7 @@ type SessionTurn struct {
 	TurnIndex      int        `json:"turn_index"`
 	Role           string     `json:"role"` // 'user', 'assistant', 'system'
 	ContentPreview string     `json:"content_preview,omitempty"`
+	ContentCASDigest string   `json:"content_cas_digest,omitempty"` // CAS digest for full content
 	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
 	FilesTouched   []string   `json:"files_touched,omitempty"`
 	HasError       bool       `json:"has_error"`

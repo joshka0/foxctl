@@ -26,10 +26,10 @@ const (
 
 // Variable represents a context variable stored externally.
 type Variable struct {
-	ID             string          `json:"id"`
-	ConversationID string          `json:"conversation_id"` // Groups variables for a user/conversation
-	Scope          Scope           `json:"scope"`           // global|conversation|turn
-	Key            string          `json:"key"`             // Variable name/path
+	ID             string `json:"id"`
+	ConversationID string `json:"conversation_id"` // Groups variables for a user/conversation
+	Scope          Scope  `json:"scope"`           // global|conversation|turn
+	Key            string `json:"key"`             // Variable name/path
 
 	// Content - either inline JSON or CAS reference for large values
 	ValueJSON   json.RawMessage `json:"value_json,omitempty"`
@@ -40,7 +40,7 @@ type Variable struct {
 	SequenceNum int `json:"sequence_num"`
 
 	// Metadata
-	Source      string     `json:"source"`                 // Producer (tool, skill, or "user")
+	Source      string     `json:"source"` // Producer (tool, skill, or "user")
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
@@ -54,30 +54,30 @@ type Variable struct {
 
 // PutParams for storing a context variable.
 type PutParams struct {
-	ConversationID string      // Required for conversation/turn scope; empty for global
-	Scope          Scope       // Required: global|conversation|turn
-	Key            string      // Required: variable name/path
-	Value          interface{} // Required: will be JSON-marshaled
-	ContentType    string      // Optional: defaults to "json"
-	Source         string      // Optional: identifies the producer
+	ConversationID string        // Required for conversation/turn scope; empty for global
+	Scope          Scope         // Required: global|conversation|turn
+	Key            string        // Required: variable name/path
+	Value          interface{}   // Required: will be JSON-marshaled
+	ContentType    string        // Optional: defaults to "json"
+	Source         string        // Optional: identifies the producer
 	TTL            time.Duration // Optional: auto-expire after duration
-	Upsert         bool        // If true, update existing key instead of creating new
+	Upsert         bool          // If true, update existing key instead of creating new
 }
 
 // QueryParams for retrieving context variables.
 type QueryParams struct {
-	ConversationID string   // Filter by conversation (empty = global only)
-	Scope          Scope    // Filter by scope (empty = all scopes)
-	Key            string   // Exact key match
-	KeyPattern     string   // Glob pattern (e.g., "memories/*", "user.*")
-	KeyPrefix      string   // Key prefix match
-	SemanticQuery  string   // Natural language query (requires embedding)
-	SequenceRange  *Range   // Sequence number range
-	IncludeExpired bool     // Include expired variables (default: exclude)
-	Limit          int      // Max results (default: 50)
-	Offset         int      // Pagination offset
-	OrderBy        string   // "created_at", "updated_at", "sequence_num", "access_count"
-	OrderDesc      bool     // Descending order
+	ConversationID string // Filter by conversation (empty = global only)
+	Scope          Scope  // Filter by scope (empty = all scopes)
+	Key            string // Exact key match
+	KeyPattern     string // Glob pattern (e.g., "memories/*", "user.*")
+	KeyPrefix      string // Key prefix match
+	SemanticQuery  string // Natural language query (requires embedding)
+	SequenceRange  *Range // Sequence number range
+	IncludeExpired bool   // Include expired variables (default: exclude)
+	Limit          int    // Max results (default: 50)
+	Offset         int    // Pagination offset
+	OrderBy        string // "created_at", "updated_at", "sequence_num", "access_count"
+	OrderDesc      bool   // Descending order
 }
 
 // Range specifies a sequence number range for range queries.
