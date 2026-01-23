@@ -99,9 +99,12 @@ func main() {
 **Solution:** Use a real file, not a symlink:
 
 ```bash
-# If you have a symlink, replace it
-rm ~/.agentctl/.env
-cp /path/to/your/.env ~/.agentctl/.env
+# Manual sync
+make env-sync  # Copies repo .env → ~/.agentctl/.env
+
+# Or with auto-watch (requires: brew install fswatch)
+make env-watch       # Start watching
+make env-watch-stop  # Stop watching
 
 # Verify it's a real file
 ls -la ~/.agentctl/.env

@@ -21,7 +21,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop
 
 fmt:
 	@echo "Running gofumpt"
@@ -378,3 +378,41 @@ completions: build
 	@mkdir -p dist
 	@bin/$(BINARY) completion bash > dist/completion.bash
 	@bin/$(BINARY) completion zsh > dist/_agentctl
+
+# Environment file sync (repo → ~/.agentctl)
+# Use real files, not symlinks, for sandbox/remote compatibility
+.PHONY: env-sync env-watch env-watch-stop
+
+env-sync:
+	@if [ -f .env ]; then \
+		mkdir -p ~/.agentctl; \
+		cp .env ~/.agentctl/.env; \
+		echo "Synced .env → ~/.agentctl/.env"; \
+	else \
+		echo "No .env file found in repo root"; \
+		exit 1; \
+	fi
+
+# Watch .env and auto-sync on changes (requires fswatch: brew install fswatch)
+ENV_WATCH_PID := /tmp/agentctl-env-watch.pid
+env-watch:
+	@command -v fswatch >/dev/null 2>&1 || { echo "fswatch not installed. Run: brew install fswatch"; exit 1; }
+	@if [ -f $(ENV_WATCH_PID) ] && kill -0 $$(cat $(ENV_WATCH_PID)) 2>/dev/null; then \
+		echo "env-watch already running (PID $$(cat $(ENV_WATCH_PID)))"; \
+	else \
+		echo "Starting env-watch..."; \
+		nohup bash -c 'fswatch -o "$(CURDIR)/.env" | while read; do cp "$(CURDIR)/.env" ~/.agentctl/.env && echo "[env-watch] synced .env"; done' \
+			> /tmp/agentctl-env-watch.log 2>&1 & echo $$! > $(ENV_WATCH_PID); \
+		sleep 0.5; \
+		echo "env-watch started (PID $$(cat $(ENV_WATCH_PID))), log: /tmp/agentctl-env-watch.log"; \
+	fi
+
+env-watch-stop:
+	@if [ -f $(ENV_WATCH_PID) ]; then \
+		PID=$$(cat $(ENV_WATCH_PID)); \
+		pkill -P $$PID 2>/dev/null; \
+		kill $$PID 2>/dev/null && echo "env-watch stopped (PID $$PID)" || echo "env-watch not running"; \
+		rm -f $(ENV_WATCH_PID); \
+	else \
+		echo "env-watch not running"; \
+	fi

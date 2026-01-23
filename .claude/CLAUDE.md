@@ -161,6 +161,12 @@ Environment variables are loaded from `~/.agentctl/.env` (global). The loader ch
 
 **Important:** The `.env` file must be a **real file**, not a symlink. Symlinks break in sandboxed/remote environments.
 
+```bash
+make env-sync        # Manual: copy repo .env → ~/.agentctl/.env
+make env-watch       # Auto: watch and sync on changes (requires fswatch)
+make env-watch-stop  # Stop the watcher
+```
+
 | Variable         | Required | Purpose               |
 | ---------------- | -------- | --------------------- |
 | `VOYAGE_API_KEY` | Yes      | Vector embeddings     |
