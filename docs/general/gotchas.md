@@ -90,6 +90,31 @@ func main() {
 
 ---
 
+### .env Must Be a Real File (Not a Symlink)
+
+**Problem:** agentctl fails in sandboxed or remote environments.
+
+**Cause:** `~/.agentctl/.env` is a symlink to the repo's `.env` file. When the repo path doesn't exist (sandbox, remote, different machine), the symlink is broken.
+
+**Solution:** Use a real file, not a symlink:
+
+```bash
+# If you have a symlink, replace it
+rm ~/.agentctl/.env
+cp /path/to/your/.env ~/.agentctl/.env
+
+# Verify it's a real file
+ls -la ~/.agentctl/.env
+# Should show: -rw------- (not lrwxr-xr-x)
+```
+
+The `.env` loader checks these locations in order:
+1. `~/.agentctl/.env` (global defaults)
+2. `$AGENTCTL_HOME/.env` (if set)
+3. `$PWD/.env` (project overrides)
+
+---
+
 ### Memory Workspace Scoping
 
 **Problem:** Memory queries return empty results.

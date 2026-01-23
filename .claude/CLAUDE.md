@@ -154,7 +154,12 @@ agentctl agent kill <session-id>
 
 ## Environment
 
-Environment variables are loaded from `<repo-root>/.env` by the config loader (gitignored, shared across worktrees).
+Environment variables are loaded from `~/.agentctl/.env` (global). The loader checks:
+1. `~/.agentctl/.env` (global defaults)
+2. `$AGENTCTL_HOME/.env` (if set)
+3. `$PWD/.env` (project overrides)
+
+**Important:** The `.env` file must be a **real file**, not a symlink. Symlinks break in sandboxed/remote environments.
 
 | Variable         | Required | Purpose               |
 | ---------------- | -------- | --------------------- |
@@ -221,6 +226,10 @@ if strings.HasSuffix(path, ".gz") {
 ### Mailbox Replies Must Not Be Auto-Acked
 
 Replies are for the caller to consume; acking in daemon poller drops async replies.
+
+### .env Must Be a Real File
+
+`~/.agentctl/.env` must be a real file, not a symlink to the repo. Symlinks break in sandboxed/remote environments where the repo path doesn't exist.
 
 **All gotchas:** [docs/general/gotchas.md](../docs/general/gotchas.md)
 
