@@ -70,3 +70,8 @@ capabilities:
     - type: home
       path: ".agentctl/cas"
   pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

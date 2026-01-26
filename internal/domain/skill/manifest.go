@@ -12,14 +12,15 @@ import (
 
 // Manifest mirrors skill.yaml structure.
 type Manifest struct {
-	APIVersion   string       `yaml:"apiVersion" json:"apiVersion"`
-	Kind         string       `yaml:"kind" json:"kind"`
-	Metadata     Metadata     `yaml:"metadata" json:"metadata"`
-	Distribution Distribution `yaml:"distribution" json:"distribution"`
-	IO           IOConfig     `yaml:"io" json:"io"`
-	Signature    Signature    `yaml:"signature" json:"signature"`
-	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
-	Memory       MemoryConfig `yaml:"memory" json:"memory"`
+	APIVersion   string        `yaml:"apiVersion" json:"apiVersion"`
+	Kind         string        `yaml:"kind" json:"kind"`
+	Metadata     Metadata      `yaml:"metadata" json:"metadata"`
+	Distribution Distribution  `yaml:"distribution" json:"distribution"`
+	IO           IOConfig      `yaml:"io" json:"io"`
+	Signature    Signature     `yaml:"signature" json:"signature"`
+	Capabilities Capabilities  `yaml:"capabilities" json:"capabilities"`
+	Memory       MemoryConfig  `yaml:"memory" json:"memory"`
+	OpenAPI      *OpenAPIConfig `yaml:"openapi,omitempty" json:"openapi,omitempty"`
 }
 
 // Metadata describes the human-facing info for a skill.
@@ -105,6 +106,55 @@ type FileAccess struct {
 type MemoryConfig struct {
 	Recommend  bool   `yaml:"recommend" json:"recommend"`
 	DefaultTTL string `yaml:"default_ttl" json:"default_ttl"`
+}
+
+// OpenAPIConfig declares REST API exposure for a skill.
+// Skills must opt-in by setting enabled: true.
+type OpenAPIConfig struct {
+	// Enabled opts the skill into REST API exposure.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// Methods maps HTTP methods to operation values.
+	// Example: {"GET": "list", "POST": "add", "PUT": "update", "DELETE": "complete"}
+	// For skills without an operation param, use "true" to enable the method.
+	Methods map[string]string `yaml:"methods,omitempty" json:"methods,omitempty"`
+
+	// BasePath overrides the default /api/skills/{command} path.
+	// Example: "/api/todos" instead of "/api/skills/todo/manage"
+	BasePath string `yaml:"base_path,omitempty" json:"base_path,omitempty"`
+
+	// IDParam specifies the name of the ID parameter for resource routes.
+	// Defaults to "id". Used for GET/PUT/DELETE /{id} routes.
+	IDParam string `yaml:"id_param,omitempty" json:"id_param,omitempty"`
+}
+
+// SupportsMethod checks if the skill supports a given HTTP method.
+func (o *OpenAPIConfig) SupportsMethod(method string) bool {
+	if o == nil || !o.Enabled {
+		return false
+	}
+	if o.Methods == nil {
+		return false
+	}
+	_, ok := o.Methods[method]
+	return ok
+}
+
+// OperationForMethod returns the operation value for a given HTTP method.
+// Returns empty string if not configured.
+func (o *OpenAPIConfig) OperationForMethod(method string) string {
+	if o == nil || o.Methods == nil {
+		return ""
+	}
+	return o.Methods[method]
+}
+
+// GetIDParam returns the ID parameter name, defaulting to "id".
+func (o *OpenAPIConfig) GetIDParam() string {
+	if o == nil || o.IDParam == "" {
+		return "id"
+	}
+	return o.IDParam
 }
 
 // LoadManifest reads and validates a manifest.

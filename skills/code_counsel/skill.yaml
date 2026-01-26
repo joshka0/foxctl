@@ -135,3 +135,8 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false  # Calls external LLM APIs
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

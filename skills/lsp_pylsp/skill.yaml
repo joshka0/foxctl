@@ -73,3 +73,8 @@ capabilities:
     - type: workdir
   pure: true
   cacheable: false
+openapi:
+  enabled: true
+  methods:
+    GET: definition
+    POST: "true"

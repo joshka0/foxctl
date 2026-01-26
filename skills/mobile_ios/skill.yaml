@@ -140,3 +140,10 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: list_devices
+    POST: tap
+    PUT: install
+    DELETE: terminate

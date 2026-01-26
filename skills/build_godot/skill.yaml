@@ -143,3 +143,8 @@ signature:
       description: "Clean build artifacts"
       example_input:
         action: "clean"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

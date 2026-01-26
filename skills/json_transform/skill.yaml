@@ -72,3 +72,10 @@ capabilities:
   filesystem:
     - type: workdir
   pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: extract
+    POST: merge
+    PUT: format
+    DELETE: "true"

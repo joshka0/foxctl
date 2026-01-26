@@ -41,3 +41,8 @@ signature:
         example_input:
           workspace: "./"
           damping_factor: 0.85
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

@@ -303,3 +303,10 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: select
+    POST: insert
+    PUT: replace
+    DELETE: delete

@@ -82,3 +82,8 @@ examples:
       session_id: "01HXYZ..."
       limit: 20
     description: "Get the first 20 turns of a session"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

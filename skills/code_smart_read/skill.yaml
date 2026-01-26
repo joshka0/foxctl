@@ -111,3 +111,8 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false  # Uses external embedding API when available
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

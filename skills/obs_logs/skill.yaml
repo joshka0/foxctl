@@ -102,3 +102,8 @@ capabilities:
     - type: home
       path: ".agentctl/observability"
   pure: true
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

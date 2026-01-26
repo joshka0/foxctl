@@ -52,3 +52,8 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false  # Agent-driven, non-deterministic
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

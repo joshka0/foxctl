@@ -128,3 +128,10 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: list
+    POST: add
+    PUT: update
+    DELETE: complete

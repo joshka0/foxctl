@@ -89,3 +89,8 @@ examples:
       session_id: "01HXYZ..."
       limit: 5
     description: "Retrieve the first 5 chunks of a session"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

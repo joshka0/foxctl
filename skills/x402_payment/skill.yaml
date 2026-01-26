@@ -164,3 +164,9 @@ capabilities:
 memory:
   recommend: true
   default_ttl: "1h"
+openapi:
+  enabled: true
+  methods:
+    GET: wallet/status
+    POST: pay
+    PUT: wallet/init

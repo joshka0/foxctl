@@ -125,3 +125,8 @@ examples:
       window_index: 2
       chunk_index: 34
     description: "Fetch timeline up to a specific chunk index"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

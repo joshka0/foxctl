@@ -100,3 +100,8 @@ examples:
       project: "agentctl"
       limit: 5
     description: "Find database migration sessions for a specific project"
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"

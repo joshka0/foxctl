@@ -119,12 +119,22 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/workspaces", api.WorkspacesHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/workspaces/switch", api.WorkspaceSwitchHandler(s.cfg, s.log))
 
+	// --- OpenAPI / Swagger ---
+	apiMux.HandleFunc("/api/openapi.json", api.OpenAPIHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/swagger", api.SwaggerUIHandler())
+	apiMux.HandleFunc("/api/swagger/", api.SwaggerUIHandler())
+
 	// --- Skills (Phase 4) ---
 	apiMux.HandleFunc("/api/skills", api.SkillsListHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/skills/schema", api.SkillsSchemaHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/skills/run", api.SkillsRunHandler(s.cfg, s.log))
-	// Skill detail: /api/skills/{category}/{name} - must come after specific routes
-	apiMux.HandleFunc("/api/skills/", api.SkillDetailHandler(s.cfg, s.log))
+	// Skill CRUD routes - supports all HTTP methods:
+	//   GET    /api/skills/todo/manage        → list
+	//   GET    /api/skills/todo/manage/{id}   → get
+	//   POST   /api/skills/todo/manage        → add
+	//   PUT    /api/skills/todo/manage/{id}   → update
+	//   DELETE /api/skills/todo/manage/{id}   → delete
+	apiMux.HandleFunc("/api/skills/", api.SkillsCRUDHandler(s.cfg, s.log))
 
 	// --- Console (Phase 6-8) ---
 	apiMux.HandleFunc("/api/console/sessions", api.ConsoleSessionsHandler(s.consoleHub, s.cfg, s.log))

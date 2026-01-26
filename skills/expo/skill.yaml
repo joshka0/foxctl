@@ -114,3 +114,10 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: logs
+    POST: build
+    PUT: update
+    DELETE: "true"

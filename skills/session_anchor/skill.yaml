@@ -70,3 +70,10 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: get
+    POST: set
+    PUT: append_learnings
+    DELETE: clear

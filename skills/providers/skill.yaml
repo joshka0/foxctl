@@ -197,3 +197,10 @@ capabilities:
   filesystem:
     - type: home
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: list
+    POST: add-mcp
+    PUT: set
+    DELETE: remove-mcp

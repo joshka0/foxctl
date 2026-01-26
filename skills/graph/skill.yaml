@@ -141,3 +141,10 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: query
+    POST: add_node
+    PUT: add_edge
+    DELETE: delete_node

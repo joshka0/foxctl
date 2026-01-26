@@ -263,3 +263,8 @@ capabilities:
   filesystem:
     - type: workdir
   pure: false
+openapi:
+  enabled: true
+  methods:
+    GET: "true"
+    POST: "true"
