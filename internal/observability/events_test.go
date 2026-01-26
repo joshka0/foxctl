@@ -2,10 +2,12 @@ package observability
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -200,5 +202,58 @@ func TestSweGrepEvent(t *testing.T) {
 	}
 	if decoded.Ts.After(time.Now().Add(time.Minute)) {
 		t.Error("Ts is in the future")
+	}
+}
+
+func TestRepoIndexEvent(t *testing.T) {
+	tmpDir := t.TempDir()
+	SetObsDirForTesting(tmpDir)
+
+	ctx := context.Background()
+
+	ev := NewRepoIndexEvent("repo.index.search", "test-workspace", "tool")
+	ev.QueryHash = HashQuestion("builder")
+	ev.ResultCount = 3
+	ev.DurationMS = 42
+
+	if err := WriteRepoIndexEvent(ctx, ev); err != nil {
+		t.Fatalf("WriteRepoIndexEvent failed: %v", err)
+	}
+
+	filePath := filepath.Join(tmpDir, "events", "repo_index.ndjson")
+	gotBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("read events file: %v", err)
+	}
+	gotBytes = bytes.TrimSpace(gotBytes)
+
+	goldenPath := filepath.Join("testdata", "repo_index.ndjson")
+	wantBytes, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden file: %v", err)
+	}
+	wantBytes = bytes.TrimSpace(wantBytes)
+
+	var gotEvent RepoIndexEvent
+	if err := json.Unmarshal(gotBytes, &gotEvent); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	var wantEvent RepoIndexEvent
+	if err := json.Unmarshal(wantBytes, &wantEvent); err != nil {
+		t.Fatalf("unmarshal golden event: %v", err)
+	}
+
+	if gotEvent.Ts.IsZero() {
+		t.Error("Ts is zero")
+	}
+	if gotEvent.Ts.After(time.Now().Add(time.Minute)) {
+		t.Error("Ts is in the future")
+	}
+
+	gotEvent.Ts = time.Time{}
+	wantEvent.Ts = time.Time{}
+
+	if !reflect.DeepEqual(wantEvent, gotEvent) {
+		t.Errorf("RepoIndexEvent mismatch: got %+v want %+v", gotEvent, wantEvent)
 	}
 }

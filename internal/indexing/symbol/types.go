@@ -50,6 +50,10 @@ const FileMetaType = "code_symbol_file_meta"
 // Entry names follow the format: "file://<workspace>/<file_path>"
 const FileSummaryType = "file_summary"
 
+// SymbolSummaryType is the memory entry type for symbol-level summaries.
+// Entry names follow the format: "symbol-summary://<workspace>/<symbol_id>"
+const SymbolSummaryType = "symbol_summary"
+
 // Kind represents the kind of code symbol.
 type Kind string
 
@@ -403,6 +407,54 @@ func MarshalFileSummaryResult(result FileSummaryResult) ([]byte, error) {
 // UnmarshalFileSummaryResult deserializes a FileSummaryResult from JSON bytes.
 func UnmarshalFileSummaryResult(data []byte) (*FileSummaryResult, error) {
 	var result FileSummaryResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// SymbolSummaryResult stores metadata used to validate symbol summaries.
+type SymbolSummaryResult struct {
+	SymbolID  string `json:"symbol_id"`
+	FilePath  string `json:"file_path,omitempty"`
+	Name      string `json:"name"`
+	Kind      Kind   `json:"kind,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Digest    string `json:"digest"`
+	Language  string `json:"language,omitempty"`
+}
+
+// SymbolSummaryEntryName returns the named memory entry for a symbol summary.
+func SymbolSummaryEntryName(workspace, symbolID string) string {
+	return fmt.Sprintf("symbol-summary://%s/%s", workspace, symbolID)
+}
+
+// SymbolSummaryInput captures the fields used to generate a symbol summary.
+type SymbolSummaryInput struct {
+	SymbolID      string `json:"symbol_id"`
+	FilePath      string `json:"file_path,omitempty"`
+	Name          string `json:"name"`
+	Kind          Kind   `json:"kind,omitempty"`
+	Signature     string `json:"signature,omitempty"`
+	Documentation string `json:"documentation,omitempty"`
+	BodyDigest    string `json:"body_digest,omitempty"`
+	Language      string `json:"language,omitempty"`
+}
+
+// ComputeSymbolSummaryDigest hashes the summary generation inputs for caching.
+func ComputeSymbolSummaryDigest(input SymbolSummaryInput) string {
+	data, _ := json.Marshal(input)
+	return ComputeDigest(data)
+}
+
+// MarshalSymbolSummaryResult serializes the symbol summary result payload.
+func MarshalSymbolSummaryResult(result SymbolSummaryResult) ([]byte, error) {
+	return json.Marshal(result)
+}
+
+// UnmarshalSymbolSummaryResult parses the symbol summary result payload.
+func UnmarshalSymbolSummaryResult(data []byte) (*SymbolSummaryResult, error) {
+	var result SymbolSummaryResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}

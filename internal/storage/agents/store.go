@@ -26,6 +26,7 @@ type Store interface {
 	Resolve(ctx context.Context, ref string) (agent.Agent, error) // Resolve slug, name, or ID
 	List(ctx context.Context, limit int) ([]agent.Agent, error)
 	ListByParent(ctx context.Context, parentID string, limit int) ([]agent.Agent, error)
+	UpdateIdentity(ctx context.Context, id, name, slug string) error
 	UpdateState(ctx context.Context, id string, state agent.State) error
 	UpdateHeartbeat(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
@@ -410,6 +411,32 @@ func (s *sqlStore) UpdateHeartbeat(ctx context.Context, id string) error {
 	rows, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("agents: update heartbeat rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateIdentity always writes both name and slug; pass existing values to preserve.
+// Empty strings clear the stored values (NULL).
+func (s *sqlStore) UpdateIdentity(ctx context.Context, id, name, slug string) error {
+	var nameVal interface{}
+	if name != "" {
+		nameVal = name
+	}
+	var slugVal interface{}
+	if slug != "" {
+		slugVal = slug
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET name = ?, slug = ? WHERE id = ?`, nameVal, slugVal, id)
+	if err != nil {
+		return fmt.Errorf("agents: update identity: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: update identity rows affected: %w", err)
 	}
 	if rows == 0 {
 		return ErrNotFound

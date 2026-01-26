@@ -37,6 +37,7 @@ dspy-go/
 .env
 .env.local
 .env.*.local
+.env.tmp
 *.token
 *.key
 

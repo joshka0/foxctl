@@ -311,21 +311,21 @@ type SimilarSession struct {
 
 // SessionTurn represents a single turn in a conversation session.
 type SessionTurn struct {
-	ID             string     `json:"id"`
-	SessionID      string     `json:"session_id"`
-	TurnIndex      int        `json:"turn_index"`
-	Role           string     `json:"role"` // 'user', 'assistant', 'system'
-	ContentPreview string     `json:"content_preview,omitempty"`
-	ContentCASDigest string   `json:"content_cas_digest,omitempty"` // CAS digest for full content
-	ToolCalls      []ToolCall `json:"tool_calls,omitempty"`
-	FilesTouched   []string   `json:"files_touched,omitempty"`
-	HasError       bool       `json:"has_error"`
-	ErrorType      string     `json:"error_type,omitempty"`
-	ErrorMessage   string     `json:"error_message,omitempty"`
-	Resolution     string     `json:"resolution,omitempty"`
-	TokensUsed     int        `json:"tokens_used"`
-	Timestamp      time.Time  `json:"timestamp"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID               string     `json:"id"`
+	SessionID        string     `json:"session_id"`
+	TurnIndex        int        `json:"turn_index"`
+	Role             string     `json:"role"` // 'user', 'assistant', 'system'
+	ContentPreview   string     `json:"content_preview,omitempty"`
+	ContentCASDigest string     `json:"content_cas_digest,omitempty"` // CAS digest for full content
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	FilesTouched     []string   `json:"files_touched,omitempty"`
+	HasError         bool       `json:"has_error"`
+	ErrorType        string     `json:"error_type,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+	Resolution       string     `json:"resolution,omitempty"`
+	TokensUsed       int        `json:"tokens_used"`
+	Timestamp        time.Time  `json:"timestamp"`
+	CreatedAt        time.Time  `json:"created_at"`
 }
 
 // ToolCall represents a tool invocation within a turn.

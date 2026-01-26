@@ -39,8 +39,11 @@ func NewAnalyzer(planner *llm.OpenAIPlanner, timeout time.Duration) *Analyzer {
 }
 
 // NewAnalyzerFromConfig creates an analyzer using auto-detected LLM provider.
-func NewAnalyzerFromConfig(cfg llm.ProviderConfig, timeout time.Duration) *Analyzer {
-	planner := llm.AutoPlannerFromConfig(cfg)
+func NewAnalyzerFromConfig(ctx context.Context, cfg llm.ProviderConfig, timeout time.Duration) *Analyzer {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	planner := llm.AutoPlannerFromConfig(ctx, cfg)
 	return NewAnalyzer(planner, timeout)
 }
 
@@ -203,8 +206,11 @@ type AnalyzerWithAPIKey struct {
 }
 
 // NewAnalyzerWithAPIKey creates an analyzer with direct API key access.
-func NewAnalyzerWithAPIKey(provider, apiKey, model string, timeout time.Duration) *AnalyzerWithAPIKey {
-	planner := llm.NewOpenAIPlanner(llm.OpenAIConfig{
+func NewAnalyzerWithAPIKey(ctx context.Context, provider, apiKey, model string, timeout time.Duration) *AnalyzerWithAPIKey {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	planner := llm.NewOpenAIPlanner(ctx, llm.OpenAIConfig{
 		APIKey:   apiKey,
 		Provider: provider,
 		Model:    model,

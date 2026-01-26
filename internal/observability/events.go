@@ -188,3 +188,40 @@ func NewSweGrepEvent(
 func WriteSweGrepEvent(ctx context.Context, ev SweGrepEvent) error {
 	return WriteEvent(ctx, "code_swe_grep", ev)
 }
+
+// RepoIndexEvent captures observability for repo index queries.
+type RepoIndexEvent struct {
+	Ts          time.Time `json:"ts"`
+	Command     string    `json:"command"`
+	WorkspaceID string    `json:"workspace_id"`
+	Source      string    `json:"source,omitempty"`
+	QueryHash   string    `json:"query_hash,omitempty"`
+	NodeID      string    `json:"node_id,omitempty"`
+	SeedCount   int       `json:"seed_count,omitempty"`
+	EdgeTypes   []string  `json:"edge_types,omitempty"`
+	Direction   string    `json:"direction,omitempty"`
+	Depth       int       `json:"depth,omitempty"`
+	Budget      int       `json:"budget,omitempty"`
+	PerNodeCap  int       `json:"per_node_cap,omitempty"`
+	ResultCount int       `json:"result_count,omitempty"`
+	Provider    string    `json:"provider,omitempty"`
+	Model       string    `json:"model,omitempty"`
+	StopReason  string    `json:"stop_reason,omitempty"`
+	ToolCalls   int       `json:"tool_calls,omitempty"`
+	DurationMS  int64     `json:"duration_ms,omitempty"`
+	Error       string    `json:"error,omitempty"`
+}
+
+func NewRepoIndexEvent(command, workspaceID, source string) RepoIndexEvent {
+	return RepoIndexEvent{
+		Ts:          time.Now().UTC(),
+		Command:     command,
+		WorkspaceID: workspaceID,
+		Source:      source,
+	}
+}
+
+// WriteRepoIndexEvent writes a RepoIndexEvent to the observability stream.
+func WriteRepoIndexEvent(ctx context.Context, ev RepoIndexEvent) error {
+	return WriteEvent(ctx, "repo_index", ev)
+}

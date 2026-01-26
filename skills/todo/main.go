@@ -1438,7 +1438,7 @@ func handlePlan(ctx context.Context, store tasks.Store, boardStore blackboard.Bo
 		}
 	} else {
 		// No explicit tasks: try LLM planning or fall back to single epic
-		planner := llm.AutoPlannerFromConfig(llm.ProviderConfig{
+		planner := llm.AutoPlannerFromConfig(ctx, llm.ProviderConfig{
 			Provider:         cfg.LLM.Provider,
 			Model:            cfg.LLM.Model,
 			APIKey:           cfg.LLM.APIKey,

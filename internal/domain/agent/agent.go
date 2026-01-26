@@ -30,6 +30,8 @@ const (
 	ModeAutonomous ExecutionMode = "autonomous"
 	// ModeProactive means agent can initiate work on its own.
 	ModeProactive ExecutionMode = "proactive"
+	// ModeStory means agent runs a gather + dialogue story loop.
+	ModeStory ExecutionMode = "story"
 )
 
 // Agent represents an autonomous actor in the multi-agent system.
@@ -54,7 +56,7 @@ type Agent struct {
 	LLMAPIKey   string `json:"llm_api_key,omitempty"`  // API key (or env var name like $GROQ_API_KEY)
 
 	// Execution mode configuration
-	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`      // reactive|autonomous|proactive (default: reactive)
+	ExecMode      ExecutionMode `json:"exec_mode,omitempty"`      // reactive|autonomous|proactive|story (default: reactive)
 	MaxIterations int           `json:"max_iterations,omitempty"` // Max tool calls per turn (default: 10)
 	MaxAutoTurns  int           `json:"max_auto_turns,omitempty"` // Max autonomous turns per session (default: 1)
 	ThinkInterval int           `json:"think_interval,omitempty"` // Seconds between proactive think cycles (default: 60)

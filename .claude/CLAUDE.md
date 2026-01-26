@@ -17,6 +17,12 @@ agentctl run code/semantic_search --input '{"format": "tree"}'
 agentctl run code/semantic_search --input '{"query": "your task topic", "format": "tree", "limit": 30}'
 ```
 
+For relationship navigation (calls/references/imports), build the repo graph:
+
+```bash
+agentctl index repo build --workspace . --go --typescript
+```
+
 Also read: `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`
 
 ## Architecture
@@ -114,6 +120,12 @@ agentctl ci comments --pr 123
 # Codemap
 agentctl codemap generate "trace auth flow"
 
+# Repo index
+agentctl index repo build --workspace .
+agentctl index repo search --workspace . --query "Supervisor" --limit 10
+agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
+agentctl index repo ask --workspace . --question "Where is task guard implemented?"
+
 # Observability
 agentctl run obs/logs --input '{}'
 agentctl run obs/logs --input '{"errors_only": true, "since": "1h"}'
@@ -161,6 +173,32 @@ Environment variables are loaded from `~/.agentctl/.env` (global). The loader ch
 
 **Important:** The `.env` file must be a **real file**, not a symlink. Symlinks break in sandboxed/remote environments.
 
+### Required
+
+| Variable         | Purpose                       |
+| ---------------- | ----------------------------- |
+| `VOYAGE_API_KEY` | Vector embeddings (1024 dims) |
+
+### Optional
+
+| Variable                   | Default       | Purpose                              |
+| -------------------------- | ------------- | ------------------------------------ |
+| `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                         |
+| `ANTHROPIC_API_KEY`        | -             | Codemap generation                   |
+| `TAVILY_API_KEY`           | -             | Web search (Tavily provider)         |
+| `EXA_API_KEY`              | -             | Web search (Exa provider)            |
+| `PERPLEXITY_API_KEY`       | -             | Web search (Perplexity provider)     |
+| `AGENTCTL_SEMANTIC_RERANK` | `0`           | Enable reranking                     |
+| `AGENTCTL_OBS_DIR`         | -             | Observability (use `$HOME`, not `~`) |
+
+### Embedding Models (Voyage AI)
+
+| Scope      | Model            | Use   |
+| ---------- | ---------------- | ----- |
+| `symbols`  | `voyage-code-3`  | Code  |
+| `memory`   | `voyage-3-large` | Text  |
+| `codemaps` | `voyage-3.5`     | Mixed |
+
 ```bash
 make env-sync        # Manual: copy repo .env → ~/.agentctl/.env
 make env-watch       # Auto: watch and sync on changes (requires fswatch)
@@ -201,13 +239,31 @@ func main() {
 }
 ```
 
-### API Keys via Config
+### API Keys via Config (FC/IS Pattern)
+
+Never use `os.Getenv` directly for API keys. Use Config struct fields instead:
 
 ```go
-// Wrong: os.Getenv("VOYAGE_API_KEY")
-// Correct:
+// Wrong - direct env access scattered throughout code
+apiKey := os.Getenv("VOYAGE_API_KEY")
+
+// Correct - use Config loaded once at startup
 cfg, _ := config.Load(ctx)
-apiKey := cfg.Embedding.VoyageAPIKey
+apiKey := cfg.Embedding.VoyageAPIKey  // For Voyage
+apiKey := cfg.Search.TavilyAPIKey     // For Tavily
+apiKey := cfg.Search.ExaAPIKey        // For Exa
+apiKey := cfg.LLM.ResolveAPIKey("anthropic")  // For LLM providers
+```
+
+For skills, API keys are available via `RunContext.Config`:
+
+```go
+func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
+    // Access via rc.Config
+    if rc.Config.Search.ExaAPIKey != "" {
+        // use Exa
+    }
+}
 ```
 
 ### Memory Path

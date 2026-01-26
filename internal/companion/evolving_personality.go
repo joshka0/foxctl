@@ -263,16 +263,25 @@ func describeStyle(dim PersonalityDimension) string {
 
 // mergeDimensions ensures all default dimensions exist in the profile.
 func mergeDimensions(existing, defaults []PersonalityDimension) []PersonalityDimension {
-	dimMap := make(map[string]PersonalityDimension)
+	byName := make(map[string]PersonalityDimension, len(existing))
+	for _, d := range existing {
+		byName[d.Name] = d
+	}
+
+	result := make([]PersonalityDimension, 0, len(defaults)+len(existing))
 	for _, d := range defaults {
-		dimMap[d.Name] = d
+		if existingDim, ok := byName[d.Name]; ok {
+			result = append(result, existingDim)
+			delete(byName, d.Name)
+		} else {
+			result = append(result, d)
+		}
 	}
 	for _, d := range existing {
-		dimMap[d.Name] = d
-	}
-	result := make([]PersonalityDimension, 0, len(dimMap))
-	for _, d := range dimMap {
-		result = append(result, d)
+		if _, ok := byName[d.Name]; ok {
+			result = append(result, d)
+			delete(byName, d.Name)
+		}
 	}
 	return result
 }

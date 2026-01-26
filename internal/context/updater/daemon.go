@@ -28,7 +28,7 @@ type DaemonConfig struct {
 
 // NewWorkerFromConfig creates a context updater worker configured from daemon settings.
 // Returns nil if LLM providers are not available.
-func NewWorkerFromConfig(cfg DaemonConfig) (*Worker, error) {
+func NewWorkerFromConfig(ctx context.Context, cfg DaemonConfig) (*Worker, error) {
 	// Build LLM provider config from platform config
 	providerCfg := llm.ProviderConfig{
 		CerebrasAPIKey:   cfg.Config.LLM.CerebrasAPIKey,
@@ -72,7 +72,7 @@ func NewWorkerFromConfig(cfg DaemonConfig) (*Worker, error) {
 		WithLLMProvider(provider).
 		WithLLMModel(model)
 
-	analyzer := NewAnalyzerWithAPIKey(provider, apiKey, model, workerConfig.LLMTimeout)
+	analyzer := NewAnalyzerWithAPIKey(ctx, provider, apiKey, model, workerConfig.LLMTimeout)
 
 	// Create worker
 	worker := NewWorker(

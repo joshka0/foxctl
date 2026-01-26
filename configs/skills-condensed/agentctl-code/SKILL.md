@@ -28,6 +28,11 @@ agentctl run code/imports --input '{"path": "internal/", "recursive": true}'
 # Smart code search
 agentctl run code/smart_search --input '{"query": "error handling", "files": ["handler.go"]}'
 
+# Repo graph index
+agentctl index repo build --workspace .
+agentctl index repo search --workspace . --query "Supervisor"
+agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
+
 # Git operations
 agentctl run code/git --input '{"action": "log", "count": 10}'
 agentctl run code/git --input '{"action": "blame", "path": "main.go"}'

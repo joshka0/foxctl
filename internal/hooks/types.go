@@ -168,10 +168,10 @@ type ProviderCapabilities struct {
 // Fields are populated based on Event; unused fields may be omitted.
 type Input struct {
 	// Core routing
-	Event         Event  `json:"event"`
-	ActorID       string `json:"actor_id,omitempty"`       // e.g. actor:agent:coder-1
-	WorkspaceID   string `json:"workspace_id,omitempty"`   // stable workspace key (e.g. hashed)
-	WorkspaceRoot string `json:"workspace_root,omitempty"` // absolute path (when available)
+	Event          Event  `json:"event"`
+	ActorID        string `json:"actor_id,omitempty"`        // e.g. actor:agent:coder-1
+	WorkspaceID    string `json:"workspace_id,omitempty"`    // stable workspace key (e.g. hashed)
+	WorkspaceRoot  string `json:"workspace_root,omitempty"`  // absolute path (when available)
 	Cwd            string `json:"cwd,omitempty"`             // current working directory (Claude Code)
 	PermissionMode string `json:"permission_mode,omitempty"` // permission mode (normal, etc.)
 	HookEventName  string `json:"hook_event_name,omitempty"` // hook event name from Claude Code

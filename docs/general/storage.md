@@ -17,6 +17,7 @@ flowchart TD
         COMP[(companion.db)]
         CTXVAR[(contextvar.db)]
         MBOX[(mailbox.db)]
+        RGI[(repoindex/)]
     end
 
     subgraph Cache["~/.agentctl/cache/"]
@@ -51,6 +52,7 @@ flowchart TD
 | `companion.db` | Companion conversation memory | `companion_turns`, `companion_day_summaries`, `companion_history` |
 | `contextvar.db` | RLM context variables | `context_vars` |
 | `mailbox.db` | Inter-agent messaging | `mailbox` |
+| `repoindex/<repo>-repoindex-<hash>.db` | Repo graph index | `nodes`, `edges`, `index_meta` |
 
 ### Cache (`~/.agentctl/cache/`)
 

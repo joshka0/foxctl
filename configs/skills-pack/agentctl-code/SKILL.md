@@ -35,5 +35,12 @@ agentctl run code/security --input '{"path": ".", "recursive": true}'
 
 ### Semantic search
 ```bash
-agentctl run code/semantic_search --input '{"query": "where is task guard implemented", "format": "tree", "limit": 25}'
+agentctl run code/semantic_search --input '{"query": "repoindex", "format": "tree", "limit": 25}'
+```
+
+### Repo graph index
+```bash
+agentctl index repo build --workspace .
+agentctl index repo search --workspace . --query "repoindex"
+agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
 ```

@@ -18,6 +18,7 @@ Detailed documentation for agentctl subsystems. For quick reference, see:
 | [Sessions](sessions.md) | Session lifecycle, lineage, context preservation |
 | [Storage](storage.md) | SQLite databases, CAS, vector stores |
 | [Search](search.md) | Semantic search, embeddings, hybrid search |
+| [Repo Index](repoindex.md) | Repo graph index, navigation, and queries |
 | [Gotchas](gotchas.md) | Common pitfalls and their solutions |
 | [v1 Specs](v1-specs.md) | Overview of foundational v1 specifications |
 

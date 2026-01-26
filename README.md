@@ -126,6 +126,37 @@ agentctl/
 
 ---
 
+## Agents
+
+Agents are mailbox-driven workers. Spawn a profile, run it in the foreground, and ask questions through the mailbox interface.
+
+```bash
+# Spawn a story-mode companion
+agentctl agent spawn \
+  --name "Stormscribe" \
+  --slug "stormscribe" \
+  --role companion \
+  --exec-mode story \
+  --llm-provider openrouter \
+  --llm-model "z-ai/glm-4.7-flash"
+
+# Run the agent daemon
+agentctl agent run <agent-id>
+
+# Ask a question with memory continuity
+agentctl agent ask <agent-id> --conversation-id story-loop --question "..." --wait
+
+# Rename the agent later
+agentctl agent rename <agent-ref> --name "Stormscribe" --slug "stormscribe"
+
+# Stop the agent
+agentctl agent kill <agent-id>
+```
+
+See `docs/general/agent-daemon.md` for engine routing and execution modes.
+
+---
+
 ## Quick Start
 
 ### Installation

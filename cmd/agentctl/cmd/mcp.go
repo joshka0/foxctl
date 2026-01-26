@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -65,10 +66,12 @@ var skillGroups = map[string][]string{
 	},
 	// code-write: Code modification tools
 	"code-write": {
+		"fs/apply_edit",
 		"code/smart_write",
 	},
 	// project: Project management tools
 	"project": {
+		"fs/read",
 		"todo/manage",
 		"memory/query",
 		"session/recall",
@@ -214,6 +217,16 @@ type backendClients struct {
 	configs map[string]mcpServerConfig
 }
 
+func skillGroupNames() []string {
+	names := make([]string, 0, len(skillGroups)+1)
+	for name := range skillGroups {
+		names = append(names, name)
+	}
+	names = append(names, "all")
+	sort.Strings(names)
+	return names
+}
+
 var backends = &backendClients{
 	clients: make(map[string]*client.Client),
 	configs: make(map[string]mcpServerConfig),
@@ -225,7 +238,7 @@ func newMCPCommand() *cobra.Command {
 		Short: "MCP server facade for Claude Code",
 		Long: `Run agentctl as an MCP server that provides a curated set of tools,
 proxying requests to backend MCP servers (tavily, exa, context7, perplexity,
-expo, supabase, playwright) and exposing local agentctl skills (html_edit).
+expo, supabase, playwright) and exposing local agentctl tools (repo_index_*, html_edit).
 
 This reduces token overhead by exposing simplified tool schemas.`,
 	}
@@ -265,6 +278,7 @@ Use --skills to expose all agentctl skills via generic agentctl_run/agentctl_ski
 Use --groups to expose specific skill groups as first-class MCP tools.
 
 Available skill groups:
+  all         - All installed agentctl skills as first-class MCP tools
   code-intel  - Code analysis: semantic_search, smart_search, symbols, snippet_extract, context_grep, codemap_get, codemap_generate
   code-write  - Code modification: smart_write
   project     - Project management: todo/manage, memory/query, session/recall
@@ -1068,6 +1082,82 @@ func registerTools(s *server.MCPServer) {
 		handleBrowserContent,
 	)
 
+	// === Repo index tools ===
+
+	// repo_index_build - Build repo graph index
+	s.AddTool(
+		mcp.NewTool("repo_index_build",
+			mcp.WithDescription("Build the repo graph index for a workspace."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithArray("go_pattern", mcp.Description("Go package patterns to index (default: ./...)"), mcp.WithStringItems()),
+			mcp.WithBoolean("include_go", mcp.Description("Include Go sources (default: true)")),
+			mcp.WithBoolean("include_typescript", mcp.Description("Include TypeScript sources (default: true)")),
+			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
+			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
+		),
+		handleRepoIndexBuild,
+	)
+
+	// repo_index_status - Index status
+	s.AddTool(
+		mcp.NewTool("repo_index_status",
+			mcp.WithDescription("Show repo graph index status."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+		),
+		handleRepoIndexStatus,
+	)
+
+	// repo_index_search - Search nodes
+	s.AddTool(
+		mcp.NewTool("repo_index_search",
+			mcp.WithDescription("Search repo index nodes by text."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithString("query", mcp.Required(), mcp.Description("FTS query string")),
+			mcp.WithNumber("limit", mcp.Description("Maximum results (default: 20)")),
+		),
+		handleRepoIndexSearch,
+	)
+
+	// repo_index_expand - Expand graph
+	s.AddTool(
+		mcp.NewTool("repo_index_expand",
+			mcp.WithDescription("Expand the graph from seed nodes."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithArray("seed", mcp.Required(), mcp.Description("Seed node IDs (repeatable)"), mcp.WithStringItems()),
+			mcp.WithArray("edge", mcp.Description("Edge types to traverse (repeatable)"), mcp.WithStringItems()),
+			mcp.WithNumber("depth", mcp.Description("Traversal depth (default: 1)")),
+			mcp.WithNumber("budget", mcp.Description("Max nodes to return (default: 50)")),
+			mcp.WithNumber("per_node", mcp.Description("Max edges per node per hop (default: 50)")),
+			mcp.WithString("direction", mcp.Description("Traversal direction: out or in (default: out)")),
+		),
+		handleRepoIndexExpand,
+	)
+
+	// repo_index_open - Open node
+	s.AddTool(
+		mcp.NewTool("repo_index_open",
+			mcp.WithDescription("Open a node by ID."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithString("id", mcp.Required(), mcp.Description("Node ID")),
+		),
+		handleRepoIndexOpen,
+	)
+
+	// repo_index_ask - Ask questions using repo index
+	s.AddTool(
+		mcp.NewTool("repo_index_ask",
+			mcp.WithDescription("Ask a question using the repo index."),
+			mcp.WithString("workspace", mcp.Description("Workspace root (default: .)")),
+			mcp.WithString("question", mcp.Required(), mcp.Description("Question to ask")),
+			mcp.WithString("provider", mcp.Description("LLM provider (cerebras|openrouter|groq|openai|gemini|anthropic)")),
+			mcp.WithString("model", mcp.Description("LLM model")),
+			mcp.WithString("api_key", mcp.Description("LLM API key override")),
+			mcp.WithNumber("max_iterations", mcp.Description("Maximum tool-call iterations (default: 12)")),
+			mcp.WithNumber("timeout_sec", mcp.Description("LLM request timeout in seconds (default: 60)")),
+		),
+		handleRepoIndexAsk,
+	)
+
 	// === Local Skill Tools (HTML Editing) ===
 
 	// html_select - Query HTML elements
@@ -1139,6 +1229,108 @@ func getArgs(req mcp.CallToolRequest) map[string]any {
 		return args
 	}
 	return make(map[string]any)
+}
+
+func getStringArg(args map[string]any, key, fallback string) string {
+	if value, ok := args[key].(string); ok {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return fallback
+}
+
+func getBoolArg(args map[string]any, key string, fallback bool) bool {
+	if value, ok := args[key].(bool); ok {
+		return value
+	}
+	return fallback
+}
+
+func getIntArg(args map[string]any, key string, fallback int) int {
+	switch value := args[key].(type) {
+	case float64:
+		if int(value) > 0 {
+			return int(value)
+		}
+	case int:
+		if value > 0 {
+			return value
+		}
+	}
+	return fallback
+}
+
+func getStringSliceArg(args map[string]any, key string) []string {
+	raw, ok := args[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch value := raw.(type) {
+	case []string:
+		return value
+	case []any:
+		var result []string
+		for _, item := range value {
+			if str, ok := item.(string); ok {
+				trimmed := strings.TrimSpace(str)
+				if trimmed != "" {
+					result = append(result, trimmed)
+				}
+			}
+		}
+		return result
+	case string:
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return []string{trimmed}
+		}
+	}
+	return nil
+}
+
+func runRepoIndexCommand(ctx context.Context, run func(cmd *cobra.Command) error) (*mcp.CallToolResult, error) {
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	cmd.SetErr(&errBuf)
+	cmd.SetContext(ctx)
+
+	if err := run(cmd); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	raw := strings.TrimSpace(out.String())
+	if raw == "" {
+		return mcp.NewToolResultText("{}"), nil
+	}
+
+	var envelope struct {
+		Status string         `json:"status"`
+		Data   map[string]any `json:"data"`
+		Error  struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return truncateSkillOutput(ctx, raw, "repo_index")
+	}
+	if envelope.Status == "error" {
+		if envelope.Error.Message != "" {
+			return mcp.NewToolResultError(envelope.Error.Message), nil
+		}
+		return mcp.NewToolResultError("repo index command failed"), nil
+	}
+
+	result, err := json.MarshalIndent(envelope.Data, "", "  ")
+	if err != nil {
+		return truncateSkillOutput(ctx, raw, "repo_index")
+	}
+
+	return truncateSkillOutput(ctx, string(result), "repo_index")
 }
 
 func handleWebSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1518,14 +1710,37 @@ func registerSkillGroups(ctx context.Context, s *server.MCPServer, groups []stri
 
 	// Collect skills to register from specified groups
 	skillsToRegister := make(map[string]bool)
+	includeAll := false
 	for _, group := range groups {
-		skills, ok := skillGroups[group]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Warning: unknown skill group %q (available: code-intel, code-write, project, agentctl-ci)\n", group)
-			continue
+		if strings.EqualFold(strings.TrimSpace(group), "all") {
+			includeAll = true
+			break
 		}
-		for _, skillName := range skills {
-			skillsToRegister[skillName] = true
+	}
+
+	if includeAll {
+		manifests, err := discoverSkills(cfg)
+		if err != nil {
+			return fmt.Errorf("discover skills: %w", err)
+		}
+		for _, manifest := range manifests {
+			skillsToRegister[manifest.Metadata.Name] = true
+		}
+	} else {
+		for _, group := range groups {
+			group = strings.ToLower(strings.TrimSpace(group))
+			if group == "" {
+				continue
+			}
+			skills, ok := skillGroups[group]
+			if !ok {
+				available := strings.Join(skillGroupNames(), ", ")
+				fmt.Fprintf(os.Stderr, "Warning: unknown skill group %q (available: %s)\n", group, available)
+				continue
+			}
+			for _, skillName := range skills {
+				skillsToRegister[skillName] = true
+			}
 		}
 	}
 
@@ -1911,7 +2126,97 @@ func normalizeSchemaType(raw string) string {
 	}
 }
 
-// Local skill handlers (HTML)
+// Local tool handlers
+
+func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	workspace := getStringArg(args, "workspace", ".")
+	patterns := getStringSliceArg(args, "go_pattern")
+	if len(patterns) == 0 {
+		patterns = []string{"./..."}
+	}
+	includeGo := getBoolArg(args, "include_go", true)
+	includeTS := getBoolArg(args, "include_typescript", true)
+	includeTests := getBoolArg(args, "include_tests", false)
+	dryRun := getBoolArg(args, "dry_run", false)
+
+	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeTests, dryRun)
+	})
+}
+
+func handleRepoIndexStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	workspace := getStringArg(args, "workspace", ".")
+	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
+		return runIndexRepoStatus(cmd, workspace)
+	})
+}
+
+func handleRepoIndexSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	workspace := getStringArg(args, "workspace", ".")
+	query := getStringArg(args, "query", "")
+	if query == "" {
+		return mcp.NewToolResultError("query is required"), nil
+	}
+	limit := getIntArg(args, "limit", 20)
+	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
+		return runIndexRepoSearch(cmd, workspace, query, limit)
+	})
+}
+
+func handleRepoIndexExpand(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	workspace := getStringArg(args, "workspace", ".")
+	seeds := getStringSliceArg(args, "seed")
+	if len(seeds) == 0 {
+		return mcp.NewToolResultError("seed is required"), nil
+	}
+	edgeTypes := getStringSliceArg(args, "edge")
+	depth := getIntArg(args, "depth", 1)
+	budget := getIntArg(args, "budget", 50)
+	perNodeCap := getIntArg(args, "per_node", 50)
+	direction := getStringArg(args, "direction", "out")
+
+	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
+		return runIndexRepoExpand(cmd, workspace, seeds, edgeTypes, depth, budget, perNodeCap, direction)
+	})
+}
+
+func handleRepoIndexOpen(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	workspace := getStringArg(args, "workspace", ".")
+	id := getStringArg(args, "id", "")
+	if id == "" {
+		return mcp.NewToolResultError("id is required"), nil
+	}
+	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
+		return runIndexRepoOpen(cmd, workspace, id)
+	})
+}
+
+func handleRepoIndexAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	args := getArgs(req)
+	workspace := getStringArg(args, "workspace", ".")
+	question := getStringArg(args, "question", "")
+	if question == "" {
+		return mcp.NewToolResultError("question is required"), nil
+	}
+	provider := getStringArg(args, "provider", "")
+	model := getStringArg(args, "model", "")
+	apiKey := getStringArg(args, "api_key", "")
+	maxIterations := getIntArg(args, "max_iterations", 12)
+	timeoutSec := getIntArg(args, "timeout_sec", 60)
+	if timeoutSec <= 0 {
+		timeoutSec = 60
+	}
+	timeout := time.Duration(timeoutSec) * time.Second
+
+	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
+		return runIndexRepoAsk(cmd, workspace, question, provider, model, apiKey, maxIterations, timeout)
+	})
+}
 
 func handleHTMLSelect(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	args := getArgs(req)

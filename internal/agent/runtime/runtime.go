@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -336,7 +337,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 	// Create ToolRunner with the executor
 	runnerCfg := engine.ToolRunnerConfig{
 		Workspace:      r.config.WorkspaceRoot,
-		WorkspaceID:   cfg.WorkspaceID,
+		WorkspaceID:    cfg.WorkspaceID,
 		SessionID:      sessionID,
 		ActorID:        cfg.ActorID,
 		ActionExecutor: r.config.ActionExecutor,
@@ -350,7 +351,7 @@ func (r *Runtime) createEngine(cfg types.AgentConfig, sessionID string) (*engine
 // createToolExecutor creates a ToolExecutor adapter for the agent tools registry.
 func (r *Runtime) createToolExecutor(cfg types.AgentConfig, sessionID string) (engine.ToolExecutor, []engine.ToolDef) {
 	// Build tool definitions based on agent role and available stores
-	toolDefs := buildToolDefsForRole(cfg.Role, r.config.MailboxStore != nil, r.config.BoardStore != nil)
+	toolDefs := buildToolDefsForRole(cfg.Role, r.config.MailboxStore != nil, r.config.BoardStore != nil, cfg.SkillsAllow)
 
 	// Create the executor adapter
 	executor := &agentToolExecutor{
@@ -441,6 +442,12 @@ func (e *agentToolExecutor) Execute(ctx context.Context, name string, args json.
 		return e.executeSmartSearch(ctx, argsMap)
 	case "context_grep":
 		return e.executeContextGrep(ctx, argsMap)
+	case "repo_index_search":
+		return e.executeRepoIndexSearch(ctx, argsMap)
+	case "repo_index_expand":
+		return e.executeRepoIndexExpand(ctx, argsMap)
+	case "repo_index_open":
+		return e.executeRepoIndexOpen(ctx, argsMap)
 	// Overseer agent management tools
 	case "agent_spawn":
 		return e.executeAgentSpawn(ctx, argsMap)
@@ -1102,6 +1109,11 @@ func (e *agentToolExecutor) executeContextSearch(ctx context.Context, args map[s
 func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
+		if q, ok := args["question"].(string); ok {
+			query = q
+		}
+	}
+	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
 
@@ -1110,7 +1122,7 @@ func (e *agentToolExecutor) executeSmartSearch(ctx context.Context, args map[str
 		limit = int(l)
 	}
 
-	input := fmt.Sprintf(`{"query": %q, "limit": %d}`, query, limit)
+	input := fmt.Sprintf(`{"question": %q, "limit": %d}`, query, limit)
 	cmd := exec.CommandContext(ctx, "agentctl", "run", "code/smart_search", "--input", input)
 	cmd.Dir = e.workspaceRoot
 
@@ -1146,6 +1158,96 @@ func (e *agentToolExecutor) executeContextGrep(ctx context.Context, args map[str
 	return string(output), nil
 }
 
+func (e *agentToolExecutor) executeRepoIndexSearch(ctx context.Context, args map[string]any) (string, error) {
+	query, _ := args["query"].(string)
+	if query == "" {
+		if q, ok := args["question"].(string); ok {
+			query = q
+		}
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+
+	limit := intArg(args, 20, "limit")
+	workspace := strings.TrimSpace(e.workspaceRoot)
+	if workspace == "" {
+		workspace = "."
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "index", "repo", "search", "--workspace", workspace, "--query", query, "--limit", strconv.Itoa(limit))
+	cmd.Dir = e.workspaceRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("repo_index_search error: %v\nOutput: %s", err, string(output)), nil
+	}
+
+	return string(output), nil
+}
+
+func (e *agentToolExecutor) executeRepoIndexExpand(ctx context.Context, args map[string]any) (string, error) {
+	seeds := stringSliceArg(args, "seeds", "seed")
+	if len(seeds) == 0 {
+		return "", fmt.Errorf("seeds are required")
+	}
+
+	edgeTypes := stringSliceArg(args, "edge_types", "edges", "edge")
+	direction, _ := args["direction"].(string)
+	if strings.TrimSpace(direction) == "" {
+		direction = "out"
+	}
+
+	depth := intArg(args, 1, "depth")
+	budget := intArg(args, 50, "budget")
+	perNodeCap := intArg(args, 50, "per_node_cap", "per_node")
+	workspace := strings.TrimSpace(e.workspaceRoot)
+	if workspace == "" {
+		workspace = "."
+	}
+
+	argsList := []string{"index", "repo", "expand", "--workspace", workspace, "--direction", direction, "--depth", strconv.Itoa(depth), "--budget", strconv.Itoa(budget), "--per-node", strconv.Itoa(perNodeCap)}
+	for _, seed := range seeds {
+		argsList = append(argsList, "--seed", seed)
+	}
+	for _, edgeType := range edgeTypes {
+		argsList = append(argsList, "--edge", edgeType)
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", argsList...)
+	cmd.Dir = e.workspaceRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("repo_index_expand error: %v\nOutput: %s", err, string(output)), nil
+	}
+
+	return string(output), nil
+}
+
+func (e *agentToolExecutor) executeRepoIndexOpen(ctx context.Context, args map[string]any) (string, error) {
+	id, _ := args["id"].(string)
+	if strings.TrimSpace(id) == "" {
+		return "", fmt.Errorf("id is required")
+	}
+
+	workspace := strings.TrimSpace(e.workspaceRoot)
+	if workspace == "" {
+		workspace = "."
+	}
+
+	cmd := exec.CommandContext(ctx, "agentctl", "index", "repo", "open", "--workspace", workspace, "--id", id)
+	cmd.Dir = e.workspaceRoot
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("repo_index_open error: %v\nOutput: %s", err, string(output)), nil
+	}
+
+	return string(output), nil
+}
+
 // executeSessionTimeline calls code/semantic_search with sessions scope and timeline format
 func (e *agentToolExecutor) executeSessionTimeline(ctx context.Context, args map[string]any) (string, error) {
 	query, _ := args["query"].(string)
@@ -1173,7 +1275,7 @@ func (e *agentToolExecutor) executeSessionTimeline(ctx context.Context, args map
 
 // buildToolDefsForRole returns tool definitions appropriate for the agent role.
 // Tool names use underscores for Anthropic API compatibility (pattern: ^[a-zA-Z0-9_-]{1,128}$).
-func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool) []engine.ToolDef {
+func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool, allowlist []string) []engine.ToolDef {
 	// Base tools available to all agents
 	tools := []engine.ToolDef{
 		{
@@ -1207,6 +1309,48 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool) []eng
 			Description: "Write content to a file",
 			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"File path to write"},"content":{"type":"string","description":"Content to write"}},"required":["path","content"]}`),
 		})
+	case types.RoleResearcher:
+		tools = append(tools,
+			engine.ToolDef{
+				Name:        "context_search",
+				Description: "Search codebase for relevant files and symbols. Returns a tree view of matches with file paths and sizes.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"query":{"type":"string","description":"Natural language query describing what to find (e.g., 'hook dispatcher implementation')"},
+					"limit":{"type":"integer","description":"Maximum results to return (default 20)"}
+				},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "smart_search",
+				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"question":{"type":"string","description":"Natural language query describing what code to find"},
+					"limit":{"type":"integer","description":"Maximum snippets to return (default 10)"}
+				},"required":["question"]}`),
+			},
+			engine.ToolDef{
+				Name:        "context_grep",
+				Description: "Search with regex pattern, returns full function/block bodies (not just matching lines). Good for finding specific patterns with surrounding context.",
+				Parameters: json.RawMessage(`{"type":"object","properties":{
+					"pattern":{"type":"string","description":"Regex pattern to search for"},
+					"path":{"type":"string","description":"Path to search in (default: workspace root)"}
+				},"required":["pattern"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_search",
+				Description: "Search the repo index for nodes that match a text query.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"FTS query string"},"limit":{"type":"integer","description":"Maximum results","default":20}},"required":["query"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_expand",
+				Description: "Expand the repo index graph from seed node IDs.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"seeds":{"type":"array","items":{"type":"string"},"description":"Seed node IDs"},"edge_types":{"type":"array","items":{"type":"string"},"description":"Edge types to traverse"},"direction":{"type":"string","enum":["out","in"],"description":"Traversal direction"},"depth":{"type":"integer","description":"Traversal depth","default":1},"budget":{"type":"integer","description":"Max nodes to return","default":50},"per_node_cap":{"type":"integer","description":"Max edges per node per hop","default":50}},"required":["seeds"]}`),
+			},
+			engine.ToolDef{
+				Name:        "repo_index_open",
+				Description: "Open a repo index node by ID.",
+				Parameters:  json.RawMessage(`{"type":"object","properties":{"id":{"type":"string","description":"Node ID"}},"required":["id"]}`),
+			},
+		)
 	case types.RoleOverseer:
 		// Overseer gets context gathering tools FIRST (for spawn prep)
 		tools = append(tools,
@@ -1222,9 +1366,9 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool) []eng
 				Name:        "smart_search",
 				Description: "All-in-one search: finds candidate files AND extracts relevant code snippets. Best for getting actual code context quickly.",
 				Parameters: json.RawMessage(`{"type":"object","properties":{
-					"query":{"type":"string","description":"Natural language query describing what code to find"},
+					"question":{"type":"string","description":"Natural language query describing what code to find"},
 					"limit":{"type":"integer","description":"Maximum snippets to return (default 10)"}
-				},"required":["query"]}`),
+				},"required":["question"]}`),
 			},
 			engine.ToolDef{
 				Name:        "context_grep",
@@ -1327,7 +1471,31 @@ func buildToolDefsForRole(role types.AgentRole, hasMailbox, hasBoard bool) []eng
 		)
 	}
 
+	if len(allowlist) > 0 {
+		tools = filterToolDefs(tools, allowlist)
+	}
+
 	return tools
+}
+
+func filterToolDefs(toolDefs []engine.ToolDef, allowlist []string) []engine.ToolDef {
+	allowed := make(map[string]struct{}, len(allowlist))
+	for _, entry := range allowlist {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed != "" {
+			allowed[trimmed] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	filtered := make([]engine.ToolDef, 0, len(toolDefs))
+	for _, tool := range toolDefs {
+		if _, ok := allowed[tool.Name]; ok {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 // runSession executes the agent session using LLMChatEngine.
@@ -1473,6 +1641,52 @@ func parseJSONToMap(data json.RawMessage) map[string]any {
 		return nil
 	}
 	return result
+}
+
+func intArg(args map[string]any, fallback int, keys ...string) int {
+	for _, key := range keys {
+		if v, ok := args[key].(float64); ok && v > 0 {
+			return int(v)
+		}
+	}
+	return fallback
+}
+
+func stringSliceArg(args map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		value, ok := args[key]
+		if !ok || value == nil {
+			continue
+		}
+		items := normalizeStringSlice(value)
+		if len(items) > 0 {
+			return items
+		}
+	}
+	return nil
+}
+
+func normalizeStringSlice(value any) []string {
+	var items []string
+	switch v := value.(type) {
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				trimmed := strings.TrimSpace(s)
+				if trimmed != "" {
+					items = append(items, trimmed)
+				}
+			}
+		}
+	case string:
+		for _, part := range strings.Split(v, ",") {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				items = append(items, trimmed)
+			}
+		}
+	}
+	return items
 }
 
 // buildTaskPrompt creates the prompt for the agent from config.

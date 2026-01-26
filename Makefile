@@ -21,7 +21,7 @@ SKILL_DIRS := $(shell find skills -mindepth 1 -maxdepth 1 -type d)
 # Skills requiring CGO (excluded from non-CGO builds)
 CGO_SKILLS := libsql_migrate
 
-.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop
+.PHONY: fmt lint typecheck lsp-check vet test test-cgo test-cgo-short test-race test-integration test-integration-cmd cover check-coverage build build-cgo build-all viewer snapshot tidy check skill skills-build skills-build-cgo skills-build-all skills-install skills-install-cgo skills-install-all skills-test completions init ts-install ts-dev-tui ts-dev-gui ts-build-tui ts-tui ts-build ts-typecheck env-sync env-watch env-watch-stop db-backup db-backup-list db-backup-clean
 
 fmt:
 	@echo "Running gofumpt"
@@ -416,3 +416,49 @@ env-watch-stop:
 	else \
 		echo "env-watch not running"; \
 	fi
+
+# Database backup (daily backups, keeps last 2)
+.PHONY: db-backup db-backup-list db-backup-clean
+
+db-backup:
+	@BACKUP_DIR="$$HOME/.agentctl/backups"; \
+	STORAGE_DIR="$$HOME/.agentctl/storage"; \
+	mkdir -p "$$BACKUP_DIR"; \
+	TIMESTAMP=$$(date +%Y%m%d_%H%M%S); \
+	BACKUP_PATH="$$BACKUP_DIR/$$TIMESTAMP"; \
+	mkdir -p "$$BACKUP_PATH"; \
+	echo "Creating backup at $$BACKUP_PATH..."; \
+	count=0; \
+	for db in "$$STORAGE_DIR"/*.db; do \
+		if [ -f "$$db" ] && [ -s "$$db" ]; then \
+			dbname=$$(basename "$$db"); \
+			sqlite3 "$$db" ".backup '$$BACKUP_PATH/$${dbname}.bak'" 2>/dev/null || \
+			cp "$$db" "$$BACKUP_PATH/$${dbname}.bak"; \
+			count=$$((count + 1)); \
+		fi; \
+	done; \
+	echo "Backed up $$count databases to: $$BACKUP_PATH"
+
+db-backup-list:
+	`@BACKUP_DIR`="$$HOME/.agentctl/backups"; \
+	echo "Available backups:"; \
+	backups=$$(ls -dt "$$BACKUP_DIR"/2* 2>/dev/null | head -10); \
+	if [ -z "$$backups" ]; then \
+		echo "  (no backups found)"; \
+	else \
+		echo "$$backups" | while read dir; do \
+
+			files=$$(ls "$$dir"/*.bak 2>/dev/null | wc -l | tr -d ' '); \
+			size=$$(du -sh "$$dir" 2>/dev/null | cut -f1); \
+			echo "  $$(basename $$dir)  $$size  ($$files DBs)"; \
+		done; \
+	fi
+
+db-backup-clean:
+	@BACKUP_DIR="$$HOME/.agentctl/backups"; \
+	echo "Keeping 2 most recent backups, removing older ones..."; \
+	ls -dt "$$BACKUP_DIR"/2* 2>/dev/null | tail -n +3 | while read dir; do \
+		echo "  Removing: $$(basename $$dir)"; \
+		rm -rf "$$dir"; \
+	done; \
+	echo "Cleanup complete"

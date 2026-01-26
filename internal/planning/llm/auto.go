@@ -1,5 +1,7 @@
 package llm
 
+import "context"
+
 // ProviderConfig holds pre-loaded LLM provider configuration.
 // This struct is populated at application startup from environment/config files
 // and passed to planning functions (FC/IS compliant - no os.Getenv in core).
@@ -26,10 +28,13 @@ type ProviderConfig struct {
 // Priority order for background/cheap tasks: Cerebras → OpenRouter → Groq → OpenAI.
 // Returns nil if no supported API keys are configured.
 // This function does NOT read environment variables - config must be pre-populated.
-func AutoPlannerFromConfig(cfg ProviderConfig) *OpenAIPlanner {
+func AutoPlannerFromConfig(ctx context.Context, cfg ProviderConfig) *OpenAIPlanner {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Prefer Cerebras if configured (fastest, cheapest for background tasks)
 	if cfg.CerebrasAPIKey != "" {
-		return NewOpenAIPlanner(OpenAIConfig{
+		return NewOpenAIPlanner(ctx, OpenAIConfig{
 			APIKey:   cfg.CerebrasAPIKey,
 			BaseURL:  "https://api.cerebras.ai/v1",
 			Model:    "llama3.1-8b", // ~$0.10/M tokens
@@ -41,9 +46,9 @@ func AutoPlannerFromConfig(cfg ProviderConfig) *OpenAIPlanner {
 	if cfg.OpenRouterAPIKey != "" {
 		model := cfg.OpenRouterModel
 		if model == "" {
-			model = "openrouter/auto"
+			model = "mistralai/devstral-2512"
 		}
-		return NewOpenAIPlanner(OpenAIConfig{
+		return NewOpenAIPlanner(ctx, OpenAIConfig{
 			APIKey:   cfg.OpenRouterAPIKey,
 			BaseURL:  "https://openrouter.ai/api/v1",
 			Model:    model,
@@ -53,7 +58,7 @@ func AutoPlannerFromConfig(cfg ProviderConfig) *OpenAIPlanner {
 
 	// Next, check for Groq
 	if cfg.GroqAPIKey != "" {
-		return NewOpenAIPlanner(OpenAIConfig{
+		return NewOpenAIPlanner(ctx, OpenAIConfig{
 			APIKey:   cfg.GroqAPIKey,
 			BaseURL:  "https://api.groq.com/openai/v1",
 			Model:    "llama-3.3-70b-versatile",
@@ -63,7 +68,7 @@ func AutoPlannerFromConfig(cfg ProviderConfig) *OpenAIPlanner {
 
 	// Finally, check for OpenAI
 	if cfg.OpenAIAPIKey != "" {
-		return NewOpenAIPlanner(OpenAIConfig{
+		return NewOpenAIPlanner(ctx, OpenAIConfig{
 			APIKey:   cfg.OpenAIAPIKey,
 			BaseURL:  "https://api.openai.com/v1",
 			Model:    "gpt-4o-mini",

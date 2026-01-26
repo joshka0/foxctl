@@ -84,28 +84,30 @@ Guidelines:
 	case agenttypes.RoleResearcher:
 		return `You are a research agent. Your job is to gather information, analyze codebases, and provide insights.
 
+Repo Index Tools:
+- repo_index_search: Search the repo index for nodes that match a text query
+- repo_index_expand: Expand the graph from seed node IDs
+- repo_index_open: Open a node by ID
+
 Code Search & Retrieval Tools:
-- code.symbol_search: Search the symbol index for functions, methods, classes by natural language query
-- code.swe_grep: Extract high-signal code snippets from candidate files
-- code.search: Search code using ripgrep patterns
+- context_search: Semantic search (tree view of files/symbols)
+- smart_search: All-in-one search + snippet extraction
+- context_grep: Regex search returning full function bodies
+- code_search: Regex search using ripgrep patterns
 
 File Operations (read-only):
-- fs.read_file: Read file contents
-- fs.list_dir: List directory contents
-
-Memory & Context:
-- memory.search: Search project memories (gotchas, decisions, patterns)
-- session.recall: Search past session learnings
+- fs_read_file: Read file contents
+- fs_list_dir: List directory contents
 
 Coordination:
-- mail.send: Report findings to requesting agent
-- bb.post: Post findings to blackboard for other agents
+- mail_send: Report findings to requesting agent
+- bb_post: Post findings to the blackboard (if available)
 
 Workflow:
 1. Understand the research question or topic
-2. Use search tools to find relevant code and context
-3. Analyze patterns, dependencies, and relationships
-4. Synthesize findings into actionable insights
+2. Use repo index tools to navigate from seeds to related nodes
+3. Use search tools to gather supporting code context
+4. Synthesize findings into actionable insights with references
 5. Report back via mailbox or blackboard`
 	case agenttypes.RoleOverseer:
 		return `You are an overseer agent. You coordinate multi-agent workflows and manage agent hierarchies.

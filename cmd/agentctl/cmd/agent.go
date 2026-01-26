@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -61,6 +62,14 @@ var agentInfoCmd = &cobra.Command{
 	RunE:  runAgentInfo,
 }
 
+var agentRenameCmd = &cobra.Command{
+	Use:   "rename <agent-ref>",
+	Short: "Rename an agent",
+	Long:  "Update an agent's human name or slug handle",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAgentRename,
+}
+
 var agentWatchCmd = &cobra.Command{
 	Use:   "watch [agent-id]",
 	Short: "Watch agent events",
@@ -113,25 +122,25 @@ var (
 
 // Flags for agent spawn
 var (
-	spawnParentNS      string
-	spawnName          string
-	spawnSlug          string
-	spawnRole          string
-	spawnPrompt        string
-	spawnPromptFile    string
-	spawnSkillsAllow   string
-	spawnPolicyFile    string
-	spawnShareBB       string
-	spawnLLMProvider   string
-	spawnLLMModel      string
-	spawnLLMAPIKey     string
+	spawnParentNS         string
+	spawnName             string
+	spawnSlug             string
+	spawnRole             string
+	spawnPrompt           string
+	spawnPromptFile       string
+	spawnSkillsAllow      string
+	spawnPolicyFile       string
+	spawnShareBB          string
+	spawnLLMProvider      string
+	spawnLLMModel         string
+	spawnLLMAPIKey        string
 	spawnExecMode         string
 	spawnMaxIterations    int
 	spawnMaxContextTokens int
 	spawnMaxAutoTurns     int
 	spawnThinkInterval    int
 	spawnDryRun           bool
-	spawnChat          bool // Convenience flag for chat/roleplay companions
+	spawnChat             bool // Convenience flag for chat/roleplay companions
 )
 
 // Flags for agent run
@@ -144,6 +153,13 @@ var (
 	killGraceful bool
 	killTimeoutS int
 	killDryRun   bool
+)
+
+// Flags for agent rename
+var (
+	renameName   string
+	renameSlug   string
+	renameDryRun bool
 )
 
 // Flags for agent list
@@ -169,6 +185,7 @@ func init() {
 	agentCmd.AddCommand(agentListCmd)
 	agentCmd.AddCommand(agentKillCmd)
 	agentCmd.AddCommand(agentInfoCmd)
+	agentCmd.AddCommand(agentRenameCmd)
 	agentCmd.AddCommand(agentWatchCmd)
 	agentCmd.AddCommand(agentRunCmd)
 	agentCmd.AddCommand(agentAskCmd)
@@ -208,6 +225,11 @@ func init() {
 	agentKillCmd.Flags().BoolVar(&killGraceful, "graceful", true, "Graceful shutdown")
 	agentKillCmd.Flags().IntVar(&killTimeoutS, "timeout", 30, "Timeout in seconds")
 	agentKillCmd.Flags().BoolVar(&killDryRun, "dry-run", false, "Preview what would be killed without terminating the agent")
+
+	// Rename flags
+	agentRenameCmd.Flags().StringVar(&renameName, "name", "", "Human name for the agent (e.g., 'Luna', 'Atlas')")
+	agentRenameCmd.Flags().StringVar(&renameSlug, "slug", "", "Human-readable handle for referencing (e.g., 'companion')")
+	agentRenameCmd.Flags().BoolVar(&renameDryRun, "dry-run", false, "Preview what would be renamed without updating the agent")
 
 	// List flags
 	agentListCmd.Flags().IntVar(&listLimit, "limit", 20, "Maximum number of agents to list")
@@ -271,6 +293,19 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Parse skills allow list (used in daemon and legacy spawn paths).
+	var skillsAllow []string
+	if spawnSkillsAllow != "" {
+		trimmed := strings.TrimSpace(spawnSkillsAllow)
+		if strings.HasPrefix(trimmed, "[") {
+			if err := json.Unmarshal([]byte(trimmed), &skillsAllow); err != nil {
+				return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON in skills-allow: %v", err), "Use a JSON array like [\"code/smart_search\"] or a comma-separated list.")
+			}
+		} else {
+			skillsAllow = parseCommaSeparated(trimmed)
+		}
+	}
+
 	// Resolve LLM API key (support $ENV_VAR syntax)
 	llmAPIKey := spawnLLMAPIKey
 	if strings.HasPrefix(llmAPIKey, "$") {
@@ -282,9 +317,6 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	if daemonClient.IsRunning() {
 		// Guard against unsupported flags in daemon mode
 		var unsupportedFlags []string
-		if spawnSkillsAllow != "" {
-			unsupportedFlags = append(unsupportedFlags, "--skills-allow")
-		}
 		if spawnPolicyFile != "" {
 			unsupportedFlags = append(unsupportedFlags, "--policy")
 		}
@@ -307,6 +339,7 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 			Prompt:           prompt,
 			Name:             spawnName,
 			Slug:             spawnSlug,
+			SkillsAllow:      skillsAllow,
 			MaxIterations:    spawnMaxIterations,
 			MaxContextTokens: spawnMaxContextTokens,
 			ExecMode:         spawnExecMode,
@@ -353,20 +386,6 @@ func runAgentSpawn(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Fall back to old agentmanager (legacy, does not have new tools)
-	// Parse skills allow
-	var skillsAllow []string
-	if spawnSkillsAllow != "" {
-		trimmed := strings.TrimSpace(spawnSkillsAllow)
-		if strings.HasPrefix(trimmed, "[") {
-			// Looks like JSON, require valid JSON
-			if err := json.Unmarshal([]byte(trimmed), &skillsAllow); err != nil {
-				return writeErrorEnvelope(cmd, "agent/spawn", string(protocol.ErrorCodeEARG), fmt.Sprintf("invalid JSON in skills-allow: %v", err))
-			}
-		} else {
-			// Treat as comma-separated
-			skillsAllow = parseCommaSeparated(trimmed)
-		}
-	}
 
 	// Load policy
 	var policy agent.Policy
@@ -573,6 +592,72 @@ func runAgentInfo(cmd *cobra.Command, args []string) error {
 
 	// Write success envelope
 	return writeOK(cmd, "agent/info", a, "run", nil)
+}
+
+func runAgentRename(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	cfg := config.MustFromContext(ctx)
+	ref := args[0]
+
+	if !cmd.Flags().Changed("name") && !cmd.Flags().Changed("slug") {
+		return writeErrorEnvelope(cmd, "agent/rename", string(protocol.ErrorCodeEARG), "at least one of --name or --slug is required", "Use --name and/or --slug to set the new identity.")
+	}
+
+	// Open agent store
+	agentStore, err := agents.Open(ctx, cfg.Storage.Root)
+	if err != nil {
+		return writeErrorEnvelope(cmd, "agent/rename", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to open agent store: %v", err), "Verify the storage root and permissions.")
+	}
+	defer func() { errs.Ignore(agentStore.Close(), "close agent store") }()
+
+	agentRecord, err := agentStore.Resolve(ctx, ref)
+	if err != nil {
+		if errors.Is(err, agents.ErrNotFound) {
+			return writeErrorEnvelope(cmd, "agent/rename", string(protocol.ErrorCodeENotFound), fmt.Sprintf("agent not found: %v", err), "Check the agent ID, name, or slug.")
+		}
+		return writeErrorEnvelope(cmd, "agent/rename", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to resolve agent: %v", err), "Verify the agent reference (ID, name, or slug).")
+	}
+
+	nextName := agentRecord.Name
+	nextSlug := agentRecord.Slug
+	if cmd.Flags().Changed("name") {
+		nextName = renameName
+	}
+	if cmd.Flags().Changed("slug") {
+		nextSlug = renameSlug
+	}
+
+	// Dry-run mode: show what would be renamed
+	if renameDryRun {
+		data := map[string]any{
+			"dry_run":      true,
+			"would_rename": true,
+			"agent_id":     agentRecord.ID,
+			"namespace":    agentRecord.Namespace,
+			"from": map[string]any{
+				"name": agentRecord.Name,
+				"slug": agentRecord.Slug,
+			},
+			"to": map[string]any{
+				"name": nextName,
+				"slug": nextSlug,
+			},
+		}
+		return writeOK(cmd, "agent/rename", data, "run", nil)
+	}
+
+	if err := agentStore.UpdateIdentity(ctx, agentRecord.ID, nextName, nextSlug); err != nil {
+		return writeErrorEnvelope(cmd, "agent/rename", string(protocol.ErrorCodeERuntime), fmt.Sprintf("failed to rename agent: %v", err), "Ensure the slug is unique and the store is writable.")
+	}
+
+	data := map[string]any{
+		"agent_id":  agentRecord.ID,
+		"namespace": agentRecord.Namespace,
+		"name":      nextName,
+		"slug":      nextSlug,
+	}
+
+	return writeOK(cmd, "agent/rename", data, "run", nil)
 }
 
 func runAgentWatch(cmd *cobra.Command, args []string) error {
@@ -883,9 +968,15 @@ func runAgentRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	workspaceRoot, err := filepath.Abs(".")
+	if err != nil {
+		return fmt.Errorf("resolve workspace root: %w", err)
+	}
+
 	opts := agentdaemon.Options{
 		AgentID:               agentRecord.ID, // Use resolved ID
 		StorageRoot:           cfg.Storage.Root,
+		WorkspaceRoot:         workspaceRoot,
 		PollInterval:          500 * time.Millisecond,
 		HeartbeatInterval:     10 * time.Second,
 		MaxPollMessages:       10,
@@ -1169,11 +1260,11 @@ func runAgentResume(cmd *cobra.Command, args []string) error {
 		}
 
 		return writeOK(cmd, "agent/resume", map[string]any{
-			"session_id":     result.SessionID,
-			"actor_id":       result.ActorID,
-			"status":         result.Status,
-			"from_session":   sessionID,
-			"via_daemon":     true,
+			"session_id":   result.SessionID,
+			"actor_id":     result.ActorID,
+			"status":       result.Status,
+			"from_session": sessionID,
+			"via_daemon":   true,
 		}, "resume", nil)
 	}
 

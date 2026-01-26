@@ -20,13 +20,16 @@ contributors
 ## TL;DR
 
 1. **Start with a tree** — `agentctl run code/semantic_search --input '{"query": "your task", "format": "tree"}'`
-2. **Envelope contract is sacred** — never change `meta.*` fields without spec
+2. **Build the repo graph** — `agentctl index repo build --workspace . --go --typescript` for call/ref navigation
+3. **Envelope contract is sacred** — never change `meta.*` fields without spec
    updates (downstream tooling relies on stable envelope shape; breaking it breaks hooks, GUIs, and golden tests)
-3. **WASI = `network:"none"`** — Core v1 mandates isolation
-4. **Large outputs → CAS** — use `data.summary` + `data.artifact`
-5. **Check gotchas first** — read
+4. **WASI = `network:"none"`** — Core v1 mandates isolation
+5. **Large outputs → CAS** — use `data.summary` + `data.artifact`
+6. **Check gotchas first** — read
    [docs/general/gotchas.md](docs/general/gotchas.md)
-6. **`--dry-run` required** for state-changing commands (writes to DB, modifies workspace, creates CAS artifacts, spawns agents, edits tasks)
+7. **`--dry-run` required** for state-changing commands (writes to DB, modifies workspace, creates CAS artifacts, spawns agents, edits tasks), except `agentctl todo add` which may run without `--dry-run`
+8. **Task titles** — generate based on current work; do not require user-provided titles
+9. **Native tools** — prefer agentctl skills, but native tools are OK when they fit better
 
 ---
 
@@ -88,6 +91,16 @@ agentctl run code/semantic_search --input '{"query": "storage memory", "format":
 - `tree_depth: 0` — unlimited depth (special case: 0 means "no limit")
 - `tree_max_children: 50` — max items per directory
 - `tree_include_summaries: false` — disable summaries for faster output
+
+### Repo Graph Index
+
+Use repoindex when you need relationships (calls, references, imports):
+
+```bash
+agentctl index repo build --workspace . --go --typescript
+agentctl index repo search --workspace . --query "repoindex" --limit 10
+agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
+```
 
 ---
 
@@ -252,6 +265,7 @@ Use these skills for code exploration, search, and analysis.
 | Find code semantically    | `code/semantic_search` | `--input '{"query": "auth middleware"}'`           |
 | Search + extract snippets | `code/smart_search`    | `--input '{"query": "error handling"}'`            |
 | Extract from known files  | `code/snippet_extract` | `--input '{"query": "...", "candidates": [...]}'`  |
+| Repo graph navigation     | repoindex (CLI)        | `agentctl index repo search --query "Supervisor"`  |
 | Get stored codemap        | `codemap/get`          | `--input '{"id": "01KES..."}'`                     |
 | Generate new codemap      | `codemap/generate`     | `--input '{"query": "trace auth flow"}'`           |
 | Full function bodies      | `code/context_ripgrep` | `--input '{"pattern": "func.*Auth", "path": "."}'` |

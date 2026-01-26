@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents"
@@ -22,6 +23,8 @@ import (
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/companion"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/indexing/repoindex"
 	"github.com/jkatigb/agentctl/internal/storage"
 	storagents "github.com/jkatigb/agentctl/internal/storage/agents"
 	"github.com/jkatigb/agentctl/internal/storage/blackboard"
@@ -44,10 +47,11 @@ type daemonStores struct {
 	tasksStore        tasks.Store
 	boardStore        blackboard.BoardStore
 	bbStore           blackboard.Store
-	contextvarStore   contextvar.Store               // for companion service RLM context
-	companionMemory   *companion.ConversationMemory  // nil if disabled
-	companionMemoryDB *sql.DB                        // need to close this too
-	compressionDaemon *companion.CompressionDaemon   // nil if disabled
+	contextvarStore   contextvar.Store              // for companion service RLM context
+	companionMemory   *companion.ConversationMemory // nil if disabled
+	companionMemoryDB *sql.DB                       // need to close this too
+	compressionDaemon *companion.CompressionDaemon  // nil if disabled
+	repoIndexStore    *repoindex.Store
 }
 
 func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonStores, error) {
@@ -175,6 +179,9 @@ func (s *daemonStores) Close() {
 	if s.companionMemoryDB != nil {
 		_ = s.companionMemoryDB.Close()
 	}
+	if s.repoIndexStore != nil {
+		_ = s.repoIndexStore.Close()
+	}
 	if s.contextvarStore != nil {
 		_ = s.contextvarStore.Close()
 	}
@@ -197,6 +204,16 @@ func (s *daemonStores) Close() {
 
 // Run starts the agent daemon.
 func Run(ctx context.Context, opts Options) error {
+	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
+	if workspaceRoot == "" {
+		workspaceRoot = "."
+	}
+	absWorkspace, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return fmt.Errorf("resolve workspace root: %w", err)
+	}
+	opts.WorkspaceRoot = absWorkspace
+
 	// 1. Open stores
 	stores, err := openDaemonStores(ctx, opts.StorageRoot, opts)
 	if err != nil {
@@ -290,6 +307,19 @@ func Run(ctx context.Context, opts Options) error {
 			Str("model", model).
 			Msg("companion service LLM config")
 
+		var extraToolExecutor engine.ToolExecutor
+		extraToolsOnly := false
+		if repoIndexOnlyAllowlist(agentRecord.SkillsAllow) {
+			store, err := repoindex.Open(ctx, opts.StorageRoot, opts.WorkspaceRoot)
+			if err != nil {
+				return fmt.Errorf("open repoindex store: %w", err)
+			}
+			stores.repoIndexStore = store
+			extraToolExecutor = engine.NewRepoIndexToolExecutor(store)
+			extraToolsOnly = true
+			log.Info().Msg("companion service configured for repo index tools only")
+		}
+
 		companionSvc = companion.NewService(stores.contextvarStore, companion.ServiceConfig{
 			LLMProvider:        provider,
 			LLMAPIKey:          apiKey,
@@ -300,6 +330,8 @@ func Run(ctx context.Context, opts Options) error {
 			ExecMode:           agentRecord.ExecMode,
 			Logger:             log.Logger,
 			MemoryDB:           stores.companionMemoryDB,
+			ExtraToolExecutor:  extraToolExecutor,
+			ExtraToolsOnly:     extraToolsOnly,
 		})
 	}
 
@@ -346,7 +378,7 @@ type pollDeps struct {
 	agentStore      storagents.Store
 	mailboxStore    mailbox.Store
 	dedupeStore     DedupeStore
-	dspyAgent       agents.Agent // nil for companion agents
+	dspyAgent       agents.Agent       // nil for companion agents
 	companionSvc    *companion.Service // non-nil for companion agents
 	cancelCtx       *CancelContext
 	optCtx          *OptimizationContext
@@ -397,8 +429,12 @@ func loadAgentRecord(ctx context.Context, store storagents.Store, agentID string
 }
 
 func buildToolsConfig(opts Options, agentRecord agent.Agent, traceID string, stores *daemonStores) tools.Config {
+	workspaceRoot := strings.TrimSpace(opts.WorkspaceRoot)
+	if workspaceRoot == "" {
+		workspaceRoot = "."
+	}
 	return tools.Config{
-		WorkspaceRoot: ".", // Default to current directory
+		WorkspaceRoot: workspaceRoot,
 		WorkspaceID:   agentRecord.Namespace,
 		ActorID:       "actor:agent:" + opts.AgentID,
 		TraceID:       traceID,
@@ -444,6 +480,32 @@ func mapFilesystemPolicy(policy agent.Policy) string {
 		}
 	}
 	return fsPolicy
+}
+
+func repoIndexOnlyAllowlist(allowlist []string) bool {
+	if len(allowlist) == 0 {
+		return false
+	}
+
+	allowed := map[string]struct{}{
+		repoindex.ToolSearch: {},
+		repoindex.ToolExpand: {},
+		repoindex.ToolOpen:   {},
+	}
+
+	validCount := 0
+	for _, entry := range allowlist {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := allowed[trimmed]; !ok {
+			return false
+		}
+		validCount++
+	}
+
+	return validCount > 0
 }
 
 func startHeartbeat(ctx context.Context, store storagents.Store, agentID string, interval time.Duration) func() {

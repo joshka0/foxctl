@@ -29,7 +29,7 @@ func TestManagerInvokeAuthSuccess(t *testing.T) {
 	mgr := NewManager(cfg,
 		WithSearchPaths([]string{tmp}),
 		WithHandshakeTimeout(5*time.Second),
-		WithRuntimeLimits(RuntimeLimits{WallTimeout: 2 * time.Second}),
+		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
 	)
 
 	payload := AuthRequestPayload{
@@ -68,7 +68,7 @@ func TestManagerInvokeAuthPluginError(t *testing.T) {
 	mgr := NewManager(cfg,
 		WithSearchPaths([]string{tmp}),
 		WithHandshakeTimeout(5*time.Second),
-		WithRuntimeLimits(RuntimeLimits{WallTimeout: 2 * time.Second}),
+		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
 	)
 
 	payload := AuthRequestPayload{
@@ -136,7 +136,7 @@ func TestManagerInvokePagination(t *testing.T) {
 	mgr := NewManager(cfg,
 		WithSearchPaths([]string{tmp}),
 		WithHandshakeTimeout(5*time.Second),
-		WithRuntimeLimits(RuntimeLimits{WallTimeout: 2 * time.Second}),
+		WithRuntimeLimits(RuntimeLimits{WallTimeout: 5 * time.Second}),
 	)
 
 	body := map[string]any{

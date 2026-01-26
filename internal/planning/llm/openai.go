@@ -30,7 +30,7 @@ type OpenAIPlanner struct {
 // The caller must provide APIKey and Provider in the config.
 // BaseURL and Model will be set to provider-specific defaults if not specified.
 // This function does NOT read environment variables (FC/IS compliant).
-func NewOpenAIPlanner(config OpenAIConfig) *OpenAIPlanner {
+func NewOpenAIPlanner(ctx context.Context, config OpenAIConfig) *OpenAIPlanner {
 	// Set BaseURL based on provider if not specified
 	if config.BaseURL == "" {
 		switch config.Provider {
@@ -61,6 +61,15 @@ func NewOpenAIPlanner(config OpenAIConfig) *OpenAIPlanner {
 
 	if config.Timeout == 0 {
 		config.Timeout = 60 * time.Second
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > 0 && remaining < config.Timeout {
+			config.Timeout = remaining
+		}
 	}
 
 	return &OpenAIPlanner{

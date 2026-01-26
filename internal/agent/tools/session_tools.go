@@ -135,14 +135,14 @@ func (r *Registry) sessionRecall(ctx context.Context, args map[string]any) (*mod
 	matches := make([]map[string]any, 0, len(payload.Matches))
 	for _, m := range payload.Matches {
 		match := map[string]any{
-			"session_id":  m.SessionID,
-			"project":     m.ProjectName,
-			"summary":     m.Summary,
-			"similarity":  m.Similarity,
-			"started_at":  m.StartedAt,
+			"session_id":   m.SessionID,
+			"project":      m.ProjectName,
+			"summary":      m.Summary,
+			"similarity":   m.Similarity,
+			"started_at":   m.StartedAt,
 			"accomplished": m.Accomplished,
-			"decisions":   m.Decisions,
-			"gotchas":     m.Gotchas,
+			"decisions":    m.Decisions,
+			"gotchas":      m.Gotchas,
 		}
 		if len(m.KeyFiles) > 0 {
 			match["key_files"] = m.KeyFiles

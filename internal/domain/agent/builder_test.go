@@ -35,7 +35,7 @@ func TestAgentAskBuilder(t *testing.T) {
 		assert.EqualValues(t, 10*60*1000, msg.TTLMS)
 		assert.Equal(t, "session-123", msg.SessionID)
 		assert.Equal(t, "/path/to/project", msg.Workspace)
-		
+
 		// Verify payload envelope
 		data, err := ParsePayload[AskData](msg)
 		require.NoError(t, err)
@@ -335,7 +335,7 @@ func TestReplyTo(t *testing.T) {
 	t.Run("copies context from original", func(t *testing.T) {
 		sessionID := "session-123"
 		workspace := "/path/to/project"
-		
+
 		original := NewAgentAsk().
 			WithID("reply-original-1").
 			WithTimestamp(fixedTime).

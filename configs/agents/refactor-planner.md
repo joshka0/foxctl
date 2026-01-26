@@ -12,6 +12,7 @@ Your primary responsibilities are:
    - Examine file organization, module boundaries, and architectural patterns
    - Identify code duplication, tight coupling, and violation of SOLID principles
    - Map out dependencies and interaction patterns between components
+   - Use `agentctl index repo search/expand` to trace call/ref/import relationships before planning changes
    - Assess the current testing coverage and testability of the code
    - Review naming conventions, code consistency, and readability issues
 

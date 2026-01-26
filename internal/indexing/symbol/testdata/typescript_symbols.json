@@ -1,0 +1,83 @@
+[
+  {
+    "id": "src/example.ts:Alias",
+    "file_path": "src/example.ts",
+    "name": "Alias",
+    "language": "typescript",
+    "kind": "type",
+    "start_line": 11,
+    "end_line": 11
+  },
+  {
+    "id": "src/example.ts:Bar",
+    "file_path": "src/example.ts",
+    "name": "Bar",
+    "language": "typescript",
+    "kind": "class",
+    "start_line": 9,
+    "end_line": 9
+  },
+  {
+    "id": "src/example.ts:Baz",
+    "file_path": "src/example.ts",
+    "name": "Baz",
+    "language": "typescript",
+    "kind": "interface",
+    "start_line": 10,
+    "end_line": 10
+  },
+  {
+    "id": "src/example.ts:Mode",
+    "file_path": "src/example.ts",
+    "name": "Mode",
+    "language": "typescript",
+    "kind": "type",
+    "start_line": 12,
+    "end_line": 12
+  },
+  {
+    "id": "src/example.ts:VALUE",
+    "file_path": "src/example.ts",
+    "name": "VALUE",
+    "language": "typescript",
+    "kind": "constant",
+    "start_line": 13,
+    "end_line": 13
+  },
+  {
+    "id": "src/example.ts:count",
+    "file_path": "src/example.ts",
+    "name": "count",
+    "language": "typescript",
+    "kind": "variable",
+    "start_line": 14,
+    "end_line": 14
+  },
+  {
+    "id": "src/example.ts:default",
+    "file_path": "src/example.ts",
+    "name": "default",
+    "language": "typescript",
+    "kind": "function",
+    "start_line": 5,
+    "end_line": 7
+  },
+  {
+    "id": "src/example.ts:flag",
+    "file_path": "src/example.ts",
+    "name": "flag",
+    "language": "typescript",
+    "kind": "variable",
+    "start_line": 15,
+    "end_line": 15
+  },
+  {
+    "id": "src/example.ts:foo",
+    "file_path": "src/example.ts",
+    "name": "foo",
+    "language": "typescript",
+    "kind": "function",
+    "start_line": 1,
+    "end_line": 3
+  }
+]

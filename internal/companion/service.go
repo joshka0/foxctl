@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/agents/react"
@@ -57,6 +58,12 @@ type ServiceConfig struct {
 	// LLMModel is the model to use.
 	LLMModel string
 
+	// StoryGatherModel overrides LLMModel for story gather stage (optional).
+	StoryGatherModel string
+
+	// StoryDialogueModel overrides LLMModel for story dialogue stage (optional).
+	StoryDialogueModel string
+
 	// DefaultPersonality is the default system prompt personality.
 	DefaultPersonality string
 
@@ -73,6 +80,7 @@ type ServiceConfig struct {
 	// - reactive: Direct LLM response with tool calls as needed (default)
 	// - autonomous: Multi-turn context gathering before responding
 	// - proactive: Like autonomous but can initiate work on its own
+	// - story: Two-stage gather + dialogue pipeline with structured outputs
 	ExecMode agent.ExecutionMode
 
 	// EngineType selects the execution engine: "llmchat" (default) or "dspy".
@@ -109,6 +117,12 @@ type ServiceConfig struct {
 
 	// HookContext provides context for hook dispatch.
 	HookContext HookContext
+
+	// ExtraToolExecutor adds extra tools to the companion toolset (optional).
+	ExtraToolExecutor engine.ToolExecutor
+
+	// ExtraToolsOnly restricts tools to ExtraToolExecutor when true.
+	ExtraToolsOnly bool
 
 	// Logger for structured logging.
 	Logger zerolog.Logger
@@ -227,17 +241,42 @@ type ChatRequest struct {
 
 	// ExecMode overrides the service default execution mode.
 	// Use "autonomous" for multi-turn context gathering before responding.
+	// Use "story" for gather + dialogue with structured outputs.
 	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
 
 	// EngineType overrides the service default engine type.
 	// Use "dspy" for DSPy ReAct agent execution.
 	EngineType EngineType `json:"engine_type,omitempty"`
+
+	// StoryGatherModel overrides ServiceConfig.StoryGatherModel for story mode (optional).
+	StoryGatherModel string `json:"story_gather_model,omitempty"`
+
+	// StoryDialogueModel overrides ServiceConfig.StoryDialogueModel for story mode (optional).
+	StoryDialogueModel string `json:"story_dialogue_model,omitempty"`
 }
 
 // ChatResponse is the response from the companion.
+type ChatTone struct {
+	Emotion   string  `json:"emotion,omitempty"`   // neutral|joy|sadness|anger|fear|surprise|disgust|playful
+	Intensity float64 `json:"intensity,omitempty"` // 0..1
+	Voice     string  `json:"voice,omitempty"`     // optional: warm, witty, calm, etc.
+}
+
+type ChatAction struct {
+	BackgroundKey string `json:"background_key,omitempty"`
+	ImagePrompt   string `json:"image_prompt,omitempty"`
+	Scene         string `json:"scene,omitempty"`
+}
+
 type ChatResponse struct {
 	// Response is the assistant's response text.
 	Response string `json:"response"`
+
+	// Tone captures structured emotion metadata for clients.
+	Tone *ChatTone `json:"tone,omitempty"`
+
+	// Action captures structured UI/scene directives for clients.
+	Action *ChatAction `json:"action,omitempty"`
 
 	// ConversationID is the conversation this response belongs to.
 	ConversationID string `json:"conversation_id"`
@@ -293,6 +332,10 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 		engineType = EngineTypeLLMChat
 	}
 
+	if execMode == agent.ModeStory && engineType == EngineTypeDSPy {
+		return nil, fmt.Errorf("story mode requires llmchat engine")
+	}
+
 	s.logger.Debug().
 		Str("exec_mode", string(execMode)).
 		Str("engine_type", string(engineType)).
@@ -325,7 +368,11 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	case EngineTypeDSPy:
 		resp, err = s.chatWithDSPy(ctx, req, rlmExecutor, systemPrompt, execMode, start)
 	default:
-		resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, start)
+		if execMode == agent.ModeStory {
+			resp, err = s.chatWithStoryLoop(ctx, req, rlmExecutor, systemPrompt, start)
+		} else {
+			resp, err = s.chatWithLLMChat(ctx, req, rlmExecutor, systemPrompt, start)
+		}
 	}
 
 	if err != nil {
@@ -339,9 +386,8 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 }
 
 // chatWithLLMChat executes using the LLMChatEngine.
-// The passedPrompt parameter provides the base system prompt (e.g., from overseer).
-// This is used as the foundation for the evolving personality system.
-func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, passedPrompt string, start time.Time) (*ChatResponse, error) {
+// The systemPrompt parameter is the full system prompt for this turn.
+func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
 	// Create LLM engine in stateless mode
 	engineCfg := engine.LLMChatConfig{
 		Provider:              s.config.LLMProvider,
@@ -361,6 +407,10 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	if req.RequireContextQuery != nil {
 		engineCfg.RequireContextQuery = *req.RequireContextQuery
 	}
+	if s.config.ExtraToolsOnly && s.config.ExtraToolExecutor != nil {
+		engineCfg.RequireContextQuery = false
+		engineCfg.RLMSystemPromptSuffix = ""
+	}
 
 	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
 	if err != nil {
@@ -379,57 +429,12 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	}
 	llmEngine.SetHookContext(hookCtx)
 
-	// Set up tool runner with RLM tools
-	toolRunner := engine.NewToolRunner(rlmExecutor, nil, engine.DefaultToolRunnerConfig())
+	toolExecutor, toolDefs, usesRLM := s.buildTooling(rlmExecutor)
+
+	toolRunner := engine.NewToolRunner(toolExecutor, nil, engine.DefaultToolRunnerConfig())
 	llmEngine.SetToolRunner(toolRunner)
-	llmEngine.SetRLMExecutor(rlmExecutor)
-
-	// Build input with evolving personality
-	// Priority: req.Personality > passedPrompt (from parent/overseer) > stored > default
-	basePersonality := req.Personality
-	if basePersonality == "" && passedPrompt != "" {
-		// Use the prompt passed from parent function (e.g., from overseer or buildSystemPrompt)
-		basePersonality = passedPrompt
-		s.logger.Debug().Str("personality", basePersonality[:min(50, len(basePersonality))]).Msg("Using passed base prompt")
-	}
-	if basePersonality == "" {
-		// Try to load stored base personality for this conversation
-		if stored, err := s.contextStore.GetByKey(ctx, req.ConversationID, contextvar.ScopeGlobal, "personality/base"); err == nil {
-			var personality string
-			if err := json.Unmarshal(stored.ValueJSON, &personality); err == nil && personality != "" {
-				basePersonality = personality
-				s.logger.Debug().Str("personality", basePersonality[:min(50, len(basePersonality))]).Msg("Using stored base personality")
-			}
-		}
-	}
-	if basePersonality == "" {
-		basePersonality = s.config.DefaultPersonality
-	}
-
-	// Use evolving personality to build dynamic system prompt
-	var systemPrompt string
-	evolvingPersonality := NewEvolvingPersonality(s.contextStore, req.ConversationID)
-	if newPrompt, err := evolvingPersonality.BuildSystemPrompt(ctx, basePersonality); err != nil {
-		s.logger.Warn().Err(err).Msg("Failed to build evolving system prompt, using base")
-		systemPrompt = basePersonality
-	} else {
-		systemPrompt = newPrompt
-	}
-
-	// Include conversation memory context if available
-	s.logger.Debug().Bool("memory_available", s.memory != nil).Str("conversation_id", req.ConversationID).Msg("Checking memory for chat")
-	if s.memory != nil {
-		memoryContext, err := s.memory.GetContext(ctx, req.ConversationID)
-		if err != nil {
-			s.logger.Warn().Err(err).Msg("Failed to get memory context")
-		} else if memoryContext != "" {
-			s.logger.Debug().Int("context_len", len(memoryContext)).Msg("Memory context retrieved, injecting into prompt")
-			systemPrompt = systemPrompt + "\n\n# Conversation Memory\n" + memoryContext
-		} else {
-			s.logger.Debug().Msg("Memory context is empty")
-		}
-	} else {
-		s.logger.Debug().Msg("Memory is nil, skipping context injection")
+	if usesRLM {
+		llmEngine.SetRLMExecutor(rlmExecutor)
 	}
 
 	input := engine.EngineInput{
@@ -437,7 +442,7 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		Messages: []engine.Message{
 			engine.NewUserMessage(req.Message),
 		},
-		Tools: rlmExecutor.List(),
+		Tools: toolDefs,
 	}
 
 	// Execute
@@ -478,6 +483,430 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 	// to avoid duplicate entries.
 
 	return resp, nil
+}
+
+func (s *Service) buildTooling(rlmExecutor *engine.RLMToolExecutor) (engine.ToolExecutor, []engine.ToolDef, bool) {
+	toolExecutor := engine.ToolExecutor(rlmExecutor)
+	toolDefs := rlmExecutor.List()
+	usesRLM := true
+	if s.config.ExtraToolExecutor != nil {
+		if s.config.ExtraToolsOnly {
+			toolExecutor = s.config.ExtraToolExecutor
+			toolDefs = s.config.ExtraToolExecutor.List()
+			usesRLM = false
+		} else {
+			toolExecutor = engine.NewCompositeToolExecutor(rlmExecutor, s.config.ExtraToolExecutor)
+			toolDefs = toolExecutor.List()
+		}
+	}
+	return toolExecutor, toolDefs, usesRLM
+}
+
+type storyContextBundle struct {
+	ContextSummary   string         `json:"context_summary"`
+	Facts            []string       `json:"facts"`
+	RecalledMemories []string       `json:"recalled_memories"`
+	UserState        map[string]any `json:"user_state"`
+	SuggestedTone    *ChatTone      `json:"suggested_tone,omitempty"`
+	SuggestedAction  *ChatAction    `json:"suggested_action,omitempty"`
+}
+
+type dialogueEnvelope struct {
+	Text   string      `json:"text"`
+	Tone   *ChatTone   `json:"tone,omitempty"`
+	Action *ChatAction `json:"action,omitempty"`
+}
+
+func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExecutor *engine.RLMToolExecutor, systemPrompt string, start time.Time) (*ChatResponse, error) {
+	gatherModel := s.config.StoryGatherModel
+	if req.StoryGatherModel != "" {
+		gatherModel = req.StoryGatherModel
+	}
+	if gatherModel == "" {
+		gatherModel = s.config.LLMModel
+	}
+
+	dialogueModel := s.config.StoryDialogueModel
+	if req.StoryDialogueModel != "" {
+		dialogueModel = req.StoryDialogueModel
+	}
+	if dialogueModel == "" {
+		dialogueModel = s.config.LLMModel
+	}
+
+	toolExecutor, toolDefs, usesRLM := s.buildTooling(rlmExecutor)
+
+	gatherCfg := engine.LLMChatConfig{
+		Provider:              s.config.LLMProvider,
+		APIKey:                s.config.LLMAPIKey,
+		Model:                 gatherModel,
+		MaxIterations:         s.config.MaxIterations,
+		Timeout:               s.config.Timeout,
+		StatelessMode:         true,
+		RLMSystemPromptSuffix: RLMContextInstructions,
+		RequireContextQuery:   s.config.RequireContextQuery,
+		HookDispatcher:        s.config.HookDispatcher,
+		ActionExecutor:        s.config.ActionExecutor,
+		Logger:                s.logger,
+		ResponseFormat:        storyGatherResponseFormat(),
+	}
+	if req.RequireContextQuery != nil {
+		gatherCfg.RequireContextQuery = *req.RequireContextQuery
+	}
+	if !usesRLM {
+		gatherCfg.RequireContextQuery = false
+		gatherCfg.RLMSystemPromptSuffix = ""
+	}
+
+	gatherInput := engine.EngineInput{
+		SystemPrompt: buildStoryGatherPrompt(systemPrompt),
+		Messages: []engine.Message{
+			engine.NewUserMessage(req.Message),
+		},
+	}
+
+	gatherOutput, err := s.runLLMChatWithResponseFormatFallback(
+		ctx,
+		req,
+		gatherCfg,
+		gatherInput,
+		toolExecutor,
+		toolDefs,
+		rlmExecutor,
+		usesRLM,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if gatherOutput.StopReason == engine.StopReasonError {
+		return nil, fmt.Errorf("story gather failed: %s", gatherOutput.Error)
+	}
+
+	contextQueries := rlmExecutor.QueryCount()
+
+	storyContext, ok := parseStoryContextBundle(gatherOutput.AssistantText)
+	storyContextJSON := "{}"
+	if ok {
+		if payload, err := json.Marshal(storyContext); err == nil {
+			storyContextJSON = string(payload)
+		}
+	}
+
+	dialogueCfg := engine.LLMChatConfig{
+		Provider:              s.config.LLMProvider,
+		APIKey:                s.config.LLMAPIKey,
+		Model:                 dialogueModel,
+		MaxIterations:         s.config.MaxIterations,
+		Timeout:               s.config.Timeout,
+		StatelessMode:         true,
+		RLMSystemPromptSuffix: "",
+		RequireContextQuery:   false,
+		HookDispatcher:        s.config.HookDispatcher,
+		ActionExecutor:        s.config.ActionExecutor,
+		Logger:                s.logger,
+		ResponseFormat:        storyDialogueResponseFormat(),
+	}
+
+	dialogueInput := engine.EngineInput{
+		SystemPrompt: buildStoryDialoguePrompt(systemPrompt, storyContextJSON),
+		Messages: []engine.Message{
+			engine.NewUserMessage(req.Message),
+		},
+	}
+
+	dialogueOutput, err := s.runLLMChatWithResponseFormatFallback(
+		ctx,
+		req,
+		dialogueCfg,
+		dialogueInput,
+		nil,
+		nil,
+		nil,
+		false,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	envelope, parsed := parseDialogueEnvelope(dialogueOutput.AssistantText)
+	responseText := dialogueOutput.AssistantText
+	var tone *ChatTone
+	var action *ChatAction
+	if parsed && envelope.Text != "" {
+		responseText = envelope.Text
+		tone = envelope.Tone
+		action = envelope.Action
+	}
+
+	resp := &ChatResponse{
+		ConversationID: req.ConversationID,
+		Response:       responseText,
+		Tone:           tone,
+		Action:         action,
+		ContextQueries: contextQueries,
+		DurationMS:     time.Since(start).Milliseconds(),
+		TokenUsage: TokenUsage{
+			InputTokens:  gatherOutput.Tokens.InputTokens + dialogueOutput.Tokens.InputTokens,
+			OutputTokens: gatherOutput.Tokens.OutputTokens + dialogueOutput.Tokens.OutputTokens,
+			TotalTokens:  gatherOutput.Tokens.TotalTokens + dialogueOutput.Tokens.TotalTokens,
+		},
+	}
+
+	toolNames := make(map[string]struct{})
+	for _, tc := range gatherOutput.ToolCalls {
+		toolNames[tc.Name] = struct{}{}
+	}
+	for name := range toolNames {
+		resp.ToolsUsed = append(resp.ToolsUsed, name)
+	}
+	sort.Strings(resp.ToolsUsed)
+
+	if dialogueOutput.StopReason == engine.StopReasonError {
+		resp.Error = dialogueOutput.Error
+	}
+
+	return resp, nil
+}
+
+func (s *Service) runLLMChatWithResponseFormatFallback(
+	ctx context.Context,
+	req ChatRequest,
+	cfg engine.LLMChatConfig,
+	input engine.EngineInput,
+	toolExecutor engine.ToolExecutor,
+	toolDefs []engine.ToolDef,
+	rlmExecutor *engine.RLMToolExecutor,
+	usesRLM bool,
+) (engine.EngineOutput, error) {
+	output, err := s.runLLMChat(ctx, req, cfg, input, toolExecutor, toolDefs, rlmExecutor, usesRLM)
+	if err == nil || len(cfg.ResponseFormat) == 0 || !isResponseFormatError(err) {
+		return output, err
+	}
+
+	if usesRLM || toolExecutor != nil || len(toolDefs) > 0 {
+		s.logger.Warn().Err(err).Msg("Response format not supported with tools; skipping retry")
+		return output, err
+	}
+
+	s.logger.Warn().Err(err).Msg("Response format not supported, retrying without response_format")
+	cfg.ResponseFormat = nil
+	return s.runLLMChat(ctx, req, cfg, input, toolExecutor, toolDefs, rlmExecutor, usesRLM)
+}
+
+func (s *Service) runLLMChat(
+	ctx context.Context,
+	req ChatRequest,
+	engineCfg engine.LLMChatConfig,
+	input engine.EngineInput,
+	toolExecutor engine.ToolExecutor,
+	toolDefs []engine.ToolDef,
+	rlmExecutor *engine.RLMToolExecutor,
+	usesRLM bool,
+) (engine.EngineOutput, error) {
+	llmEngine, err := engine.NewLLMChatEngine(engineCfg)
+	if err != nil {
+		return engine.EngineOutput{}, fmt.Errorf("create engine: %w", err)
+	}
+
+	hookCtx := engine.HookContext{
+		SessionID:     s.config.HookContext.SessionID,
+		ActorID:       s.config.HookContext.ActorID,
+		WorkspaceID:   s.config.HookContext.WorkspaceID,
+		WorkspaceRoot: s.config.HookContext.WorkspaceRoot,
+	}
+	if hookCtx.SessionID == "" {
+		hookCtx.SessionID = req.ConversationID
+	}
+	llmEngine.SetHookContext(hookCtx)
+
+	if toolExecutor != nil && len(toolDefs) > 0 {
+		toolRunner := engine.NewToolRunner(toolExecutor, nil, engine.DefaultToolRunnerConfig())
+		llmEngine.SetToolRunner(toolRunner)
+		input.Tools = toolDefs
+	}
+	if usesRLM && rlmExecutor != nil {
+		llmEngine.SetRLMExecutor(rlmExecutor)
+	}
+
+	output, err := llmEngine.Run(ctx, input)
+	if err != nil {
+		return engine.EngineOutput{}, fmt.Errorf("engine run: %w", err)
+	}
+	return output, nil
+}
+
+func buildStoryGatherPrompt(systemPrompt string) string {
+	return strings.TrimSpace(systemPrompt) + `
+
+# Story Context Gathering
+
+You are running a context-gathering pass. Use tools to query or store relevant context.
+Do not answer the user directly. Return JSON only that matches the schema.
+Include:
+- context_summary: short summary for the dialogue stage
+- facts: list of relevant facts
+- recalled_memories: list of recalled memories
+- user_state: key/value state from context
+- suggested_tone: emotion guidance for the reply
+- suggested_action: UI/scene guidance for the reply`
+}
+
+func buildStoryDialoguePrompt(systemPrompt, storyContextJSON string) string {
+	return strings.TrimSpace(systemPrompt) + "\n\n# Story Context Bundle\n" + storyContextJSON + `
+
+# Story Dialogue
+
+Use the story context bundle to craft the user-facing response.
+Return JSON only that matches the schema with fields: text, tone, action.`
+}
+
+func parseStoryContextBundle(raw string) (storyContextBundle, bool) {
+	var bundle storyContextBundle
+	if err := json.Unmarshal([]byte(raw), &bundle); err == nil {
+		normalizeChatTone(bundle.SuggestedTone)
+		return bundle, true
+	}
+	if extracted, ok := extractJSONObject(raw); ok {
+		if err := json.Unmarshal([]byte(extracted), &bundle); err == nil {
+			normalizeChatTone(bundle.SuggestedTone)
+			return bundle, true
+		}
+	}
+	return storyContextBundle{}, false
+}
+
+func parseDialogueEnvelope(raw string) (dialogueEnvelope, bool) {
+	var envelope dialogueEnvelope
+	if err := json.Unmarshal([]byte(raw), &envelope); err == nil {
+		normalizeChatTone(envelope.Tone)
+		return envelope, true
+	}
+	if extracted, ok := extractJSONObject(raw); ok {
+		if err := json.Unmarshal([]byte(extracted), &envelope); err == nil {
+			normalizeChatTone(envelope.Tone)
+			return envelope, true
+		}
+	}
+	return dialogueEnvelope{}, false
+}
+
+func normalizeChatTone(tone *ChatTone) {
+	if tone == nil {
+		return
+	}
+	if tone.Intensity < 0 {
+		tone.Intensity = 0
+	}
+	if tone.Intensity > 1 {
+		tone.Intensity = 1
+	}
+}
+
+func extractJSONObject(raw string) (string, bool) {
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start == -1 || end <= start {
+		return "", false
+	}
+	return raw[start : end+1], true
+}
+
+func isResponseFormatError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "response_format") ||
+		strings.Contains(msg, "json_schema") ||
+		strings.Contains(msg, "structured output") ||
+		strings.Contains(msg, "structured outputs")
+}
+
+const storyGatherResponseFormatJSON = `{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "story_context_bundle",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "context_summary": { "type": "string" },
+        "facts": { "type": "array", "items": { "type": "string" } },
+        "recalled_memories": { "type": "array", "items": { "type": "string" } },
+        "user_state": { "type": "object", "additionalProperties": true },
+        "suggested_tone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "emotion": {
+              "type": "string",
+              "enum": ["neutral","joy","sadness","anger","fear","surprise","disgust","playful"]
+            },
+            "intensity": { "type": "number" },
+            "voice": { "type": "string" }
+          },
+          "required": ["emotion", "intensity"]
+        },
+        "suggested_action": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "background_key": { "type": "string" },
+            "image_prompt": { "type": "string" },
+            "scene": { "type": "string" }
+          }
+        }
+      },
+      "required": ["context_summary", "facts", "recalled_memories", "user_state", "suggested_tone", "suggested_action"]
+    }
+  }
+}`
+
+const storyDialogueResponseFormatJSON = `{
+  "type": "json_schema",
+  "json_schema": {
+    "name": "story_dialogue_envelope",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "tone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "emotion": {
+              "type": "string",
+              "enum": ["neutral","joy","sadness","anger","fear","surprise","disgust","playful"]
+            },
+            "intensity": { "type": "number" },
+            "voice": { "type": "string" }
+          },
+          "required": ["emotion", "intensity"]
+        },
+        "action": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "background_key": { "type": "string" },
+            "image_prompt": { "type": "string" },
+            "scene": { "type": "string" }
+          }
+        }
+      },
+      "required": ["text", "tone", "action"]
+    }
+  }
+}`
+
+func storyGatherResponseFormat() json.RawMessage {
+	return json.RawMessage(storyGatherResponseFormatJSON)
+}
+
+func storyDialogueResponseFormat() json.RawMessage {
+	return json.RawMessage(storyDialogueResponseFormatJSON)
 }
 
 // chatWithDSPy executes using the DSPy ReAct agent.

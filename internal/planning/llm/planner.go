@@ -112,6 +112,14 @@ func parseResponse(response string) (*PlanResult, error) {
 
 	var result PlanResult
 	if err := json.Unmarshal([]byte(response), &result); err != nil {
+		if repaired, ok := repairJSON(response); ok {
+			if repairErr := json.Unmarshal([]byte(repaired), &result); repairErr == nil {
+				if len(result.Tasks) == 0 {
+					return nil, fmt.Errorf("LLM returned empty task list")
+				}
+				return &result, nil
+			}
+		}
 		return nil, fmt.Errorf("failed to parse LLM response as JSON: %w\nResponse: %s", err, response)
 	}
 
@@ -120,4 +128,68 @@ func parseResponse(response string) (*PlanResult, error) {
 	}
 
 	return &result, nil
+}
+
+func repairJSON(response string) (string, bool) {
+	start := strings.Index(response, "{")
+	if start == -1 {
+		return "", false
+	}
+
+	candidate := strings.TrimSpace(response[start:])
+	if lastIdx := strings.LastIndexAny(candidate, "}]"); lastIdx != -1 && lastIdx < len(candidate)-1 {
+		candidate = strings.TrimSpace(candidate[:lastIdx+1])
+	}
+
+	stack := make([]byte, 0, 8)
+	inString := false
+	escape := false
+	for i := 0; i < len(candidate); i++ {
+		ch := candidate[i]
+		if inString {
+			if escape {
+				escape = false
+				continue
+			}
+			if ch == 92 {
+				escape = true
+				continue
+			}
+			if ch == 34 {
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case 34:
+			inString = true
+		case 123:
+			stack = append(stack, 125)
+		case 91:
+			stack = append(stack, 93)
+		case 125, 93:
+			if len(stack) > 0 && stack[len(stack)-1] == ch {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+
+	if inString {
+		return "", false
+	}
+	if len(stack) == 0 {
+		if candidate != response {
+			return candidate, true
+		}
+		return "", false
+	}
+
+	var sb strings.Builder
+	sb.WriteString(candidate)
+	for i := len(stack) - 1; i >= 0; i-- {
+		sb.WriteByte(stack[i])
+	}
+
+	return sb.String(), true
 }

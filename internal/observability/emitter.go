@@ -176,4 +176,3 @@ func (w *WideEventWriter) Close() error {
 	}
 	return w.file.Close()
 }
-

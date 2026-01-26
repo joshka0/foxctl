@@ -178,6 +178,10 @@ type AgentConfig struct {
 	// Prompt is the specific task/instruction for the agent.
 	Prompt string `json:"prompt,omitempty"`
 
+	// SkillsAllow is an optional allowlist of tool names for this agent.
+	// Use <category>/<skill> (for example, code/smart_search).
+	SkillsAllow []string `json:"skills_allow,omitempty"`
+
 	// TeamID is the optional team this agent belongs to.
 	TeamID string `json:"team_id,omitempty"`
 
@@ -207,7 +211,7 @@ type AgentConfig struct {
 	// Set to 0 to use runtime default.
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
 
-	// ExecMode controls whether the agent runs in autonomous/proactive mode.
+	// ExecMode controls execution mode (reactive|autonomous|proactive|story).
 	ExecMode agent.ExecutionMode `json:"exec_mode,omitempty"`
 
 	// MaxAutoTurns limits the number of autonomous continuations.

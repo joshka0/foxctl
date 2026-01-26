@@ -218,10 +218,11 @@ type PersonalityAdjustInput struct {
 
 // PersonalityDimension represents an adjustable personality dimension.
 type PersonalityDimension struct {
-	Name     string  `json:"name"`
-	Value    float64 `json:"value"`
-	MinLabel string  `json:"min_label"`
-	MaxLabel string  `json:"max_label"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
+	Value       float64 `json:"value"`
+	MinLabel    string  `json:"min_label"`
+	MaxLabel    string  `json:"max_label"`
 }
 
 // PersonalityProfile is stored in context for persistence.
@@ -508,7 +509,7 @@ func (e *RLMToolExecutor) executePersonalityAdjust(ctx context.Context, args jso
 	}
 
 	// Load current personality profile from global context
-	profile, err := e.loadPersonalityProfile(ctx)
+	profile, extras, err := e.loadPersonalityProfile(ctx)
 	if err != nil {
 		return "", fmt.Errorf("load profile: %w", err)
 	}
@@ -541,7 +542,7 @@ func (e *RLMToolExecutor) executePersonalityAdjust(ctx context.Context, args jso
 	}
 
 	// Save updated profile
-	if err := e.savePersonalityProfile(ctx, profile); err != nil {
+	if err := e.savePersonalityProfile(ctx, profile, extras); err != nil {
 		return "", fmt.Errorf("save profile: %w", err)
 	}
 
@@ -562,35 +563,46 @@ func (e *RLMToolExecutor) executePersonalityAdjust(ctx context.Context, args jso
 }
 
 // loadPersonalityProfile loads the personality profile from global context.
-func (e *RLMToolExecutor) loadPersonalityProfile(ctx context.Context) (*PersonalityProfile, error) {
+func (e *RLMToolExecutor) loadPersonalityProfile(ctx context.Context) (*PersonalityProfile, map[string]any, error) {
 	v, err := e.store.GetByKey(ctx, e.conversationID, contextvar.ScopeGlobal, "personality/profile")
 	if err != nil {
 		if errors.Is(err, contextvar.ErrNotFound) {
 			// Return default profile
 			return &PersonalityProfile{
 				Dimensions: defaultPersonalityDimensions(),
-			}, nil
+			}, map[string]any{}, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 
 	var profile PersonalityProfile
 	if err := json.Unmarshal(v.ValueJSON, &profile); err != nil {
-		return nil, fmt.Errorf("unmarshal profile: %w", err)
+		return nil, nil, fmt.Errorf("unmarshal profile: %w", err)
 	}
 
 	// Ensure all dimensions exist (in case new ones were added)
 	profile.Dimensions = mergeDimensions(profile.Dimensions, defaultPersonalityDimensions())
-	return &profile, nil
+
+	extras := map[string]any{}
+	if err := json.Unmarshal(v.ValueJSON, &extras); err != nil {
+		extras = map[string]any{}
+	}
+	return &profile, extras, nil
 }
 
 // savePersonalityProfile persists the personality profile to global context.
-func (e *RLMToolExecutor) savePersonalityProfile(ctx context.Context, profile *PersonalityProfile) error {
+func (e *RLMToolExecutor) savePersonalityProfile(ctx context.Context, profile *PersonalityProfile, extras map[string]any) error {
+	if extras == nil {
+		extras = map[string]any{}
+	}
+	extras["dimensions"] = profile.Dimensions
+	extras["learned_traits"] = profile.LearnedTraits
+
 	_, err := e.store.Put(ctx, contextvar.PutParams{
 		ConversationID: e.conversationID,
 		Scope:          contextvar.ScopeGlobal,
 		Key:            "personality/profile",
-		Value:          profile,
+		Value:          extras,
 		Source:         "rlm_personality_adjust",
 		Upsert:         true,
 	})
@@ -600,27 +612,81 @@ func (e *RLMToolExecutor) savePersonalityProfile(ctx context.Context, profile *P
 // defaultPersonalityDimensions returns the default personality configuration.
 func defaultPersonalityDimensions() []PersonalityDimension {
 	return []PersonalityDimension{
-		{Name: "formality", Value: 0.5, MinLabel: "formal", MaxLabel: "casual"},
-		{Name: "verbosity", Value: 0.5, MinLabel: "brief", MaxLabel: "detailed"},
-		{Name: "enthusiasm", Value: 0.6, MinLabel: "calm", MaxLabel: "energetic"},
-		{Name: "humor", Value: 0.3, MinLabel: "serious", MaxLabel: "playful"},
-		{Name: "empathy", Value: 0.7, MinLabel: "task-focused", MaxLabel: "supportive"},
-		{Name: "proactivity", Value: 0.5, MinLabel: "responsive", MaxLabel: "proactive"},
+		{
+			Name:        "formality",
+			Description: "How formal vs casual the responses are",
+			Value:       0.5,
+			MinLabel:    "formal and professional",
+			MaxLabel:    "casual and friendly",
+		},
+		{
+			Name:        "verbosity",
+			Description: "How detailed vs concise the responses are",
+			Value:       0.5,
+			MinLabel:    "brief and to-the-point",
+			MaxLabel:    "detailed and thorough",
+		},
+		{
+			Name:        "enthusiasm",
+			Description: "Energy level in responses",
+			Value:       0.6,
+			MinLabel:    "calm and measured",
+			MaxLabel:    "enthusiastic and energetic",
+		},
+		{
+			Name:        "humor",
+			Description: "Use of humor and playfulness",
+			Value:       0.3,
+			MinLabel:    "serious and straightforward",
+			MaxLabel:    "playful and witty",
+		},
+		{
+			Name:        "empathy",
+			Description: "Emotional attunement and support",
+			Value:       0.7,
+			MinLabel:    "task-focused",
+			MaxLabel:    "emotionally supportive",
+		},
+		{
+			Name:        "proactivity",
+			Description: "How much to offer suggestions and follow-ups",
+			Value:       0.5,
+			MinLabel:    "responsive only",
+			MaxLabel:    "proactive with suggestions",
+		},
 	}
 }
 
 // mergeDimensions ensures all default dimensions exist in the profile.
 func mergeDimensions(existing, defaults []PersonalityDimension) []PersonalityDimension {
-	dimMap := make(map[string]PersonalityDimension)
+	byName := make(map[string]PersonalityDimension, len(existing))
+	for _, d := range existing {
+		byName[d.Name] = d
+	}
+
+	result := make([]PersonalityDimension, 0, len(defaults)+len(existing))
 	for _, d := range defaults {
-		dimMap[d.Name] = d
+		if existingDim, ok := byName[d.Name]; ok {
+			if existingDim.Description == "" {
+				existingDim.Description = d.Description
+			}
+			if existingDim.MinLabel == "" {
+				existingDim.MinLabel = d.MinLabel
+			}
+			if existingDim.MaxLabel == "" {
+				existingDim.MaxLabel = d.MaxLabel
+			}
+			result = append(result, existingDim)
+			delete(byName, d.Name)
+		} else {
+			result = append(result, d)
+		}
 	}
 	for _, d := range existing {
-		dimMap[d.Name] = d
-	}
-	result := make([]PersonalityDimension, 0, len(dimMap))
-	for _, d := range dimMap {
-		result = append(result, d)
+		if _, ok := byName[d.Name]; ok {
+			result = append(result, d)
+			delete(byName, d.Name)
+		}
 	}
 	return result
 }

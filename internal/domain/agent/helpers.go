@@ -87,11 +87,11 @@ func (s *Sender) nowTimeValue() (int64, error) {
 // SendAsk sends a request and returns the ask ID for correlation.
 func (s *Sender) SendAsk(ctx context.Context, toNS, question string, opts ...AskOpt) (string, error) {
 	cfg := &AskConfig{
-		TTL:          5 * time.Minute,
-		SessionID:    "",
-		Workspace:    "",
-		Context:      nil,
-		Correlation:  "",
+		TTL:         5 * time.Minute,
+		SessionID:   "",
+		Workspace:   "",
+		Context:     nil,
+		Correlation: "",
 	}
 
 	for _, opt := range opts {

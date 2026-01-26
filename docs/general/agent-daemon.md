@@ -4,7 +4,7 @@
 
 ## Overview
 
-The agent daemon runs companion and autonomous agents via the mailbox polling loop (L1 loop). It routes agents to different execution engines based on their `exec_mode`.
+The agent daemon runs companion and autonomous agents via the mailbox polling loop (L1 loop). It routes agents to different execution engines based on their `exec_mode`, including story mode's gather + dialogue loop.
 
 ## Engine Selection
 
@@ -20,6 +20,14 @@ The agent daemon runs companion and autonomous agents via the mailbox polling lo
 │   │  - Conversation memory (L0/L1/L2)                       │  │
 │   │  - RLM context tools (optional)                         │  │
 │   │  - Default provider: cerebras                           │  │
+│   └─────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│   exec_mode = "story"                                         │
+│   ┌─────────────────────────────────────────────────────────┐  │
+│   │  LLMChatEngine via companion.Service                    │  │
+│   │  - Gather loop w/ tools (RLM)                           │  │
+│   │  - Dialogue generation                                  │  │
+│   │  - Structured outputs (optional)                        │  │
 │   └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │   exec_mode = "autonomous" | "proactive"                       │
@@ -38,6 +46,7 @@ The agent daemon runs companion and autonomous agents via the mailbox polling lo
 | Mode | Engine | Use Case | Provider Support |
 |------|--------|----------|------------------|
 | `reactive` | LLMChatEngine | Chat companions, simple Q&A | Any (cerebras default) |
+| `story` | LLMChatEngine | Gather + dialogue companions, structured outputs | Any (tool-capable model recommended) |
 | `autonomous` | DSPy ReAct | Tool-using agents, multi-step tasks | gemini, openai, anthropic, groq, openrouter |
 | `proactive` | DSPy ReAct | Background workers, scheduled tasks | gemini, openai, anthropic, groq, openrouter |
 
@@ -70,6 +79,22 @@ agentctl agent spawn \
   --llm-provider cerebras \
   --llm-model "llama-3.3-70b" \
   --system-prompt @prompt.txt
+
+# Run the daemon
+agentctl agent run <agent-id>
+```
+
+### Story Companion (Gather + Dialogue)
+
+```bash
+# Spawn a story-mode companion using LLMChatEngine
+agentctl agent spawn \
+  --name "Stormscribe" \
+  --slug "stormscribe" \
+  --role companion \
+  --exec-mode story \
+  --llm-provider openrouter \
+  --llm-model "z-ai/glm-4.7-flash"
 
 # Run the daemon
 agentctl agent run <agent-id>
@@ -108,6 +133,26 @@ Mailbox Message
 │ 2. companion.Service.Chat()             │
 │    - Injects conversation memory        │
 │    - Executes via LLMChatEngine         │
+│    - Stores turns on success            │
+│                                         │
+│ 3. Reply via mailbox                    │
+└─────────────────────────────────────────┘
+```
+
+### Story Agent (LLMChatEngine)
+
+```
+Mailbox Message
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│ handleAsk() / handleConsoleAsk()        │
+├─────────────────────────────────────────┤
+│ 1. Resolve conversation ID              │
+│                                         │
+│ 2. companion.Service.Chat()             │
+│    - Gather loop with tools             │
+│    - Dialogue generation                │
 │    - Stores turns on success            │
 │                                         │
 │ 3. Reply via mailbox                    │

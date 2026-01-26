@@ -19,10 +19,9 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
-	"github.com/oklog/ulid/v2"
 	"github.com/jkatigb/agentctl/internal/agent/types"
-	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/context/updater"
+	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/runner"
 	"github.com/jkatigb/agentctl/internal/hooks"
@@ -41,6 +40,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
+	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
 )
 
@@ -840,7 +840,7 @@ func (s *Service) startContextUpdater(ctx context.Context) error {
 	injector := updater.NewInjector(ctxBufferInjector, updater.DefaultInjectorConfig())
 
 	// Create worker with real providers
-	worker, err := updater.NewWorkerFromConfig(updater.DaemonConfig{
+	worker, err := updater.NewWorkerFromConfig(ctx, updater.DaemonConfig{
 		Config:   s.cfg,
 		Logger:   logger,
 		Sessions: sessionAdapter,
@@ -883,6 +883,9 @@ func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 	if workspace == "" {
 		fmt.Fprintf(os.Stderr, "file summary worker: skipped (no workspace)\n")
 		return nil
+	}
+	if absWorkspace, err := filepath.Abs(workspace); err == nil {
+		workspace = filepath.Clean(absWorkspace)
 	}
 
 	// Check if LLM providers are available for summarization
@@ -1060,12 +1063,13 @@ func (s *Service) startAgentOrchestration(ctx context.Context) error {
 
 // AgentSpawnParams are the parameters for agent.spawn.
 type AgentSpawnParams struct {
-	Role        string `json:"role"`
-	AgentID     string `json:"agent_id,omitempty"` // Agent config ID for session filtering
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	EpicID      string `json:"epic_id,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
+	Role        string   `json:"role"`
+	AgentID     string   `json:"agent_id,omitempty"` // Agent config ID for session filtering
+	WorkspaceID string   `json:"workspace_id,omitempty"`
+	EpicID      string   `json:"epic_id,omitempty"`
+	TaskID      string   `json:"task_id,omitempty"`
+	Prompt      string   `json:"prompt,omitempty"`
+	SkillsAllow []string `json:"skills_allow,omitempty"`
 
 	// Agent metadata
 	Name string `json:"name,omitempty"`
@@ -1074,7 +1078,7 @@ type AgentSpawnParams struct {
 	// Execution config
 	MaxIterations    int    `json:"max_iterations,omitempty"`
 	MaxContextTokens int    `json:"max_context_tokens,omitempty"` // Context budget (0=no limit)
-	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "proactive"
+	ExecMode         string `json:"exec_mode,omitempty"`          // "reactive", "autonomous", "proactive", "story"
 	MaxAutoTurns     int    `json:"max_auto_turns,omitempty"`
 
 	// LLM override
@@ -1120,6 +1124,7 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 		EpicID:      p.EpicID,
 		TaskID:      p.TaskID,
 		Prompt:      p.Prompt,
+		SkillsAllow: p.SkillsAllow,
 	}
 
 	// Apply execution config if provided
@@ -1131,7 +1136,7 @@ func (s *Service) handleAgentSpawn(ctx context.Context, params json.RawMessage) 
 	}
 	if p.ExecMode != "" {
 		switch p.ExecMode {
-		case string(agent.ModeReactive), string(agent.ModeAutonomous), string(agent.ModeProactive):
+		case string(agent.ModeReactive), string(agent.ModeAutonomous), string(agent.ModeProactive), string(agent.ModeStory):
 			cfg.ExecMode = agent.ExecutionMode(p.ExecMode)
 		default:
 			return nil, fmt.Errorf("invalid exec_mode: %s", p.ExecMode)

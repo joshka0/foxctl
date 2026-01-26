@@ -249,6 +249,7 @@ func handleAgentDaemonStart(w http.ResponseWriter, r *http.Request, cfg config.C
 		AgentID:     agentID, // Pass agent config ID for session filtering
 		WorkspaceID: workspace,
 		Prompt:      prompt,
+		SkillsAllow: agent.SkillsAllow,
 	}
 
 	result, err := client.AgentSpawn(params)

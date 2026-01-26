@@ -41,6 +41,15 @@ agentctl run code/smart_search --input '{"question": "how does error handling wo
 agentctl run code/context_ripgrep --input '{"pattern": "func.*Auth", "path": ".", "max_blocks": 10}'
 ```
 
+### Repo Graph Index → index repo
+Use for relationship navigation (calls/refs/imports).
+
+```bash
+agentctl index repo build --workspace .
+agentctl index repo search --workspace . --query "Supervisor"
+agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
+```
+
 ### File Reading → code/context_grep or fs/read
 **For large files, read specific sections, not entire files.**
 
@@ -163,6 +172,7 @@ agentctl memory put --name "gotcha-name" --type "gotcha" --summary "Short descri
 | Search code | `agentctl run code/smart_search --input '{"question": "..."}'` |
 | Read lines | `agentctl run code/context_grep --input '{"mode": "line", "file_path": "...", "line_start": N, "line_end": M}'` |
 | Edit file | `agentctl run fs/apply_edit --input '{"path": "...", "edits": [...], "dry_run": true}'` |
+| Repo index | `agentctl index repo search --workspace . --query "..."` |
 | Web search | `agentctl run web/search --input '{"query": "...", "extract": true}'` |
 | Web fetch | `agentctl run web/extract --input '{"urls": [...], "query": "..."}'` |
 | Run tests | `make test-short` |

@@ -14,6 +14,7 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/platform/fsutil"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -187,9 +188,11 @@ Remote sync:
 	cmd.AddCommand(
 		newIndexInitCommand(),
 		newIndexStatusCommand(),
+		newIndexRepoCommand(),
 		newIndexSyncCommand(),
 		newIndexGitDiffCommand(),
 		newIndexFileSummariesCommand(),
+		newIndexSymbolSummariesCommand(),
 	)
 	return cmd
 }
@@ -1483,9 +1486,98 @@ Provider priority:
 	return cmd
 }
 
-func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool, batchSize int, glob string, exclude []string) error {
+func newIndexSymbolSummariesCommand() *cobra.Command {
+	var workspace string
+	var force bool
+	var dryRun bool
+	var useLLM bool
+	var batchSize int
+
+	cmd := &cobra.Command{
+		Use:   "symbol-summaries",
+		Short: "Generate symbol summaries for repo navigation",
+		Long: `Generate short, search-friendly symbol summaries for repoindex.
+
+These summaries describe what each indexed symbol does and are used by
+repoindex to annotate symbol nodes for faster navigation. Summaries are
+cached by symbol digest and only regenerated when symbol metadata changes.
+
+By default, summaries are deterministic (doc comment + signature).
+Use --llm to enable LLM-generated summaries.
+
+Requires symbol index entries (run "agentctl index init --scope symbols" first if missing).
+
+If --llm is set, requires an LLM provider (Devstral via OpenRouter, Cerebras, or Groq).
+Set OPENROUTER_API_KEY, CEREBRAS_API_KEY, or GROQ_API_KEY.
+
+Provider priority:
+  1. Devstral via OpenRouter (best for code summaries)
+  2. Cerebras (fast)
+  3. Groq (fast)`,
+		Example: `  # Generate deterministic symbol summaries
+  agentctl index symbol-summaries
+
+  # Force regenerate all symbol summaries
+  agentctl index symbol-summaries --force
+
+  # Enable LLM summaries
+  agentctl index symbol-summaries --llm
+
+  # Dry run to see what would be processed
+  agentctl index symbol-summaries --dry-run`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runIndexSymbolSummaries(cmd, workspace, force, dryRun, useLLM, batchSize)
+		},
+	}
+
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "Workspace root directory")
+	cmd.Flags().BoolVar(&force, "force", false, "Force regenerate all summaries (ignore cache)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be processed without making changes")
+	cmd.Flags().BoolVar(&useLLM, "llm", false, "Use LLM for summaries (default: deterministic)")
+	cmd.Flags().IntVar(&batchSize, "batch-size", 200, "Number of symbols to process per batch")
+
+	return cmd
+}
+
+func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool, batchSize int, glob string, exclude []string) (err error) {
 	ctx := cmd.Context()
 	start := time.Now()
+	var summaryEvent *observability.EventBuilder
+	var filesFound int
+	var filesSkipped int
+	var filesToProcessCount int
+	var processedCount int
+	var errorsCount int
+	var providerName string
+	var modelName string
+
+	defer func() {
+		if summaryEvent == nil {
+			return
+		}
+		summaryEvent.WithDataMap(map[string]any{
+			"files_found":      filesFound,
+			"files_to_process": filesToProcessCount,
+			"files_skipped":    filesSkipped,
+			"processed":        processedCount,
+			"errors":           errorsCount,
+			"force":            force,
+			"dry_run":          dryRun,
+			"batch_size":       batchSize,
+			"glob":             glob,
+			"provider":         providerName,
+			"model":            modelName,
+		})
+		if err != nil {
+			if emitErr := observability.EmitSync(ctx, summaryEvent.Error(err, time.Since(start))); emitErr != nil {
+				fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+			}
+			return
+		}
+		if emitErr := observability.EmitSync(ctx, summaryEvent.Success(time.Since(start))); emitErr != nil {
+			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+		}
+	}()
 
 	// Validate batchSize to prevent infinite loop
 	if batchSize <= 0 {
@@ -1498,6 +1590,13 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		return fmt.Errorf("resolve workspace: %w", err)
 	}
 
+	summaryEvent = observability.NewEvent("index.file_summaries").
+		WithComponent(observability.ComponentCLI).
+		WithCommand("index.file-summaries").
+		WithWorkspace(absWorkspace).
+		EnrichFromEnv().
+		EnrichFromContext(ctx)
+
 	// Load config
 	cfg, err := loadConfig(ctx)
 	if err != nil {
@@ -1509,6 +1608,8 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 	if err != nil {
 		return fmt.Errorf("find files: %w", err)
 	}
+
+	filesFound = len(files)
 
 	if len(files) == 0 {
 		data := map[string]any{
@@ -1562,6 +1663,9 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		filesToProcess = append(filesToProcess, f)
 	}
 
+	filesSkipped = skippedCount
+	filesToProcessCount = len(filesToProcess)
+
 	if dryRun {
 		data := map[string]any{
 			"dry_run":          true,
@@ -1595,10 +1699,10 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		return fmt.Errorf("no LLM providers available - set OPENROUTER_API_KEY, CEREBRAS_API_KEY, or GROQ_API_KEY")
 	}
 
+	providerName = providers[0].Name
+	modelName = providers[0].Model
+
 	llm := llmproviders.NewSummaryLLM(providers[0])
-	if llm == nil {
-		return fmt.Errorf("failed to create LLM provider")
-	}
 
 	fmt.Fprintf(os.Stderr, "Using LLM provider: %s (%s)\n", providers[0].Name, providers[0].Model)
 	fmt.Fprintf(os.Stderr, "Processing %d files (skipped %d with current summaries)...\n", len(filesToProcess), skippedCount)
@@ -1633,6 +1737,16 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		fmt.Fprintf(os.Stderr, "  Batch %d-%d of %d...\n", i+1, end, len(filesToProcess))
 
 		for _, f := range batch {
+			fileStart := time.Now()
+			fileEvent := observability.NewEvent("index.file_summaries").
+				WithComponent(observability.ComponentCLI).
+				WithCommand("index.file-summaries").
+				WithSubtype("file").
+				WithWorkspace(absWorkspace).
+				WithData("path", f).
+				EnrichFromEnv().
+				EnrichFromContext(ctx)
+
 			input, inputErr := buildFileSummaryInput(absWorkspace, f)
 			if inputErr != nil {
 				results = append(results, map[string]any{
@@ -1642,6 +1756,8 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 				})
 				errors++
 				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", f, inputErr)
+				fileEvent.WithData("status", "error")
+				observability.Emit(ctx, fileEvent.Error(inputErr, time.Since(fileStart)))
 				continue
 			}
 
@@ -1654,6 +1770,8 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 				})
 				errors++
 				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", f, err)
+				fileEvent.WithData("status", "error")
+				observability.Emit(ctx, fileEvent.Error(err, time.Since(fileStart)))
 				continue
 			}
 
@@ -1665,14 +1783,21 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 				})
 				processed++
 				fmt.Fprintf(os.Stderr, "    [generated] %s\n", f)
+				fileEvent.WithData("status", "generated").WithData("cached", false)
+				observability.Emit(ctx, fileEvent.Success(time.Since(fileStart)))
 			} else {
 				results = append(results, map[string]any{
 					"file":   f,
 					"status": "cached",
 				})
+				fileEvent.WithData("status", "cached").WithData("cached", true)
+				observability.Emit(ctx, fileEvent.Success(time.Since(fileStart)))
 			}
 		}
 	}
+
+	processedCount = processed
+	errorsCount = errors
 
 	data := map[string]any{
 		"workspace":     absWorkspace,
@@ -1688,6 +1813,309 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 	}
 
 	env := protocol.OK("index.file-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+	return protocol.Write(cmd.OutOrStdout(), env)
+}
+
+func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun, useLLM bool, batchSize int) (err error) {
+	ctx := cmd.Context()
+	start := time.Now()
+	var summaryEvent *observability.EventBuilder
+	var symbolsFound int
+	var symbolsSkipped int
+	var symbolsToProcessCount int
+	var processedCount int
+	var errorsCount int
+	var providerName string
+	var modelName string
+	var llm retrieval.SummaryLLM
+
+	defer func() {
+		if summaryEvent == nil {
+			return
+		}
+		summaryEvent.WithDataMap(map[string]any{
+			"symbols_found":      symbolsFound,
+			"symbols_to_process": symbolsToProcessCount,
+			"symbols_skipped":    symbolsSkipped,
+			"processed":          processedCount,
+			"errors":             errorsCount,
+			"force":              force,
+			"dry_run":            dryRun,
+			"batch_size":         batchSize,
+			"llm_enabled":        useLLM,
+			"provider":           providerName,
+			"model":              modelName,
+		})
+		if err != nil {
+			if emitErr := observability.EmitSync(ctx, summaryEvent.Error(err, time.Since(start))); emitErr != nil {
+				fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+			}
+			return
+		}
+		if emitErr := observability.EmitSync(ctx, summaryEvent.Success(time.Since(start))); emitErr != nil {
+			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+		}
+	}()
+
+	if batchSize <= 0 {
+		return fmt.Errorf("batch-size must be positive, got %d", batchSize)
+	}
+
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return fmt.Errorf("resolve workspace: %w", err)
+	}
+
+	summaryEvent = observability.NewEvent("index.symbol_summaries").
+		WithComponent(observability.ComponentCLI).
+		WithCommand("index.symbol-summaries").
+		WithWorkspace(absWorkspace).
+		EnrichFromEnv().
+		EnrichFromContext(ctx)
+
+	cfg, err := loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	storageDir := filepath.Join(cfg.Home, "storage")
+	casDir := cfg.Paths.CAS
+	if casDir == "" {
+		casDir = filepath.Join(cfg.Home, "cas")
+	}
+
+	store, err := memory.Open(ctx, storageDir, casDir)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer store.Close()
+
+	filter := memory.ListFilter{Types: []string{symbol.SymbolType}}
+	var inputs []symbol.SymbolSummaryInput
+	var skippedCount int
+	results := make([]map[string]any, 0)
+
+	offset := 0
+	total := 0
+	for {
+		entries, totalCount, listErr := store.ListFiltered(ctx, absWorkspace, filter, batchSize, offset)
+		if listErr != nil {
+			return fmt.Errorf("list symbols: %w", listErr)
+		}
+		if total == 0 {
+			total = totalCount
+			symbolsFound = totalCount
+		}
+		if len(entries) == 0 {
+			break
+		}
+		for _, entry := range entries {
+			result, parseErr := symbol.UnmarshalResult(entry.Result)
+			if parseErr != nil {
+				errorsCount++
+				results = append(results, map[string]any{
+					"symbol": entry.Name,
+					"status": "error",
+					"error":  parseErr.Error(),
+				})
+				continue
+			}
+			sym := result.Symbol
+			if sym.Kind == symbol.KindFileSummary {
+				skippedCount++
+				continue
+			}
+			input, inputErr := buildSymbolSummaryInput(sym)
+			if inputErr != nil {
+				errorsCount++
+				results = append(results, map[string]any{
+					"symbol_id": sym.ID,
+					"status":    "error",
+					"error":     inputErr.Error(),
+				})
+				continue
+			}
+
+			if !force {
+				entryName := symbol.SymbolSummaryEntryName(absWorkspace, sym.ID)
+				entry, getErr := store.Get(ctx, entryName, absWorkspace)
+				if getErr == nil {
+					var cached symbol.SymbolSummaryResult
+					if err := json.Unmarshal(entry.Result, &cached); err == nil {
+						currentDigest := symbol.ComputeSymbolSummaryDigest(input)
+						if cached.Digest == currentDigest {
+							skippedCount++
+							continue
+						}
+					}
+				}
+			}
+
+			inputs = append(inputs, input)
+		}
+		offset += len(entries)
+		if total > 0 && offset >= total {
+			break
+		}
+	}
+
+	symbolsSkipped = skippedCount
+	symbolsToProcessCount = len(inputs)
+
+	if symbolsFound == 0 {
+		data := map[string]any{
+			"workspace":     absWorkspace,
+			"symbols_found": 0,
+			"message":       "no symbols found - run symbol indexing first",
+		}
+		env := protocol.OK("index.symbol-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	if dryRun {
+		items := make([]map[string]string, 0, len(inputs))
+		for _, input := range inputs {
+			items = append(items, map[string]string{
+				"symbol_id": input.SymbolID,
+				"name":      input.Name,
+				"file":      input.FilePath,
+			})
+		}
+		data := map[string]any{
+			"dry_run":            true,
+			"workspace":          absWorkspace,
+			"symbols_found":      symbolsFound,
+			"symbols_to_process": len(inputs),
+			"symbols_skipped":    skippedCount,
+			"force":              force,
+			"symbols":            items,
+		}
+		env := protocol.OK("index.symbol-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	if len(inputs) == 0 {
+		data := map[string]any{
+			"workspace":       absWorkspace,
+			"symbols_found":   symbolsFound,
+			"symbols_skipped": skippedCount,
+			"processed":       0,
+			"message":         "all symbols already have current summaries",
+			"duration_ms":     time.Since(start).Milliseconds(),
+		}
+		env := protocol.OK("index.symbol-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
+		return protocol.Write(cmd.OutOrStdout(), env)
+	}
+
+	if useLLM {
+		providers := llmproviders.FileSummaryProviders()
+		if len(providers) == 0 {
+			return fmt.Errorf("no LLM providers available - set OPENROUTER_API_KEY, CEREBRAS_API_KEY, or GROQ_API_KEY")
+		}
+
+		providerName = providers[0].Name
+		modelName = providers[0].Model
+
+		llm = llmproviders.NewSummaryLLM(providers[0])
+
+		fmt.Fprintf(os.Stderr, "Using LLM provider: %s (%s)\n", providerName, modelName)
+	} else {
+		providerName = "deterministic"
+		modelName = "fallback"
+		fmt.Fprintln(os.Stderr, "Using deterministic symbol summaries (no LLM)")
+	}
+
+	fmt.Fprintf(os.Stderr, "Processing %d symbols (skipped %d with current summaries)...\n", len(inputs), skippedCount)
+
+	var embedProvider semantic.EmbeddingProvider
+	if key := os.Getenv("VOYAGE_API_KEY"); key != "" {
+		provider, embedErr := semantic.NewVoyageProvider(semantic.VoyageConfig{
+			APIKey: key,
+			Model:  "voyage-code-3",
+		})
+		if embedErr == nil {
+			embedProvider = provider
+		}
+	}
+
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	generator := retrieval.NewSymbolSummaryGenerator(store, llm, embedProvider, absWorkspace, logger)
+
+	var processed, errors int
+	for i := 0; i < len(inputs); i += batchSize {
+		end := i + batchSize
+		if end > len(inputs) {
+			end = len(inputs)
+		}
+		batch := inputs[i:end]
+
+		fmt.Fprintf(os.Stderr, "  Batch %d-%d of %d...\n", i+1, end, len(inputs))
+
+		for _, input := range batch {
+			symbolStart := time.Now()
+			symbolEvent := observability.NewEvent("index.symbol_summaries").
+				WithComponent(observability.ComponentCLI).
+				WithCommand("index.symbol-summaries").
+				WithSubtype("symbol").
+				WithWorkspace(absWorkspace).
+				WithData("symbol_id", input.SymbolID).
+				WithData("file", input.FilePath).
+				EnrichFromEnv().
+				EnrichFromContext(ctx)
+
+			summary, cached, genErr := generator.GetOrCreateSummary(ctx, input)
+			if genErr != nil {
+				results = append(results, map[string]any{
+					"symbol_id": input.SymbolID,
+					"status":    "error",
+					"error":     genErr.Error(),
+				})
+				errors++
+				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", input.SymbolID, genErr)
+				symbolEvent.WithData("status", "error")
+				observability.Emit(ctx, symbolEvent.Error(genErr, time.Since(symbolStart)))
+				continue
+			}
+
+			if !cached {
+				results = append(results, map[string]any{
+					"symbol_id": input.SymbolID,
+					"status":    "generated",
+					"summary":   summary,
+				})
+				processed++
+				fmt.Fprintf(os.Stderr, "    [generated] %s\n", input.SymbolID)
+				symbolEvent.WithData("status", "generated").WithData("cached", false)
+				observability.Emit(ctx, symbolEvent.Success(time.Since(symbolStart)))
+			} else {
+				results = append(results, map[string]any{
+					"symbol_id": input.SymbolID,
+					"status":    "cached",
+				})
+				symbolEvent.WithData("status", "cached").WithData("cached", true)
+				observability.Emit(ctx, symbolEvent.Success(time.Since(symbolStart)))
+			}
+		}
+	}
+
+	processedCount = processed
+	errorsCount += errors
+
+	data := map[string]any{
+		"workspace":       absWorkspace,
+		"provider":        providerName,
+		"model":           modelName,
+		"llm_enabled":     useLLM,
+		"symbols_found":   symbolsFound,
+		"symbols_skipped": skippedCount,
+		"processed":       processed,
+		"errors":          errorsCount,
+		"force":           force,
+		"results":         results,
+		"duration_ms":     time.Since(start).Milliseconds(),
+	}
+
+	env := protocol.OK("index.symbol-summaries", data, protocol.WithSource("cli"), protocol.WithWorkspace(absWorkspace))
 	return protocol.Write(cmd.OutOrStdout(), env)
 }
 
@@ -1721,6 +2149,27 @@ func buildFileSummaryInput(workspace, relPath string) (symbol.FileSummaryInput, 
 
 	// Extract top symbols (simplified)
 	input.TopSymbols = extractTopSymbolsForSummary(string(content), relPath)
+
+	return input, nil
+}
+
+func buildSymbolSummaryInput(sym symbol.Symbol) (symbol.SymbolSummaryInput, error) {
+	if sym.ID == "" {
+		return symbol.SymbolSummaryInput{}, fmt.Errorf("symbol ID missing")
+	}
+	if sym.Name == "" {
+		return symbol.SymbolSummaryInput{}, fmt.Errorf("symbol name missing for %s", sym.ID)
+	}
+	input := symbol.SymbolSummaryInput{
+		SymbolID:      sym.ID,
+		FilePath:      sym.FilePath,
+		Name:          sym.Name,
+		Kind:          sym.Kind,
+		Signature:     sym.Signature,
+		Documentation: sym.Documentation,
+		BodyDigest:    sym.BodyDigest,
+		Language:      sym.Language,
+	}
 
 	return input, nil
 }

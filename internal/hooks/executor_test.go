@@ -83,6 +83,7 @@ func (m *MockMailboxStore) Send(ctx context.Context, msg agent.Message) error {
 func (m *MockMailboxStore) Poll(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int) ([]agent.Message, error) {
 	return nil, nil
 }
+
 func (m *MockMailboxStore) PollByTypes(ctx context.Context, agentNS string, leaseDuration time.Duration, maxMessages int, types []agent.MessageType) ([]agent.Message, error) {
 	return nil, nil
 }

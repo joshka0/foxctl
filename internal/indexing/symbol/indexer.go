@@ -552,7 +552,7 @@ func (idx *Indexer) detectLanguage(file indexing.FileChange) string {
 		return "python"
 	case ".js":
 		return "javascript"
-	case ".ts":
+	case ".ts", ".tsx":
 		return "typescript"
 	case ".rs":
 		return "rust"

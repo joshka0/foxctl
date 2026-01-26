@@ -69,6 +69,16 @@ Extract high-signal code snippets from candidates:
 agentctl run code/smart_search --input '{"query": "error handling", "files": ["handler.go", "service.go"]}'
 ```
 
+## Repo Graph Index
+
+Navigate code by relationships (calls, references, imports):
+
+```bash
+agentctl index repo build --workspace .
+agentctl index repo search --workspace . --query "Supervisor"
+agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO
+```
+
 ## Git Operations
 
 ```bash

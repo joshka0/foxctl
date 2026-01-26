@@ -27,8 +27,10 @@ type OptimizationContext struct {
 
 // Options configures the agent daemon.
 type Options struct {
-	AgentID           string
-	StorageRoot       string
+	AgentID     string
+	StorageRoot string
+	// WorkspaceRoot is the absolute path used for repo index and tool workspace access.
+	WorkspaceRoot     string
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
 	MaxPollMessages   int

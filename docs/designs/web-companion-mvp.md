@@ -92,7 +92,7 @@ Semantic Retrieval + LLM
 
 - Character profile: name, avatar, short backstory, voice, base mood.
 - Emotion set (8): neutral, joy, sadness, anger, fear, surprise, disgust, playful.
-- Emotion selection: if streamed text includes emoji, map to the 8-state set and strip the emoji from rendered text.
+- Emotion selection: prefer `tone.emotion` when present; otherwise, if streamed text includes emoji, map to the 8-state set and strip the emoji from rendered text.
 - Fallbacks: if no emoji is present, optionally classify with Gemini 3.0 Flash or default to neutral; allow manual override.
 - Streaming UX: start in neutral and update emotion as soon as a mapped emoji appears.
 
@@ -100,6 +100,7 @@ Semantic Retrieval + LLM
 
 - User-selectable backgrounds for the companion panel.
 - Optional auto-switching by emotion, with a per-user toggle.
+- If `action.background_key` is provided, use it as the scene key; if `action.image_prompt` is provided, use it to generate a background.
 - Background choice stored with character profile.
 - Optional: generate backgrounds via Gemini 3.0 Flash and cache per user.
 

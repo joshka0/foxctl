@@ -2493,7 +2493,7 @@ func scanSession(row scannable) (Session, error) {
 	var parentSessionID, agentID, agentType, status sql.NullString
 	var keyQuestions sql.NullString
 	var contentHash sql.NullString
-// Nullable string fields for agent sessions
+	// Nullable string fields for agent sessions
 	var prompt, promptHash, llmProvider, llmModel sql.NullString
 	// Nullable string fields that might be NULL in database
 	var projectName, gitBranch, claudeVersion, rawJSONLPath sql.NullString

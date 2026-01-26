@@ -16,6 +16,26 @@ agentctl run code/semantic_search --input '{"query": "auth", "scopes": ["symbols
 
 ---
 
+## Repo Graph Index (repoindex)
+
+Repoindex is a relationship-based graph that complements semantic search. It
+does not use embeddings; it uses FTS + graph expansion over code structure.
+
+```bash
+# Build the graph (Go + TypeScript)
+agentctl index repo build --workspace . --go --typescript
+
+# Search nodes by text (FTS)
+agentctl index repo search --workspace . --query "Supervisor" --limit 10
+
+# Expand relationships
+agentctl index repo expand --workspace . --seed "<node-id>" --edge CALLS --edge REFERS_TO --depth 2
+```
+
+For details and edge types, see [repoindex.md](repoindex.md).
+
+---
+
 ## Search Modes
 
 | Mode | Type | Best For |

@@ -66,6 +66,9 @@ type LLMChatConfig struct {
 	// MaxTokens limits the response length.
 	MaxTokens int
 
+	// ResponseFormat enforces structured outputs when supported by the provider.
+	ResponseFormat json.RawMessage
+
 	// HookDispatcher for pre/post tool use hooks (optional).
 	HookDispatcher hooks.Dispatcher
 
@@ -384,6 +387,14 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				})
 			}
 
+			// Warn on second-to-last iteration so agent can wrap up
+			if iteration == e.config.MaxIterations-1 {
+				messages = append(messages, oaiMessage{
+					Role:    "user",
+					Content: "⚠️ IMPORTANT: This is your FINAL iteration. You must provide your complete response NOW. Do NOT call any more tools - just give your final answer/summary.",
+				})
+			}
+
 			// Continue the loop
 			continue
 		}
@@ -504,6 +515,9 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 	if len(tools) > 0 {
 		reqBody.Tools = tools
 	}
+	if len(e.config.ResponseFormat) > 0 {
+		reqBody.ResponseFormat = e.config.ResponseFormat
+	}
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
@@ -554,11 +568,12 @@ func (e *LLMChatEngine) callLLM(ctx context.Context, messages []oaiMessage, tool
 // OpenAI API types
 
 type oaiRequest struct {
-	Model       string       `json:"model"`
-	Messages    []oaiMessage `json:"messages"`
-	Tools       []oaiTool    `json:"tools,omitempty"`
-	Temperature float64      `json:"temperature,omitempty"`
-	MaxTokens   int          `json:"max_tokens,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []oaiMessage    `json:"messages"`
+	Tools          []oaiTool       `json:"tools,omitempty"`
+	Temperature    float64         `json:"temperature,omitempty"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	ResponseFormat json.RawMessage `json:"response_format,omitempty"`
 }
 
 type oaiMessage struct {

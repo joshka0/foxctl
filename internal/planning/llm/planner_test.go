@@ -83,6 +83,22 @@ func TestParseResponse_MarkdownCodeBlock(t *testing.T) {
 	}
 }
 
+func TestParseResponse_TruncatedJSON(t *testing.T) {
+	response := `{
+		"tasks": [{"title": "Test Task", "description": "Testing"}],
+		"reasoning": "Simple test"
+	`
+
+	result, err := parseResponse(response)
+	if err != nil {
+		t.Fatalf("parseResponse failed: %v", err)
+	}
+
+	if len(result.Tasks) != 1 {
+		t.Errorf("expected 1 task, got %d", len(result.Tasks))
+	}
+}
+
 func TestParseResponse_EmptyTasks(t *testing.T) {
 	response := `{"tasks": [], "reasoning": "Nothing to do"}`
 
@@ -95,10 +111,15 @@ func TestParseResponse_EmptyTasks(t *testing.T) {
 // configFromEnv builds a ProviderConfig from environment variables.
 // This is only used in tests - the imperative shell.
 func configFromEnv() ProviderConfig {
+	model := os.Getenv("OPENROUTER_MODEL")
+	if model == "" {
+		model = os.Getenv("OPENROUTER_MODEL_NAME")
+	}
+
 	return ProviderConfig{
 		CerebrasAPIKey:   os.Getenv("CEREBRAS_API_KEY"),
 		OpenRouterAPIKey: os.Getenv("OPENROUTER_API_KEY"),
-		OpenRouterModel:  os.Getenv("OPENROUTER_MODEL"),
+		OpenRouterModel:  model,
 		GroqAPIKey:       os.Getenv("GROQ_API_KEY"),
 		OpenAIAPIKey:     os.Getenv("OPENAI_API_KEY"),
 	}
@@ -108,7 +129,7 @@ func TestAutoPlanner_NoAPIKey(t *testing.T) {
 	// Test with empty config - no API keys set
 	cfg := ProviderConfig{}
 
-	planner := AutoPlannerFromConfig(cfg)
+	planner := AutoPlannerFromConfig(context.Background(), cfg)
 	if planner != nil {
 		t.Error("expected nil planner when no API keys are set")
 	}
@@ -130,10 +151,10 @@ func TestOpenAIPlanner_Integration(t *testing.T) {
 
 	cfg := configFromEnv()
 	if !IsLLMPlanningAvailableFromConfig(cfg) {
-		t.Skip("Skipping LLM integration test: no API key configured (set GROQ_API_KEY or OPENAI_API_KEY)")
+		t.Skip("Skipping LLM integration test: no API key configured (set OPENROUTER_API_KEY, GROQ_API_KEY, or OPENAI_API_KEY)")
 	}
 
-	planner := AutoPlannerFromConfig(cfg)
+	planner := AutoPlannerFromConfig(context.Background(), cfg)
 	if planner == nil {
 		t.Fatal("expected planner to be available")
 	}

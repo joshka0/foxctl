@@ -541,6 +541,199 @@ func filterFileSummaryEntries(scored []storage.ScoredEntry, limit int) []FileEnt
 	return entries
 }
 
+type SymbolSummaryGenerator struct {
+	store         storage.MemoryStore
+	llm           SummaryLLM
+	embedProvider semantic.EmbeddingProvider
+	workspace     string
+	logger        zerolog.Logger
+}
+
+func NewSymbolSummaryGenerator(
+	store storage.MemoryStore,
+	llm SummaryLLM,
+	embedProvider semantic.EmbeddingProvider,
+	workspace string,
+	logger zerolog.Logger,
+) *SymbolSummaryGenerator {
+	return &SymbolSummaryGenerator{
+		store:         store,
+		llm:           llm,
+		embedProvider: embedProvider,
+		workspace:     workspace,
+		logger:        logger.With().Str("component", "symbol_summary").Logger(),
+	}
+}
+
+func (g *SymbolSummaryGenerator) GetOrCreateSummary(
+	ctx context.Context,
+	input symbol.SymbolSummaryInput,
+) (string, bool, error) {
+	entryName := symbol.SymbolSummaryEntryName(g.workspace, input.SymbolID)
+
+	entry, err := g.store.Get(ctx, entryName, g.workspace)
+	if err != nil {
+		if !errors.Is(err, memory.ErrNotFound) {
+			g.logger.Warn().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to check cache, skipping")
+			return "", false, fmt.Errorf("check cache for %s: %w", input.SymbolID, err)
+		}
+	} else {
+		var result symbol.SymbolSummaryResult
+		if err := json.Unmarshal(entry.Result, &result); err == nil {
+			currentDigest := symbol.ComputeSymbolSummaryDigest(input)
+			if result.Digest == currentDigest {
+				g.logger.Debug().Str("symbol_id", input.SymbolID).Msg("using cached symbol summary")
+				return entry.Summary, true, nil
+			}
+			g.logger.Debug().Str("symbol_id", input.SymbolID).Msg("digest changed, regenerating summary")
+		}
+	}
+
+	summary, err := g.generateSummary(ctx, input)
+	if err != nil {
+		return "", false, fmt.Errorf("generate summary for %s: %w", input.SymbolID, err)
+	}
+
+	if err := g.storeSummary(ctx, input, summary); err != nil {
+		g.logger.Warn().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to store summary")
+	}
+
+	return summary, false, nil
+}
+
+func (g *SymbolSummaryGenerator) generateSummary(
+	ctx context.Context,
+	input symbol.SymbolSummaryInput,
+) (string, error) {
+	if g.llm != nil {
+		prompt := g.buildPrompt(input)
+		summary, err := g.llm.GenerateSummary(ctx, prompt)
+		if err == nil && summary != "" {
+			g.logger.Debug().Str("symbol_id", input.SymbolID).Msg("generated summary via LLM")
+			return summary, nil
+		}
+		g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("LLM failed, using fallback")
+	}
+
+	return g.deterministicSummary(input), nil
+}
+
+func (g *SymbolSummaryGenerator) buildPrompt(input symbol.SymbolSummaryInput) string {
+	var sb strings.Builder
+
+	sb.WriteString("Write a concise summary (1-2 sentences, max 30 words) for a code symbol.\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- Start with an action verb or noun phrase (no This function/The method)\n")
+	sb.WriteString("- Mention key behavior, side effects, and domain terms\n")
+	sb.WriteString("- Include important types or resources referenced by the signature\n\n")
+
+	sb.WriteString(fmt.Sprintf("Symbol: %s\n", input.Name))
+	if input.Kind != "" {
+		sb.WriteString(fmt.Sprintf("Kind: %s\n", input.Kind))
+	}
+	if input.Signature != "" {
+		sb.WriteString(fmt.Sprintf("Signature: %s\n", truncate(input.Signature, 200)))
+	}
+	if input.FilePath != "" {
+		sb.WriteString(fmt.Sprintf("File: %s\n", input.FilePath))
+	}
+	if input.Documentation != "" {
+		sb.WriteString(fmt.Sprintf("Doc: %s\n", truncate(input.Documentation, 240)))
+	}
+
+	sb.WriteString("\nSummary:")
+
+	return sb.String()
+}
+
+func (g *SymbolSummaryGenerator) deterministicSummary(input symbol.SymbolSummaryInput) string {
+	if input.Documentation != "" {
+		doc := strings.TrimSpace(input.Documentation)
+		if doc != "" {
+			return truncate(doc, 160)
+		}
+	}
+
+	labelParts := make([]string, 0, 2)
+	if input.Kind != "" {
+		labelParts = append(labelParts, string(input.Kind))
+	}
+	if input.Name != "" {
+		labelParts = append(labelParts, input.Name)
+	}
+	label := strings.TrimSpace(strings.Join(labelParts, " "))
+	if label == "" {
+		label = "Symbol"
+	}
+	if input.Signature != "" {
+		return fmt.Sprintf("%s: %s.", label, input.Signature)
+	}
+	return label + "."
+}
+
+func (g *SymbolSummaryGenerator) storeSummary(
+	ctx context.Context,
+	input symbol.SymbolSummaryInput,
+	summary string,
+) error {
+	entryName := symbol.SymbolSummaryEntryName(g.workspace, input.SymbolID)
+	digest := symbol.ComputeSymbolSummaryDigest(input)
+
+	result := symbol.SymbolSummaryResult{
+		SymbolID:  input.SymbolID,
+		FilePath:  input.FilePath,
+		Name:      input.Name,
+		Kind:      input.Kind,
+		Signature: input.Signature,
+		Digest:    digest,
+		Language:  input.Language,
+	}
+
+	resultJSON, err := symbol.MarshalSymbolSummaryResult(result)
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
+	}
+
+	entry := storage.NamedEntry{
+		Name:      entryName,
+		Type:      symbol.SymbolSummaryType,
+		Workspace: g.workspace,
+		Summary:   summary,
+		Result:    resultJSON,
+	}
+
+	if _, err = g.store.Save(ctx, entry); err != nil {
+		return err
+	}
+
+	if g.embedProvider != nil && summary != "" {
+		embedding, err := g.embedProvider.Embed(ctx, summary)
+		if err != nil {
+			g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to embed summary")
+			return nil
+		}
+		dimensions := g.embedProvider.Dimensions()
+		if err := g.store.ValidateEmbeddingDimensions(ctx, g.workspace, dimensions); err != nil {
+			g.logger.Warn().Err(err).Str("symbol_id", input.SymbolID).Msg("embedding dimensions mismatch; skipping summary embedding")
+			return nil
+		}
+		if err := g.store.UpdateEmbedding(ctx, entryName, g.workspace, embedding); err != nil {
+			g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to store summary embedding")
+		}
+		meta := memory.EmbeddingMetadata{
+			Workspace:  g.workspace,
+			Provider:   providerNameFromModel(g.embedProvider.Model()),
+			Model:      g.embedProvider.Model(),
+			Dimensions: dimensions,
+		}
+		if err := g.store.SetEmbeddingMetadata(ctx, meta); err != nil {
+			g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to store embedding metadata")
+		}
+	}
+
+	return nil
+}
+
 func providerNameFromModel(model string) string {
 	lower := strings.ToLower(strings.TrimSpace(model))
 	switch {
