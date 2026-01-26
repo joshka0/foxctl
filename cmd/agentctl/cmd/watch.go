@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage/testwatch"
 	testwatchrunner "github.com/jkatigb/agentctl/internal/testwatch"
 	"github.com/rs/zerolog"
@@ -52,8 +54,8 @@ Modes:
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 
-			// Set up logging
-			log := zerolog.New(cmd.ErrOrStderr()).With().Timestamp().Logger()
+			// No-op logger for runner internals - we emit via observability
+			log := zerolog.New(io.Discard) //nolint:forbidigo // no-op logger for runner internals
 
 			// Determine workspace root
 			var err error
@@ -112,7 +114,10 @@ Modes:
 
 			// Handle --once mode
 			if once {
-				log.Info().Msg("running all watchers once")
+				observability.Emit(ctx, observability.NewEvent("watch.run_once").
+					WithComponent(observability.ComponentCLI).
+					WithData("workspace", workspaceDir).
+					Success(0))
 				if err := runner.RunOnce(ctx); err != nil {
 					return err
 				}
@@ -122,10 +127,11 @@ Modes:
 			}
 
 			// Watch mode
-			log.Info().
-				Str("workspace", workspaceDir).
-				Int("watchers", len(twCfg.Watchers)).
-				Msg("starting test watcher")
+			observability.Emit(ctx, observability.NewEvent("watch.start").
+				WithComponent(observability.ComponentCLI).
+				WithData("workspace", workspaceDir).
+				WithData("watchers", len(twCfg.Watchers)).
+				Success(0))
 
 			// Set up file watcher
 			watcher, err := fsnotify.NewWatcher()
@@ -147,12 +153,18 @@ Modes:
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 			// Run initial tests
-			log.Info().Msg("running initial test pass")
+			observability.Emit(ctx, observability.NewEvent("watch.initial_run").
+				WithComponent(observability.ComponentCLI).
+				Success(0))
 			if err := runner.RunOnce(ctx); err != nil {
-				log.Error().Err(err).Msg("initial test run failed")
+				observability.Emit(ctx, observability.NewEvent("watch.initial_run_error").
+					WithComponent(observability.ComponentCLI).
+					Error(err, 0))
 			}
 
-			log.Info().Msg("watching for file changes... (Ctrl+C to stop)")
+			observability.Emit(ctx, observability.NewEvent("watch.watching").
+				WithComponent(observability.ComponentCLI).
+				Success(0))
 
 			// Event loop
 			for {
@@ -170,7 +182,11 @@ Modes:
 							continue
 						}
 
-						log.Debug().Str("file", event.Name).Str("op", event.Op.String()).Msg("file changed")
+						observability.Emit(ctx, observability.NewEvent("watch.file_changed").
+							WithComponent(observability.ComponentCLI).
+							WithData("file", event.Name).
+							WithData("op", event.Op.String()).
+							Success(0))
 						runner.OnFileChange(ctx, event.Name)
 					}
 
@@ -186,10 +202,15 @@ Modes:
 					if !ok {
 						return nil
 					}
-					log.Error().Err(err).Msg("watcher error")
+					observability.Emit(ctx, observability.NewEvent("watch.error").
+						WithComponent(observability.ComponentCLI).
+						Error(err, 0))
 
 				case sig := <-sigCh:
-					log.Info().Str("signal", sig.String()).Msg("shutting down")
+					observability.Emit(ctx, observability.NewEvent("watch.shutdown").
+						WithComponent(observability.ComponentCLI).
+						WithData("signal", sig.String()).
+						Success(0))
 					return nil
 
 				case <-ctx.Done():

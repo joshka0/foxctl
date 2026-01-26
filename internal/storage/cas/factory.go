@@ -2,9 +2,8 @@ package cas
 
 import (
 	"context"
-	"fmt"
-	"os"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -39,7 +38,9 @@ func OpenCAS(ctx context.Context, cfg Config) (storage.CASStore, error) {
 	if cfg.Migration.AutoMigrate && cfg.Driver != DriverFile {
 		if err := autoMigrate(ctx, cfg, store); err != nil {
 			// Log but don't fail - migration is best-effort
-			fmt.Fprintf(os.Stderr, "cas: auto-migration warning: %v\n", err)
+			observability.Emit(ctx, observability.NewEvent("cas.auto_migration_warning").
+				WithComponent("cas").
+				Error(err, 0))
 		}
 	}
 

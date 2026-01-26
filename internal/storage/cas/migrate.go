@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
 
@@ -56,7 +57,10 @@ func Migrate(ctx context.Context, src, dst storage.CASStore) (MigrateResult, err
 		if obj.Pinned {
 			if err := dst.Pin(ctx, obj.Digest); err != nil {
 				// Non-fatal error
-				fmt.Fprintf(os.Stderr, "cas: warning: failed to pin %s: %v\n", obj.Digest, err)
+				observability.Emit(ctx, observability.NewEvent("cas.pin_failed").
+					WithComponent("cas").
+					WithData("digest", obj.Digest).
+					Error(err, 0))
 			}
 		}
 
@@ -142,16 +146,26 @@ func autoMigrate(ctx context.Context, cfg Config, dst storage.CASStore) error {
 	}
 
 	// Perform incremental migration
-	fmt.Fprintf(os.Stderr, "cas: auto-migrating %d new objects from %s (source: %d, dest: %d)\n",
-		newCount, cfg.Migration.SourcePath, contentCount, len(dstObjects))
+	observability.Emit(ctx, observability.NewEvent("cas.auto_migration_start").
+		WithComponent("cas").
+		WithData("new_count", newCount).
+		WithData("source_path", cfg.Migration.SourcePath).
+		WithData("source_count", contentCount).
+		WithData("dest_count", len(dstObjects)).
+		Success(0))
 
 	result, err := MigrateFromFile(ctx, cfg.Migration.SourcePath, dst)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(os.Stderr, "cas: migrated %d objects (%d bytes), skipped %d, errors %d\n",
-		result.ObjectsMigrated, result.BytesMigrated, result.ObjectsSkipped, result.Errors)
+	observability.Emit(ctx, observability.NewEvent("cas.auto_migration_complete").
+		WithComponent("cas").
+		WithData("objects_migrated", result.ObjectsMigrated).
+		WithData("bytes_migrated", result.BytesMigrated).
+		WithData("objects_skipped", result.ObjectsSkipped).
+		WithData("errors", result.Errors).
+		Success(0))
 
 	return nil
 }

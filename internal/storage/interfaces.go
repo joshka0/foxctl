@@ -142,6 +142,12 @@ type NamedEntry struct {
 	LastAccess  time.Time
 	AccessCount int
 	SessionID   string // AI coding tool session ID (Claude Code, OpenCode, Cursor, etc.)
+
+	// Atomic processing fields (SimpleMem-style semantic lossless compression)
+	// See: https://github.com/aiming-lab/SimpleMem
+	AtomicText string   // Self-contained, disambiguated rewrite of summary
+	Entities   []string // Extracted entities (files, functions, people, concepts)
+	Keywords   []string // BM25-optimized search terms
 }
 
 // ScoredEntry couples a named entry with a relevance score.
@@ -212,6 +218,10 @@ type MemoryStore interface {
 	// ExistsByNameSuffix checks if any entry exists with a name ending in the given suffix.
 	// Used for content-hash deduplication across sessions (e.g., suffix ":<type>:<digest>").
 	ExistsByNameSuffix(ctx context.Context, workspace, suffix string) (bool, error)
+	// UpdateAtomic stores atomic processing results for a named memory entry.
+	// atomicText is the self-contained rewrite, entities are extracted identifiers,
+	// keywords are BM25-optimized search terms.
+	UpdateAtomic(ctx context.Context, name, workspace, atomicText string, entities, keywords []string) error
 }
 
 // Session represents a captured Claude Code conversation session.

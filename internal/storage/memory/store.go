@@ -555,6 +555,22 @@ CREATE INDEX IF NOT EXISTS idx_named_memory_ws_updated ON named_memory(workspace
 		return fmt.Errorf("memory: add session index: %w", err)
 	}
 
+	// Add atomic processing columns for SimpleMem-style semantic lossless compression.
+	// See: https://github.com/aiming-lab/SimpleMem
+	atomicColumns := []string{
+		`ALTER TABLE named_memory ADD COLUMN atomic_text TEXT`,   // Self-contained, disambiguated rewrite
+		`ALTER TABLE named_memory ADD COLUMN entities TEXT`,      // JSON array of extracted entities
+		`ALTER TABLE named_memory ADD COLUMN keywords TEXT`,      // JSON array of BM25 keywords
+	}
+	for _, stmt := range atomicColumns {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			errMsg := strings.ToLower(err.Error())
+			if !strings.Contains(errMsg, "duplicate column") && !strings.Contains(errMsg, "already exists") {
+				return fmt.Errorf("memory: add atomic column: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -989,4 +1005,33 @@ func scoreEntry(entry NamedEntry) float64 {
 	recency := 1.0 / (1.0 + recencyHours/24.0)
 	frequency := math.Log1p(float64(entry.AccessCount))
 	return 0.6*recency + 0.4*frequency
+}
+
+// UpdateAtomic stores atomic processing results for a named memory entry.
+// atomicText is the self-contained rewrite, entities are extracted identifiers,
+// keywords are BM25-optimized search terms.
+func (s *Store) UpdateAtomic(ctx context.Context, name, workspace, atomicText string, entities, keywords []string) error {
+	entitiesJSON, err := sqlutil.FormatJSON(entities)
+	if err != nil {
+		return fmt.Errorf("memory: marshal entities: %w", err)
+	}
+	keywordsJSON, err := sqlutil.FormatJSON(keywords)
+	if err != nil {
+		return fmt.Errorf("memory: marshal keywords: %w", err)
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE named_memory
+		SET atomic_text = ?, entities = ?, keywords = ?, updated_at = ?
+		WHERE name = ? AND workspace = ?
+	`, atomicText, entitiesJSON, keywordsJSON, sqlutil.FormatTimestamp(timeutil.NowUTC()), name, workspace)
+	if err != nil {
+		return fmt.Errorf("memory: update atomic: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("memory: entry not found: %s in workspace %s", name, workspace)
+	}
+	return nil
 }

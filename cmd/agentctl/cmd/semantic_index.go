@@ -347,7 +347,8 @@ func createSemanticIndexer(ctx context.Context, workspace string, chunkBytes, ch
 		ProviderModel:     model,
 	}
 
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	// TODO: Migrate semantic indexer to use observability instead of zerolog
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // indexer requires zerolog
 	indexer := semantic.NewIndexer(indexerCfg, store, provider, workspace, logger)
 
 	return indexer, cleanup, nil

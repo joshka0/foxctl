@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/executil"
@@ -21,6 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/jkatigb/agentctl/internal/indexing/atomic"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
@@ -485,7 +487,13 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 	if err != nil {
 		return 0, err
 	}
-	defer cleanup()
+
+	// WaitGroup for async atomic processing goroutines
+	var atomicWg sync.WaitGroup
+	defer func() {
+		atomicWg.Wait() // Wait for all atomic goroutines before cleanup
+		cleanup()
+	}()
 
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, rc.Config)
 	if err != nil {
@@ -493,10 +501,15 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 	}
 
 	count := 0
+	atomicCfg := struct{ APIKey, Endpoint, Model string }{
+		rc.Config.LLM.AtomicAPIKey,
+		rc.Config.LLM.AtomicEndpoint,
+		rc.Config.LLM.AtomicModel,
+	}
 
 	// Persist gotchas
 	for _, g := range resp.Gotchas {
-		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "gotcha", g.Summary, map[string]any{
+		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "gotcha", g.Summary, atomicCfg, &atomicWg, map[string]any{
 			"context":  g.Context,
 			"fix":      g.Fix,
 			"tags":     g.Tags,
@@ -509,7 +522,7 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 
 	// Persist decisions
 	for _, d := range resp.Decisions {
-		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "decision", d.Summary, map[string]any{
+		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "decision", d.Summary, atomicCfg, &atomicWg, map[string]any{
 			"reasoning":    d.Reasoning,
 			"alternatives": d.Alternatives,
 			"tags":         d.Tags,
@@ -521,7 +534,7 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 
 	// Persist user preferences
 	for _, p := range resp.UserPreferences {
-		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "user_pref", p.Summary, map[string]any{
+		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "user_pref", p.Summary, atomicCfg, &atomicWg, map[string]any{
 			"context":  p.Context,
 			"strength": p.Strength,
 			"tags":     p.Tags,
@@ -533,7 +546,7 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 
 	// Persist anti-patterns
 	for _, a := range resp.AntiPatterns {
-		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "anti_pattern", a.Summary, map[string]any{
+		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "anti_pattern", a.Summary, atomicCfg, &atomicWg, map[string]any{
 			"why_bad":     a.WhyBad,
 			"alternative": a.Alternative,
 			"tags":        a.Tags,
@@ -545,7 +558,7 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 
 	// Persist learnings
 	for _, l := range resp.Learnings {
-		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "learning", l.Summary, map[string]any{
+		if err := persistOne(ctx, store, embedder, sessionID, epicID, workspace, "learning", l.Summary, atomicCfg, &atomicWg, map[string]any{
 			"example":  l.Example,
 			"reusable": l.Reusable,
 			"tags":     l.Tags,
@@ -558,7 +571,7 @@ func persistLearnings(ctx context.Context, rc *skillmain.RunContext, sessionID, 
 	return count, nil
 }
 
-func persistOne(ctx context.Context, store *memory.Store, embedder *semantic.Embedder, sessionID, epicID, workspace, typ, summary string, extra map[string]any) error {
+func persistOne(ctx context.Context, store *memory.Store, embedder *semantic.Embedder, sessionID, epicID, workspace, typ, summary string, atomicCfg struct{ APIKey, Endpoint, Model string }, atomicWg *sync.WaitGroup, extra map[string]any) error {
 	if summary == "" {
 		return nil
 	}
@@ -613,6 +626,25 @@ func persistOne(ctx context.Context, store *memory.Store, embedder *semantic.Emb
 		}
 	}
 
+	// Atomic fact processing (SimpleMem-style) - async with WaitGroup
+	if atomicCfg.APIKey != "" && atomicWg != nil {
+		atomicWg.Add(1)
+		go func(entryName, entryWorkspace, entrySummary, key, endpoint, model string) {
+			defer atomicWg.Done()
+			processor, procErr := atomic.NewProcessorWithConfig(key, endpoint, model)
+			if procErr != nil {
+				return // Silently skip if processor unavailable
+			}
+			fact, _, factErr := processor.ProcessSingle(ctx, entrySummary, atomic.ProcessContext{
+				Workspace: entryWorkspace,
+			})
+			if factErr != nil {
+				return // Silently skip on processing error
+			}
+			_ = store.UpdateAtomic(ctx, entryName, entryWorkspace, fact.Atomic, fact.Entities, fact.Keywords)
+		}(name, workspace, datedSummary, atomicCfg.APIKey, atomicCfg.Endpoint, atomicCfg.Model)
+	}
+
 	return nil
 }
 
@@ -637,7 +669,12 @@ func extractLearningsWindows(ctx context.Context, rc *skillmain.RunContext, sess
 		output.Message = fmt.Sprintf("failed to open memory store: %v", err)
 		return output
 	}
-	defer memCleanup()
+	// Track async atomic processing goroutines to wait before cleanup
+	var atomicWg sync.WaitGroup
+	defer func() {
+		atomicWg.Wait() // Wait for all atomic goroutines before closing store
+		memCleanup()
+	}()
 
 	// Workspace detection
 	workspace := workspaceutil.Resolve(session.WorkspacePath, "", rc.Workspace)
@@ -705,8 +742,13 @@ func extractLearningsWindows(ctx context.Context, rc *skillmain.RunContext, sess
 		}
 
 		// Process this batch
+		atomicCfg := struct{ APIKey, Endpoint, Model string }{
+			rc.Config.LLM.AtomicAPIKey,
+			rc.Config.LLM.AtomicEndpoint,
+			rc.Config.LLM.AtomicModel,
+		}
 		processed, persisted, gotchas, decisions, prefs, anti, learnings := processWindowBatch(
-			ctx, sessionStore, memStore, embedder, session.ID, in.EpicID, workspace, batch, providers, in.MaxTokens,
+			ctx, sessionStore, memStore, embedder, session.ID, in.EpicID, workspace, atomicCfg, &atomicWg, batch, providers, in.MaxTokens,
 		)
 
 		totalProcessed += processed
@@ -755,6 +797,8 @@ func processWindowBatch(
 	memStore *memory.Store,
 	embedder *semantic.Embedder,
 	sessionID, epicID, workspace string,
+	atomicCfg struct{ APIKey, Endpoint, Model string },
+	atomicWg *sync.WaitGroup,
 	batch []sessions.ContextWindow,
 	providers []LLMProvider,
 	maxTokens int,
@@ -834,7 +878,7 @@ func processWindowBatch(
 		processed++
 
 		// Persist learnings from this window
-		windowPersisted := persistWindowLearnings(ctx, memStore, embedder, sessionID, epicID, workspace, window, resp)
+		windowPersisted := persistWindowLearnings(ctx, memStore, embedder, sessionID, epicID, workspace, atomicCfg, atomicWg, window, resp)
 		persisted += windowPersisted
 
 		// Collect results
@@ -1020,6 +1064,8 @@ func persistWindowLearnings(
 	store *memory.Store,
 	embedder *semantic.Embedder,
 	sessionID, epicID, workspace string,
+	atomicCfg struct{ APIKey, Endpoint, Model string },
+	atomicWg *sync.WaitGroup,
 	window sessions.ContextWindow,
 	resp *LLMResponse,
 ) int {
@@ -1083,6 +1129,25 @@ func persistWindowLearnings(
 			if embedding, err := embedder.Embed(ctx, datedSummary); err == nil && len(embedding.Vec) > 0 {
 				_ = store.UpdateEmbedding(ctx, name, workspace, embedding.Vec)
 			}
+		}
+
+		// Atomic fact processing (SimpleMem-style) - async with WaitGroup
+		if atomicCfg.APIKey != "" && atomicWg != nil {
+			atomicWg.Add(1)
+			go func(entryName, entryWorkspace, entrySummary, key, endpoint, model string) {
+				defer atomicWg.Done()
+				processor, procErr := atomic.NewProcessorWithConfig(key, endpoint, model)
+				if procErr != nil {
+					return
+				}
+				fact, _, factErr := processor.ProcessSingle(ctx, entrySummary, atomic.ProcessContext{
+					Workspace: entryWorkspace,
+				})
+				if factErr != nil {
+					return
+				}
+				_ = store.UpdateAtomic(ctx, entryName, entryWorkspace, fact.Atomic, fact.Entities, fact.Keywords)
+			}(name, workspace, datedSummary, atomicCfg.APIKey, atomicCfg.Endpoint, atomicCfg.Model)
 		}
 	}
 

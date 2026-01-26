@@ -352,7 +352,6 @@ func (a *AgentActor) initializeLLMChatEngine(cfg AgentActorConfig) error {
 	engineCfg.Provider = cfg.LLMProvider
 	engineCfg.APIKey = cfg.LLMAPIKey
 	engineCfg.Model = cfg.LLMModel
-	engineCfg.Logger = a.logger // Use actor's logger, not config logger
 	engineCfg.HookDispatcher = cfg.Hooks
 
 	// Set max iterations from agent config

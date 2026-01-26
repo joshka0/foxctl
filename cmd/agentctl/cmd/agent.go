@@ -17,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/agentmanager"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -1201,8 +1202,12 @@ func waitForReply(ctx context.Context, store mailbox.Store, out io.Writer, calle
 			messages, err := store.List(ctx, callerNS, 50)
 			if err != nil {
 				consecutiveErrors++
-				fmt.Fprintf(os.Stderr, "warning: failed to list mailbox messages (attempt %d/%d): %v\n",
-					consecutiveErrors, maxConsecutiveErrors, err)
+				observability.Emit(ctx, observability.NewEvent("agent.mailbox_poll_error").
+					WithComponent(observability.ComponentCLI).
+					WithData("attempt", consecutiveErrors).
+					WithData("max_attempts", maxConsecutiveErrors).
+					WithData("namespace", callerNS).
+					Error(err, 0))
 				if consecutiveErrors >= maxConsecutiveErrors {
 					return fmt.Errorf("too many consecutive mailbox errors (%d): %w", consecutiveErrors, err)
 				}

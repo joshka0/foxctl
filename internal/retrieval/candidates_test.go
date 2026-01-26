@@ -195,6 +195,10 @@ func (m *mockMemoryStore) SetEmbeddingMetadata(ctx context.Context, meta storage
 	return nil
 }
 
+func (m *mockMemoryStore) UpdateAtomic(ctx context.Context, name, workspace, atomicText string, entities, keywords []string) error {
+	return nil
+}
+
 // helper for simple contains check
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
+	"github.com/jkatigb/agentctl/internal/observability"
 )
 
 // Event represents an SSE event to be sent to clients.
@@ -45,8 +45,6 @@ type Client struct {
 
 // Hub manages SSE client connections and event broadcasting.
 type Hub struct {
-	log zerolog.Logger
-
 	mu      sync.RWMutex
 	clients map[string]*Client
 
@@ -64,9 +62,8 @@ type Hub struct {
 }
 
 // NewHub creates a new SSE hub.
-func NewHub(log zerolog.Logger) *Hub {
+func NewHub() *Hub {
 	h := &Hub{
-		log:        log,
 		clients:    make(map[string]*Client),
 		broadcast:  make(chan Event, 256),
 		register:   make(chan *Client, 16),
@@ -96,7 +93,6 @@ func (h *Hub) Run(ctx context.Context) {
 			h.mu.Lock()
 			h.clients[client.ID] = client
 			h.mu.Unlock()
-			h.log.Debug().Str("client_id", client.ID).Int("total", len(h.clients)).Msg("sse client registered")
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -105,10 +101,9 @@ func (h *Hub) Run(ctx context.Context) {
 				close(client.Send)
 			}
 			h.mu.Unlock()
-			h.log.Debug().Str("client_id", client.ID).Int("total", len(h.clients)).Msg("sse client unregistered")
 
 		case event := <-h.broadcast:
-			h.broadcastEvent(event)
+			h.broadcastEvent(ctx, event)
 
 		case <-ticker.C:
 			// Send heartbeat to all clients
@@ -146,7 +141,10 @@ func (h *Hub) Publish(eventType string, data any) {
 	case <-h.done:
 	default:
 		// Channel full, drop event
-		h.log.Warn().Str("type", eventType).Msg("sse broadcast channel full, dropping event")
+		observability.Emit(context.Background(), observability.NewEvent("sse.broadcast_channel_full").
+			WithComponent("sse").
+			WithData("event_type", eventType).
+			Error(nil, 0))
 	}
 }
 
@@ -172,10 +170,13 @@ func (h *Hub) Close() {
 	}
 }
 
-func (h *Hub) broadcastEvent(event Event) {
+func (h *Hub) broadcastEvent(ctx context.Context, event Event) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		h.log.Error().Err(err).Msg("failed to marshal sse event")
+		observability.Emit(ctx, observability.NewEvent("sse.marshal_failed").
+			WithComponent("sse").
+			WithData("event_type", event.Type).
+			Error(err, 0))
 		return
 	}
 
@@ -190,8 +191,7 @@ func (h *Hub) broadcastEvent(event Event) {
 		select {
 		case client.Send <- msg:
 		default:
-			// Client buffer full, skip
-			h.log.Debug().Str("client_id", client.ID).Msg("sse client buffer full")
+			// Client buffer full, skip (too verbose for wide events)
 		}
 	}
 }

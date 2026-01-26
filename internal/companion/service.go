@@ -186,7 +186,6 @@ func NewService(store contextvar.Store, cfg ServiceConfig) *Service {
 				Provider: cfg.LLMProvider,
 				APIKey:   cfg.LLMAPIKey,
 				Model:    cfg.LLMModel,
-				Logger:   cfg.Logger,
 			})
 			opts = append(opts, WithSummarizer(summarizer))
 		} else {
@@ -400,7 +399,6 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		RequireContextQuery:   s.config.RequireContextQuery,
 		HookDispatcher:        s.config.HookDispatcher,
 		ActionExecutor:        s.config.ActionExecutor,
-		Logger:                s.logger,
 	}
 
 	// Override RequireContextQuery if specified in request
@@ -547,7 +545,6 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 		RequireContextQuery:   s.config.RequireContextQuery,
 		HookDispatcher:        s.config.HookDispatcher,
 		ActionExecutor:        s.config.ActionExecutor,
-		Logger:                s.logger,
 		ResponseFormat:        storyGatherResponseFormat(),
 	}
 	if req.RequireContextQuery != nil {
@@ -603,7 +600,6 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 		RequireContextQuery:   false,
 		HookDispatcher:        s.config.HookDispatcher,
 		ActionExecutor:        s.config.ActionExecutor,
-		Logger:                s.logger,
 		ResponseFormat:        storyDialogueResponseFormat(),
 	}
 

@@ -1,3 +1,4 @@
+//nolint:forbidigo // This IS the logging infrastructure - zerolog/stderr usage is intentional
 // Package observability provides helpers for emitting observability events.
 // Events are written as NDJSON to $AGENTCTL_OBS_DIR/events/<name>.ndjson.
 // See docs/observability/events.md for the full spec.

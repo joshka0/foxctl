@@ -8,16 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/agent/runtime"
 	"github.com/jkatigb/agentctl/internal/agent/types"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
-	"github.com/jkatigb/agentctl/internal/platform/logging"
 	"github.com/jkatigb/agentctl/internal/storage"
 	memstore "github.com/jkatigb/agentctl/internal/storage/memory"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
@@ -139,8 +138,10 @@ func getOrCreateRuntime(ctx context.Context) (*runtime.Runtime, error) {
 
 		hooksCfg, err := hooks.LoadConfigWithDefaults(workspaceRoot)
 		if err != nil {
-			logger := logging.FromContext(ctx)
-			logger.Warn().Err(err).Msg("dspy-agent: failed to load hooks config; continuing without hooks")
+			observability.Emit(ctx, observability.NewEvent("dspy_agent.hooks_config_warning").
+				WithComponent(observability.ComponentCLI).
+				WithData("reason", "continuing without hooks").
+				Error(err, 0))
 			hooksCfg = hooks.EmptyConfig()
 		}
 
@@ -191,8 +192,10 @@ func runDspySpawn(cmd *cobra.Command, _ []string) error {
 			}
 			inBytes, err := json.Marshal(in)
 			if err != nil {
-				logger := logging.FromContext(ctx)
-				logger.Warn().Err(err).Msg("dspy-agent/spawn: failed to marshal trajectory capture input; skipping trajectory capture")
+				observability.Emit(ctx, observability.NewEvent("dspy_agent.trajectory_marshal_warning").
+					WithComponent(observability.ComponentCLI).
+					WithData("reason", "skipping trajectory capture").
+					Error(err, 0))
 			} else {
 				c, err := trajectorycapture.Start(ctx, trajectorycapture.StartOptions{
 					StorageRoot:     cfg.Storage.Root,
@@ -306,22 +309,6 @@ func runDspyList(cmd *cobra.Command, _ []string) error {
 		}
 		sessionData = append(sessionData, data)
 	}
-
-	// Also print a human-readable table to stderr
-	w := tabwriter.NewWriter(os.Stderr, 0, 0, 2, ' ', 0)
-	// Table output to stderr; errors are not actionable.
-	fmt.Fprintln(w, "SESSION ID\tROLE\tSTATUS\tITERATIONS\tSTARTED")
-	for _, s := range sessions {
-		sess := s.GetSession()
-		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\n",
-			sess.ID[:8]+"...",
-			sess.Config.Role,
-			sess.Status,
-			sess.Iterations,
-			sess.StartedAt.Format("15:04:05"),
-		)
-	}
-	_ = w.Flush() //nolint:errcheck
 
 	// Write success envelope
 	env := envelope.OK("dspy-agent/list", map[string]any{

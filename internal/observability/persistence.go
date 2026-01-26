@@ -1,3 +1,4 @@
+//nolint:forbidigo // This IS the logging infrastructure - zerolog/stderr usage is intentional
 // Package observability provides wide event observability with configurable persistence.
 //
 // Persistence Options:

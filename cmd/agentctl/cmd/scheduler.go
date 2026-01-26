@@ -7,7 +7,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/execution/scheduler"
 	"github.com/jkatigb/agentctl/internal/protocol"
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
 
@@ -68,9 +67,7 @@ func init() {
 	schedulerSetWeightCmd.Flags().IntVar(&schedulerWeight, "weight", 1, "Scheduling weight (higher = more capacity)")
 	if err := schedulerSetWeightCmd.MarkFlagRequired("weight"); err != nil {
 		// This should never happen unless there's a programmer error (flag doesn't exist)
-		// Log to stderr and exit gracefully rather than panicking
-		logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
-		logger.Fatal().Err(err).Str("flag", "weight").Msg("Failed to mark flag as required")
+		panic(fmt.Sprintf("failed to mark flag 'weight' as required: %v", err))
 	}
 }
 

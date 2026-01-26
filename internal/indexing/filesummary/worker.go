@@ -13,7 +13,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/retrieval"
 	"github.com/jkatigb/agentctl/internal/storage"
-	"github.com/rs/zerolog"
 )
 
 // WorkerConfig configures the background file summary worker.
@@ -62,7 +61,6 @@ type Worker struct {
 	llm       retrieval.SummaryLLM
 	embed     semantic.EmbeddingProvider
 	workspace string
-	logger    zerolog.Logger
 
 	mu      sync.Mutex
 	running bool
@@ -76,14 +74,12 @@ type Worker struct {
 }
 
 // NewWorker creates a new file summary worker.
-// If logger is nil, a default stderr logger is used.
 func NewWorker(
 	cfg WorkerConfig,
 	store storage.MemoryStore,
 	llm retrieval.SummaryLLM,
 	embed semantic.EmbeddingProvider,
 	workspace string,
-	logger *zerolog.Logger,
 ) *Worker {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 1
@@ -107,21 +103,12 @@ func NewWorker(
 		cfg.ExcludeDirs = DefaultWorkerConfig().ExcludeDirs
 	}
 
-	// Use default logger if not provided
-	var log zerolog.Logger
-	if logger != nil {
-		log = logger.With().Str("component", "filesummary-worker").Logger()
-	} else {
-		log = zerolog.New(os.Stderr).With().Timestamp().Str("component", "filesummary-worker").Logger()
-	}
-
 	return &Worker{
 		config:    cfg,
 		store:     store,
 		llm:       llm,
 		embed:     embed,
 		workspace: workspace,
-		logger:    log,
 		limiter:   newRateLimiter(cfg.RateLimitRPS),
 	}
 }
@@ -138,11 +125,12 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.doneCh = make(chan struct{})
 	w.mu.Unlock()
 
-	w.logger.Info().
-		Int("workers", w.config.Workers).
-		Float64("rate_limit_rps", w.config.RateLimitRPS).
-		Str("workspace", w.workspace).
-		Msg("starting file summary worker")
+	observability.Emit(ctx, observability.NewEvent("filesummary.worker_start").
+		WithComponent("worker").
+		WithWorkspace(w.workspace).
+		WithData("workers", w.config.Workers).
+		WithData("rate_limit_rps", w.config.RateLimitRPS).
+		Success(0))
 
 	go w.run(ctx)
 	return nil
@@ -169,12 +157,20 @@ func (w *Worker) Stop() error {
 
 	select {
 	case <-w.doneCh:
-		w.logger.Info().
-			Int64("processed", w.processed).
-			Int64("errors", w.errors).
-			Msg("file summary worker stopped")
+		// Use Stats() to safely read counters under lock
+		processed, errors := w.Stats()
+		observability.Emit(context.Background(), observability.NewEvent("filesummary.worker_stop").
+			WithComponent("worker").
+			WithWorkspace(w.workspace).
+			WithData("processed", processed).
+			WithData("errors", errors).
+			Success(0))
 	case <-time.After(w.config.ShutdownTimeout):
-		w.logger.Warn().Msg("file summary worker shutdown timed out")
+		observability.Emit(context.Background(), observability.NewEvent("filesummary.worker_timeout").
+			WithComponent("worker").
+			WithWorkspace(w.workspace).
+			WithData("message", "shutdown timed out").
+			Success(0))
 	}
 
 	return nil
@@ -189,13 +185,20 @@ func (w *Worker) TriggerFullScan(ctx context.Context) (int, error) {
 	}
 
 	if len(files) == 0 {
-		w.logger.Info().Msg("full scan triggered: no files to process")
+		observability.Emit(ctx, observability.NewEvent("filesummary.full_scan").
+			WithComponent("worker").
+			WithWorkspace(w.workspace).
+			WithData("files_found", 0).
+			WithData("message", "no files to process").
+			Success(0))
 		return 0, nil
 	}
 
-	w.logger.Info().
-		Int("files_found", len(files)).
-		Msg("full scan triggered, processing files")
+	observability.Emit(ctx, observability.NewEvent("filesummary.full_scan").
+		WithComponent("worker").
+		WithWorkspace(w.workspace).
+		WithData("files_found", len(files)).
+		Success(0))
 
 	// Process the files immediately (using the same logic as processBatch)
 	generator := retrieval.NewFileSummaryGenerator(
@@ -203,7 +206,6 @@ func (w *Worker) TriggerFullScan(ctx context.Context) (int, error) {
 		w.llm,
 		w.embed,
 		w.workspace,
-		w.logger,
 	)
 
 	var processed int
@@ -219,7 +221,6 @@ func (w *Worker) TriggerFullScan(ctx context.Context) (int, error) {
 
 		input, err := w.buildInput(file)
 		if err != nil {
-			w.logger.Debug().Err(err).Str("file", file).Msg("failed to build input")
 			w.mu.Lock()
 			w.errors++
 			w.mu.Unlock()
@@ -228,7 +229,6 @@ func (w *Worker) TriggerFullScan(ctx context.Context) (int, error) {
 
 		_, cached, err := generator.GetOrCreateSummary(ctx, input)
 		if err != nil {
-			w.logger.Debug().Err(err).Str("file", file).Msg("failed to generate summary")
 			w.mu.Lock()
 			w.errors++
 			w.mu.Unlock()
@@ -240,7 +240,6 @@ func (w *Worker) TriggerFullScan(ctx context.Context) (int, error) {
 			w.processed++
 			w.mu.Unlock()
 			processed++
-			w.logger.Debug().Str("file", file).Msg("generated summary")
 		}
 	}
 
@@ -286,7 +285,6 @@ func (w *Worker) processBatch(ctx context.Context) {
 
 	files, err := w.scanWorkspace(ctx)
 	if err != nil {
-		w.logger.Error().Err(err).Msg("failed to scan workspace")
 		w.emitBatchEvent(ctx, 0, 0, 1, time.Since(start), err)
 		return
 	}
@@ -300,16 +298,11 @@ func (w *Worker) processBatch(ctx context.Context) {
 		files = files[:w.config.BatchSize]
 	}
 
-	w.logger.Debug().
-		Int("files", len(files)).
-		Msg("processing batch")
-
 	generator := retrieval.NewFileSummaryGenerator(
 		w.store,
 		w.llm,
 		w.embed,
 		w.workspace,
-		w.logger,
 	)
 
 	var batchProcessed, batchErrors int
@@ -330,7 +323,6 @@ func (w *Worker) processBatch(ctx context.Context) {
 
 		input, err := w.buildInput(file)
 		if err != nil {
-			w.logger.Debug().Err(err).Str("file", file).Msg("failed to build input")
 			w.mu.Lock()
 			w.errors++
 			w.mu.Unlock()
@@ -340,7 +332,6 @@ func (w *Worker) processBatch(ctx context.Context) {
 
 		_, cached, err := generator.GetOrCreateSummary(ctx, input)
 		if err != nil {
-			w.logger.Debug().Err(err).Str("file", file).Msg("failed to generate summary")
 			w.mu.Lock()
 			w.errors++
 			w.mu.Unlock()
@@ -353,7 +344,6 @@ func (w *Worker) processBatch(ctx context.Context) {
 			w.processed++
 			w.mu.Unlock()
 			batchProcessed++
-			w.logger.Debug().Str("file", file).Msg("generated summary")
 		}
 	}
 

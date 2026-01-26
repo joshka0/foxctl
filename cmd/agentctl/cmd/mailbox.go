@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -92,9 +91,7 @@ func init() {
 	mailboxSendCmd.Flags().StringVar(&mailboxSendCorrelation, "correlation", "", "Correlation ID (for ask/reply)")
 	if err := mailboxSendCmd.MarkFlagRequired("from"); err != nil {
 		// This should never happen unless there's a programmer error (flag doesn't exist)
-		// Log to stderr and exit gracefully rather than panicking
-		fmt.Fprintf(os.Stderr, "FATAL: Failed to mark 'from' flag as required: %v\n", err)
-		os.Exit(1)
+		panic(fmt.Sprintf("failed to mark 'from' flag as required: %v", err))
 	}
 
 	// Poll flags

@@ -149,3 +149,8 @@ func (s *TursoStore) SetEmbeddingMetadata(_ context.Context, _ EmbeddingMetadata
 func (s *TursoStore) ExistsByNameSuffix(_ context.Context, _ string, _ string) (bool, error) {
 	return false, errors.New("turso store not available")
 }
+
+// UpdateAtomic is a stub.
+func (s *TursoStore) UpdateAtomic(_ context.Context, _, _, _ string, _, _ []string) error {
+	return errors.New("turso store not available")
+}

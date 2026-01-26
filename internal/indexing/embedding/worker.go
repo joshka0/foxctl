@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
-	"github.com/rs/zerolog"
+	"github.com/jkatigb/agentctl/internal/observability"
 )
 
 // WorkerConfig configures the background worker.
@@ -43,7 +43,6 @@ type Worker struct {
 	config   WorkerConfig
 	store    *Store
 	provider semantic.EmbeddingProvider
-	logger   zerolog.Logger
 
 	mu      sync.Mutex
 	running bool
@@ -54,7 +53,7 @@ type Worker struct {
 }
 
 // NewWorker creates a new background worker.
-func NewWorker(cfg WorkerConfig, store *Store, provider semantic.EmbeddingProvider, logger zerolog.Logger) *Worker {
+func NewWorker(cfg WorkerConfig, store *Store, provider semantic.EmbeddingProvider) *Worker {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 2
 	}
@@ -75,7 +74,6 @@ func NewWorker(cfg WorkerConfig, store *Store, provider semantic.EmbeddingProvid
 		config:   cfg,
 		store:    store,
 		provider: provider,
-		logger:   logger.With().Str("component", "embedding-worker").Logger(),
 		limiter:  newRateLimiter(cfg.RateLimitRPS),
 	}
 }
@@ -92,10 +90,11 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.doneCh = make(chan struct{})
 	w.mu.Unlock()
 
-	w.logger.Info().
-		Int("workers", w.config.Workers).
-		Float64("rate_limit_rps", w.config.RateLimitRPS).
-		Msg("starting embedding worker")
+	observability.Emit(ctx, observability.NewEvent("embedding.worker_start").
+		WithComponent("embedding-worker").
+		WithData("workers", w.config.Workers).
+		WithData("rate_limit_rps", w.config.RateLimitRPS).
+		Success(0))
 
 	go w.run(ctx)
 	return nil
@@ -114,9 +113,14 @@ func (w *Worker) Stop() error {
 	// Wait for shutdown with timeout
 	select {
 	case <-w.doneCh:
-		w.logger.Info().Msg("embedding worker stopped")
+		observability.Emit(context.Background(), observability.NewEvent("embedding.worker_stop").
+			WithComponent("embedding-worker").
+			Success(0))
 	case <-time.After(w.config.ShutdownTimeout):
-		w.logger.Warn().Msg("embedding worker shutdown timed out")
+		observability.Emit(context.Background(), observability.NewEvent("embedding.worker_timeout").
+			WithComponent("embedding-worker").
+			WithData("message", "shutdown timed out").
+			Error(nil, 0))
 	}
 
 	w.mu.Lock()
@@ -171,7 +175,9 @@ func (w *Worker) dispatchJobs(ctx context.Context, jobCh chan<- *EmbeddingJob) {
 	for dispatched < w.config.BatchSize {
 		job, err := w.store.ClaimNext(ctx)
 		if err != nil {
-			w.logger.Error().Err(err).Msg("failed to claim job")
+			observability.Emit(ctx, observability.NewEvent("embedding.claim_failed").
+				WithComponent("embedding-worker").
+				Error(err, 0))
 			return
 		}
 		if job == nil {
@@ -188,17 +194,10 @@ func (w *Worker) dispatchJobs(ctx context.Context, jobCh chan<- *EmbeddingJob) {
 			dispatched++
 		}
 	}
-
-	if dispatched > 0 {
-		w.logger.Debug().Int("dispatched", dispatched).Msg("dispatched jobs")
-	}
 }
 
 func (w *Worker) worker(ctx context.Context, id int, jobCh <-chan *EmbeddingJob) {
 	defer w.wg.Done()
-
-	logger := w.logger.With().Int("worker_id", id).Logger()
-	logger.Debug().Msg("worker started")
 
 	for job := range jobCh {
 		select {
@@ -209,19 +208,12 @@ func (w *Worker) worker(ctx context.Context, id int, jobCh <-chan *EmbeddingJob)
 		default:
 		}
 
-		w.processJob(ctx, logger, job)
+		w.processJob(ctx, id, job)
 	}
-
-	logger.Debug().Msg("worker stopped")
 }
 
-func (w *Worker) processJob(ctx context.Context, logger zerolog.Logger, job *EmbeddingJob) {
+func (w *Worker) processJob(ctx context.Context, workerID int, job *EmbeddingJob) {
 	start := time.Now()
-
-	logger = logger.With().
-		Str("job_id", job.ID).
-		Str("symbol_id", job.SymbolID).
-		Logger()
 
 	// Apply rate limiting
 	w.limiter.wait(ctx)
@@ -229,26 +221,44 @@ func (w *Worker) processJob(ctx context.Context, logger zerolog.Logger, job *Emb
 	// Generate embedding
 	embedding, err := w.provider.Embed(ctx, job.Content)
 	if err != nil {
-		logger.Error().Err(err).Msg("embedding generation failed")
+		observability.Emit(ctx, observability.NewEvent("embedding.generation_failed").
+			WithComponent("embedding-worker").
+			WithData("worker_id", workerID).
+			WithData("job_id", job.ID).
+			WithData("symbol_id", job.SymbolID).
+			Error(err, time.Since(start)))
 		if failErr := w.store.Fail(ctx, job.ID, err.Error()); failErr != nil {
-			logger.Error().Err(failErr).Msg("failed to mark job as failed")
+			observability.Emit(ctx, observability.NewEvent("embedding.mark_failed_error").
+				WithComponent("embedding-worker").
+				WithData("job_id", job.ID).
+				Error(failErr, 0))
 		}
 		return
 	}
 
 	// Store result
 	if err := w.store.Complete(ctx, job.ID, embedding, w.provider.Model()); err != nil {
-		logger.Error().Err(err).Msg("failed to store embedding")
+		observability.Emit(ctx, observability.NewEvent("embedding.store_failed").
+			WithComponent("embedding-worker").
+			WithData("worker_id", workerID).
+			WithData("job_id", job.ID).
+			Error(err, time.Since(start)))
 		if failErr := w.store.Fail(ctx, job.ID, err.Error()); failErr != nil {
-			logger.Error().Err(failErr).Msg("failed to mark job as failed")
+			observability.Emit(ctx, observability.NewEvent("embedding.mark_failed_error").
+				WithComponent("embedding-worker").
+				WithData("job_id", job.ID).
+				Error(failErr, 0))
 		}
 		return
 	}
 
-	logger.Debug().
-		Dur("duration", time.Since(start)).
-		Int("dimensions", len(embedding)).
-		Msg("embedding generated")
+	// Success - emit event only for significant operations (remove for high-volume)
+	observability.Emit(ctx, observability.NewEvent("embedding.generated").
+		WithComponent("embedding-worker").
+		WithData("worker_id", workerID).
+		WithData("job_id", job.ID).
+		WithData("dimensions", len(embedding)).
+		Success(time.Since(start)))
 }
 
 // rateLimiter implements a simple token bucket rate limiter.
@@ -313,7 +323,6 @@ func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
-	logger := w.logger.With().Str("job_id", job.ID).Logger()
-	w.processJob(ctx, logger, job)
+	w.processJob(ctx, 0, job)
 	return true, nil
 }

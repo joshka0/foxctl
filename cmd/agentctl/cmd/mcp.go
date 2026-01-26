@@ -28,6 +28,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/buildinfo"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
@@ -609,7 +610,10 @@ func runMCPServer(ctx context.Context, opts mcpServerOptions) error {
 	// Register skill groups as first-class MCP tools
 	if len(opts.groups) > 0 {
 		if err := registerSkillGroups(ctx, s, opts.groups); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to register skill groups: %v\n", err)
+			observability.Emit(ctx, observability.NewEvent("mcp.skill_groups_registration_warning").
+				WithComponent(observability.ComponentCLI).
+				WithData("reason", "continuing without skill groups").
+				Error(err, 0))
 		}
 	}
 
@@ -646,8 +650,8 @@ func runSSEDaemon(ctx context.Context, s *server.MCPServer, addr string) error {
 		if resp, err := http.Get(healthURL); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				fmt.Fprintf(os.Stderr, "MCP daemon already running (PID %d) at %s\n", existingPID, addr)
-				fmt.Fprintf(os.Stderr, "Use existing daemon or kill PID %d to restart\n", existingPID)
+				fmt.Fprintf(os.Stderr, "MCP daemon already running (PID %d) at %s\n", existingPID, addr) //nolint:forbidigo // CLI user-facing status output
+				fmt.Fprintf(os.Stderr, "Use existing daemon or kill PID %d to restart\n", existingPID)   //nolint:forbidigo // CLI user-facing status output
 				return nil
 			}
 		}

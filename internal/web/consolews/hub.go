@@ -11,8 +11,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/oklog/ulid/v2"
-	"github.com/rs/zerolog"
 )
 
 // getAllowedOrigins returns the list of allowed WebSocket origins.
@@ -38,7 +38,6 @@ type RunnerFactory func(session *Session) Runner
 type Hub struct {
 	mu            sync.RWMutex
 	sessions      map[string]*Session
-	log           zerolog.Logger
 	persistence   *PersistenceAdapter
 	runnerFactory RunnerFactory
 
@@ -49,11 +48,10 @@ type Hub struct {
 }
 
 // NewHub creates a new console WebSocket hub.
-func NewHub(ctx context.Context, log zerolog.Logger) *Hub {
+func NewHub(ctx context.Context) *Hub {
 	return &Hub{
 		ctx:      ctx,
 		sessions: make(map[string]*Session),
-		log:      log,
 	}
 }
 
@@ -98,25 +96,28 @@ func (h *Hub) CreateSession(cfg SessionConfig) *Session {
 		clients:      make(map[*Client]struct{}),
 		subscribers:  make(map[chan Payload]struct{}),
 		messages:     make([]Message, 0),
-		log:          h.log.With().Str("session", cfg.ID).Logger(),
 		created:      time.Now(),
 	}
 
 	h.sessions[cfg.ID] = session
-	h.log.Info().Str("session_id", cfg.ID).Str("workspace", cfg.Workspace).Msg("console session created")
+
+	observability.Emit(h.ctx, observability.NewEvent("consolews.session_created").
+		WithComponent("consolews").
+		WithSession(cfg.ID, "").
+		WithData("workspace", cfg.Workspace).
+		Success(0))
 
 	// Set runner if factory is configured
 	if h.runnerFactory != nil {
 		runner := h.runnerFactory(session)
 		if runner != nil {
 			session.SetRunner(runner)
-			h.log.Debug().Str("session_id", cfg.ID).Msg("console runner attached")
 		}
 	}
 
 	// Persist session if adapter is configured
 	if h.persistence != nil {
-		persistAsync(h.ctx, &h.wg, h.log, "create_session", func(ctx context.Context) error {
+		persistAsync(h.ctx, &h.wg, "create_session", func(ctx context.Context) error {
 			return h.persistence.CreateSession(ctx, session)
 		})
 	}
@@ -132,11 +133,15 @@ func (h *Hub) RemoveSession(id string) {
 	if session, ok := h.sessions[id]; ok {
 		session.Close()
 		delete(h.sessions, id)
-		h.log.Info().Str("session_id", id).Msg("console session removed")
+
+		observability.Emit(h.ctx, observability.NewEvent("consolews.session_removed").
+			WithComponent("consolews").
+			WithSession(id, "").
+			Success(0))
 
 		// End persistent session if adapter is configured
 		if h.persistence != nil {
-			persistAsync(h.ctx, &h.wg, h.log, "end_session", func(ctx context.Context) error {
+			persistAsync(h.ctx, &h.wg, "end_session", func(ctx context.Context) error {
 				return h.persistence.EndSession(ctx, id, "ok")
 			})
 		}
@@ -178,11 +183,10 @@ type Client struct {
 	conn    *websocket.Conn
 	session *Session
 	send    chan []byte
-	log     zerolog.Logger
 }
 
 // HandleWebSocket handles WebSocket connections at /ws/console/:sessionID.
-func HandleWebSocket(hub *Hub, log zerolog.Logger) http.HandlerFunc {
+func HandleWebSocket(hub *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Extract session ID from path: /ws/console/{sessionID}
 		path := r.URL.Path
@@ -215,7 +219,9 @@ func HandleWebSocket(hub *Hub, log zerolog.Logger) http.HandlerFunc {
 			OriginPatterns: getAllowedOrigins(),
 		})
 		if err != nil {
-			log.Error().Err(err).Msg("websocket accept failed")
+			observability.Emit(r.Context(), observability.NewEvent("consolews.accept_failed").
+				WithComponent("consolews").
+				Error(err, 0))
 			return
 		}
 
@@ -223,7 +229,6 @@ func HandleWebSocket(hub *Hub, log zerolog.Logger) http.HandlerFunc {
 			conn:    conn,
 			session: session,
 			send:    make(chan []byte, 256),
-			log:     log.With().Str("session", sessionID).Logger(),
 		}
 
 		session.AddClient(client)
@@ -245,9 +250,7 @@ func (c *Client) readPump(ctx context.Context) {
 		var payload Payload
 		err := wsjson.Read(ctx, c.conn, &payload)
 		if err != nil {
-			if websocket.CloseStatus(err) != websocket.StatusNormalClosure {
-				c.log.Debug().Err(err).Msg("websocket read error")
-			}
+			// Normal closure is expected, don't log
 			return
 		}
 
@@ -273,13 +276,13 @@ func (c *Client) writePump(ctx context.Context) {
 				return
 			}
 			if err := c.conn.Write(ctx, websocket.MessageText, message); err != nil {
-				c.log.Debug().Err(err).Msg("websocket write error")
+				// Connection closed, exit silently
 				return
 			}
 		case <-ticker.C:
 			// Send ping
 			if err := c.conn.Ping(ctx); err != nil {
-				c.log.Debug().Err(err).Msg("websocket ping error")
+				// Connection closed, exit silently
 				return
 			}
 		}
@@ -291,8 +294,7 @@ func (c *Client) Send(data []byte) {
 	select {
 	case c.send <- data:
 	default:
-		// Buffer full, drop message
-		c.log.Warn().Msg("client send buffer full")
+		// Buffer full, drop message (best effort)
 	}
 }
 

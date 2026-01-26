@@ -3,13 +3,13 @@ package web
 import (
 	"context"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/consoleapp"
 	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/web/api"
 	"github.com/jkatigb/agentctl/internal/web/consolews"
@@ -28,15 +28,15 @@ type Server struct {
 // NewServer creates a new web server.
 // The ctx is used for console hub persistence goroutines - pass the application lifecycle context.
 func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog.Logger) (*Server, error) {
-	sseHub := sse.NewHub(log.With().Str("component", "sse").Logger())
-	consoleHub := consolews.NewHub(ctx, log.With().Str("component", "console").Logger())
+	sseHub := sse.NewHub()
+	consoleHub := consolews.NewHub(ctx)
 
 	// Set up persistence adapter for console sessions
-	persistence := consolews.NewPersistenceAdapter(cfg.Storage.Root, log)
+	persistence := consolews.NewPersistenceAdapter(cfg.Storage.Root)
 	consoleHub.SetPersistence(persistence)
 
 	// Set up runner factory for console sessions (LLM integration)
-	runnerFactory := createConsoleRunnerFactory(cfg, log)
+	runnerFactory := createConsoleRunnerFactory(cfg)
 	consoleHub.SetRunnerFactory(runnerFactory)
 
 	s := &Server{
@@ -51,43 +51,32 @@ func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog
 }
 
 // createConsoleRunnerFactory creates a factory function that creates LLM runners for console sessions.
-func createConsoleRunnerFactory(cfg config.Config, log zerolog.Logger) consolews.RunnerFactory {
+func createConsoleRunnerFactory(cfg config.Config) consolews.RunnerFactory {
 	// Load .env file to get API keys
 	config.LoadDotEnv()
 
-	// Debug: check if API key is available
-	groqKey := os.Getenv("GROQ_API_KEY")
-	orKey := os.Getenv("OPENROUTER_API_KEY")
-	log.Info().
-		Bool("groq_key_present", groqKey != "").
-		Bool("openrouter_key_present", orKey != "").
-		Msg("console runner factory initialized, .env loaded")
-
 	return func(session *consolews.Session) consolews.Runner {
-		log.Info().Str("session", session.ID()).Msg("creating console runner for session")
-
 		// Create LLM engine config
 		engineCfg := engine.LLMChatConfig{
 			MaxIterations: 20,
 			Temperature:   0.0,
 			MaxTokens:     4096,
-			Logger:        log.With().Str("session", session.ID()).Logger(),
 		}
 
 		// Create the engine (auto-detects API keys)
 		llmEngine, err := engine.NewLLMChatEngine(engineCfg)
 		if err != nil {
-			log.Warn().Err(err).Msg("failed to create LLM engine for console - no API key?")
+			observability.Emit(context.Background(), observability.NewEvent("web.console_engine_failed").
+				WithComponent("web").
+				WithSession(session.ID(), "").
+				Error(err, 0))
 			return nil
 		}
-
-		log.Info().Str("session", session.ID()).Msg("LLM engine created for console session")
 
 		// Create console runner
 		runner := consoleapp.NewRunner(consoleapp.RunnerConfig{
 			Engine: llmEngine,
 			Tools:  nil, // No tools for now - pure chat
-			Logger: log.With().Str("session", session.ID()).Logger(),
 		})
 
 		return runner
@@ -117,7 +106,7 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/health", api.StatusHandler(s.cfg, s.log))
 
 	// --- SSE Events ---
-	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub, s.log))
+	apiMux.HandleFunc("/api/events", sse.Handler(s.sseHub))
 
 	// --- Jobs (Phase 2) ---
 	apiMux.HandleFunc("/api/jobs", api.JobsListHandler(s.cfg, s.log))
@@ -240,7 +229,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiMux)
 	mux.Handle("/api/v1/", wrapV1(apiMux))
-	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleHub, s.log))
+	mux.HandleFunc("/ws/console/", consolews.HandleWebSocket(s.consoleHub))
 
 	// --- Static UI (optional) ---
 	if s.opts.UIDir != "" {
@@ -295,14 +284,17 @@ func withCORS(dev bool, next http.Handler) http.Handler {
 	})
 }
 
-// withRequestLogging logs HTTP requests.
-func withRequestLogging(log zerolog.Logger, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Debug().
-			Str("method", r.Method).
-			Str("path", r.URL.Path).
-			Str("remote", r.RemoteAddr).
-			Msg("http request")
-		next.ServeHTTP(w, r)
-	})
+// withRequestLogging is a middleware placeholder for HTTP request logging.
+//
+// Currently a pass-through (no logging) for two reasons:
+//  1. Debug-level request logging adds overhead and noise for local API server
+//  2. Wide events are better suited for operation-level telemetry (errors, latency)
+//     rather than per-request debug traces
+//
+// TODO: Consider adding observability events for:
+//   - Slow requests (latency > threshold)
+//   - Error responses (4xx, 5xx)
+//   - Specific endpoints that benefit from audit trails
+func withRequestLogging(_ zerolog.Logger, next http.Handler) http.Handler {
+	return next
 }

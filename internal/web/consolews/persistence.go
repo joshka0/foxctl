@@ -5,8 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
-
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 )
@@ -14,14 +13,17 @@ import (
 // persistAsync runs a persistence function asynchronously with a timeout.
 // The goroutine is tracked by wg for graceful shutdown, and derives its
 // context from parentCtx (FC/IS compliant - no context.Background()).
-func persistAsync(parentCtx context.Context, wg *sync.WaitGroup, log zerolog.Logger, name string, fn func(ctx context.Context) error) {
+func persistAsync(parentCtx context.Context, wg *sync.WaitGroup, name string, fn func(ctx context.Context) error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
 		defer cancel()
 		if err := fn(ctx); err != nil {
-			log.Error().Err(err).Str("op", name).Msg("persistence failed")
+			observability.Emit(ctx, observability.NewEvent("consolews.persistence_failed").
+				WithComponent("consolews").
+				WithData("op", name).
+				Error(err, 0))
 		}
 	}()
 }
@@ -29,14 +31,12 @@ func persistAsync(parentCtx context.Context, wg *sync.WaitGroup, log zerolog.Log
 // PersistenceAdapter handles saving console sessions to the sessions store.
 type PersistenceAdapter struct {
 	storageRoot string
-	log         zerolog.Logger
 }
 
 // NewPersistenceAdapter creates a new persistence adapter.
-func NewPersistenceAdapter(storageRoot string, log zerolog.Logger) *PersistenceAdapter {
+func NewPersistenceAdapter(storageRoot string) *PersistenceAdapter {
 	return &PersistenceAdapter{
 		storageRoot: storageRoot,
-		log:         log.With().Str("component", "persistence").Logger(),
 	}
 }
 
@@ -60,11 +60,17 @@ func (p *PersistenceAdapter) CreateSession(ctx context.Context, s *Session) erro
 
 	_, err = store.Save(ctx, session)
 	if err != nil {
-		p.log.Error().Err(err).Str("session_id", s.ID()).Msg("failed to create persistent session")
+		observability.Emit(ctx, observability.NewEvent("consolews.create_session_failed").
+			WithComponent("consolews").
+			WithSession(s.ID(), "").
+			Error(err, 0))
 		return err
 	}
 
-	p.log.Info().Str("session_id", s.ID()).Msg("created persistent session")
+	observability.Emit(ctx, observability.NewEvent("consolews.session_persisted").
+		WithComponent("consolews").
+		WithSession(s.ID(), "").
+		Success(0))
 	return nil
 }
 
@@ -115,10 +121,11 @@ func (p *PersistenceAdapter) SaveTurn(ctx context.Context, sessionID string, msg
 
 	_, err = store.SaveTurn(ctx, turn)
 	if err != nil {
-		p.log.Error().Err(err).
-			Str("session_id", sessionID).
-			Int("turn_index", turnIndex).
-			Msg("failed to save turn")
+		observability.Emit(ctx, observability.NewEvent("consolews.save_turn_failed").
+			WithComponent("consolews").
+			WithSession(sessionID, "").
+			WithData("turn_index", turnIndex).
+			Error(err, 0))
 		return err
 	}
 
@@ -162,11 +169,19 @@ func (p *PersistenceAdapter) EndSession(ctx context.Context, sessionID string, s
 
 	err = store.SetStatus(ctx, sessionID, status)
 	if err != nil {
-		p.log.Error().Err(err).Str("session_id", sessionID).Str("status", status).Msg("failed to end session")
+		observability.Emit(ctx, observability.NewEvent("consolews.end_session_failed").
+			WithComponent("consolews").
+			WithSession(sessionID, "").
+			WithData("status", status).
+			Error(err, 0))
 		return err
 	}
 
-	p.log.Info().Str("session_id", sessionID).Str("status", status).Msg("ended session")
+	observability.Emit(ctx, observability.NewEvent("consolews.session_ended").
+		WithComponent("consolews").
+		WithSession(sessionID, "").
+		WithData("status", status).
+		Success(0))
 	return nil
 }
 

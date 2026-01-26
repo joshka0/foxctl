@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -368,13 +369,13 @@ func runIndexInit(cmd *cobra.Command, workspace string, scopes []string, glob st
 		wg.Wait()
 	} else {
 		for _, scope := range scopes {
-			fmt.Fprintf(os.Stderr, "Indexing %s with %s...\n", scope, modelForScope(scope))
+			fmt.Fprintf(os.Stderr, "Indexing %s with %s...\n", scope, modelForScope(scope)) //nolint:forbidigo // CLI progress output
 			result := indexScope(scope)
 			results = append(results, result)
 			if result.Error != "" {
-				fmt.Fprintf(os.Stderr, "  Error: %s\n", result.Error)
+				fmt.Fprintf(os.Stderr, "  Error: %s\n", result.Error) //nolint:forbidigo // CLI progress output
 			} else {
-				fmt.Fprintf(os.Stderr, "  Done: %d items in %dms\n", result.Count, result.Duration)
+				fmt.Fprintf(os.Stderr, "  Done: %d items in %dms\n", result.Count, result.Duration) //nolint:forbidigo // CLI progress output
 			}
 		}
 	}
@@ -530,7 +531,8 @@ func indexSymbols(ctx context.Context, cfg config.Config, workspace, glob string
 	}
 
 	indexerCfg := semantic.Config{Enabled: true}
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	// TODO: Migrate semantic indexer to use observability instead of zerolog
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // semantic indexer requires zerolog
 	indexer := semantic.NewIndexer(indexerCfg, store, provider, workspace, logger)
 
 	args := semantic.JobArgs{
@@ -587,21 +589,34 @@ func reembedMemories(ctx context.Context, cfg config.Config, workspace, apiKey s
 
 		batchCount := 0
 		for _, mem := range memories {
-			fmt.Fprintf(os.Stderr, "  [memory] %s\n", mem.Name)
 			embedding, err := provider.Embed(ctx, mem.Summary)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "    [error] %v\n", err)
+				observability.Emit(ctx, observability.NewEvent("index.memory_embed").
+					WithComponent(observability.ComponentCLI).
+					WithData("memory", mem.Name).
+					Error(err, 0))
 				continue // Skip on error, don't fail entire batch
 			}
 
 			if err := store.UpdateEmbedding(ctx, mem.Name, workspace, embedding); err != nil {
-				fmt.Fprintf(os.Stderr, "    [error] %v\n", err)
+				observability.Emit(ctx, observability.NewEvent("index.memory_embed").
+					WithComponent(observability.ComponentCLI).
+					WithData("memory", mem.Name).
+					WithData("phase", "update").
+					Error(err, 0))
 				continue
 			}
+			observability.Emit(ctx, observability.NewEvent("index.memory_embed").
+				WithComponent(observability.ComponentCLI).
+				WithData("memory", mem.Name).
+				Success(0))
 			batchCount++
 		}
 		totalCount += batchCount
-		fmt.Fprintf(os.Stderr, "  Batch complete: %d items\n", batchCount)
+		observability.Emit(ctx, observability.NewEvent("index.memory_batch_complete").
+			WithComponent(observability.ComponentCLI).
+			WithData("batch_count", batchCount).
+			Success(0))
 	}
 
 	return totalCount, nil
@@ -649,9 +664,12 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 			continue
 		}
 
-		fmt.Fprintf(os.Stderr, "  [task] %s\n", task.ID)
 		embedding, err := provider.Embed(ctx, text)
 		if err != nil {
+			observability.Emit(ctx, observability.NewEvent("index.task_embed").
+				WithComponent(observability.ComponentCLI).
+				WithData("task_id", task.ID).
+				Error(err, 0))
 			continue
 		}
 
@@ -684,15 +702,27 @@ func reembedTasks(ctx context.Context, cfg config.Config, defaultWorkspace, apiK
 			Summary:   text,
 			Result:    taskResult,
 		}); err != nil {
-			fmt.Fprintf(os.Stderr, "    [warn] save to memory: %v\n", err)
+			observability.Emit(ctx, observability.NewEvent("index.task_memory_save_warning").
+				WithComponent(observability.ComponentCLI).
+				WithData("task_id", task.ID).
+				WithData("reason", "save to memory").
+				Error(err, 0))
 			// Continue anyway - tasks.db already has the embedding
 		}
 
 		// Update embedding in memory.db
 		if err := memStore.UpdateEmbedding(ctx, entryName, workspace, embedding); err != nil {
-			fmt.Fprintf(os.Stderr, "    [warn] update embedding in memory: %v\n", err)
+			observability.Emit(ctx, observability.NewEvent("index.task_embedding_update_warning").
+				WithComponent(observability.ComponentCLI).
+				WithData("task_id", task.ID).
+				WithData("reason", "update embedding in memory").
+				Error(err, 0))
 		}
 
+		observability.Emit(ctx, observability.NewEvent("index.task_embed").
+			WithComponent(observability.ComponentCLI).
+			WithData("task_id", task.ID).
+			Success(0))
 		count++
 	}
 
@@ -731,9 +761,12 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 			continue
 		}
 
-		fmt.Fprintf(os.Stderr, "  [session] %s\n", sess.ID)
 		embedding, err := provider.Embed(ctx, text)
 		if err != nil {
+			observability.Emit(ctx, observability.NewEvent("index.session_embed").
+				WithComponent(observability.ComponentCLI).
+				WithData("session_id", sess.ID).
+				Error(err, 0))
 			continue
 		}
 
@@ -741,8 +774,17 @@ func reembedSessions(ctx context.Context, cfg config.Config, apiKey string) (int
 		embeddingBytes := vector.SerializeF32(embedding)
 
 		if err := store.SetEmbedding(ctx, sess.ID, embeddingBytes, modelForScope("sessions")); err != nil {
+			observability.Emit(ctx, observability.NewEvent("index.session_embed").
+				WithComponent(observability.ComponentCLI).
+				WithData("session_id", sess.ID).
+				WithData("phase", "store").
+				Error(err, 0))
 			continue
 		}
+		observability.Emit(ctx, observability.NewEvent("index.session_embed").
+			WithComponent(observability.ComponentCLI).
+			WithData("session_id", sess.ID).
+			Success(0))
 		count++
 	}
 
@@ -927,9 +969,17 @@ func runIndexSyncPush(cmd *cobra.Command, workspace, remoteURL, remoteToken stri
 
 		if !dryRun {
 			if errMsg, ok := result["error"].(string); ok && errMsg != "" {
-				fmt.Fprintf(os.Stderr, "  [%s] Error: %s\n", scope, errMsg)
+				observability.Emit(ctx, observability.NewEvent("index.push_scope_error").
+					WithComponent(observability.ComponentCLI).
+					WithData("scope", scope).
+					WithData("error", errMsg).
+					Error(errors.New(errMsg), 0))
 			} else {
-				fmt.Fprintf(os.Stderr, "  [%s] Pushed %d items\n", scope, result["count"])
+				observability.Emit(ctx, observability.NewEvent("index.push_scope_complete").
+					WithComponent(observability.ComponentCLI).
+					WithData("scope", scope).
+					WithData("count", result["count"]).
+					Success(0))
 			}
 		}
 	}
@@ -1099,7 +1149,10 @@ func syncMemoryToTurso(ctx context.Context, cfg config.Config, workspace, remote
 
 		_, err = remoteStore.SaveWithEmbedding(ctx, mem, emb, model)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "    [warn] skip %s: %v\n", mem.Name, err)
+			observability.Emit(ctx, observability.NewEvent("index.turso_memory_skip").
+				WithComponent(observability.ComponentCLI).
+				WithData("memory", mem.Name).
+				Error(err, 0))
 			continue
 		}
 		count++
@@ -1157,7 +1210,10 @@ func syncSessionsToTurso(ctx context.Context, cfg config.Config, remoteURL, remo
 
 		// Save session to remote (includes embedding via Session struct)
 		if _, err := remoteStore.Save(ctx, sess); err != nil {
-			fmt.Fprintf(os.Stderr, "    [warn] skip session %s: %v\n", sess.ID, err)
+			observability.Emit(ctx, observability.NewEvent("index.turso_session_skip").
+				WithComponent(observability.ComponentCLI).
+				WithData("session_id", sess.ID).
+				Error(err, 0))
 			continue
 		}
 		count++
@@ -1310,7 +1366,8 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 
 	// Use indexer for file processing
 	indexerCfg := semantic.Config{Enabled: true}
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	// TODO: Migrate semantic indexer to use observability instead of zerolog
+	logger := zerolog.New(os.Stderr).With().Timestamp().Logger() //nolint:forbidigo // semantic indexer requires zerolog
 
 	var indexedCount int
 	var queuedCount int
@@ -1362,7 +1419,10 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 				"chunks_indexed": result.Summary.ChunksIndexed,
 			})
 			indexedCount++
-			fmt.Fprintf(os.Stderr, "  [indexed] %s\n", relPath)
+			observability.Emit(ctx, observability.NewEvent("index.gitdiff_file_indexed").
+				WithComponent(observability.ComponentCLI).
+				WithData("file", relPath).
+				Success(0))
 		} else {
 			// Without provider, just report the file as queued (not indexed)
 			results = append(results, map[string]any{
@@ -1371,7 +1431,10 @@ func runIndexGitDiff(cmd *cobra.Command, workspace, base, head string, dryRun, e
 				"note":   "no embedding provider (add --embed with VOYAGE_API_KEY)",
 			})
 			queuedCount++
-			fmt.Fprintf(os.Stderr, "  [queued] %s\n", relPath)
+			observability.Emit(ctx, observability.NewEvent("index.gitdiff_file_queued").
+				WithComponent(observability.ComponentCLI).
+				WithData("file", relPath).
+				Success(0))
 		}
 	}
 
@@ -1570,12 +1633,12 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		})
 		if err != nil {
 			if emitErr := observability.EmitSync(ctx, summaryEvent.Error(err, time.Since(start))); emitErr != nil {
-				fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+				fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr) //nolint:forbidigo // fallback for obs emit failures
 			}
 			return
 		}
 		if emitErr := observability.EmitSync(ctx, summaryEvent.Success(time.Since(start))); emitErr != nil {
-			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr) //nolint:forbidigo // fallback for obs emit failures
 		}
 	}()
 
@@ -1704,8 +1767,16 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 
 	llm := llmproviders.NewSummaryLLM(providers[0])
 
-	fmt.Fprintf(os.Stderr, "Using LLM provider: %s (%s)\n", providers[0].Name, providers[0].Model)
-	fmt.Fprintf(os.Stderr, "Processing %d files (skipped %d with current summaries)...\n", len(filesToProcess), skippedCount)
+	observability.Emit(ctx, observability.NewEvent("index.summary_llm_selected").
+		WithComponent(observability.ComponentCLI).
+		WithData("provider", providers[0].Name).
+		WithData("model", providers[0].Model).
+		Success(0))
+	observability.Emit(ctx, observability.NewEvent("index.summary_files_processing").
+		WithComponent(observability.ComponentCLI).
+		WithData("files_to_process", len(filesToProcess)).
+		WithData("files_skipped", skippedCount).
+		Success(0))
 
 	// Get optional embedding provider
 	var embedProvider semantic.EmbeddingProvider
@@ -1720,8 +1791,7 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 	}
 
 	// Create summary generator
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	generator := retrieval.NewFileSummaryGenerator(store, llm, embedProvider, absWorkspace, logger)
+	generator := retrieval.NewFileSummaryGenerator(store, llm, embedProvider, absWorkspace)
 
 	// Process files in batches
 	var processed, errors int
@@ -1734,7 +1804,12 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 		}
 		batch := filesToProcess[i:end]
 
-		fmt.Fprintf(os.Stderr, "  Batch %d-%d of %d...\n", i+1, end, len(filesToProcess))
+		observability.Emit(ctx, observability.NewEvent("index.summary_batch_start").
+			WithComponent(observability.ComponentCLI).
+			WithData("batch_start", i+1).
+			WithData("batch_end", end).
+			WithData("total_files", len(filesToProcess)).
+			Success(0))
 
 		for _, f := range batch {
 			fileStart := time.Now()
@@ -1755,7 +1830,6 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 					"error":  inputErr.Error(),
 				})
 				errors++
-				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", f, inputErr)
 				fileEvent.WithData("status", "error")
 				observability.Emit(ctx, fileEvent.Error(inputErr, time.Since(fileStart)))
 				continue
@@ -1769,7 +1843,6 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 					"error":  err.Error(),
 				})
 				errors++
-				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", f, err)
 				fileEvent.WithData("status", "error")
 				observability.Emit(ctx, fileEvent.Error(err, time.Since(fileStart)))
 				continue
@@ -1782,7 +1855,6 @@ func runIndexSummaries(cmd *cobra.Command, workspace string, force, dryRun bool,
 					"summary": summary,
 				})
 				processed++
-				fmt.Fprintf(os.Stderr, "    [generated] %s\n", f)
 				fileEvent.WithData("status", "generated").WithData("cached", false)
 				observability.Emit(ctx, fileEvent.Success(time.Since(fileStart)))
 			} else {
@@ -1848,12 +1920,12 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 		})
 		if err != nil {
 			if emitErr := observability.EmitSync(ctx, summaryEvent.Error(err, time.Since(start))); emitErr != nil {
-				fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+				fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr) //nolint:forbidigo // fallback for obs emit failures
 			}
 			return
 		}
 		if emitErr := observability.EmitSync(ctx, summaryEvent.Success(time.Since(start))); emitErr != nil {
-			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr) //nolint:forbidigo // fallback for obs emit failures
 		}
 	}()
 
@@ -2018,14 +2090,24 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 
 		llm = llmproviders.NewSummaryLLM(providers[0])
 
-		fmt.Fprintf(os.Stderr, "Using LLM provider: %s (%s)\n", providerName, modelName)
+		observability.Emit(ctx, observability.NewEvent("index.symbol_llm_selected").
+			WithComponent(observability.ComponentCLI).
+			WithData("provider", providerName).
+			WithData("model", modelName).
+			Success(0))
 	} else {
 		providerName = "deterministic"
 		modelName = "fallback"
-		fmt.Fprintln(os.Stderr, "Using deterministic symbol summaries (no LLM)")
+		observability.Emit(ctx, observability.NewEvent("index.symbol_deterministic_mode").
+			WithComponent(observability.ComponentCLI).
+			Success(0))
 	}
 
-	fmt.Fprintf(os.Stderr, "Processing %d symbols (skipped %d with current summaries)...\n", len(inputs), skippedCount)
+	observability.Emit(ctx, observability.NewEvent("index.symbol_processing_start").
+		WithComponent(observability.ComponentCLI).
+		WithData("symbols_to_process", len(inputs)).
+		WithData("symbols_skipped", skippedCount).
+		Success(0))
 
 	var embedProvider semantic.EmbeddingProvider
 	if key := os.Getenv("VOYAGE_API_KEY"); key != "" {
@@ -2038,8 +2120,7 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 		}
 	}
 
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	generator := retrieval.NewSymbolSummaryGenerator(store, llm, embedProvider, absWorkspace, logger)
+	generator := retrieval.NewSymbolSummaryGenerator(store, llm, embedProvider, absWorkspace)
 
 	var processed, errors int
 	for i := 0; i < len(inputs); i += batchSize {
@@ -2049,7 +2130,12 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 		}
 		batch := inputs[i:end]
 
-		fmt.Fprintf(os.Stderr, "  Batch %d-%d of %d...\n", i+1, end, len(inputs))
+		observability.Emit(ctx, observability.NewEvent("index.symbol_batch_start").
+			WithComponent(observability.ComponentCLI).
+			WithData("batch_start", i+1).
+			WithData("batch_end", end).
+			WithData("total_symbols", len(inputs)).
+			Success(0))
 
 		for _, input := range batch {
 			symbolStart := time.Now()
@@ -2071,7 +2157,6 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 					"error":     genErr.Error(),
 				})
 				errors++
-				fmt.Fprintf(os.Stderr, "    [error] %s: %v\n", input.SymbolID, genErr)
 				symbolEvent.WithData("status", "error")
 				observability.Emit(ctx, symbolEvent.Error(genErr, time.Since(symbolStart)))
 				continue
@@ -2084,7 +2169,6 @@ func runIndexSymbolSummaries(cmd *cobra.Command, workspace string, force, dryRun
 					"summary":   summary,
 				})
 				processed++
-				fmt.Fprintf(os.Stderr, "    [generated] %s\n", input.SymbolID)
 				symbolEvent.WithData("status", "generated").WithData("cached", false)
 				observability.Emit(ctx, symbolEvent.Success(time.Since(symbolStart)))
 			} else {

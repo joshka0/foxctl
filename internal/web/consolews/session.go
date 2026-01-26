@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/oklog/ulid/v2"
-	"github.com/rs/zerolog"
 )
 
 // Session represents an active console chat session.
@@ -34,7 +34,6 @@ type Session struct {
 	// Runner callback (set by consoleapp)
 	runner Runner
 
-	log     zerolog.Logger
 	created time.Time
 }
 
@@ -108,7 +107,7 @@ func (s *Session) AddMessage(msg Message) {
 
 	// Persist turn if persistence is configured on hub
 	if s.hub != nil && s.hub.persistence != nil {
-		persistAsync(s.hub.ctx, &s.hub.wg, s.log, "save_turn", func(ctx context.Context) error {
+		persistAsync(s.hub.ctx, &s.hub.wg, "save_turn", func(ctx context.Context) error {
 			return s.hub.persistence.SaveTurn(ctx, s.id, msg, turnIndex)
 		})
 	}
@@ -119,7 +118,6 @@ func (s *Session) AddClient(c *Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clients[c] = struct{}{}
-	s.log.Debug().Int("clients", len(s.clients)).Msg("client added")
 }
 
 // RemoveClient unregisters a client from the session.
@@ -130,7 +128,6 @@ func (s *Session) RemoveClient(c *Client) {
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
 		close(c.send)
-		s.log.Debug().Int("clients", len(s.clients)).Msg("client removed")
 	}
 }
 
@@ -138,7 +135,10 @@ func (s *Session) RemoveClient(c *Client) {
 func (s *Session) Broadcast(p Payload) {
 	data, err := json.Marshal(p)
 	if err != nil {
-		s.log.Error().Err(err).Msg("failed to marshal payload")
+		observability.Emit(context.Background(), observability.NewEvent("consolews.marshal_failed").
+			WithComponent("consolews").
+			WithSession(s.id, "").
+			Error(err, 0))
 		return
 	}
 
@@ -153,7 +153,7 @@ func (s *Session) Broadcast(p Payload) {
 		select {
 		case ch <- p:
 		default:
-			s.log.Debug().Msg("console subscriber buffer full")
+			// Subscriber buffer full, best effort
 		}
 	}
 	s.subMu.RUnlock()
@@ -177,7 +177,11 @@ func (s *Session) HandlePayload(ctx context.Context, client *Client, p Payload) 
 	case PayloadTypeCmd:
 		s.handleCmd(ctx, client, p)
 	default:
-		s.log.Warn().Str("type", string(p.Type)).Msg("unknown payload type")
+		observability.Emit(ctx, observability.NewEvent("consolews.unknown_payload").
+			WithComponent("consolews").
+			WithSession(s.id, "").
+			WithData("type", string(p.Type)).
+			Error(nil, 0))
 	}
 }
 
@@ -187,11 +191,6 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 	if correlationID == "" {
 		correlationID = ulid.Make().String()
 	}
-
-	s.log.Info().
-		Str("correlation_id", correlationID).
-		Int("content_len", len(p.Content)).
-		Msg("ask received")
 
 	// Add user message to history
 	s.AddMessage(Message{
@@ -237,7 +236,11 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 			if reqCtx.Err() == context.Canceled {
 				s.BroadcastEvent(correlationID, "Request cancelled", map[string]any{"cancelled": true})
 			} else {
-				s.log.Error().Err(err).Str("correlation_id", correlationID).Msg("runner error")
+				observability.Emit(reqCtx, observability.NewEvent("consolews.runner_error").
+					WithComponent("consolews").
+					WithSession(s.id, "").
+					WithData("correlation_id", correlationID).
+					Error(err, 0))
 				s.BroadcastReply(correlationID, "Error: "+err.Error())
 			}
 		}
@@ -254,7 +257,11 @@ func (s *Session) handleCmd(ctx context.Context, client *Client, p Payload) {
 	case "cancel":
 		s.handleCancel(p.Cmd.CorrelationID)
 	default:
-		s.log.Warn().Str("cmd", p.Cmd.Name).Msg("unknown command")
+		observability.Emit(ctx, observability.NewEvent("consolews.unknown_command").
+			WithComponent("consolews").
+			WithSession(s.id, "").
+			WithData("cmd", p.Cmd.Name).
+			Error(nil, 0))
 	}
 }
 
@@ -265,7 +272,6 @@ func (s *Session) handleCancel(correlationID string) {
 
 	// If correlationID matches or is empty, cancel current request
 	if s.cancel != nil && (correlationID == "" || s.inflight == correlationID) {
-		s.log.Info().Str("correlation_id", s.inflight).Msg("cancelling request")
 		s.cancel()
 	}
 }
@@ -294,8 +300,6 @@ func (s *Session) Close() {
 		delete(s.subscribers, ch)
 	}
 	s.subMu.Unlock()
-
-	s.log.Info().Msg("session closed")
 }
 
 // InFlight returns the correlation ID of the in-flight request, if any.

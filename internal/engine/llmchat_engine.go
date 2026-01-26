@@ -13,7 +13,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/hooks"
 	"github.com/jkatigb/agentctl/internal/observability"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
-	"github.com/rs/zerolog"
 )
 
 // HookContext provides context for hook dispatch from LLMChatEngine.
@@ -32,7 +31,6 @@ type LLMChatEngine struct {
 	toolRunner  *ToolRunner
 	rlmExecutor *RLMToolExecutor // For tracking RLM context queries
 	hookContext HookContext      // Context for hook dispatch
-	logger      zerolog.Logger
 }
 
 // LLMChatConfig configures the LLM chat engine.
@@ -75,9 +73,6 @@ type LLMChatConfig struct {
 	// ActionExecutor processes hook output actions. Optional - actions are
 	// skipped if nil.
 	ActionExecutor hooks.ActionExecutor
-
-	// Logger for structured logging.
-	Logger zerolog.Logger
 
 	// StatelessMode enables RLM (Recursive Language Model) mode.
 	// In this mode:
@@ -149,7 +144,6 @@ func NewLLMChatEngine(cfg LLMChatConfig) (*LLMChatEngine, error) {
 	engine := &LLMChatEngine{
 		config: cfg,
 		client: &http.Client{Timeout: cfg.Timeout},
-		logger: cfg.Logger,
 	}
 
 	return engine, nil
@@ -178,14 +172,6 @@ func (e *LLMChatEngine) IsStatelessMode() bool {
 
 // Run implements AgentEngine.
 func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutput, error) {
-	e.logger.Debug().
-		Str("provider", e.config.Provider).
-		Str("model", e.config.Model).
-		Bool("stateless", e.config.StatelessMode).
-		Int("input_messages", len(input.Messages)).
-		Int("input_tools", len(input.Tools)).
-		Msg("LLMChatEngine.Run started")
-
 	// Reset RLM query counter at start of turn
 	if e.rlmExecutor != nil {
 		e.rlmExecutor.ResetQueryCount()
@@ -251,17 +237,11 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				WithData("provider", e.config.Provider).
 				WithData("model", e.config.Model).
 				Success(iterDuration))
-
-			e.logger.Debug().
-				Int("tools_count", len(tools)).
-				Int("tool_calls", len(resp.Choices[0].Message.ToolCalls)).
-				Int("content_len", len(resp.Choices[0].Message.Content)).
-				Str("finish_reason", finishReason).
-				Int("prompt_tokens", promptTokens).
-				Int("completion_tokens", completionTokens).
-				Msg("LLM response received")
 		} else {
-			e.logger.Warn().Msg("LLM returned no choices")
+			observability.Emit(ctx, observability.NewEvent("llm.no_choices").
+				WithComponent(observability.ComponentAgent).
+				WithData("message", "LLM returned no choices").
+				Error(nil, 0))
 		}
 
 		// Track tokens
@@ -319,7 +299,10 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 				// 1. Dispatch PreToolUse hook
 				preOutput, err := e.dispatchPreToolUse(ctx, toolCall)
 				if err != nil {
-					e.logger.Warn().Err(err).Str("tool", toolCall.Name).Msg("PreToolUse hook error")
+					observability.Emit(ctx, observability.NewEvent("hook.pre_tool_use_error").
+						WithComponent(observability.ComponentAgent).
+						WithData("tool", toolCall.Name).
+						Error(err, 0))
 				}
 
 				// Check if blocked by hook
@@ -643,7 +626,10 @@ func (e *LLMChatEngine) dispatchPreToolUse(ctx context.Context, call ToolCall) (
 
 	result, err := e.config.HookDispatcher.Dispatch(ctx, input)
 	if err != nil {
-		e.logger.Warn().Err(err).Str("tool", call.Name).Msg("PreToolUse hook dispatch failed")
+		observability.Emit(ctx, observability.NewEvent("hook.pre_tool_dispatch_failed").
+			WithComponent(observability.ComponentAgent).
+			WithData("tool", call.Name).
+			Error(err, 0))
 		return hooks.NewApprove("hook error (fail-open)", nil), nil
 	}
 	return result.Output, nil
@@ -681,7 +667,10 @@ func (e *LLMChatEngine) dispatchPostToolUse(ctx context.Context, call ToolCall, 
 
 	hookResult, err := e.config.HookDispatcher.Dispatch(ctx, input)
 	if err != nil {
-		e.logger.Warn().Err(err).Str("tool", call.Name).Msg("PostToolUse hook dispatch failed")
+		observability.Emit(ctx, observability.NewEvent("hook.post_tool_dispatch_failed").
+			WithComponent(observability.ComponentAgent).
+			WithData("tool", call.Name).
+			Error(err, 0))
 		return hooks.NewNone()
 	}
 	return hookResult.Output

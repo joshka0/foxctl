@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/cmd/agentctl/cmd/memorycmd"
+	"github.com/jkatigb/agentctl/internal/adapters/skillslib/obs"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
+	"github.com/jkatigb/agentctl/internal/indexing/atomic"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/cache"
@@ -144,6 +147,7 @@ func newMemoryPutCommand() *cobra.Command {
 	var summary string
 	var file string
 	var data string
+	var atomicFlag bool
 	cmd := &cobra.Command{
 		Use:   "put",
 		Short: "Store a JSON envelope as memory",
@@ -169,16 +173,65 @@ func newMemoryPutCommand() *cobra.Command {
 					if err != nil {
 						return err
 					}
+
+					// Atomic processing: transform summary into self-contained atomic fact
+					var atomicText string
+					var entities, keywords []string
+					if atomicFlag && summary != "" {
+						processor, procErr := atomic.NewProcessorWithConfig(cfg.LLM.AtomicAPIKey, cfg.LLM.AtomicEndpoint, cfg.LLM.AtomicModel)
+						if procErr != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "atomic: processor init failed: %v (api_key_set=%v)\n",
+								procErr, cfg.LLM.AtomicAPIKey != "")
+						} else {
+							fact, usage, factErr := processor.ProcessSingle(ctx, summary, atomic.ProcessContext{
+								Workspace: ws,
+							})
+							if factErr != nil {
+								fmt.Fprintf(cmd.ErrOrStderr(), "atomic: processing failed: %v\n", factErr)
+							} else {
+								// Emit token usage via observability
+								if usage != nil {
+									event := observability.NewEvent("memory.atomic_processing").
+										WithComponent(observability.ComponentCLI).
+										WithData(obs.KeyLLMModel, usage.Model).
+										WithData(obs.KeyLLMInputTokens, usage.InputTokens).
+										WithData(obs.KeyLLMOutputTokens, usage.OutputTokens).
+										WithData(obs.KeyLLMTotalTokens, usage.TotalTokens).
+										WithData(obs.KeyLLMInputCostUSD, usage.InputCostUSD).
+										WithData(obs.KeyLLMOutputCostUSD, usage.OutputCostUSD).
+										WithData(obs.KeyLLMTotalCostUSD, usage.TotalCostUSD).
+										WithData("memory_name", name)
+									observability.Emit(ctx, event.Success(0))
+								}
+								// Update the memory with atomic fields - only set response fields on success
+								if updateErr := store.UpdateAtomic(ctx, name, ws, fact.Atomic, fact.Entities, fact.Keywords); updateErr != nil {
+									fmt.Fprintf(cmd.ErrOrStderr(), "atomic: store update failed: %v\n", updateErr)
+								} else {
+									// Only populate response fields after successful persistence
+									atomicText = fact.Atomic
+									entities = fact.Entities
+									keywords = fact.Keywords
+								}
+							}
+						}
+					}
+
 					resp := struct {
-						Name      string `json:"name"`
-						Type      string `json:"type"`
-						Workspace string `json:"workspace"`
-						Summary   string `json:"summary"`
+						Name       string   `json:"name"`
+						Type       string   `json:"type"`
+						Workspace  string   `json:"workspace"`
+						Summary    string   `json:"summary"`
+						AtomicText string   `json:"atomic_text,omitempty"`
+						Entities   []string `json:"entities,omitempty"`
+						Keywords   []string `json:"keywords,omitempty"`
 					}{
-						Name:      entry.Name,
-						Type:      entry.Type,
-						Workspace: entry.Workspace,
-						Summary:   entry.Summary,
+						Name:       entry.Name,
+						Type:       entry.Type,
+						Workspace:  entry.Workspace,
+						Summary:    entry.Summary,
+						AtomicText: atomicText,
+						Entities:   entities,
+						Keywords:   keywords,
 					}
 					return memorycmd.WriteOK(cmd.OutOrStdout(), "agentctl.memory.put", resp)
 				})
@@ -191,6 +244,7 @@ func newMemoryPutCommand() *cobra.Command {
 	cmd.Flags().StringVar(&summary, "summary", "", "Summary metadata")
 	cmd.Flags().StringVar(&file, "file", "", "Path to JSON envelope ('-' for stdin)")
 	cmd.Flags().StringVar(&data, "data", "", "Inline JSON envelope")
+	cmd.Flags().BoolVar(&atomicFlag, "atomic", false, "Enable atomic fact processing (SimpleMem-style)")
 	return cmd
 }
 

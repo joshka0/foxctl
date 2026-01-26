@@ -87,6 +87,11 @@ type Store interface {
 	ListTasksByEpic(ctx context.Context, epicID string) ([]Task, error)
 	// LinkTaskToEpic associates a task with an epic.
 	LinkTaskToEpic(ctx context.Context, taskID, epicID string) error
+
+	// UpdateAtomic stores atomic processing results for a task.
+	// atomicDescription is the self-contained rewrite, entities are extracted identifiers,
+	// keywords are BM25-optimized search terms.
+	UpdateAtomic(ctx context.Context, id, atomicDescription string, entities, keywords []string) error
 }
 
 // Task represents a persisted task record.
@@ -122,6 +127,12 @@ type Task struct {
 
 	// Epic linkage - groups tasks under a higher-level goal
 	EpicID string // ID of the epic this task belongs to (if any)
+
+	// Atomic processing fields (SimpleMem-style semantic lossless compression)
+	// See: https://github.com/aiming-lab/SimpleMem
+	AtomicDescription string   // Self-contained, disambiguated rewrite of description
+	Entities          []string // Extracted entities (files, functions, people, concepts)
+	Keywords          []string // BM25-optimized search terms
 }
 
 // ListOptions configures task list queries.
@@ -278,6 +289,11 @@ CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id);
 		`ALTER TABLE tasks ADD COLUMN embedding_model TEXT`,
 		`ALTER TABLE tasks ADD COLUMN pagerank REAL`,
 		`ALTER TABLE tasks ADD COLUMN epic_id TEXT`,
+		// Atomic processing columns for SimpleMem-style semantic lossless compression.
+		// See: https://github.com/aiming-lab/SimpleMem
+		`ALTER TABLE tasks ADD COLUMN atomic_description TEXT`, // Self-contained, disambiguated rewrite
+		`ALTER TABLE tasks ADD COLUMN entities TEXT`,           // JSON array of extracted entities
+		`ALTER TABLE tasks ADD COLUMN keywords TEXT`,           // JSON array of BM25 keywords
 	}
 	for _, stmt := range alterDDL {
 		// Ignore errors from "duplicate column" - columns may already exist.
@@ -905,6 +921,35 @@ func (s *sqlStore) LinkTaskToEpic(ctx context.Context, taskID, epicID string) er
 	_, err := s.db.ExecContext(ctx, `UPDATE tasks SET epic_id = ? WHERE id = ?`, epicID, taskID)
 	if err != nil {
 		return fmt.Errorf("tasks: link to epic: %w", err)
+	}
+	return nil
+}
+
+// UpdateAtomic stores atomic processing results for a task.
+// atomicDescription is the self-contained rewrite, entities are extracted identifiers,
+// keywords are BM25-optimized search terms.
+func (s *sqlStore) UpdateAtomic(ctx context.Context, id, atomicDescription string, entities, keywords []string) error {
+	entitiesJSON, err := json.Marshal(entities)
+	if err != nil {
+		return fmt.Errorf("tasks: marshal entities: %w", err)
+	}
+	keywordsJSON, err := json.Marshal(keywords)
+	if err != nil {
+		return fmt.Errorf("tasks: marshal keywords: %w", err)
+	}
+
+	result, execErr := s.db.ExecContext(ctx, `
+		UPDATE tasks
+		SET atomic_description = ?, entities = ?, keywords = ?
+		WHERE id = ?
+	`, atomicDescription, string(entitiesJSON), string(keywordsJSON), id)
+	if execErr != nil {
+		return fmt.Errorf("tasks: update atomic: %w", execErr)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("tasks: task not found: %s", id)
 	}
 	return nil
 }

@@ -11,9 +11,9 @@ import (
 
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/indexing/symbol"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
-	"github.com/rs/zerolog"
 )
 
 // FileSummaryGenerator creates file-level summaries for the semantic search tree.
@@ -22,7 +22,6 @@ type FileSummaryGenerator struct {
 	llm           SummaryLLM
 	embedProvider semantic.EmbeddingProvider
 	workspace     string
-	logger        zerolog.Logger
 }
 
 // SummaryLLM is the interface for LLM-based summary generation.
@@ -38,14 +37,12 @@ func NewFileSummaryGenerator(
 	llm SummaryLLM,
 	embedProvider semantic.EmbeddingProvider,
 	workspace string,
-	logger zerolog.Logger,
 ) *FileSummaryGenerator {
 	return &FileSummaryGenerator{
 		store:         store,
 		llm:           llm,
 		embedProvider: embedProvider,
 		workspace:     workspace,
-		logger:        logger.With().Str("component", "file_summary").Logger(),
 	}
 }
 
@@ -62,8 +59,12 @@ func (g *FileSummaryGenerator) GetOrCreateSummary(
 	if err != nil {
 		// Distinguish "not found" (expected) from actual errors (unexpected)
 		if !errors.Is(err, memory.ErrNotFound) {
-			// Transient DB error - log and don't attempt LLM call that may also fail to persist
-			g.logger.Warn().Err(err).Str("path", input.FilePath).Msg("failed to check cache, skipping")
+			// Transient DB error - don't attempt LLM call that may also fail to persist
+			observability.Emit(ctx, observability.NewEvent("file_summary.cache_check_failed").
+				WithComponent("retrieval").
+				WithWorkspace(g.workspace).
+				WithData("path", input.FilePath).
+				Error(err, 0))
 			return "", false, fmt.Errorf("check cache for %s: %w", input.FilePath, err)
 		}
 		// Not found - continue to generate
@@ -73,14 +74,9 @@ func (g *FileSummaryGenerator) GetOrCreateSummary(
 		if err := json.Unmarshal(entry.Result, &result); err == nil {
 			currentDigest := symbol.ComputeFileSummaryDigest(input)
 			if result.Digest == currentDigest {
-				g.logger.Debug().
-					Str("path", input.FilePath).
-					Msg("using cached file summary")
 				return entry.Summary, true, nil
 			}
-			g.logger.Debug().
-				Str("path", input.FilePath).
-				Msg("digest changed, regenerating summary")
+			// Digest changed - regenerate
 		}
 	}
 
@@ -92,7 +88,11 @@ func (g *FileSummaryGenerator) GetOrCreateSummary(
 
 	// Store the summary
 	if err := g.storeSummary(ctx, input, summary); err != nil {
-		g.logger.Warn().Err(err).Str("path", input.FilePath).Msg("failed to store summary")
+		observability.Emit(ctx, observability.NewEvent("file_summary.store_failed").
+			WithComponent("retrieval").
+			WithWorkspace(g.workspace).
+			WithData("path", input.FilePath).
+			Error(err, 0))
 		// Don't fail - we still have the summary
 	}
 
@@ -109,12 +109,9 @@ func (g *FileSummaryGenerator) generateSummary(
 		prompt := g.buildPrompt(input)
 		summary, err := g.llm.GenerateSummary(ctx, prompt)
 		if err == nil && summary != "" {
-			g.logger.Debug().
-				Str("path", input.FilePath).
-				Msg("generated summary via LLM")
 			return summary, nil
 		}
-		g.logger.Debug().Err(err).Str("path", input.FilePath).Msg("LLM failed, using fallback")
+		// LLM failed - fall back to deterministic
 	}
 
 	// Fallback to deterministic summary
@@ -249,16 +246,21 @@ func (g *FileSummaryGenerator) storeSummary(
 	if g.embedProvider != nil && summary != "" {
 		embedding, err := g.embedProvider.Embed(ctx, summary)
 		if err != nil {
-			g.logger.Debug().Err(err).Str("path", input.FilePath).Msg("failed to embed summary")
+			// Embedding failed - non-fatal, skip
 			return nil
 		}
 		dimensions := g.embedProvider.Dimensions()
 		if err := g.store.ValidateEmbeddingDimensions(ctx, g.workspace, dimensions); err != nil {
-			g.logger.Warn().Err(err).Str("path", input.FilePath).Msg("embedding dimensions mismatch; skipping summary embedding")
+			observability.Emit(ctx, observability.NewEvent("file_summary.embedding_dimensions_mismatch").
+				WithComponent("retrieval").
+				WithWorkspace(g.workspace).
+				WithData("path", input.FilePath).
+				Error(err, 0))
 			return nil
 		}
 		if err := g.store.UpdateEmbedding(ctx, entryName, g.workspace, embedding); err != nil {
-			g.logger.Debug().Err(err).Str("path", input.FilePath).Msg("failed to store summary embedding")
+			// Embedding store failed - non-fatal
+			return nil
 		}
 		meta := memory.EmbeddingMetadata{
 			Workspace:  g.workspace,
@@ -267,7 +269,8 @@ func (g *FileSummaryGenerator) storeSummary(
 			Dimensions: dimensions,
 		}
 		if err := g.store.SetEmbeddingMetadata(ctx, meta); err != nil {
-			g.logger.Debug().Err(err).Str("path", input.FilePath).Msg("failed to store embedding metadata")
+			// Metadata store failed - non-fatal
+			_ = err
 		}
 	}
 
@@ -314,7 +317,12 @@ func (g *FileSummaryGenerator) BatchCreateSummaries(
 
 		_, cached, err := g.GetOrCreateSummary(ctx, input)
 		if err != nil {
-			g.logger.Warn().Err(err).Str("path", input.FilePath).Msg("failed to create summary")
+			// Log error but continue with remaining files
+			observability.Emit(ctx, observability.NewEvent("file_summary.batch_create_failed").
+				WithComponent("retrieval").
+				WithWorkspace(g.workspace).
+				WithData("path", input.FilePath).
+				Error(err, 0))
 			continue
 		}
 
@@ -337,7 +345,10 @@ func (g *FileSummaryGenerator) BackfillEmbeddings(ctx context.Context, max int) 
 	}
 	dimensions := g.embedProvider.Dimensions()
 	if err := g.store.ValidateEmbeddingDimensions(ctx, g.workspace, dimensions); err != nil {
-		g.logger.Warn().Err(err).Msg("embedding dimensions mismatch; skipping summary backfill")
+		observability.Emit(ctx, observability.NewEvent("file_summary.backfill_dimensions_mismatch").
+			WithComponent("retrieval").
+			WithWorkspace(g.workspace).
+			Error(err, 0))
 		return 0, nil
 	}
 	meta := memory.EmbeddingMetadata{
@@ -347,7 +358,8 @@ func (g *FileSummaryGenerator) BackfillEmbeddings(ctx context.Context, max int) 
 		Dimensions: dimensions,
 	}
 	if err := g.store.SetEmbeddingMetadata(ctx, meta); err != nil {
-		g.logger.Debug().Err(err).Msg("failed to store embedding metadata")
+		// Non-fatal - continue with backfill
+		_ = err
 	}
 
 	// List a superset to allow filtering to file_summary entries.
@@ -371,11 +383,11 @@ func (g *FileSummaryGenerator) BackfillEmbeddings(ctx context.Context, max int) 
 		}
 		embedding, err := g.embedProvider.Embed(ctx, entry.Summary)
 		if err != nil {
-			g.logger.Debug().Err(err).Str("name", entry.Name).Msg("failed to embed summary")
+			// Embedding failed - skip this entry
 			continue
 		}
 		if err := g.store.UpdateEmbedding(ctx, entry.Name, g.workspace, embedding); err != nil {
-			g.logger.Debug().Err(err).Str("name", entry.Name).Msg("failed to store summary embedding")
+			// Store failed - skip this entry
 			continue
 		}
 		updated++
@@ -411,7 +423,7 @@ func (g *FileSummaryGenerator) GenerateRootSummary(
 		if err == nil && summary != "" {
 			return summary, nil
 		}
-		g.logger.Debug().Err(err).Msg("LLM failed for root summary, using fallback")
+		// LLM failed - fall back to deterministic
 	}
 
 	// Deterministic fallback: stitch top summaries
@@ -546,7 +558,6 @@ type SymbolSummaryGenerator struct {
 	llm           SummaryLLM
 	embedProvider semantic.EmbeddingProvider
 	workspace     string
-	logger        zerolog.Logger
 }
 
 func NewSymbolSummaryGenerator(
@@ -554,14 +565,12 @@ func NewSymbolSummaryGenerator(
 	llm SummaryLLM,
 	embedProvider semantic.EmbeddingProvider,
 	workspace string,
-	logger zerolog.Logger,
 ) *SymbolSummaryGenerator {
 	return &SymbolSummaryGenerator{
 		store:         store,
 		llm:           llm,
 		embedProvider: embedProvider,
 		workspace:     workspace,
-		logger:        logger.With().Str("component", "symbol_summary").Logger(),
 	}
 }
 
@@ -574,7 +583,11 @@ func (g *SymbolSummaryGenerator) GetOrCreateSummary(
 	entry, err := g.store.Get(ctx, entryName, g.workspace)
 	if err != nil {
 		if !errors.Is(err, memory.ErrNotFound) {
-			g.logger.Warn().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to check cache, skipping")
+			observability.Emit(ctx, observability.NewEvent("symbol_summary.cache_check_failed").
+				WithComponent("retrieval").
+				WithWorkspace(g.workspace).
+				WithData("symbol_id", input.SymbolID).
+				Error(err, 0))
 			return "", false, fmt.Errorf("check cache for %s: %w", input.SymbolID, err)
 		}
 	} else {
@@ -582,10 +595,9 @@ func (g *SymbolSummaryGenerator) GetOrCreateSummary(
 		if err := json.Unmarshal(entry.Result, &result); err == nil {
 			currentDigest := symbol.ComputeSymbolSummaryDigest(input)
 			if result.Digest == currentDigest {
-				g.logger.Debug().Str("symbol_id", input.SymbolID).Msg("using cached symbol summary")
 				return entry.Summary, true, nil
 			}
-			g.logger.Debug().Str("symbol_id", input.SymbolID).Msg("digest changed, regenerating summary")
+			// Digest changed - regenerate
 		}
 	}
 
@@ -595,7 +607,11 @@ func (g *SymbolSummaryGenerator) GetOrCreateSummary(
 	}
 
 	if err := g.storeSummary(ctx, input, summary); err != nil {
-		g.logger.Warn().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to store summary")
+		observability.Emit(ctx, observability.NewEvent("symbol_summary.store_failed").
+			WithComponent("retrieval").
+			WithWorkspace(g.workspace).
+			WithData("symbol_id", input.SymbolID).
+			Error(err, 0))
 	}
 
 	return summary, false, nil
@@ -609,10 +625,9 @@ func (g *SymbolSummaryGenerator) generateSummary(
 		prompt := g.buildPrompt(input)
 		summary, err := g.llm.GenerateSummary(ctx, prompt)
 		if err == nil && summary != "" {
-			g.logger.Debug().Str("symbol_id", input.SymbolID).Msg("generated summary via LLM")
 			return summary, nil
 		}
-		g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("LLM failed, using fallback")
+		// LLM failed - fall back to deterministic
 	}
 
 	return g.deterministicSummary(input), nil
@@ -709,16 +724,21 @@ func (g *SymbolSummaryGenerator) storeSummary(
 	if g.embedProvider != nil && summary != "" {
 		embedding, err := g.embedProvider.Embed(ctx, summary)
 		if err != nil {
-			g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to embed summary")
+			// Embedding failed - non-fatal, skip
 			return nil
 		}
 		dimensions := g.embedProvider.Dimensions()
 		if err := g.store.ValidateEmbeddingDimensions(ctx, g.workspace, dimensions); err != nil {
-			g.logger.Warn().Err(err).Str("symbol_id", input.SymbolID).Msg("embedding dimensions mismatch; skipping summary embedding")
+			observability.Emit(ctx, observability.NewEvent("symbol_summary.embedding_dimensions_mismatch").
+				WithComponent("retrieval").
+				WithWorkspace(g.workspace).
+				WithData("symbol_id", input.SymbolID).
+				Error(err, 0))
 			return nil
 		}
 		if err := g.store.UpdateEmbedding(ctx, entryName, g.workspace, embedding); err != nil {
-			g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to store summary embedding")
+			// Embedding store failed - non-fatal
+			return nil
 		}
 		meta := memory.EmbeddingMetadata{
 			Workspace:  g.workspace,
@@ -727,7 +747,8 @@ func (g *SymbolSummaryGenerator) storeSummary(
 			Dimensions: dimensions,
 		}
 		if err := g.store.SetEmbeddingMetadata(ctx, meta); err != nil {
-			g.logger.Debug().Err(err).Str("symbol_id", input.SymbolID).Msg("failed to store embedding metadata")
+			// Metadata store failed - non-fatal
+			_ = err
 		}
 	}
 

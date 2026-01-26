@@ -41,7 +41,6 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/oklog/ulid/v2"
-	"github.com/rs/zerolog"
 )
 
 // ServiceOptions configures the daemon service.
@@ -745,7 +744,6 @@ func (s *Service) startSummaryWorker(ctx context.Context) error {
 
 	// Create worker with default config
 	workerCfg := summary.DefaultWorkerConfig()
-	logger := zerolog.New(os.Stderr).With().Timestamp().Logger()
 
 	worker := summary.NewWorker(
 		workerCfg,
@@ -753,7 +751,6 @@ func (s *Service) startSummaryWorker(ctx context.Context) error {
 		sessionStore,
 		providers,
 		s.cfg,
-		logger,
 	)
 
 	// Create cancellable context for worker
@@ -937,7 +934,6 @@ func (s *Service) startFileSummaryWorker(ctx context.Context) error {
 		llm,
 		embedProvider,
 		workspace,
-		nil, // Use default logger
 	)
 
 	// Create cancellable context for worker

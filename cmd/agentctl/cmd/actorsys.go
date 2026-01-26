@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	"github.com/jkatigb/agentctl/internal/domain/envelope"
 	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
@@ -236,9 +238,11 @@ func runActorSysSupervisorStart(cmd *cobra.Command, _ []string) error {
 	var hookDispatcher hooks.Dispatcher
 	hooksCfg, err := hooks.LoadConfigWithDefaults(cfg.Storage.Root)
 	if err != nil {
-		// Hooks are optional - log warning but continue
-		log := zerolog.New(os.Stderr).With().Timestamp().Logger()
-		log.Warn().Err(err).Msg("failed to load hooks config, continuing without hooks")
+		// Hooks are optional - emit warning but continue
+		observability.Emit(ctx, observability.NewEvent("actorsys.hooks_config_warning").
+			WithComponent(observability.ComponentCLI).
+			WithData("reason", "continuing without hooks").
+			Error(err, 0))
 	} else if hooksCfg != nil {
 		hookDispatcher = hooks.NewDispatcherWithRegistry(hooksCfg, cfg.Paths.Skills)
 	}
@@ -246,9 +250,10 @@ func runActorSysSupervisorStart(cmd *cobra.Command, _ []string) error {
 	// Respawn registered actors if enabled
 	if supervisorRespawnRegistered {
 		if err := respawnRegisteredActors(ctx, cfg, system, hookDispatcher); err != nil {
-			// Log warning but don't fail startup
-			log := zerolog.New(os.Stderr).With().Timestamp().Logger()
-			log.Warn().Err(err).Msg("failed to respawn registered actors")
+			// Emit warning but don't fail startup
+			observability.Emit(ctx, observability.NewEvent("actorsys.respawn_warning").
+				WithComponent(observability.ComponentCLI).
+				Error(err, 0))
 		}
 	}
 
@@ -781,24 +786,32 @@ func respawnRegisteredActors(ctx context.Context, cfg config.Config, system *act
 			Hooks:         hookDispatcher, // Wire hooks dispatcher
 		}
 
-		logger := zerolog.New(os.Stderr).With().
-			Str("actor", rec.Namespace).
-			Logger()
+		// Use no-op logger for actor internals - we emit via observability instead
+		noopLogger := zerolog.New(io.Discard) //nolint:forbidigo // no-op logger for actor internals
 
-		agentActor, err := actor.NewAgentActor(agentCfg, actor.WithAgentLogger(logger))
+		agentActor, err := actor.NewAgentActor(agentCfg, actor.WithAgentLogger(noopLogger))
 		if err != nil {
-			logger.Warn().Err(err).Msg("failed to create actor")
+			observability.Emit(ctx, observability.NewEvent("actorsys.actor_create_error").
+				WithComponent(observability.ComponentCLI).
+				WithData("actor", rec.Namespace).
+				Error(err, 0))
 			continue
 		}
 
 		if err := system.Register(ctx, agentActor); err != nil {
-			logger.Warn().Err(err).Msg("failed to register actor")
+			observability.Emit(ctx, observability.NewEvent("actorsys.actor_register_error").
+				WithComponent(observability.ComponentCLI).
+				WithData("actor", rec.Namespace).
+				Error(err, 0))
 			continue
 		}
 
 		// Update status to running
 		if err := regStore.UpdateStatus(ctx, rec.Namespace, actor.ActorStatusRunning); err != nil {
-			logger.Warn().Err(err).Msg("failed to update status")
+			observability.Emit(ctx, observability.NewEvent("actorsys.status_update_error").
+				WithComponent(observability.ComponentCLI).
+				WithData("actor", rec.Namespace).
+				Error(err, 0))
 		}
 	}
 

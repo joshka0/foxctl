@@ -1,3 +1,4 @@
+//nolint:forbidigo // This IS the logging infrastructure - zerolog usage is intentional
 package obs
 
 import (

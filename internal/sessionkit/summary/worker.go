@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	llmproviders "github.com/jkatigb/agentctl/internal/providers/llm"
 	"github.com/jkatigb/agentctl/internal/queue"
 	"github.com/jkatigb/agentctl/internal/storage"
 	"github.com/jkatigb/agentctl/internal/storage/sessions"
-	"github.com/rs/zerolog"
 )
 
 // Worker processes summary queue jobs in the background.
@@ -26,7 +26,6 @@ type Worker struct {
 	sessionStore *sessions.Store
 	providers    []llmproviders.Provider
 	cfg          config.Config
-	logger       zerolog.Logger
 
 	mu      sync.Mutex
 	running bool
@@ -43,7 +42,6 @@ func NewWorker(
 	sessionStore *sessions.Store,
 	providers []llmproviders.Provider,
 	appCfg config.Config,
-	logger zerolog.Logger,
 ) *Worker {
 	if cfg.Workers <= 0 {
 		cfg.Workers = 2
@@ -67,7 +65,6 @@ func NewWorker(
 		sessionStore: sessionStore,
 		providers:    providers,
 		cfg:          appCfg,
-		logger:       logger.With().Str("component", "summary-worker").Logger(),
 		limiter:      newRateLimiter(cfg.RateLimitRPS),
 	}
 }
@@ -84,10 +81,11 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.doneCh = make(chan struct{})
 	w.mu.Unlock()
 
-	w.logger.Info().
-		Int("workers", w.config.Workers).
-		Float64("rate_limit_rps", w.config.RateLimitRPS).
-		Msg("starting summary worker")
+	observability.Emit(ctx, observability.NewEvent("summary.worker_start").
+		WithComponent("summary-worker").
+		WithData("workers", w.config.Workers).
+		WithData("rate_limit_rps", w.config.RateLimitRPS).
+		Success(0))
 
 	go w.run(ctx)
 	return nil
@@ -106,9 +104,14 @@ func (w *Worker) Stop() error {
 	// Wait for shutdown with timeout
 	select {
 	case <-w.doneCh:
-		w.logger.Info().Msg("summary worker stopped")
+		observability.Emit(context.Background(), observability.NewEvent("summary.worker_stop").
+			WithComponent("summary-worker").
+			Success(0))
 	case <-time.After(w.config.ShutdownTimeout):
-		w.logger.Warn().Msg("summary worker shutdown timed out")
+		observability.Emit(context.Background(), observability.NewEvent("summary.worker_timeout").
+			WithComponent("summary-worker").
+			WithData("message", "shutdown timed out").
+			Error(nil, 0))
 	}
 
 	w.mu.Lock()
@@ -163,7 +166,9 @@ func (w *Worker) dispatchJobs(ctx context.Context, jobCh chan<- *queue.Job) {
 	for dispatched < w.config.BatchSize {
 		job, err := w.queueStore.ClaimNext(ctx, queue.ClaimOptions{})
 		if err != nil {
-			w.logger.Error().Err(err).Msg("failed to claim job")
+			observability.Emit(ctx, observability.NewEvent("summary.claim_failed").
+				WithComponent("summary-worker").
+				Error(err, 0))
 			return
 		}
 		if job == nil {
@@ -179,10 +184,6 @@ func (w *Worker) dispatchJobs(ctx context.Context, jobCh chan<- *queue.Job) {
 		case jobCh <- job:
 			dispatched++
 		}
-	}
-
-	if dispatched > 0 {
-		w.logger.Debug().Int("dispatched", dispatched).Msg("dispatched summary jobs")
 	}
 }
 
@@ -206,16 +207,25 @@ func (w *Worker) worker(ctx context.Context, id int, jobCh <-chan *queue.Job) {
 
 		if result.Success {
 			if err := w.queueStore.Complete(ctx, job.ID); err != nil {
-				w.logger.Error().Err(err).Str("job_id", job.ID).Msg("failed to mark job complete")
+				observability.Emit(ctx, observability.NewEvent("summary.mark_complete_failed").
+					WithComponent("summary-worker").
+					WithData("job_id", job.ID).
+					Error(err, 0))
 			}
 		} else if result.Skipped {
 			// Skipped jobs are still "complete" - they don't need retry
 			if err := w.queueStore.Complete(ctx, job.ID); err != nil {
-				w.logger.Error().Err(err).Str("job_id", job.ID).Msg("failed to mark skipped job complete")
+				observability.Emit(ctx, observability.NewEvent("summary.mark_skipped_failed").
+					WithComponent("summary-worker").
+					WithData("job_id", job.ID).
+					Error(err, 0))
 			}
 		} else {
 			if err := w.queueStore.Fail(ctx, job.ID, result.Error); err != nil {
-				w.logger.Error().Err(err).Str("job_id", job.ID).Msg("failed to mark job failed")
+				observability.Emit(ctx, observability.NewEvent("summary.mark_failed_error").
+					WithComponent("summary-worker").
+					WithData("job_id", job.ID).
+					Error(err, 0))
 			}
 		}
 	}
@@ -253,7 +263,9 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) JobResult {
 	// Get content preview from chunks for this window
 	contentPreview, err := w.getWindowContentPreview(ctx, payload.SessionID, window.ChunkStart, window.ChunkEnd)
 	if err != nil {
-		w.logger.Warn().Err(err).Msg("failed to get content preview, using empty")
+		observability.Emit(ctx, observability.NewEvent("summary.content_preview_failed").
+			WithComponent("summary-worker").
+			Error(err, 0))
 		contentPreview = ""
 	}
 
@@ -262,10 +274,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) JobResult {
 		result.Success = true
 		result.Skipped = true
 		result.SkipReason = "no_content_preview"
-		w.logger.Debug().
-			Str("session_id", payload.SessionID).
-			Int("window_index", payload.WindowIndex).
-			Msg("skipping window with no content preview")
 		return result
 	}
 
@@ -283,12 +291,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) JobResult {
 	}
 
 	result.Success = true
-	w.logger.Debug().
-		Str("session_id", payload.SessionID).
-		Int("window_index", payload.WindowIndex).
-		Int("summary_len", len(summary)).
-		Msg("summarized window")
-
 	return result
 }
 
@@ -332,10 +334,10 @@ func (w *Worker) summarizeWindow(ctx context.Context, window *storage.ContextWin
 		summary, err := callLLM(ctx, provider, prompt)
 		if err != nil {
 			lastErr = err
-			w.logger.Warn().
-				Err(err).
-				Str("provider", provider.Name).
-				Msg("provider failed, trying next")
+			observability.Emit(ctx, observability.NewEvent("summary.provider_failed").
+				WithComponent("summary-worker").
+				WithData("provider", provider.Name).
+				Error(err, 0))
 			continue
 		}
 		return summary, nil

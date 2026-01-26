@@ -2406,7 +2406,7 @@ func enrichEntriesWithSummaries(
 
 	// Create LLM client for file summaries (Devstral via OpenRouter)
 	llmClient := newSummaryLLM(logger)
-	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace, logger)
+	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace)
 
 	// Collect file paths that need summaries
 	var paths []string
@@ -2535,7 +2535,7 @@ func generateRootSummary(
 
 	// Create generator with LLM client for root summary
 	llmClient := newSummaryLLM(logger)
-	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace, logger)
+	gen := retrieval.NewFileSummaryGenerator(memStore, llmClient, embedProvider, workspace)
 
 	// Generate root summary
 	rootSummary, err := gen.GenerateRootSummary(ctx, topSummaries)

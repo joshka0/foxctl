@@ -498,7 +498,7 @@ func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, a
 			DurationMS:  time.Since(start).Milliseconds(),
 			Error:       err.Error(),
 		}); emitErr != nil {
-			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr) //nolint:forbidigo // fallback for obs emit failures
 		}
 		return fmt.Errorf("engine run: %w", err)
 	}
@@ -517,7 +517,7 @@ func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, a
 			DurationMS:  time.Since(start).Milliseconds(),
 			Error:       output.Error,
 		}); emitErr != nil {
-			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+			fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr) //nolint:forbidigo // fallback for obs emit failures
 		}
 		return fmt.Errorf("llm error: %s", output.Error)
 	}
@@ -534,7 +534,7 @@ func runIndexRepoAsk(cmd *cobra.Command, workspace, question, provider, model, a
 		ToolCalls:   len(output.ToolCalls),
 		DurationMS:  time.Since(start).Milliseconds(),
 	}); emitErr != nil {
-		fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr)
+		fmt.Fprintf(os.Stderr, "observability emit failed: %v\n", emitErr) //nolint:forbidigo // fallback for obs emit failures
 	}
 
 	type toolCallSummary struct {

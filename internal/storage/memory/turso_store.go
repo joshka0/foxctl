@@ -1131,4 +1131,33 @@ func (s *TursoStore) SetEmbeddingMetadata(ctx context.Context, meta EmbeddingMet
 	return nil
 }
 
+// UpdateAtomic stores atomic processing results for a named memory entry.
+// atomicText is the self-contained rewrite, entities are extracted identifiers,
+// keywords are BM25-optimized search terms.
+func (s *TursoStore) UpdateAtomic(ctx context.Context, name, workspace, atomicText string, entities, keywords []string) error {
+	entitiesJSON, err := sqlutil.FormatJSON(entities)
+	if err != nil {
+		return fmt.Errorf("memory: marshal entities: %w", err)
+	}
+	keywordsJSON, err := sqlutil.FormatJSON(keywords)
+	if err != nil {
+		return fmt.Errorf("memory: marshal keywords: %w", err)
+	}
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE named_memory
+		SET atomic_text = ?, entities = ?, keywords = ?, updated_at = ?
+		WHERE name = ? AND workspace = ?
+	`, atomicText, entitiesJSON, keywordsJSON, sqlutil.FormatTimestamp(timeutil.NowUTC()), name, workspace)
+	if err != nil {
+		return fmt.Errorf("memory: update atomic: %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("memory: entry not found: %s in workspace %s", name, workspace)
+	}
+	return nil
+}
+
 // scoreEntry is defined in store.go - using same function for both SQLite and Turso

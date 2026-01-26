@@ -15,6 +15,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/workspaceutil"
+	"github.com/jkatigb/agentctl/internal/indexing/atomic"
 	"github.com/jkatigb/agentctl/internal/platform/timeutil"
 	"github.com/jkatigb/agentctl/internal/sessionkit"
 	"github.com/jkatigb/agentctl/internal/storage/memory"
@@ -170,7 +171,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	}
 
 	for _, plan := range plansToProcess {
-		result := processPlan(ctx, rc.Logger, &plan, unifiedDetector, syncStates, taskStore, memStore, input, sessionID)
+		atomicCfg := struct{ APIKey, Endpoint, Model string }{
+			rc.Config.LLM.AtomicAPIKey,
+			rc.Config.LLM.AtomicEndpoint,
+			rc.Config.LLM.AtomicModel,
+		}
+		result := processPlan(ctx, rc.Logger, &plan, unifiedDetector, syncStates, taskStore, memStore, input, sessionID, atomicCfg)
 		output.Results = append(output.Results, result)
 		output.PlansProcessed++
 
@@ -202,6 +208,7 @@ func processPlan(
 	memStore *memory.Store,
 	input Input,
 	sessionID string,
+	atomicCfg struct{ APIKey, Endpoint, Model string },
 ) SyncResult {
 	result := SyncResult{
 		PlanFile:    plan.FilePath,
@@ -287,6 +294,27 @@ func processPlan(
 						stepResult.Status = "created"
 						stepResult.TaskID = created.ID
 						result.TasksCreated++
+
+						// Atomic fact processing (SimpleMem-style) - async, non-blocking
+						if atomicCfg.APIKey != "" {
+							go func(taskID, title, desc, ws, key, endpoint, model string, ts tasks.Store) {
+								processor, procErr := atomic.NewProcessorWithConfig(key, endpoint, model)
+								if procErr != nil {
+									return
+								}
+								rawText := title
+								if desc != "" {
+									rawText = title + ": " + desc
+								}
+								fact, _, factErr := processor.ProcessSingle(context.Background(), rawText, atomic.ProcessContext{
+									Workspace: ws,
+								})
+								if factErr != nil {
+									return
+								}
+								_ = ts.UpdateAtomic(context.Background(), taskID, fact.Atomic, fact.Entities, fact.Keywords)
+							}(created.ID, created.Title, created.Description, input.Workspace, atomicCfg.APIKey, atomicCfg.Endpoint, atomicCfg.Model, taskStore)
+						}
 					}
 				}
 			}

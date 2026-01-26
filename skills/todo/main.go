@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/adapters/artifacts"
@@ -20,6 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/analysis/overseer"
 	"github.com/jkatigb/agentctl/internal/analysis/tasksgraph"
 	"github.com/jkatigb/agentctl/internal/domain/agent"
+	"github.com/jkatigb/agentctl/internal/indexing/atomic"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/planning/llm"
 	"github.com/jkatigb/agentctl/internal/platform/config"
@@ -124,6 +126,7 @@ type addRequest struct {
 	DependsOn   []string `json:"depends_on"`
 	ScopePath   string   `json:"scope_path"`
 	SessionID   string   `json:"session_id,omitempty"` // Override runner context session_id
+	Atomic      bool     `json:"atomic,omitempty"`     // Enable atomic fact processing (SimpleMem-style)
 }
 
 type completeRequest struct {
@@ -259,7 +262,12 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if err != nil {
 		return skillerr.WrapIO("open task store", err)
 	}
-	defer cleanup()
+	// Track async atomic processing goroutines to wait before cleanup
+	var atomicWg sync.WaitGroup
+	defer func() {
+		atomicWg.Wait() // Wait for all atomic goroutines before closing store
+		cleanup()
+	}()
 
 	op := oputil.Op(in.Operation)
 	if op == "" {
@@ -281,7 +289,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 		if in.Add != nil && strings.TrimSpace(in.Add.SessionID) != "" {
 			addSessionID = strings.TrimSpace(in.Add.SessionID)
 		}
-		task, allTasks, err := handleAdd(ctx, store, cfg, workspaceID, addSessionID, in.Add)
+		task, allTasks, err := handleAdd(ctx, store, cfg, workspaceID, addSessionID, in.Add, &atomicWg)
 		if err != nil {
 			return err
 		}
@@ -575,7 +583,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
-func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID, sessionID string, req *addRequest) (*taskOutput, []tasks.Task, error) {
+func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, workspaceID, sessionID string, req *addRequest, atomicWg *sync.WaitGroup) (*taskOutput, []tasks.Task, error) {
 	if req == nil {
 		return nil, nil, skillerr.Arg("add payload is required")
 	}
@@ -675,6 +683,31 @@ func handleAdd(ctx context.Context, store tasks.Store, cfg config.Config, worksp
 	added, err := store.Add(ctx, newTask)
 	if err != nil {
 		return nil, nil, skillerr.WrapIO("add task", err)
+	}
+
+	// Atomic fact processing (SimpleMem-style) - async with WaitGroup
+	if req.Atomic && atomicWg != nil {
+		atomicWg.Add(1)
+		go func(taskID, title, desc, ws, apiKey, endpoint, model string) {
+			defer atomicWg.Done()
+			processor, procErr := atomic.NewProcessorWithConfig(apiKey, endpoint, model)
+			if procErr != nil {
+				return // Silently skip if processor unavailable
+			}
+			// Combine title and description for richer atomic processing
+			rawText := title
+			if desc != "" {
+				rawText = title + ": " + desc
+			}
+			fact, _, factErr := processor.ProcessSingle(context.Background(), rawText, atomic.ProcessContext{
+				Workspace: ws,
+			})
+			if factErr != nil {
+				return // Silently skip on processing error
+			}
+			// Update task with atomic fields
+			_ = store.UpdateAtomic(context.Background(), taskID, fact.Atomic, fact.Entities, fact.Keywords)
+		}(added.ID, added.Title, added.Description, workspaceID, cfg.LLM.AtomicAPIKey, cfg.LLM.AtomicEndpoint, cfg.LLM.AtomicModel)
 	}
 
 	createTaskDependencyEdges(ctx, cfg, workspaceID, added, nil)

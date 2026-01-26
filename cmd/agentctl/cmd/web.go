@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/web"
 )
 
@@ -68,11 +69,12 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Setup logger
-	log := zerolog.New(os.Stderr).With().
-		Timestamp().
-		Str("component", "web").
-		Logger()
+	// Setup logger for web server internals
+	// TODO: Migrate web server to use observability instead of zerolog
+	log := zerolog.New(os.Stderr).With(). //nolint:forbidigo // web server requires zerolog internally
+							Timestamp().
+							Str("component", "web").
+							Logger()
 
 	// Create web server
 	opts := web.Options{
@@ -140,7 +142,9 @@ func runWebServe(cmd *cobra.Command, _ []string) error {
 	defer shutdownCancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Error().Err(err).Msg("error during shutdown")
+		observability.Emit(context.Background(), observability.NewEvent("web.shutdown_error").
+			WithComponent(observability.ComponentCLI).
+			Error(err, 0))
 		return err
 	}
 

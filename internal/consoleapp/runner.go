@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
-	"github.com/rs/zerolog"
+	"time"
 
 	"github.com/jkatigb/agentctl/internal/engine"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/web/consolews"
 )
 
@@ -16,7 +16,6 @@ import (
 type Runner struct {
 	engine engine.AgentEngine
 	tools  []engine.ToolDef
-	log    zerolog.Logger
 }
 
 // RunnerConfig configures the console runner.
@@ -26,9 +25,6 @@ type RunnerConfig struct {
 
 	// Tools are the available tool definitions.
 	Tools []engine.ToolDef
-
-	// Logger for structured logging.
-	Logger zerolog.Logger
 }
 
 // NewRunner creates a new console runner.
@@ -36,16 +32,12 @@ func NewRunner(cfg RunnerConfig) *Runner {
 	return &Runner{
 		engine: cfg.Engine,
 		tools:  cfg.Tools,
-		log:    cfg.Logger,
 	}
 }
 
 // Run implements consolews.Runner.
 func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessage string, correlationID string) error {
-	r.log.Info().
-		Str("session", session.ID()).
-		Str("correlation_id", correlationID).
-		Msg("starting console run")
+	start := time.Now()
 
 	// Build engine input from session history
 	input := r.buildInput(session, userMessage)
@@ -54,7 +46,6 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 	streamCallback := &StreamCallback{
 		session:       session,
 		correlationID: correlationID,
-		log:           r.log,
 	}
 
 	// Run the engine
@@ -92,14 +83,15 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 	// Emit final reply
 	streamCallback.EmitReply(output.AssistantText)
 
-	r.log.Info().
-		Str("session", session.ID()).
-		Str("correlation_id", correlationID).
-		Str("stop_reason", string(output.StopReason)).
-		Int("tool_calls", len(output.ToolCalls)).
-		Int("input_tokens", output.Tokens.InputTokens).
-		Int("output_tokens", output.Tokens.OutputTokens).
-		Msg("console run complete")
+	observability.Emit(ctx, observability.NewEvent("console.run_complete").
+		WithComponent("console").
+		WithSession(session.ID(), "").
+		WithData("correlation_id", correlationID).
+		WithData("stop_reason", string(output.StopReason)).
+		WithData("tool_calls", len(output.ToolCalls)).
+		WithData("input_tokens", output.Tokens.InputTokens).
+		WithData("output_tokens", output.Tokens.OutputTokens).
+		Success(time.Since(start)))
 
 	return nil
 }
@@ -133,7 +125,6 @@ func (r *Runner) buildInput(session *consolews.Session, userMessage string) engi
 type StreamCallback struct {
 	session       *consolews.Session
 	correlationID string
-	log           zerolog.Logger
 }
 
 // EmitToolCall emits a tool call event.

@@ -241,6 +241,18 @@ type LLMSettings struct {
 
 	// CerebrasModel is the model for Cerebras (from CEREBRAS_MODEL)
 	CerebrasModel string `mapstructure:"cerebras_model" json:"cerebras_model"`
+
+	// AtomicAPIKey is the API key for atomic fact processing (from AGENTCTL_ATOMIC_API_KEY).
+	// Used for fast/cheap LLM operations. Supports any OpenAI-compatible endpoint.
+	AtomicAPIKey string `mapstructure:"atomic_api_key" json:"atomic_api_key"`
+
+	// AtomicEndpoint is the endpoint URL for atomic processing (from AGENTCTL_ATOMIC_ENDPOINT).
+	// Defaults to OpenRouter if not set.
+	AtomicEndpoint string `mapstructure:"atomic_endpoint" json:"atomic_endpoint"`
+
+	// AtomicModel is the model for atomic processing (from AGENTCTL_ATOMIC_MODEL).
+	// Defaults to zhipu-ai/glm-4-flash-250414 if not set.
+	AtomicModel string `mapstructure:"atomic_model" json:"atomic_model"`
 }
 
 // ResolveAPIKey returns the API key for the given provider.
@@ -573,6 +585,21 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if model := os.Getenv("AGENTCTL_LLM_MODEL"); model != "" && cfg.LLM.Model == "" {
 		cfg.LLM.Model = model
+	}
+
+	// Atomic processing config (for SimpleMem-style fact decomposition)
+	if key := os.Getenv("AGENTCTL_ATOMIC_API_KEY"); key != "" && cfg.LLM.AtomicAPIKey == "" {
+		cfg.LLM.AtomicAPIKey = key
+	}
+	// Fallback: use OpenRouter key if atomic key not set
+	if cfg.LLM.AtomicAPIKey == "" && cfg.LLM.OpenRouterAPIKey != "" {
+		cfg.LLM.AtomicAPIKey = cfg.LLM.OpenRouterAPIKey
+	}
+	if endpoint := os.Getenv("AGENTCTL_ATOMIC_ENDPOINT"); endpoint != "" && cfg.LLM.AtomicEndpoint == "" {
+		cfg.LLM.AtomicEndpoint = endpoint
+	}
+	if model := os.Getenv("AGENTCTL_ATOMIC_MODEL"); model != "" && cfg.LLM.AtomicModel == "" {
+		cfg.LLM.AtomicModel = model
 	}
 
 	// Embedding API key env var overrides (FC/IS compliant)

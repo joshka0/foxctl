@@ -185,6 +185,7 @@ Environment variables are loaded from `~/.agentctl/.env` (global). The loader ch
 | -------------------------- | ------------- | ------------------------------------ |
 | `AGENTCTL_HOME`            | `~/.agentctl` | Storage root                         |
 | `ANTHROPIC_API_KEY`        | -             | Codemap generation                   |
+| `OPENROUTER_API_KEY`       | -             | Atomic fact processing (SimpleMem)   |
 | `TAVILY_API_KEY`           | -             | Web search (Tavily provider)         |
 | `EXA_API_KEY`              | -             | Web search (Exa provider)            |
 | `PERPLEXITY_API_KEY`       | -             | Web search (Perplexity provider)     |
@@ -249,9 +250,10 @@ apiKey := os.Getenv("VOYAGE_API_KEY")
 
 // Correct - use Config loaded once at startup
 cfg, _ := config.Load(ctx)
-apiKey := cfg.Embedding.VoyageAPIKey  // For Voyage
-apiKey := cfg.Search.TavilyAPIKey     // For Tavily
-apiKey := cfg.Search.ExaAPIKey        // For Exa
+apiKey := cfg.Embedding.VoyageAPIKey    // For Voyage
+apiKey := cfg.Search.TavilyAPIKey       // For Tavily
+apiKey := cfg.Search.ExaAPIKey          // For Exa
+apiKey := cfg.LLM.OpenRouterAPIKey      // For OpenRouter (atomic processing)
 apiKey := cfg.LLM.ResolveAPIKey("anthropic")  // For LLM providers
 ```
 
@@ -292,6 +294,28 @@ Replies are for the caller to consume; acking in daemon poller drops async repli
 ### .env Must Be a Real File
 
 `~/.agentctl/.env` must be a real file, not a symlink to the repo. Symlinks break in sandboxed/remote environments where the repo path doesn't exist.
+
+### Logging via Wide Events (Not stderr)
+
+Never use `fmt.Fprintf(stderr, ...)` or `log.Printf` for operational logging. Use observability wide events instead:
+
+```go
+// Wrong - loses structured data, not queryable
+fmt.Fprintf(cmd.ErrOrStderr(), "processed: %d tokens ($%.6f)\n", tokens, cost)
+
+// Correct - structured, queryable via obs/logs
+event := observability.NewEvent("memory.atomic_processing").
+    WithComponent(observability.ComponentCLI).
+    WithData(obs.KeyLLMTotalTokens, tokens).
+    WithData(obs.KeyLLMTotalCostUSD, cost)
+observability.Emit(ctx, event.Success(duration))
+```
+
+For LLM token tracking, use the constants from `internal/adapters/skillslib/obs`:
+- `obs.KeyLLMModel`, `obs.KeyLLMInputTokens`, `obs.KeyLLMOutputTokens`
+- `obs.KeyLLMTotalTokens`, `obs.KeyLLMInputCostUSD`, `obs.KeyLLMTotalCostUSD`
+
+View logs with: `agentctl run obs/logs --input '{}'`
 
 **All gotchas:** [docs/general/gotchas.md](../docs/general/gotchas.md)
 

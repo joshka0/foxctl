@@ -5,11 +5,10 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
-	"github.com/rs/zerolog"
 )
 
 // Handler returns an HTTP handler for the SSE endpoint.
-func Handler(hub *Hub, log zerolog.Logger) http.HandlerFunc {
+func Handler(hub *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only allow GET
 		if r.Method != http.MethodGet {
@@ -44,8 +43,6 @@ func Handler(hub *Hub, log zerolog.Logger) http.HandlerFunc {
 		hub.Register(client)
 		defer hub.Unregister(client)
 
-		log.Debug().Str("client_id", clientID).Msg("sse client connected")
-
 		// Send initial connected event
 		_, _ = w.Write([]byte("data: {\"type\":\"connected\",\"client_id\":\"" + clientID + "\"}\n\n"))
 		flusher.Flush()
@@ -55,18 +52,15 @@ func Handler(hub *Hub, log zerolog.Logger) http.HandlerFunc {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Debug().Str("client_id", clientID).Msg("sse client disconnected (context)")
 				return
 
 			case msg, ok := <-client.Send:
 				if !ok {
-					log.Debug().Str("client_id", clientID).Msg("sse client channel closed")
 					return
 				}
 
 				_, err := w.Write(msg)
 				if err != nil {
-					log.Debug().Str("client_id", clientID).Err(err).Msg("sse write error")
 					return
 				}
 				flusher.Flush()
