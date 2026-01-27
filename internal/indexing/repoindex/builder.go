@@ -23,6 +23,7 @@ const (
 	goPkgPrefix         = "go:"
 	tsLocalPrefix       = "ts:local:"
 	tsNpmPrefix         = "ts:npm:"
+	elixirPkgPrefix     = "ex:"
 	maxRollupEntries    = 6
 	maxRollupSummaryLen = 160
 )
@@ -57,7 +58,7 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	if len(opts.Patterns) == 0 {
 		opts.Patterns = []string{"./..."}
 	}
-	if !opts.IncludeGo && !opts.IncludeTypescript {
+	if !opts.IncludeGo && !opts.IncludeTypescript && !opts.IncludeElixir {
 		return result, fmt.Errorf("repoindex: at least one language must be enabled")
 	}
 
@@ -71,6 +72,11 @@ func (b *Builder) Build(ctx context.Context, opts BuildOptions) (BuildResult, er
 	}
 	if opts.IncludeTypescript {
 		if err := b.buildTS(ctx, opts, nodes, edges, &result); err != nil {
+			return result, err
+		}
+	}
+	if opts.IncludeElixir {
+		if err := b.buildElixir(ctx, opts, nodes, edges, &result); err != nil {
 			return result, err
 		}
 	}
@@ -329,6 +335,111 @@ func (b *Builder) buildTS(ctx context.Context, opts BuildOptions, nodes map[stri
 	}
 
 	return nil
+}
+
+func (b *Builder) buildElixir(ctx context.Context, opts BuildOptions, nodes map[string]Node, edges map[string]Edge, result *BuildResult) error {
+	extractor := b.registry.Get("elixir")
+	if extractor == nil {
+		return fmt.Errorf("repoindex: no elixir extractor registered")
+	}
+
+	exclude := []string{
+		"_build/**",
+		"deps/**",
+		"node_modules/**",
+		".git/**",
+		"cover/**",
+		"priv/static/**",
+	}
+
+	patterns := []string{"**/*.ex", "**/*.exs"}
+	files := make(map[string]bool)
+	for _, pattern := range patterns {
+		paths, err := fsutil.FindFilesRespectingGitignore(opts.RepoRoot, pattern, exclude)
+		if err != nil {
+			return fmt.Errorf("repoindex: find elixir files: %w", err)
+		}
+		for _, path := range paths {
+			files[path] = true
+		}
+	}
+
+	var fileList []string
+	for path := range files {
+		fileList = append(fileList, path)
+	}
+	sort.Strings(fileList)
+
+	seenPackages := make(map[string]bool)
+
+	for _, fileRelPath := range fileList {
+		if !opts.IncludeTests && fsutil.IsTestFile(fileRelPath) {
+			continue
+		}
+		absPath := filepath.Join(opts.RepoRoot, fileRelPath)
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("repoindex: read elixir file %s: %w", fileRelPath, err)
+		}
+
+		// Determine package from directory structure or module name
+		pkgID := elixirPackageID(fileRelPath)
+
+		addNode(nodes, Node{
+			ID:        PackageID(pkgID),
+			Kind:      NodePackage,
+			Pkg:       pkgID,
+			Name:      strings.TrimPrefix(pkgID, elixirPkgPrefix),
+			UpdatedAt: time.Now().UTC(),
+		})
+		if !seenPackages[pkgID] {
+			result.Packages++
+			seenPackages[pkgID] = true
+		}
+
+		lineCount := countLines(content)
+		fileNode := Node{
+			ID:        FileID(pkgID, fileRelPath),
+			Kind:      NodeFile,
+			Pkg:       pkgID,
+			File:      fileRelPath,
+			Name:      filepath.Base(fileRelPath),
+			SpanStart: 1,
+			SpanEnd:   lineCount,
+			Hash:      symbol.ComputeDigest(content),
+			UpdatedAt: time.Now().UTC(),
+		}
+		applyFileSummary(ctx, opts, &fileNode, fileRelPath)
+		addNode(nodes, fileNode)
+		addEdge(edges, Edge{
+			Src:    PackageID(pkgID),
+			Dst:    fileNode.ID,
+			Type:   EdgeContains,
+			Weight: 1.0,
+		})
+		result.Files++
+
+		syms, err := extractor.Extract(ctx, fileRelPath, content)
+		if err != nil {
+			return fmt.Errorf("repoindex: extract elixir symbols %s: %w", fileRelPath, err)
+		}
+		for _, sym := range syms {
+			addSymbol(ctx, opts, nodes, edges, pkgID, fileNode.ID, sym)
+			result.Symbols++
+		}
+	}
+
+	return nil
+}
+
+// elixirPackageID determines the package ID for an Elixir file.
+// Uses the directory path as the package identifier.
+func elixirPackageID(filePath string) string {
+	dir := filepath.Dir(filePath)
+	if dir == "." || dir == "" {
+		return elixirPkgPrefix + "root"
+	}
+	return elixirPkgPrefix + filepath.ToSlash(dir)
 }
 
 func (b *Builder) addGoReferenceEdges(opts BuildOptions, pkgs []*packages.Package, nodes map[string]Node, edges map[string]Edge) error {
@@ -923,6 +1034,31 @@ func isExportedSymbol(sym symbol.Symbol) bool {
 		if sym.Name == "default" {
 			return true
 		}
+	}
+	if sym.Language == "elixir" {
+		signature := strings.TrimSpace(sym.Signature)
+		// Modules are always exported
+		if strings.HasPrefix(signature, "defmodule ") {
+			return true
+		}
+		// Public functions
+		if strings.HasPrefix(signature, "def ") {
+			return true
+		}
+		// Public macros
+		if strings.HasPrefix(signature, "defmacro ") {
+			return true
+		}
+		// Public types
+		if strings.HasPrefix(signature, "@type ") {
+			return true
+		}
+		// Callbacks are part of behaviours (public API)
+		if strings.HasPrefix(signature, "@callback ") {
+			return true
+		}
+		// Private: defp, defmacrop, @typep
+		return false
 	}
 	return isExportedName(sym.Name)
 }

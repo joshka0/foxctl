@@ -394,6 +394,8 @@ func ExtractSymbolSignatures(content []byte, filePath string) []string {
 		return extractJSSymbolSignatures(content)
 	case ".py":
 		return extractPythonSymbolSignatures(content)
+	case ".ex", ".exs":
+		return extractElixirSymbolSignatures(content)
 	default:
 		return extractGenericSymbolSignatures(content)
 	}
@@ -588,6 +590,34 @@ func extractPythonSymbolSignatures(content []byte) []string {
 			if !strings.HasPrefix(name, "_") { // Public only
 				symbols = append(symbols, name+":class")
 			}
+		}
+	}
+
+	return symbols
+}
+
+// extractElixirSymbolSignatures extracts public symbols from Elixir source.
+func extractElixirSymbolSignatures(content []byte) []string {
+	var symbols []string
+	lines := strings.Split(string(content), "\n")
+
+	moduleDef := regexp.MustCompile(`^\s*defmodule\s+([A-Z][A-Za-z0-9_.]*)\s+do`)
+	funcDef := regexp.MustCompile(`^\s*def\s+([a-z_][a-z0-9_?!]*)\s*(?:\(|,|\s+do)`)
+	macroDef := regexp.MustCompile(`^\s*defmacro\s+([a-z_][a-z0-9_?!]*)\s*(?:\(|,|\s+do)`)
+	typeDef := regexp.MustCompile(`^\s*@type\s+([a-z_][a-z0-9_]*)\s*::`)
+	callbackDef := regexp.MustCompile(`^\s*@callback\s+([a-z_][a-z0-9_?!]*)\s*\(`)
+
+	for _, line := range lines {
+		if m := moduleDef.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":module")
+		} else if m := funcDef.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":function")
+		} else if m := macroDef.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":macro")
+		} else if m := typeDef.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":type")
+		} else if m := callbackDef.FindStringSubmatch(line); m != nil {
+			symbols = append(symbols, m[1]+":callback")
 		}
 	}
 

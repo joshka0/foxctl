@@ -40,6 +40,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	var patterns []string
 	var includeGo bool
 	var includeTS bool
+	var includeElixir bool
 	var includeTests bool
 	var dryRun bool
 
@@ -47,7 +48,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 		Use:   "build",
 		Short: "Build the repo graph index",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeTests, dryRun)
+			return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTests, dryRun)
 		},
 	}
 
@@ -55,6 +56,7 @@ func newIndexRepoBuildCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&patterns, "go-pattern", []string{"./..."}, "Go package patterns to index")
 	cmd.Flags().BoolVar(&includeGo, "go", true, "Include Go sources")
 	cmd.Flags().BoolVar(&includeTS, "typescript", true, "Include TypeScript sources")
+	cmd.Flags().BoolVar(&includeElixir, "elixir", false, "Include Elixir sources")
 	cmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include test files")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Build without writing to the index")
 
@@ -175,7 +177,7 @@ func newIndexRepoAskCommand() *cobra.Command {
 	return cmd
 }
 
-func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includeTS, includeTests, dryRun bool) error {
+func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, includeGo, includeTS, includeElixir, includeTests, dryRun bool) error {
 	ctx := cmd.Context()
 	start := time.Now()
 
@@ -214,6 +216,7 @@ func runIndexRepoBuild(cmd *cobra.Command, workspace string, patterns []string, 
 		IncludeTests:          includeTests,
 		IncludeGo:             includeGo,
 		IncludeTypescript:     includeTS,
+		IncludeElixir:         includeElixir,
 		DryRun:                dryRun,
 		SummaryProvider:       summaryProvider,
 		SymbolSummaryProvider: symbolSummaryProvider,

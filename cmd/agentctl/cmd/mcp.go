@@ -1096,6 +1096,7 @@ func registerTools(s *server.MCPServer) {
 			mcp.WithArray("go_pattern", mcp.Description("Go package patterns to index (default: ./...)"), mcp.WithStringItems()),
 			mcp.WithBoolean("include_go", mcp.Description("Include Go sources (default: true)")),
 			mcp.WithBoolean("include_typescript", mcp.Description("Include TypeScript sources (default: true)")),
+			mcp.WithBoolean("include_elixir", mcp.Description("Include Elixir sources (default: false)")),
 			mcp.WithBoolean("include_tests", mcp.Description("Include test files (default: false)")),
 			mcp.WithBoolean("dry_run", mcp.Description("Build without writing to the index (default: false)")),
 		),
@@ -2141,11 +2142,12 @@ func handleRepoIndexBuild(ctx context.Context, req mcp.CallToolRequest) (*mcp.Ca
 	}
 	includeGo := getBoolArg(args, "include_go", true)
 	includeTS := getBoolArg(args, "include_typescript", true)
+	includeElixir := getBoolArg(args, "include_elixir", false)
 	includeTests := getBoolArg(args, "include_tests", false)
 	dryRun := getBoolArg(args, "dry_run", false)
 
 	return runRepoIndexCommand(ctx, func(cmd *cobra.Command) error {
-		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeTests, dryRun)
+		return runIndexRepoBuild(cmd, workspace, patterns, includeGo, includeTS, includeElixir, includeTests, dryRun)
 	})
 }
 

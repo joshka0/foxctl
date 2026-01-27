@@ -5,6 +5,111 @@
 
 ---
 
+## Getting Started (New Repo Setup)
+
+Initialize a new repository for full agentctl tooling support:
+
+### 1. Environment Setup
+
+Ensure API keys are configured in `~/.agentctl/.env`:
+
+```bash
+# Required for embeddings
+VOYAGE_API_KEY=your_key_here
+
+# Optional but recommended
+ANTHROPIC_API_KEY=your_key      # Codemap generation
+OPENROUTER_API_KEY=your_key     # Atomic fact processing, file/symbol summaries
+```
+
+### 2. Build Repo Graph Index
+
+Creates a graph of code relationships (calls, references, imports):
+
+```bash
+# For Go + TypeScript projects
+agentctl index repo build --workspace . --go --typescript
+
+# Go only
+agentctl index repo build --workspace . --go --typescript=false
+
+# TypeScript only
+agentctl index repo build --workspace . --go=false --typescript
+```
+
+### 3. Generate File & Symbol Summaries
+
+LLM-powered summaries for better semantic search (requires OPENROUTER_API_KEY):
+
+```bash
+# File summaries - describes what each file does
+agentctl index file-summaries --workspace .
+
+# Symbol summaries - describes functions/types in repo graph
+agentctl index symbol-summaries --workspace .
+
+# Use --llm for richer symbol summaries (slower)
+agentctl index symbol-summaries --workspace . --llm
+```
+
+### 4. Initialize Embeddings
+
+Embed all knowledge scopes for vector search:
+
+```bash
+# All scopes at once (recommended for new repos)
+agentctl index init --workspace .
+
+# Specific scopes
+agentctl index init --workspace . --scope symbols        # Code files
+agentctl index init --workspace . --scope memory         # Gotchas/notes
+agentctl index init --workspace . --scope tasks          # Task descriptions
+agentctl index init --workspace . --scope sessions       # Session context
+
+# For TypeScript-only repos, specify glob pattern
+agentctl index init --workspace . --scope symbols --glob '**/*.{ts,tsx,js,jsx}'
+```
+
+### 5. Verify Setup
+
+```bash
+# Check all index status
+agentctl index status --workspace .
+
+# Check repo graph status
+agentctl index repo status --workspace .
+
+# Test semantic search
+agentctl run code/semantic_search --input '{"format": "tree", "limit": 20}'
+
+# Test repo graph search
+agentctl index repo search --workspace . --query "authentication" --limit 10
+```
+
+### Quick Setup Script
+
+For a new TypeScript repo:
+```bash
+# Build all indexes
+agentctl index repo build --workspace . --go=false --typescript
+agentctl index file-summaries --workspace .
+agentctl index symbol-summaries --workspace .
+agentctl index init --workspace . --scope symbols --glob '**/*.{ts,tsx}'
+agentctl index init --workspace . --scope memory,tasks,sessions
+```
+
+### Available Tools After Setup
+
+| Tool | Command | Purpose |
+|------|---------|---------|
+| **Semantic Search** | `agentctl run code/semantic_search --input '{"query": "..."}'` | Find code by concept |
+| **Graph Search** | `agentctl index repo search --query "..."` | Find nodes by text |
+| **Graph Expand** | `agentctl index repo expand --seed "<id>" --edge CALLS` | Traverse relationships |
+| **Graph Ask** | `agentctl index repo ask --question "..."` | Natural language queries |
+| **Codemap** | `agentctl codemap generate "trace flow"` | AI-traced relationships |
+
+---
+
 ## Session Start / Post-Compaction
 
 Get oriented with the codebase tree:

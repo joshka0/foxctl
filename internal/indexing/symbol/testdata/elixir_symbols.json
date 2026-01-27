@@ -1,0 +1,98 @@
+[
+  {
+    "id": "lib/my_app/users.ex:MyApp.Users",
+    "file_path": "lib/my_app/users.ex",
+    "name": "MyApp.Users",
+    "language": "elixir",
+    "kind": "class",
+    "start_line": 1,
+    "end_line": 25,
+    "start_byte": 0,
+    "end_byte": 473,
+    "body_digest": "sha256:6fa77b55c550cc37cafd64cea2da11c2c94208a215a6eb473f359458c6e3bb81"
+  },
+  {
+    "id": "lib/my_app/users.ex:user_id",
+    "file_path": "lib/my_app/users.ex",
+    "name": "user_id",
+    "language": "elixir",
+    "kind": "type",
+    "start_line": 4,
+    "end_line": 4,
+    "start_byte": 57,
+    "end_byte": 85,
+    "body_digest": "sha256:1f9b2741d3defe33e4b74a9d67f75e60124bb84d34dceb13c479f9e0b2eb189d"
+  },
+  {
+    "id": "lib/my_app/users.ex:internal_state",
+    "file_path": "lib/my_app/users.ex",
+    "name": "internal_state",
+    "language": "elixir",
+    "kind": "type",
+    "start_line": 5,
+    "end_line": 5,
+    "start_byte": 86,
+    "end_byte": 118,
+    "body_digest": "sha256:c8aeecc0d0463fc031ed981a08edc606f47cd89e1bd032974b06e002d653f7ae"
+  },
+  {
+    "id": "lib/my_app/users.ex:on_create",
+    "file_path": "lib/my_app/users.ex",
+    "name": "on_create",
+    "language": "elixir",
+    "kind": "interface",
+    "start_line": 7,
+    "end_line": 7,
+    "start_byte": 120,
+    "end_byte": 178,
+    "body_digest": "sha256:ffec363bb434cb9d30614b88f57360e92078a91c9773974fc0744f3be14333cd"
+  },
+  {
+    "id": "lib/my_app/users.ex:create",
+    "file_path": "lib/my_app/users.ex",
+    "name": "create",
+    "language": "elixir",
+    "kind": "function",
+    "start_line": 9,
+    "end_line": 12,
+    "start_byte": 180,
+    "end_byte": 271,
+    "body_digest": "sha256:525163bee51dba85f6ad07d8096f91348d8bfd69a25397738dc8c2fcb1cc79fb"
+  },
+  {
+    "id": "lib/my_app/users.ex:validate",
+    "file_path": "lib/my_app/users.ex",
+    "name": "validate",
+    "language": "elixir",
+    "kind": "function",
+    "start_line": 14,
+    "end_line": 16,
+    "start_byte": 273,
+    "end_byte": 320,
+    "body_digest": "sha256:fc90b444e4bb0e37b955bc53d4a54ef9c6d6e1d931caaaa3583bf991bd8e4800"
+  },
+  {
+    "id": "lib/my_app/users.ex:debug",
+    "file_path": "lib/my_app/users.ex",
+    "name": "debug",
+    "language": "elixir",
+    "kind": "function",
+    "start_line": 18,
+    "end_line": 22,
+    "start_byte": 322,
+    "end_byte": 415,
+    "body_digest": "sha256:3eaa4d7b2094d27335203a1725c7823e376cdc957ff6f767ec7767f668f07a76"
+  },
+  {
+    "id": "lib/my_app/users.ex:internal_debug",
+    "file_path": "lib/my_app/users.ex",
+    "name": "internal_debug",
+    "language": "elixir",
+    "kind": "function",
+    "start_line": 24,
+    "end_line": 25,
+    "start_byte": 417,
+    "end_byte": 473,
+    "body_digest": "sha256:e3e33f073328815cd060043f42667c6a7b72cc453e467a002003d4a9cdbe84da"
+  }
+]

@@ -103,6 +103,7 @@ type BuildOptions struct {
 	IncludeTests          bool
 	IncludeGo             bool
 	IncludeTypescript     bool
+	IncludeElixir         bool
 	DryRun                bool
 	SummaryProvider       FileSummaryProvider
 	SymbolSummaryProvider SymbolSummaryProvider
