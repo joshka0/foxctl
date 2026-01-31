@@ -1,4 +1,5 @@
 // Package main implements the ci/checks skill.
+// Summarizes GitHub check runs for pull requests with optional detailed error extraction.
 package main
 
 import (
@@ -17,7 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for ci/checks operations.
 type Input struct {
 	PR         skillmain.FlexString `json:"pr" validate:"required"`
 	Owner      string               `json:"owner,omitempty"`
@@ -26,6 +27,7 @@ type Input struct {
 	ErrorsOnly bool                 `json:"errors_only,omitempty"`
 }
 
+// PRInfo represents basic pull request information from GitHub API.
 type PRInfo struct {
 	Number int `json:"number"`
 	Head   struct {
@@ -33,6 +35,7 @@ type PRInfo struct {
 	} `json:"head"`
 }
 
+// CheckRun represents a GitHub check run from the API response.
 type CheckRun struct {
 	ID          int    `json:"id"`
 	Name        string `json:"name"`
@@ -43,6 +46,7 @@ type CheckRun struct {
 	CompletedAt string `json:"completed_at"`
 }
 
+// CheckSummary represents a processed check run with additional computed fields.
 type CheckSummary struct {
 	ID              int      `json:"id"`
 	Name            string   `json:"name"`
@@ -57,6 +61,7 @@ type CheckSummary struct {
 	Locations       []string `json:"locations,omitempty"`
 }
 
+// JobDetails represents GitHub Actions job details including steps.
 type JobDetails struct {
 	ID          int       `json:"id"`
 	Name        string    `json:"name"`
@@ -68,6 +73,7 @@ type JobDetails struct {
 	HTMLURL     string    `json:"html_url"`
 }
 
+// JobStep represents a single step within a GitHub Actions job.
 type JobStep struct {
 	Name        string `json:"name"`
 	Status      string `json:"status"`
@@ -77,10 +83,21 @@ type JobStep struct {
 	CompletedAt string `json:"completed_at"`
 }
 
+// main is the skill entry point for ci/checks.
 func main() {
 	skillmain.Main("ci/checks", run)
 }
 
+// run orchestrates CI check run analysis for a GitHub pull request.
+//
+// Index:
+// - Purpose: Summarize GitHub check runs for PRs with optional detailed error extraction and filtering
+// - Flow: resolve PR → fetch check runs → filter/sort → enrich with job details → extract error excerpts → emit summary
+// - SideEffects: GitHub API calls; optional log fetching for detailed mode
+// - FailureModes: invalid PR, missing token, GitHub API errors, network timeouts
+// - Observability: emits repository/pr_number/head_sha/overall_status/has_blocking_ci/all_checks_successful/has_neutral_or_skipped/totals/mode/errors_only/checks
+// - Related: getPR, getCheckRuns, getJobDetails, getJobLogs, extractConciseError, cihelpers.ResolveOwnerRepo, cihelpers.ResolveToken
+// - Keywords: ci/checks, pr, check_runs, conclusion, errors_only, mode, summary, detailed, github_api
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	prRef := strings.TrimSpace(in.PR.String())
 
@@ -204,6 +221,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "ci/checks", data)
 }
 
+// getPR fetches basic pull request information from GitHub API.
 func getPR(client *http.Client, token, owner, repo string, prNum int) (*PRInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, prNum)
 	var pr PRInfo
@@ -213,6 +231,7 @@ func getPR(client *http.Client, token, owner, repo string, prNum int) (*PRInfo, 
 	return &pr, nil
 }
 
+// getCheckRuns fetches check runs for a specific commit from GitHub API.
 func getCheckRuns(client *http.Client, token, owner, repo, sha string) ([]CheckRun, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s/check-runs", owner, repo, sha)
 	var response struct {
@@ -224,6 +243,7 @@ func getCheckRuns(client *http.Client, token, owner, repo, sha string) ([]CheckR
 	return response.CheckRuns, nil
 }
 
+// getJobDetails fetches detailed job information from GitHub Actions API.
 func getJobDetails(client *http.Client, token, owner, repo, jobURL string) (*JobDetails, error) {
 	parts := strings.Split(jobURL, "/")
 	if len(parts) < 8 {
@@ -239,6 +259,7 @@ func getJobDetails(client *http.Client, token, owner, repo, jobURL string) (*Job
 	return &job, nil
 }
 
+// findFailedStep finds the last failed step in a job (reverse order for most recent).
 func findFailedStep(job *JobDetails) *JobStep {
 	for i := len(job.Steps) - 1; i >= 0; i-- {
 		step := &job.Steps[i]
@@ -249,6 +270,7 @@ func findFailedStep(job *JobDetails) *JobStep {
 	return nil
 }
 
+// countConclusions counts check runs by their conclusion status.
 func countConclusions(checkRuns []CheckRun) (total, failed, cancelled, neutral, success int) {
 	for _, c := range checkRuns {
 		total++
@@ -266,6 +288,7 @@ func countConclusions(checkRuns []CheckRun) (total, failed, cancelled, neutral, 
 	return total, failed, cancelled, neutral, success
 }
 
+// isBlockingConclusion determines if a check conclusion blocks PR merging.
 func isBlockingConclusion(conclusion string) bool {
 	switch conclusion {
 	case "failure", "timed_out", "action_required", "stale", "cancelled":
@@ -275,6 +298,7 @@ func isBlockingConclusion(conclusion string) bool {
 	}
 }
 
+// filterBlockingChecks returns only check runs with blocking conclusions.
 func filterBlockingChecks(checkRuns []CheckRun) []CheckRun {
 	var out []CheckRun
 	for _, c := range checkRuns {
@@ -285,6 +309,7 @@ func filterBlockingChecks(checkRuns []CheckRun) []CheckRun {
 	return out
 }
 
+// classifyCIStatus determines overall CI status and flags from check run counts.
 func classifyCIStatus(total, failed, cancelled, neutral, success int) (string, bool, bool, bool) {
 	overall := "unknown"
 	if failed > 0 {
@@ -304,7 +329,7 @@ func classifyCIStatus(total, failed, cancelled, neutral, success int) (string, b
 	return overall, hasBlockingCI, allChecksSuccessful, hasNeutralOrSkipped
 }
 
-// getJobLogs fetches raw logs for a GitHub Actions job.
+// getJobLogs fetches raw logs for a GitHub Actions job with redirect handling.
 func getJobLogs(client *http.Client, token, owner, repo string, jobID int) (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d/logs", owner, repo, jobID)
 	req, err := http.NewRequest("GET", url, nil)

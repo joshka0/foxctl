@@ -1,0 +1,115 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: presence/orchestrate
+  version: 0.1.0
+  description: "Coordinate presence skills to generate a complete presence bundle"
+  tags: ["presence", "orchestrate", "companion"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 16
+signature:
+  command: presence/orchestrate
+  parameters:
+    - name: text
+      type: string
+      required: true
+      description: "Response text to process for presence"
+    - name: conversation_id
+      type: string
+      required: true
+      description: "Conversation ID for context"
+    - name: character_id
+      type: string
+      required: false
+      description: "Character ID for overlay selection"
+    - name: generate_voice
+      type: boolean
+      required: false
+      default: false
+      description: "Generate voice audio"
+    - name: generate_background
+      type: boolean
+      required: false
+      default: false
+      description: "Generate background image"
+    - name: scene
+      type: string
+      required: false
+      description: "Scene context for background generation"
+    - name: style
+      type: string
+      required: false
+      default: "anime"
+      description: "Art style for background: anime|realistic|watercolor|minimalist"
+    - name: voice_id
+      type: string
+      required: false
+      description: "ElevenLabs voice ID override"
+  help:
+    short: "Orchestrate presence generation for companion responses"
+    long: |
+      Coordinates presence generation by:
+      1. Parsing text for emoji and markers (sync)
+      2. Preparing parameters for parallel asset generation:
+         - Background image (if enabled)
+         - Character overlay selection
+         - Voice synthesis (if enabled)
+
+      Returns a PresenceBundle with emotion data and asset digests.
+
+      The skill outputs parameters for the individual presence skills.
+      The companion service uses this to run them in parallel.
+
+      Example:
+        agentctl run presence/orchestrate --input '{
+          "text": "*softly* I understand... 😢",
+          "conversation_id": "conv-123",
+          "generate_voice": true,
+          "generate_background": true
+        }'
+
+    workflows:
+      - id: full-presence
+        description: "Generate complete presence bundle"
+        example_input:
+          text: "That sounds wonderful! 😊"
+          conversation_id: "conv-123"
+          generate_voice: true
+          generate_background: true
+  returns:
+    - name: emotion
+      type: string
+      description: "Detected emotion"
+    - name: intensity
+      type: number
+      description: "Emotion intensity 0.0-1.0"
+    - name: confidence
+      type: number
+      description: "Detection confidence 0.0-1.0"
+    - name: display_text
+      type: string
+      description: "Text with markers stripped"
+    - name: markers
+      type: array
+      description: "Detected markers"
+    - name: detected_emoji
+      type: array
+      description: "Detected emoji"
+    - name: background_params
+      type: object
+      description: "Parameters for presence/background call"
+    - name: character_params
+      type: object
+      description: "Parameters for presence/character call"
+    - name: voice_params
+      type: object
+      description: "Parameters for presence/voice call"
+capabilities:
+  network: "none"
+  filesystem: []
+  pure: true

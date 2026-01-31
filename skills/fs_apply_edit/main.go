@@ -26,7 +26,7 @@ const (
 	MatchRegex MatchMode = "regex"
 )
 
-// Edit represents a single edit operation.
+// Edit represents a single edit operation for fs/apply_edit.
 type Edit struct {
 	Search        string    `json:"search" validate:"required"`
 	Replace       string    `json:"replace"`
@@ -37,7 +37,7 @@ type Edit struct {
 	MatchMode     MatchMode `json:"match_mode,omitempty" validate:"omitempty,oneof=exact fuzzy regex"`
 }
 
-// Input is the skill input.
+// Input is the skill input for fs/apply_edit operations.
 type Input struct {
 	Path         string `json:"path" validate:"required"`
 	Edits        []Edit `json:"edits" validate:"required,min=1,dive"`
@@ -53,7 +53,7 @@ type EditResult struct {
 	Error        string `json:"error,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output for fs/apply_edit operations.
 type Output struct {
 	Path             string            `json:"path"`
 	BackupDigest     string            `json:"backup_digest,omitempty"`
@@ -65,10 +65,21 @@ type Output struct {
 	EditResults      []EditResult      `json:"edit_results,omitempty"`
 }
 
+// main is the skill entry point for fs/apply_edit.
 func main() {
 	skillmain.Main("fs/apply_edit", run)
 }
 
+// run orchestrates file editing with fuzzy matching, backup creation, and diff generation.
+//
+// Index:
+// - Purpose: Apply targeted edits to files using exact, fuzzy, or regex matching with CAS backup
+// - Flow: validate input → resolve path → apply edits → create backup → generate diff → emit results
+// - SideEffects: file modifications; backup creation; CAS storage; diff generation
+// - FailureModes: invalid paths, regex errors, backup failures, file permission errors
+// - Observability: emits edit results, replacement counts, backup artifacts, and diff output
+// - Related: applyEdit, applyExactMatch, applyFuzzyMatch, applyRegexMatch
+// - Keywords: fs/apply_edit, file_editing, fuzzy_matching, backup, diff, cas
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if !in.DryRun {

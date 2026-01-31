@@ -33,16 +33,28 @@ func init() {
 	logging.SetLogger(logger)
 }
 
+// input is the expected JSON input for codemap/generate operations.
 type input struct {
 	Query     string `json:"query"`
 	Workspace string `json:"workspace"`
 	Depth     int    `json:"depth"`
 }
 
+// main is the skill entry point for codemap/generate.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates codemap generation using dspy-go agent with optional embedding storage.
+//
+// Index:
+// - Purpose: Generate semantic codemaps using AI agent with natural language queries
+// - Flow: validate input → resolve workspace → open stores → create agent → generate codemap → store with embeddings
+// - SideEffects: database operations; graph store queries; AI agent execution; embedding generation; memory storage
+// - FailureModes: invalid queries, workspace validation errors, agent creation failures, generation errors, storage errors
+// - Observability: emits generated codemap with traces, files, and metadata
+// - Related: storeCodemapWithEmbedding, buildCodemapSummary
+// - Keywords: codemap/generate, dspy-go, agent, embeddings, semantic, traces
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.Query == "" {
 		return skillerr.Arg("query is required", skillerr.WithHint("Provide a natural language query to generate a codemap."))
@@ -117,8 +129,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, result)
 }
 
-// storeCodemapWithEmbedding saves the codemap to memory store with chunked embeddings
-// for semantic search.
+// storeCodemapWithEmbedding saves the codemap to memory store with chunked embeddings for semantic search.
 func storeCodemapWithEmbedding(ctx context.Context, logger zerolog.Logger, cfg *config.Config, cm *codemap.Codemap, workspace string) error {
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 	geminiKey := os.Getenv("GEMINI_API_KEY")
@@ -167,6 +178,7 @@ func storeCodemapWithEmbedding(ctx context.Context, logger zerolog.Logger, cfg *
 	return nil
 }
 
+// buildCodemapSummary creates a summary string from title, description, and fallback.
 func buildCodemapSummary(title, description, fallback string) string {
 	if title == "" && description == "" {
 		return fallback

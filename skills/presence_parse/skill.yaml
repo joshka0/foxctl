@@ -1,0 +1,88 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: presence/parse
+  version: 0.1.0
+  description: "Parse text for emoji and emotion markers, extract structured emotion data"
+  tags: ["presence", "emotion", "parse", "companion"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 4
+signature:
+  command: presence/parse
+  parameters:
+    - name: text
+      type: string
+      required: true
+      description: "Text to parse for emotion markers"
+    - name: strip_markers
+      type: boolean
+      required: false
+      default: true
+      description: "Remove detected emoji and *markers* from output text"
+    - name: allowed_emotions
+      type: array
+      required: false
+      items:
+        type: string
+      description: "Constrain output to these emotions (default: all)"
+  help:
+    short: "Extract emotion from text via emoji and marker detection"
+    long: |
+      Parse response text to detect emotional content via:
+      - Emoji mapping (e.g., "joy", "sadness", "anger")
+      - Text markers like *sighs*, *laughs*, *softly*
+
+      Returns structured emotion data for use by other presence skills.
+
+      Example:
+        agentctl run presence/parse --input '{"text": "That is so exciting! *giggles*"}'
+
+      Output:
+        {
+          "emotion": "joy",
+          "intensity": 0.8,
+          "stripped_text": "That is so exciting!",
+          "detected_emoji": [],
+          "markers": ["giggles"]
+        }
+    workflows:
+      - id: parse-emoji
+        description: "Parse text with emoji"
+        example_input:
+          text: "I understand how you feel..."
+      - id: parse-markers
+        description: "Parse text with emotion markers"
+        example_input:
+          text: "*softly* It will be okay. *pause*"
+          strip_markers: true
+  returns:
+    - name: emotion
+      type: string
+      description: "Detected emotion: neutral|joy|sadness|anger|fear|surprise|disgust|playful"
+    - name: intensity
+      type: number
+      description: "Emotion intensity (0.0-1.0)"
+    - name: confidence
+      type: number
+      description: "Detection confidence (0.0-1.0)"
+    - name: stripped_text
+      type: string
+      description: "Text with emoji and markers removed"
+    - name: detected_emoji
+      type: array
+      description: "List of emoji found in text"
+    - name: markers
+      type: array
+      description: "List of *markers* found in text"
+    - name: method
+      type: string
+      description: "Detection method used: emoji_map|marker_analysis|heuristic"
+capabilities:
+  network: "none"
+  filesystem: []
+  pure: true

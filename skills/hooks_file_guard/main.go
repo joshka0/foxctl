@@ -37,10 +37,21 @@ const (
 	DefaultReservationTTL = 10 * time.Minute
 )
 
+// main is the skill entry point for hooks/file_guard.
 func main() {
 	skillmain.Main("hooks/file_guard", run)
 }
 
+// run orchestrates file reservation management to prevent edit conflicts between agents.
+//
+// Index:
+// - Purpose: Manage file reservations to prevent edit conflicts between agents with advisory/strict modes
+// - Flow: detect write operations → resolve workspace/actor → extract file path → check conflicts → create reservation → emit decision
+// - SideEffects: file reservation creation; conflict detection; workspace isolation
+// - FailureModes: store access failures, path validation errors, reservation conflicts
+// - Observability: emits reservation status, conflict warnings, and file context
+// - Related: getTaskContext, formatConflicts, emitOutput
+// - Keywords: hooks/file_guard, file_reservations, conflict_prevention, agent_coordination
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 
@@ -206,7 +217,14 @@ func getTaskContext(ctx context.Context, taskStore tasks.Store, workspaceID, too
 
 // formatConflicts creates a warning message for conflicts with context about the other agent's work.
 //
-//nolint:revive // strings.Builder.WriteString never returns an error for in-memory writes.
+// Index:
+// - Purpose: Format conflict warnings with context about other agents' work
+// - Flow: iterate conflicts → build warning message with conflict details
+// - SideEffects: none
+// - FailureModes: none
+// - Observability: emits conflict warnings
+// - Related: agent.ReservationConflict, conflict.Path, conflict.Holder, conflict.Mode
+// - Keywords: conflict warnings, reservation conflicts, agent coordination
 func formatConflicts(conflicts []agent.ReservationConflict) string {
 	var sb strings.Builder
 	sb.WriteString("## File Reservation Conflict\n\n")
@@ -228,6 +246,7 @@ func formatConflicts(conflicts []agent.ReservationConflict) string {
 	return sb.String()
 }
 
+// emitOutput writes the hook output to the skill output.
 func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
 	return hookutil.EmitOutput(rc, "hooks/file_guard", output, nil)
 }

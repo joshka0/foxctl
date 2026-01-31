@@ -35,7 +35,6 @@ dspy-go/
 
 # Environment and secrets
 .env
-.env.local
 .env.*.local
 .env.tmp
 *.token
@@ -131,3 +130,4 @@ pr*.txt
 *_test
 !*_test.go
 !*_test/
+sha256:*

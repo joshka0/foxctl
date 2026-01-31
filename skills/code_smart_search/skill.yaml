@@ -11,7 +11,7 @@ distribution:
     entry: skills/code_smart_search/code_smart_search
 io:
   format: JSON
-  inline_output_kb: 32
+  inline_output_kb: 64
 signature:
   command: code/smart_search
   parameters:

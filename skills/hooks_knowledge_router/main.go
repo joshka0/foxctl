@@ -21,6 +21,7 @@ import (
 )
 
 // RouterConfig holds configuration for the knowledge router.
+// RouterConfig holds configuration for the knowledge router.
 type RouterConfig struct {
 	Threshold          float64 `json:"threshold"`
 	MaxRecommendations int     `json:"max_recommendations"`
@@ -35,6 +36,7 @@ func DefaultConfig() RouterConfig {
 }
 
 // Match represents a knowledge item match with score.
+// Match represents a knowledge item match with score.
 type Match struct {
 	Name        string  `json:"name"`
 	Kind        string  `json:"kind"`
@@ -42,10 +44,21 @@ type Match struct {
 	Score       float64 `json:"score"`
 }
 
+// main is the skill entry point for hooks/knowledge_router.
 func main() {
 	skillmain.Main("hooks/knowledge_router", run)
 }
 
+// run orchestrates knowledge pack recommendation based on prompt content and file paths.
+//
+// Index:
+// - Purpose: Surface relevant knowledge packs based on prompt content and file paths with threshold-based filtering
+// - Flow: load config → open store → extract search context → find matches → filter by threshold → emit recommendations
+// - SideEffects: knowledge store queries; context injection; recommendation scoring
+// - FailureModes: store access failures, keyword extraction errors
+// - Observability: emits recommendation counts, scores, and configuration info
+// - Related: extractPrompt, findMatches, extractKeywords, scoreKeywordMatch
+// - Keywords: hooks/knowledge_router, knowledge_recommendation, content_matching, path_matching, threshold_filtering
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 	routerCfg := DefaultConfig()
@@ -259,6 +272,7 @@ func minFloat(a, b float64) float64 {
 	return b
 }
 
+// emitOutput emits the hook output with optional extras.
 func emitOutput(rc *skillmain.RunContext, output hooks.Output, recommendations []Match, cfg RouterConfig) error {
 	var extras map[string]any
 	if len(recommendations) > 0 {

@@ -15,13 +15,13 @@ import (
 
 const command = "calibration/get"
 
-// Input represents the skill input parameters.
+// Input represents the skill input parameters for calibration profile retrieval.
 type Input struct {
 	Workspace string `json:"workspace,omitempty"`
 	Format    string `json:"format,omitempty"` // "compact" (default) or "detailed"
 }
 
-// Output represents the skill output.
+// Output represents the skill output with profile data in multiple formats.
 type Output struct {
 	Found      bool                 `json:"found"`
 	Profile    *calibration.Profile `json:"profile,omitempty"`
@@ -30,10 +30,21 @@ type Output struct {
 	HookOutput *hooks.Output        `json:"hook_output,omitempty"`
 }
 
+// main is the skill entry point for calibration/get.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates calibration profile retrieval with multiple output formats and hook integration.
+//
+// Index:
+// - Purpose: Retrieve calibration profiles with compact/detailed formatting and hook output for context injection
+// - Flow: resolve workspace → open memory store → load profile → format based on requested output → emit results
+// - SideEffects: profile loading; format conversion; hook output generation; context preparation
+// - FailureModes: workspace resolution failures, memory store access errors, missing profiles
+// - Observability: emits profile availability, formatted outputs, and hook-compatible context data
+// - Related: calibration.LoadProfile, calibration.FormatCompact, calibration.FormatDetailed, calibration.FormatForInjection
+// - Keywords: calibration/get, profile_retrieval, calibration_data, context_injection, hook_integration
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Resolve workspace
 	workspace := workspaceutil.Resolve(in.Workspace, "", rc.Workspace)

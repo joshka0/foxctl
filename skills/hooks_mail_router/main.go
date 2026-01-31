@@ -22,10 +22,21 @@ const (
 	MaxMessagesInContext = 5
 )
 
+// main is the skill entry point for hooks/mail_router.
 func main() {
 	skillmain.Main("hooks/mail_router", run)
 }
 
+// run orchestrates mailbox message routing with priority handling and surface tracking.
+//
+// Index:
+// - Purpose: Surface relevant mailbox messages into Claude's context, prioritizing admin and overseer messages
+// - Flow: resolve workspace/actor → open board store → query inbox → build context → mark surfaced messages → emit results
+// - SideEffects: message surfacing; inbox querying; context injection
+// - FailureModes: store access failures, inbox query errors
+// - Observability: emits message counts, workspace info, and formatted context
+// - Related: buildMailContext, isPlanEvent, extractPlanEventType, extractPlanTaskID, formatSender
+// - Keywords: hooks/mail_router, mailbox_routing, message_prioritization, context_injection, plan_events
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 

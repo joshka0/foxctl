@@ -49,7 +49,10 @@ func ConsoleSessionsHandler(hub *consolews.Hub, cfg config.Config, log zerolog.L
 }
 
 // ConsoleSessionCreateHandler returns a handler for POST /api/console/sessions.
-// Creates a new console session.
+// ConsoleSessionCreateHandler returns an http.HandlerFunc that handles POST requests to create a new console session.
+// It expects a JSON body with fields `workspace`, `profile`, and `system_prompt` (defaults `profile` to "explorer" when empty),
+// creates a session via the provided hub, logs the creation, and responds with HTTP 201 and the session info.
+// Responds with HTTP 400 for invalid JSON and HTTP 405 for non-POST methods.
 func ConsoleSessionCreateHandler(hub *consolews.Hub, cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -62,7 +65,7 @@ func ConsoleSessionCreateHandler(hub *consolews.Hub, cfg config.Config, log zero
 			Profile      string `json:"profile"`
 			SystemPrompt string `json:"system_prompt"`
 		}
-		if err := readJSON(r, &req); err != nil {
+		if err := readJSON(w, r, &req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
@@ -154,7 +157,14 @@ func ConsoleSessionDetailHandler(hub *consolews.Hub, cfg config.Config, log zero
 	}
 }
 
-// handleSessionAsk handles POST /api/console/sessions/:id/ask.
+// handleSessionAsk processes an ask request for a console session and queues it for asynchronous handling.
+//
+// It accepts only POST requests and responds with HTTP 405 for other methods. The request body must be JSON
+// containing a non-empty `content` field; malformed JSON or a missing `content` field produce HTTP 400.
+// If `correlation_id` is not provided the handler generates one. The request is translated into a console payload
+// and dispatched to the session for background processing with a 30-minute timeout; the work is started in the
+// background so it can outlive the HTTP request. On success the handler responds with HTTP 202 and a JSON body
+// containing the `correlation_id` and a confirmation message.
 func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews.Session, log zerolog.Logger) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -165,7 +175,7 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 		Content       string `json:"content"`
 		CorrelationID string `json:"correlation_id"`
 	}
-	if err := readJSON(r, &req); err != nil {
+	if err := readJSON(w, r, &req); err != nil {
 		httpError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
@@ -189,9 +199,11 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 
 	// Handle the payload (async) - use timeout context to prevent unbounded execution
 	// 30 minute timeout for long-running agent tasks
+	// Note: We intentionally use context.Background() to let the work outlive this HTTP request.
+	// The timeout ensures cleanup even if the session cancel mechanism isn't invoked.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	go func() {
-		defer cancel()
+		defer cancel() // Ensure context resources are freed when work completes
 		session.HandlePayload(ctx, nil, payload)
 	}()
 
@@ -207,7 +219,10 @@ func handleSessionAsk(w http.ResponseWriter, r *http.Request, session *consolews
 	})
 }
 
-// handleSessionCancel handles POST /api/console/sessions/:id/cancel.
+// handleSessionCancel handles POST requests to cancel a console session.
+// It accepts an optional JSON body with a `correlation_id`, sends a cancel
+// command payload to the provided session using the request context, logs the
+// cancellation, and responds with a JSON acknowledgement.
 func handleSessionCancel(w http.ResponseWriter, r *http.Request, session *consolews.Session, log zerolog.Logger) {
 	if r.Method != http.MethodPost {
 		httpError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -217,7 +232,7 @@ func handleSessionCancel(w http.ResponseWriter, r *http.Request, session *consol
 	var req struct {
 		CorrelationID string `json:"correlation_id"`
 	}
-	_ = readJSON(r, &req) // Optional body
+	_ = readJSON(w, r, &req) // Optional body
 
 	// Create cancel command payload
 	payload := consolews.Payload{

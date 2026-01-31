@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/domain/agent"
@@ -28,9 +30,45 @@ type MailboxMessageResponse struct {
 	Stream      string `json:"stream,omitempty"`
 }
 
-// MailboxListHandler returns a handler for GET /api/mailbox.
+// MailboxSendRequest is the request body for sending a mailbox message.
+type MailboxSendRequest struct {
+	WorkspaceID string `json:"workspace_id"`
+	Sender      string `json:"sender"`
+	Recipient   string `json:"recipient"`
+	Subject     string `json:"subject"`
+	Body        string `json:"body"`
+	Kind        string `json:"kind,omitempty"`
+	Priority    int    `json:"priority,omitempty"`
+	AckRequired bool   `json:"ack_required,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
+	Stream      string `json:"stream,omitempty"`
+}
+
+// MailboxSendResponse is the response for sending a mailbox message.
+type MailboxSendResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// MailboxListHandler returns an HTTP handler for the /api/mailbox endpoint.
+//
+// It handles GET and POST requests. POST requests are forwarded to handleMailboxSend to create and send a mailbox message.
+// GET requests return a list of mailbox messages and accept the following query parameters:
+// - limit: integer 1–500 (defaults to 50).
+// - actor_id or actor: actor identifier; if omitted and `all` is not true, defaults to the broadcast recipient.
+// - all: boolean flag to bypass actor restriction.
+// - only_unread: boolean flag to filter only unread messages.
+// - only_unsurfaced: boolean flag to filter only unsurfaced messages.
+// - workspace_id or workspace: required workspace identifier.
+//
+// For a successful GET the handler returns a JSON object with a "messages" array. For unsupported HTTP methods it responds with 405 Method Not Allowed.
 func MailboxListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			handleMailboxSend(w, r, cfg, log)
+			return
+		}
 		if r.Method != http.MethodGet {
 			httpError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -114,6 +152,8 @@ func convertBoardMessages(msgs []agent.BoardMessage) []MailboxMessageResponse {
 	return resp
 }
 
+// parseBool reports whether raw represents a truthy value.
+// It treats the trimmed, case-insensitive strings "1", "true", "yes", "y", and "on" as true; any other value yields false.
 func parseBool(raw string) bool {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "1", "true", "yes", "y", "on":
@@ -121,4 +161,100 @@ func parseBool(raw string) bool {
 	default:
 		return false
 	}
+}
+
+// handleMailboxSend parses a MailboxSendRequest from the HTTP request, validates required fields,
+// constructs a BoardMessage with defaults (kind defaults to "info", priority defaults to 3) and
+// persists it to the board store, then responds with a 201 Created containing the new message ID.
+//
+// Validation behavior:
+// - Returns 400 if workspace_id, sender, or recipient are missing.
+// - Returns 400 if kind is not one of "instruction", "info", "alert", or "review_request".
+// - Returns 400 if priority is not between 1 (highest) and 5 (lowest).
+//
+// Store errors result in a 500 Internal Server Error response.
+func handleMailboxSend(w http.ResponseWriter, r *http.Request, cfg config.Config, log zerolog.Logger) {
+	// Parse request body (readJSON limits body size to prevent DOS)
+	var req MailboxSendRequest
+	if err := readJSON(w, r, &req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	if req.WorkspaceID == "" {
+		httpError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+	if req.Sender == "" {
+		httpError(w, http.StatusBadRequest, "sender is required")
+		return
+	}
+	if req.Recipient == "" {
+		httpError(w, http.StatusBadRequest, "recipient is required")
+		return
+	}
+
+	// Open board store
+	store, err := blackboard.OpenBoardStore(r.Context(), cfg.Storage.Root)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to open board store")
+		httpError(w, http.StatusInternalServerError, "failed to open board store")
+		return
+	}
+	defer store.Close()
+
+	// Validate and default kind to "info"
+	kind := agent.BoardMessageKind(req.Kind)
+	if kind == "" {
+		kind = agent.BoardMessageKindInfo
+	} else {
+		// Validate enum value
+		switch kind {
+		case agent.BoardMessageKindInstruction, agent.BoardMessageKindInfo,
+			agent.BoardMessageKindAlert, agent.BoardMessageKindReviewRequest:
+			// valid
+		default:
+			httpError(w, http.StatusBadRequest, "invalid kind: must be one of instruction, info, alert, review_request")
+			return
+		}
+	}
+
+	// Validate and default priority (1=highest, 5=lowest)
+	priority := req.Priority
+	if priority == 0 {
+		priority = 3 // default to medium priority
+	} else if priority < 1 || priority > 5 {
+		httpError(w, http.StatusBadRequest, "invalid priority: must be between 1 (highest) and 5 (lowest)")
+		return
+	}
+
+	// Create the message
+	msg := &agent.BoardMessage{
+		ID:          uuid.New().String(),
+		WorkspaceID: req.WorkspaceID,
+		Sender:      req.Sender,
+		Recipient:   req.Recipient,
+		Subject:     req.Subject,
+		Body:        req.Body,
+		Kind:        kind,
+		Priority:    priority,
+		Status:      agent.BoardMessageStatusUnread,
+		AckRequired: req.AckRequired,
+		CreatedAt:   time.Now(),
+		TaskID:      req.TaskID,
+		Stream:      req.Stream,
+	}
+
+	// Send the message
+	if err := store.SendMessage(r.Context(), msg); err != nil {
+		log.Error().Err(err).Msg("failed to send message")
+		httpError(w, http.StatusInternalServerError, "failed to send message")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, MailboxSendResponse{
+		ID:      msg.ID,
+		Status:  "sent",
+		Message: "Message sent successfully",
+	})
 }

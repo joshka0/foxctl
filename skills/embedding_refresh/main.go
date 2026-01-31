@@ -27,7 +27,7 @@ const (
 	geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 )
 
-// Input is the skill input schema.
+// Input is the skill input schema for embedding/refresh operations.
 type Input struct {
 	// Scope is the type of item to refresh: "memory", "symbol", or "session".
 	Scope string `json:"scope" validate:"required,oneof=memory symbol session"`
@@ -42,7 +42,7 @@ type Input struct {
 	DryRun bool `json:"dry_run,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output for embedding/refresh operations.
 type Output struct {
 	Scope      string `json:"scope"`
 	Name       string `json:"name"`
@@ -53,10 +53,21 @@ type Output struct {
 	Hint       string `json:"hint,omitempty"`
 }
 
+// main is the skill entry point for embedding/refresh.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates embedding refresh for memories, symbols, and sessions.
+//
+// Index:
+// - Purpose: Regenerate embeddings for specific items with content formatting and storage routing
+// - Flow: validate input → get content → generate embedding → store based on scope → emit results
+// - SideEffects: embedding API calls; database updates; content formatting; dimension validation
+// - FailureModes: missing API keys, item not found, no content, embedding failures, storage errors
+// - Observability: emits refresh status with dimensions, timing, and detailed error messages
+// - Related: getMemoryContent, getSymbolContent, getSessionContent, formatMemoryContent, formatSessionContent
+// - Keywords: embedding/refresh, regeneration, memories, symbols, sessions, vector_search
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
@@ -306,6 +317,7 @@ func inferActivityType(tags []string) string {
 	return "development"
 }
 
+// joinStrings concatenates string slice with separator.
 func joinStrings(s []string, sep string) string {
 	if len(s) == 0 {
 		return ""

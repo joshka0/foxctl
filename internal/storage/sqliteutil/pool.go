@@ -13,25 +13,28 @@ import (
 // This is useful for daemon mode where we want to keep connections open
 // across multiple requests to avoid the ~50ms open/close overhead per request.
 type Pool struct {
-	mu       sync.RWMutex
-	dbs      map[string]*pooledDB
-	migrates map[string]func(context.Context, *sql.DB) error
-	closed   bool
+	mu     sync.RWMutex
+	dbs    map[string]*pooledDB
+	closed bool
 }
+
 
 // pooledDB wraps a database connection with reference counting.
 type pooledDB struct {
-	db       *sql.DB
-	refCount int
+	db          *sql.DB
+	refCount    int
+	migrateOnce sync.Once
+	migrateErr  error
 }
 
-// NewPool creates a new database connection pool.
+
+// NewPool creates a new Pool with its internal database map initialized and ready for use.
 func NewPool() *Pool {
 	return &Pool{
-		dbs:      make(map[string]*pooledDB),
-		migrates: make(map[string]func(context.Context, *sql.DB) error),
+		dbs: make(map[string]*pooledDB),
 	}
 }
+
 
 // Get returns a database connection for the given path.
 // If a connection doesn't exist, it opens one using OpenDB.
@@ -48,11 +51,22 @@ func (p *Pool) Get(ctx context.Context, path string, migrate func(context.Contex
 	// Check for existing connection
 	if pdb, ok := p.dbs[path]; ok {
 		pdb.refCount++
+		if migrate != nil {
+			pdb.migrateOnce.Do(func() {
+				pdb.migrateErr = migrate(ctx, pdb.db)
+			})
+			if pdb.migrateErr != nil {
+				if pdb.refCount > 0 {
+					pdb.refCount--
+				}
+				return nil, pdb.migrateErr
+			}
+		}
 		return pdb.db, nil
 	}
 
-	// Open new connection
-	db, err := OpenDB(ctx, path, migrate)
+	// Open new connection (migrations handled below)
+	db, err := OpenDB(ctx, path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -63,16 +77,26 @@ func (p *Pool) Get(ctx context.Context, path string, migrate func(context.Contex
 	db.SetMaxOpenConns(5)
 
 	// Store in pool
-	p.dbs[path] = &pooledDB{
+	pdb := &pooledDB{
 		db:       db,
 		refCount: 1,
 	}
+	p.dbs[path] = pdb
+
 	if migrate != nil {
-		p.migrates[path] = migrate
+		pdb.migrateOnce.Do(func() {
+			pdb.migrateErr = migrate(ctx, pdb.db)
+		})
+		if pdb.migrateErr != nil {
+			delete(p.dbs, path)
+			_ = db.Close()
+			return nil, pdb.migrateErr
+		}
 	}
 
 	return db, nil
 }
+
 
 // Release decrements the reference count for a database.
 // In daemon mode, this typically doesn't close the connection -
@@ -82,10 +106,12 @@ func (p *Pool) Release(path string) {
 	defer p.mu.Unlock()
 
 	if pdb, ok := p.dbs[path]; ok {
-		pdb.refCount--
-		// Don't close even if refCount reaches 0 - keep for reuse
+		if pdb.refCount > 0 {
+			pdb.refCount--
+		}
 	}
 }
+
 
 // Close closes all pooled database connections.
 func (p *Pool) Close() error {

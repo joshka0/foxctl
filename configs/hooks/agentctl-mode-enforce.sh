@@ -421,7 +421,7 @@ esac
 
 # Run the skill
 skill_stderr=$(mktemp)
-result=$(printf '%s' "$SKILL_INPUT" | "$AGENTCTL_BIN" run "$SKILL" --input-file - 2>"$skill_stderr") || {
+result=$(printf '%s' "$SKILL_INPUT" | "$AGENTCTL_BIN" run --daemon "$SKILL" --input-file - 2>"$skill_stderr") || {
   error_detail=$(cat "$skill_stderr" 2>/dev/null || echo "unknown error")
   rm -f "$skill_stderr"
   [[ -n "$DEBUG" ]] && echo "DEBUG: skill failed: $error_detail" >&2

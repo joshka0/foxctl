@@ -64,6 +64,10 @@ type EngineOutput struct {
 	// ToolResults are the results from tool execution.
 	ToolResults []ToolResult `json:"tool_results,omitempty"`
 
+	// InjectedContexts tracks context injected by hooks for tool calls.
+	// Entries include ToolCallID for correlation; order is insertion order.
+	InjectedContexts []InjectedContext `json:"injected_contexts,omitempty"`
+
 	// StopReason indicates why the turn ended.
 	StopReason StopReason `json:"stop_reason"`
 
@@ -72,6 +76,18 @@ type EngineOutput struct {
 
 	// Error contains error details if StopReason is Error.
 	Error string `json:"error,omitempty"`
+}
+
+// InjectedContext tracks context injected by hooks during tool execution.
+type InjectedContext struct {
+	// ToolCallID is the ID of the associated tool call.
+	ToolCallID string `json:"tool_call_id"`
+
+	// Source is the hook/action that injected the context.
+	Source string `json:"source,omitempty"`
+
+	// Content is the injected context text.
+	Content string `json:"content"`
 }
 
 // StopReason indicates why an engine turn ended.

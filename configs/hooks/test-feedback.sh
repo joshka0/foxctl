@@ -22,7 +22,7 @@ INPUT=$(cat)
 # Run the test_feedback skill and extract hook_output from envelope
 # Use --ephemeral for faster execution (skip job persistence)
 # Redirect stderr to /dev/null to suppress status messages
-result="$(echo "$INPUT" | "$AGENTCTL_BIN" run hooks/test_feedback --ephemeral --input-file - 2>/dev/null)" || {
+result="$(echo "$INPUT" | "$AGENTCTL_BIN" run --daemon hooks/test_feedback --ephemeral --input-file - 2>/dev/null)" || {
   # On error, return empty (fail-open)
   echo '{}'
   exit 0

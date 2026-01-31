@@ -1,5 +1,5 @@
 // Package main implements the code/semantic_search skill.
-// It performs unified semantic search across code symbols, sessions, and memories,
+// Performs unified semantic search across code symbols, sessions, and memories,
 // combining results with Reciprocal Rank Fusion and extracting context hints.
 //
 // Phase 3: Uses internal/retrieval infrastructure for symbol search with BM25 fallback.
@@ -89,7 +89,7 @@ const (
 	ScopeCodemaps = "codemaps"
 )
 
-// Input is the expected JSON input.
+// Input is the expected JSON input for code/semantic_search operations.
 type Input struct {
 	Query          string   `json:"query,omitempty"`           // Empty query with format=tree returns full repo tree
 	Scope          []string `json:"scope,omitempty"`           // ["symbols", "sessions", "memories", "tasks"]
@@ -123,7 +123,7 @@ type Input struct {
 	TreeMaxMissingSummaries int   `json:"tree_max_missing_summaries,omitempty"` // Max summaries to generate lazily (default: 20)
 }
 
-// Output is the JSON output.
+// Output is the JSON output structure for code/semantic_search results.
 type Output struct {
 	Query        string                `json:"query"`
 	Results      []Result              `json:"results"`
@@ -145,7 +145,7 @@ type SynthesisSummary struct {
 	TokensUsed  int      `json:"tokens_used"`  // Approximate tokens consumed
 }
 
-// Result represents a single search result.
+// Result represents a single search result from any source.
 type Result struct {
 	Source      string           `json:"source"`                 // "symbol", "session", "memory"
 	ID          string           `json:"id"`                     // Unique identifier (normalized)
@@ -164,7 +164,7 @@ type Result struct {
 	Timeline    *SessionTimeline `json:"timeline,omitempty"`     // Timeline data (for sessions when timeline=true)
 }
 
-// ContextHint represents a hint from related sessions.
+// ContextHint represents a hint from related sessions for context enrichment.
 type ContextHint struct {
 	Type      string   `json:"type"`                // "past_solution", "gotcha", "decision"
 	SessionID string   `json:"session_id"`          // Source session ID
@@ -173,7 +173,7 @@ type ContextHint struct {
 	KeyFiles  []string `json:"key_files,omitempty"` // Related files
 }
 
-// SearchStats contains search statistics.
+// SearchStats contains search statistics and performance metrics.
 type SearchStats struct {
 	TotalResults        int            `json:"total_results"`
 	SourceCounts        map[string]int `json:"source_counts"`
@@ -189,7 +189,7 @@ type SearchStats struct {
 	RerankCount     int    `json:"rerank_count,omitempty"` // Number of candidates reranked
 }
 
-// SessionTimeline contains timeline data for a session.
+// SessionTimeline contains timeline data for a session with chunks and learnings.
 type SessionTimeline struct {
 	SessionID      string             `json:"session_id"`
 	SessionName    string             `json:"session_name,omitempty"`
@@ -201,7 +201,7 @@ type SessionTimeline struct {
 	Message        string             `json:"message,omitempty"`
 }
 
-// TimelineChunk represents a summarized chunk in the timeline.
+// TimelineChunk represents a summarized chunk in the session timeline.
 type TimelineChunk struct {
 	SummaryID     string   `json:"summary_id"`
 	WindowIndex   int      `json:"window_index"`
@@ -220,7 +220,7 @@ type TimelineLearning struct {
 	WindowIndex int    `json:"window_index"`
 }
 
-// TimelineRollup aggregates timeline metadata.
+// TimelineRollup aggregates timeline metadata from chunks and learnings.
 type TimelineRollup struct {
 	SummaryLines []string `json:"summary_lines,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
@@ -230,10 +230,21 @@ type TimelineRollup struct {
 	Gotchas      []string `json:"gotchas,omitempty"`
 }
 
+// main is the skill entry point for code/semantic_search.
 func main() {
 	skillmain.Main(Command, run)
 }
 
+// run orchestrates unified semantic search across multiple data sources.
+//
+// Index:
+// - Purpose: Perform unified semantic search across symbols, sessions, memories, tasks, and codemaps with RRF fusion
+// - Flow: validate input → generate scoped embeddings → parallel search sources → fuse results → apply PageRank boost → rerank (optional) → synthesize (optional)
+// - SideEffects: embedding API calls; database queries; LLM API calls (synthesis); artifact persistence
+// - FailureModes: missing API keys, database errors, embedding failures, LLM errors, timeout errors
+// - Observability: emits query/results/context_hints/timelines/stats/summary/tree_text/tree/artifact
+// - Related: search, generateScopedEmbeddings, reciprocalRankFusion, applyPageRankBoost, applyReranking, synthesizeResults, buildFullRepoTree
+// - Keywords: code/semantic_search, unified, symbols, sessions, memories, tasks, codemaps, rrf, pagerank, rerank, synthesis, tree
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if len(in.Scope) == 0 {
@@ -291,6 +302,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, Command, out)
 }
 
+// search performs the core search logic with parallel source queries and result fusion.
 func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *Input, voyageKey, geminiKey string) (*Output, error) {
 	// Apply total timeout
 	searchCtx, cancel := context.WithTimeout(ctx, DefaultTotalTimeout)
@@ -746,6 +758,7 @@ func search(ctx context.Context, logger zerolog.Logger, cfg config.Config, in *I
 	return out, nil
 }
 
+// sourceResults holds results from a single search source with timing and error information.
 type sourceResults struct {
 	source  string
 	results []Result
@@ -1370,6 +1383,7 @@ func searchMemoriesVector(
 
 // ID normalization functions for canonical IDs
 
+// normalizeSymbolID creates a canonical ID for symbol results.
 func normalizeSymbolID(workspaceID string, candidate retrieval.Candidate) string {
 	// Format: symbol:<workspace>:<path>#L<line>
 	id := fmt.Sprintf("symbol:%s:%s", workspaceID, candidate.Path)
@@ -1379,21 +1393,25 @@ func normalizeSymbolID(workspaceID string, candidate retrieval.Candidate) string
 	return id
 }
 
+// normalizeSessionID creates a canonical ID for session results.
 func normalizeSessionID(sessionID string) string {
 	// Format: session:<id>
 	return fmt.Sprintf("session:%s", sessionID)
 }
 
+// normalizeMemoryID creates a canonical ID for memory results.
 func normalizeMemoryID(name string) string {
 	// Format: memory:<name>
 	return fmt.Sprintf("memory:%s", name)
 }
 
+// normalizeTaskID creates a canonical ID for task results.
 func normalizeTaskID(taskID string) string {
 	// Format: task:<id>
 	return fmt.Sprintf("task:%s", taskID)
 }
 
+// normalizeCodemapID creates a canonical ID for codemap results.
 func normalizeCodemapID(codemapID string) string {
 	// Format: codemap:<id>
 	return fmt.Sprintf("codemap:%s", codemapID)
@@ -1597,6 +1615,7 @@ func searchCodemaps(
 }
 
 // isEmptySessionSummary returns true if the session summary is empty or a placeholder.
+// isEmptySessionSummary returns true if the session summary is empty or a placeholder.
 func isEmptySessionSummary(summary string) bool {
 	s := strings.TrimSpace(strings.ToLower(summary))
 	if s == "" {
@@ -1617,6 +1636,7 @@ func isEmptySessionSummary(summary string) bool {
 	return false
 }
 
+// getSessionName extracts a display name from a session.
 func getSessionName(s storage.Session) string {
 	if s.Summary != "" {
 		// Use first line of summary as name
@@ -1635,6 +1655,7 @@ func getSessionName(s storage.Session) string {
 	return s.ID
 }
 
+// reciprocalRankFusion combines results from multiple sources using RRF algorithm.
 func reciprocalRankFusion(sourceResults map[string][]Result, minSimilarity float64) []Result {
 	if len(sourceResults) == 0 {
 		return []Result{}
@@ -1905,6 +1926,7 @@ func applyReranking(ctx context.Context, logger zerolog.Logger, in Input, result
 	return rerankedResults, stats
 }
 
+// extractContextHints extracts context hints from session results.
 func extractContextHints(sessionResults []Result, maxHints int) []ContextHint {
 	if len(sessionResults) == 0 {
 		return nil
@@ -1931,6 +1953,7 @@ func extractContextHints(sessionResults []Result, maxHints int) []ContextHint {
 	return hints
 }
 
+// extractSymbolName extracts the symbol name from a symbol ID string.
 func extractSymbolName(symbolID string) string {
 	// Symbol ID format: file.go:FunctionName or file.go:Type.Method
 	parts := strings.SplitN(symbolID, ":", 2)
@@ -2009,7 +2032,7 @@ func synthesizeResults(ctx context.Context, query string, results []Result, mode
 	return nil, skillerr.WrapRuntime("all LLM providers failed", lastErr)
 }
 
-// callLLMProvider calls an OpenAI-compatible API endpoint.
+// callLLMProvider calls an OpenAI-compatible API endpoint for synthesis.
 func callLLMProvider(ctx context.Context, provider LLMProvider, prompt string) (*SynthesisSummary, error) {
 	reqBody := map[string]any{
 		"model":      provider.Model,
@@ -2081,7 +2104,7 @@ func callLLMProvider(ctx context.Context, provider LLMProvider, prompt string) (
 	return summary, nil
 }
 
-// buildSynthesisPrompt builds the prompt for LLM synthesis.
+// buildSynthesisPrompt builds the prompt for LLM synthesis of search results.
 func buildSynthesisPrompt(query string, results []Result) string {
 	var sb strings.Builder
 	sb.WriteString("You are a code analysis assistant. Synthesize these search results to answer the user's question.\n\n")
@@ -2754,7 +2777,7 @@ func fetchTimelineLearnings(ctx context.Context, store *memory.Store, sessionID,
 	return learnings
 }
 
-// buildTimelineRollup aggregates timeline metadata.
+// buildTimelineRollup aggregates timeline metadata from chunks and learnings.
 func buildTimelineRollup(chunks []TimelineChunk, learnings []TimelineLearning) *TimelineRollup {
 	if len(chunks) == 0 && len(learnings) == 0 {
 		return nil

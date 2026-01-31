@@ -23,15 +23,32 @@ import (
 // SkillHandle captures manifest and artifact path for execution.
 type SkillHandle = runservice.SkillHandle
 
+// loadSkillInput loads skill input from multiple sources and returns it as bytes.
+// It supports the following sources, tried in order:
+//  - file == "-" : read raw bytes from stdin (errors if stdin is a terminal).
+//  - file != ""  : read bytes from the specified file path.
+//  - inline == "stdin" (case-insensitive): read the "data" field from a JSON envelope on stdin (errors if stdin is a terminal).
+//  - inline starting with "sha256:": read the object with that hash from the configured CAS store.
+//  - inline non-empty: use the inline string as the input bytes.
+//  - fallback: return the bytes for an empty JSON object ("{}").
+// The function returns an error for I/O failures, CAS access errors, or when stdin is a terminal where piped input is required.
 func loadSkillInput(cmd *cobra.Command, cfg config.Config, inline, file string) ([]byte, error) {
 	trimmed := strings.TrimSpace(inline)
 	switch {
 	case file == "-":
-		return io.ReadAll(cmd.InOrStdin())
+		in := cmd.InOrStdin()
+		if isTerminalReader(in) {
+			return nil, fmt.Errorf("stdin is a terminal; provide --input, use --input-file <path>, or pipe input into --input-file -")
+		}
+		return io.ReadAll(in)
 	case file != "":
 		return os.ReadFile(file)
 	case strings.EqualFold(trimmed, "stdin"):
-		data, err := extractEnvelopeData(cmd.InOrStdin())
+		in := cmd.InOrStdin()
+		if isTerminalReader(in) {
+			return nil, fmt.Errorf("stdin is a terminal; provide --input, use --input-file <path>, or pipe input into --input stdin")
+		}
+		data, err := extractEnvelopeData(in)
 		if err != nil {
 			return nil, fmt.Errorf("read stdin envelope: %w", err)
 		}
@@ -66,6 +83,9 @@ func loadSkillInput(cmd *cobra.Command, cfg config.Config, inline, file string) 
 	}
 }
 
+// extractEnvelopeData reads a JSON envelope from r and returns the raw JSON value of its "data" field.
+// If the envelope has no "data" field or the field is empty after trimming whitespace, it returns the JSON literal "null".
+// An error is returned if decoding the input fails.
 func extractEnvelopeData(r io.Reader) ([]byte, error) {
 	dec := json.NewDecoder(r)
 	var env struct {
@@ -84,6 +104,28 @@ func extractEnvelopeData(r io.Reader) ([]byte, error) {
 	return trimmed, nil
 }
 
+// isTerminalReader reports whether r refers to a terminal (a character device).
+// It returns false if r is not an *os.File or if obtaining file info fails.
+func isTerminalReader(r io.Reader) bool {
+	file, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// findSkill locates and loads a skill by name, returning its SkillHandle or an error.
+// 
+// It attempts to resolve the requested skill using the configured skill resolver, load the
+// resolved skill directory, and search alternative candidate locations if the primary
+// resolution is unsuitable. If not found, it will attempt to install an embedded skill
+// (if available) and re-resolve. The function returns the first encountered meaningful
+// error when resolution or loading fails, or a final error suggesting building or
+// installing skills when no candidate is found.
 func findSkill(cfg config.Config, requested string) (SkillHandle, error) {
 	// Use the Resolver to find the skill
 	resolver := createSkillResolver(cfg)

@@ -11,7 +11,7 @@ distribution:
     entry: skills/code_context_ripgrep/code_context_ripgrep
 io:
   format: JSON
-  inline_output_kb: 32
+  inline_output_kb: 64
 signature:
   command: code/context_ripgrep
   parameters:

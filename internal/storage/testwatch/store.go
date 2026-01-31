@@ -69,24 +69,37 @@ type Store interface {
 }
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open initializes the test watch store rooted at the provided path.
+
+// Open opens or creates the SQLite database at root/test_watch.db, applies the package migrations, and returns a Store backed by that database.
+// The returned store uses a shared SQLite connection and will invoke the underlying close function when closed.
+// Any error encountered while opening the database or running migrations is wrapped and returned.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "test_watch.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("testwatch: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
+
 
 // Close releases database resources.
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
+
+// migrate creates the database schema required by the package.
+// It ensures the `test_status` table exists with columns for workspace_id, watcher_id,
+// status, command, started_at, finished_at, summary, failures_json, and raw_tail,
+// and creates an index on workspace_id. Returns an error if applying the DDL fails.
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS test_status (

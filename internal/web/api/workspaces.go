@@ -133,7 +133,14 @@ func listWorkspaces(ctx context.Context, store *sessions.Store, cfg config.Confi
 }
 
 // WorkspaceSwitchHandler returns a handler for POST /api/workspaces/switch.
-// Switch the active workspace context.
+// WorkspaceSwitchHandler returns an HTTP handler that switches the server's active workspace.
+// 
+// The handler accepts a POST request and determines the target workspace path from the
+// "workspace" or "path" query parameters, or from a JSON body { "path": "<workspace>" }.
+// It validates that the path is absolute, does not contain `..`, exists on disk, and is a directory.
+// On success it sets the server-side current workspace, logs the change, and responds with JSON
+// containing the selected path and its base name. On method mismatch it responds 405; for
+// missing/invalid input or validation failures it responds 400; for filesystem errors it responds 500.
 func WorkspaceSwitchHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -150,7 +157,7 @@ func WorkspaceSwitchHandler(cfg config.Config, log zerolog.Logger) http.HandlerF
 			var req struct {
 				Path string `json:"path"`
 			}
-			if err := readJSON(r, &req); err != nil {
+			if err := readJSON(w, r, &req); err != nil {
 				httpError(w, http.StatusBadRequest, "invalid json")
 				return
 			}

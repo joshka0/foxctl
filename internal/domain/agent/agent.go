@@ -60,6 +60,9 @@ type Agent struct {
 	MaxIterations int           `json:"max_iterations,omitempty"` // Max tool calls per turn (default: 10)
 	MaxAutoTurns  int           `json:"max_auto_turns,omitempty"` // Max autonomous turns per session (default: 1)
 	ThinkInterval int           `json:"think_interval,omitempty"` // Seconds between proactive think cycles (default: 60)
+
+	// Linked companion conversation
+	ConversationID string `json:"conversation_id,omitempty"` // Linked companion conversation ID for chat history
 }
 
 // Policy defines execution constraints and capabilities for an agent.

@@ -19,13 +19,14 @@ import (
 
 const command = "obs/replay"
 
+// input defines the skill input parameters for trace event reconstruction with filtering options.
 type input struct {
 	TraceID     string `json:"trace_id" validate:"required"`
 	SpanID      string `json:"span_id,omitempty"`
 	IncludeData bool   `json:"include_data,omitempty"` // Include full artifact data
 }
 
-// wideEvent represents a wide event from the NDJSON log.
+// wideEvent represents a wide event from the NDJSON log with comprehensive observability data.
 type wideEvent struct {
 	Timestamp   string         `json:"ts"`
 	TraceID     string         `json:"trace_id"`
@@ -44,13 +45,13 @@ type wideEvent struct {
 	Data        map[string]any `json:"data,omitempty"`
 }
 
-// reconstructedEvent contains the event plus any fetched artifacts.
+// reconstructedEvent contains the event plus any fetched artifacts with full data reconstruction.
 type reconstructedEvent struct {
 	Event     wideEvent      `json:"event"`
 	Artifacts map[string]any `json:"artifacts,omitempty"`
 }
 
-// trajectoryEvent contains trajectory data with full payload.
+// trajectoryEvent contains trajectory data with full payload and artifact fetching capabilities.
 type trajectoryEvent struct {
 	ID           string         `json:"id"`
 	TrajectoryID string         `json:"trajectory_id"`
@@ -64,10 +65,21 @@ type trajectoryEvent struct {
 	FullData     any            `json:"full_data,omitempty"` // Fetched from CAS
 }
 
+// main is the skill entry point for obs/replay with trace event reconstruction capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates trace event reconstruction from multiple sources with artifact fetching.
+//
+// Index:
+// - Purpose: Reconstruct events from trace IDs by combining wide events and trajectory data with optional artifact fetching
+// - Flow: locate observability directory → find wide events → query trajectory events → fetch artifacts → emit results
+// - SideEffects: reads NDJSON log files; queries trajectory store; fetches CAS artifacts; reconstructs event timelines
+// - FailureModes: missing observability data, trace not found, CAS access failures, file parsing errors
+// - Observability: emits reconstructed events, artifact data, event counts, and comprehensive trace summaries
+// - Related: findWideEvents, findTrajectoryEvents, fetchWideEventArtifacts, fetchCASContent
+// - Keywords: obs/replay, trace_reconstruction, event_timeline, artifact_fetching, observability
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Find the events file
 	obsDir := rc.Config.Paths.Observability
@@ -169,6 +181,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// truncateID truncates long IDs for display while preserving readability with ellipsis.
 func truncateID(id string) string {
 	if len(id) > 16 {
 		return id[:16] + "..."
@@ -176,6 +189,7 @@ func truncateID(id string) string {
 	return id
 }
 
+// findWideEvents searches NDJSON log file for events matching trace ID and optional span ID.
 func findWideEvents(path, traceID, spanID string) ([]wideEvent, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -212,6 +226,8 @@ func findWideEvents(path, traceID, spanID string) ([]wideEvent, error) {
 	return events, scanner.Err()
 }
 
+// findTrajectoryEvents queries trajectory store for events matching the specified trace ID.
+// It opens the trajectory store, queries for events by trace ID, and returns the results.
 func findTrajectoryEvents(ctx context.Context, rc *skillmain.RunContext, workspaceID, traceID string) ([]trajectory.Event, error) {
 	store, err := trajectory.Open(ctx, rc.Config.Storage.Root)
 	if err != nil {
@@ -222,6 +238,8 @@ func findTrajectoryEvents(ctx context.Context, rc *skillmain.RunContext, workspa
 	return store.GetEventsByTraceID(ctx, workspaceID, traceID)
 }
 
+// fetchWideEventArtifacts retrieves CAS artifacts referenced in wide event data with error handling.
+// It fetches artifacts from the CAS store, handling errors and returning the artifacts as a map.
 func fetchWideEventArtifacts(ctx context.Context, rc *skillmain.RunContext, evt wideEvent) (map[string]any, error) {
 	if evt.Data == nil || rc.CASStore == nil {
 		return nil, nil
@@ -259,6 +277,8 @@ func fetchWideEventArtifacts(ctx context.Context, rc *skillmain.RunContext, evt 
 	return artifacts, nil
 }
 
+// fetchCASContent retrieves and parses CAS content with support for JSON, NDJSON, and text formats.
+// It fetches content from the CAS store, determines the content type, and parses it accordingly.
 func fetchCASContent(ctx context.Context, rc *skillmain.RunContext, digest string) (any, error) {
 	reader, meta, err := rc.CASStore.Get(ctx, digest)
 	if err != nil {

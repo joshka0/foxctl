@@ -57,7 +57,7 @@ if [[ "$has_anchor" -eq 1 ]]; then
   else
     # Persist anchor via session/anchor skill
     anchor_input="$(jq -nc --arg op "set" --arg ws "$workspace_root" --arg sid "$session_id" --arg mp "$clean_prompt" '{operation:$op, workspace:$ws, session_id:$sid, main_prompt:$mp, trigger:"user_prompt_submit"}')"
-    "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace_root" --input "$anchor_input" >/dev/null 2>/dev/null || true
+    "$AGENTCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace_root" --input "$anchor_input" >/dev/null 2>/dev/null || true
     
     # Write anchor flag file for stop hook (lightweight check)
     if [[ -n "$session_id" && "$session_id" != "null" ]]; then

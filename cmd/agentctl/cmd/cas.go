@@ -450,8 +450,14 @@ func commandConfig(ctx context.Context) (config.Config, error) {
 	return cfg, nil
 }
 
+// openInput returns a ReadCloser for the given path.
+// If path is "-" it returns a ReadCloser wrapping stdin unless stdin is a terminal, in which case it returns an error asking for a file path or piped input.
+// For any other path it opens the named file and returns any open error wrapped.
 func openInput(path string, stdin io.Reader) (io.ReadCloser, error) {
 	if path == "-" {
+		if isTerminalReader(stdin) {
+			return nil, fmt.Errorf("stdin is a terminal; provide a file path or pipe input into -")
+		}
 		return io.NopCloser(stdin), nil
 	}
 	file, err := os.Open(path)

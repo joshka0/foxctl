@@ -21,6 +21,7 @@ import (
 
 const command = "fs/find"
 
+// input is the skill input schema for fs/find operations.
 type input struct {
 	Query         string `json:"query"`
 	Path          string `json:"path"`
@@ -35,6 +36,7 @@ type input struct {
 	MaxResults    int    `json:"max_results"`
 }
 
+// fileResult represents a found file or directory with metadata.
 type fileResult struct {
 	Path         string   `json:"path"`
 	Name         string   `json:"name"`
@@ -46,10 +48,21 @@ type fileResult struct {
 	Matches      []string `json:"matches,omitempty"`
 }
 
+// main is the skill entry point for fs/find.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates file system search with filtering, fuzzy matching, and result persistence.
+//
+// Index:
+// - Purpose: Find files and directories with advanced filtering, fuzzy search, and result ranking
+// - Flow: validate input → resolve path → walk directory → apply filters → score results → sort → emit results
+// - SideEffects: directory traversal; file system access; CAS storage for large result sets
+// - FailureModes: invalid paths, permission errors, time filter parsing errors
+// - Observability: emits search results with scores, match types, and artifact hints for large sets
+// - Related: parseTimeFilter, fuzzyScore, sortResults
+// - Keywords: fs/find, file_search, fuzzy_matching, directory_traversal, filtering
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.Type == "" {
@@ -205,6 +218,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// parseTimeFilter converts time filter strings to time.Time.
 func parseTimeFilter(since string) (time.Time, error) {
 	now := time.Now()
 	hint := "Use Nd, Nw, Nm, or Ny (e.g., \"7d\")."
@@ -245,6 +259,7 @@ func parseTimeFilter(since string) (time.Time, error) {
 	return time.Time{}, skillerr.Validation("modified_since must be in form Nd, Nw, Nm, or Ny", skillerr.WithHint(hint))
 }
 
+// fuzzyScore calculates match score and identifies match types for fuzzy search.
 func fuzzyScore(query, path, name string) (float64, []string) {
 	query = strings.ToLower(query)
 	pathLower := strings.ToLower(path)
@@ -296,6 +311,7 @@ func fuzzyScore(query, path, name string) (float64, []string) {
 	return score, matches
 }
 
+// fuzzyInitials checks if query matches initials of target string.
 func fuzzyInitials(query, target string) bool {
 	if len(query) == 0 {
 		return false
@@ -314,6 +330,7 @@ func fuzzyInitials(query, target string) bool {
 	return queryIdx == len(query)
 }
 
+// sortResults sorts file results by specified criteria.
 func sortResults(results []fileResult, sortBy string) {
 	switch sortBy {
 	case "name":
@@ -338,6 +355,7 @@ func sortResults(results []fileResult, sortBy string) {
 	}
 }
 
+// getFileType determines if a directory entry is a file or directory.
 func getFileType(d fs.DirEntry) string {
 	if d.IsDir() {
 		return "directory"

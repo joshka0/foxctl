@@ -26,6 +26,7 @@ const (
 	MaxLimit              = 50
 )
 
+// Input is the expected JSON input for codemap/list operations.
 type Input struct {
 	Limit           int    `json:"limit,omitempty"`
 	Offset          int    `json:"offset,omitempty"`
@@ -34,12 +35,14 @@ type Input struct {
 	MaxSummaryChars int    `json:"max_summary_chars,omitempty"`
 }
 
+// Output contains paginated codemap listings with search capabilities.
 type Output struct {
 	Codemaps   []CodemapEntry `json:"codemaps"`
 	Pagination Pagination     `json:"pagination"`
 	Stats      Stats          `json:"stats"`
 }
 
+// CodemapEntry represents a codemap in the listing with metadata.
 type CodemapEntry struct {
 	ID         string `json:"id"`
 	Title      string `json:"title"`
@@ -49,6 +52,7 @@ type CodemapEntry struct {
 	TraceCount int    `json:"trace_count,omitempty"`
 }
 
+// Pagination provides pagination metadata for codemap listings.
 type Pagination struct {
 	Total   int  `json:"total"`
 	Offset  int  `json:"offset"`
@@ -56,15 +60,27 @@ type Pagination struct {
 	HasMore bool `json:"has_more"`
 }
 
+// Stats provides performance and method information for the operation.
 type Stats struct {
 	LatencyMS    int    `json:"latency_ms"`
 	SearchMethod string `json:"search_method,omitempty"`
 }
 
+// main is the skill entry point for codemap/list.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run lists codemaps with pagination, search, and filtering capabilities.
+//
+// Index:
+// - Purpose: List stored codemaps with pagination, optional semantic search, and summary truncation
+// - Flow: apply defaults → open memory store → search (vector/filter) → paginate → extract metadata → build output
+// - SideEffects: database queries; vector search; content truncation; metadata extraction
+// - FailureModes: database errors, search errors, timeout errors, parse errors
+// - Observability: emits paginated results with search method, timing metrics, and trace counts
+// - Related: searchCodemaps, extractTitleFromName
+// - Keywords: codemap/list, pagination, vector_search, filtering, metadata
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.Limit <= 0 {
@@ -191,6 +207,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// searchCodemaps performs vector search for codemaps using semantic embeddings.
 func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg config.Config, workspacePath, query string, limit int) ([]storage.ScoredEntry, error) {
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeCodemaps, cfg)
 	if err != nil {
@@ -217,6 +234,7 @@ func searchCodemaps(ctx context.Context, memStore storage.MemoryStore, cfg confi
 	return filtered, nil
 }
 
+// extractTitleFromName extracts a readable title from codemap storage name.
 func extractTitleFromName(name string) string {
 	name = strings.TrimPrefix(name, "codemap://")
 	runes := []rune(name)

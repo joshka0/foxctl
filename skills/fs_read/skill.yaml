@@ -11,7 +11,7 @@ distribution:
     entry: skills/fs_read/fs_read
 io:
   format: JSON
-  inline_output_kb: 32
+  inline_output_kb: 64
 signature:
   command: fs/read
   parameters:

@@ -94,7 +94,7 @@ input_json=$(jq -nc --arg file "$file_path" --argjson embed_queue "$embed_queue"
   embed: false,
   embed_queue: $embed_queue
 }')
-result=$("$AGENTCTL_BIN" run code/incremental_index \
+result=$("$AGENTCTL_BIN" run --daemon code/incremental_index \
   --input "$input_json" \
   2>/dev/null) || {
   # Don't block on indexing failures

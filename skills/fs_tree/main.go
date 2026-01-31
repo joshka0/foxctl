@@ -18,7 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-// Input defines the input parameters for fs/tree.
+// Input defines the input parameters for fs/tree operations.
 type Input struct {
 	Path          string `json:"path"`
 	MaxDepth      int    `json:"max_depth" validate:"gte=0"`
@@ -29,6 +29,7 @@ type Input struct {
 	Format        string `json:"format" validate:"omitempty,oneof=tree list json"`
 }
 
+// treeNode represents a node in the directory tree.
 type treeNode struct {
 	Name     string      `json:"name"`
 	Path     string      `json:"path"`
@@ -38,6 +39,7 @@ type treeNode struct {
 	Level    int         `json:"level"`
 }
 
+// treeStats contains statistics about the directory tree.
 type treeStats struct {
 	TotalDirs  int   `json:"total_dirs"`
 	TotalFiles int   `json:"total_files"`
@@ -45,6 +47,7 @@ type treeStats struct {
 	MaxDepth   int   `json:"max_depth"`
 }
 
+// treeOutput contains the complete tree representation.
 type treeOutput struct {
 	Root     *treeNode `json:"root"`
 	Stats    treeStats `json:"stats"`
@@ -52,10 +55,21 @@ type treeOutput struct {
 	ListText []string  `json:"list_text,omitempty"`
 }
 
+// main is the skill entry point for fs/tree.
 func main() {
 	skillmain.Main("fs/tree", run)
 }
 
+// run orchestrates directory tree generation with multiple output formats and statistics.
+//
+// Index:
+// - Purpose: Generate directory trees with filtering, statistics, and multiple output formats
+// - Flow: validate input → resolve path → build tree → generate output format → emit results
+// - SideEffects: directory traversal; file system access; CAS storage for large trees
+// - FailureModes: invalid paths, permission errors, directory read errors
+// - Observability: emits tree structure, statistics, and artifact hints for large trees
+// - Related: buildTree, renderTree, renderList, formatSize
+// - Keywords: fs/tree, directory_tree, tree_generation, statistics, file_system
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.MaxDepth <= 0 {
@@ -118,6 +132,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "fs/tree", data)
 }
 
+// buildTree recursively builds the directory tree structure.
 func buildTree(path, workspace string, in Input, level int) (*treeNode, treeStats, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -212,6 +227,7 @@ func buildTree(path, workspace string, in Input, level int) (*treeNode, treeStat
 	return node, stats, nil
 }
 
+// renderTree generates ASCII tree representation with optional size information.
 func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) string {
 	if node == nil {
 		return ""
@@ -267,6 +283,7 @@ func renderTree(node *treeNode, prefix string, isLast bool, includeSize bool) st
 	return builder.String()
 }
 
+// renderList generates flat list representation with indentation.
 func renderList(node *treeNode, includeSize bool) []string {
 	var lines []string
 

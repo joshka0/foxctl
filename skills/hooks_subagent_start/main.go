@@ -22,16 +22,28 @@ import (
 const command = "hooks/subagent_start"
 
 // SubagentPayload represents the SubagentStart event payload from Claude Code.
+// SubagentPayload represents the SubagentStart event payload from Claude Code.
 type SubagentPayload struct {
 	SubagentName string `json:"subagent_name"`
 	SubagentType string `json:"subagent_type"`
 	AgentID      string `json:"agent_id"`
 }
 
+// main is the skill entry point for hooks/subagent_start.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates subagent initialization with profile inference and capability briefing.
+//
+// Index:
+// - Purpose: Handle SubagentStart events to infer profiles, generate briefings, and set environment variables
+// - Flow: parse payload → infer profile → get config → generate briefing → emit context injection
+// - SideEffects: profile inference; handbook generation; context injection; environment setup
+// - FailureModes: payload parsing errors, profile inference failures, handbook generation errors
+// - Observability: emits subagent name, inferred profile, allowed skills, and briefing content
+// - Related: inferProfile, generateBriefing, generateFallbackBriefing, containsAny
+// - Keywords: hooks/subagent_start, subagent_lifecycle, profile_inference, capability_briefing, agent_handbook
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Parse subagent payload from tool input
 	var payload SubagentPayload

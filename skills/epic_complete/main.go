@@ -28,7 +28,7 @@ const commandName = "epic/complete"
 // logger is the package-level observability logger.
 var logger *obs.Logger
 
-// Input defines the skill input.
+// Input defines the skill input for epic/complete operations.
 type Input struct {
 	EpicID        string `json:"epic_id,omitempty"`        // Specific epic to complete (default: active epic)
 	Force         bool   `json:"force,omitempty"`          // Complete even with pending tasks
@@ -36,7 +36,7 @@ type Input struct {
 	DryRun        bool   `json:"dry_run,omitempty"`        // Skip writes and LLM calls
 }
 
-// Output defines the skill output.
+// Output defines the skill output for epic/complete operations.
 type Output struct {
 	EpicID         string          `json:"epic_id"`
 	EpicTitle      string          `json:"epic_title"`
@@ -60,11 +60,22 @@ type GotchaSummary struct {
 	Gotcha    string `json:"gotcha"`
 }
 
+// main is the skill entry point for epic/complete.
 func main() {
 	config.LoadDotEnv()
 	skillmain.Main(commandName, run)
 }
 
+// run orchestrates epic completion with task analysis, gotcha capture, and learning extraction.
+//
+// Index:
+// - Purpose: Complete epics with comprehensive analysis, gotcha persistence, and learning extraction
+// - Flow: validate epic → analyze tasks → extract learnings → persist gotchas → mark epic complete → clear active epic
+// - SideEffects: database updates; memory store operations; learning extraction; epic state changes
+// - FailureModes: epic not found, pending tasks without force, store errors, learning extraction failures
+// - Observability: emits completion statistics, task breakdown, gotchas, learnings, and status messages
+// - Related: extractLearnings, persistGotchas, matchesEpic, sanitizeForName
+// - Keywords: epic/complete, epic_management, task_analysis, gotchas, learnings, closure
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(commandName))
@@ -292,6 +303,7 @@ func extractLearnings(ctx context.Context, cfg config.Config, epicID, workspace 
 	return result, nil
 }
 
+// matchesEpic checks if a memory entry is associated with the given epic ID.
 func matchesEpic(entry storage.NamedEntry, epicID string) bool {
 	if epicID == "" {
 		return false

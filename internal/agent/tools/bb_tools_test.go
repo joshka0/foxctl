@@ -182,18 +182,19 @@ func TestBBWatch_ReturnsNewRecords(t *testing.T) {
 	r, err := NewRegistry(cfg, nil)
 	require.NoError(t, err)
 
-	// Start watch in goroutine
-	done := make(chan map[string]any)
+	// Start watch in goroutine (send raw result; parse in test goroutine)
+	done := make(chan *models.CallToolResult, 1)
 	go func() {
 		res, _ := r.bbWatch(ctx, map[string]any{"topic": "chat", "timeout_seconds": 2.0}) //nolint:errcheck
 		// If timeout hits, it returns success with whatever it found
-		done <- parseResult(t, res)
+		done <- res
 	}()
 
-	time.Sleep(500 * time.Millisecond)                                       // Give watch time to start in CI environments
-	_, _ = r.bbPost(ctx, map[string]any{"topic": "chat", "payload": "msg1"}) //nolint:errcheck
+	time.Sleep(500 * time.Millisecond) // Give watch time to start in CI environments
+	postRes, _ := r.bbPost(ctx, map[string]any{"topic": "chat", "payload": "msg1"}) //nolint:errcheck
+	parseResult(t, postRes)
 
-	res := <-done
+	res := parseResult(t, <-done)
 	records, ok := res["records"].([]any)
 	require.True(t, ok, "expected records to be []any, got %T", res["records"])
 	assert.Len(t, records, 1)

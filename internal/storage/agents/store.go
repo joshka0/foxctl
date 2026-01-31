@@ -30,24 +30,30 @@ type Store interface {
 	UpdateState(ctx context.Context, id string, state agent.State) error
 	UpdateHeartbeat(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
+	Trash(ctx context.Context, id string) error                                // Soft delete (only stopped agents)
+	UpdateConversationID(ctx context.Context, id, conversationID string) error // Link agent to conversation
 }
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open initializes the agent store rooted at the provided path.
+// backed by that database or an error if the database could not be opened.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "agents.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("agents: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
 
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
 func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
@@ -84,8 +90,8 @@ func (s *sqlStore) Create(ctx context.Context, a agent.Agent) error {
 
 func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
-		FROM agents WHERE id = ?`, id)
+		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval, conversation_id
+		FROM agents WHERE id = ? AND deleted_at IS NULL`, id)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
@@ -94,7 +100,8 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	var llmProvider, llmModel, llmAPIKey sql.NullString
 	var execMode sql.NullString
 	var maxIterations, maxAutoTurns, thinkInterval sql.NullInt64
-	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval); err != nil {
+	var conversationID sql.NullString
+	if err := row.Scan(&a.ID, &parentID, &a.Namespace, &name, &slug, &role, &prompt, &skillsJSON, &policyJSON, &a.ShareBB, &a.State, &created, &heartbeat, &llmProvider, &llmModel, &llmAPIKey, &execMode, &maxIterations, &maxAutoTurns, &thinkInterval, &conversationID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agent.Agent{}, ErrNotFound
 		}
@@ -141,13 +148,16 @@ func (s *sqlStore) Get(ctx context.Context, id string) (agent.Agent, error) {
 	a.MaxAutoTurns = int(maxAutoTurns.Int64)
 	a.ThinkInterval = int(thinkInterval.Int64)
 
+	// Set conversation ID
+	a.ConversationID = conversationID.String
+
 	return a, nil
 }
 
 func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
-		FROM agents WHERE ns = ?`, ns)
+		FROM agents WHERE ns = ? AND deleted_at IS NULL`, ns)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
@@ -209,7 +219,7 @@ func (s *sqlStore) GetByNamespace(ctx context.Context, ns string) (agent.Agent, 
 func (s *sqlStore) GetBySlug(ctx context.Context, slug string) (agent.Agent, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
-		FROM agents WHERE slug = ?`, slug)
+		FROM agents WHERE slug = ? AND deleted_at IS NULL`, slug)
 
 	var a agent.Agent
 	var skillsJSON, policyJSON string
@@ -282,7 +292,7 @@ func (s *sqlStore) Resolve(ctx context.Context, ref string) (agent.Agent, error)
 	// Try by name (case-insensitive)
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
-		FROM agents WHERE LOWER(name) = LOWER(?) LIMIT 1`, ref)
+		FROM agents WHERE LOWER(name) = LOWER(?) AND deleted_at IS NULL LIMIT 1`, ref)
 
 	var skillsJSON, policyJSON string
 	var created string
@@ -338,6 +348,7 @@ func (s *sqlStore) List(ctx context.Context, limit int) ([]agent.Agent, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
 		FROM agents
+		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
 		LIMIT ?`, limit)
 	if err != nil {
@@ -365,7 +376,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, parent_id, ns, name, slug, role, prompt, skills_allow, policy, share_bb, state, created_at, heartbeat_at, llm_provider, llm_model, llm_api_key, exec_mode, max_iterations, max_auto_turns, think_interval
 		FROM agents
-		WHERE parent_id = ?
+		WHERE parent_id = ? AND deleted_at IS NULL
 		ORDER BY created_at DESC
 		LIMIT ?`, parentID, limit)
 	if err != nil {
@@ -388,7 +399,7 @@ func (s *sqlStore) ListByParent(ctx context.Context, parentID string, limit int)
 
 func (s *sqlStore) UpdateState(ctx context.Context, id string, state agent.State) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET state = ? WHERE id = ?`, state, id)
+		UPDATE agents SET state = ? WHERE id = ? AND deleted_at IS NULL`, state, id)
 	if err != nil {
 		return fmt.Errorf("agents: update state: %w", err)
 	}
@@ -404,7 +415,7 @@ func (s *sqlStore) UpdateState(ctx context.Context, id string, state agent.State
 
 func (s *sqlStore) UpdateHeartbeat(ctx context.Context, id string) error {
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET heartbeat_at = ? WHERE id = ?`, sqlutil.FormatTimestamp(time.Now().UTC()), id)
+		UPDATE agents SET heartbeat_at = ? WHERE id = ? AND deleted_at IS NULL`, sqlutil.FormatTimestamp(time.Now().UTC()), id)
 	if err != nil {
 		return fmt.Errorf("agents: update heartbeat: %w", err)
 	}
@@ -430,13 +441,35 @@ func (s *sqlStore) UpdateIdentity(ctx context.Context, id, name, slug string) er
 		slugVal = slug
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE agents SET name = ?, slug = ? WHERE id = ?`, nameVal, slugVal, id)
+		UPDATE agents SET name = ?, slug = ? WHERE id = ? AND deleted_at IS NULL`, nameVal, slugVal, id)
 	if err != nil {
 		return fmt.Errorf("agents: update identity: %w", err)
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("agents: update identity rows affected: %w", err)
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateConversationID links an agent to a companion conversation.
+// Pass empty string to clear the link.
+func (s *sqlStore) UpdateConversationID(ctx context.Context, id, conversationID string) error {
+	var convVal interface{}
+	if conversationID != "" {
+		convVal = conversationID
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET conversation_id = ? WHERE id = ? AND deleted_at IS NULL`, convVal, id)
+	if err != nil {
+		return fmt.Errorf("agents: update conversation_id: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: update conversation_id rows affected: %w", err)
 	}
 	if rows == 0 {
 		return ErrNotFound
@@ -459,6 +492,44 @@ func (s *sqlStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// Trash soft-deletes an agent by setting deleted_at. Only stopped agents can be trashed.
+func (s *sqlStore) Trash(ctx context.Context, id string) error {
+	// Atomic update: only trash if agent exists, is stopped, and not already trashed
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET deleted_at = ?
+		WHERE id = ? AND state = ? AND deleted_at IS NULL`,
+		sqlutil.FormatTimestamp(time.Now().UTC()), id, string(agent.StateStopped))
+	if err != nil {
+		return fmt.Errorf("agents: trash: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("agents: trash rows affected: %w", err)
+	}
+	if rows == 0 {
+		// Check why: agent not found vs not stopped
+		var state string
+		err := s.db.QueryRowContext(ctx, `SELECT state FROM agents WHERE id = ? AND deleted_at IS NULL`, id).Scan(&state)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("agents: trash check state: %w", err)
+		}
+		// Agent exists but wasn't stopped
+		return ErrNotStopped
+	}
+	return nil
+}
+
+// ErrNotStopped indicates the agent must be stopped before it can be trashed.
+var ErrNotStopped = errors.New("agent: must be stopped to trash")
+
+// migrate creates or updates the agents schema in db to the current layout.
+// It ensures the agents table and core indexes exist, attempts to add newer
+// columns required by newer versions (ignoring errors if those columns already
+// exist), and creates slug indexes including a unique partial index for
+// non-null slugs. It returns an error if applying the initial DDL fails.
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS agents (
@@ -500,6 +571,8 @@ CREATE INDEX IF NOT EXISTS idx_agents_state ON agents(state);
 		"ALTER TABLE agents ADD COLUMN max_iterations INTEGER",
 		"ALTER TABLE agents ADD COLUMN max_auto_turns INTEGER",
 		"ALTER TABLE agents ADD COLUMN think_interval INTEGER",
+		"ALTER TABLE agents ADD COLUMN deleted_at TEXT",      // Soft delete timestamp
+		"ALTER TABLE agents ADD COLUMN conversation_id TEXT", // Linked companion conversation ID
 	}
 	for _, stmt := range alterStmts {
 		// SQLite will error if column already exists, which is fine

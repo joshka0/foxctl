@@ -27,6 +27,7 @@ import (
 
 const command = "codemap/check"
 
+// input is the expected JSON input for codemap/check operations.
 type input struct {
 	CodemapID   string `json:"codemap_id"`
 	Workspace   string `json:"workspace"`
@@ -34,12 +35,14 @@ type input struct {
 	Regenerate  bool   `json:"regenerate"`
 }
 
+// changedFile represents a file that has changed since codemap creation.
 type changedFile struct {
 	Path         string `json:"path"`
 	CommitsSince int    `json:"commits_since"`
 	LastChange   string `json:"last_change"`
 }
 
+// output contains staleness analysis results for a codemap.
 type output struct {
 	CodemapID      string        `json:"codemap_id"`
 	Title          string        `json:"title"`
@@ -58,10 +61,21 @@ type output struct {
 // pathPattern extracts file path from annotation path like "@internal/foo.go:42"
 var pathPattern = regexp.MustCompile(`^@?(.+?)(?::\d+)?$`)
 
+// main is the skill entry point for codemap/check.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates codemap staleness detection with optional regeneration.
+//
+// Index:
+// - Purpose: Determine if a codemap needs updating by checking if referenced files have changed since creation
+// - Flow: validate input → load codemap → extract file paths → check git/mtime changes → calculate staleness → optionally regenerate
+// - SideEffects: database queries; git log execution; file system stat calls; subprocess execution (regeneration)
+// - FailureModes: invalid codemap ID, load failures, git errors, regeneration failures
+// - Observability: emits comprehensive staleness analysis with changed files, recommendations, and regeneration status
+// - Related: checkStaleness, loadCodemap, extractFilePaths, checkGitChanges, checkMtimeChanges, regenerateCodemap
+// - Keywords: codemap/check, staleness, git, mtime, regeneration, recommendations
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	if in.CodemapID == "" {
 		return skillerr.Arg("codemap_id is required", skillerr.WithHint("Provide a codemap_id from codemap/list."))
@@ -77,6 +91,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, result)
 }
 
+// checkStaleness performs the core staleness analysis for a codemap.
 func checkStaleness(ctx context.Context, cfg config.Config, codemapID, workspace string, includeDiff bool, regenerate bool) (*output, error) {
 	// Load codemap from memory store
 	cm, err := loadCodemap(ctx, cfg, codemapID, workspace)
@@ -159,6 +174,7 @@ func checkStaleness(ctx context.Context, cfg config.Config, codemapID, workspace
 	return result, nil
 }
 
+// loadCodemap loads a codemap from memory store with format fallback support.
 func loadCodemap(ctx context.Context, cfg config.Config, codemapID, workspace string) (*codemap.Codemap, error) {
 	memStore, err := memory.OpenWithConfig(ctx, cfg)
 	if err != nil {
@@ -224,6 +240,7 @@ func loadCodemap(ctx context.Context, cfg config.Config, codemapID, workspace st
 	return &cm, nil
 }
 
+// extractFilePaths extracts unique file paths from codemap annotations.
 func extractFilePaths(cm *codemap.Codemap) []string {
 	pathSet := make(map[string]struct{})
 
@@ -251,12 +268,14 @@ func extractFilePaths(cm *codemap.Codemap) []string {
 	return paths
 }
 
+// codemapIDFromName extracts codemap ID from storage name.
 func codemapIDFromName(name string) string {
 	name = strings.TrimPrefix(name, "codemap://")
 	name = strings.TrimPrefix(name, "codemap:")
 	return name
 }
 
+// checkGitChanges uses git log to find files changed since codemap creation.
 func checkGitChanges(ctx context.Context, workspace string, since time.Time, files []string) ([]changedFile, error) {
 	if len(files) == 0 {
 		return []changedFile{}, nil
@@ -288,6 +307,7 @@ func checkGitChanges(ctx context.Context, workspace string, since time.Time, fil
 	return parseGitLogOutput(string(result.Stdout), files)
 }
 
+// parseGitLogOutput parses git log output to extract file change information.
 func parseGitLogOutput(output string, watchedFiles []string) ([]changedFile, error) {
 	// Build set of watched files for fast lookup
 	watchedSet := make(map[string]struct{})
@@ -343,6 +363,7 @@ func parseGitLogOutput(output string, watchedFiles []string) ([]changedFile, err
 	return result, nil
 }
 
+// checkMtimeChanges falls back to file modification time when git is unavailable.
 func checkMtimeChanges(workspace string, since time.Time, files []string) ([]changedFile, error) {
 	var changed []changedFile
 
@@ -368,6 +389,7 @@ func checkMtimeChanges(workspace string, since time.Time, files []string) ([]cha
 	return changed, nil
 }
 
+// buildSummary creates a human-readable summary of staleness analysis.
 func buildSummary(cm *codemap.Codemap, totalFiles int, changed []changedFile, score float64) string {
 	if len(changed) == 0 {
 		return fmt.Sprintf("Codemap '%s' is fresh. All %d referenced files unchanged since %s.",
@@ -388,8 +410,7 @@ func buildSummary(cm *codemap.Codemap, totalFiles int, changed []changedFile, sc
 		cm.Title, score*100, len(changed), totalFiles, strings.Join(changedNames, ", "))
 }
 
-// regenerateCodemap calls the codemap/generate skill to create a new codemap
-// with the same query. Returns the new codemap ID on success.
+// regenerateCodemap calls the codemap/generate skill to create a new codemap with the same query.
 func regenerateCodemap(ctx context.Context, cfg config.Config, query, workspace string) (string, error) {
 	// Build input for codemap/generate
 	genInput := map[string]any{

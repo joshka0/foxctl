@@ -23,6 +23,10 @@ func newProtoCommand() *cobra.Command {
 	return cmd
 }
 
+// newProtoValidateCommand creates a Cobra command named "validate" that validates a JSON envelope against Protocol v1.
+// The command reads input from the file specified by --input (default "-") or from stdin, and can run in strict mode
+// via --strict to fail on unknown fields and trailing data. Validation results and error conditions are emitted as
+// protocol envelopes; if stdin is a terminal the command emits an envelope error advising to provide a file or pipe.
 func newProtoValidateCommand() *cobra.Command {
 	var inputPath string
 	var strict bool
@@ -44,6 +48,13 @@ func newProtoValidateCommand() *cobra.Command {
 			var reader io.Reader
 			if inputPath == "-" {
 				reader = cmd.InOrStdin()
+				if isTerminalReader(reader) {
+					payload := map[string]any{"input": inputDesc, "hint": "Provide --input <file> or pipe input into stdin"}
+					if writeErr := protocol.WriteError(cmd.OutOrStdout(), "agentctl.proto.validate", protocol.ErrorCodeEEnvelope, "stdin is a terminal", payload, opts()...); writeErr != nil {
+						return fmt.Errorf("write envelope: %w", writeErr)
+					}
+					return fmt.Errorf("read input: stdin is a terminal")
+				}
 			} else {
 				file, err := os.Open(filepath.Clean(inputPath))
 				if err != nil {

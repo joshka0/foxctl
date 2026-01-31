@@ -20,6 +20,7 @@ import (
 
 const command = "code/security"
 
+// input defines the parameters for security scanning.
 type input struct {
 	Path              string   `json:"path"`
 	ScanMode          string   `json:"scan_mode"`
@@ -29,6 +30,7 @@ type input struct {
 	MaxResults        int      `json:"max_results"`
 }
 
+// vulnerability represents a security vulnerability found during scanning.
 type vulnerability struct {
 	ID             string `json:"id"`
 	Category       string `json:"category"`
@@ -43,6 +45,7 @@ type vulnerability struct {
 	Confidence     string `json:"confidence"`
 }
 
+// securityPattern defines a security vulnerability detection pattern.
 type securityPattern struct {
 	ID             string
 	Category       string
@@ -343,10 +346,21 @@ var securityPatterns = []securityPattern{
 	},
 }
 
+// main is the skill entry point for code/security.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates security vulnerability scanning with pattern matching and severity filtering.
+//
+// Index:
+// - Purpose: Scan code for security vulnerabilities using regex patterns with configurable severity and category filtering
+// - Flow: validate input → resolve path → scan directory/file → filter by severity → sort results → emit findings
+// - SideEffects: file system traversal; pattern matching; sensitive data redaction; result persistence
+// - FailureModes: invalid paths, file access errors, pattern matching failures
+// - Observability: emits vulnerability counts, severity breakdown, category statistics, and risk scores
+// - Related: scanDirectory, scanFile, selectPatterns, filterBySeverity, calculateStats
+// - Keywords: code/security, vulnerability_scanning, security_patterns, injection_detection, secret_detection
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.ScanMode == "" {
@@ -410,6 +424,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// scanDirectory walks a directory tree and scans all eligible files for security vulnerabilities.
 func scanDirectory(dir, workspace string, in input) ([]vulnerability, error) {
 	var vulns []vulnerability
 
@@ -445,6 +460,7 @@ func scanDirectory(dir, workspace string, in input) ([]vulnerability, error) {
 	return vulns, err
 }
 
+// scanFile scans a single file for security vulnerabilities using pattern matching.
 func scanFile(path, workspace string, in input) ([]vulnerability, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -499,6 +515,7 @@ func scanFile(path, workspace string, in input) ([]vulnerability, error) {
 	return vulns, nil
 }
 
+// selectPatterns filters security patterns based on scan mode and category selection.
 func selectPatterns(in input) []securityPattern {
 	if in.ScanMode == "scan" && len(in.Categories) == 0 {
 		return securityPatterns
@@ -539,6 +556,7 @@ func selectPatterns(in input) []securityPattern {
 	return patterns
 }
 
+// filterBySeverity removes vulnerabilities below the specified severity threshold.
 func filterBySeverity(vulns []vulnerability, threshold string) []vulnerability {
 	minScore := severityScore(threshold)
 	filtered := make([]vulnerability, 0)
@@ -552,6 +570,7 @@ func filterBySeverity(vulns []vulnerability, threshold string) []vulnerability {
 	return filtered
 }
 
+// severityScore converts severity string to numeric score for comparison.
 func severityScore(severity string) int {
 	scores := map[string]int{
 		"critical": 4,
@@ -562,6 +581,7 @@ func severityScore(severity string) int {
 	return scores[severity]
 }
 
+// calculateStats computes vulnerability statistics including severity/category breakdowns and risk score.
 func calculateStats(vulns []vulnerability) map[string]any {
 	stats := map[string]any{
 		"total_issues": len(vulns),

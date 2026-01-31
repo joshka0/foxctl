@@ -15,6 +15,7 @@ import (
 
 const command = "data/jq"
 
+// input is the expected JSON input for data/jq operations.
 type input struct {
 	Query     string `json:"query"`
 	Input     string `json:"input"`
@@ -25,10 +26,21 @@ type input struct {
 	YAMLInput bool   `json:"yaml_input"`
 }
 
+// main is the skill entry point for data/jq.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run executes jq queries on JSON/YAML data with configurable output formatting.
+//
+// Index:
+// - Purpose: Execute jq queries on JSON/YAML data with various output options and artifact storage
+// - Flow: validate input → check jq availability → build command args → execute jq → parse results → store large outputs
+// - SideEffects: subprocess execution; file system reads; artifact storage; content type detection
+// - FailureModes: invalid queries, missing jq tool, execution errors, parse errors
+// - Observability: emits query results with success status, output type, and optional artifact storage
+// - Related: buildJQArgs
+// - Keywords: data/jq, JSON, YAML, query, transformation, subprocess
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate
 	if strings.TrimSpace(in.Query) == "" {
@@ -104,6 +116,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, payload)
 }
 
+// buildJQArgs constructs the argument list for the jq command based on input flags.
 func buildJQArgs(in input) []string {
 	var args []string
 

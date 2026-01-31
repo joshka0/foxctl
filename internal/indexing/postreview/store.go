@@ -47,18 +47,25 @@ type Store interface {
 
 // sqlStore implements Store using SQLite.
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open creates a new SQLite-backed store at the given root directory.
+// Open opens or creates a SQLite-backed Store at root+"/post_review_events.db" and applies the package's schema migrations.
 func Open(ctx context.Context, root string) (Store, error) {
-	db, err := sqliteutil.OpenDB(ctx, root+"/post_review_events.db", migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, root+"/post_review_events.db", migrate)
 	if err != nil {
 		return nil, fmt.Errorf("postreview: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+// migrate creates the post_review_events table and its indexes if they do not already exist.
+// 
+// The table stores post-review events with columns for id, workspace_id, task_id, review_id,
+// review_kind, review_status, diff_applied_at, source, created_at, sequence, files_json and metadata_json.
+// It enforces a UNIQUE constraint on (workspace_id, task_id, review_id) and creates indexes on
+// workspace_id and created_at DESC.
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS post_review_events (
@@ -184,7 +191,10 @@ func (s *sqlStore) List(ctx context.Context, workspaceID string, limit int) ([]i
 }
 
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
 func (s *sqlStore) scanOne(ctx context.Context, query string, args ...any) (indexing.PostReviewEvent, error) {

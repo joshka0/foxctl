@@ -26,13 +26,13 @@ func titleCase(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// Input represents the skill input parameters.
+// Input represents the skill input parameters for calibration feedback.
 type Input struct {
 	Workspace string `json:"workspace,omitempty"`
 	Format    string `json:"format,omitempty"` // "full" (default), "tips", or "summary"
 }
 
-// Output represents the skill output.
+// Output represents the skill output with calibration insights and recommendations.
 type Output struct {
 	Found            bool              `json:"found"`
 	Insights         []Insight         `json:"insights,omitempty"`
@@ -43,7 +43,7 @@ type Output struct {
 	Message          string            `json:"message,omitempty"`
 }
 
-// Insight represents an actionable insight about the user.
+// Insight represents an actionable insight about the user's communication patterns.
 type Insight struct {
 	Category    string `json:"category"`    // Communication, Cognition, Trust, etc.
 	Title       string `json:"title"`       // Short title
@@ -51,7 +51,7 @@ type Insight struct {
 	Suggestion  string `json:"suggestion"`  // Actionable suggestion
 }
 
-// ExpertiseSummary summarizes the user's expertise profile.
+// ExpertiseSummary summarizes the user's expertise profile with strengths and learning areas.
 type ExpertiseSummary struct {
 	Strong   []string `json:"strong"`
 	Learning []string `json:"learning"`
@@ -59,17 +59,28 @@ type ExpertiseSummary struct {
 	Tip      string   `json:"tip"`
 }
 
-// Trend represents a detected preference trend.
+// Trend represents a detected preference trend over time.
 type Trend struct {
 	Dimension string `json:"dimension"`
 	Direction string `json:"direction"` // increasing, decreasing, stable
 	Note      string `json:"note"`
 }
 
+// main is the skill entry point for calibration/feedback.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates calibration feedback generation with multiple output formats and insight types.
+//
+// Index:
+// - Purpose: Generate actionable feedback about communication patterns and preferences from calibration profiles
+// - Flow: resolve workspace → open memory store → load profile → generate insights/tips/trends → emit formatted output
+// - SideEffects: profile loading; insight generation; trend analysis; expertise summarization
+// - FailureModes: workspace resolution failures, memory store access errors, missing profiles
+// - Observability: emits insight counts, expertise summaries, trend analysis, and actionable communication tips
+// - Related: generateInsights, generateExpertiseSummary, detectTrends, generateTips
+// - Keywords: calibration/feedback, user_profile, communication_patterns, expertise_analysis, preference_trends
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Resolve workspace
 	workspace := workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
@@ -136,7 +147,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
-// generateInsights creates actionable insights from the profile.
+// generateInsights creates actionable insights from the calibration profile across multiple dimensions.
 func generateInsights(p *calibration.Profile) []Insight {
 	var insights []Insight
 
@@ -163,6 +174,7 @@ func generateInsights(p *calibration.Profile) []Insight {
 	return insights
 }
 
+// generateCommunicationInsight creates insights about verbosity and communication preferences.
 func generateCommunicationInsight(p *calibration.Profile) Insight {
 	var desc, suggestion string
 
@@ -186,6 +198,7 @@ func generateCommunicationInsight(p *calibration.Profile) Insight {
 	}
 }
 
+// generateCognitionInsight creates insights about mental models and learning styles.
 func generateCognitionInsight(p *calibration.Profile) Insight {
 	var desc, suggestion string
 
@@ -212,6 +225,7 @@ func generateCognitionInsight(p *calibration.Profile) Insight {
 	}
 }
 
+// generateTrustInsight creates insights about autonomy preferences and correction styles.
 func generateTrustInsight(p *calibration.Profile) Insight {
 	var desc, suggestion string
 
@@ -235,6 +249,7 @@ func generateTrustInsight(p *calibration.Profile) Insight {
 	}
 }
 
+// generateWorkingStyleInsight creates insights about problem-solving approaches and collaboration modes.
 func generateWorkingStyleInsight(p *calibration.Profile) Insight {
 	var desc, suggestion string
 
@@ -261,7 +276,7 @@ func generateWorkingStyleInsight(p *calibration.Profile) Insight {
 	}
 }
 
-// generateExpertiseSummary creates a summary of expertise areas.
+// generateExpertiseSummary creates a summary of expertise areas with actionable tips.
 func generateExpertiseSummary(p *calibration.Profile) *ExpertiseSummary {
 	summary := &ExpertiseSummary{}
 
@@ -294,7 +309,7 @@ func generateExpertiseSummary(p *calibration.Profile) *ExpertiseSummary {
 	return summary
 }
 
-// detectTrends analyzes the timeline for preference trends.
+// detectTrends analyzes the timeline for preference trends with directional analysis.
 func detectTrends(p *calibration.Profile) []Trend {
 	var trends []Trend
 
@@ -391,7 +406,7 @@ func formatDimension(dim string) string {
 	return strings.ReplaceAll(dim, "_", " ")
 }
 
-// generateTips creates actionable communication tips.
+// generateTips creates actionable communication tips based on profile preferences.
 func generateTips(p *calibration.Profile) []string {
 	var tips []string
 

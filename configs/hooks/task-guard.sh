@@ -45,7 +45,7 @@ hook_input=$(printf '%s' "$payload" | jq -c --arg ws "$workspace_root" '{
 }')
 
 # Call agentctl skill with --ephemeral for faster execution (skip job persistence)
-result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run hooks/task_guard --ephemeral --input-file - 2>/dev/null)" || {
+result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run --daemon hooks/task_guard --ephemeral --input-file - 2>/dev/null)" || {
   # On error, allow the operation to proceed (fail-open)
   echo '{}' 
   exit 0

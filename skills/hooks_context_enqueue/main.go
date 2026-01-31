@@ -17,6 +17,7 @@ import (
 const skillName = "hooks/context_enqueue"
 
 // Input for the context_enqueue skill.
+// Input defines the input parameters for context_enqueue operations.
 type Input struct {
 	WorkspaceID string         `json:"workspace_id"`
 	SessionID   string         `json:"session_id"`
@@ -29,11 +30,22 @@ type Input struct {
 	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
+// main is the skill entry point for hooks/context_enqueue.
 func main() {
 	config.LoadDotEnv()
 	skillmain.Main(skillName, run)
 }
 
+// run orchestrates context enqueuing to buffer for later injection with validation and deduplication.
+//
+// Index:
+// - Purpose: Enqueue context to buffer for later injection when direct injection isn't possible
+// - Flow: validate input → open store → enqueue with TTL → get pending count → emit results
+// - SideEffects: context buffer storage; deduplication; TTL management
+// - FailureModes: invalid input, store access failures, enqueue errors
+// - Observability: emits enqueue results, pending counts, and timing metrics
+// - Related: contextbuffer.Enqueue, contextbuffer.Count
+// - Keywords: hooks/context_enqueue, context_buffer, delayed_injection, ttl_management
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	start := time.Now()
 

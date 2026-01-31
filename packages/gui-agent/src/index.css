@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  /* Color variables using oklch for better color mixing */
+  --color-background: oklch(0.14 0.02 255);
+  --color-foreground: oklch(0.97 0.01 255);
+
+  --color-card: oklch(0.17 0.02 255);
+  --color-card-foreground: oklch(0.97 0.01 255);
+
+  --color-popover: oklch(0.17 0.02 255);
+  --color-popover-foreground: oklch(0.97 0.01 255);
+
+  --color-primary: oklch(0.97 0.01 255);
+  --color-primary-foreground: oklch(0.17 0.02 255);
+
+  --color-secondary: oklch(0.25 0.02 255);
+  --color-secondary-foreground: oklch(0.97 0.01 255);
+
+  --color-muted: oklch(0.25 0.02 255);
+  --color-muted-foreground: oklch(0.70 0.01 255);
+
+  --color-accent: oklch(0.25 0.02 255);
+  --color-accent-foreground: oklch(0.97 0.01 255);
+
+  --color-destructive: oklch(0.45 0.20 27);
+  --color-destructive-foreground: oklch(0.97 0.01 255);
+
+  --color-border: oklch(0.30 0.02 255);
+  --color-input: oklch(0.30 0.02 255);
+  --color-ring: oklch(0.70 0.01 255);
+
+  --radius: 0.5rem;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}

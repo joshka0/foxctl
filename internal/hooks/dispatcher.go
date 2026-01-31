@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/hooks/pathutil"
+	"github.com/jkatigb/agentctl/internal/observability"
 )
 
 // Dispatcher executes hooks for events and merges their outputs.
@@ -193,6 +194,22 @@ func (d *dispatcher) Dispatch(ctx context.Context, input Input) (Result, error) 
 
 			result.HookResults = append(result.HookResults, hookResult)
 			outputs = append(outputs, output)
+
+			// Emit observability event for hook execution
+			hookEvent := observability.NewEvent(observability.OpHookExecute).
+				WithComponent(observability.ComponentHook).
+				WithSession(input.SessionID, input.ActorID).
+				WithData("hook_id", hook.ID).
+				WithData("hook_name", entry.Skill).
+				WithData("event_type", string(input.Event)).
+				WithData("tool_name", input.ToolName).
+				WithData("blocked", output.Decision.IsBlocking()).
+				WithData("fail_open", hookResult.FailOpen)
+			if err != nil {
+				observability.Emit(ctx, hookEvent.Error(err, hookResult.Duration))
+			} else {
+				observability.Emit(ctx, hookEvent.Success(hookResult.Duration))
+			}
 
 			// Check for early block (optimization)
 			if output.Decision.IsBlocking() && !result.Blocked {

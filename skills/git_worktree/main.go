@@ -16,6 +16,7 @@ import (
 
 const command = "git/worktree"
 
+// input defines the input parameters for git/worktree operations.
 type input struct {
 	Operation string `json:"operation"`
 	Path      string `json:"path"`
@@ -25,6 +26,7 @@ type input struct {
 	NewBranch bool   `json:"new_branch"`
 }
 
+// worktree represents a git worktree with metadata.
 type worktree struct {
 	Path   string `json:"path"`
 	Branch string `json:"branch"`
@@ -32,10 +34,21 @@ type worktree struct {
 	Bare   bool   `json:"bare"`
 }
 
+// main is the skill entry point for git/worktree.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates git worktree operations with path validation and repository management.
+//
+// Index:
+// - Purpose: Execute git worktree operations (list, add, remove, prune) with path validation
+// - Flow: validate input → resolve repo → check git → dispatch operation → emit results
+// - SideEffects: git worktree creation/removal; file system access; repository management
+// - FailureModes: invalid git repo, path validation errors, git execution errors
+// - Observability: emits worktree lists, operation results, and error context
+// - Related: listWorktrees, addWorktree, removeWorktree, pruneWorktrees, parseWorktreeList
+// - Keywords: git/worktree, worktree_management, git_operations, repository_management
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	in.Operation = oputil.DefaultOp(in.Operation, "list")
@@ -69,6 +82,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// listWorktrees retrieves and parses all worktrees in the repository.
 func listWorktrees(ctx context.Context, gitPath, repoPath string) (map[string]any, error) {
 	result := executil.Run(ctx, "", gitPath, "-C", repoPath, "worktree", "list", "--porcelain")
 	if result.Err != nil {
@@ -84,6 +98,7 @@ func listWorktrees(ctx context.Context, gitPath, repoPath string) (map[string]an
 	}, nil
 }
 
+// parseWorktreeList parses git worktree list porcelain output into structured data.
 func parseWorktreeList(output string) []worktree {
 	lines := strings.Split(output, "\n")
 	var worktrees []worktree
@@ -118,6 +133,7 @@ func parseWorktreeList(output string) []worktree {
 	return worktrees
 }
 
+// addWorktree creates a new git worktree with optional branch creation.
 func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, skillerr.Arg(
@@ -157,6 +173,7 @@ func addWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPat
 	}, nil
 }
 
+// removeWorktree removes an existing git worktree with optional force flag.
 func removeWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	if in.Path == "" {
 		return nil, skillerr.Arg(
@@ -191,6 +208,7 @@ func removeWorktree(ctx context.Context, rc *skillmain.RunContext, gitPath, repo
 	}, nil
 }
 
+// pruneWorktrees removes stale worktree references from the repository.
 func pruneWorktrees(ctx context.Context, gitPath, repoPath string) (map[string]any, error) {
 	result := executil.Run(ctx, "", gitPath, "-C", repoPath, "worktree", "prune", "-v")
 	output := append([]byte{}, result.Stdout...)

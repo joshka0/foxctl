@@ -25,6 +25,7 @@ var ErrNotFound = errors.New("not found")
 type Store struct {
 	db    *sql.DB
 	queue *queue.Store
+	close func() error
 }
 
 type embeddingPayload struct {
@@ -36,21 +37,27 @@ type embeddingPayload struct {
 	ContentDigest string `json:"content_digest"`
 }
 
-// OpenStore opens the embedding store in the provided root directory.
+// OpenStore opens or creates the embedding store at the given root directory and returns a Store
+// for managing embedding jobs and stored embeddings.
+//
+// It creates or opens root/embedding_queue.db, runs necessary schema migrations, and
+// initializes the internal queue store. If initialization fails, any opened resources are closed
+// before returning an error. The returned Store contains a cleanup function that must be called
+// via Store.Close when the store is no longer needed.
 func OpenStore(ctx context.Context, root string) (*Store, error) {
 	dbPath := filepath.Join(root, "embedding_queue.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("embedding: open db: %w", err)
 	}
 
 	queueStore, err := queue.NewStore(db, queue.Options{Table: embeddingQueueTable})
 	if err != nil {
-		_ = db.Close()
+		_ = closeFn()
 		return nil, err
 	}
 
-	return &Store{db: db, queue: queueStore}, nil
+	return &Store{db: db, queue: queueStore, close: closeFn}, nil
 }
 
 // OpenStoreFromConfig opens the embedding store using config paths.
@@ -60,12 +67,16 @@ func OpenStoreFromConfig(ctx context.Context, cfg config.Config) (*Store, error)
 
 // Close closes the underlying database handle.
 func (s *Store) Close() error {
-	if s.db != nil {
-		return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
 	}
-	return nil
+	return s.close()
 }
 
+// migrate performs database schema migrations required by the embedding store.
+// It ensures the embedding queue table exists, creates the symbol_embeddings
+// table and its file-path index if they do not exist, and migrates legacy
+// embedding job rows into the new queue schema.
 func migrate(ctx context.Context, db *sql.DB) error {
 	if err := queue.Migrate(ctx, db, queue.Options{Table: embeddingQueueTable}); err != nil {
 		return err

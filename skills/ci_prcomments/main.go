@@ -1,4 +1,5 @@
 // Package main implements the ci/prcomments skill.
+// Generates task-focused PR reports with merge conflicts, CI failures, and review comments.
 package main
 
 import (
@@ -26,7 +27,7 @@ import (
 // logger is the package-level structured logger that writes JSON to stderr.
 var logger = zerolog.New(os.Stderr).With().Str("component", "ci_prcomments").Timestamp().Logger()
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for ci/prcomments operations.
 type Input struct {
 	PR              skillmain.FlexString `json:"pr" validate:"required"`
 	Owner           string               `json:"owner,omitempty"`
@@ -38,6 +39,7 @@ type Input struct {
 	IncludeResolved bool                 `json:"include_resolved,omitempty"` // Include resolved/addressed comments (default: false)
 }
 
+// Comment represents a GitHub comment with metadata and resolution status.
 type Comment struct {
 	ID        int       `json:"id"`
 	User      User      `json:"user"`
@@ -49,10 +51,12 @@ type Comment struct {
 	Outdated  bool      `json:"outdated,omitempty"` // Comment is on outdated code
 }
 
+// User represents a GitHub user with login information.
 type User struct {
 	Login string `json:"login"`
 }
 
+// PRInfo represents basic pull request information from GitHub API.
 type PRInfo struct {
 	Title      string `json:"title"`
 	Body       string `json:"body"`
@@ -62,6 +66,7 @@ type PRInfo struct {
 	MergeState string `json:"mergeable_state"`
 }
 
+// CheckRun represents a GitHub check run from the API response.
 type CheckRun struct {
 	ID         int         `json:"id"`
 	Name       string      `json:"name"`
@@ -71,12 +76,14 @@ type CheckRun struct {
 	HTMLURL    string      `json:"html_url"`
 }
 
+// CheckOutput represents the output text of a GitHub check run.
 type CheckOutput struct {
 	Title   string `json:"title"`
 	Summary string `json:"summary"`
 	Text    string `json:"text"`
 }
 
+// JobDetails represents GitHub Actions job details including steps.
 type JobDetails struct {
 	ID          int       `json:"id"`
 	Name        string    `json:"name"`
@@ -88,6 +95,7 @@ type JobDetails struct {
 	HTMLURL     string    `json:"html_url"`
 }
 
+// JobStep represents a single step within a GitHub Actions job.
 type JobStep struct {
 	Name        string `json:"name"`
 	Status      string `json:"status"`
@@ -97,6 +105,7 @@ type JobStep struct {
 	CompletedAt string `json:"completed_at"`
 }
 
+// TaskSummary represents a summary of task counts by category.
 type TaskSummary struct {
 	Total          int `json:"total"`
 	MergeConflicts int `json:"merge_conflicts"`
@@ -104,6 +113,7 @@ type TaskSummary struct {
 	ReviewComments int `json:"review_comments"`
 }
 
+// TaskItem represents an individual task item extracted from PR analysis.
 type TaskItem struct {
 	Kind          string `json:"kind"`
 	Summary       string `json:"summary"`
@@ -119,7 +129,7 @@ type TaskItem struct {
 	Outdated      bool   `json:"outdated,omitempty"`
 }
 
-// PRReview represents a GitHub PR review with body content.
+// PRReview represents a GitHub PR review with body content and state.
 type PRReview struct {
 	ID        int       `json:"id"`
 	User      User      `json:"user"`
@@ -128,10 +138,21 @@ type PRReview struct {
 	CreatedAt time.Time `json:"submitted_at"`
 }
 
+// main is the skill entry point for ci/prcomments.
 func main() {
 	skillmain.Main("ci/prcomments", run)
 }
 
+// run orchestrates PR comment analysis and task report generation.
+//
+// Index:
+// - Purpose: Generate task-focused PR reports with merge conflicts, CI failures, and review comments
+// - Flow: resolve PR → fetch comments/checks → enrich with job details → extract AI prompts → build markdown → emit structured output
+// - SideEffects: GitHub API calls; optional file output; artifact persistence for large content
+// - FailureModes: invalid PR, missing token, GitHub API errors, network timeouts, file write errors
+// - Observability: emits repository/pr_number/title/author/url/tasks/status/has_blocking_issues/tasks_list/markdown_preview/markdown_truncated/format/errors_only/with_context/comments/coderabbit_ai_prompt/markdown_output_path/markdown_artifact
+// - Related: getPR, getIssueComments, getReviewComments, getCheckRuns, getJobDetails, buildMarkdownReport, buildTasksList, cihelpers.ResolveOwnerRepo, cihelpers.ResolveToken
+// - Keywords: ci/prcomments, pr, comments, check_runs, merge_conflicts, tasks, markdown, coderabbit, greptile, errors_only, with_context
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	prRef := strings.TrimSpace(in.PR.String())
 
@@ -274,6 +295,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "ci/prcomments", data)
 }
 
+// getPR fetches basic pull request information from GitHub API.
 func getPR(client *http.Client, token, owner, repo string, prNum int) (*PRInfo, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, prNum)
 	var pr PRInfo
@@ -283,6 +305,7 @@ func getPR(client *http.Client, token, owner, repo string, prNum int) (*PRInfo, 
 	return &pr, nil
 }
 
+// getIssueComments fetches issue-level comments for a PR from GitHub API.
 func getIssueComments(client *http.Client, token, owner, repo string, prNum int) ([]Comment, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", owner, repo, prNum)
 	var comments []Comment
@@ -292,6 +315,7 @@ func getIssueComments(client *http.Client, token, owner, repo string, prNum int)
 	return comments, nil
 }
 
+// getReviewComments fetches review comments for a PR from GitHub API.
 func getReviewComments(client *http.Client, token, owner, repo string, prNum int) ([]Comment, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/comments", owner, repo, prNum)
 	var comments []Comment
@@ -489,6 +513,7 @@ func mergeResolvedStatus(comments []Comment, statuses map[int]ReviewThreadStatus
 	}
 }
 
+// getCheckRuns fetches check runs for a PR and enriches failed checks with detailed output.
 func getCheckRuns(client *http.Client, token, owner, repo string, prNum int) ([]CheckRun, error) {
 	prURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d", owner, repo, prNum)
 	var pr struct {
@@ -524,6 +549,7 @@ func getCheckRuns(client *http.Client, token, owner, repo string, prNum int) ([]
 	return detailed, nil
 }
 
+// getCheckRunDetails fetches detailed information for a specific check run.
 func getCheckRunDetails(client *http.Client, token, owner, repo string, checkID int) (*CheckRun, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/check-runs/%d", owner, repo, checkID)
 	var check CheckRun
@@ -533,6 +559,7 @@ func getCheckRunDetails(client *http.Client, token, owner, repo string, checkID 
 	return &check, nil
 }
 
+// getJobDetails fetches detailed job information from GitHub Actions API.
 func getJobDetails(client *http.Client, token, owner, repo, jobURL string) (*JobDetails, error) {
 	parts := strings.Split(jobURL, "/")
 	if len(parts) < 8 {
@@ -548,6 +575,7 @@ func getJobDetails(client *http.Client, token, owner, repo, jobURL string) (*Job
 	return &job, nil
 }
 
+// getJobErrorOutput fetches and extracts error output from GitHub Actions job logs.
 func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int, failedStepName string) (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d/logs", owner, repo, jobID)
 	req, err := http.NewRequest("GET", url, nil)
@@ -735,12 +763,15 @@ func getJobErrorOutput(client *http.Client, token, owner, repo string, jobID int
 	return logContent, nil
 }
 
+// sortCommentsByTime sorts comments by creation time in chronological order.
 func sortCommentsByTime(comments []Comment) {
 	sort.Slice(comments, func(i, j int) bool {
 		return comments[i].CreatedAt.Before(comments[j].CreatedAt)
 	})
 }
 
+// buildMarkdownReport builds a formatted markdown report of PR tasks and summary.
+//
 //nolint:revive // bytes.Buffer.Write/fmt.Fprintf never returns an error for in-memory writes.
 func buildMarkdownReport(prInfo *PRInfo, owner, repo string, prNum int, comments []Comment, checkRuns []CheckRun, conflictingFiles []string, client *http.Client, token string, withContext, errorsOnly bool) (string, TaskSummary) {
 	var buf bytes.Buffer
@@ -845,6 +876,7 @@ func buildMarkdownReport(prInfo *PRInfo, owner, repo string, prNum int, comments
 	return buf.String(), summary
 }
 
+// getChangedFilesForPR fetches the list of changed files for a PR.
 func getChangedFilesForPR(client *http.Client, token, owner, repo string, prNum int) []string {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/files", owner, repo, prNum)
 	var files []struct {
@@ -862,6 +894,7 @@ func getChangedFilesForPR(client *http.Client, token, owner, repo string, prNum 
 	return conflicting
 }
 
+// buildTasksList builds a structured list of task items from PR analysis.
 func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []CheckRun, includeResolved bool) []TaskItem {
 	tasks := make([]TaskItem, 0)
 	if len(conflictingFiles) > 0 {
@@ -929,6 +962,7 @@ func buildTasksList(conflictingFiles []string, comments []Comment, checkRuns []C
 	return tasks
 }
 
+// displayJobDetailsTaskFormat formats job details for task display in markdown.
 func displayJobDetailsTaskFormat(buf *bytes.Buffer, job *JobDetails, client *http.Client, token, owner, repo string) {
 	var failedStep *JobStep
 	for i := len(job.Steps) - 1; i >= 0; i-- {
@@ -951,6 +985,7 @@ func displayJobDetailsTaskFormat(buf *bytes.Buffer, job *JobDetails, client *htt
 	}
 }
 
+// cleanGitHubLogLine cleans GitHub Actions log formatting markers and timestamps.
 func cleanGitHubLogLine(line string) string {
 	pattern := regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z\s+`)
 	line = pattern.ReplaceAllString(line, "")
@@ -962,6 +997,7 @@ func cleanGitHubLogLine(line string) string {
 	return strings.TrimSpace(line)
 }
 
+// cleanCommentBody removes metadata and extracts actionable content from bot comments.
 func cleanCommentBody(body string) string {
 	if body == "" {
 		return ""
@@ -1014,6 +1050,7 @@ func cleanCommentBody(body string) string {
 	return ""
 }
 
+// extractCodexComment extracts actionable content from ChatGPT Codex connector comments.
 func extractCodexComment(body string) string {
 	lines := strings.Split(body, "\n")
 	var result []string
@@ -1037,6 +1074,7 @@ func extractCodexComment(body string) string {
 	return ""
 }
 
+// classifyCodeRabbitTask extracts severity and summary from CodeRabbit comment content.
 func classifyCodeRabbitTask(cleanBody string) (severity, summary string) {
 	lines := strings.Split(cleanBody, "\n")
 	for _, line := range lines {
@@ -1083,6 +1121,7 @@ func classifyCodeRabbitTask(cleanBody string) (severity, summary string) {
 	return severity, summary
 }
 
+// extractCodeRabbitComment extracts actionable content from CodeRabbit bot comments.
 func extractCodeRabbitComment(body string) string {
 	body = regexp.MustCompile(`(?s)<!-- internal state.*?<!-- internal state end -->`).ReplaceAllString(body, "")
 	body = regexp.MustCompile(`(?s)<!-- tips_.*?-->`).ReplaceAllString(body, "")

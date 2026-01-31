@@ -33,7 +33,7 @@ import (
 // Command is the skill command name.
 const Command = "code/incremental_index"
 
-// input matches the skill input specification.
+// input matches the skill input specification for incremental file indexing.
 type input struct {
 	File        string `json:"file"`
 	WorkspaceID string `json:"workspace_id"`
@@ -42,7 +42,7 @@ type input struct {
 	EmbedQueue  bool   `json:"embed_queue"`
 }
 
-// output contains the skill result data.
+// output contains the skill result data with indexing statistics and timing information.
 type output struct {
 	File             string `json:"file"`
 	Language         string `json:"language"`
@@ -58,10 +58,21 @@ type output struct {
 	SkipReason       string `json:"skip_reason,omitempty"`
 }
 
+// main is the skill entry point for code/incremental_index.
 func main() {
 	skillmain.Main(Command, run)
 }
 
+// run orchestrates incremental file indexing with symbol extraction, embedding queuing, and graph edge ingestion.
+//
+// Index:
+// - Purpose: Index individual files for live code search with symbol extraction, embedding, and graph relationships
+// - Flow: resolve path → detect language → extract symbols → upsert to memory store → queue embeddings → ingest graph edges
+// - SideEffects: updates memory store; queues embedding jobs; updates graph store with call/import relationships
+// - FailureModes: file access errors, parsing failures, storage errors, unsupported languages
+// - Observability: emits indexing statistics, timing metrics, and skip reasons for unsupported files
+// - Related: extractSymbols, upsertSymbols, queueEmbeddings, ingestGraphEdges
+// - Keywords: code/incremental_index, file_indexing, symbol_extraction, embedding_queue, graph_ingestion, live_indexing
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults not handled by skillmain
 	if in.WorkspaceID == "" {
@@ -164,7 +175,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	})
 }
 
-// extractSymbols extracts code symbols from the file content.
+// extractSymbols extracts code symbols from the file content using language-specific extractors.
 func extractSymbols(ctx context.Context, lang, filePath string, content []byte) ([]symbol.Symbol, error) {
 	switch lang {
 	case "go":
@@ -179,7 +190,7 @@ func extractSymbols(ctx context.Context, lang, filePath string, content []byte) 
 	}
 }
 
-// extractPythonSymbols does simple regex-based extraction for Python.
+// extractPythonSymbols does simple regex-based extraction for Python functions and classes.
 func extractPythonSymbols(filePath string, content []byte) ([]symbol.Symbol, error) {
 	var symbols []symbol.Symbol
 	lines := strings.Split(string(content), "\n")
@@ -224,7 +235,7 @@ func extractPythonSymbols(filePath string, content []byte) ([]symbol.Symbol, err
 	return symbols, nil
 }
 
-// extractJSSymbols does simple regex-based extraction for JavaScript/TypeScript.
+// extractJSSymbols does simple regex-based extraction for JavaScript/TypeScript functions, classes, and interfaces.
 func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Symbol, error) {
 	var symbols []symbol.Symbol
 	lines := strings.Split(string(content), "\n")
@@ -304,7 +315,7 @@ func extractJSSymbols(filePath string, content []byte, lang string) ([]symbol.Sy
 	return symbols, nil
 }
 
-// upsertSymbols saves new/updated symbols and removes stale ones.
+// upsertSymbols saves new/updated symbols and removes stale ones with session tracking.
 // Returns (updated count, deleted count, error).
 func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, filePath, sessionID string, symbols []symbol.Symbol) (int, int, error) {
 	// Build a map of new symbol entry names
@@ -382,7 +393,7 @@ func upsertSymbols(ctx context.Context, store storage.MemoryStore, workspaceID, 
 }
 
 // detectLanguage returns the language based on file extension.
-// queueEmbeddings enqueues symbols for background embedding generation.
+// queueEmbeddings enqueues symbols for background embedding generation with deduplication.
 // Returns (queued count, skipped count).
 func queueEmbeddings(ctx context.Context, storageRoot, workspaceID string, symbols []symbol.Symbol, fileContent []byte) (int, int) {
 	// Open embedding store
@@ -430,7 +441,7 @@ func queueEmbeddings(ctx context.Context, storageRoot, workspaceID string, symbo
 	return result.Queued, result.Skipped
 }
 
-// extractSymbolBody extracts the body text for a symbol from file content.
+// extractSymbolBody extracts the body text for a symbol from file content using line ranges and indentation heuristics.
 func extractSymbolBody(content string, sym symbol.Symbol) string {
 	lines := strings.Split(content, "\n")
 
@@ -460,7 +471,7 @@ func extractSymbolBody(content string, sym symbol.Symbol) string {
 	return strings.Join(bodyLines, "\n")
 }
 
-// inferEndLine tries to find the end of a code block based on indentation.
+// inferEndLine tries to find the end of a code block based on indentation and closing patterns.
 func inferEndLine(lines []string, startIdx int) int {
 	if startIdx >= len(lines) {
 		return startIdx + 1
@@ -496,11 +507,12 @@ func inferEndLine(lines []string, startIdx int) int {
 	return len(lines)
 }
 
+// emit outputs the result envelope with indexing statistics and timing information.
 func emit(rc *skillmain.RunContext, out output) error {
 	return skillout.Emit(rc, Command, out)
 }
 
-// ingestGraphEdges extracts call and import relationships and stores them in the graph store.
+// ingestGraphEdges extracts call and import relationships and stores them in the graph store for PageRank.
 // This enables PageRank-boosted code search by building the dependency graph.
 // Returns (call edges created, import edges created).
 func ingestGraphEdges(ctx context.Context, storageRoot, workspace, filePath string, symbols []symbol.Symbol, content []byte) (int, int) {
@@ -608,7 +620,7 @@ func ingestGraphEdges(ctx context.Context, storageRoot, workspace, filePath stri
 	return callEdges, importEdges
 }
 
-// extractGoImports extracts import paths from Go source code.
+// extractGoImports extracts import paths from Go source code with external package filtering.
 func extractGoImports(content []byte) []string {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "", content, parser.ImportsOnly)

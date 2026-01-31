@@ -1,4 +1,5 @@
 // Package main implements the code/diff skill.
+// Generates unified diffs between files with statistics and hunk analysis.
 package main
 
 import (
@@ -15,6 +16,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/textutil"
 )
 
+// input defines the input parameters for code/diff operations.
 type input struct {
 	OldPath          string `json:"old_path" validate:"required"`
 	NewPath          string `json:"new_path" validate:"required"`
@@ -23,6 +25,7 @@ type input struct {
 	IgnoreWhitespace bool   `json:"ignore_whitespace"`
 }
 
+// diffResult represents the complete diff analysis result.
 type diffResult struct {
 	OldFile    string     `json:"old_file"`
 	NewFile    string     `json:"new_file"`
@@ -31,6 +34,7 @@ type diffResult struct {
 	Hunks      []diffHunk `json:"hunks,omitempty"`
 }
 
+// diffStats represents statistical summary of diff changes.
 type diffStats struct {
 	LinesAdded   int     `json:"lines_added"`
 	LinesRemoved int     `json:"lines_removed"`
@@ -39,6 +43,7 @@ type diffStats struct {
 	Similarity   float64 `json:"similarity_percent"`
 }
 
+// diffHunk represents a hunk of changes in the diff.
 type diffHunk struct {
 	OldStart int      `json:"old_start"`
 	OldLines int      `json:"old_lines"`
@@ -48,10 +53,21 @@ type diffHunk struct {
 	Lines    []string `json:"lines"`
 }
 
+// main is the skill entry point for code/diff.
 func main() {
 	skillmain.Main("code/diff", run)
 }
 
+// run orchestrates file diff generation with multiple output formats.
+//
+// Index:
+// - Purpose: Generate unified diffs between files with statistics and hunk analysis
+// - Flow: validate paths → read files → normalize whitespace (optional) → compute LCS diff → build hunks → calculate stats → format output
+// - SideEffects: file system reads; artifact persistence for large diffs; whitespace normalization
+// - FailureModes: invalid paths, file read errors, memory pressure for large files
+// - Observability: emits diff/statistics/old_file/new_file/hunks/unified/artifact based on format
+// - Related: normalizeWhitespace, computeDiff, longestCommonSubsequence, buildHunks, computeStats, generateUnifiedDiff
+// - Keywords: code/diff, unified, stats, summary, hunk, lcs, whitespace, context_lines
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.Format == "" {
@@ -154,6 +170,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, "code/diff", data)
 }
 
+// normalizeWhitespace normalizes line endings and converts tabs to spaces.
 func normalizeWhitespace(content []byte) []byte {
 	// Normalize whitespace: trim trailing spaces, convert tabs to spaces
 	lines := strings.Split(string(content), "\n")
@@ -165,12 +182,14 @@ func normalizeWhitespace(content []byte) []byte {
 	return []byte(strings.Join(lines, "\n"))
 }
 
+// computeDiff computes diff hunks using LCS algorithm with context lines.
 func computeDiff(oldLines, newLines []string, context int) []diffHunk {
 	// Simple LCS-based diff algorithm
 	lcs := longestCommonSubsequence(oldLines, newLines)
 	return buildHunks(oldLines, newLines, lcs, context)
 }
 
+// longestCommonSubsequence computes LCS matrix for two string slices.
 func longestCommonSubsequence(a, b []string) [][]int {
 	m, n := len(a), len(b)
 	lcs := make([][]int, m+1)
@@ -193,6 +212,7 @@ func longestCommonSubsequence(a, b []string) [][]int {
 	return lcs
 }
 
+// buildHunks constructs diff hunks from LCS matrix with context.
 func buildHunks(oldLines, newLines []string, lcs [][]int, context int) []diffHunk {
 	var hunks []diffHunk
 	var currentHunk *diffHunk
@@ -289,6 +309,7 @@ func buildHunks(oldLines, newLines []string, lcs [][]int, context int) []diffHun
 	return hunks
 }
 
+// computeStats calculates diff statistics from hunks and line counts.
 func computeStats(hunks []diffHunk, oldTotal, newTotal int) diffStats {
 	stats := diffStats{}
 
@@ -319,6 +340,7 @@ func computeStats(hunks []diffHunk, oldTotal, newTotal int) diffStats {
 	return stats
 }
 
+// generateUnifiedDiff formats hunks into unified diff string format.
 func generateUnifiedDiff(oldFile, newFile string, hunks []diffHunk) string {
 	var builder strings.Builder
 

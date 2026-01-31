@@ -56,7 +56,7 @@ input_json=$(jq -nc \
   }')
 
 # Run code/counsel skill (may take time due to LLM calls)
-result=$("$AGENTCTL_BIN" run code/counsel --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
+result=$("$AGENTCTL_BIN" run --daemon code/counsel --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
   jq -nc '{decision:"approve", context:"**Counsel:** Analysis failed. Check API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, or CEREBRAS_API_KEY)."}'
   exit 0
 }

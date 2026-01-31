@@ -49,7 +49,7 @@ if [[ -z "$workspace" || -z "$session_id" ]]; then
 fi
 
 # Drain context buffer with source filter for context-updater
-result=$("$AGENTCTL_BIN" run hooks/context_drain --input "$(jq -nc \
+result=$("$AGENTCTL_BIN" run --daemon hooks/context_drain --input "$(jq -nc \
   --arg ws "$workspace" \
   --arg sid "$session_id" \
   '{

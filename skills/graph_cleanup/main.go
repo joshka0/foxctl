@@ -19,6 +19,7 @@ const command = "graph/cleanup"
 
 var allowedOps = []string{"cleanup", "stats", "repair"}
 
+// input defines the input parameters for graph/cleanup operations.
 type input struct {
 	Workspace string `json:"workspace"`
 	Operation string `json:"operation"` // cleanup, stats, repair
@@ -28,16 +29,28 @@ type input struct {
 	Recalculate   bool `json:"recalculate"`    // Recalculate node degrees
 }
 
+// cleanupResult contains the results of cleanup operations.
 type cleanupResult struct {
 	ExpiredEdgesRemoved  int  `json:"expired_edges_removed,omitempty"`
 	DanglingEdgesRemoved int  `json:"dangling_edges_removed,omitempty"`
 	DegreesRecalculated  bool `json:"degrees_recalculated,omitempty"`
 }
 
+// main is the skill entry point for graph/cleanup.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates graph maintenance and cleanup operations with workspace isolation.
+//
+// Index:
+// - Purpose: Execute graph cleanup operations (expired edges, dangling edges, degree recalculation)
+// - Flow: validate operation → open store → dispatch to handler → emit results
+// - SideEffects: graph database cleanup; edge removal; degree recalculation
+// - FailureModes: database errors, cleanup operation failures
+// - Observability: emits cleanup statistics, operation counts, and error context
+// - Related: handleCleanup, handleRepair, handleStats
+// - Keywords: graph/cleanup, graph_maintenance, database_cleanup, expired_edges, dangling_edges
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	op := oputil.Op(oputil.DefaultOp(in.Operation, "cleanup"))
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
@@ -101,6 +114,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// handleCleanup performs selective cleanup operations based on input flags.
 func handleCleanup(ctx context.Context, store graph.Store, workspace string, in input) (*cleanupResult, error) {
 	result := &cleanupResult{}
 
@@ -142,6 +156,7 @@ func handleCleanup(ctx context.Context, store graph.Store, workspace string, in 
 	return result, nil
 }
 
+// handleRepair performs comprehensive cleanup and repair operations.
 func handleRepair(ctx context.Context, store graph.Store, workspace string) (*cleanupResult, error) {
 	result := &cleanupResult{}
 

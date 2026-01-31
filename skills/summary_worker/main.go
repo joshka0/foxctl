@@ -28,7 +28,7 @@ const (
 	defaultMaxDur = 300 // 5 minutes
 )
 
-// Input is the skill input schema.
+// Input is the skill input schema for summary worker with batch processing and filtering options.
 type Input struct {
 	// BatchSize is the number of jobs to process per batch (default: 10).
 	BatchSize int `json:"batch_size,omitempty"`
@@ -46,7 +46,7 @@ type Input struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output with comprehensive processing statistics and queue state.
 type Output struct {
 	Processed  int            `json:"processed"`
 	Errors     int            `json:"errors"`
@@ -60,7 +60,7 @@ type Output struct {
 	Message    string         `json:"message"`
 }
 
-// QueueSnapshot is a summary of queue state after processing.
+// QueueSnapshot is a summary of queue state after processing with job counts by status.
 type QueueSnapshot struct {
 	Queued    int `json:"queued"`
 	Running   int `json:"running"`
@@ -68,10 +68,21 @@ type QueueSnapshot struct {
 	Failed    int `json:"failed"`
 }
 
+// main is the skill entry point for summary/worker with queue processing capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates summary queue processing with batch management, timeout handling, and error recovery.
+//
+// Index:
+// - Purpose: Process queued window summaries with LLM generation, batch management, and comprehensive error handling
+// - Flow: validate providers → open stores → process jobs in batches → generate summaries → update windows → emit results
+// - SideEffects: claims and completes queue jobs; updates session window summaries; manages LLM provider fallbacks
+// - FailureModes: missing LLM providers, queue access failures, session store errors, LLM API failures
+// - Observability: emits processing statistics, queue snapshots, error details, and comprehensive progress tracking
+// - Related: getWindowContentPreview, buildWindowSummaryPrompt, callLLM
+// - Keywords: summary/worker, queue_processing, batch_jobs, llm_summarization, error_recovery
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	log := rc.Logger
 
@@ -342,6 +353,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
+// getWindowContentPreview extracts content previews from session chunks within the specified range.
 func getWindowContentPreview(ctx context.Context, store *sessions.Store, sessionID string, chunkStart, chunkEnd int) (string, error) {
 	chunks, err := store.GetChunks(ctx, sessionID, 0)
 	if err != nil {
@@ -366,6 +378,7 @@ func getWindowContentPreview(ctx context.Context, store *sessions.Store, session
 	return combined, nil
 }
 
+// buildWindowSummaryPrompt creates a structured prompt for LLM window summarization with context.
 func buildWindowSummaryPrompt(window *storage.ContextWindow, contentPreview string) string {
 	return fmt.Sprintf(`Summarize this coding session window in 2-3 concise sentences.
 Focus on: what was accomplished, key decisions made, and any issues encountered.
@@ -377,6 +390,7 @@ Content preview:
 Summary:`, window.Trigger, contentPreview)
 }
 
+// callLLM makes HTTP requests to LLM providers for text generation with error handling and timeouts.
 func callLLM(ctx context.Context, provider llmproviders.Provider, prompt string) (string, error) {
 	if provider.IsCLI {
 		return "", fmt.Errorf("CLI providers not supported in worker")

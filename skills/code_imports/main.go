@@ -20,6 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
+// input defines the skill input parameters for import analysis across multiple programming languages.
 type input struct {
 	Path       string `json:"path"`
 	QueryType  string `json:"query_type"`
@@ -29,6 +30,7 @@ type input struct {
 	MaxResults int    `json:"max_results"`
 }
 
+// importInfo represents a single import statement with metadata about its type and usage.
 type importInfo struct {
 	File       string   `json:"file"`
 	Import     string   `json:"import"`
@@ -41,6 +43,7 @@ type importInfo struct {
 	UsageCount int      `json:"usage_count,omitempty"`
 }
 
+// graphNode represents a file node in the import dependency graph with bidirectional relationships.
 type graphNode struct {
 	File       string   `json:"file"`
 	Imports    []string `json:"imports"`
@@ -48,10 +51,21 @@ type graphNode struct {
 	IsExternal bool     `json:"is_external"`
 }
 
+// main is the skill entry point for code/imports.
 func main() {
 	skillmain.Main("code/imports", run)
 }
 
+// run orchestrates import analysis across multiple languages with graph building and dependency tracking.
+//
+// Index:
+// - Purpose: Analyze imports and dependencies in codebases across Go, Python, and JavaScript/TypeScript
+// - Flow: apply defaults → resolve path → extract imports → process query type → build response with statistics
+// - SideEffects: reads file contents; parses source code; builds dependency graphs; stores artifacts
+// - FailureModes: file access errors, parsing failures, unsupported languages, invalid query types
+// - Observability: emits import lists, dependency graphs, statistics, and external dependency analysis
+// - Related: extractFromDirectory, extractFromFile, buildGraph, getDependencies, getDependents
+// - Keywords: code/imports, import_analysis, dependency_graph, code_dependencies, cross_language
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.QueryType == "" {
@@ -177,6 +191,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, "code/imports", data)
 }
 
+// extractFromDirectory walks a directory to extract imports from all supported language files.
 func extractFromDirectory(dir, workspace string, in input) ([]importInfo, map[string][]string, error) {
 	var imports []importInfo
 	fileImports := make(map[string][]string)
@@ -220,6 +235,7 @@ func extractFromDirectory(dir, workspace string, in input) ([]importInfo, map[st
 	return imports, fileImports, err
 }
 
+// extractFromFile extracts imports from a single file using language-specific parsers.
 func extractFromFile(path, workspace string, in input) ([]importInfo, []string, error) {
 	// Detect language
 	lang := langutil.DetectAllowedWithHint(in.Language, path, langutil.CommonCodeLanguages)
@@ -239,6 +255,7 @@ func extractFromFile(path, workspace string, in input) ([]importInfo, []string, 
 	}
 }
 
+// extractGoImports extracts imports from Go files using the Go parser with alias detection.
 func extractGoImports(path, workspace string, in input) ([]importInfo, []string, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
@@ -278,6 +295,7 @@ func extractGoImports(path, workspace string, in input) ([]importInfo, []string,
 	return imports, importPaths, nil
 }
 
+// extractPythonImports extracts imports from Python files with support for 'import' and 'from...import' statements.
 func extractPythonImports(path, workspace string, _ input) ([]importInfo, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -343,6 +361,7 @@ func extractPythonImports(path, workspace string, _ input) ([]importInfo, []stri
 	return imports, importPaths, nil
 }
 
+// extractJSImports extracts imports from JavaScript/TypeScript files with ES6 import and CommonJS require support.
 func extractJSImports(path, workspace string, _ input) ([]importInfo, []string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -398,6 +417,7 @@ func extractJSImports(path, workspace string, _ input) ([]importInfo, []string, 
 	return imports, importPaths, nil
 }
 
+// buildGraph constructs a dependency graph from file imports with bidirectional relationship tracking.
 func buildGraph(fileImports map[string][]string, _ string) []graphNode {
 	graph := make(map[string]*graphNode)
 
@@ -439,6 +459,7 @@ func buildGraph(fileImports map[string][]string, _ string) []graphNode {
 	return nodes
 }
 
+// getDependencies recursively finds all dependencies of a file up to the specified depth.
 func getDependencies(file string, fileImports map[string][]string, maxDepth int) []string {
 	visited := make(map[string]bool)
 	var deps []string
@@ -462,6 +483,15 @@ func getDependencies(file string, fileImports map[string][]string, maxDepth int)
 	return deps
 }
 
+// getDependents recursively finds all files that depend on the specified file up to the specified depth.
+//
+// This function traverses the reverse dependency graph starting from the specified file and
+// returns a list of all files that depend on the file, up to the specified depth.
+//
+// Index
+//
+//   - getDependents
+//   - reverseMap
 func getDependents(file string, fileImports map[string][]string, maxDepth int) []string {
 	// Build reverse map
 	reverseMap := make(map[string][]string)
@@ -493,6 +523,7 @@ func getDependents(file string, fileImports map[string][]string, maxDepth int) [
 	return dependents
 }
 
+// filterExternal filters imports to only include external (non-standard library) dependencies.
 func filterExternal(imports []importInfo) []importInfo {
 	var external []importInfo
 	for _, imp := range imports {
@@ -503,6 +534,7 @@ func filterExternal(imports []importInfo) []importInfo {
 	return external
 }
 
+// calculateStats computes import statistics including total, unique, standard library, external, and local counts.
 func calculateStats(imports []importInfo) map[string]any {
 	total := len(imports)
 	stdLib := 0
@@ -539,6 +571,7 @@ func calculateStats(imports []importInfo) map[string]any {
 	}
 }
 
+// isGoStdLib determines if a Go import path belongs to the standard library.
 func isGoStdLib(importPath string) bool {
 	// Common Go standard library packages
 	stdLibPrefixes := []string{
@@ -557,6 +590,7 @@ func isGoStdLib(importPath string) bool {
 	return !strings.Contains(importPath, ".")
 }
 
+// isPythonStdLib determines if a Python import belongs to the standard library.
 func isPythonStdLib(importPath string) bool {
 	stdLibs := []string{
 		"os", "sys", "re", "json", "time", "datetime", "collections",

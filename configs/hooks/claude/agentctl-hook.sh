@@ -87,7 +87,7 @@ PROMPT_TEXT="$(printf '%s' "$PAYLOAD" | jq -r '.prompt // ""' 2>/dev/null || tru
 SOURCE="$(printf '%s' "$PAYLOAD" | jq -r '.source // ""' 2>/dev/null || true)"
 
 # Map Claude event -> canonical event(s)
-# Special handling for Stop: run StopRequested first; if approved, then SessionEnd.
+# dispatch_once constructs a canonical hook input for a given event, invokes the central hooks/dispatch dispatcher in daemon mode, handles dispatcher and skill-level errors, and echoes the resulting `hook_output` JSON (or `{}` on failure).
 
 dispatch_once() {
   local canonical_event="$1"
@@ -145,7 +145,7 @@ dispatch_once() {
 
   resp="$(
     printf '%s' "$hook_input" | \
-      "$AGENTCTL_BIN" run hooks/dispatch --workspace "$WORKSPACE_ROOT" --ephemeral --input-file - 2>"$stderr_file"
+      "$AGENTCTL_BIN" run --daemon hooks/dispatch --workspace "$WORKSPACE_ROOT" --ephemeral --input-file - 2>"$stderr_file"
   )" && exit_code=0 || exit_code=$?
 
   local stderr_content

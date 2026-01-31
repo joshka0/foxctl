@@ -21,7 +21,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
-// Input defines the input parameters for code/symbols.
+// Input defines the input parameters for code/symbols operations.
 type Input struct {
 	Path           string `json:"path"`
 	SymbolType     string `json:"symbol_type" validate:"omitempty,oneof=all function method struct interface type const var"`
@@ -31,6 +31,7 @@ type Input struct {
 	MaxResults     int    `json:"max_results" validate:"gte=0"`
 }
 
+// symbol represents a code symbol with metadata and documentation.
 type symbol struct {
 	Name       string   `json:"name"`
 	Type       string   `json:"type"`
@@ -46,10 +47,21 @@ type symbol struct {
 	Returns    []string `json:"returns,omitempty"`
 }
 
+// main is the skill entry point for code/symbols.
 func main() {
 	skillmain.Main("code/symbols", run)
 }
 
+// run orchestrates symbol extraction from files with configurable filtering options.
+//
+// Index:
+// - Purpose: Extract code symbols (functions, methods, types, variables) from source files with language-specific parsing
+// - Flow: resolve path → determine file/directory → extract symbols using language-specific parsers → filter by type/exports → limit results → persist if needed
+// - SideEffects: file system reads; directory traversal; AST parsing (Go); regex parsing (Python/JS/TS); artifact persistence
+// - FailureModes: invalid paths, parse errors, unsupported languages, file read errors
+// - Observability: emits symbol_count/preview/type_counts/symbol_type/language/artifact
+// - Related: extractFromDirectory, extractFromFile, extractGoSymbols, extractPythonSymbols, extractJSSymbols
+// - Keywords: code/symbols, extraction, AST, functions, methods, types, variables, documentation
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.SymbolType == "" {
@@ -133,6 +145,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "code/symbols", data)
 }
 
+// extractFromDirectory walks a directory and extracts symbols from all supported files.
 func extractFromDirectory(dir, workspace string, in Input) ([]symbol, error) {
 	var symbols []symbol
 
@@ -173,6 +186,7 @@ func extractFromDirectory(dir, workspace string, in Input) ([]symbol, error) {
 	return symbols, err
 }
 
+// extractFromFile extracts symbols from a single file using language-specific parser.
 func extractFromFile(path, workspace string, in Input) ([]symbol, error) {
 	// Detect language
 	lang := langutil.DetectAllowedWithHint(in.Language, path, langutil.CommonCodeLanguages)
@@ -192,6 +206,7 @@ func extractFromFile(path, workspace string, in Input) ([]symbol, error) {
 	}
 }
 
+// extractGoSymbols uses Go AST to extract symbols from Go source files.
 func extractGoSymbols(path, workspace string, in Input) ([]symbol, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
@@ -218,6 +233,7 @@ func extractGoSymbols(path, workspace string, in Input) ([]symbol, error) {
 	return symbols, nil
 }
 
+// extractGoFunction extracts function/method information from Go AST FuncDecl.
 func extractGoFunction(decl *ast.FuncDecl, fset *token.FileSet, file string, in Input) *symbol {
 	if decl.Name == nil {
 		return nil
@@ -287,6 +303,7 @@ func extractGoFunction(decl *ast.FuncDecl, fset *token.FileSet, file string, in 
 	return sym
 }
 
+// extractGoGenDecl extracts type/const/var declarations from Go AST GenDecl.
 func extractGoGenDecl(decl *ast.GenDecl, fset *token.FileSet, file string, in Input) []symbol {
 	var symbols []symbol
 
@@ -365,6 +382,7 @@ func extractGoGenDecl(decl *ast.GenDecl, fset *token.FileSet, file string, in In
 	return symbols
 }
 
+// exprToString converts a Go AST expression to string representation.
 func exprToString(expr ast.Expr) string {
 	if expr == nil {
 		return ""
@@ -403,6 +421,7 @@ func exprToString(expr ast.Expr) string {
 	}
 }
 
+// extractPythonSymbols uses regex-based parsing to extract symbols from Python files.
 func extractPythonSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	// Simple regex-based extraction for Python
 	// A full AST parser would be better but this provides basic functionality
@@ -457,6 +476,7 @@ func extractPythonSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	return symbols, nil
 }
 
+// extractJSSymbols uses regex-based parsing to extract symbols from JavaScript/TypeScript files.
 func extractJSSymbols(path, workspace string, _ Input) ([]symbol, error) {
 	// Simple regex-based extraction for JavaScript/TypeScript
 	content, err := os.ReadFile(path)

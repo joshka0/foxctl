@@ -50,6 +50,7 @@ var allowedOps = []string{
 	"push_file",
 }
 
+// input defines the parameters for Android device automation with ADB.
 type input struct {
 	Operation  string `json:"operation"`
 	Serial     string `json:"serial,omitempty"`
@@ -76,7 +77,7 @@ type input struct {
 	Since   string `json:"since,omitempty"`   // Time filter (e.g., "1h", "30m", "2024-01-01 12:00:00")
 }
 
-// UINode represents a node in the UI hierarchy.
+// UINode represents a node in the UI hierarchy with XML attributes.
 type UINode struct {
 	XMLName       xml.Name `xml:"node"`
 	Index         string   `xml:"index,attr"`
@@ -99,10 +100,21 @@ type UINode struct {
 	Children      []UINode `xml:"node"`
 }
 
+// main is the skill entry point for mobile/android.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates Android device automation via ADB with comprehensive device management capabilities.
+//
+// Index:
+// - Purpose: Automate Android devices/emulators via ADB including app management, UI interaction, and system operations
+// - Flow: validate operation → check ADB availability → route to specific handler → execute ADB commands → emit results
+// - SideEffects: device interaction; app installation/launch; UI automation; file transfers; screen recording; log collection
+// - FailureModes: ADB unavailable, device not connected, invalid operations, command execution failures
+// - Observability: emits operation results, device status, file artifacts, and structured UI hierarchy data
+// - Related: mobileutil.RunADB, mobileutil.ListADBDevices, parseUIHierarchy, emitLogcatResult
+// - Keywords: mobile/android, adb_automation, device_management, ui_automation, android_testing
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
 	op := oputil.Op(in.Operation)
@@ -459,7 +471,7 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, serial string) error 
 	return emit(rc, payload)
 }
 
-// parseUIHierarchy parses the UI hierarchy XML into a flat list of elements.
+// parseUIHierarchy parses the UI hierarchy XML into a flat list of elements with boolean conversions.
 func parseUIHierarchy(data []byte) []map[string]any {
 	var elements []map[string]any
 
@@ -763,7 +775,7 @@ func logcatClear(ctx context.Context, rc *skillmain.RunContext, serial string) e
 	})
 }
 
-// filterLogsByPattern filters log lines by a regex pattern.
+// filterLogsByPattern filters log lines by a regex pattern with case-insensitive matching.
 func filterLogsByPattern(data []byte, pattern string) []byte {
 	re, err := regexp.Compile("(?i)" + pattern) // Case-insensitive
 	if err != nil {

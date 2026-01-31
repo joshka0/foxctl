@@ -34,15 +34,19 @@ type Store interface {
 }
 
 type sqlStore struct {
-	db *sql.DB
-	mu sync.Mutex
+	db    *sql.DB
+	close func() error
+	mu    sync.Mutex
 }
 
+
 // Open initializes the persistent store rooted at the provided path.
-// Falls back to in-memory database if filesystem is readonly (e.g., sandbox environments).
+// Open opens a SQLite-backed job Store at root/jobs.db and applies migrations.
+// If the on-disk database cannot be opened due to a read-only filesystem, Open writes a brief warning to stderr and falls back to an in-memory store.
+// On success it returns the Store; on failure it returns a non-nil error.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "jobs.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		// Check if error is due to readonly filesystem
 		if isReadonlyError(err) {
@@ -52,22 +56,20 @@ func Open(ctx context.Context, root string) (Store, error) {
 			fmt.Fprintf(os.Stderr, "hint: if using Claude Code, this is expected in sandbox mode\n")
 
 			// Fall back to in-memory database for sandbox environments
-			memDB, memErr := sql.Open("sqlite3", ":memory:")
+			memDB, memErr := sqliteutil.OpenInMemory(ctx, migrate)
 			if memErr != nil {
 				return nil, fmt.Errorf("jobs: open in-memory db: %w", memErr)
 			}
-			if memErr = migrate(ctx, memDB); memErr != nil {
-				errs.Ignore(memDB.Close(), "close failed in-memory db")
-				return nil, fmt.Errorf("jobs: migrate in-memory db: %w", memErr)
-			}
-			return &sqlStore{db: memDB}, nil
+			return &sqlStore{db: memDB, close: memDB.Close}, nil
 		}
 		return nil, fmt.Errorf("jobs: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
 
-// isReadonlyError checks if an error indicates a readonly filesystem.
+
+// isReadonlyError reports whether err represents a readonly-filesystem or readonly-database condition.
+// It returns true when the error string contains known readonly-related substrings, false otherwise.
 func isReadonlyError(err error) bool {
 	if err == nil {
 		return false
@@ -79,8 +81,12 @@ func isReadonlyError(err error) bool {
 }
 
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 func (s *sqlStore) List(ctx context.Context, limit int) ([]types.Job, error) {
 	if limit <= 0 {

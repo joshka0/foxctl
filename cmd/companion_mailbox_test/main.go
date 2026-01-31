@@ -25,6 +25,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// main runs a self-contained demo of the companion mailbox flow: it loads configuration and API keys, initializes temporary storage (context store, board store, memory DB and store), creates a companion executor, spawns a philosopher companion, sends a series of mailbox messages to it, inspects board responses, performs a direct message, prints final context and memory statistics, demonstrates semantic search over named memories, stops all actors, and cleans up temporary resources.
 func main() {
 	ctx := context.Background()
 
@@ -68,11 +69,13 @@ func main() {
 
 	// Create memory database for conversation memory
 	memoryDBPath := filepath.Join(tmpDir, "memory.db")
-	memoryDB, err := sqliteutil.OpenDB(ctx, memoryDBPath, nil) // Migration handled by companion.ConversationMemory
+	memoryDB, closeFn, err := sqliteutil.OpenDBShared(ctx, memoryDBPath, nil) // Migration handled by companion.ConversationMemory
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create memory database")
 	}
-	defer memoryDB.Close()
+	defer func() {
+		_ = closeFn()
+	}()
 
 	// Open context store
 	contextStore, err := contextvar.Open(ctx, tmpDir)

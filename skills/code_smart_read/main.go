@@ -38,7 +38,7 @@ const (
 	DefaultTimeout         = 30 * time.Second
 )
 
-// Input is the expected JSON input.
+// Input is the expected JSON input for code/smart_read operations.
 type Input struct {
 	// Query is the natural-language question guiding file selection.
 	Query string `json:"query" validate:"required"`
@@ -65,7 +65,7 @@ type Input struct {
 	ContextLines int `json:"context_lines,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output structure for code/smart_read results.
 type Output struct {
 	// Evidence contains the extracted code snippets.
 	Evidence *codecontext.Evidence `json:"evidence"`
@@ -83,7 +83,7 @@ type Output struct {
 // SecretFinding represents a detected secret in the output.
 type SecretFinding = secretutil.Finding
 
-// CandidateInfo describes a candidate file.
+// CandidateInfo describes a candidate file for smart reading.
 type CandidateInfo struct {
 	Path   string  `json:"path"`
 	Score  float64 `json:"score"`
@@ -100,10 +100,21 @@ type Stats struct {
 	SelectionMethod string `json:"selection_method"` // "explicit", "auto"
 }
 
+// main is the skill entry point for code/smart_read.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates intelligent file reading with auto-selection and context extraction.
+//
+// Index:
+// - Purpose: Provide intelligent file reading with auto-selection, context-aware extraction, and multiple rendering modes
+// - Flow: apply defaults → determine candidates (explicit or auto) → collect evidence → scan for secrets → emit results
+// - SideEffects: file system reads; embedding API calls (auto-selection); secret scanning; artifact persistence
+// - FailureModes: invalid paths, file read errors, embedding provider errors, timeout errors
+// - Observability: emits evidence/candidates/secret_findings/stats
+// - Related: autoSelectFiles, codecontext.Collect, secretutil.ScanEvidence, mapMode
+// - Keywords: code/smart_read, evidence, snippets, auto_selection, secrets, structure, flow
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	start := time.Now()
 	logger := rc.Logger.With().Str("skill", command).Logger()
@@ -202,13 +213,13 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
-// autoSelectResult holds the result of auto-selection.
+// autoSelectResult holds the result of auto-selection with candidates and info.
 type autoSelectResult struct {
 	candidates []codecontext.Candidate
 	info       []CandidateInfo
 }
 
-// autoSelectFiles uses retrieval.Generator to find relevant files.
+// autoSelectFiles uses retrieval.Generator to find relevant files based on query.
 func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, logger zerolog.Logger) (*autoSelectResult, error) {
 	// Open memory store for retrieval
 	memStore, err := memory.OpenWithConfig(ctx, rc.Config)

@@ -30,7 +30,7 @@ const defaultTimeout = 60 * time.Second
 // Daemon mode is faster but may have issues with some operations.
 var useDaemon = os.Getenv("AGENTCTL_GOPLS_CLI") != "1"
 
-// Input defines the input parameters for lsp/gopls.
+// Input defines the input parameters for lsp/gopls with LSP-style nested parameters support.
 type Input struct {
 	Operation  string `json:"operation" validate:"required,oneof=definition references symbols workspace_symbol call_hierarchy implementation check"`
 	File       string `json:"file"`
@@ -45,16 +45,19 @@ type Input struct {
 	Position     *positionParam     `json:"position,omitempty"`
 }
 
+// textDocumentParam represents LSP-style TextDocumentIdentifier for nested parameter support.
 type textDocumentParam struct {
 	URI string `json:"uri"`
 }
 
+// positionParam represents LSP-style Position for nested parameter support.
 type positionParam struct {
 	Line      int `json:"line"`
 	Character int `json:"character"`
 }
 
 // Result types for different operations
+// Location represents a file location with line and column coordinates and optional end position.
 type Location struct {
 	File   string `json:"file"`
 	Line   int    `json:"line"`
@@ -62,11 +65,13 @@ type Location struct {
 	End    *Pos   `json:"end,omitempty"`
 }
 
+// Pos represents a position with line and column coordinates.
 type Pos struct {
 	Line   int `json:"line"`
 	Column int `json:"column"`
 }
 
+// Symbol represents a code symbol with name, kind, and location information.
 type Symbol struct {
 	Name    string `json:"name"`
 	Kind    string `json:"kind"`
@@ -77,15 +82,18 @@ type Symbol struct {
 	EndCol  int    `json:"end_column,omitempty"`
 }
 
+// Definition represents a symbol definition with location and optional text.
 type Definition struct {
 	Location Location `json:"location"`
 	Text     string   `json:"text,omitempty"`
 }
 
+// Reference represents a symbol reference with location information.
 type Reference struct {
 	Location Location `json:"location"`
 }
 
+// CallHierarchyItem represents an item in call hierarchy with function and location.
 type CallHierarchyItem struct {
 	Function string `json:"function"`
 	File     string `json:"file"`
@@ -93,12 +101,14 @@ type CallHierarchyItem struct {
 	Column   int    `json:"column"`
 }
 
+// CallHierarchy represents bidirectional call relationships with callers and callees.
 type CallHierarchy struct {
 	Identifier string              `json:"identifier"`
 	Callers    []CallHierarchyItem `json:"callers"`
 	Callees    []CallHierarchyItem `json:"callees"`
 }
 
+// Diagnostic represents a diagnostic message with location and severity information.
 type Diagnostic struct {
 	File     string `json:"file"`
 	Line     int    `json:"line"`
@@ -107,6 +117,7 @@ type Diagnostic struct {
 	Message  string `json:"message"`
 }
 
+// output contains the skill result data with operation-specific results and counts.
 type output struct {
 	Operation     string         `json:"operation"`
 	Definition    *Definition    `json:"definition,omitempty"`
@@ -117,10 +128,21 @@ type output struct {
 	Count         int            `json:"count"`
 }
 
+// main is the skill entry point for lsp/gopls.
 func main() {
 	skillmain.Main("lsp/gopls", run)
 }
 
+// run orchestrates Go language server operations using either persistent daemon or CLI mode with fallback.
+//
+// Index:
+// - Purpose: Provide Go language server operations (definition, references, symbols, etc.) via gopls daemon or CLI
+// - Flow: normalize input → apply timeout → validate paths → try daemon mode → fallback to CLI mode → emit results
+// - SideEffects: spawns persistent gopls daemon; executes gopls CLI commands; parses LSP-style output
+// - FailureModes: gopls not installed, daemon startup failures, invalid file paths, timeout errors, parsing failures
+// - Observability: emits operation results, location data, symbol information, diagnostic messages, and timing metrics
+// - Related: runWithDaemon, runWithCLI, normalizeInput, parseDefinition, parseReferences
+// - Keywords: lsp/gopls, language_server, go_tools, code_navigation, symbol_search, call_hierarchy, diagnostics
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults and normalize LSP-style parameters
 	normalizeInput(&in)
@@ -154,7 +176,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return runWithCLI(ctx, rc, workspace, in)
 }
 
-// normalizeInput applies defaults and LSP-style parameter normalization.
+// normalizeInput applies defaults and LSP-style parameter normalization for flat and nested input formats.
 func normalizeInput(in *Input) {
 	// Support LSP-style nested parameters (textDocument/position) as alternative to flat file/line/column
 	if in.TextDocument != nil && in.TextDocument.URI != "" && in.File == "" {
@@ -178,7 +200,7 @@ func normalizeInput(in *Input) {
 	}
 }
 
-// runWithDaemon uses the persistent gopls daemon.
+// runWithDaemon uses the persistent gopls daemon for fast LSP operations with connection reuse.
 func runWithDaemon(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	daemon, err := gopls.GetDaemon(ctx, workspace)
 	if err != nil {
@@ -251,7 +273,7 @@ func runWithDaemon(ctx context.Context, rc *skillmain.RunContext, workspace stri
 	return skillout.Emit(rc, "lsp/gopls", out)
 }
 
-// runWithCLI uses the traditional gopls CLI (slower but supports all operations).
+// runWithCLI uses the traditional gopls CLI for all operations with slower but comprehensive support.
 func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	// Check gopls availability
 	goplsPath, err := executil.RequireTool("gopls", "install gopls (go install golang.org/x/tools/gopls@latest)")
@@ -330,6 +352,7 @@ func runWithCLI(ctx context.Context, rc *skillmain.RunContext, workspace string,
 	return skillout.Emit(rc, "lsp/gopls", out)
 }
 
+// runDefinition executes gopls definition command to find symbol definitions with location parsing.
 func runDefinition(ctx context.Context, goplsPath, workspace string, in Input) (*Definition, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, skillerr.Arg("definition requires file and line")
@@ -346,6 +369,7 @@ func runDefinition(ctx context.Context, goplsPath, workspace string, in Input) (
 	return parseDefinition(string(result.Stdout))
 }
 
+// runReferences executes gopls references command to find all symbol references with result limiting.
 func runReferences(ctx context.Context, goplsPath, workspace string, in Input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, skillerr.Arg("references requires file and line")
@@ -362,6 +386,7 @@ func runReferences(ctx context.Context, goplsPath, workspace string, in Input) (
 	return parseReferences(string(result.Stdout), workspace)
 }
 
+// runSymbols executes gopls symbols command to list document symbols with kind and position parsing.
 func runSymbols(ctx context.Context, goplsPath, workspace string, in Input) ([]Symbol, error) {
 	if in.File == "" {
 		return nil, skillerr.Arg("symbols requires file")
@@ -377,6 +402,7 @@ func runSymbols(ctx context.Context, goplsPath, workspace string, in Input) ([]S
 	return parseSymbols(string(result.Stdout), workspace)
 }
 
+// runWorkspaceSymbol executes gopls workspace_symbol command to search symbols across the workspace.
 func runWorkspaceSymbol(ctx context.Context, goplsPath, workspace string, in Input) ([]Symbol, error) {
 	if in.Query == "" {
 		return nil, skillerr.Arg("workspace_symbol requires query")
@@ -390,6 +416,7 @@ func runWorkspaceSymbol(ctx context.Context, goplsPath, workspace string, in Inp
 	return parseWorkspaceSymbols(string(result.Stdout), workspace)
 }
 
+// runCallHierarchy executes gopls call_hierarchy command to analyze bidirectional call relationships.
 func runCallHierarchy(ctx context.Context, goplsPath, workspace string, in Input) (*CallHierarchy, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, skillerr.Arg("call_hierarchy requires file and line")
@@ -406,6 +433,7 @@ func runCallHierarchy(ctx context.Context, goplsPath, workspace string, in Input
 	return parseCallHierarchy(string(result.Stdout), workspace)
 }
 
+// runImplementation executes gopls implementation command to find interface implementations.
 func runImplementation(ctx context.Context, goplsPath, workspace string, in Input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, skillerr.Arg("implementation requires file and line")
@@ -422,6 +450,7 @@ func runImplementation(ctx context.Context, goplsPath, workspace string, in Inpu
 	return parseReferences(string(result.Stdout), workspace)
 }
 
+// runCheck executes gopls check command to analyze code for diagnostic issues and errors.
 func runCheck(ctx context.Context, goplsPath, workspace string, in Input) ([]Diagnostic, error) {
 	if in.File == "" {
 		return nil, skillerr.Arg("check requires file")
@@ -436,6 +465,7 @@ func runCheck(ctx context.Context, goplsPath, workspace string, in Input) ([]Dia
 
 // Parsing functions
 
+// parseDefinition parses gopls definition output to extract location and definition text.
 func parseDefinition(out string) (*Definition, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) == 0 {
@@ -462,6 +492,7 @@ func parseDefinition(out string) (*Definition, error) {
 	return def, nil
 }
 
+// parseReferences parses gopls references output to extract reference locations with workspace-relative paths.
 func parseReferences(out, workspace string) ([]Reference, error) {
 	refs := []Reference{}
 	scanner := bufio.NewScanner(strings.NewReader(out))
@@ -480,6 +511,7 @@ func parseReferences(out, workspace string) ([]Reference, error) {
 	return refs, nil
 }
 
+// parseSymbols parses gopls symbols output to extract document symbols with positions and kinds.
 func parseSymbols(out, workspace string) ([]Symbol, error) {
 	syms := []Symbol{}
 	scanner := bufio.NewScanner(strings.NewReader(out))
@@ -516,12 +548,25 @@ func parseWorkspaceSymbols(out, workspace string) ([]Symbol, error) {
 	return syms, nil
 }
 
+// parseCallHierarchy parses gopls call_hierarchy output to extract callers and callees with locations.
+//
+// Index:
+//   - Call Hierarchy
+//   - Caller/Callee Extraction
+//
+// Parameters:
+//
+//	out (string): gopls call_hierarchy output
+//	workspace (string): Workspace path for relative file paths
+//
+// Returns:
+//
+//	(*CallHierarchy, error): Extracted call hierarchy or error
 func parseCallHierarchy(out, workspace string) (*CallHierarchy, error) {
 	ch := &CallHierarchy{
 		Callers: []CallHierarchyItem{},
 		Callees: []CallHierarchyItem{},
 	}
-
 	scanner := bufio.NewScanner(strings.NewReader(out))
 
 	for scanner.Scan() {
@@ -553,6 +598,20 @@ func parseCallHierarchy(out, workspace string) (*CallHierarchy, error) {
 	return ch, nil
 }
 
+// parseCallHierarchyItem parses individual call hierarchy items with function names and locations.
+//
+// Index:
+//   - Call Hierarchy Items
+//   - Function Extraction
+//
+// Parameters:
+//
+//	line (string): Individual call hierarchy item line
+//	workspace (string): Workspace path for relative file paths
+//
+// Returns:
+//
+//	(*CallHierarchyItem, error): Extracted call hierarchy item or nil
 func parseCallHierarchyItem(line, workspace string) *CallHierarchyItem {
 	// Format: caller[0]: ranges 128:15-26 in /path/file.go from/to function funcName in /path/file.go:line:col
 	item := &CallHierarchyItem{}
@@ -577,6 +636,20 @@ func parseCallHierarchyItem(line, workspace string) *CallHierarchyItem {
 	return item
 }
 
+// parseDiagnostics parses gopls check output to extract diagnostic messages with severity and locations.
+//
+// Index:
+//   - Diagnostics
+//   - Diagnostic Extraction
+//
+// Parameters:
+//
+//	out (string): gopls check output
+//	workspace (string): Workspace path for relative file paths
+//
+// Returns:
+//
+//	([]Diagnostic, error): List of extracted diagnostics or error
 func parseDiagnostics(out, workspace string) ([]Diagnostic, error) {
 	diags := []Diagnostic{}
 	scanner := bufio.NewScanner(strings.NewReader(out))
@@ -595,6 +668,20 @@ func parseDiagnostics(out, workspace string) ([]Diagnostic, error) {
 	return diags, nil
 }
 
+// parseDiagnosticLine parses individual diagnostic lines to extract location, severity, and message.
+//
+// Index:
+//   - Diagnostic Lines
+//   - Diagnostic Extraction
+//
+// Parameters:
+//
+//	line (string): Individual diagnostic line
+//	workspace (string): Workspace path for relative file paths
+//
+// Returns:
+//
+//	(Diagnostic, error): Extracted diagnostic or error
 func parseDiagnosticLine(line, workspace string) (Diagnostic, error) {
 	diag := Diagnostic{Severity: "error"}
 
@@ -728,6 +815,7 @@ func parseWorkspaceSymbolLine(line, workspace string) (Symbol, error) {
 	return sym, nil
 }
 
+// resolvePath converts relative paths to absolute paths using the workspace as base.
 func resolvePath(workspace, path string) string {
 	if filepath.IsAbs(path) {
 		return path
@@ -735,6 +823,7 @@ func resolvePath(workspace, path string) string {
 	return filepath.Join(workspace, path)
 }
 
+// makeRelative converts absolute paths to workspace-relative paths for cleaner output.
 func makeRelative(path, workspace string) string {
 	rel, err := filepath.Rel(workspace, path)
 	if err != nil {

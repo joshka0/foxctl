@@ -20,7 +20,7 @@ const (
 	defaultMaxDur = 300 // 5 minutes
 )
 
-// Input is the skill input schema.
+// Input is the skill input schema for embedding/worker operations.
 type Input struct {
 	// BatchSize is the number of jobs to process per batch (default: 10).
 	BatchSize int `json:"batch_size,omitempty"`
@@ -36,7 +36,7 @@ type Input struct {
 	DryRun bool `json:"dry_run,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output for embedding/worker operations.
 type Output struct {
 	Processed  int            `json:"processed"`
 	Errors     int            `json:"errors"`
@@ -58,10 +58,20 @@ type QueueSnapshot struct {
 	Embeddings int `json:"embeddings"`
 }
 
+// main is the skill entry point for embedding/worker.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates background embedding job processing with timeout and batch controls.
+//
+// Index:
+// - Purpose: Process queued embedding jobs with batch processing, timeout handling, and error recovery
+// - Flow: configure embedder → open store → claim jobs → generate embeddings → store results → repeat until done
+// - SideEffects: embedding API calls; job state transitions; queue statistics; dimension validation
+// - FailureModes: missing API keys, store errors, embedding failures, dimension mismatches, timeouts
+// - Observability: emits processing statistics, error details, queue snapshots, and timing metrics
+// - Keywords: embedding/worker, background, jobs, batch_processing, timeout, error_recovery
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	log := rc.Logger
 

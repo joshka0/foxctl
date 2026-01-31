@@ -11,6 +11,7 @@ import (
 	"time"
 
 	actormemory "github.com/jkatigb/agentctl/internal/actor/memory"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/indexing/semantic"
 	"github.com/jkatigb/agentctl/internal/storage"
 )
@@ -87,12 +88,13 @@ func RoleplayMemoryConfig() MemoryConfig {
 
 // ConversationTurn represents a single message in the conversation.
 type ConversationTurn struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversation_id"`
-	Role           string    `json:"role"` // user, assistant
-	Content        string    `json:"content"`
-	TokenCount     int       `json:"token_count"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string          `json:"id"`
+	ConversationID string          `json:"conversation_id"`
+	Role           string          `json:"role"` // user, assistant
+	Content        string          `json:"content"`
+	TokenCount     int             `json:"token_count"`
+	CreatedAt      time.Time       `json:"created_at"`
+	ToolCalls      json.RawMessage `json:"tool_calls,omitempty"` // JSON array of tool calls made during this turn
 }
 
 // DaySummary represents a summarized day of conversation.
@@ -194,10 +196,15 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 			role TEXT NOT NULL,
 			content TEXT NOT NULL,
 			token_count INTEGER DEFAULT 0,
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			tool_calls TEXT -- JSON array of tool calls made during this turn
 		);
 		CREATE INDEX IF NOT EXISTS idx_companion_turns_conv_time
 		ON companion_turns(conversation_id, created_at DESC);
+
+		-- Migration: Add tool_calls column if it doesn't exist
+		-- SQLite doesn't have IF NOT EXISTS for ALTER, so we use a pragma check
+		-- This is safe because SQLite ignores duplicate column additions silently with this pattern
 
 		-- Day summaries (L1 storage)
 		CREATE TABLE IF NOT EXISTS companion_day_summaries (
@@ -230,6 +237,19 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 
+		-- Soft-deleted conversations tracking
+		CREATE TABLE IF NOT EXISTS companion_deleted_conversations (
+			conversation_id TEXT PRIMARY KEY,
+			deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+
+		-- Custom conversation titles
+		CREATE TABLE IF NOT EXISTS companion_conversation_titles (
+			conversation_id TEXT PRIMARY KEY,
+			title TEXT NOT NULL,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
+
 		-- Compression cursor tracking
 		CREATE TABLE IF NOT EXISTS companion_memory_state (
 			conversation_id TEXT PRIMARY KEY,
@@ -238,10 +258,99 @@ func (m *ConversationMemory) ensureSchema(ctx context.Context) error {
 			total_turns INTEGER DEFAULT 0,
 			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
+
+		-- Character definitions for presence system
+		CREATE TABLE IF NOT EXISTS companion_characters (
+			id TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			avatar_digest TEXT,
+			voice_id TEXT,
+			base_mood TEXT DEFAULT 'neutral',
+			backstory TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(conversation_id, name)
+		);
+		CREATE INDEX IF NOT EXISTS idx_companion_characters_conv
+		ON companion_characters(conversation_id);
+
+		-- Emotion overlays per character
+		CREATE TABLE IF NOT EXISTS companion_character_overlays (
+			id TEXT PRIMARY KEY,
+			character_id TEXT NOT NULL,
+			emotion TEXT NOT NULL,
+			overlay_digest TEXT NOT NULL,
+			intensity_low_digest TEXT,
+			intensity_high_digest TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(character_id, emotion)
+		);
+		CREATE INDEX IF NOT EXISTS idx_companion_overlays_char
+		ON companion_character_overlays(character_id);
+
+		-- Generated background cache
+		CREATE TABLE IF NOT EXISTS companion_generated_backgrounds (
+			id TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL,
+			prompt_hash TEXT NOT NULL,
+			image_digest TEXT NOT NULL,
+			emotion TEXT,
+			scene TEXT,
+			model TEXT NOT NULL,
+			latency_ms INTEGER,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP,
+			UNIQUE(conversation_id, prompt_hash)
+		);
+		CREATE INDEX IF NOT EXISTS idx_backgrounds_conv
+		ON companion_generated_backgrounds(conversation_id);
+
+		-- Generated voice cache
+		CREATE TABLE IF NOT EXISTS companion_generated_voices (
+			id TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL,
+			text_hash TEXT NOT NULL,
+			voice_id TEXT NOT NULL,
+			audio_digest TEXT NOT NULL,
+			format TEXT DEFAULT 'mp3',
+			duration_ms INTEGER,
+			model TEXT NOT NULL,
+			latency_ms INTEGER,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			expires_at TIMESTAMP,
+			UNIQUE(conversation_id, text_hash, voice_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_voices_conv
+		ON companion_generated_voices(conversation_id);
+
+		-- Presence bundle cache (latest presence data per conversation)
+		CREATE TABLE IF NOT EXISTS companion_presence_bundles (
+			conversation_id TEXT PRIMARY KEY,
+			emotion TEXT,
+			intensity REAL,
+			display_text TEXT,
+			character_id TEXT,
+			overlay_digest TEXT,
+			background_digest TEXT,
+			audio_digest TEXT,
+			audio_duration_ms INTEGER,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);
 	`
 
 	_, err := m.db.ExecContext(ctx, schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migration: Add tool_calls column to existing companion_turns table
+	// SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check first
+	_, _ = m.db.ExecContext(ctx, `ALTER TABLE companion_turns ADD COLUMN tool_calls TEXT`)
+	// Ignore error - column may already exist
+
+	return nil
 }
 
 // AppendTurn adds a new turn to the conversation.
@@ -260,9 +369,9 @@ func (m *ConversationMemory) AppendTurn(ctx context.Context, turn ConversationTu
 	}
 
 	_, err := m.db.ExecContext(ctx, `
-		INSERT INTO companion_turns (id, conversation_id, role, content, token_count, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, turn.ID, turn.ConversationID, turn.Role, turn.Content, turn.TokenCount, turn.CreatedAt)
+		INSERT INTO companion_turns (id, conversation_id, role, content, token_count, created_at, tool_calls)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, turn.ID, turn.ConversationID, turn.Role, turn.Content, turn.TokenCount, turn.CreatedAt, turn.ToolCalls)
 	if err != nil {
 		return fmt.Errorf("insert turn: %w", err)
 	}
@@ -1042,16 +1151,19 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 		limit = 50
 	}
 
-	// Get distinct conversation IDs with stats
+	// Get distinct conversation IDs with stats (excluding soft-deleted), including custom titles
 	query := `
 		SELECT
-			conversation_id,
+			t.conversation_id,
 			COUNT(*) as message_count,
-			MIN(created_at) as created_at,
-			MAX(created_at) as updated_at
-		FROM companion_turns
-		GROUP BY conversation_id
-		ORDER BY MAX(created_at) DESC
+			MIN(t.created_at) as created_at,
+			MAX(t.created_at) as updated_at,
+			COALESCE(titles.title, '') as title
+		FROM companion_turns t
+		LEFT JOIN companion_conversation_titles titles ON t.conversation_id = titles.conversation_id
+		WHERE t.conversation_id NOT IN (SELECT conversation_id FROM companion_deleted_conversations)
+		GROUP BY t.conversation_id
+		ORDER BY MAX(t.created_at) DESC
 		LIMIT ?
 	`
 
@@ -1064,10 +1176,11 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 	var conversations []ConversationSummary
 	for rows.Next() {
 		var conv ConversationSummary
-		var createdAt, updatedAt string
-		if err := rows.Scan(&conv.ID, &conv.MessageCount, &createdAt, &updatedAt); err != nil {
+		var createdAt, updatedAt, title string
+		if err := rows.Scan(&conv.ID, &conv.MessageCount, &createdAt, &updatedAt, &title); err != nil {
 			return nil, err
 		}
+		conv.Name = title
 		// Parse timestamps and convert to ISO 8601 for frontend compatibility
 		conv.CreatedAt = parseAndFormatTimestamp(createdAt)
 		conv.UpdatedAt = parseAndFormatTimestamp(updatedAt)
@@ -1095,8 +1208,96 @@ func (m *ConversationMemory) ListConversations(ctx context.Context, limit int) (
 	return conversations, nil
 }
 
+// GetConversationMessages retrieves all messages for a specific conversation.
+// Returns messages in chronological order (oldest first).
+func (m *ConversationMemory) GetConversationMessages(ctx context.Context, conversationID string, limit int) ([]ConversationTurn, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	rows, err := m.db.QueryContext(ctx, `
+		SELECT id, conversation_id, role, content, token_count, created_at, tool_calls
+		FROM companion_turns
+		WHERE conversation_id = ?
+		ORDER BY created_at ASC
+		LIMIT ?
+	`, conversationID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query messages: %w", err)
+	}
+	defer rows.Close()
+
+	var turns []ConversationTurn
+	for rows.Next() {
+		var t ConversationTurn
+		var toolCallsJSON sql.NullString
+		if err := rows.Scan(&t.ID, &t.ConversationID, &t.Role, &t.Content, &t.TokenCount, &t.CreatedAt, &toolCallsJSON); err != nil {
+			observability.Emit(ctx, observability.NewEvent("companion.turn_scan_failed").
+				WithComponent("companion").
+				WithData("conversation_id", conversationID).
+				WithData("error", err.Error()).
+				Error(err, 0))
+			continue
+		}
+		if toolCallsJSON.Valid && toolCallsJSON.String != "" {
+			t.ToolCalls = json.RawMessage(toolCallsJSON.String)
+		}
+		turns = append(turns, t)
+	}
+
+	return turns, rows.Err()
+}
+
+// SoftDeleteConversation marks a conversation as deleted without removing the data.
+func (m *ConversationMemory) SoftDeleteConversation(ctx context.Context, conversationID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	_, err := m.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO companion_deleted_conversations (conversation_id, deleted_at)
+		VALUES (?, CURRENT_TIMESTAMP)
+	`, conversationID)
+	if err != nil {
+		return fmt.Errorf("soft delete conversation: %w", err)
+	}
+
+	return nil
+}
+
+// RenameConversation sets or updates the custom title for a conversation.
+func (m *ConversationMemory) RenameConversation(ctx context.Context, conversationID, title string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if title == "" {
+		// If empty title, delete the custom title entry
+		_, err := m.db.ExecContext(ctx, `
+			DELETE FROM companion_conversation_titles WHERE conversation_id = ?
+		`, conversationID)
+		if err != nil {
+			return fmt.Errorf("remove conversation title: %w", err)
+		}
+		return nil
+	}
+
+	_, err := m.db.ExecContext(ctx, `
+		INSERT OR REPLACE INTO companion_conversation_titles (conversation_id, title, updated_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+	`, conversationID, title)
+	if err != nil {
+		return fmt.Errorf("rename conversation: %w", err)
+	}
+
+	return nil
+}
+
 // parseAndFormatTimestamp attempts to parse various timestamp formats and returns ISO 8601.
-// Handles Go's default time format (with monotonic clock) and other common formats.
+// parseAndFormatTimestamp parses a timestamp string in several common formats and returns it formatted as RFC3339 in UTC.
+// It accepts Go's default time format (including values that contain a monotonic clock suffix like " m=+..."), RFC3339/RFC3339Nano, and a few common date-time layouts.
+// If parsing fails, it returns the original input unchanged.
 func parseAndFormatTimestamp(ts string) string {
 	if ts == "" {
 		return ""

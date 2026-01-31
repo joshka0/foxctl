@@ -194,13 +194,18 @@ const (
 )
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open initializes the task store rooted at the provided path.
+
+// Open initializes and returns a Store backed by an SQLite database at root/tasks.db.
+// It runs the package migrations, configures the SQLite connection pool for single-writer
+// semantics and optimized task operations, and returns a store whose Close will release
+// the underlying database resources.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "tasks.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: open db: %w", err)
 	}
@@ -212,14 +217,32 @@ func Open(ctx context.Context, root string) (Store, error) {
 	db.SetConnMaxLifetime(defaultConnMaxLifetime)
 	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
+
 
 // Close releases database resources.
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
+
+// migrate creates and migrates the tasks package database schema to the current version.
+//
+// It is safe to call multiple times: it creates missing tables and indexes, adds new
+// columns if they do not exist, normalizes legacy JSON array columns (children, depends_on,
+// entities, keywords) to the canonical "[]" representation, and ensures required indexes
+// (including plan_file and session indexes) exist.
+//
+// As part of schema evolution, the function may drop and recreate the active_epics table
+// to add session_id; this intentionally discards transient active-epic entries.
+//
+// The function returns an error if the primary schema creation step fails; individual
+// idempotent alter/update statements and auxiliary cleanup steps intentionally ignore
+// duplicate-column and similar minor errors.
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS tasks (
@@ -297,6 +320,17 @@ CREATE INDEX IF NOT EXISTS idx_active_epics_session ON active_epics(session_id);
 	}
 	for _, stmt := range alterDDL {
 		// Ignore errors from "duplicate column" - columns may already exist.
+		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
+	}
+
+	// Normalize JSON array columns to [] for legacy/partial rows.
+	fixup := []string{
+		"UPDATE tasks SET children = '[]' WHERE children IS NULL OR trim(children) = '' OR children = 'null'",
+		"UPDATE tasks SET depends_on = '[]' WHERE depends_on IS NULL OR trim(depends_on) = '' OR depends_on = 'null'",
+		"UPDATE tasks SET entities = '[]' WHERE entities IS NULL OR trim(entities) = '' OR entities = 'null'",
+		"UPDATE tasks SET keywords = '[]' WHERE keywords IS NULL OR trim(keywords) = '' OR keywords = 'null'",
+	}
+	for _, stmt := range fixup {
 		_, _ = db.ExecContext(ctx, stmt) //nolint:errcheck
 	}
 
@@ -399,6 +433,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
 // Update replaces mutable fields of an existing task.
 func (s *sqlStore) Update(ctx context.Context, t Task) (Task, error) {
+	if t.Children == nil {
+		t.Children = []string{}
+	}
+	if t.DependsOn == nil {
+		t.DependsOn = []string{}
+	}
+
 	childrenJSON, err := json.Marshal(t.Children)
 	if err != nil {
 		return Task{}, fmt.Errorf("tasks: marshal children: %w", err)
@@ -934,6 +975,13 @@ func (s *sqlStore) LinkTaskToEpic(ctx context.Context, taskID, epicID string) er
 // atomicDescription is the self-contained rewrite, entities are extracted identifiers,
 // keywords are BM25-optimized search terms.
 func (s *sqlStore) UpdateAtomic(ctx context.Context, id, atomicDescription string, entities, keywords []string) error {
+	if entities == nil {
+		entities = []string{}
+	}
+	if keywords == nil {
+		keywords = []string{}
+	}
+
 	entitiesJSON, err := json.Marshal(entities)
 	if err != nil {
 		return fmt.Errorf("tasks: marshal entities: %w", err)

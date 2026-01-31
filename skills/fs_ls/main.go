@@ -18,7 +18,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
-// Input defines the input parameters for fs/ls.
+// Input defines the input parameters for fs/ls operations.
 type Input struct {
 	Path       string   `json:"path"`
 	Include    []string `json:"include"`
@@ -27,6 +27,7 @@ type Input struct {
 	ShowHidden bool     `json:"show_hidden"`
 }
 
+// entry represents a directory entry with metadata.
 type entry struct {
 	Name      string `json:"name"`
 	Path      string `json:"path"`
@@ -36,10 +37,21 @@ type entry struct {
 	ModTime   string `json:"mod_time"`
 }
 
+// main is the skill entry point for fs/ls.
 func main() {
 	skillmain.Main("fs/ls", run)
 }
 
+// run orchestrates directory listing with filtering, statistics, and result persistence.
+//
+// Index:
+// - Purpose: List directory contents with filtering, statistics, and optional result persistence
+// - Flow: validate input → resolve path → read directory → apply filters → calculate stats → emit results
+// - SideEffects: directory traversal; file system access; CAS storage for large result sets
+// - FailureModes: invalid paths, permission errors, directory read errors
+// - Observability: emits entry counts, file/directory statistics, and artifact hints for large sets
+// - Related: readDir, fileSize
+// - Keywords: fs/ls, directory_listing, filtering, statistics, file_system
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if strings.TrimSpace(in.Path) == "" {
@@ -100,6 +112,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "fs/ls", data)
 }
 
+// readDir reads directory entries and applies filtering rules.
 func readDir(path string, in Input) ([]entry, error) {
 	ents, err := os.ReadDir(path)
 	if err != nil {
@@ -138,6 +151,7 @@ func readDir(path string, in Input) ([]entry, error) {
 	return out, nil
 }
 
+// fileSize returns the size for files, 0 for directories.
 func fileSize(info fs.FileInfo) int64 {
 	if info.IsDir() {
 		return 0

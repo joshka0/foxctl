@@ -17,15 +17,27 @@ import (
 
 const command = "fs/cas_get"
 
+// input is the skill input schema for fs/cas_get operations.
 type input struct {
 	Digest string `json:"digest"`
 	Output string `json:"output,omitempty"`
 }
 
+// main is the skill entry point for fs/cas_get.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run retrieves content from CAS and writes it to file system.
+//
+// Index:
+// - Purpose: Retrieve CAS artifacts by digest and write to file system with proper extension handling
+// - Flow: validate digest → get metadata → retrieve content → determine output path → write file → emit results
+// - SideEffects: file creation; CAS store access; temporary file creation; directory creation
+// - FailureModes: invalid digest format, CAS access errors, file write errors, permission errors
+// - Observability: emits file path, digest, size, kind, and summary information
+// - Related: extensionFromKind
+// - Keywords: fs/cas_get, cas, content_addressable_storage, file_retrieval
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate digest format
 	if strings.TrimSpace(in.Digest) == "" {
@@ -111,6 +123,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// extensionFromKind maps content types to file extensions.
 func extensionFromKind(kind string) string {
 	// Extract base type from content-type
 	if idx := strings.Index(kind, ";"); idx != -1 {

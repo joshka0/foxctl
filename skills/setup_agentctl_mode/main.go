@@ -18,25 +18,39 @@ import (
 
 const command = "setup/agentctl_mode"
 
+// Input defines the skill input parameters for agentctl mode management with get/set operations.
 type Input struct {
 	Operation   string `json:"operation"`    // "get" or "set"
 	WorkspaceID string `json:"workspace_id"` // optional, defaults to cwd
 	Enabled     *bool  `json:"enabled"`      // for "set" operation
 }
 
+// Output defines the skill output with workspace mode status and identification information.
 type Output struct {
 	Enabled     bool   `json:"enabled"`
 	WorkspaceID string `json:"workspace_id"`
 }
 
+// ModeValue represents the stored agentctl mode configuration with enabled state.
 type ModeValue struct {
 	Enabled bool `json:"enabled"`
 }
 
+// main is the skill entry point for setup/agentctl_mode.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates agentctl mode management with get/set operations and workspace resolution.
+//
+// Index:
+// - Purpose: Manage agentctl mode settings per workspace with get/set operations
+// - Flow: validate operation → resolve workspace → open database → ensure schema → execute get/set → emit results
+// - SideEffects: database schema creation; mode value storage/retrieval; workspace configuration updates
+// - FailureModes: invalid operations, database access failures, JSON marshaling errors, workspace resolution failures
+// - Observability: emits current mode status, workspace ID, and operation results
+// - Related: ensureSchema, getMode, setMode, workspaceutil.ResolveID
+// - Keywords: setup/agentctl_mode, workspace_settings, mode_management, database_storage
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	if input.Operation == "" {
 		return skillerr.Arg("operation is required", skillerr.WithHint("Use 'get' or 'set'."))
@@ -91,6 +105,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	}
 }
 
+// ensureSchema creates the workspace_settings table if it doesn't exist for persistent storage.
 func ensureSchema(ctx context.Context, db *sql.DB) error {
 	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS workspace_settings (
@@ -107,6 +122,7 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// getMode retrieves the agentctl mode setting for a workspace with default fallback to disabled.
 func getMode(ctx context.Context, db *sql.DB, workspace string) (bool, error) {
 	var valueStr string
 	err := db.QueryRowContext(ctx,
@@ -128,6 +144,7 @@ func getMode(ctx context.Context, db *sql.DB, workspace string) (bool, error) {
 	return val.Enabled, nil
 }
 
+// setMode stores the agentctl mode setting for a workspace with upsert behavior and timestamp tracking.
 func setMode(ctx context.Context, db *sql.DB, workspace string, enabled bool) error {
 	val := ModeValue{Enabled: enabled}
 	valueJSON, err := json.Marshal(val)

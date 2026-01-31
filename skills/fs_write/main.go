@@ -19,7 +19,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-// Input defines the input parameters for fs/write.
+// Input defines the input parameters for fs/write operations.
 type Input struct {
 	Path        string `json:"path" validate:"required"`
 	Content     string `json:"content"`
@@ -29,10 +29,21 @@ type Input struct {
 	CreateDirs  bool   `json:"create_dirs"`
 }
 
+// main is the skill entry point for fs/write.
 func main() {
 	skillmain.Main("fs/write", run)
 }
 
+// run orchestrates file writing with content validation, mode checking, and checksum generation.
+//
+// Index:
+// - Purpose: Write files with content validation, multiple modes, and checksum generation
+// - Flow: validate input → resolve path → get content → check mode → write file → generate checksum → emit results
+// - SideEffects: file creation/modification; directory creation; CAS access; checksum generation
+// - FailureModes: invalid paths, permission errors, mode conflicts, write errors, CAS errors
+// - Observability: emits write statistics, file metadata, checksum, and mode information
+// - Related: getContent, parsePermissions, checkWriteMode, performWrite
+// - Keywords: fs/write, file_writing, content_validation, checksum_generation, file_modes
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.Mode == "" {
@@ -105,6 +116,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "fs/write", data)
 }
 
+// getContent retrieves content from input string or CAS digest.
 func getContent(ctx context.Context, rc *skillmain.RunContext, in Input) ([]byte, error) {
 	if in.Content != "" {
 		return []byte(in.Content), nil
@@ -130,6 +142,7 @@ func getContent(ctx context.Context, rc *skillmain.RunContext, in Input) ([]byte
 	return nil, skillerr.Arg("no content provided")
 }
 
+// parsePermissions converts octal permission string to FileMode.
 func parsePermissions(perm string) (fs.FileMode, error) {
 	// Remove leading 0 if present for parsing
 	perm = strings.TrimPrefix(perm, "0")
@@ -140,6 +153,7 @@ func parsePermissions(perm string) (fs.FileMode, error) {
 	return fs.FileMode(mode), nil
 }
 
+// checkWriteMode validates write mode against file existence.
 func checkWriteMode(path, mode string) error {
 	_, err := os.Stat(path)
 	exists := err == nil
@@ -160,6 +174,7 @@ func checkWriteMode(path, mode string) error {
 	return nil
 }
 
+// performWrite executes the actual file write operation with checksum generation.
 func performWrite(path string, content []byte, mode string, perm fs.FileMode) (int, string, error) {
 	var f *os.File
 	var err error

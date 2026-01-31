@@ -20,6 +20,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
+// Input defines the parameters for session anchor operations.
 type Input struct {
 	Operation  string   `json:"operation"`
 	Workspace  string   `json:"workspace"`
@@ -33,6 +34,7 @@ type Input struct {
 	Question   string   `json:"question,omitempty"`
 }
 
+// Anchor represents a session anchor with main prompt and learning history.
 type Anchor struct {
 	AnchorID        string     `json:"anchor_id"`
 	Workspace       string     `json:"workspace"`
@@ -46,6 +48,7 @@ type Anchor struct {
 	LastSessionID   string     `json:"last_session_id,omitempty"`
 }
 
+// Learning represents a learning entry within an anchor.
 type Learning struct {
 	At           time.Time `json:"at"`
 	Trigger      string    `json:"trigger,omitempty"`
@@ -56,6 +59,7 @@ type Learning struct {
 	CompactionNo int       `json:"compaction_no,omitempty"`
 }
 
+// Output represents the result of session anchor operations.
 type Output struct {
 	Found   bool    `json:"found"`
 	Anchor  *Anchor `json:"anchor,omitempty"`
@@ -78,10 +82,21 @@ var allowedOps = []string{
 	"clear",
 }
 
+// main is the skill entry point for session/anchor.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session anchor operations including get, set, learning management, and question handling.
+//
+// Index:
+// - Purpose: Manage session anchors with main prompts, learnings, compaction tracking, and pending questions
+// - Flow: validate operation → resolve session ID → build anchor key → open memory store → execute operation
+// - SideEffects: anchor storage/retrieval; learning accumulation; compaction counting; question management
+// - FailureModes: memory store access failures, invalid operations, missing required fields
+// - Observability: emits anchor status, operation results, learning counts, and compaction numbers
+// - Related: loadAnchor, saveAnchor, messageForGet, truncateOneLine, capRecentLearnings, normalizeLearnings
+// - Keywords: session/anchor, session_management, learning_tracking, compaction, question_management
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
@@ -261,6 +276,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 }
 
+// messageForGet generates appropriate messages for anchor retrieval operations.
 func messageForGet(found bool) string {
 	if found {
 		return "anchor loaded"
@@ -268,6 +284,7 @@ func messageForGet(found bool) string {
 	return "no anchor set"
 }
 
+// loadAnchor retrieves and deserializes an anchor from the memory store.
 func loadAnchor(ctx context.Context, store *memory.Store, name, workspace string) (*Anchor, bool, error) {
 	entry, err := store.Get(ctx, name, workspace)
 	if err != nil {
@@ -285,6 +302,7 @@ func loadAnchor(ctx context.Context, store *memory.Store, name, workspace string
 	return &a, true, nil
 }
 
+// saveAnchor serializes and stores an anchor with normalized data and metadata.
 func saveAnchor(ctx context.Context, store *memory.Store, name, workspace string, anchor *Anchor, sessionID string) error {
 	if anchor == nil {
 		return skillerr.Validation("save anchor: nil anchor")
@@ -318,6 +336,7 @@ func saveAnchor(ctx context.Context, store *memory.Store, name, workspace string
 	return nil
 }
 
+// truncateOneLine converts multi-line text to a single line with length limit.
 func truncateOneLine(s string, max int) string {
 	line := strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
 	line = strings.Join(strings.Fields(line), " ")
@@ -330,6 +349,7 @@ func truncateOneLine(s string, max int) string {
 	return line[:max]
 }
 
+// capRecentLearnings limits the number of recent learnings to prevent unbounded growth.
 func capRecentLearnings(in []Learning, max int) []Learning {
 	if max <= 0 {
 		return []Learning{}
@@ -340,6 +360,7 @@ func capRecentLearnings(in []Learning, max int) []Learning {
 	return append([]Learning{}, in[len(in)-max:]...)
 }
 
+// normalizeLearnings normalizes string arrays within learning entries.
 func normalizeLearnings(in []Learning) []Learning {
 	if in == nil {
 		return []Learning{}

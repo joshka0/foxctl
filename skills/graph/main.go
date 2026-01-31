@@ -29,6 +29,7 @@ var allowedOps = []string{
 	"cleanup",
 }
 
+// input defines the input parameters for graph operations.
 type input struct {
 	Operation  string          `json:"operation"`
 	Workspace  string          `json:"workspace"`
@@ -42,6 +43,7 @@ type input struct {
 	Cleanup    *cleanupReq     `json:"cleanup"`
 }
 
+// addNodeRequest defines parameters for adding a node to the graph.
 type addNodeRequest struct {
 	NodeID      string            `json:"node_id"`
 	NodeType    string            `json:"node_type"`
@@ -50,6 +52,7 @@ type addNodeRequest struct {
 	Metadata    map[string]string `json:"metadata"`
 }
 
+// addEdgeRequest defines parameters for adding an edge to the graph.
 type addEdgeRequest struct {
 	FromID   string            `json:"from_id"`
 	FromType string            `json:"from_type"`
@@ -61,12 +64,14 @@ type addEdgeRequest struct {
 	Metadata map[string]string `json:"metadata"`
 }
 
+// queryRequest defines parameters for querying graph edges.
 type queryRequest struct {
 	NodeID    string   `json:"node_id"`
 	EdgeTypes []string `json:"edge_types"`
 	Direction string   `json:"direction"` // "from", "to", "both"
 }
 
+// neighborsReq defines parameters for finding neighboring nodes.
 type neighborsReq struct {
 	NodeID    string   `json:"node_id"`
 	Direction string   `json:"direction"` // "in", "out", "both"
@@ -74,30 +79,45 @@ type neighborsReq struct {
 	Limit     int      `json:"limit"`
 }
 
+// topNodesReq defines parameters for finding top-ranked nodes.
 type topNodesReq struct {
 	NodeType string  `json:"node_type"`
 	MinRank  float64 `json:"min_rank"`
 	Limit    int     `json:"limit"`
 }
 
+// deleteNodeReq defines parameters for deleting a node.
 type deleteNodeReq struct {
 	NodeID string `json:"node_id"`
 }
 
+// deleteEdgeReq defines parameters for deleting an edge.
 type deleteEdgeReq struct {
 	EdgeID string `json:"edge_id"`
 }
 
+// cleanupReq defines parameters for graph cleanup operations.
 type cleanupReq struct {
 	ExpiredEdges  bool `json:"expired_edges"`
 	DanglingEdges bool `json:"dangling_edges"`
 	RecalcDegrees bool `json:"recalc_degrees"`
 }
 
+// main is the skill entry point for graph.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates graph database operations with workspace isolation and validation.
+//
+// Index:
+// - Purpose: Execute graph database operations (nodes, edges, queries, stats, cleanup) with workspace isolation
+// - Flow: validate operation → open store → dispatch to handler → emit results
+// - SideEffects: graph database modifications; node/edge creation/deletion; statistics updates
+// - FailureModes: invalid operations, database errors, validation failures
+// - Observability: emits operation results, statistics, and error context
+// - Related: handleAddNode, handleAddEdge, handleQuery, handleNeighbors, handleTopNodes, handleDeleteNode, handleDeleteEdge, handleStats, handleCleanup
+// - Keywords: graph, graph_database, dependency_graph, node_management, edge_management
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
@@ -145,6 +165,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 }
 
+// handleAddNode adds or updates a node in the graph database.
 func handleAddNode(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *addNodeRequest) error {
 	if req == nil {
 		return skillerr.Arg("add_node request required", skillerr.WithHint("Provide add_node payload."))
@@ -173,6 +194,7 @@ func handleAddNode(ctx context.Context, rc *skillmain.RunContext, store *graph.S
 	return skillout.Emit(rc, "graph.add_node", data)
 }
 
+// handleAddEdge adds or updates an edge in the graph database.
 func handleAddEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *addEdgeRequest) error {
 	if req == nil {
 		return skillerr.Arg("add_edge request required", skillerr.WithHint("Provide add_edge payload."))
@@ -210,6 +232,7 @@ func handleAddEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.S
 	return skillout.Emit(rc, "graph.add_edge", data)
 }
 
+// handleQuery queries edges from/to a node with optional filtering.
 func handleQuery(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *queryRequest) error {
 	if req == nil {
 		return skillerr.Arg("query request required", skillerr.WithHint("Provide query payload."))
@@ -283,6 +306,7 @@ func handleQuery(ctx context.Context, rc *skillmain.RunContext, store *graph.SQL
 	return skillout.Emit(rc, "graph.query", data)
 }
 
+// handleNeighbors finds neighboring nodes with optional filtering.
 func handleNeighbors(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *neighborsReq) error {
 	if req == nil {
 		return skillerr.Arg("neighbors request required", skillerr.WithHint("Provide neighbors payload."))
@@ -345,6 +369,7 @@ func handleNeighbors(ctx context.Context, rc *skillmain.RunContext, store *graph
 	return skillout.Emit(rc, "graph.neighbors", data)
 }
 
+// handleTopNodes retrieves top-ranked nodes with optional filtering.
 func handleTopNodes(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *topNodesReq) error {
 	if req == nil {
 		req = &topNodesReq{}
@@ -402,6 +427,7 @@ func handleTopNodes(ctx context.Context, rc *skillmain.RunContext, store *graph.
 	return skillout.Emit(rc, "graph.top_nodes", data)
 }
 
+// handleDeleteNode removes a node from the graph database.
 func handleDeleteNode(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *deleteNodeReq) error {
 	if req == nil {
 		return skillerr.Arg("delete_node request required", skillerr.WithHint("Provide delete_node payload."))
@@ -419,6 +445,7 @@ func handleDeleteNode(ctx context.Context, rc *skillmain.RunContext, store *grap
 	return skillout.Emit(rc, "graph.delete_node", data)
 }
 
+// handleDeleteEdge removes an edge from the graph database.
 func handleDeleteEdge(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, req *deleteEdgeReq) error {
 	if req == nil {
 		return skillerr.Arg("delete_edge request required", skillerr.WithHint("Provide delete_edge payload."))
@@ -435,6 +462,7 @@ func handleDeleteEdge(ctx context.Context, rc *skillmain.RunContext, store *grap
 	return skillout.Emit(rc, "graph.delete_edge", data)
 }
 
+// handleStats retrieves graph statistics for a workspace.
 func handleStats(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string) error {
 	stats, err := store.Stats(ctx, workspace)
 	if err != nil {
@@ -457,6 +485,7 @@ func handleStats(ctx context.Context, rc *skillmain.RunContext, store *graph.SQL
 	return skillout.Emit(rc, "graph.stats", data)
 }
 
+// handleCleanup performs graph maintenance operations.
 func handleCleanup(ctx context.Context, rc *skillmain.RunContext, store *graph.SQLiteStore, workspace string, req *cleanupReq) error {
 	if req == nil {
 		req = &cleanupReq{}

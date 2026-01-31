@@ -3,6 +3,7 @@ package consolews
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -205,6 +206,11 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 
 	if runner == nil {
 		// No runner - send error reply
+		observability.Emit(ctx, observability.NewEvent("consolews.no_runner").
+			WithComponent("consolews").
+			WithSession(s.id, "").
+			WithData("correlation_id", correlationID).
+			Error(nil, 0))
 		s.BroadcastReply(correlationID, "Console runner not configured. Please ensure the server has an LLM provider configured.")
 		return
 	}
@@ -233,13 +239,16 @@ func (s *Session) handleAsk(ctx context.Context, client *Client, p Payload) {
 		}()
 
 		if err := runner.Run(reqCtx, s, p.Content, correlationID); err != nil {
-			if reqCtx.Err() == context.Canceled {
+			// Check if the error itself is due to context cancellation
+			// (not just if the context happens to be cancelled)
+			if errors.Is(err, context.Canceled) {
 				s.BroadcastEvent(correlationID, "Request cancelled", map[string]any{"cancelled": true})
 			} else {
 				observability.Emit(reqCtx, observability.NewEvent("consolews.runner_error").
 					WithComponent("consolews").
 					WithSession(s.id, "").
 					WithData("correlation_id", correlationID).
+					WithData("error", err.Error()).
 					Error(err, 0))
 				s.BroadcastReply(correlationID, "Error: "+err.Error())
 			}

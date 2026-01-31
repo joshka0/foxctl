@@ -29,22 +29,32 @@ type Store interface {
 }
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open initializes the blackboard store rooted at the provided path.
+
+// Open initializes and returns a SQLite-backed blackboard Store rooted at the
+// provided path. It creates or opens the file "<root>/blackboard.db", applies
+// required schema migrations, and returns a Store whose Close method should be
+// called to release resources; an error is returned on failure.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "blackboard.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("blackboard: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 func (s *sqlStore) Post(ctx context.Context, record agent.BlackboardRecord) error {
 	leaseJSON := "null"
@@ -290,13 +300,6 @@ func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<
 		for {
 			select {
 			case <-ctx.Done():
-				// Send context error if it wasn't a normal cancellation
-				if err := ctx.Err(); err != nil && err != context.Canceled {
-					select {
-					case errCh <- err:
-					default:
-					}
-				}
 				return
 			case <-ticker.C:
 				// Query for new records since lastTS, using ID as tie-breaker
@@ -307,7 +310,13 @@ func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<
 					WHERE ns = ? AND topic = ? AND (ts > ? OR (ts = ? AND id > ?))
 					ORDER BY ts ASC, id ASC`, ns, topic, lastTS, lastTS, lastID)
 				if err != nil {
-					errCh <- fmt.Errorf("blackboard: watch query: %w", err)
+					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+						return
+					}
+					select {
+					case errCh <- fmt.Errorf("blackboard: watch query: %w", err):
+					default:
+					}
 					return
 				}
 
@@ -316,7 +325,13 @@ func (s *sqlStore) Watch(ctx context.Context, ns, topic string, fromTS int64) (<
 					record, err := scanRecordFromRows(rows)
 					if err != nil {
 						errs.Ignore(rows.Close(), "close blackboard watch rows")
-						errCh <- fmt.Errorf("blackboard: watch scan: %w", err)
+						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+							return
+						}
+						select {
+						case errCh <- fmt.Errorf("blackboard: watch scan: %w", err):
+						default:
+						}
 						return
 					}
 					newRecords = append(newRecords, record)

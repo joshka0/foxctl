@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/XiaoConstantine/dspy-go/pkg/core"
@@ -139,20 +140,27 @@ type SpawnHandler interface {
 
 // Session represents a running agent session.
 type Session struct {
-	ID         string
-	Config     types.AgentConfig
-	Status     types.AgentStatus
-	Engine     *engine.LLMChatEngine
-	Tools      []engine.ToolDef
-	StartedAt  time.Time
-	EndedAt    *time.Time
-	Iterations int
-	Summary    string
-	Error      string
-	ToolCalls  []types.ToolCall
-	Children   []string // IDs of spawned child sessions
-	cancel     context.CancelFunc
-	mu         sync.RWMutex
+	ID           string
+	Config       types.AgentConfig
+	Status       types.AgentStatus
+	Engine       *engine.LLMChatEngine
+	Tools        []engine.ToolDef
+	StartedAt    time.Time
+	EndedAt      *time.Time
+	Iterations   int
+	Summary      string
+	Error        string
+	ToolCalls    []types.ToolCall
+	Children     []string // IDs of spawned child sessions
+	SystemPrompt string   // Role-specific system prompt
+	TurnCounter  uint64   // Monotonically increasing turn index
+	cancel       context.CancelFunc
+	mu           sync.RWMutex
+}
+
+// nextTurnIndex atomically increments and returns the next turn index for this session.
+func (s *Session) nextTurnIndex() int {
+	return int(atomic.AddUint64(&s.TurnCounter, 1) - 1)
 }
 
 // NewRuntime creates a new agent runtime.
@@ -277,6 +285,16 @@ func (r *Runtime) Spawn(ctx context.Context, cfg types.AgentConfig) (*Session, e
 			_ = err // TODO: Add logging
 		}
 	}
+
+	// Emit spawn event for real-time activity tracking
+	observability.Emit(ctx, observability.NewEvent(observability.OpAgentSpawn).
+		WithComponent(observability.ComponentAgent).
+		WithSession(sessionID, cfg.ActorID).
+		WithWorkspace(r.config.WorkspaceRoot).
+		WithData("role", string(cfg.Role)).
+		WithData("depth", cfg.Depth).
+		WithData("max_iterations", cfg.MaxIterations).
+		Success(0)) // Duration 0 since spawn is instant
 
 	// Start the agent in background
 	go r.runSession(sessionCtx, session)
@@ -1500,6 +1518,8 @@ func filterToolDefs(toolDefs []engine.ToolDef, allowlist []string) []engine.Tool
 
 // runSession executes the agent session using LLMChatEngine.
 func (r *Runtime) runSession(ctx context.Context, session *Session) {
+	sessionStart := time.Now()
+
 	defer func() {
 		if rec := recover(); rec != nil {
 			session.mu.Lock()
@@ -1509,6 +1529,16 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 			session.EndedAt = &now
 			session.mu.Unlock()
 			r.persistSessionStatus(session)
+
+			// Emit error completion event
+			observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
+				WithComponent(observability.ComponentAgent).
+				WithSession(session.ID, session.Config.ActorID).
+				WithWorkspace(r.config.WorkspaceRoot).
+				WithData("role", string(session.Config.Role)).
+				WithData("iterations", session.Iterations).
+				WithData("panic", true).
+				Error(fmt.Errorf("panic: %v", rec), time.Since(sessionStart)))
 		}
 	}()
 
@@ -1529,15 +1559,14 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 	}
 
 	// Build the system prompt and task message
-	systemPrompt := agentprompt.Instruction(session.Config.Role)
+	session.SystemPrompt = agentprompt.Instruction(session.Config.Role)
 	taskPrompt := buildTaskPrompt(session.Config)
 	var result string
-	turnIndex := 0
 
 	for {
 		// Build input for LLMChatEngine
 		engineInput := engine.EngineInput{
-			SystemPrompt: systemPrompt,
+			SystemPrompt: session.SystemPrompt,
 			Messages: []engine.Message{
 				{Role: engine.RoleUser, Content: taskPrompt},
 			},
@@ -1547,8 +1576,8 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		}
 
 		// Persist user turn before running engine
+		turnIndex := session.nextTurnIndex()
 		_ = r.saveTurn(ctx, session.ID, turnIndex, "user", taskPrompt, nil, 0)
-		turnIndex++
 
 		// Run the engine
 		output, err := session.Engine.Run(ctx, engineInput)
@@ -1558,8 +1587,18 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 			session.EndedAt = &now
 			session.Status = types.StatusError
 			session.Error = err.Error()
+			iterations := session.Iterations
 			session.mu.Unlock()
 			r.persistSessionStatus(session)
+
+			// Emit error completion event
+			observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
+				WithComponent(observability.ComponentAgent).
+				WithSession(session.ID, session.Config.ActorID).
+				WithWorkspace(r.config.WorkspaceRoot).
+				WithData("role", string(session.Config.Role)).
+				WithData("iterations", iterations).
+				Error(err, time.Since(sessionStart)))
 			return
 		}
 
@@ -1576,11 +1615,28 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 			})
 		}
 		session.Iterations = len(session.ToolCalls)
+		currentIterations := session.Iterations
 		session.mu.Unlock()
 
+		// Emit iteration event for real-time activity tracking
+		toolNames := make([]string, len(output.ToolCalls))
+		for i, tc := range output.ToolCalls {
+			toolNames[i] = tc.Name
+		}
+		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+			WithComponent(observability.ComponentAgent).
+			WithSession(session.ID, session.Config.ActorID).
+			WithWorkspace(r.config.WorkspaceRoot).
+			WithData("role", string(session.Config.Role)).
+			WithData("iteration", currentIterations).
+			WithData("tool_calls", len(output.ToolCalls)).
+			WithData("tool_names", toolNames).
+			WithData("tokens_used", output.Tokens.TotalTokens).
+			WithData("stop_reason", string(output.StopReason)).
+			Success(0))
+
 		// Persist assistant turn after engine run
-		_ = r.saveTurn(ctx, session.ID, turnIndex, "assistant", result, output.ToolCalls, output.Tokens.TotalTokens)
-		turnIndex++
+		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "assistant", result, output.ToolCalls, output.Tokens.TotalTokens)
 
 		// Check for errors in output
 		if output.StopReason == engine.StopReasonError || output.Error != "" {
@@ -1624,14 +1680,71 @@ func (r *Runtime) runSession(ctx context.Context, session *Session) {
 		break
 	}
 
+	// Handle exec_mode after initial prompt execution
+	switch session.Config.ExecMode {
+	case agent.ModeAutonomous:
+		// Run autonomous continuation loop
+		result = r.runAutonomousContinuation(ctx, session, result)
+
+	case agent.ModeReactive:
+		// Reactive mode: stay alive polling for messages
+		// Update status to running while in message loop
+		session.mu.Lock()
+		session.Status = types.StatusRunning
+		session.mu.Unlock()
+		r.persistSessionStatus(session)
+
+		// Enter message loop (blocks until context canceled)
+		r.runMessageLoop(ctx, session, 0)
+
+	case agent.ModeProactive:
+		// Proactive mode: stay alive with think cycles + message polling
+		session.mu.Lock()
+		session.Status = types.StatusRunning
+		session.mu.Unlock()
+		r.persistSessionStatus(session)
+
+		// Default think interval: 60 seconds
+		thinkInterval := 60 * time.Second
+
+		// Enter message loop with proactive think cycles (blocks until context canceled)
+		r.runMessageLoop(ctx, session, thinkInterval)
+
+	default:
+		// Default (empty or unknown): complete immediately after initial response
+	}
+
+	// Check if context was canceled before marking OK
 	session.mu.Lock()
 	now := time.Now()
 	session.EndedAt = &now
-	session.Status = types.StatusOK
+	if ctx.Err() == context.Canceled {
+		session.Status = types.StatusCanceled
+		session.Error = "session canceled"
+	} else if ctx.Err() == context.DeadlineExceeded {
+		session.Status = types.StatusError
+		session.Error = "session timeout"
+	} else {
+		session.Status = types.StatusOK
+	}
 	session.Summary = result
+	totalIterations := session.Iterations
+	totalToolCalls := len(session.ToolCalls)
 	session.mu.Unlock()
 
 	r.persistSessionStatus(session)
+
+	// Emit completion event for real-time activity tracking
+	observability.Emit(ctx, observability.NewEvent(observability.OpAgentComplete).
+		WithComponent(observability.ComponentAgent).
+		WithSession(session.ID, session.Config.ActorID).
+		WithWorkspace(r.config.WorkspaceRoot).
+		WithData("role", string(session.Config.Role)).
+		WithData("iterations", totalIterations).
+		WithData("tool_calls", totalToolCalls).
+		WithData("summary_len", len(result)).
+		WithData("exec_mode", string(session.Config.ExecMode)).
+		Success(time.Since(sessionStart)))
 }
 
 // parseJSONToMap parses JSON bytes into a map.
@@ -2246,4 +2359,316 @@ func (r *Runtime) Resume(ctx context.Context, sessionID string, additionalPrompt
 	}
 
 	return newSession, nil
+}
+
+// containsTaskComplete reports whether the agent output signals task completion.
+// It returns true when the trimmed result equals the token "TASK_COMPLETE" or
+// when the trimmed result is a short completion phrase ("Task completed", "Done",
+// or "Complete") shorter than 100 characters.
+func containsTaskComplete(result string) bool {
+	trimmed := strings.TrimSpace(result)
+	return len(trimmed) > 0 && (trimmed == "TASK_COMPLETE" ||
+		len(trimmed) < 100 && (trimmed == "Task completed" || trimmed == "Done" || trimmed == "Complete"))
+}
+
+// containsNoWork reports whether the proactive agent indicated there is no work to do.
+// It returns true if the trimmed result equals "NO_WORK_NEEDED" or "No work needed".
+func containsNoWork(result string) bool {
+	trimmed := strings.TrimSpace(result)
+	return trimmed == "NO_WORK_NEEDED" || trimmed == "No work needed"
+}
+
+// runAutonomousContinuation allows the agent to continue working across multiple turns
+// without needing a new external message. Used for autonomous mode.
+func (r *Runtime) runAutonomousContinuation(ctx context.Context, session *Session, lastResult string) string {
+	maxTurns := session.Config.MaxAutoTurns
+	if maxTurns <= 1 {
+		return lastResult // Autonomous continuation disabled
+	}
+
+	result := lastResult
+
+	for turn := 1; turn < maxTurns; turn++ {
+		select {
+		case <-ctx.Done():
+			return result
+		default:
+		}
+
+		// Emit autonomous turn event
+		observability.Emit(ctx, observability.NewEvent("agent.autonomous_turn").
+			WithComponent(observability.ComponentAgent).
+			WithSession(session.ID, session.Config.ActorID).
+			WithWorkspace(r.config.WorkspaceRoot).
+			WithData("turn", turn+1).
+			WithData("max_turns", maxTurns).
+			Success(0))
+
+		// Check if agent already signaled completion
+		if containsTaskComplete(result) {
+			break
+		}
+
+		continuePrompt := "Continue working on the previous task if there is more to do. If the task is complete, respond with 'TASK_COMPLETE'. Do not repeat already completed work."
+
+		// Persist user turn before running engine
+		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", continuePrompt, nil, 0)
+
+		engineInput := engine.EngineInput{
+			SystemPrompt: session.SystemPrompt,
+			Messages: []engine.Message{
+				{Role: engine.RoleUser, Content: continuePrompt},
+			},
+			Tools:     session.Tools,
+			Workspace: r.config.WorkspaceRoot,
+			SessionID: session.ID,
+		}
+
+		output, err := session.Engine.Run(ctx, engineInput)
+		if err != nil {
+			break
+		}
+
+		result = output.AssistantText
+
+		// Record tool calls for this continuation turn
+		session.mu.Lock()
+		for _, tc := range output.ToolCalls {
+			session.ToolCalls = append(session.ToolCalls, types.ToolCall{
+				ToolName:  tc.Name,
+				Args:      parseJSONToMap(tc.Arguments),
+				Timestamp: time.Now(),
+			})
+		}
+		session.Iterations = len(session.ToolCalls)
+		currentIterations := session.Iterations
+		session.mu.Unlock()
+
+		// Emit iteration event for real-time activity tracking
+		toolNames := make([]string, len(output.ToolCalls))
+		for i, tc := range output.ToolCalls {
+			toolNames[i] = tc.Name
+		}
+		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+			WithComponent(observability.ComponentAgent).
+			WithSession(session.ID, session.Config.ActorID).
+			WithWorkspace(r.config.WorkspaceRoot).
+			WithData("role", string(session.Config.Role)).
+			WithData("iteration", currentIterations).
+			WithData("tool_calls", len(output.ToolCalls)).
+			WithData("tool_names", toolNames).
+			WithData("tokens_used", output.Tokens.TotalTokens).
+			WithData("autonomous_turn", turn+1).
+			Success(0))
+
+		// Persist assistant turn after engine run
+		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "assistant", result, output.ToolCalls, output.Tokens.TotalTokens)
+
+		if containsTaskComplete(result) {
+			break
+		}
+	}
+
+	return result
+}
+
+// runMessageLoop polls for mailbox messages and processes them.
+// Used for reactive and proactive modes to keep agents alive.
+func (r *Runtime) runMessageLoop(ctx context.Context, session *Session, thinkInterval time.Duration) {
+	if r.config.MailboxStore == nil {
+		return
+	}
+
+	pollTicker := time.NewTicker(2 * time.Second)
+	defer pollTicker.Stop()
+
+	var thinkTicker *time.Ticker
+	var thinkChan <-chan time.Time
+	isProactive := session.Config.ExecMode == agent.ModeProactive
+
+	if isProactive && thinkInterval > 0 {
+		thinkTicker = time.NewTicker(thinkInterval)
+		thinkChan = thinkTicker.C
+		defer thinkTicker.Stop()
+	}
+
+	// Extract namespace from ActorID (format: actor:<role>:<id>)
+	actorNS := session.Config.ActorID
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-pollTicker.C:
+			r.processMailboxMessages(ctx, session, actorNS)
+		case <-thinkChan:
+			r.runProactiveThink(ctx, session)
+		}
+	}
+}
+
+// processMailboxMessages checks and processes pending mailbox messages.
+func (r *Runtime) processMailboxMessages(ctx context.Context, session *Session, actorNS string) {
+	if r.config.MailboxStore == nil {
+		return
+	}
+
+	messages, err := r.config.MailboxStore.List(ctx, actorNS, 10)
+	if err != nil {
+		return
+	}
+
+	for _, msg := range messages {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Process message - extract body from Payload
+		payloadStr := string(msg.Payload)
+		prompt := fmt.Sprintf("You received a message:\nFrom: %s\nPayload: %s\n\nRespond appropriately.", msg.FromNS, payloadStr)
+
+		// Persist user turn before running engine
+		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", prompt, nil, 0)
+
+		engineInput := engine.EngineInput{
+			SystemPrompt: session.SystemPrompt,
+			Messages: []engine.Message{
+				{Role: engine.RoleUser, Content: prompt},
+			},
+			Tools:     session.Tools,
+			Workspace: r.config.WorkspaceRoot,
+			SessionID: session.ID,
+		}
+
+		output, err := session.Engine.Run(ctx, engineInput)
+		if err != nil {
+			observability.Emit(ctx, observability.NewEvent("agent.mailbox_error").
+				WithComponent(observability.ComponentAgent).
+				WithSession(session.ID, session.Config.ActorID).
+				WithWorkspace(r.config.WorkspaceRoot).
+				Error(err, 0))
+			continue
+		}
+
+		// Record tool calls
+		session.mu.Lock()
+		for _, tc := range output.ToolCalls {
+			session.ToolCalls = append(session.ToolCalls, types.ToolCall{
+				ToolName:  tc.Name,
+				Args:      parseJSONToMap(tc.Arguments),
+				Timestamp: time.Now(),
+			})
+		}
+		session.Iterations = len(session.ToolCalls)
+		currentIterations := session.Iterations
+		session.mu.Unlock()
+
+		// Emit iteration event for real-time activity tracking
+		toolNames := make([]string, len(output.ToolCalls))
+		for i, tc := range output.ToolCalls {
+			toolNames[i] = tc.Name
+		}
+		observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+			WithComponent(observability.ComponentAgent).
+			WithSession(session.ID, session.Config.ActorID).
+			WithWorkspace(r.config.WorkspaceRoot).
+			WithData("role", string(session.Config.Role)).
+			WithData("iteration", currentIterations).
+			WithData("tool_calls", len(output.ToolCalls)).
+			WithData("tool_names", toolNames).
+			WithData("tokens_used", output.Tokens.TotalTokens).
+			WithData("message_source", "mailbox").
+			Success(0))
+
+		// Persist assistant turn after engine run
+		_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "assistant", output.AssistantText, output.ToolCalls, output.Tokens.TotalTokens)
+
+		// Ack the message
+		_ = r.config.MailboxStore.Ack(ctx, msg.ID)
+	}
+}
+
+// runProactiveThink runs a periodic "think" cycle for proactive agents.
+func (r *Runtime) runProactiveThink(ctx context.Context, session *Session) {
+	thinkPrompt := `You are in proactive mode. Check if there is any work that needs to be done:
+1. Review any pending tasks or todos
+2. Check for any issues that need attention
+3. Look for opportunities to help
+
+If there is work to do, start working on the highest priority item.
+If there is nothing to do, respond with 'NO_WORK_NEEDED'.`
+
+	// Persist user turn before running engine
+	_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "user", thinkPrompt, nil, 0)
+
+	engineInput := engine.EngineInput{
+		SystemPrompt: session.SystemPrompt,
+		Messages: []engine.Message{
+			{Role: engine.RoleUser, Content: thinkPrompt},
+		},
+		Tools:     session.Tools,
+		Workspace: r.config.WorkspaceRoot,
+		SessionID: session.ID,
+	}
+
+	output, err := session.Engine.Run(ctx, engineInput)
+	if err != nil {
+		observability.Emit(ctx, observability.NewEvent("agent.proactive_think_error").
+			WithComponent(observability.ComponentAgent).
+			WithSession(session.ID, session.Config.ActorID).
+			WithWorkspace(r.config.WorkspaceRoot).
+			Error(err, 0))
+		return
+	}
+
+	// Persist assistant turn after engine run
+	_ = r.saveTurn(ctx, session.ID, session.nextTurnIndex(), "assistant", output.AssistantText, output.ToolCalls, output.Tokens.TotalTokens)
+
+	if containsNoWork(output.AssistantText) {
+		return
+	}
+
+	// Record tool calls
+	session.mu.Lock()
+	for _, tc := range output.ToolCalls {
+		session.ToolCalls = append(session.ToolCalls, types.ToolCall{
+			ToolName:  tc.Name,
+			Args:      parseJSONToMap(tc.Arguments),
+			Timestamp: time.Now(),
+		})
+	}
+	session.Iterations = len(session.ToolCalls)
+	currentIterations := session.Iterations
+	session.mu.Unlock()
+
+	// Emit iteration event for real-time activity tracking
+	toolNames := make([]string, len(output.ToolCalls))
+	for i, tc := range output.ToolCalls {
+		toolNames[i] = tc.Name
+	}
+	observability.Emit(ctx, observability.NewEvent(observability.OpAgentIteration).
+		WithComponent(observability.ComponentAgent).
+		WithSession(session.ID, session.Config.ActorID).
+		WithWorkspace(r.config.WorkspaceRoot).
+		WithData("role", string(session.Config.Role)).
+		WithData("iteration", currentIterations).
+		WithData("tool_calls", len(output.ToolCalls)).
+		WithData("tool_names", toolNames).
+		WithData("tokens_used", output.Tokens.TotalTokens).
+		WithData("proactive_think", true).
+		Success(0))
+
+	// Emit proactive work event
+	observability.Emit(ctx, observability.NewEvent("agent.proactive_work").
+		WithComponent(observability.ComponentAgent).
+		WithSession(session.ID, session.Config.ActorID).
+		WithWorkspace(r.config.WorkspaceRoot).
+		Success(0))
+
+	// If work was started and autonomous continuation is enabled
+	if session.Config.MaxAutoTurns > 1 {
+		r.runAutonomousContinuation(ctx, session, output.AssistantText)
+	}
 }

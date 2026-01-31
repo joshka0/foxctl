@@ -18,7 +18,7 @@ import (
 
 var allowedOps = []string{"enqueue", "stats", "get", "get_by_file", "job_status", "cleanup"}
 
-// Input is the skill input schema.
+// Input is the skill input schema for embedding/queue operations.
 type Input struct {
 	// Operation is the action to perform.
 	Operation string `json:"operation" validate:"required"`
@@ -56,7 +56,7 @@ type SymbolInput struct {
 	Content    string `json:"content"`
 }
 
-// Output is the skill output.
+// Output is the skill output for embedding/queue operations.
 type Output struct {
 	Operation string `json:"operation"`
 
@@ -84,10 +84,21 @@ type Output struct {
 	Message string `json:"message,omitempty"`
 }
 
+// main is the skill entry point for embedding/queue.
 func main() {
 	skillmain.Main("embedding/queue", run)
 }
 
+// run orchestrates embedding queue operations with multiple action support.
+//
+// Index:
+// - Purpose: Manage background symbol embedding queue with enqueue, stats, retrieval, and cleanup operations
+// - Flow: validate operation → open store → route to handler → emit operation-specific results
+// - SideEffects: database operations; job state management; embedding storage; queue cleanup
+// - FailureModes: invalid operations, store errors, missing required fields, job not found
+// - Observability: emits operation results with statistics, job IDs, and human-readable messages
+// - Related: handleEnqueue, handleStats, handleGet, handleGetByFile, handleJobStatus, handleCleanup
+// - Keywords: embedding/queue, background, jobs, symbols, batch_processing
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
@@ -144,6 +155,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "embedding/queue", output)
 }
 
+// handleEnqueue processes symbol enqueue requests with deduplication and priority support.
 func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
 	if len(input.Symbols) == 0 {
 		return skillerr.Arg("symbols is required for enqueue")
@@ -182,6 +194,7 @@ func handleEnqueue(ctx context.Context, store *embedding.Store, input *Input, ou
 	return nil
 }
 
+// handleStats retrieves and formats queue statistics for monitoring.
 func handleStats(ctx context.Context, store *embedding.Store, output *Output) error {
 	stats, err := store.Stats(ctx)
 	if err != nil {
@@ -194,6 +207,7 @@ func handleStats(ctx context.Context, store *embedding.Store, output *Output) er
 	return nil
 }
 
+// handleGet retrieves a specific embedding by symbol ID.
 func handleGet(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
 	if input.SymbolID == "" {
 		return skillerr.Arg("symbol_id is required for get")
@@ -213,6 +227,7 @@ func handleGet(ctx context.Context, store *embedding.Store, input *Input, output
 	return nil
 }
 
+// handleGetByFile retrieves all embeddings for a specific file path.
 func handleGetByFile(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
 	if input.FilePath == "" {
 		return skillerr.Arg("file_path is required for get_by_file")
@@ -228,6 +243,7 @@ func handleGetByFile(ctx context.Context, store *embedding.Store, input *Input, 
 	return nil
 }
 
+// handleJobStatus retrieves the current status of a specific embedding job.
 func handleJobStatus(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
 	if input.JobID == "" {
 		return skillerr.Arg("job_id is required for job_status")
@@ -243,6 +259,7 @@ func handleJobStatus(ctx context.Context, store *embedding.Store, input *Input, 
 	return nil
 }
 
+// handleCleanup removes old completed/failed jobs from the queue.
 func handleCleanup(ctx context.Context, store *embedding.Store, input *Input, output *Output) error {
 	hours := input.OlderThanHours
 	if hours <= 0 {

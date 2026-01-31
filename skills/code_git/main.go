@@ -27,6 +27,7 @@ var (
 )
 
 // validateGitAuthor validates the author input to prevent command injection
+// validateGitAuthor validates the author input to prevent command injection.
 func validateGitAuthor(author string) error {
 	if author == "" {
 		return nil // Empty is allowed, means no filter
@@ -44,6 +45,7 @@ func validateGitAuthor(author string) error {
 }
 
 // validateGitSince validates the since input to prevent command injection
+// validateGitSince validates the since input to prevent command injection.
 func validateGitSince(since string) error {
 	if since == "" {
 		return skillerr.Validation("since parameter cannot be empty")
@@ -60,6 +62,7 @@ func validateGitSince(since string) error {
 	return skillerr.Validation("since parameter must be in format like '7d', '2w', '3m', or '1y'")
 }
 
+// input defines the input parameters for code/git operations.
 type input struct {
 	QueryType    string `json:"query_type" validate:"required"`
 	Path         string `json:"path"`
@@ -69,6 +72,7 @@ type input struct {
 	ContextLines int    `json:"context_lines"`
 }
 
+// gitResult represents a git query result with metadata.
 type gitResult struct {
 	Type     string         `json:"type"`
 	File     string         `json:"file,omitempty"`
@@ -84,10 +88,21 @@ type gitResult struct {
 	LineText string         `json:"line_text,omitempty"`
 }
 
+// main is the skill entry point for code/git.
 func main() {
 	skillmain.Main("code/git", run)
 }
 
+// run orchestrates git repository analysis with multiple query types and security validation.
+//
+// Index:
+// - Purpose: Execute various git queries with security validation and result persistence
+// - Flow: validate input → check git availability → resolve workspace → execute query → emit results
+// - SideEffects: git command execution; file system access; CAS storage for large result sets
+// - FailureModes: invalid git repo, command injection, git execution errors
+// - Observability: emits query results, statistics, and artifact hints for large result sets
+// - Related: queryRecent, queryHotspots, queryCochanged, queryBlame, queryAuthors, validateGitAuthor, validateGitSince, parseSinceArg
+// - Keywords: code/git, git_analysis, repository_queries, security_validation, command_injection_prevention
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.Since == "" {
@@ -156,6 +171,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, "code/git", data)
 }
 
+// queryRecent executes git log to find recent changes with author and time filtering.
 func queryRecent(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	// git log --since="..." --name-only --pretty=format:"%H|%an|%ae|%ad|%s"
 
@@ -192,6 +208,7 @@ func queryRecent(ctx context.Context, gitPath, workspace, path string, in input)
 	return parseRecentChanges(result.Stdout, workspace, in.MaxResults), nil
 }
 
+// queryHotspots finds frequently changed files by analyzing git commit history.
 func queryHotspots(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	// git log --since="..." --pretty=format: --name-only | sort | uniq -c | sort -rn
 
@@ -228,6 +245,7 @@ func queryHotspots(ctx context.Context, gitPath, workspace, path string, in inpu
 	return parseHotspots(result.Stdout, workspace, in.MaxResults), nil
 }
 
+// queryCochanged finds files that are often changed together with the target file.
 func queryCochanged(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	if path == workspace {
 		return nil, skillerr.Validation("cochanged query requires a specific file path")
@@ -284,6 +302,7 @@ func queryCochanged(ctx context.Context, gitPath, workspace, path string, in inp
 	return results, nil
 }
 
+// queryBlame executes git blame to show line-by-line authorship information.
 func queryBlame(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	if path == workspace {
 		return nil, skillerr.Validation("blame query requires a specific file path")
@@ -300,6 +319,7 @@ func queryBlame(ctx context.Context, gitPath, workspace, path string, in input) 
 	return parseBlame(result.Stdout, relPath, in.MaxResults), nil
 }
 
+// queryAuthors retrieves commit authors within the specified time range.
 func queryAuthors(ctx context.Context, gitPath, workspace, path string, in input) ([]gitResult, error) {
 	// Validate inputs to prevent command injection
 	if err := validateGitSince(in.Since); err != nil {
@@ -326,6 +346,7 @@ func queryAuthors(ctx context.Context, gitPath, workspace, path string, in input
 	return parseAuthors(result.Stdout, in.MaxResults), nil
 }
 
+// parseRecentChanges parses git log output into structured recent change results.
 func parseRecentChanges(output []byte, _ string, maxResults int) []gitResult {
 	var results []gitResult
 	lines := strings.Split(string(output), "\n")
@@ -376,6 +397,7 @@ func parseRecentChanges(output []byte, _ string, maxResults int) []gitResult {
 	return results
 }
 
+// parseHotspots converts file change counts into hotspot results.
 func parseHotspots(output []byte, _ string, maxResults int) []gitResult {
 	lines := strings.Split(string(output), "\n")
 	fileCounts := make(map[string]int)
@@ -408,6 +430,7 @@ func parseHotspots(output []byte, _ string, maxResults int) []gitResult {
 	return results
 }
 
+// parseBlame parses git blame porcelain output into structured blame results.
 func parseBlame(output []byte, file string, maxResults int) []gitResult {
 	var results []gitResult
 	lines := strings.Split(string(output), "\n")
@@ -459,6 +482,7 @@ func parseBlame(output []byte, file string, maxResults int) []gitResult {
 	return results
 }
 
+// parseAuthors converts git log author output into structured author statistics.
 func parseAuthors(output []byte, maxResults int) []gitResult {
 	lines := strings.Split(string(output), "\n")
 	authorCounts := make(map[string]map[string]any)
@@ -510,6 +534,7 @@ func parseAuthors(output []byte, maxResults int) []gitResult {
 	return results
 }
 
+// parseSinceArg converts shorthand time format to git-compatible "ago" format.
 func parseSinceArg(since string) string {
 	// Convert shorthand to git-compatible format
 	// "7d" -> "7 days ago", "1w" -> "1 week ago", "1m" -> "1 month ago"

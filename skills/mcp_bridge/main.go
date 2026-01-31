@@ -22,6 +22,7 @@ import (
 
 const command = "mcp/bridge"
 
+// input defines the skill input parameters for MCP server connections and tool calls.
 type input struct {
 	ServerCmd     string            `json:"server_cmd"`
 	ServerArgs    []string          `json:"server_args"`
@@ -32,24 +33,28 @@ type input struct {
 	ToolArgs      map[string]any    `json:"tool_args"`
 }
 
-// arrayFlags allows parsing repeated flags like -arg "foo" -arg "bar"
+// arrayFlags allows parsing repeated flags like -arg "foo" -arg "bar" for command-line interface.
 type arrayFlags []string
 
+// String returns the concatenated string representation of the array flags.
 func (i *arrayFlags) String() string {
 	return strings.Join(*i, " ")
 }
 
+// Set adds a value to the array flags collection for command-line parsing.
 func (i *arrayFlags) Set(value string) error {
 	*i = append(*i, value)
 	return nil
 }
 
+// main is the skill entry point for mcp/bridge with command-line flag parsing and error handling.
 func main() {
 	if err := runMain(); err != nil {
 		os.Exit(1)
 	}
 }
 
+// runMain orchestrates the MCP bridge skill with flag parsing, input validation, and error handling.
 func runMain() error {
 	// Parse flags
 	var (
@@ -95,6 +100,16 @@ func runMain() error {
 	return nil
 }
 
+// run orchestrates MCP server connections and tool execution with stdio and SSE transport support.
+//
+// Index:
+// - Purpose: Bridge to MCP servers supporting both stdio and SSE transports for tool execution
+// - Flow: validate input → create MCP client → initialize connection → call tool → format results → emit output
+// - SideEffects: spawns MCP server processes; manages HTTP connections; handles MCP protocol communication
+// - FailureModes: server startup failures, connection errors, initialization failures, tool call errors
+// - Observability: emits tool execution results, error messages, and connection status with proper cleanup
+// - Related: mcputil.NewClient, mcputil.Initialize, parseInput
+// - Keywords: mcp/bridge, mcp_server, tool_execution, stdio_transport, sse_transport, protocol_bridge
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	var mcpClient *client.Client
 	var err error
@@ -147,6 +162,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// parseInput parses input from stdin and command-line flags supporting both tool mode and legacy mode.
 func parseInput(r io.Reader, cmdFlag, urlFlag, toolFlag string, argsFlag, envFlag, headersFlag []string) (input, error) {
 	// If flags are provided (at least tool and one of cmd/url), we are in "Tool Mode"
 	if toolFlag != "" && (cmdFlag != "" || urlFlag != "") {

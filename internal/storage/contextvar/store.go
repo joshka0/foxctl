@@ -67,23 +67,31 @@ type Store interface {
 	DB() *sql.DB
 }
 
-// Open creates or opens a context variable store.
+// Open opens or creates a context variable Store backed by a SQLite database at storageRoot/contextvar.db.
+// It applies the necessary schema migrations and provides an sql-backed Store; the returned Store should be closed when no longer needed.
 func Open(ctx context.Context, storageRoot string) (Store, error) {
 	dbPath := filepath.Join(storageRoot, "contextvar.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("contextvar: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
+
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
+
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 func (s *sqlStore) DB() *sql.DB {
 	return s.db

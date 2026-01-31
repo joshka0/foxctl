@@ -53,6 +53,23 @@ components:
         duration_ms:
           type: integer
           format: int64
+    AgentUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        conversation_id:
+          type: string
+          description: ID of conversation to link to this agent
+        name:
+          type: string
+          description: Human-readable name
+        slug:
+          type: string
+          description: Human-readable handle
+        exec_mode:
+          type: string
+          enum: [autonomous, proactive, reactive]
+          description: Execution mode for the agent
   parameters:
     Id:
       name: id
@@ -219,10 +236,64 @@ paths:
           $ref: '#/components/responses/OkEnvelope'
   /agents:
     get:
+      summary: List all agents
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
       responses:
         '200':
           $ref: '#/components/responses/OkEnvelope'
+  /agents/spawn:
     post:
+      summary: Spawn a new agent via daemon
+      description: Creates and starts a new agent with the specified configuration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+                - prompt
+              properties:
+                role:
+                  type: string
+                  description: Agent role (e.g., researcher, coder, planner)
+                prompt:
+                  type: string
+                  description: Initial prompt for the agent
+                workspace_id:
+                  type: string
+                  description: Workspace path
+                skills_allow:
+                  type: array
+                  maxItems: 256
+                  items:
+                    type: string
+                  description: List of allowed skills
+                name:
+                  type: string
+                  description: Human-readable name (auto-generated if empty)
+                slug:
+                  type: string
+                  description: Human-readable handle
+                exec_mode:
+                  type: string
+                  enum: [autonomous, proactive, reactive, story]
+                max_iterations:
+                  type: integer
+                max_context_tokens:
+                  type: integer
+                max_auto_turns:
+                  type: integer
+                llm_provider:
+                  type: string
+                llm_model:
+                  type: string
       responses:
         '200':
           $ref: '#/components/responses/OkEnvelope'
@@ -230,31 +301,60 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
+      summary: Get agent details
       responses:
         '200':
           $ref: '#/components/responses/OkEnvelope'
     patch:
+      summary: Update agent fields (e.g., conversation_id)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentUpdate'
       responses:
         '200':
           $ref: '#/components/responses/OkEnvelope'
-  /agents/{id}/start:
+    delete:
+      summary: Soft delete (trash) an agent
+      responses:
+        '200':
+          $ref: '#/components/responses/OkEnvelope'
+  /agents/{id}/daemon/start:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
+      summary: Start/resume a stopped agent via daemon
+      description: Looks up agent config from database and spawns a new daemon session with that config. Optionally accepts a prompt and workspace override in the request body.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+                  description: Optional prompt override (uses stored prompt if not provided)
+                workspace:
+                  type: string
+                  description: Optional workspace override (uses agent namespace if not provided)
       responses:
         '200':
           $ref: '#/components/responses/OkEnvelope'
-  /agents/{id}/stop:
+  /agents/{id}/daemon/kill:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
+      summary: Stop/kill a running agent via daemon
+      description: Finds the active daemon session for the agent and kills it. If no active session exists or daemon is not running, updates agent state to stopped.
       responses:
         '200':
           $ref: '#/components/responses/OkEnvelope'
-  /agents/{id}/sessions:
+  /agents/{id}/daemon/sessions:
     parameters:
       - $ref: '#/components/parameters/Id'
     get:
+      summary: List daemon sessions for an agent
       responses:
         '200':
           $ref: '#/components/responses/OkEnvelope'

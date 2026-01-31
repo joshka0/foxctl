@@ -20,6 +20,7 @@ import (
 
 const command = "git/status"
 
+// input defines the input parameters for git/status operations.
 type input struct {
 	Operation string `json:"operation"`
 	RepoPath  string `json:"repo_path"`
@@ -29,6 +30,7 @@ type input struct {
 	Stat      bool   `json:"stat"`
 }
 
+// fileStatus represents the status of a file in the working directory.
 type fileStatus struct {
 	Path        string `json:"path"`
 	Status      string `json:"status"`
@@ -36,6 +38,7 @@ type fileStatus struct {
 	WorkingTree string `json:"working_tree"`
 }
 
+// commitInfo represents basic information about a git commit.
 type commitInfo struct {
 	Hash      string `json:"hash"`
 	ShortHash string `json:"short_hash"`
@@ -44,10 +47,21 @@ type commitInfo struct {
 	Message   string `json:"message"`
 }
 
+// main is the skill entry point for git/status.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates git repository status, diff, and log operations with result persistence.
+//
+// Index:
+// - Purpose: Execute git status, diff, and log operations with artifact storage for large outputs
+// - Flow: validate input → resolve repo → check git → dispatch operation → emit results
+// - SideEffects: git command execution; file system access; CAS storage for large diffs
+// - FailureModes: invalid git repo, git execution errors, permission issues
+// - Observability: emits status info, diff previews, commit logs, and artifact hints
+// - Related: getStatus, getDiff, getLog, parseStatusOutput, parseLogOutput, parseDiffStat, countByStatus
+// - Keywords: git/status, git_operations, repository_status, diff_analysis, commit_history
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	in.Operation = oputil.DefaultOp(in.Operation, "status")
@@ -86,6 +100,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// getStatus retrieves and parses git repository status information.
 func getStatus(ctx context.Context, gitPath, repoPath string) (map[string]any, error) {
 	// Get porcelain status
 	result := executil.Run(ctx, "", gitPath, "-C", repoPath, "status", "--porcelain=v1", "-b")
@@ -129,6 +144,7 @@ func getStatus(ctx context.Context, gitPath, repoPath string) (map[string]any, e
 	return data, nil
 }
 
+// getDiff generates git diff output with optional staging and commit comparison.
 func getDiff(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath string, in input) (map[string]any, error) {
 	args := []string{"-C", repoPath, "diff"}
 
@@ -184,6 +200,7 @@ func getDiff(ctx context.Context, rc *skillmain.RunContext, gitPath, repoPath st
 	return data, nil
 }
 
+// getLog retrieves commit history with configurable limits and commit filtering.
 func getLog(ctx context.Context, gitPath, repoPath string, in input) (map[string]any, error) {
 	format := "--pretty=format:%H%x00%h%x00%an%x00%ai%x00%s"
 	args := []string{"-C", repoPath, "log", format, fmt.Sprintf("-%d", in.Limit)}
@@ -209,6 +226,7 @@ func getLog(ctx context.Context, gitPath, repoPath string, in input) (map[string
 	return data, nil
 }
 
+// parseStatusOutput parses git porcelain status output into structured data.
 func parseStatusOutput(output string) ([]fileStatus, string, string) {
 	var files []fileStatus
 	var branch, upstream string
@@ -257,6 +275,7 @@ func parseStatusOutput(output string) ([]fileStatus, string, string) {
 	return files, branch, upstream
 }
 
+// parseLogOutput parses git log output into structured commit information.
 func parseLogOutput(output string) []commitInfo {
 	var commits []commitInfo
 
@@ -281,6 +300,7 @@ func parseLogOutput(output string) []commitInfo {
 	return commits
 }
 
+// parseDiffStat extracts file change statistics from diff --stat output.
 func parseDiffStat(diff string) map[string]map[string]int {
 	stats := make(map[string]map[string]int)
 	re := regexp.MustCompile(`^\s*(.+?)\s*\|\s*(\d+)\s*([+\-]+)`)
@@ -303,6 +323,7 @@ func parseDiffStat(diff string) map[string]map[string]int {
 	return stats
 }
 
+// countByStatus counts files by their status code.
 func countByStatus(files []fileStatus, status string) int {
 	count := 0
 	for _, f := range files {

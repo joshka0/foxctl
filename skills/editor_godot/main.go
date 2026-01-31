@@ -43,10 +43,21 @@ type PluginError struct {
 
 const skillName = "editor/godot"
 
+// main is the skill entry point for editor/godot.
 func main() {
 	skillmain.Main(skillName, run)
 }
 
+// run orchestrates communication with the Godot Editor AI Bridge plugin.
+//
+// Index:
+// - Purpose: Interface with Godot Editor through AI Bridge plugin for various editor operations
+// - Flow: validate input → resolve handler → build plugin request → call plugin → handle response → emit results
+// - SideEffects: HTTP requests to plugin; artifact storage for large responses; error handling
+// - FailureModes: invalid actions, plugin connection errors, handler validation errors, network failures
+// - Observability: emits action results with summaries, optional artifacts, and error details
+// - Related: callPlugin, emitPluginError, emitSuccess
+// - Keywords: editor/godot, Godot, plugin, HTTP, bridge, editor_integration
 func run(ctx context.Context, rc *skillmain.RunContext, in handlers.Input) error {
 	// Validate
 	if strings.TrimSpace(in.Action) == "" {
@@ -117,6 +128,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in handlers.Input) error
 	return emitSuccess(ctx, rc, in.Action, resp.Data, handler)
 }
 
+// callPlugin makes an HTTP request to the GodotAIBridge plugin.
 func callPlugin(ctx context.Context, host string, port int, timeout time.Duration, req PluginRequest) (*PluginResponse, error) {
 	url := fmt.Sprintf("http://%s:%d/", host, port)
 
@@ -164,6 +176,7 @@ func callPlugin(ctx context.Context, host string, port int, timeout time.Duratio
 	return &resp, nil
 }
 
+// emitPluginError converts plugin errors to skill errors with proper context.
 func emitPluginError(rc *skillmain.RunContext, pe *PluginError) error {
 	err := skillerr.Runtime(pe.Message, skillerr.WithHint(pe.Hint))
 	if pe.Code != "" {
@@ -175,6 +188,7 @@ func emitPluginError(rc *skillmain.RunContext, pe *PluginError) error {
 	return err
 }
 
+// emitSuccess handles successful plugin responses with optional artifact storage.
 func emitSuccess(ctx context.Context, rc *skillmain.RunContext, action string, data any, handler handlers.Handler) error {
 	// Serialize data to check size
 	dataBytes, err := json.Marshal(data)

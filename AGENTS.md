@@ -27,9 +27,10 @@ contributors
 5. **Large outputs → CAS** — use `data.summary` + `data.artifact`
 6. **Check gotchas first** — read
    [docs/general/gotchas.md](docs/general/gotchas.md)
-7. **`--dry-run` required** for state-changing commands (writes to DB, modifies workspace, creates CAS artifacts, spawns agents, edits tasks), except `agentctl todo add` which may run without `--dry-run`
+7. **`--dry-run` required** for state-changing commands (writes to DB, modifies workspace, creates CAS artifacts, spawns agents, edits tasks), except `agentctl todo` commands that do not support `--dry-run` (for example `agentctl todo add` or `agentctl todo complete`)
 8. **Task titles** — generate based on current work; do not require user-provided titles
-9. **Native tools** — prefer agentctl skills, but native tools are OK when they fit better
+9. **Native tools** — prefer agentctl skills, but if a skill is unavailable or makes completion harder, fall back to native tools
+10. **Terminology coaching** — when the user asks something technical but uses imprecise language, provide the correct terminology in parentheses as a mini-lesson (e.g., "Fixed. Added scrolling *(in CSS terms: `overflow-y: auto` to handle content overflow)*")
 
 ---
 

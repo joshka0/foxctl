@@ -12,20 +12,25 @@ import (
 
 // SQLiteDedupeStore implements DedupeStore using SQLite persistence.
 type SQLiteDedupeStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// OpenSQLiteDedupeStore opens or creates the dedupe database.
+// OpenSQLiteDedupeStore opens or creates the dedupe database at the provided storage root and returns a SQLiteDedupeStore.
+// The returned store provides methods to query and update deduplication state and must be closed with Close when no longer needed.
+// If opening or initializing the database fails, an error describing the failure is returned.
 func OpenSQLiteDedupeStore(ctx context.Context, storageRoot string) (*SQLiteDedupeStore, error) {
 	dbPath := filepath.Join(storageRoot, "daemon_dedupe.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrateDedupe)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrateDedupe)
 	if err != nil {
 		return nil, fmt.Errorf("open dedupe db: %w", err)
 	}
 
-	return &SQLiteDedupeStore{db: db}, nil
+	return &SQLiteDedupeStore{db: db, close: closeFn}, nil
 }
 
+// migrateDedupe creates the daemon_dedupe table and its processed_at index if they do not exist.
+// It returns any error encountered while executing the migration SQL.
 func migrateDedupe(ctx context.Context, db *sql.DB) error {
 	schema := `
        CREATE TABLE IF NOT EXISTS daemon_dedupe (
@@ -80,5 +85,8 @@ func (s *SQLiteDedupeStore) Cleanup(ctx context.Context, olderThan time.Duration
 
 // Close closes the database connection.
 func (s *SQLiteDedupeStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }

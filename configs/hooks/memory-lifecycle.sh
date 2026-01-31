@@ -163,7 +163,7 @@ case "$tool_name" in
         # Small delay to ensure capture has stored the entry, then embed
         (
           sleep 1
-          "$AGENTCTL_BIN" run embedding/refresh --input "$(jq -nc \
+          "$AGENTCTL_BIN" run --daemon embedding/refresh --input "$(jq -nc \
             --arg scope "memory" \
             --arg name "$memory_name" \
             --arg workspace "$workspace" \
@@ -185,7 +185,7 @@ case "$tool_name" in
 
           if [[ -n "$name" ]]; then
             # Fire and forget - don't block the tool
-            "$AGENTCTL_BIN" run embedding/refresh --input "$(jq -nc \
+            "$AGENTCTL_BIN" run --daemon embedding/refresh --input "$(jq -nc \
               --arg scope "memory" \
               --arg name "$name" \
               --arg workspace "$workspace" \

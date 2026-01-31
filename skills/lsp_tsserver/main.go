@@ -33,6 +33,7 @@ const command = "lsp/tsserver"
 
 var allowedOps = []string{"definition", "references", "symbols", "workspace_symbol"}
 
+// input defines the skill input parameters for TypeScript/JavaScript language server operations.
 type input struct {
 	Operation  string `json:"operation"`
 	File       string `json:"file"`
@@ -43,7 +44,7 @@ type input struct {
 	Timeout    int    `json:"timeout"` // timeout in seconds, defaults to 30
 }
 
-// Output types
+// Symbol represents a code symbol with name, kind, and location information for TypeScript/JavaScript code.
 type Symbol struct {
 	Name   string `json:"name"`
 	Kind   string `json:"kind"`
@@ -52,12 +53,14 @@ type Symbol struct {
 	Column int    `json:"column"`
 }
 
+// Reference represents a symbol reference with file location for TypeScript/JavaScript code.
 type Reference struct {
 	File   string `json:"file"`
 	Line   int    `json:"line"`
 	Column int    `json:"column"`
 }
 
+// Definition represents a symbol definition with location and optional text for TypeScript/JavaScript code.
 type Definition struct {
 	File   string `json:"file"`
 	Line   int    `json:"line"`
@@ -65,6 +68,7 @@ type Definition struct {
 	Text   string `json:"text,omitempty"`
 }
 
+// output contains the skill result data with operation-specific results and counts for TypeScript LSP operations.
 type output struct {
 	Operation   string      `json:"operation"`
 	Definition  *Definition `json:"definition,omitempty"`
@@ -74,16 +78,27 @@ type output struct {
 	Count       int         `json:"count"`
 }
 
-// LSPClient manages the TypeScript language server lifecycle
+// LSPClient manages the TypeScript language server lifecycle with JSON-RPC communication and graceful shutdown.
 type LSPClient struct {
 	cmd *exec.Cmd
 	rpc *jsonrpc.Client
 }
 
+// main is the skill entry point for lsp/tsserver.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates TypeScript/JavaScript language server operations using typescript-language-server with JSON-RPC communication.
+//
+// Index:
+// - Purpose: Provide TypeScript/JavaScript language server operations (definition, references, symbols) via typescript-language-server
+// - Flow: validate input → check server availability → create LSP client → initialize server → open file → execute operation → emit results
+// - SideEffects: spawns typescript-language-server process; manages JSON-RPC communication; reads file contents; initializes LSP session
+// - FailureModes: typescript-language-server not installed, server startup failures, JSON-RPC errors, file access errors, timeout errors
+// - Observability: emits operation results, symbol information, location data, and timing metrics with graceful shutdown handling
+// - Related: newLSPClient, LSPClient.definition, LSPClient.references, LSPClient.documentSymbols, detectLanguage
+// - Keywords: lsp/tsserver, typescript_language_server, javascript_language_server, json_rpc, code_navigation, symbol_search
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxResults <= 0 {
@@ -181,6 +196,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return writeOutput(rc, out)
 }
 
+// newLSPClient creates and initializes a new TypeScript language server client with JSON-RPC communication.
 func newLSPClient(ctx context.Context, serverPath, workspace string) (*LSPClient, error) {
 	cmd := exec.CommandContext(ctx, serverPath, "--stdio")
 	cmd.Dir = workspace
@@ -216,6 +232,7 @@ func newLSPClient(ctx context.Context, serverPath, workspace string) (*LSPClient
 // shutdownTimeout is the maximum time to wait for graceful shutdown.
 const shutdownTimeout = 5 * time.Second
 
+// Close gracefully shuts down the language server with timeout handling and force kill fallback.
 func (c *LSPClient) Close() error {
 	// Send shutdown request with timeout
 	done := make(chan error, 1)
@@ -239,6 +256,7 @@ func (c *LSPClient) Close() error {
 	}
 }
 
+// initialize performs LSP server initialization with capabilities negotiation for TypeScript/JavaScript.
 func (c *LSPClient) initialize(ctx context.Context, workspace string) error {
 	params := map[string]any{
 		"processId": os.Getpid(),
@@ -268,6 +286,7 @@ func (c *LSPClient) initialize(ctx context.Context, workspace string) error {
 	return c.rpc.Notify("initialized", map[string]any{})
 }
 
+// openFile opens a file in the language server for analysis with language detection and content synchronization.
 func (c *LSPClient) openFile(_ context.Context, filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -292,6 +311,7 @@ func (c *LSPClient) openFile(_ context.Context, filePath string) error {
 	return nil
 }
 
+// definition finds symbol definitions using LSP textDocument/definition request with location parsing.
 func (c *LSPClient) definition(ctx context.Context, workspace string, in input) (*Definition, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, skillerr.Arg("definition requires file and line")
@@ -335,6 +355,7 @@ func (c *LSPClient) definition(ctx context.Context, workspace string, in input) 
 	}, nil
 }
 
+// references finds all symbol references using LSP textDocument/references request with declaration inclusion.
 func (c *LSPClient) references(ctx context.Context, workspace string, in input) ([]Reference, error) {
 	if in.File == "" || in.Line <= 0 {
 		return nil, skillerr.Arg("references requires file and line")
@@ -376,6 +397,7 @@ func (c *LSPClient) references(ctx context.Context, workspace string, in input) 
 	return refs, nil
 }
 
+// documentSymbols extracts document symbols using LSP textDocument/documentSymbol with hierarchical flattening.
 func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in input) ([]Symbol, error) {
 	if in.File == "" {
 		return nil, skillerr.Arg("symbols requires file")
@@ -429,6 +451,11 @@ func (c *LSPClient) documentSymbols(ctx context.Context, workspace string, in in
 	return syms, nil
 }
 
+// workspaceSymbols searches workspace symbols using LSP workspace/symbol request with query matching.
+//
+// Index:
+//   - LSPClient
+//   - workspaceSymbols
 func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in input) ([]Symbol, error) {
 	if in.Query == "" {
 		return nil, skillerr.Arg("workspace_symbol requires query")
@@ -462,6 +489,7 @@ func (c *LSPClient) workspaceSymbols(ctx context.Context, workspace string, in i
 	return syms, nil
 }
 
+// detectLanguage determines the language ID for TypeScript/JavaScript files based on file extension.
 func detectLanguage(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {
@@ -478,6 +506,7 @@ func detectLanguage(path string) string {
 	}
 }
 
+// writeOutput emits the final skill results with operation-specific data and counts.
 func writeOutput(rc *skillmain.RunContext, out output) error {
 	return skillout.Emit(rc, command, out)
 }

@@ -42,18 +42,28 @@ import (
 const messageLeaseDuration = 30 * time.Second
 
 type daemonStores struct {
-	agentStore        storagents.Store
-	mailboxStore      mailbox.Store
-	tasksStore        tasks.Store
-	boardStore        blackboard.BoardStore
-	bbStore           blackboard.Store
-	contextvarStore   contextvar.Store              // for companion service RLM context
-	companionMemory   *companion.ConversationMemory // nil if disabled
-	companionMemoryDB *sql.DB                       // need to close this too
-	compressionDaemon *companion.CompressionDaemon  // nil if disabled
-	repoIndexStore    *repoindex.Store
+	agentStore           storagents.Store
+	mailboxStore         mailbox.Store
+	tasksStore           tasks.Store
+	boardStore           blackboard.BoardStore
+	bbStore              blackboard.Store
+	contextvarStore      contextvar.Store              // for companion service RLM context
+	companionMemory      *companion.ConversationMemory // nil if disabled
+	companionMemoryDB    *sql.DB                       // need to close this too
+	companionMemoryClose func() error
+	compressionDaemon    *companion.CompressionDaemon // nil if disabled
+	repoIndexStore       *repoindex.Store
 }
 
+// openDaemonStores opens and initializes all persistent stores used by the daemon under the provided workspace root
+// and returns a daemonStores containing the opened resources.
+//
+// The function opens agent, mailbox, tasks, board, blackboard, and contextvar stores. If Options.EnableCompanionMemory
+// is true it also opens a companion memory DB, constructs a ConversationMemory (with roleplay or standard memory
+// configuration based on Options.CompanionMode), optionally attaches an LLM-based summarizer, and may start a background
+// compression daemon. The returned daemonStores includes any cleanup callback for the companion DB.
+//
+// On any error the function closes any already-opened resources before returning the error.
 func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonStores, error) {
 	stores := &daemonStores{}
 
@@ -102,12 +112,13 @@ func openDaemonStores(ctx context.Context, root string, opts Options) (*daemonSt
 	// Open companion memory if enabled
 	if opts.EnableCompanionMemory {
 		dbPath := filepath.Join(root, "companion.db")
-		db, err := sqliteutil.OpenDB(ctx, dbPath, nil) // schema managed by NewConversationMemory
+		db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil) // schema managed by NewConversationMemory
 		if err != nil {
 			stores.Close()
 			return nil, fmt.Errorf("open companion db: %w", err)
 		}
 		stores.companionMemoryDB = db
+		stores.companionMemoryClose = closeFn
 
 		// Select memory configuration based on companion mode
 		var memCfg companion.MemoryConfig
@@ -177,7 +188,11 @@ func (s *daemonStores) Close() {
 		s.compressionDaemon.Stop()
 	}
 	if s.companionMemoryDB != nil {
-		_ = s.companionMemoryDB.Close()
+		if s.companionMemoryClose != nil {
+			_ = s.companionMemoryClose()
+		} else {
+			_ = s.companionMemoryDB.Close()
+		}
 	}
 	if s.repoIndexStore != nil {
 		_ = s.repoIndexStore.Close()

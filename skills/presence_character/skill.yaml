@@ -1,0 +1,116 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: presence/character
+  version: 0.1.0
+  description: "Manage character overlays and select emotion-based sprites"
+  tags: ["presence", "character", "overlay", "companion"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 8
+signature:
+  command: presence/character
+  parameters:
+    - name: action
+      type: string
+      required: true
+      description: "Action: get|select|register|list|register_overlay"
+    - name: conversation_id
+      type: string
+      required: false
+      description: "Conversation ID for character context"
+    - name: character_id
+      type: string
+      required: false
+      description: "Character ID (required for get, select, register_overlay)"
+    - name: emotion
+      type: string
+      required: false
+      description: "Emotion for overlay selection (required for select, register_overlay)"
+    - name: intensity
+      type: number
+      required: false
+      default: 0.5
+      description: "Emotion intensity 0.0-1.0 for overlay variant selection"
+    - name: name
+      type: string
+      required: false
+      description: "Character name (required for register)"
+    - name: avatar_digest
+      type: string
+      required: false
+      description: "CAS digest of base avatar image (for register)"
+    - name: voice_id
+      type: string
+      required: false
+      description: "ElevenLabs voice ID (for register)"
+    - name: overlay_digest
+      type: string
+      required: false
+      description: "CAS digest of overlay image (for register_overlay)"
+  help:
+    short: "Manage character overlays for emotion visualization"
+    long: |
+      Manage character definitions and emotion overlays for presence visualization.
+
+      Actions:
+      - get: Get character by ID
+      - select: Select appropriate overlay for emotion/intensity
+      - register: Create new character
+      - list: List characters for conversation
+      - register_overlay: Add emotion overlay to character
+
+      Each character can have multiple emotion overlays (joy, sadness, etc.)
+      with optional intensity variants (low, medium, high).
+
+      Example:
+        # Register a character
+        agentctl run presence/character --input '{
+          "action": "register",
+          "conversation_id": "conv-123",
+          "name": "Aria",
+          "voice_id": "EXAVITQu4vr4xnSDxMaL"
+        }'
+
+        # Select overlay for emotion
+        agentctl run presence/character --input '{
+          "action": "select",
+          "character_id": "char-123",
+          "emotion": "joy",
+          "intensity": 0.8
+        }'
+
+    workflows:
+      - id: register-character
+        description: "Create a new character"
+        example_input:
+          action: "register"
+          conversation_id: "conv-123"
+          name: "Luna"
+      - id: select-overlay
+        description: "Get overlay for emotion"
+        example_input:
+          action: "select"
+          character_id: "char-123"
+          emotion: "joy"
+  returns:
+    - name: character
+      type: object
+      description: "Character details (for get, register)"
+    - name: overlay
+      type: object
+      description: "Selected overlay (for select)"
+    - name: characters
+      type: array
+      description: "List of characters (for list)"
+    - name: overlays
+      type: array
+      description: "Available overlays for character"
+capabilities:
+  network: "none"
+  filesystem: []
+  pure: false

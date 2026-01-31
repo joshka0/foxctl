@@ -126,6 +126,25 @@ type ServiceConfig struct {
 
 	// Logger for structured logging.
 	Logger zerolog.Logger
+
+	// PresenceConfig configures multimodal presence generation (optional).
+	PresenceConfig *PresenceConfig
+
+	// SkillRunner executes skills for presence generation (optional).
+	// Required when PresenceConfig.Enabled is true.
+	SkillRunner SkillRunner
+}
+
+// SkillRunner executes skills by name.
+type SkillRunner interface {
+	Run(ctx context.Context, skillName string, input map[string]any) (*SkillRunResult, error)
+}
+
+// SkillRunResult contains the result of a skill execution.
+type SkillRunResult struct {
+	Success  bool            `json:"success"`
+	Output   json.RawMessage `json:"output,omitempty"`
+	Error    string          `json:"error,omitempty"`
 }
 
 // HookContext provides context for hook dispatch in companion sessions.
@@ -267,6 +286,81 @@ type ChatAction struct {
 	Scene         string `json:"scene,omitempty"`
 }
 
+// PresenceConfig configures multimodal presence generation.
+type PresenceConfig struct {
+	// Enabled turns on presence generation for responses.
+	Enabled bool `json:"enabled"`
+
+	// VoiceEnabled generates voice audio via ElevenLabs.
+	VoiceEnabled bool `json:"voice_enabled"`
+
+	// BackgroundEnabled generates mood backgrounds.
+	BackgroundEnabled bool `json:"background_enabled"`
+
+	// CharacterID is the default character for overlay selection.
+	CharacterID string `json:"character_id,omitempty"`
+
+	// Style is the art style for backgrounds: anime|realistic|watercolor|minimalist
+	Style string `json:"style,omitempty"`
+
+	// VoiceID is the ElevenLabs voice ID override.
+	VoiceID string `json:"voice_id,omitempty"`
+}
+
+// PresenceBundle contains multimodal presence assets for a response.
+type PresenceBundle struct {
+	// Emotion detected from text
+	Emotion   string  `json:"emotion"`
+	Intensity float64 `json:"intensity"`
+
+	// DisplayText is the response text with markers stripped
+	DisplayText string `json:"display_text"`
+
+	// Markers detected in text
+	Markers       []string `json:"markers,omitempty"`
+	DetectedEmoji []string `json:"detected_emoji,omitempty"`
+
+	// Asset digests (CAS references)
+	BackgroundDigest string `json:"background_digest,omitempty"`
+	OverlayDigest    string `json:"overlay_digest,omitempty"`
+	AudioDigest      string `json:"audio_digest,omitempty"`
+
+	// Audio metadata
+	AudioDurationMS int `json:"audio_duration_ms,omitempty"`
+
+	// Generation metadata
+	CacheHits   int      `json:"cache_hits"`
+	CacheMisses int      `json:"cache_misses"`
+	Errors      []string `json:"errors,omitempty"`
+}
+
+// ToolCallDetail contains detailed information about a tool call.
+type ToolCallDetail struct {
+	// ID is the unique identifier for this tool call.
+	ID string `json:"id"`
+
+	// Name is the canonical tool name.
+	Name string `json:"name"`
+
+	// Arguments is the JSON arguments for the tool.
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+
+	// Output is the result from executing the tool.
+	Output string `json:"output,omitempty"`
+}
+
+// InjectedContextDetail contains context injected by hooks.
+type InjectedContextDetail struct {
+	// ToolCallID is the ID of the associated tool call.
+	ToolCallID string `json:"tool_call_id"`
+
+	// Source is the hook/action that injected the context.
+	Source string `json:"source,omitempty"`
+
+	// Content is the injected context text.
+	Content string `json:"content"`
+}
+
 type ChatResponse struct {
 	// Response is the assistant's response text.
 	Response string `json:"response"`
@@ -277,14 +371,24 @@ type ChatResponse struct {
 	// Action captures structured UI/scene directives for clients.
 	Action *ChatAction `json:"action,omitempty"`
 
+	// Presence contains multimodal presence assets (voice, background, overlay).
+	// Only populated when PresenceConfig.Enabled is true.
+	Presence *PresenceBundle `json:"presence,omitempty"`
+
 	// ConversationID is the conversation this response belongs to.
 	ConversationID string `json:"conversation_id"`
 
 	// ContextQueries is how many times context was queried this turn.
 	ContextQueries int `json:"context_queries"`
 
-	// ToolsUsed lists the tools that were called.
+	// ToolsUsed lists the names of tools that were called.
 	ToolsUsed []string `json:"tools_used"`
+
+	// ToolCalls contains detailed information about each tool call.
+	ToolCalls []ToolCallDetail `json:"tool_calls,omitempty"`
+
+	// InjectedContexts contains context injected by hooks during tool execution.
+	InjectedContexts []InjectedContextDetail `json:"injected_contexts,omitempty"`
 
 	// TokenUsage tracks token consumption.
 	TokenUsage TokenUsage `json:"token_usage"`
@@ -381,6 +485,13 @@ func (s *Service) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, err
 	// Store conversation turns in memory
 	s.storeConversationTurns(ctx, req, resp, start)
 
+	// Generate presence assets (voice, background, overlay) if enabled
+	if s.presenceEnabled() {
+		presenceCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		s.generatePresence(presenceCtx, req, resp)
+	}
+
 	return resp, nil
 }
 
@@ -462,7 +573,7 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		},
 	}
 
-	// Collect tools used
+	// Collect tools used (names only for backwards compatibility)
 	toolNames := make(map[string]struct{})
 	for _, tc := range output.ToolCalls {
 		toolNames[tc.Name] = struct{}{}
@@ -471,6 +582,30 @@ func (s *Service) chatWithLLMChat(ctx context.Context, req ChatRequest, rlmExecu
 		resp.ToolsUsed = append(resp.ToolsUsed, name)
 	}
 	sort.Strings(resp.ToolsUsed)
+
+	// Build map of tool results by call ID for lookup
+	toolResults := make(map[string]string)
+	for _, tr := range output.ToolResults {
+		toolResults[tr.ToolCallID] = tr.Content
+	}
+	// Add detailed tool call information with outputs
+	for _, tc := range output.ToolCalls {
+		resp.ToolCalls = append(resp.ToolCalls, ToolCallDetail{
+			ID:        tc.ID,
+			Name:      tc.Name,
+			Arguments: tc.Arguments,
+			Output:    toolResults[tc.ID],
+		})
+	}
+
+	// Add injected context information
+	for _, ic := range output.InjectedContexts {
+		resp.InjectedContexts = append(resp.InjectedContexts, InjectedContextDetail{
+			ToolCallID: ic.ToolCallID,
+			Source:     ic.Source,
+			Content:    ic.Content,
+		})
+	}
 
 	// Check for errors
 	if output.StopReason == engine.StopReasonError {
@@ -656,6 +791,24 @@ func (s *Service) chatWithStoryLoop(ctx context.Context, req ChatRequest, rlmExe
 		resp.ToolsUsed = append(resp.ToolsUsed, name)
 	}
 	sort.Strings(resp.ToolsUsed)
+
+	// Add detailed tool call information from gather phase
+	for _, tc := range gatherOutput.ToolCalls {
+		resp.ToolCalls = append(resp.ToolCalls, ToolCallDetail{
+			ID:        tc.ID,
+			Name:      tc.Name,
+			Arguments: tc.Arguments,
+		})
+	}
+
+	// Add injected context information from gather phase
+	for _, ic := range gatherOutput.InjectedContexts {
+		resp.InjectedContexts = append(resp.InjectedContexts, InjectedContextDetail{
+			ToolCallID: ic.ToolCallID,
+			Source:     ic.Source,
+			Content:    ic.Content,
+		})
+	}
 
 	if dialogueOutput.StopReason == engine.StopReasonError {
 		resp.Error = dialogueOutput.Error
@@ -1112,13 +1265,21 @@ func (s *Service) storeConversationTurns(ctx context.Context, req ChatRequest, r
 		s.logger.Warn().Err(err).Msg("Failed to store user turn")
 	}
 
-	// Store assistant turn
+	// Store assistant turn with tool calls
 	assistantTurn := ConversationTurn{
 		ConversationID: req.ConversationID,
 		Role:           "assistant",
 		Content:        resp.Response,
 		CreatedAt:      time.Now(),
 	}
+
+	// Serialize tool calls if present
+	if len(resp.ToolCalls) > 0 {
+		if toolCallsJSON, err := json.Marshal(resp.ToolCalls); err == nil {
+			assistantTurn.ToolCalls = toolCallsJSON
+		}
+	}
+
 	if err := s.memory.AppendTurn(ctx, assistantTurn); err != nil {
 		s.logger.Warn().Err(err).Msg("Failed to store assistant turn")
 	}
@@ -1439,4 +1600,307 @@ func (s *Service) ListConversations(ctx context.Context, limit int) ([]Conversat
 		return nil, fmt.Errorf("memory features not enabled")
 	}
 	return s.memory.ListConversations(ctx, limit)
+}
+
+// GetConversationMessages returns messages for a specific conversation.
+func (s *Service) GetConversationMessages(ctx context.Context, conversationID string, limit int) ([]ConversationTurn, error) {
+	if s.memory == nil {
+		return nil, fmt.Errorf("memory features not enabled")
+	}
+	return s.memory.GetConversationMessages(ctx, conversationID, limit)
+}
+
+// SoftDeleteConversation marks a conversation as deleted without removing data.
+func (s *Service) SoftDeleteConversation(ctx context.Context, conversationID string) error {
+	if s.memory == nil {
+		return fmt.Errorf("memory features not enabled")
+	}
+	return s.memory.SoftDeleteConversation(ctx, conversationID)
+}
+
+// RenameConversation sets or updates the custom title for a conversation.
+func (s *Service) RenameConversation(ctx context.Context, conversationID, title string) error {
+	if s.memory == nil {
+		return fmt.Errorf("memory features not enabled")
+	}
+	return s.memory.RenameConversation(ctx, conversationID, title)
+}
+
+// PersonalityInfo contains the full personality state and built system prompt.
+type PersonalityInfo struct {
+	// Profile contains the raw personality dimensions and learned preferences.
+	Profile *PersonalityProfile `json:"profile"`
+
+	// SystemPrompt is the built prompt including personality adjustments.
+	SystemPrompt string `json:"system_prompt"`
+
+	// MemoryContext is the conversation memory summary if available.
+	MemoryContext string `json:"memory_context,omitempty"`
+}
+
+// GetPersonalityInfo returns the personality profile and built system prompt for a conversation.
+func (s *Service) GetPersonalityInfo(ctx context.Context, conversationID string) (*PersonalityInfo, error) {
+	// Get base personality
+	basePersonality := s.config.DefaultPersonality
+	if stored, err := s.contextStore.GetByKey(ctx, conversationID, contextvar.ScopeGlobal, "personality/base"); err == nil {
+		var personality string
+		if err := json.Unmarshal(stored.ValueJSON, &personality); err == nil && personality != "" {
+			basePersonality = personality
+		}
+	}
+
+	// Create evolving personality manager
+	evolvingPersonality := NewEvolvingPersonality(s.contextStore, conversationID)
+
+	// Get the profile
+	profile, err := evolvingPersonality.GetProfile(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get personality profile: %w", err)
+	}
+
+	// Build the full system prompt
+	systemPrompt, err := evolvingPersonality.BuildSystemPrompt(ctx, basePersonality)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("Failed to build system prompt, using base")
+		systemPrompt = basePersonality
+	}
+
+	// Get memory context if available
+	var memoryContext string
+	if s.memory != nil {
+		memoryContext, _ = s.memory.GetContext(ctx, conversationID)
+	}
+
+	return &PersonalityInfo{
+		Profile:       profile,
+		SystemPrompt:  systemPrompt,
+		MemoryContext: memoryContext,
+	}, nil
+}
+
+// UpdatePersonalityDimension updates a single personality dimension value.
+func (s *Service) UpdatePersonalityDimension(ctx context.Context, conversationID, dimensionName string, value float64) error {
+	// Clamp value to valid range
+	if value < 0 {
+		value = 0
+	}
+	if value > 1 {
+		value = 1
+	}
+
+	evolvingPersonality := NewEvolvingPersonality(s.contextStore, conversationID)
+
+	profile, err := evolvingPersonality.GetProfile(ctx)
+	if err != nil {
+		return fmt.Errorf("get personality profile: %w", err)
+	}
+
+	// Find and update the dimension
+	found := false
+	for i := range profile.Dimensions {
+		if profile.Dimensions[i].Name == dimensionName {
+			profile.Dimensions[i].Value = value
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("dimension %q not found", dimensionName)
+	}
+
+	return evolvingPersonality.SaveProfile(ctx, profile)
+}
+
+// presenceEnabled returns true if presence generation is configured and enabled.
+func (s *Service) presenceEnabled() bool {
+	return s.config.PresenceConfig != nil && s.config.PresenceConfig.Enabled && s.config.SkillRunner != nil
+}
+
+// generatePresence runs presence/orchestrate and executes sub-skills in parallel.
+// It updates the response with presence assets.
+func (s *Service) generatePresence(ctx context.Context, req ChatRequest, resp *ChatResponse) {
+	if !s.presenceEnabled() {
+		return
+	}
+
+	presenceCfg := s.config.PresenceConfig
+
+	// Build orchestrate input
+	input := map[string]any{
+		"text":                resp.Response,
+		"conversation_id":     req.ConversationID,
+		"generate_voice":      presenceCfg.VoiceEnabled,
+		"generate_background": presenceCfg.BackgroundEnabled,
+	}
+	if presenceCfg.CharacterID != "" {
+		input["character_id"] = presenceCfg.CharacterID
+	}
+	if presenceCfg.Style != "" {
+		input["style"] = presenceCfg.Style
+	}
+	if presenceCfg.VoiceID != "" {
+		input["voice_id"] = presenceCfg.VoiceID
+	}
+	// Add scene from ChatAction if present
+	if resp.Action != nil && resp.Action.Scene != "" {
+		input["scene"] = resp.Action.Scene
+	}
+
+	// Run presence/orchestrate to parse emotions and get sub-skill params
+	result, err := s.config.SkillRunner.Run(ctx, "presence/orchestrate", input)
+	if err != nil {
+		s.logger.Warn().Err(err).Msg("presence/orchestrate failed")
+		return
+	}
+	if !result.Success {
+		s.logger.Warn().Str("error", result.Error).Msg("presence/orchestrate returned error")
+		return
+	}
+
+	// Parse orchestrate output
+	var orchOutput struct {
+		Emotion          string         `json:"emotion"`
+		Intensity        float64        `json:"intensity"`
+		DisplayText      string         `json:"display_text"`
+		Markers          []string       `json:"markers"`
+		DetectedEmoji    []string       `json:"detected_emoji"`
+		BackgroundParams map[string]any `json:"background_params"`
+		CharacterParams  map[string]any `json:"character_params"`
+		VoiceParams      map[string]any `json:"voice_params"`
+	}
+	if err := json.Unmarshal(result.Output, &orchOutput); err != nil {
+		s.logger.Warn().Err(err).Msg("failed to parse presence/orchestrate output")
+		return
+	}
+
+	// Initialize presence bundle with parsed emotion data
+	bundle := &PresenceBundle{
+		Emotion:       orchOutput.Emotion,
+		Intensity:     orchOutput.Intensity,
+		DisplayText:   orchOutput.DisplayText,
+		Markers:       orchOutput.Markers,
+		DetectedEmoji: orchOutput.DetectedEmoji,
+	}
+
+	// Run sub-skills in parallel using goroutines
+	type subSkillResult struct {
+		skill  string
+		output json.RawMessage
+		err    error
+	}
+	resultCh := make(chan subSkillResult, 3)
+	running := 0
+
+	// Background generation
+	if orchOutput.BackgroundParams != nil {
+		running++
+		go func() {
+			res, err := s.config.SkillRunner.Run(ctx, "presence/background", orchOutput.BackgroundParams)
+			if err != nil {
+				resultCh <- subSkillResult{skill: "background", err: err}
+				return
+			}
+			resultCh <- subSkillResult{skill: "background", output: res.Output}
+		}()
+	}
+
+	// Character overlay selection
+	if orchOutput.CharacterParams != nil {
+		running++
+		go func() {
+			res, err := s.config.SkillRunner.Run(ctx, "presence/character", orchOutput.CharacterParams)
+			if err != nil {
+				resultCh <- subSkillResult{skill: "character", err: err}
+				return
+			}
+			resultCh <- subSkillResult{skill: "character", output: res.Output}
+		}()
+	}
+
+	// Voice generation
+	if orchOutput.VoiceParams != nil {
+		running++
+		go func() {
+			res, err := s.config.SkillRunner.Run(ctx, "presence/voice", orchOutput.VoiceParams)
+			if err != nil {
+				resultCh <- subSkillResult{skill: "voice", err: err}
+				return
+			}
+			resultCh <- subSkillResult{skill: "voice", output: res.Output}
+		}()
+	}
+
+	// Collect results with context cancellation support
+	for i := 0; i < running; i++ {
+		var res subSkillResult
+		select {
+		case res = <-resultCh:
+			// Got result, process below
+		case <-ctx.Done():
+			// Context cancelled, stop waiting for remaining results
+			s.logger.Warn().Err(ctx.Err()).Int("remaining", running-i).Msg("presence bundle collection cancelled")
+			bundle.Errors = append(bundle.Errors, fmt.Sprintf("cancelled: %v", ctx.Err()))
+			resp.Presence = bundle
+			return
+		}
+		if res.err != nil {
+			s.logger.Warn().Err(res.err).Str("skill", res.skill).Msg("presence sub-skill failed")
+			bundle.Errors = append(bundle.Errors, fmt.Sprintf("%s: %v", res.skill, res.err))
+			bundle.CacheMisses++
+			continue
+		}
+
+		switch res.skill {
+		case "background":
+			var bgOut struct {
+				ImageDigest string `json:"image_digest"`
+				Cached      bool   `json:"cached"`
+			}
+			if err := json.Unmarshal(res.output, &bgOut); err == nil {
+				bundle.BackgroundDigest = bgOut.ImageDigest
+				if bgOut.Cached {
+					bundle.CacheHits++
+				} else {
+					bundle.CacheMisses++
+				}
+			}
+
+		case "character":
+			var charOut struct {
+				Overlay *struct {
+					OverlayDigest string `json:"overlay_digest"`
+				} `json:"overlay"`
+			}
+			if err := json.Unmarshal(res.output, &charOut); err == nil && charOut.Overlay != nil {
+				bundle.OverlayDigest = charOut.Overlay.OverlayDigest
+			}
+
+		case "voice":
+			var voiceOut struct {
+				AudioDigest string `json:"audio_digest"`
+				DurationMS  int    `json:"duration_ms"`
+				Cached      bool   `json:"cached"`
+			}
+			if err := json.Unmarshal(res.output, &voiceOut); err == nil {
+				bundle.AudioDigest = voiceOut.AudioDigest
+				bundle.AudioDurationMS = voiceOut.DurationMS
+				if voiceOut.Cached {
+					bundle.CacheHits++
+				} else {
+					bundle.CacheMisses++
+				}
+			}
+		}
+	}
+
+	resp.Presence = bundle
+
+	// Also update Tone from presence if not already set
+	if resp.Tone == nil && bundle.Emotion != "" {
+		resp.Tone = &ChatTone{
+			Emotion:   bundle.Emotion,
+			Intensity: bundle.Intensity,
+		}
+	}
 }

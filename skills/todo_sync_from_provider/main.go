@@ -16,6 +16,7 @@ import (
 
 const command = "todo/sync_from_provider"
 
+// input defines the parameters for syncing todos from a provider.
 type input struct {
 	// Provider is the source provider ("claude" is currently the only supported value)
 	Provider string `json:"provider" validate:"required,oneof=claude"`
@@ -33,6 +34,7 @@ type input struct {
 	DryRun bool `json:"dry_run"`
 }
 
+// output defines the results of the sync operation.
 type output struct {
 	Created   int      `json:"created"`
 	Updated   int      `json:"updated"`
@@ -45,10 +47,21 @@ type output struct {
 	DryRun    bool     `json:"dry_run,omitempty"`
 }
 
+// main is the skill entry point for todo/sync_from_provider.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates inbound todo synchronization from external providers into agentctl's task system.
+//
+// Index:
+// - Purpose: Sync todos FROM a provider (e.g., Claude Code) INTO agentctl's task management system
+// - Flow: open task store → resolve session ID → get todos from input or file → run inbound sync → emit results
+// - SideEffects: task creation/updates; completion tracking; dependency management; dry-run simulation
+// - FailureModes: task store access failures, provider file read errors, sync operation failures
+// - Observability: emits sync statistics, created/updated/completed counts, warnings, and dry-run status
+// - Related: todosync.Service, todosync.InboundSyncInput
+// - Keywords: todo/sync_from_provider, todo_sync, inbound_sync, claude_code, task_management
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Open task store
 	taskStore, cleanup, err := sessionkit.OpenTasks(ctx, rc.Config)

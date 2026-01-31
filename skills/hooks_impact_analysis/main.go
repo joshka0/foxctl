@@ -47,6 +47,7 @@ const (
 )
 
 // Config holds impact analysis configuration.
+// Config holds impact analysis configuration.
 type Config struct {
 	MaxSymbols int           `json:"max_symbols"`
 	MaxRefs    int           `json:"max_refs"`
@@ -97,6 +98,7 @@ func ConfigFromMap(envMap map[string]string) Config {
 }
 
 // Symbol represents a code symbol.
+// Symbol represents a code symbol.
 type Symbol struct {
 	Name    string `json:"name"`
 	Type    string `json:"type"`
@@ -104,6 +106,7 @@ type Symbol struct {
 	EndLine int    `json:"end_line,omitempty"`
 }
 
+// Impact represents the impact analysis result for a symbol.
 // Impact represents the impact analysis result for a symbol.
 type Impact struct {
 	Symbol     string   `json:"symbol"`
@@ -114,6 +117,7 @@ type Impact struct {
 	ImplFiles  []string `json:"impl_files,omitempty"`
 }
 
+// Language represents a supported language with its LSP skill.
 // Language represents a supported language with its LSP skill.
 type Language struct {
 	Name     string
@@ -169,10 +173,21 @@ var languages = map[string]Language{
 	},
 }
 
+// main is the skill entry point for hooks/impact_analysis.
 func main() {
 	skillmain.Main("hooks/impact_analysis", run)
 }
 
+// run orchestrates impact analysis for edited files using LSP references and implementations.
+//
+// Index:
+// - Purpose: Analyze external dependencies of edited code symbols using LSP servers
+// - Flow: validate config → extract file path → check language → get symbols → analyze impacts in parallel → filter significant results → emit context
+// - SideEffects: LSP server communication; debouncing; context injection
+// - FailureModes: LSP server errors, file access failures, timeout errors
+// - Observability: emits impact analysis results, dependency counts, and performance metrics
+// - Related: getSymbols, analyzeImpacts, getLSPReferences, getLSPImplementations, formatImpactContext
+// - Keywords: hooks/impact_analysis, lsp_analysis, code_dependencies, reference_analysis, implementation_analysis
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	cfg := LoadConfig()
 
@@ -275,6 +290,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	return emitApprove(rc, contextMsg, significantImpacts)
 }
 
+// getSymbols retrieves code symbols from a file using the code/symbols skill.
 func getSymbols(ctx context.Context, filePath string, maxResults int, workspace string) ([]Symbol, error) {
 	// Use agentctl run code/symbols
 	input := map[string]any{
@@ -300,6 +316,7 @@ func getSymbols(ctx context.Context, filePath string, maxResults int, workspace 
 	return data.Preview, nil
 }
 
+// analyzeImpacts analyzes external dependencies for symbols using parallel LSP calls.
 func analyzeImpacts(ctx context.Context, filePath string, symbols []Symbol, lang Language, cfg Config, workspace string) []Impact {
 	var wg sync.WaitGroup
 	results := make(chan Impact, len(symbols))
@@ -392,6 +409,7 @@ func analyzeImpacts(ctx context.Context, filePath string, symbols []Symbol, lang
 	return impacts
 }
 
+// findSymbolColumn finds the column position of a symbol in a file.
 func findSymbolColumn(filePath string, line int, symbolName string) int {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -415,6 +433,7 @@ func findSymbolColumn(filePath string, line int, symbolName string) int {
 	return 1
 }
 
+// getLSPReferences retrieves references for a symbol using LSP with timeout and language-specific optimizations.
 func getLSPReferences(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -489,6 +508,7 @@ func getLSPReferencesViaAgentctl(ctx context.Context, skill, filePath string, li
 	return refs
 }
 
+// getLSPImplementations retrieves implementations for a symbol using LSP with timeout and language-specific optimizations.
 func getLSPImplementations(ctx context.Context, skill, filePath string, line, col int, timeout time.Duration, workspace string) []string {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -563,6 +583,7 @@ func getLSPImplementationsViaAgentctl(ctx context.Context, skill, filePath strin
 	return impls
 }
 
+// workspaceArgs builds workspace arguments for agentctl commands.
 func workspaceArgs(workspace string) []string {
 	if workspace == "" {
 		return nil
@@ -573,6 +594,7 @@ func workspaceArgs(workspace string) []string {
 // Debounce support using temp file timestamps.
 var debounceDir = filepath.Join(os.TempDir(), "agentctl-impact-debounce")
 
+// shouldDebounce checks if impact analysis should be skipped due to recent analysis.
 func shouldDebounce(filePath string) bool {
 	hash := hashPath(filePath)
 	markerPath := filepath.Join(debounceDir, hash)
@@ -585,6 +607,7 @@ func shouldDebounce(filePath string) bool {
 	return time.Since(info.ModTime()) < debounceCooldown
 }
 
+// touchDebounce updates the debounce timestamp for a file.
 func touchDebounce(filePath string) {
 	_ = os.MkdirAll(debounceDir, 0o755)
 	hash := hashPath(filePath)
@@ -596,6 +619,7 @@ func touchDebounce(filePath string) {
 	}
 }
 
+// hashPath generates a simple hash from a file path for debounce tracking.
 func hashPath(path string) string {
 	// Simple hash using path characters
 	var h uint64
@@ -605,8 +629,7 @@ func hashPath(path string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-// isSameFile checks if refFile refers to the same file as filePath.
-// Handles both absolute and relative paths from LSP.
+// isSameFile checks if refFile refers to the same file as filePath handling both absolute and relative paths.
 func isSameFile(filePath, refFile, workspaceRoot string) bool {
 	// Direct match
 	if filePath == refFile {
@@ -629,6 +652,7 @@ func isSameFile(filePath, refFile, workspaceRoot string) bool {
 	return false
 }
 
+// formatImpactContext formats impact analysis results into a markdown context string.
 func formatImpactContext(filename string, impacts []Impact) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("**Impact:** `%s` - external dependencies found:\n", filename))
@@ -650,12 +674,14 @@ func formatImpactContext(filename string, impacts []Impact) string {
 	return sb.String()
 }
 
+// emitNone emits a none decision with a reason.
 func emitNone(rc *skillmain.RunContext, reason string) error {
 	output := hooks.NewNone()
 	output.Reason = reason
 	return emitOutput(rc, output)
 }
 
+// emitApprove emits an approve decision with impact context.
 func emitApprove(rc *skillmain.RunContext, contextMsg string, impacts []Impact) error {
 	output := hooks.Output{
 		Decision: hooks.DecisionApprove,
@@ -667,6 +693,7 @@ func emitApprove(rc *skillmain.RunContext, contextMsg string, impacts []Impact) 
 	return emitOutput(rc, output)
 }
 
+// emitOutput emits the hook output with proper formatting.
 func emitOutput(rc *skillmain.RunContext, output hooks.Output) error {
 	return hookutil.EmitOutput(rc, "hooks/impact_analysis", output, nil)
 }

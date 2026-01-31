@@ -42,6 +42,15 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 	// Build engine input from session history
 	input := r.buildInput(session, userMessage)
 
+	// Log run start
+	observability.Emit(ctx, observability.NewEvent("console.run_start").
+		WithComponent("console").
+		WithSession(session.ID(), "").
+		WithData("correlation_id", correlationID).
+		WithData("message_count", len(input.Messages)).
+		WithData("user_message_len", len(userMessage)).
+		Success(0))
+
 	// Stream callback for tool calls and partial responses
 	streamCallback := &StreamCallback{
 		session:       session,
@@ -51,6 +60,12 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 	// Run the engine
 	output, err := r.engine.Run(ctx, input)
 	if err != nil {
+		observability.Emit(ctx, observability.NewEvent("console.engine_error").
+			WithComponent("console").
+			WithSession(session.ID(), "").
+			WithData("correlation_id", correlationID).
+			WithData("error", err.Error()).
+			Error(err, time.Since(start)))
 		return fmt.Errorf("engine run: %w", err)
 	}
 
@@ -65,19 +80,84 @@ func (r *Runner) Run(ctx context.Context, session *consolews.Session, userMessag
 
 	// Check for errors
 	if output.StopReason == engine.StopReasonError {
+		observability.Emit(ctx, observability.NewEvent("console.stop_reason_error").
+			WithComponent("console").
+			WithSession(session.ID(), "").
+			WithData("correlation_id", correlationID).
+			WithData("error", output.Error).
+			Error(nil, time.Since(start)))
 		return fmt.Errorf("engine error: %s", output.Error)
 	}
 
 	if output.StopReason == engine.StopReasonCancelled {
+		observability.Emit(ctx, observability.NewEvent("console.stop_reason_cancelled").
+			WithComponent("console").
+			WithSession(session.ID(), "").
+			WithData("correlation_id", correlationID).
+			Canceled(time.Since(start)))
 		return ctx.Err()
 	}
 
-	// Add assistant response to session history
-	if output.AssistantText != "" {
-		session.AddMessage(consolews.Message{
+	// Add assistant response to session history with tool calls and injected context metadata
+	if output.AssistantText != "" || len(output.ToolCalls) > 0 {
+		msg := consolews.Message{
 			Role:    "assistant",
 			Content: output.AssistantText,
-		})
+		}
+
+		// Build metadata
+		metadata := make(map[string]any)
+
+		// Add tool calls to metadata if present
+		if len(output.ToolCalls) > 0 {
+			const (
+				maxResultSize     = 64 * 1024 // 64KB threshold for truncation
+				truncatedSummary  = 2 * 1024  // 2KB summary for truncated results
+			)
+			toolCallsData := make([]map[string]any, 0, len(output.ToolCalls))
+			for i, tc := range output.ToolCalls {
+				tcData := map[string]any{
+					"id":        tc.ID,
+					"name":      tc.Name,
+					"arguments": json.RawMessage(tc.Arguments),
+				}
+				// Add result if available, with size-based truncation
+				if i < len(output.ToolResults) {
+					result := output.ToolResults[i].Content
+					originalSize := len(result)
+					if originalSize > maxResultSize {
+						// Truncate large results and add metadata
+						tcData["result"] = result[:truncatedSummary] + fmt.Sprintf("\n\n[truncated - %d bytes total]", originalSize)
+						tcData["result_truncated"] = true
+						tcData["result_original_size"] = originalSize
+					} else {
+						tcData["result"] = result
+					}
+					tcData["is_error"] = output.ToolResults[i].IsError
+				}
+				toolCallsData = append(toolCallsData, tcData)
+			}
+			metadata["tool_calls"] = toolCallsData
+		}
+
+		// Add injected contexts to metadata if present
+		if len(output.InjectedContexts) > 0 {
+			injectedData := make([]map[string]any, 0, len(output.InjectedContexts))
+			for _, ic := range output.InjectedContexts {
+				injectedData = append(injectedData, map[string]any{
+					"tool_call_id": ic.ToolCallID,
+					"source":       ic.Source,
+					"content":      ic.Content,
+				})
+			}
+			metadata["injected_contexts"] = injectedData
+		}
+
+		if len(metadata) > 0 {
+			msg.Metadata = metadata
+		}
+
+		session.AddMessage(msg)
 	}
 
 	// Emit final reply

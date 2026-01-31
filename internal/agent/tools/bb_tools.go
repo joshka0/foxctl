@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -11,6 +12,13 @@ import (
 	"github.com/jkatigb/agentctl/internal/domain/agent"
 	errspkg "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/oklog/ulid/v2"
+)
+
+// Blackboard tool limits to prevent abuse.
+const (
+	maxBBTTLSeconds   = 86400 // 24 hours max TTL
+	maxBBLimit        = 100   // Max records per search
+	maxBBLeaseSeconds = 3600  // 1 hour max lease
 )
 
 // registerBBTools registers blackboard (topic bus) tools.
@@ -198,7 +206,12 @@ func (r *Registry) bbPost(ctx context.Context, args map[string]any) (*models.Cal
 
 	ttlSeconds := 3600
 	if t, ok := args["ttl_seconds"].(float64); ok && t > 0 {
+		// Clamp to max before casting to prevent bypass via large values
+		if t > float64(maxBBTTLSeconds) {
+			t = float64(maxBBTTLSeconds)
+		}
 		ttlSeconds = int(t)
+	}
 	}
 
 	casRef := ""
@@ -245,8 +258,16 @@ func (r *Registry) bbSearch(ctx context.Context, args map[string]any) (*models.C
 	}
 
 	limit := 20
+	const maxLimit = 1000 // prevent memory exhaustion
 	if l, ok := args["limit"].(float64); ok && l > 0 {
+		// Clamp to max before casting to prevent bypass via large values
+		if l > float64(maxBBLimit) {
+			l = float64(maxBBLimit)
+		}
 		limit = int(l)
+		if limit > maxLimit {
+			limit = maxLimit
+		}
 	}
 
 	unleasedOnly := false
@@ -300,8 +321,16 @@ func (r *Registry) bbClaim(ctx context.Context, args map[string]any) (*models.Ca
 	}
 
 	leaseSeconds := 300
+	const maxLeaseSeconds = 3600 // 1 hour max
 	if l, ok := args["lease_seconds"].(float64); ok && l > 0 {
+		// Clamp to max before casting to prevent bypass via large values
+		if l > float64(maxBBLeaseSeconds) {
+			l = float64(maxBBLeaseSeconds)
+		}
 		leaseSeconds = int(l)
+		if leaseSeconds > maxLeaseSeconds {
+			leaseSeconds = maxLeaseSeconds
+		}
 	}
 
 	store, err := r.openBlackboardStore(ctx)
@@ -394,18 +423,72 @@ func (r *Registry) bbWatch(ctx context.Context, args map[string]any) (*models.Ca
 	collected := []agent.BlackboardRecord{} // Empty slice, not nil (nil serializes to null in JSON)
 	lastTS := sinceTS
 
+	drain := func() {
+		for {
+			select {
+			case rec, ok := <-recordsCh:
+				if !ok {
+					return
+				}
+				collected = append(collected, rec)
+				if rec.TS > lastTS {
+					lastTS = rec.TS
+				}
+			default:
+				return
+			}
+		}
+	}
+
+	// fallback retrieves records via store.Search when the watch channel yields nothing.
+	// ORDERING ASSUMPTION: store.Search returns records ordered by ts DESC (newest first).
+	// The reverse iteration (from len-1 to 0) ensures 'collected' is populated in
+	// chronological order (oldest first), matching the expected output format.
+	// Do NOT change store.Search ordering without updating this loop accordingly.
+	fallback := func() {
+		if len(collected) > 0 {
+			return
+		}
+
+		// Use a short timeout for fallback search to avoid blocking indefinitely
+		fallbackCtx, fallbackCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer fallbackCancel()
+
+		records, err := store.Search(fallbackCtx, r.config.WorkspaceID, topic, 20)
+		if err != nil {
+			return
+		}
+
+		// Iterate in reverse to convert DESC order to chronological (ASC) for collected.
+		// This ensures lastTS tracks the most recent timestamp correctly.
+		for i := len(records) - 1; i >= 0; i-- {
+			rec := records[i]
+			if rec.TS <= sinceTS {
+				continue
+			}
+			collected = append(collected, rec)
+			if rec.TS > lastTS {
+				lastTS = rec.TS
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-watchCtx.Done():
+			drain()
+			fallback()
 			return successResult(map[string]any{
 				"records": collected,
 				"last_ts": lastTS,
 				"count":   len(collected),
 			}), nil
 		case err := <-errCh:
-			if err != nil {
+			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				return errorResult(fmt.Sprintf("watch error: %v", err)), nil
 			}
+			drain()
+			fallback()
 			return successResult(map[string]any{
 				"records": collected,
 				"last_ts": lastTS,
@@ -413,6 +496,8 @@ func (r *Registry) bbWatch(ctx context.Context, args map[string]any) (*models.Ca
 			}), nil
 		case rec, ok := <-recordsCh:
 			if !ok {
+				drain()
+				fallback()
 				return successResult(map[string]any{
 					"records": collected,
 					"last_ts": lastTS,

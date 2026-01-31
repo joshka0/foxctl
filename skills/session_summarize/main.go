@@ -42,7 +42,7 @@ const (
 // logger is the package-level observability logger, initialized in run().
 var logger *obs.Logger
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for session summarization with multiple modes and options.
 type Input struct {
 	SessionID string `json:"session_id"`
 	Force     bool   `json:"force,omitempty"`
@@ -81,7 +81,7 @@ type Input struct {
 	QueueOnly bool `json:"queue_only,omitempty"`
 }
 
-// SummarizeStats tracks token usage, costs, and skip reasons for summarization.
+// SummarizeStats tracks token usage, costs, and skip reasons for summarization with detailed metrics.
 type SummarizeStats struct {
 	// Token usage
 	InputTokens  int `json:"input_tokens,omitempty"`
@@ -108,7 +108,7 @@ type SummarizeStats struct {
 	LearningsPersisted int `json:"learnings_persisted,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with comprehensive session summary data and metadata.
 type Output struct {
 	SessionID       string   `json:"session_id"`
 	Summary         string   `json:"summary"`
@@ -152,14 +152,14 @@ type Output struct {
 	Message string `json:"message"`
 }
 
-// TokenUsage captures API response token usage for cost tracking.
+// TokenUsage captures API response token usage for cost tracking and usage analytics.
 type TokenUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
 	TotalTokens  int `json:"total_tokens"`
 }
 
-// ProviderCost defines per-million-token costs for a provider.
+// ProviderCost defines per-million-token costs for a provider with input/output pricing.
 type ProviderCost struct {
 	InputPerMillion  float64
 	OutputPerMillion float64
@@ -194,7 +194,7 @@ var providerCosts = map[string]ProviderCost{
 	"gemini":    {InputPerMillion: 0.075, OutputPerMillion: 0.30}, // Gemini 1.5 Flash
 }
 
-// calculateCost returns input cost, output cost, total cost in USD.
+// calculateCost returns input cost, output cost, total cost in USD with provider-specific pricing.
 func calculateCost(provider string, usage TokenUsage) (inputCost, outputCost, totalCost float64) {
 	cost, ok := providerCosts[provider]
 	if !ok {
@@ -217,7 +217,7 @@ func calculateCost(provider string, usage TokenUsage) (inputCost, outputCost, to
 	return
 }
 
-// SummaryResponse is the expected JSON response from the LLM.
+// SummaryResponse is the expected JSON response from the LLM with structured summary fields.
 type SummaryResponse struct {
 	Summary         string   `json:"summary"`
 	Accomplished    []string `json:"accomplished"`
@@ -232,7 +232,7 @@ type SummaryResponse struct {
 	KeyQuestions    []string `json:"key_questions,omitempty"` // Semantic search questions for context restoration
 }
 
-// ClaudeMessage represents a message from Claude Code's JSONL format.
+// ClaudeMessage represents a message from Claude Code's JSONL format with comprehensive metadata.
 type ClaudeMessage struct {
 	Type       string          `json:"type"`
 	UUID       string          `json:"uuid,omitempty"`
@@ -246,14 +246,14 @@ type ClaudeMessage struct {
 	Summary    string          `json:"summary,omitempty"`
 }
 
-// MessageContent represents the content of a message.
+// MessageContent represents the content of a message with role and structured data.
 type MessageContent struct {
 	Role    string          `json:"role,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
 	Model   string          `json:"model,omitempty"`
 }
 
-// ContentBlock represents a block in assistant message content.
+// ContentBlock represents a block in assistant message content with various content types.
 type ContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
@@ -263,7 +263,7 @@ type ContentBlock struct {
 	ToolUseID string          `json:"id,omitempty"`
 }
 
-// UserContentBlock represents a block in user message content (text or tool_result).
+// UserContentBlock represents a block in user message content (text or tool_result) with error handling.
 type UserContentBlock struct {
 	Type      string `json:"type"`
 	Text      string `json:"text,omitempty"`
@@ -272,14 +272,14 @@ type UserContentBlock struct {
 	Content   string `json:"content,omitempty"` // tool result content (often large)
 }
 
-// codexEventPayload models Codex event_msg payloads for summarization.
+// codexEventPayload models Codex event_msg payloads for summarization with event type detection.
 type codexEventPayload struct {
 	Type    string `json:"type"`
 	Message string `json:"message,omitempty"`
 	Text    string `json:"text,omitempty"`
 }
 
-// FilteredMessage is a high-signal message for summarization.
+// FilteredMessage is a high-signal message for summarization with role, content, and tool tracking.
 type FilteredMessage struct {
 	Role       string   `json:"role"`
 	Content    string   `json:"content"`
@@ -297,10 +297,21 @@ const (
 // LLMProvider represents a chat completion API provider.
 type LLMProvider = llmproviders.Provider
 
+// main is the skill entry point for session/summarize with multi-mode summarization capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session summarization with multiple modes, deduplication, and embedding generation.
+//
+// Index:
+// - Purpose: Generate structured summaries for sessions with multiple output modes and cost optimization
+// - Flow: validate input → resolve mode → open session store → route to handler → generate summary → persist learnings → emit results
+// - SideEffects: updates session summaries; stores learnings in memory; generates embeddings; manages queue jobs
+// - FailureModes: invalid sessions, LLM provider failures, file access errors, embedding generation failures
+// - Observability: emits summary results, token usage, cost tracking, deduplication status, and processing statistics
+// - Related: persistSessionLearnings, filterJSONL, summarizeWithFallback, buildSeedPrompt, reembedAll
+// - Keywords: session/summarize, session_summary, llm_summarization, deduplication, embeddings, cost_tracking
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply timeout
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -621,6 +632,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
+// persistSessionLearnings extracts and persists session learnings to memory with embedding support.
 func persistSessionLearnings(ctx context.Context, rc *skillmain.RunContext, session sessions.Session, resp *SummaryResponse) (int, error) {
 	workspace := session.WorkspacePath
 	if strings.TrimSpace(workspace) == "" {
@@ -673,6 +685,7 @@ func persistSessionLearnings(ctx context.Context, rc *skillmain.RunContext, sess
 	return count, nil
 }
 
+// persistLearnings stores individual learning items with deduplication and embedding generation.
 func persistLearnings(ctx context.Context, store *memory.Store, embedProvider semantic.EmbeddingProvider, sessionID, workspace, typ string, items []string) (int, error) {
 	count := 0
 	for _, raw := range items {
@@ -731,6 +744,7 @@ func persistLearnings(ctx context.Context, store *memory.Store, embedProvider se
 	return count, nil
 }
 
+// normalizeLearning normalizes learning text by trimming whitespace and collapsing multiple spaces.
 func normalizeLearning(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -739,7 +753,7 @@ func normalizeLearning(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// filterJSONL reads the raw JSONL and extracts high-signal content.
+// filterJSONL reads and filters raw JSONL session data to extract high-signal content with compression support.
 // Aggressively filters to reduce 35MB+ session files to a few hundred KB.
 // Handles both plain .jsonl and gzip-compressed .jsonl.gz files.
 // Returns the filtered messages and a content hash for deduplication.
@@ -865,7 +879,7 @@ func filterJSONL(ctx context.Context, path string, maxTokens int) ([]FilteredMes
 	return filtered, contentHash, nil
 }
 
-// filterMessage extracts high-signal content from a message.
+// filterMessage extracts high-signal content from a message with aggressive filtering of noise.
 // Drops: file-history-snapshot, queue-operation, thinking blocks, tool_result blocks
 func filterMessage(msg ClaudeMessage) *FilteredMessage {
 	switch msg.Type {

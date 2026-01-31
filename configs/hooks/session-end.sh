@@ -12,6 +12,53 @@
 
 set -euo pipefail
 
+# Portable atomic file append with stale lock detection and cleanup.
+# Usage: atomic_append <file> <content>
+# Lock timeout: 30 seconds (stale locks older than this are removed)
+# atomic_append appends CONTENT to FILE atomically using a per-file lock directory and a PID marker to detect and clear stale locks; returns 0 on success and 1 if it cannot obtain the lock after retries.
+atomic_append() {
+  local file="$1"
+  local content="$2"
+  local lock_dir="${file}.lock.d"
+  local lock_marker="${lock_dir}/pid"
+  local max_retries=50
+  local lock_timeout=30
+  local retries=0
+
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    retries=$((retries + 1))
+    if [[ $retries -ge $max_retries ]]; then
+      # Check for stale lock before giving up
+      if [[ -f "$lock_marker" ]]; then
+        local lock_age
+        lock_age=$(( $(date +%s) - $(stat -f %m "$lock_marker" 2>/dev/null || stat -c %Y "$lock_marker" 2>/dev/null || echo 0) ))
+        if [[ $lock_age -gt $lock_timeout ]]; then
+          # Stale lock detected, remove it
+          rm -f "$lock_marker" 2>/dev/null || true
+          rmdir "$lock_dir" 2>/dev/null || true
+          retries=0
+          continue
+        fi
+      fi
+      # Max retries exceeded, skip this append (non-critical)
+      return 1
+    fi
+    sleep 0.1
+  done
+
+  # Write PID marker for stale detection
+  echo $$ > "$lock_marker" 2>/dev/null || true
+
+  # Perform the append
+  printf '%s\n' "$content" >> "$file"
+
+  # Cleanup
+  rm -f "$lock_marker" 2>/dev/null || true
+  rmdir "$lock_dir" 2>/dev/null || true
+  return 0
+}
+
+# init_user_prefs_file initializes a persistent append-only user preferences file at the given path with a header describing the expected format if the file does not already exist.
 init_user_prefs_file() {
   local prefs_file="$1"
   if [[ -f "$prefs_file" ]]; then
@@ -38,6 +85,7 @@ init_recent_gotchas_file() {
 EOF
 }
 
+# append_summary_notes parses a summarization JSON and appends extracted user preferences, gotchas, and time-sink notes into workspace configs/USER_PREFS.md and configs/RECENT_GOTCHAS.md, creating the config directory and files when missing.
 append_summary_notes() {
   local summary_json="$1"
   local workspace_path="$2"
@@ -63,11 +111,7 @@ append_summary_notes() {
     init_user_prefs_file "$prefs_file"
     while IFS= read -r item; do
       [[ -z "$item" ]] && continue
-      # Use flock for atomic append to prevent interleaved writes from concurrent processes
-      (
-        flock -x 200 2>/dev/null || true
-        printf -- "- %s: %s\n" "$today" "$item" >>"$prefs_file"
-      ) 200>"${prefs_file}.lock"
+      atomic_append "$prefs_file" "- $today: $item" || true
     done <<<"$prefs"
   fi
 
@@ -78,21 +122,13 @@ append_summary_notes() {
     if [[ -n "$gotchas" ]]; then
       while IFS= read -r item; do
         [[ -z "$item" ]] && continue
-        # Use flock for atomic append
-        (
-          flock -x 200 2>/dev/null || true
-          printf -- "- %s [gotcha]: %s\n" "$today" "$item" >>"$gotchas_file"
-        ) 200>"${gotchas_file}.lock"
+        atomic_append "$gotchas_file" "- $today [gotcha]: $item" || true
       done <<<"$gotchas"
     fi
     if [[ -n "$time_sinks" ]]; then
       while IFS= read -r item; do
         [[ -z "$item" ]] && continue
-        # Use flock for atomic append
-        (
-          flock -x 200 2>/dev/null || true
-          printf -- "- %s [time]: %s\n" "$today" "$item" >>"$gotchas_file"
-        ) 200>"${gotchas_file}.lock"
+        atomic_append "$gotchas_file" "- $today [time]: $item" || true
       done <<<"$time_sinks"
     fi
   fi
@@ -133,13 +169,24 @@ capture_input=$(jq -nc \
 
 # ASYNC: Run in background unless SYNC mode requested
 if [[ "${AGENTCTL_SESSION_CAPTURE_SYNC:-}" != "1" ]]; then
-  LOG_DIR="${HOME}/.agentctl/logs/hooks"
+  # Respect AGENTCTL_HOME if set, otherwise use default
+  AGENTCTL_HOME="${AGENTCTL_HOME:-${HOME}/.agentctl}"
+  LOG_DIR="${AGENTCTL_HOME}/logs/hooks"
   mkdir -p "$LOG_DIR" 2>/dev/null || true
-  LOG_FILE="$LOG_DIR/session-capture-$(date +%Y%m%d-%H%M%S).log"
+  # Include milliseconds and PID to avoid log file collisions
+  LOG_FILE="$LOG_DIR/session-capture-$(date +%Y%m%d-%H%M%S)-$$.log"
 
-  # Spawn in background and exit immediately
+  # Maximum time for background capture (5 minutes)
+  CAPTURE_TIMEOUT=300
+
+  # Spawn in background with timeout and exit immediately
   (
-    capture_result="$(printf '%s' "$capture_input" | "$AGENTCTL_BIN" run session/capture --input-file - 2>&1)" || true
+    # Use timeout if available (GNU coreutils), otherwise proceed without it
+    if command -v timeout &>/dev/null; then
+      capture_result="$(printf '%s' "$capture_input" | timeout "$CAPTURE_TIMEOUT" "$AGENTCTL_BIN" run --daemon session/capture --input-file - 2>&1)" || true
+    else
+      capture_result="$(printf '%s' "$capture_input" | "$AGENTCTL_BIN" run --daemon session/capture --input-file - 2>&1)" || true
+    fi
     echo "$capture_result" >> "$LOG_FILE"
 
     # If CEREBRAS_API_KEY is set, also summarize
@@ -147,7 +194,11 @@ if [[ "${AGENTCTL_SESSION_CAPTURE_SYNC:-}" != "1" ]]; then
       captured_session_id=$(printf '%s' "$capture_result" | jq -r '.data.session_id // ""' 2>/dev/null)
       if [[ -n "$captured_session_id" ]]; then
         summarize_input=$(jq -nc --arg session_id "$captured_session_id" '{session_id: $session_id}')
-        summarize_result="$(printf '%s' "$summarize_input" | "$AGENTCTL_BIN" run session/summarize --no-cas --input-file - 2>>"$LOG_FILE")" || true
+        if command -v timeout &>/dev/null; then
+          summarize_result="$(printf '%s' "$summarize_input" | timeout "$CAPTURE_TIMEOUT" "$AGENTCTL_BIN" run --daemon session/summarize --no-cas --input-file - 2>>"$LOG_FILE")" || true
+        else
+          summarize_result="$(printf '%s' "$summarize_input" | "$AGENTCTL_BIN" run --daemon session/summarize --no-cas --input-file - 2>>"$LOG_FILE")" || true
+        fi
         echo "$summarize_result" >> "$LOG_FILE"
         append_summary_notes "$summarize_result" "$workspace"
       fi
@@ -158,10 +209,15 @@ if [[ "${AGENTCTL_SESSION_CAPTURE_SYNC:-}" != "1" ]]; then
 fi
 
 # SYNC mode: Original blocking behavior
-capture_result="$(printf '%s' "$capture_input" | "$AGENTCTL_BIN" run session/capture --input-file - 2>/dev/null)" || exit 0
+capture_result="$(printf '%s' "$capture_input" | "$AGENTCTL_BIN" run --daemon session/capture --input-file - 2>/dev/null)" || true
 
-capture_status=$(printf '%s' "$capture_result" | jq -r '.data.status // "error"')
-captured_session_id=$(printf '%s' "$capture_result" | jq -r '.data.session_id // ""')
+# Handle capture failure gracefully
+if [[ -z "$capture_result" ]]; then
+  exit 0
+fi
+
+capture_status=$(printf '%s' "$capture_result" | jq -r '.data.status // "error"' 2>/dev/null) || true
+captured_session_id=$(printf '%s' "$capture_result" | jq -r '.data.session_id // ""' 2>/dev/null) || true
 
 if [[ "$capture_status" != "captured" && "$capture_status" != "exists" ]]; then
   exit 0
@@ -170,7 +226,7 @@ fi
 # If CEREBRAS_API_KEY is set, also summarize
 if [[ -n "${CEREBRAS_API_KEY:-}" && -n "$captured_session_id" ]]; then
   summarize_input=$(jq -nc --arg session_id "$captured_session_id" '{session_id: $session_id}')
-  summarize_result="$(printf '%s' "$summarize_input" | "$AGENTCTL_BIN" run session/summarize --no-cas --input-file - 2>/dev/null)" || true
+  summarize_result="$(printf '%s' "$summarize_input" | "$AGENTCTL_BIN" run --daemon session/summarize --no-cas --input-file - 2>/dev/null)" || true
   append_summary_notes "$summarize_result" "$workspace"
 fi
 

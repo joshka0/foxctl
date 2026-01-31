@@ -81,7 +81,7 @@ if [[ "$is_conceptual" == "true" ]]; then
   search_method="semantic+snippet_extract"
 
   # Get candidates from semantic search
-  candidates=$("$AGENTCTL_BIN" run code/semantic_search --ephemeral --input "$(jq -nc --arg q "$pattern" '{
+  candidates=$("$AGENTCTL_BIN" run --daemon code/semantic_search --ephemeral --input "$(jq -nc --arg q "$pattern" '{
     query: $q,
     scope: ["symbols"],
     limit: 10
@@ -89,7 +89,7 @@ if [[ "$is_conceptual" == "true" ]]; then
 
   # If we got candidates, use snippet_extract
   if [[ "$candidates" != "[]" && "$candidates" != "null" && -n "$candidates" ]]; then
-    result=$("$AGENTCTL_BIN" run code/snippet_extract --ephemeral --input "$(jq -nc --arg q "$pattern" --argjson cands "$candidates" '{
+    result=$("$AGENTCTL_BIN" run --daemon code/snippet_extract --ephemeral --input "$(jq -nc --arg q "$pattern" --argjson cands "$candidates" '{
       question: $q,
       candidates: $cands,
       max_files: 8,
@@ -106,7 +106,7 @@ if [[ -z "$result" ]]; then
     path: $path,
     max_blocks: $max_blocks
   }')
-  result=$("$AGENTCTL_BIN" run code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
+  result=$("$AGENTCTL_BIN" run --daemon code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
     echo '{}'
     exit 0
   }
@@ -131,7 +131,7 @@ if [[ "$search_method" == "semantic+snippet_extract" ]]; then
       path: $path,
       max_blocks: $max_blocks
     }')
-    result=$("$AGENTCTL_BIN" run code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
+    result=$("$AGENTCTL_BIN" run --daemon code/context_ripgrep --ephemeral --input "$input_json" 2>/dev/null) || {
       echo '{}'
       exit 0
     }

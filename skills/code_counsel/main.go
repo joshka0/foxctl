@@ -51,7 +51,7 @@ const (
 	PerspectiveGeneral     = "general"
 )
 
-// Input is the expected JSON input.
+// Input is the expected JSON input for multi-perspective code analysis.
 type Input struct {
 	// Query is the natural-language question or analysis focus.
 	Query string `json:"query" validate:"required"`
@@ -81,7 +81,7 @@ type Input struct {
 	Provider string `json:"provider,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output with multi-perspective analysis results and statistics.
 type Output struct {
 	// Analyses contains results from each perspective.
 	Analyses []PerspectiveAnalysis `json:"analyses"`
@@ -99,7 +99,7 @@ type Output struct {
 // SecretWarning represents a detected secret.
 type SecretWarning = secretutil.Finding
 
-// PerspectiveAnalysis contains the analysis from a single perspective.
+// PerspectiveAnalysis contains the analysis from a single perspective with findings and scoring.
 type PerspectiveAnalysis struct {
 	// Perspective is the analysis type.
 	Perspective string `json:"perspective"`
@@ -117,7 +117,7 @@ type PerspectiveAnalysis struct {
 	DurationMS int64 `json:"duration_ms"`
 }
 
-// Finding represents a single observation from the analysis.
+// Finding represents a single observation from the analysis with severity and suggestions.
 type Finding struct {
 	// Type categorizes the finding (e.g., "issue", "suggestion", "positive").
 	Type string `json:"type"`
@@ -138,7 +138,7 @@ type Finding struct {
 	Suggestion string `json:"suggestion,omitempty"`
 }
 
-// Stats provides metrics about the analysis process.
+// Stats provides metrics about the analysis process with timing and provider information.
 type Stats struct {
 	LatencyMS       int      `json:"latency_ms"`
 	FilesAnalyzed   int      `json:"files_analyzed"`
@@ -147,10 +147,21 @@ type Stats struct {
 	Provider        string   `json:"provider"`
 }
 
+// main is the skill entry point for code/counsel.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates multi-perspective code analysis using LLMs with evidence gathering and secret detection.
+//
+// Index:
+// - Purpose: Analyze code from multiple perspectives (security, performance, readability, correctness) using LLMs
+// - Flow: apply defaults → gather evidence → scan for secrets → detect provider → run parallel perspectives → generate summary
+// - SideEffects: makes HTTP API calls to LLM providers; reads file contents; scans for secrets
+// - FailureModes: missing API keys, file access errors, LLM API failures, parsing errors, timeout
+// - Observability: emits analysis results, secret warnings, timing metrics, and provider information
+// - Related: gatherEvidence, runPerspectiveAnalysis, detectProvider, renderEvidenceForLLM
+// - Keywords: code/counsel, code_analysis, multi_perspective, llm_analysis, security_review, performance_review
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	start := time.Now()
 	logger := rc.Logger.With().Str("skill", command).Logger()
@@ -254,7 +265,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
-// gatherEvidence collects code evidence for analysis.
+// gatherEvidence collects code evidence for analysis with auto-selection and explicit file support.
 func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, logger zerolog.Logger) (*codecontext.Evidence, error) {
 	var candidates []codecontext.Candidate
 
@@ -300,7 +311,7 @@ func gatherEvidence(ctx context.Context, rc *skillmain.RunContext, in Input, log
 	return evidence, nil
 }
 
-// autoSelectFiles uses retrieval.Generator to find relevant files.
+// autoSelectFiles uses retrieval.Generator to find relevant files based on semantic search.
 func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string, maxFiles int, logger zerolog.Logger) ([]codecontext.Candidate, error) {
 	memStore, err := memory.OpenWithConfig(ctx, rc.Config)
 	if err != nil {
@@ -346,7 +357,7 @@ func autoSelectFiles(ctx context.Context, rc *skillmain.RunContext, query string
 	return candidates, nil
 }
 
-// renderEvidenceForLLM converts evidence to a string suitable for LLM context.
+// renderEvidenceForLLM converts evidence to a formatted string suitable for LLM context.
 func renderEvidenceForLLM(evidence *codecontext.Evidence) string {
 	var sb strings.Builder
 
@@ -368,7 +379,7 @@ func renderEvidenceForLLM(evidence *codecontext.Evidence) string {
 	return sb.String()
 }
 
-// detectProvider returns the best available provider.
+// detectProvider returns the best available LLM provider based on environment variables.
 func detectProvider() string {
 	if os.Getenv("CEREBRAS_API_KEY") != "" {
 		return "cerebras"
@@ -382,7 +393,7 @@ func detectProvider() string {
 	return "anthropic" // Default fallback
 }
 
-// runPerspectiveAnalysis runs analysis from a specific perspective.
+// runPerspectiveAnalysis runs analysis from a specific perspective using LLM with structured parsing.
 func runPerspectiveAnalysis(ctx context.Context, provider, perspective, query, codeContext string, logger zerolog.Logger) (*PerspectiveAnalysis, error) {
 	prompt := buildAnalysisPrompt(perspective, query, codeContext)
 
@@ -404,7 +415,7 @@ func runPerspectiveAnalysis(ctx context.Context, provider, perspective, query, c
 	return analysis, nil
 }
 
-// buildAnalysisPrompt constructs the prompt for a perspective.
+// buildAnalysisPrompt constructs the perspective-specific prompt for LLM analysis with JSON output format.
 func buildAnalysisPrompt(perspective, query, codeContext string) string {
 	var systemContext string
 	switch perspective {
@@ -443,7 +454,7 @@ Respond in JSON format:
 }`, systemContext, query, codeContext)
 }
 
-// callLLM makes an API call to the specified provider.
+// callLLM makes an API call to the specified LLM provider with error handling and fallbacks.
 func callLLM(ctx context.Context, provider, prompt string) (string, error) {
 	switch provider {
 	case "cerebras":
@@ -457,6 +468,7 @@ func callLLM(ctx context.Context, provider, prompt string) (string, error) {
 	}
 }
 
+// callCerebras makes an API call to Cerebras LLM with authentication and error handling.
 func callCerebras(ctx context.Context, prompt string) (string, error) {
 	apiKey := os.Getenv("CEREBRAS_API_KEY")
 	if apiKey == "" {
@@ -520,6 +532,7 @@ func callCerebras(ctx context.Context, prompt string) (string, error) {
 	return result.Choices[0].Message.Content, nil
 }
 
+// callAnthropic makes an API call to Anthropic Claude with authentication and error handling.
 func callAnthropic(ctx context.Context, prompt string) (string, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
@@ -577,6 +590,7 @@ func callAnthropic(ctx context.Context, prompt string) (string, error) {
 	return result.Content[0].Text, nil
 }
 
+// callOpenAI makes an API call to OpenAI GPT with authentication and error handling.
 func callOpenAI(ctx context.Context, prompt string) (string, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
@@ -635,7 +649,7 @@ func callOpenAI(ctx context.Context, prompt string) (string, error) {
 	return result.Choices[0].Message.Content, nil
 }
 
-// parseAnalysisResponse parses the LLM's JSON response.
+// parseAnalysisResponse parses the LLM's JSON response with markdown code block handling.
 func parseAnalysisResponse(perspective, response string) (*PerspectiveAnalysis, error) {
 	// Try to extract JSON from the response
 	response = strings.TrimSpace(response)
@@ -673,7 +687,7 @@ func parseAnalysisResponse(perspective, response string) (*PerspectiveAnalysis, 
 	}, nil
 }
 
-// titleCase capitalizes the first letter of each word (simple replacement for deprecated strings.Title).
+// titleCase capitalizes the first letter of each word (replacement for deprecated strings.Title).
 func titleCase(s string) string {
 	words := strings.Fields(s)
 	for i, w := range words {
@@ -684,7 +698,7 @@ func titleCase(s string) string {
 	return strings.Join(words, " ")
 }
 
-// generateOverallSummary combines analyses from multiple perspectives.
+// generateOverallSummary combines analyses from multiple perspectives with scoring aggregation.
 func generateOverallSummary(analyses []PerspectiveAnalysis) string {
 	var parts []string
 	var totalScore float64
@@ -710,7 +724,7 @@ func generateOverallSummary(analyses []PerspectiveAnalysis) string {
 	return summary
 }
 
-// embedderAdapter adapts *Embedder to EmbeddingProvider interface.
+// embedderAdapter adapts *Embedder to EmbeddingProvider interface for semantic search integration.
 type embedderAdapter struct {
 	embedder *semantic.Embedder
 }

@@ -91,16 +91,16 @@ if [[ "${AGENTCTL_GRAPH_MAINTENANCE_SYNC:-}" != "1" ]]; then
     # 1. Cleanup expired and dangling edges
     if [[ "$do_cleanup" == true ]]; then
       echo "--- Cleanup ---" >> "$LOG_FILE"
-      printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
+      printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
     fi
 
     # 2. Recalculate degrees and PageRank
     if [[ "$do_pagerank" == true ]]; then
       echo "--- Degrees ---" >> "$LOG_FILE"
-      printf '%s' "$degree_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
+      printf '%s' "$degree_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
 
       echo "--- PageRank ---" >> "$LOG_FILE"
-      printf '%s' "$pagerank_input" | "$AGENTCTL_BIN" run graph/pagerank --input-file - >> "$LOG_FILE" 2>&1 || true
+      printf '%s' "$pagerank_input" | "$AGENTCTL_BIN" run --daemon graph/pagerank --input-file - >> "$LOG_FILE" 2>&1 || true
     fi
 
     echo "=== Done ===" >> "$LOG_FILE"
@@ -111,12 +111,12 @@ fi
 
 # SYNC mode (for debugging)
 if [[ "$do_cleanup" == true ]]; then
-  printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null || true
+  printf '%s' "$cleanup_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - 2>/dev/null || true
 fi
 
 if [[ "$do_pagerank" == true ]]; then
-  printf '%s' "$degree_input" | "$AGENTCTL_BIN" run graph/manage --input-file - 2>/dev/null || true
-  printf '%s' "$pagerank_input" | "$AGENTCTL_BIN" run graph/pagerank --input-file - 2>/dev/null || true
+  printf '%s' "$degree_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - 2>/dev/null || true
+  printf '%s' "$pagerank_input" | "$AGENTCTL_BIN" run --daemon graph/pagerank --input-file - 2>/dev/null || true
 fi
 
 exit 0

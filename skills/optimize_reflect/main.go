@@ -15,16 +15,28 @@ import (
 
 const command = "optimize/reflect"
 
+// input defines the skill input parameters for optimization reflection with workspace and trajectory targeting.
 type input struct {
 	Workspace    string `json:"workspace"`
 	Role         string `json:"role"`
 	TrajectoryID string `json:"trajectory_id"`
 }
 
+// main is the skill entry point for optimize/reflect with trajectory analysis capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates optimization reflection with trajectory analysis and improvement generation.
+//
+// Index:
+// - Purpose: Generate reflections and insights from trajectory data with pattern analysis and improvement suggestions
+// - Flow: validate input → resolve workspace → open stores → create engine → analyze trajectory or generate summary → emit results
+// - SideEffects: reads trajectory data; analyzes patterns; generates improvement suggestions; accesses optimization stores
+// - FailureModes: missing required fields, store access failures, trajectory analysis errors, pattern generation failures
+// - Observability: emits reflection data, improvement suggestions, pattern summaries, and comprehensive analysis metrics
+// - Related: optimization.ReflectionEngine, trajectory store, pattern store
+// - Keywords: optimize/reflect, trajectory_analysis, pattern_recognition, improvement_generation, optimization
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate required fields
 	if in.Role == "" {

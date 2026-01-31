@@ -29,24 +29,31 @@ type Store struct {
 	db     *sql.DB
 	table  string
 	ownsDB bool
+	close  func() error
 }
 
-// Open opens a queue store backed by the provided database path.
+
+// Open opens a SQLite-backed queue store at dbPath and applies migrations for the specified table.
+// It validates and normalizes opts.Table, opens (or creates) a shared SQLite database, runs the
+// queue table migrations, and returns a Store that owns the database handle and its close function.
+// An error is returned if the table name is invalid or the database cannot be opened or migrated.
 func Open(ctx context.Context, dbPath string, opts Options) (*Store, error) {
 	table, err := normalizeTableName(opts.Table)
 	if err != nil {
 		return nil, err
 	}
-	db, err := sqliteutil.OpenDB(ctx, dbPath, func(ctx context.Context, db *sql.DB) error {
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, func(ctx context.Context, db *sql.DB) error {
 		return Migrate(ctx, db, Options{Table: table})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("queue: open db: %w", err)
 	}
-	return &Store{db: db, table: table, ownsDB: true}, nil
+	return &Store{db: db, table: table, ownsDB: true, close: closeFn}, nil
 }
 
-// OpenInRoot opens a queue store in the given root directory.
+
+// OpenInRoot opens a queue Store located at the filesystem path formed by joining
+// the provided root directory and filename.
 func OpenInRoot(ctx context.Context, root, filename string, opts Options) (*Store, error) {
 	return Open(ctx, filepath.Join(root, filename), opts)
 }
@@ -62,13 +69,23 @@ func NewStore(db *sql.DB, opts Options) (*Store, error) {
 
 // Close closes the store if it owns the database handle.
 func (s *Store) Close() error {
-	if s.ownsDB && s.db != nil {
+	if s == nil || !s.ownsDB {
+		return nil
+	}
+	if s.close != nil {
+		return s.close()
+	}
+	if s.db != nil {
 		return s.db.Close()
 	}
 	return nil
 }
 
-// Migrate creates the queue table and indexes if they don't exist.
+
+// Migrate creates the queue table and its supporting indexes in db if they do not exist.
+// It validates and normalizes opts.Table and returns an error if the table name is invalid.
+// The created table includes a UNIQUE constraint on (group_id, dedupe_key) and the function
+// also creates indexes for (state, priority DESC, created_at) and (group_id, dedupe_key).
 func Migrate(ctx context.Context, db *sql.DB, opts Options) error {
 	table, err := normalizeTableName(opts.Table)
 	if err != nil {

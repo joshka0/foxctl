@@ -25,9 +25,15 @@ type Store struct {
 	db       *sql.DB
 	path     string
 	repoRoot string
+	close    func() error
 }
 
-// Open opens (or creates) a repoindex store for the given repo root.
+// Open opens or creates a SQLite-backed repo index store for the given repo root.
+// The database file is placed under storageRoot/repoindex using a deterministic key
+// derived from repoRoot; if a legacy database file is present it will be migrated
+// (renamed) to the new path. Open ensures the schema is migrated and configures
+// recommended PRAGMA options before returning a Store representing the opened
+// repository index, or an error if opening, migration, or setup fails.
 func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 	if repoRoot == "" {
 		return nil, fmt.Errorf("repoindex: repo root is required")
@@ -55,28 +61,28 @@ func Open(ctx context.Context, storageRoot, repoRoot string) (*Store, error) {
 		}
 	}
 
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("repoindex: open db: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, "PRAGMA synchronous=NORMAL;"); err != nil {
-		_ = db.Close()
+		_ = closeFn()
 		return nil, fmt.Errorf("repoindex: set synchronous: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, "PRAGMA temp_store=MEMORY;"); err != nil {
-		_ = db.Close()
+		_ = closeFn()
 		return nil, fmt.Errorf("repoindex: set temp_store: %w", err)
 	}
 
-	return &Store{db: db, path: dbPath, repoRoot: absoluteRoot}, nil
+	return &Store{db: db, path: dbPath, repoRoot: absoluteRoot, close: closeFn}, nil
 }
 
 // Close closes the underlying database.
 func (s *Store) Close() error {
-	if s.db == nil {
+	if s == nil || s.close == nil {
 		return nil
 	}
-	return s.db.Close()
+	return s.close()
 }
 
 // Path returns the on-disk database path.

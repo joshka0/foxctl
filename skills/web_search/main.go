@@ -17,7 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-// Input defines the web search parameters.
+// Input defines the web search parameters with provider and extraction options.
 type Input struct {
 	Query        string `json:"query"`
 	MaxResults   int    `json:"max_results"`
@@ -28,7 +28,7 @@ type Input struct {
 	Topic        string `json:"topic"`
 }
 
-// SearchResult represents a single search result.
+// SearchResult represents a single search result with title, URL, snippet, and relevance score.
 type SearchResult struct {
 	Title   string  `json:"title"`
 	URL     string  `json:"url"`
@@ -36,7 +36,7 @@ type SearchResult struct {
 	Score   float64 `json:"score,omitempty"`
 }
 
-// Extraction represents extracted content from a URL.
+// Extraction represents extracted content from a URL with contextual information.
 type Extraction struct {
 	URL     string `json:"url"`
 	Title   string `json:"title"`
@@ -44,7 +44,7 @@ type Extraction struct {
 	Query   string `json:"query,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with search results, extractions, and metadata.
 type Output struct {
 	Results     []SearchResult `json:"results"`
 	Extractions []Extraction   `json:"extractions,omitempty"`
@@ -56,10 +56,21 @@ type Output struct {
 
 const command = "web/search"
 
+// main is the skill entry point for web/search.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates web searches using Exa or Tavily providers with optional content extraction.
+//
+// Index:
+// - Purpose: Search the web using Exa/Tavily APIs with optional content extraction from top results
+// - Flow: validate input → determine provider → execute search → extract content if requested → emit results
+// - SideEffects: HTTP requests to search APIs; web content fetching; HTML parsing; CAS storage for large results
+// - FailureModes: missing API keys, network failures, HTTP errors, content extraction failures
+// - Observability: emits search results, extraction counts, provider info, and artifact digests for large content
+// - Related: searchExa, searchTavily, extractContent, extractTextFromHTML, removeTagContent
+// - Keywords: web/search, web_searching, exa_api, tavily_api, content_extraction, html_parsing
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if strings.TrimSpace(in.Query) == "" {
@@ -152,7 +163,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.EmitWithCAS(ctx, rc, command, output)
 }
 
-// searchExa performs a search using Exa API.
+// searchExa performs a search using Exa API with neural search and autoprompt.
 func searchExa(ctx context.Context, in Input, apiKey string) ([]SearchResult, error) {
 	if apiKey == "" {
 		return nil, skillerr.Arg(
@@ -231,7 +242,7 @@ func searchExa(ctx context.Context, in Input, apiKey string) ([]SearchResult, er
 	return results, nil
 }
 
-// searchTavily performs a search using Tavily API.
+// searchTavily performs a search using Tavily API with advanced search depth.
 func searchTavily(ctx context.Context, in Input, apiKey string) ([]SearchResult, error) {
 	if apiKey == "" {
 		return nil, skillerr.Arg(
@@ -307,7 +318,7 @@ func searchTavily(ctx context.Context, in Input, apiKey string) ([]SearchResult,
 	return results, nil
 }
 
-// extractContent fetches URL content and extracts relevant snippets.
+// extractContent fetches URL content and extracts relevant snippets with size limits.
 func extractContent(ctx context.Context, url string, query string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -344,7 +355,7 @@ func extractContent(ctx context.Context, url string, query string) (string, erro
 	return content, nil
 }
 
-// extractTextFromHTML performs basic HTML to text conversion.
+// extractTextFromHTML performs basic HTML to text conversion with tag removal.
 func extractTextFromHTML(html string) string {
 	// Remove script and style tags
 	html = removeTagContent(html, "script")
@@ -380,7 +391,7 @@ func extractTextFromHTML(html string) string {
 	return strings.Join(cleaned, "\n")
 }
 
-// removeTagContent removes a tag and its content from HTML.
+// removeTagContent removes a tag and its content from HTML with proper nesting handling.
 func removeTagContent(html, tag string) string {
 	lower := strings.ToLower(html)
 	result := html

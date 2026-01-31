@@ -19,7 +19,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 )
 
-// Provider represents a supported AI coding assistant.
+// Provider represents a supported AI coding assistant with configuration paths and metadata.
 type Provider struct {
 	Name         string `json:"name"`
 	ConfigPath   string `json:"config_path"`
@@ -87,6 +87,7 @@ var allowedOps = []string{
 	"import",
 }
 
+// input defines the skill input parameters for provider configuration management with comprehensive operations.
 type input struct {
 	Operation  string         `json:"operation"`
 	Provider   string         `json:"provider"`
@@ -98,6 +99,7 @@ type input struct {
 	DryRun     bool           `json:"dry_run"`
 }
 
+// mcpConfig defines MCP server configuration with transport options and environment variables.
 type mcpConfig struct {
 	Name    string            `json:"name"`
 	Command string            `json:"command,omitempty"`
@@ -108,22 +110,26 @@ type mcpConfig struct {
 	Scope   string            `json:"scope,omitempty"` // user, project
 }
 
+// skillConfig defines skill configuration with name and source path for installation.
 type skillConfig struct {
 	Name   string `json:"name"`
 	Source string `json:"source"`
 }
 
+// settingConfig defines configuration setting with key-value pair for nested updates.
 type settingConfig struct {
 	Key   string      `json:"key"`
 	Value interface{} `json:"value"`
 }
 
+// syncConfig defines synchronization configuration between providers with selective sync options.
 type syncConfig struct {
 	From string   `json:"from"`
 	To   []string `json:"to"`
 	What []string `json:"what"` // mcp, settings, skills, all
 }
 
+// output defines the skill output with provider status, configuration data, and change tracking.
 type output struct {
 	Providers []providerStatus `json:"providers,omitempty"`
 	Config    interface{}      `json:"config,omitempty"`
@@ -131,6 +137,7 @@ type output struct {
 	Errors    []string         `json:"errors,omitempty"`
 }
 
+// providerStatus represents the status of a provider with installation state and resource counts.
 type providerStatus struct {
 	Name         string `json:"name"`
 	Installed    bool   `json:"installed"`
@@ -141,6 +148,7 @@ type providerStatus struct {
 	MCPCount     int    `json:"mcp_count,omitempty"`
 }
 
+// change represents a configuration change with provider, type, target, and application status.
 type change struct {
 	Provider string `json:"provider"`
 	Type     string `json:"type"` // add_mcp, remove_mcp, add_skill, set, etc.
@@ -148,10 +156,21 @@ type change struct {
 	Applied  bool   `json:"applied"`
 }
 
+// main is the skill entry point for providers/config with unified configuration management.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates provider configuration management with validation, routing, and operation execution.
+//
+// Index:
+// - Purpose: Unified configuration management for AI coding assistants with MCP and skill support
+// - Flow: validate operation → resolve provider → route to handler → execute operation → emit results
+// - SideEffects: configuration file modifications; skill directory management; MCP server updates; cross-provider sync
+// - FailureModes: invalid operations, missing providers, file access errors, configuration parsing errors
+// - Observability: emits operation results, provider status, configuration changes, and error details
+// - Related: listProviders, getConfig, addMCP, removeMCP, addSkill, removeSkill, syncProviders
+// - Keywords: providers/config, configuration_management, mcp_servers, skills_sync, ai_assistants
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
@@ -223,6 +242,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// listProviders enumerates all supported providers with installation status and resource statistics.
 func listProviders() (*output, error) {
 	var statuses []providerStatus
 
@@ -259,6 +279,7 @@ func listProviders() (*output, error) {
 	return &output{Providers: statuses}, nil
 }
 
+// getConfig retrieves the configuration for a specific provider with format detection and parsing.
 func getConfig(providerName string) (*output, error) {
 	p, ok := providers[providerName]
 	if !ok {
@@ -289,6 +310,7 @@ func getConfig(providerName string) (*output, error) {
 	return &output{Config: cfg}, nil
 }
 
+// addMCP adds an MCP server configuration to one or more providers with format adaptation.
 func addMCP(providerName string, mcp *mcpConfig, dryRun bool) (*output, error) {
 	if mcp == nil || mcp.Name == "" {
 		return nil, fmt.Errorf("mcp config with name is required")
@@ -373,6 +395,7 @@ func addMCP(providerName string, mcp *mcpConfig, dryRun bool) (*output, error) {
 	return out, nil
 }
 
+// removeMCP removes an MCP server configuration from one or more providers with cleanup.
 func removeMCP(providerName string, mcpName string, dryRun bool) (*output, error) {
 	if mcpName == "" {
 		return nil, fmt.Errorf("mcp name is required")
@@ -450,6 +473,7 @@ func removeMCP(providerName string, mcpName string, dryRun bool) (*output, error
 	return out, nil
 }
 
+// addSkill adds a skill to one or more providers via symlink creation with directory management.
 func addSkill(providerName string, skill *skillConfig, dryRun bool) (*output, error) {
 	if skill == nil || skill.Name == "" || skill.Source == "" {
 		return nil, fmt.Errorf("skill name and source are required")
@@ -511,6 +535,7 @@ func addSkill(providerName string, skill *skillConfig, dryRun bool) (*output, er
 	return out, nil
 }
 
+// removeSkill removes a skill from one or more providers with cleanup and error handling.
 func removeSkill(providerName string, skillName string, dryRun bool) (*output, error) {
 	if skillName == "" {
 		return nil, fmt.Errorf("skill name is required")
@@ -560,6 +585,7 @@ func removeSkill(providerName string, skillName string, dryRun bool) (*output, e
 	return out, nil
 }
 
+// setConfig updates a configuration setting using dot notation for nested keys with validation.
 func setConfig(providerName string, setting *settingConfig, dryRun bool) (*output, error) {
 	if setting == nil || setting.Key == "" {
 		return nil, fmt.Errorf("setting key is required")
@@ -611,6 +637,7 @@ func setConfig(providerName string, setting *settingConfig, dryRun bool) (*outpu
 	return &output{Changes: []change{ch}}, nil
 }
 
+// syncProviders synchronizes configuration, MCP servers, and skills between providers with selective sync.
 func syncProviders(sc *syncConfig, dryRun bool) (*output, error) {
 	if sc == nil || sc.From == "" || len(sc.To) == 0 {
 		return nil, fmt.Errorf("sync_config with from and to is required")
@@ -731,6 +758,7 @@ func syncProviders(sc *syncConfig, dryRun bool) (*output, error) {
 	return out, nil
 }
 
+// exportConfig exports provider configuration to JSON file with formatting and path validation.
 func exportConfig(providerName string, filePath string) (*output, error) {
 	if filePath == "" {
 		filePath = fmt.Sprintf("%s-config-export.json", providerName)
@@ -760,6 +788,7 @@ func exportConfig(providerName string, filePath string) (*output, error) {
 	}, nil
 }
 
+// importConfig imports provider configuration from JSON file with validation and type conversion.
 func importConfig(providerName string, filePath string, dryRun bool) (*output, error) {
 	if filePath == "" {
 		return nil, fmt.Errorf("file path is required for import")
@@ -807,6 +836,7 @@ func importConfig(providerName string, filePath string, dryRun bool) (*output, e
 
 // Helper functions
 
+// getTargetProviders resolves target provider names with support for "all" wildcard expansion.
 func getTargetProviders(providerName string) []string {
 	if providerName == "all" {
 		var names []string
@@ -818,6 +848,7 @@ func getTargetProviders(providerName string) []string {
 	return []string{providerName}
 }
 
+// buildMCPEntry constructs provider-specific MCP server configuration with format adaptation.
 func buildMCPEntry(mcp *mcpConfig, providerName string) map[string]interface{} {
 	entry := make(map[string]interface{})
 
@@ -856,6 +887,7 @@ func buildMCPEntry(mcp *mcpConfig, providerName string) map[string]interface{} {
 	return entry
 }
 
+// convertMCPConfig converts generic MCP configuration to typed mcpConfig with type safety.
 func convertMCPConfig(cfg interface{}, name string) *mcpConfig {
 	mcp := &mcpConfig{Name: name}
 
@@ -889,6 +921,7 @@ func convertMCPConfig(cfg interface{}, name string) *mcpConfig {
 	return mcp
 }
 
+// countMCPServers counts the number of MCP servers in a configuration file with parsing.
 func countMCPServers(path, configType, mcpKey string) (int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -912,6 +945,7 @@ func countMCPServers(path, configType, mcpKey string) (int, error) {
 	return 0, nil
 }
 
+// setNestedValue sets a nested configuration value using dot notation with map creation.
 func setNestedValue(m map[string]interface{}, key string, value interface{}) {
 	parts := strings.Split(key, ".")
 	current := m
@@ -931,6 +965,7 @@ func setNestedValue(m map[string]interface{}, key string, value interface{}) {
 	}
 }
 
+// writeConfig writes configuration to file with format-specific serialization and directory creation.
 func writeConfig(path string, cfg map[string]interface{}, configType string) error {
 	// Ensure directory exists
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -958,6 +993,7 @@ func writeConfig(path string, cfg map[string]interface{}, configType string) err
 	return os.WriteFile(path, data, 0o644)
 }
 
+// expandPath expands tilde to home directory with cross-platform support.
 func expandPath(path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, _ := os.UserHomeDir()
@@ -966,16 +1002,19 @@ func expandPath(path string) string {
 	return path
 }
 
+// fileExists checks if a path exists and is a regular file with error handling.
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
 
+// dirExists checks if a path exists and is a directory with error handling.
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
 
+// contains checks if a string slice contains a specific item with linear search.
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {

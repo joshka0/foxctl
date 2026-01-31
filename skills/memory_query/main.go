@@ -26,7 +26,7 @@ const (
 	DefaultTimeout       = 5 * time.Second
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for memory query with filtering and search options.
 type Input struct {
 	Query          string  `json:"query,omitempty"`
 	File           string  `json:"file,omitempty"`
@@ -39,14 +39,14 @@ type Input struct {
 	IncludeContent bool    `json:"include_content,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with memory results, pagination, and query statistics.
 type Output struct {
 	Memories   []MemoryResult `json:"memories"`
 	Pagination Pagination     `json:"pagination"`
 	Stats      QueryStats     `json:"stats"`
 }
 
-// Pagination provides pagination metadata.
+// Pagination provides pagination metadata for memory query results with total count and navigation.
 type Pagination struct {
 	Total   int  `json:"total"`
 	Offset  int  `json:"offset"`
@@ -54,7 +54,7 @@ type Pagination struct {
 	HasMore bool `json:"has_more"`
 }
 
-// MemoryResult represents a single memory entry in results.
+// MemoryResult represents a single memory entry in results with scoring and metadata.
 type MemoryResult struct {
 	Name      string  `json:"name"`
 	Type      string  `json:"type"`
@@ -67,7 +67,7 @@ type MemoryResult struct {
 	Content   any     `json:"content,omitempty"`
 }
 
-// QueryStats provides query statistics.
+// QueryStats provides query statistics with performance metrics and filter information.
 type QueryStats struct {
 	TotalFound      int    `json:"total_found"`
 	Filtered        int    `json:"filtered"`
@@ -79,10 +79,21 @@ type QueryStats struct {
 	Hint            string `json:"hint,omitempty"`
 }
 
+// main is the skill entry point for memory/query with filtered memory access capabilities.
 func main() {
 	skillmain.Main("memory/query", run)
 }
 
+// run orchestrates memory query operations with validation, normalization, and result formatting.
+//
+// Index:
+// - Purpose: Query memory entries with filtering, search, and pagination capabilities
+// - Flow: validate input → normalize parameters → execute query → format results → emit output
+// - SideEffects: opens memory store connection; performs vector search; reads memory entries
+// - FailureModes: invalid input, memory store access failures, search errors, timeout issues
+// - Observability: emits query results, pagination metadata, search statistics, and performance metrics
+// - Related: normalizeInput, query, searchWithEmbeddings, isFileAssociated, extractFileFromEntry
+// - Keywords: memory/query, memory_search, vector_search, filtering, pagination
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate: at least one search criteria must be provided
 	if in.Query == "" && in.File == "" && in.Types == "" {
@@ -100,6 +111,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "memory/query", out)
 }
 
+// normalizeInput applies default values and validation limits to input parameters with bounds checking.
 func normalizeInput(in *Input, rc *skillmain.RunContext) {
 	in.Limit = mathutil.DefaultPositiveInt(in.Limit, DefaultLimit)
 	if in.Limit > 100 {
@@ -114,6 +126,7 @@ func normalizeInput(in *Input, rc *skillmain.RunContext) {
 	}
 }
 
+// query executes memory search with filtering, vector search fallback, and result pagination.
 func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
@@ -315,6 +328,7 @@ func query(ctx context.Context, rc *skillmain.RunContext, in *Input) (*Output, e
 	return out, nil
 }
 
+// searchWithEmbeddings performs vector similarity search using embeddings with query enrichment.
 func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, cfg config.Config, workspacePath string, in *Input) ([]storage.ScoredEntry, error) {
 	embedder, err := semantic.NewEmbedderFromConfig(semantic.ScopeMemory, cfg)
 	if err != nil {
@@ -336,6 +350,7 @@ func searchWithEmbeddings(ctx context.Context, memStore *memory.Store, cfg confi
 	return results, nil
 }
 
+// isFileAssociated checks if a memory entry is associated with a specific file path with flexible matching.
 func isFileAssociated(entry storage.NamedEntry, filePath string) bool {
 	filePath = normalizePath(filePath)
 
@@ -367,6 +382,7 @@ func isFileAssociated(entry storage.NamedEntry, filePath string) bool {
 	return false
 }
 
+// extractFileFromEntry extracts file path information from memory entry with multiple field detection.
 func extractFileFromEntry(entry storage.NamedEntry) string {
 	if strings.HasPrefix(entry.Name, "edit:") {
 		parts := strings.SplitN(entry.Name, ":", 3)
@@ -389,6 +405,7 @@ func extractFileFromEntry(entry storage.NamedEntry) string {
 	return ""
 }
 
+// normalizePath normalizes file paths by removing common prefixes for consistent comparison.
 func normalizePath(p string) string {
 	p = strings.TrimPrefix(p, "./")
 	p = strings.TrimPrefix(p, "/")

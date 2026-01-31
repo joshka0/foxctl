@@ -203,6 +203,27 @@ ts-dev-tui: ts-install
 ts-dev-gui: ts-install
 	@cd packages/gui && bun run dev:all
 
+# Build and restart gui-agent with API server (full rebuild workflow)
+gui-agent-dev: build
+	@echo "Building gui-agent frontend..."
+	@cd packages/gui-agent && npm run build
+	@echo "Stopping any running web servers..."
+	@pkill -f 'agentctl web serve' 2>/dev/null || true
+	@sleep 1
+	@echo "Starting web server..."
+	@./bin/agentctl web serve --dev-cors --ui-dir packages/gui-agent/dist > /tmp/agentctl-web.log 2>&1 &
+	@sleep 2
+	@echo "Web server running at http://localhost:8090 (logs: /tmp/agentctl-web.log)"
+	@curl -sf http://localhost:8090/api/health > /dev/null && echo "Health check: OK" || echo "Health check: FAILED"
+
+# Build gui-agent frontend only (no server restart)
+gui-agent-build:
+	@cd packages/gui-agent && npm run build
+
+# Run gui-agent in Vite dev mode with hot reload (no Go rebuild)
+gui-agent-vite:
+	@cd packages/gui-agent && npm run dev
+
 # Runs both API server and TUI binary together
 ts-tui: ts-build-tui build
 	@echo "Starting API server and TUI..."

@@ -40,22 +40,31 @@ type BoardStore interface {
 }
 
 type boardSQLStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// OpenBoardStore initializes the board store rooted at the provided path.
+
+// OpenBoardStore initializes a BoardStore backed by a SQLite database stored at
+// root/board.db. It applies the package migration function before returning the
+// store and returns an error if the database cannot be opened or migrated.
 func OpenBoardStore(ctx context.Context, root string) (BoardStore, error) {
 	dbPath := filepath.Join(root, "board.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrateBoard)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrateBoard)
 	if err != nil {
 		return nil, fmt.Errorf("board: open db: %w", err)
 	}
-	return &boardSQLStore{db: db}, nil
+	return &boardSQLStore{db: db, close: closeFn}, nil
 }
 
+
 func (s *boardSQLStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 // SendMessage inserts a new BoardMessage.
 // The msg.ID is populated with a ULID if not already set.

@@ -21,6 +21,7 @@ const skillName = "hooks/context_drain"
 var logger *obs.Logger
 
 // Input for the context_drain skill.
+// Input defines the input parameters for context_drain operations.
 type Input struct {
 	WorkspaceID string   `json:"workspace_id"`
 	SessionID   string   `json:"session_id"`
@@ -33,11 +34,22 @@ type Input struct {
 	Prune       bool     `json:"prune,omitempty"`        // Also prune expired entries
 }
 
+// main is the skill entry point for hooks/context_drain.
 func main() {
 	config.LoadDotEnv()
 	skillmain.Main(skillName, run)
 }
 
+// run orchestrates context buffer draining with filtering, peeking, and pruning capabilities.
+//
+// Index:
+// - Purpose: Drain the context buffer for injection into AI turns with flexible filtering and formatting
+// - Flow: validate input → open store → build drain params → drain/peek → optionally prune → emit results
+// - SideEffects: context consumption; expired entry pruning; source filtering
+// - FailureModes: invalid input, store access failures, drain operation errors
+// - Observability: emits drain counts, pending totals, timing metrics, and source summaries
+// - Related: contextbuffer.Drain, contextbuffer.Peek, contextbuffer.PruneExpired
+// - Keywords: hooks/context_drain, context_buffer, context_injection, peek_operations, pruning
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(skillName))

@@ -35,7 +35,7 @@ var allowedOps = []string{
 	"logs",
 }
 
-// Input represents the skill input parameters.
+// Input represents the skill input parameters for mobile/expo operations.
 type Input struct {
 	Operation     string `json:"operation"`
 	DeviceID      string `json:"device_id,omitempty"`
@@ -49,10 +49,21 @@ type Input struct {
 	Count         int    `json:"count,omitempty"`
 }
 
+// main is the skill entry point for mobile/expo.
 func main() {
 	skillmain.Main(skillName, run)
 }
 
+// run orchestrates Expo development operations with device management and EAS integration.
+//
+// Index:
+// - Purpose: Unified Expo development with device control, deep linking, EAS builds, and log retrieval
+// - Flow: validate operation → detect platform → route to handler → emit operation-specific results
+// - SideEffects: device interactions; ADB/IDB commands; EAS API calls; file system access
+// - FailureModes: invalid operations, device not found, ADB/IDB failures, EAS errors, missing tools
+// - Observability: emits operation status, platform info, build IDs, and detailed error messages
+// - Related: detectPlatform, shake, reload, deepLink, build, update, logs
+// - Keywords: mobile/expo, expo, react_native, device_control, eas_build, development
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	op := oputil.Op(in.Operation)
@@ -98,6 +109,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 }
 
+// emit outputs skill results with consistent formatting.
 func emit(rc *skillmain.RunContext, data map[string]any) error {
 	return skillout.Emit(rc, skillName, data)
 }
@@ -152,6 +164,7 @@ func shake(ctx context.Context, rc *skillmain.RunContext, platform, deviceID str
 	})
 }
 
+// iosShake triggers shake gesture on iOS simulator using IDB or AppleScript.
 func iosShake(ctx context.Context, udid string) error {
 	// Method 1: Try sending keyboard shortcut via IDB (Cmd+D opens React Native dev menu)
 	// First, focus the simulator
@@ -177,6 +190,7 @@ func iosShake(ctx context.Context, udid string) error {
 	return nil
 }
 
+// androidShake triggers shake gesture on Android device/emulator using ADB.
 func androidShake(ctx context.Context, serial string) error {
 	// Android: Send accelerometer event to simulate shake
 	// Using input command to send key events that trigger shake detection
@@ -205,6 +219,7 @@ func reload(ctx context.Context, rc *skillmain.RunContext, platform, deviceID st
 	})
 }
 
+// iosReload triggers reload on iOS simulator via dev menu.
 func iosReload(ctx context.Context, udid string) error {
 	// Shake to open dev menu
 	if err := iosShake(ctx, udid); err != nil {
@@ -218,6 +233,7 @@ func iosReload(ctx context.Context, udid string) error {
 	return result.Err
 }
 
+// androidReload triggers reload on Android device/emulator via dev menu.
 func androidReload(ctx context.Context, serial string) error {
 	// Open dev menu first
 	if err := androidShake(ctx, serial); err != nil {
@@ -262,11 +278,13 @@ func deepLink(ctx context.Context, rc *skillmain.RunContext, platform, deviceID,
 	})
 }
 
+// iosDeepLink opens deep link on iOS simulator using IDB.
 func iosDeepLink(ctx context.Context, udid, url string) error {
 	result := mobileutil.RunIDB(ctx, udid, "open", url)
 	return result.Err
 }
 
+// androidDeepLink opens deep link on Android device/emulator using ADB.
 func androidDeepLink(ctx context.Context, serial, url string) error {
 	result := mobileutil.RunADB(ctx, serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", url)
 	return result.Err
@@ -341,6 +359,7 @@ func toggleRemoteDebug(ctx context.Context, rc *skillmain.RunContext, platform, 
 	})
 }
 
+// iosToggleDevOption toggles a dev menu option on iOS simulator.
 func iosToggleDevOption(ctx context.Context, udid, key string) error {
 	// Open dev menu
 	if err := iosShake(ctx, udid); err != nil {
@@ -354,6 +373,7 @@ func iosToggleDevOption(ctx context.Context, udid, key string) error {
 	return result.Err
 }
 
+// androidToggleDevOption toggles a dev menu option on Android device/emulator.
 func androidToggleDevOption(ctx context.Context, serial, key string) error {
 	// Open dev menu
 	result := mobileutil.RunADB(ctx, serial, "shell", "input", "keyevent", "82")

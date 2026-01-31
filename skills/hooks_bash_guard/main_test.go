@@ -128,6 +128,60 @@ func TestBashGuard_UnrestrictedAllowsAllCommands(t *testing.T) {
 	assert.Equal(t, "approve", hookOutput["decision"])
 }
 
+// Tests for sed range rewrite
+
+func TestBashGuard_RewritesSedRangeCommand(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	in := bashInput("sed -n '10,12p' /tmp/notes.txt")
+
+	err := run(context.Background(), rc, in)
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	hookOutput := getHookOutput(t, data)
+	assert.Equal(t, "approve", hookOutput["decision"])
+
+	updated, ok := hookOutput["updated_tool_input"].(map[string]any)
+	require.True(t, ok)
+	command, ok := updated["command"].(string)
+	require.True(t, ok)
+	assert.Contains(t, command, "code/context_grep")
+	assert.Contains(t, command, `"file_path":"/tmp/notes.txt"`)
+	assert.Contains(t, command, `"line_start":10`)
+	assert.Contains(t, command, `"line_end":12`)
+}
+
+func TestBashGuard_RewritesSedRangeFromCat(t *testing.T) {
+	var buf bytes.Buffer
+	rc, cleanup := newTestContext(t, &buf)
+	defer cleanup()
+
+	in := bashInput("cat -n /tmp/notes.txt | sed -n '10,12p'")
+
+	err := run(context.Background(), rc, in)
+	require.NoError(t, err)
+
+	env := decodeEnvelope(t, &buf)
+	assertOK(t, env)
+	data := getData(t, env)
+	hookOutput := getHookOutput(t, data)
+	assert.Equal(t, "approve", hookOutput["decision"])
+
+	updated, ok := hookOutput["updated_tool_input"].(map[string]any)
+	require.True(t, ok)
+	command, ok := updated["command"].(string)
+	require.True(t, ok)
+	assert.Contains(t, command, "code/context_grep")
+	assert.Contains(t, command, `"file_path":"/tmp/notes.txt"`)
+	assert.Contains(t, command, `"line_start":10`)
+	assert.Contains(t, command, `"line_end":12`)
+}
+
 // Tests for explorer profile blocking non-agentctl commands
 
 func TestBashGuard_ExplorerBlocksArbitraryCommand(t *testing.T) {

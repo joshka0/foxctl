@@ -25,11 +25,13 @@ import (
 
 const command = "hooks/session_end"
 
+// HookInput extends hooks.Input with transcript path for session end processing.
 type HookInput struct {
 	hooks.Input
 	TranscriptPath string `json:"transcript_path,omitempty"`
 }
 
+// SessionMetrics captures metrics about the ended session.
 // SessionMetrics captures metrics about the ended session.
 type SessionMetrics struct {
 	MetricsID         string    `json:"metrics_id"`
@@ -44,10 +46,21 @@ type SessionMetrics struct {
 	FeedbackPending   bool      `json:"feedback_pending"`
 }
 
+// main is the skill entry point for hooks/session_end.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session end processing with metrics collection and feedback prompting.
+//
+// Index:
+// - Purpose: Capture session metrics at session end and prompt for feedback collection
+// - Flow: validate event → resolve workspace → collect task stats → get trajectory count → save metrics → create graph edges → emit feedback prompt
+// - SideEffects: metrics storage; graph edge creation; feedback prompting
+// - FailureModes: store access failures, workspace resolution errors
+// - Observability: emits session statistics, task counts, and feedback prompts
+// - Related: buildFeedbackPrompt, createSessionGraphEdges, fileExists
+// - Keywords: hooks/session_end, session_metrics, feedback_collection, graph_edges, task_statistics
 func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	// Only process Stop events
 	if in.Event != hooks.EventSessionEnd && string(in.Event) != "Stop" {
@@ -163,6 +176,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in HookInput) error {
 	return hookutil.EmitOutput(rc, command, output, nil)
 }
 
+// buildFeedbackPrompt builds a markdown prompt for session feedback.
 func buildFeedbackPrompt(metrics SessionMetrics) string {
 	var sb strings.Builder
 	sb.WriteString("---\n")
@@ -187,6 +201,7 @@ func buildFeedbackPrompt(metrics SessionMetrics) string {
 	return sb.String()
 }
 
+// fileExists checks if a file exists, handling tilde expansion.
 func fileExists(path string) bool {
 	if path == "" {
 		return false
@@ -260,6 +275,7 @@ func createSessionGraphEdges(ctx context.Context, storagePath, workspaceID, sess
 	}
 }
 
+// intPtr returns a pointer to an integer.
 func intPtr(i int) *int {
 	return &i
 }

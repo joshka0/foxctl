@@ -1,0 +1,102 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: presence/voice
+  version: 0.1.0
+  description: "Generate speech audio using ElevenLabs TTS with emotion support"
+  tags: ["presence", "voice", "tts", "elevenlabs", "companion"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 4
+signature:
+  command: presence/voice
+  parameters:
+    - name: text
+      type: string
+      required: true
+      description: "Text to synthesize (max 5000 chars). Supports *markers* for emotion."
+    - name: voice_id
+      type: string
+      required: false
+      description: "ElevenLabs voice ID (default: Rachel)"
+    - name: emotion
+      type: string
+      required: false
+      description: "Emotion to apply: neutral|joy|sadness|anger|fear|surprise|playful"
+    - name: intensity
+      type: number
+      required: false
+      default: 0.5
+      description: "Emotion intensity 0.0-1.0 for voice modulation"
+    - name: conversation_id
+      type: string
+      required: false
+      description: "Conversation ID for caching context"
+    - name: use_cache
+      type: boolean
+      required: false
+      default: true
+      description: "Check cache before generating new audio"
+    - name: model
+      type: string
+      required: false
+      default: "eleven_multilingual_v2"
+      description: "ElevenLabs model to use"
+  help:
+    short: "Generate emotion-aware speech with ElevenLabs"
+    long: |
+      Generate speech audio using ElevenLabs TTS with emotion-aware voice settings.
+
+      Voice settings adjust based on emotion:
+      - neutral: Balanced stability and similarity
+      - joy: Lower stability, higher style for expressiveness
+      - sadness: Higher stability, lower similarity for softer tone
+      - anger: Low stability, high similarity for intensity
+      - playful: Low stability, high style for fun delivery
+
+      Text can include *markers* like *sighs*, *laughs* which influence delivery.
+      Generated audio is stored in CAS and cached by text hash.
+
+      Example:
+        agentctl run presence/voice --input '{
+          "text": "*softly* I understand how you feel...",
+          "emotion": "sadness",
+          "intensity": 0.7
+        }'
+
+    workflows:
+      - id: synthesize-text
+        description: "Generate speech for text"
+        example_input:
+          text: "Hello! How are you today?"
+          emotion: "joy"
+      - id: emotional-delivery
+        description: "Synthesize with specific emotion"
+        example_input:
+          text: "*sighs* I see what you mean..."
+          emotion: "sadness"
+          intensity: 0.8
+  returns:
+    - name: audio_digest
+      type: string
+      description: "CAS digest of generated audio (sha256:...)"
+    - name: duration_ms
+      type: integer
+      description: "Audio duration in milliseconds"
+    - name: cached
+      type: boolean
+      description: "Whether the result was served from cache"
+    - name: model
+      type: string
+      description: "Model used for synthesis"
+    - name: voice_id
+      type: string
+      description: "Voice ID used"
+capabilities:
+  network: "egress"
+  filesystem: []
+  pure: false

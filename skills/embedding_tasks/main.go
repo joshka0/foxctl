@@ -27,7 +27,7 @@ const (
 	defaultBatchMax = 10 // Process 10 tasks at a time by default
 )
 
-// Input is the skill input schema.
+// Input is the skill input schema for embedding/tasks operations.
 type Input struct {
 	// Scope determines which tasks to embed: "all", "pending", "completed", or "workspace".
 	Scope string `json:"scope" validate:"omitempty,oneof=all pending completed workspace"`
@@ -49,7 +49,7 @@ type Input struct {
 	DryRun bool `json:"dry_run,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output for embedding/tasks operations.
 type Output struct {
 	Scope        string       `json:"scope"`
 	TasksFound   int          `json:"tasks_found"`
@@ -72,10 +72,21 @@ type TaskResult struct {
 	Message    string `json:"message,omitempty"`
 }
 
+// main is the skill entry point for embedding/tasks.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates task embedding generation with batch processing and scope filtering.
+//
+// Index:
+// - Purpose: Generate semantic embeddings for tasks to enable task search and retrieval
+// - Flow: validate input → list tasks by scope → process in batches → generate embeddings → store as memories
+// - SideEffects: embedding API calls; memory store updates; task content formatting; batch processing
+// - FailureModes: missing API keys, task store errors, embedding failures, memory store errors
+// - Observability: emits processing statistics, task results, error details, and timing metrics
+// - Related: taskEmbeddingContent, listAllTasks
+// - Keywords: embedding/tasks, tasks, semantic_search, batch_processing, embeddings
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if in.Scope == "" && in.TaskID == "" {

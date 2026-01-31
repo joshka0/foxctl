@@ -42,19 +42,28 @@ func Emit(ctx context.Context, event *WideEvent) {
 }
 
 // EmitWithConfig writes a WideEvent with custom persistence configuration.
-// If config is nil, uses the default NDJSON persistence.
+// EmitWithConfig emits a WideEvent by streaming it to SSE and optionally persisting it to disk.
+// 
+// EmitWithConfig does nothing if event is nil. It always publishes the event to SSE for real‑time
+// streaming. If no observability directory is configured, persistence is skipped. When persistence is
+// enabled, the active sampler (if any) is consulted and a Drop decision prevents file persistence.
+// If config is nil, the event is persisted using the default NDJSON format.
 func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig) {
 	if event == nil {
 		return
 	}
 
-	// Check if observability is enabled
+	// Always try to publish to SSE (even if file persistence is disabled)
+	// This allows real-time activity streaming without requiring AGENTCTL_OBS_DIR
+	publishToSSE(event)
+
+	// Check if file observability is enabled
 	dir := getObsDir()
 	if dir == "" {
 		return
 	}
 
-	// Apply sampling
+	// Apply sampling for file persistence
 	sampler := getSampler()
 	if sampler != nil {
 		decision := sampler.ShouldSample(event)
@@ -68,11 +77,15 @@ func EmitWithConfig(ctx context.Context, event *WideEvent, config *persistConfig
 }
 
 // EmitSync writes a WideEvent synchronously, bypassing sampling.
-// Use this for critical events that must always be recorded.
+// EmitSync emits a WideEvent immediately. It always publishes the event to the server-sent events (SSE) stream and, if file-based observability is enabled, appends the event to the wide_events NDJSON file.
+// EmitSync bypasses any sampling; calling it with a nil event is a no-op. It returns any error encountered while writing the event to persistent storage.
 func EmitSync(ctx context.Context, event *WideEvent) error {
 	if event == nil {
 		return nil
 	}
+
+	// Always try to publish to SSE (even if file persistence is disabled)
+	publishToSSE(event)
 
 	dir := getObsDir()
 	if dir == "" {

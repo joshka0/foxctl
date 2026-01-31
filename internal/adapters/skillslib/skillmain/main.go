@@ -94,7 +94,9 @@ func Bootstrap(ctx context.Context, stdout io.Writer) (*RunContext, error) {
 }
 
 // mainWithCode is the internal implementation that returns an exit code.
-// This allows testing without calling os.Exit.
+// mainWithCode runs a typed skill entrypoint using the provided stdin/stdout and returns an OS-style exit code.
+// It loads environment and configuration, decodes and validates JSON input from stdin, enriches observability spans, executes the supplied run function, and writes any error envelopes to stdout.
+// Returns 0 on success and a non-zero exit code when configuration, parsing, validation, or execution fail.
 func mainWithCode[I any](command string, run RunFunc[I], stdin io.Reader, stdout io.Writer) int {
 	// Set up context with signal handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -169,6 +171,9 @@ func mainWithCode[I any](command string, run RunFunc[I], stdin io.Reader, stdout
 		emitError(stdout, command, skillerr.WrapValidation("validate input", err))
 		return 1
 	}
+
+	// Enrich span with input data for observability
+	enrichSpanWithInput(span, input)
 
 	// Run the skill
 	if err := run(ctx, rc, input); err != nil {
@@ -275,7 +280,10 @@ func buildRunContext(cfg config.Config, stdout io.Writer) (*RunContext, error) {
 	}, nil
 }
 
-// resolveSessionIDWithFallback returns the session ID from env vars or identity file.
+// resolveSessionIDWithFallback obtains the session ID by checking known environment variables and falling back to the workspace identity manager.
+// It checks environment variables in this priority: AGENTCTL_SESSION_ID, CLAUDE_SESSION_ID, OPENCODE_SESSION_ID, CURSOR_SESSION_ID, TERM_SESSION_ID.
+// If none are set and both workspace and agentctlHome are provided, it queries the identity manager for the active session and returns its SessionID.
+// Returns an empty string if no session ID can be determined.
 func resolveSessionIDWithFallback(workspace, agentctlHome string) string {
 	// Try environment variables first
 	for _, key := range []string{
@@ -301,7 +309,91 @@ func resolveSessionIDWithFallback(workspace, agentctlHome string) string {
 	return ""
 }
 
-// emitError writes an error envelope to stdout.
+// enrichSpanWithInput extracts key fields from the input and adds them to the span.
+// enrichSpanWithInput adds selected input fields to the given observability span to improve debugging visibility.
+// It marshals the input to JSON, extracts a predefined set of common keys, and attaches them to the span:
+// - Scalar values are recorded as `input_<field>` (string values longer than 100 characters are truncated and suffixed with "...").
+// - Slice/array values are recorded as `input_<field>_count` with the element count.
+// If `input` is nil or cannot be marshaled/unmarshaled, the function returns without modifying the span.
+func enrichSpanWithInput(span *observability.EventBuilder, input any) {
+	if input == nil {
+		return
+	}
+
+	// Convert input to a map to extract fields
+	data, err := json.Marshal(input)
+	if err != nil {
+		return
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+
+	// Sensitive fields - only log length, never raw content
+	sensitiveFields := map[string]bool{
+		"prompt":  true,
+		"query":   true,
+		"path":    true,
+		"paths":   true,
+		"file":    true,
+		"files":   true,
+		"pattern": true,
+	}
+
+	// Safe fields - can log values (with truncation)
+	safeFields := []string{
+		"scope",       // index scope
+		"scopes",      // multiple scopes
+		"limit",       // result limits
+		"format",      // output format
+		"action",      // todo/memory actions
+		"workspace",   // workspace path
+		"name",        // memory/entity names
+		"type",        // memory/entity types
+		"pr",          // PR number
+		"branch",      // git branch
+		"commit",      // git commit
+		"symbol",      // code symbol
+		"symbols",     // multiple symbols
+		"model",       // LLM model
+		"provider",    // LLM provider
+		"errors_only", // error filtering
+		"since",       // time filtering
+	}
+
+	// Log sensitive fields with length only
+	for field := range sensitiveFields {
+		if v, ok := m[field]; ok && v != nil {
+			if s, ok := v.(string); ok {
+				span.WithData("input_"+field+"_length", len(s))
+			} else if arr, ok := v.([]any); ok {
+				span.WithData("input_"+field+"_count", len(arr))
+			}
+		}
+	}
+
+	// Log safe fields with values (truncated if needed)
+	for _, field := range safeFields {
+		if v, ok := m[field]; ok && v != nil {
+			// For strings, truncate if too long
+			if s, ok := v.(string); ok && len(s) > 100 {
+				v = s[:100] + "..."
+			}
+			// For arrays, just show count
+			if arr, ok := v.([]any); ok {
+				span.WithData("input_"+field+"_count", len(arr))
+				continue
+			}
+			span.WithData("input_"+field, v)
+		}
+	}
+}
+
+// emitError writes an error envelope to w for the given command and skill error.
+// It appends a usage hint to err when appropriate, constructs an envelope containing
+// the command and error details, and attempts to write that envelope to w. Failures
+// during writing are suppressed.
 func emitError(w io.Writer, command string, err *skillerr.Error) {
 	appendUsageHint(command, err)
 	env := envelope.Error(command, err.Code, err.Message, err.ToEnvelopeData())

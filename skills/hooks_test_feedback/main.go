@@ -18,6 +18,7 @@ import (
 )
 
 // FeedbackConfig holds configuration for the test feedback hook.
+// FeedbackConfig holds configuration for the test feedback hook.
 type FeedbackConfig struct {
 	MaxFailures int `json:"max_failures"` // Max failures to show per watcher
 }
@@ -30,6 +31,7 @@ func DefaultConfig() FeedbackConfig {
 }
 
 // WatcherFeedback represents test feedback for a single watcher.
+// WatcherFeedback represents test feedback for a single watcher.
 type WatcherFeedback struct {
 	WatcherID string              `json:"watcher_id"`
 	Status    string              `json:"status"`
@@ -37,10 +39,21 @@ type WatcherFeedback struct {
 	Failures  []testwatch.Failure `json:"failures,omitempty"`
 }
 
+// main is the skill entry point for hooks/test_feedback.
 func main() {
 	skillmain.Main("hooks/test_feedback", run)
 }
 
+// run orchestrates test failure feedback collection and formatting for advisory context.
+//
+// Index:
+// - Purpose: Surface failing test results to Claude after code edits with advisory context
+// - Flow: load config → open store → get test statuses → filter failures → build context → emit advisory output
+// - SideEffects: test status querying; context formatting; failure limiting
+// - FailureModes: store access failures, missing test watchers, status loading errors
+// - Observability: emits test failure counts, watcher summaries, and formatted failure context
+// - Related: buildContextString
+// - Keywords: hooks/test_feedback, test_failures, advisory_context, test_watching, failure_reporting
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 	feedbackCfg := DefaultConfig()
@@ -123,6 +136,8 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	return emitOutput(rc, output, meta)
 }
 
+// buildContextString formats test failure context for Claude with watcher summaries and failure details.
+//
 //nolint:revive // strings.Builder.WriteString never returns an error for in-memory writes.
 func buildContextString(watchers []WatcherFeedback, cfg FeedbackConfig) string {
 	var sb strings.Builder
@@ -160,6 +175,7 @@ func buildContextString(watchers []WatcherFeedback, cfg FeedbackConfig) string {
 	return sb.String()
 }
 
+// emitOutput emits the hook output with optional metadata.
 func emitOutput(rc *skillmain.RunContext, output hooks.Output, meta map[string]any) error {
 	var extras map[string]any
 	if meta != nil {

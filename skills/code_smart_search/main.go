@@ -40,7 +40,7 @@ const (
 	DefaultMaxBytesPerFile = 65536
 )
 
-// Input is the expected JSON input.
+// Input is the expected JSON input for code/smart_search operations.
 type Input struct {
 	WorkspaceID string   `json:"workspace_id"`
 	Question    string   `json:"question" validate:"required"`
@@ -48,14 +48,14 @@ type Input struct {
 	Limits      Limits   `json:"limits"`
 }
 
-// Limits controls candidate generation and snippet extraction.
+// Limits controls candidate generation and snippet extraction parameters.
 type Limits struct {
 	MaxCandidates   int `json:"max_candidates"`
 	MaxSnippets     int `json:"max_snippets"`
 	MaxBytesPerFile int `json:"max_bytes_per_file"`
 }
 
-// Output is the skill output structure.
+// Output is the skill output structure for code/smart_search results.
 type Output struct {
 	Summary        Summary           `json:"summary"`
 	Candidates     []CandidateOutput `json:"candidates"`
@@ -63,7 +63,7 @@ type Output struct {
 	Artifact       string            `json:"artifact,omitempty"`
 }
 
-// Summary contains aggregated statistics.
+// Summary contains aggregated statistics for the smart search operation.
 type Summary struct {
 	CandidatesGenerated   int            `json:"candidates_generated"`
 	CandidatesBySource    map[string]int `json:"candidates_by_source"`
@@ -82,11 +82,21 @@ type CandidateOutput struct {
 	Source   string  `json:"source"`
 }
 
+// main is the skill entry point for code/smart_search.
 func main() {
 	skillmain.Main(Command, run)
 }
 
-// run is the main skill logic.
+// run orchestrates smart code search by combining candidate generation with snippet extraction.
+//
+// Index:
+// - Purpose: Combine candidate generation from symbol/semantic indexes with snippet extraction via code/snippet_extract
+// - Flow: apply defaults → generate candidates from sources → invoke snippet_extract → build output with statistics
+// - SideEffects: database queries; subprocess execution (snippet_extract); artifact persistence; file system reads
+// - FailureModes: invalid workspace, candidate generation errors, snippet_extract execution failures, JSON parsing errors
+// - Observability: emits summary/candidates/snippets_inline/artifact with detailed timing metrics
+// - Related: generateCandidates, invokeSnippetExtract, retrieval.Generator
+// - Keywords: code/smart_search, candidates, snippets, symbols, ripgrep, semantic, extraction
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.WorkspaceID == "" {
@@ -174,7 +184,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, Command, output)
 }
 
-// generateCandidates uses the retrieval package to generate candidates.
+// generateCandidates uses the retrieval package to generate candidates from configured sources.
 func generateCandidates(ctx context.Context, rc *skillmain.RunContext, in Input) ([]retrieval.Candidate, error) {
 	// Open memory store (uses Storage.Root for persistent data)
 	store, err := memory.OpenWithConfig(ctx, rc.Config)
@@ -215,7 +225,7 @@ func generateCandidates(ctx context.Context, rc *skillmain.RunContext, in Input)
 	return result.Candidates, nil
 }
 
-// ExtractResult holds the parsed result from code/snippet_extract.
+// ExtractResult holds the parsed result from code/snippet_extract skill.
 type ExtractResult struct {
 	FilesRelevant   int
 	SnippetsEmitted int

@@ -21,6 +21,7 @@ import (
 
 const command = "code/stats"
 
+// input is the expected JSON input for code/stats operations.
 type input struct {
 	Path         string `json:"path"`
 	BreakdownBy  string `json:"breakdown_by"`
@@ -28,6 +29,7 @@ type input struct {
 	MaxDepth     int    `json:"max_depth"`
 }
 
+// stats contains aggregated code statistics with breakdown and language information.
 type stats struct {
 	TotalFiles      int             `json:"total_files"`
 	TotalLines      int             `json:"total_lines"`
@@ -40,6 +42,7 @@ type stats struct {
 	TopFiles        []fileStats     `json:"top_files,omitempty"`
 }
 
+// breakdownItem represents statistics for a single breakdown category.
 type breakdownItem struct {
 	Name       string  `json:"name"`
 	FileCount  int     `json:"file_count"`
@@ -51,6 +54,7 @@ type breakdownItem struct {
 	Percentage float64 `json:"percentage"`
 }
 
+// fileStats represents statistics for a single file.
 type fileStats struct {
 	Path      string `json:"path"`
 	Lines     int    `json:"lines"`
@@ -58,10 +62,21 @@ type fileStats struct {
 	Language  string `json:"language"`
 }
 
+// main is the skill entry point for code/stats.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates code statistics collection with configurable breakdown options.
+//
+// Index:
+// - Purpose: Collect and analyze code statistics including lines, files, languages, and breakdown metrics
+// - Flow: resolve path → walk directory tree → count lines per file → aggregate by breakdown category → calculate percentages → persist if needed
+// - SideEffects: file system reads; directory traversal; artifact persistence; CAS hint generation
+// - FailureModes: invalid paths, file read errors, directory traversal errors, large file skips
+// - Observability: emits statistics/breakdown_by/cas_hint/artifact with detailed metrics
+// - Related: detectLanguage, countLines, preparePreview
+// - Keywords: code/stats, statistics, lines, languages, breakdown, aggregation
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.BreakdownBy == "" {
@@ -237,6 +252,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// detectLanguage determines the programming language from file extension and name.
 func detectLanguage(ext, name string) string {
 	langMap := map[string]string{
 		".go":    "Go",
@@ -284,6 +300,7 @@ func detectLanguage(ext, name string) string {
 	return "unknown"
 }
 
+// countLines counts total, code, blank, and comment lines in a file.
 func countLines(path, lang string) (total, code, blank, comments int, err error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -346,12 +363,14 @@ func countLines(path, lang string) (total, code, blank, comments int, err error)
 	return total, code, blank, comments, nil
 }
 
+// commentStyle defines comment prefixes and block delimiters for a language.
 type commentStyle struct {
 	line       []string
 	blockStart string
 	blockEnd   string
 }
 
+// getCommentPrefixes returns comment style configuration for a given language.
 func getCommentPrefixes(lang string) commentStyle {
 	switch lang {
 	case "Go", "C", "C++", "C/C++ Header", "C++ Header", "Java", "JavaScript", "TypeScript", "Rust", "PHP":
@@ -367,6 +386,7 @@ func getCommentPrefixes(lang string) commentStyle {
 	}
 }
 
+// preparePreview creates a truncated preview of stats for inline output.
 func preparePreview(s *stats, limit int) (*stats, bool) {
 	// For stats, keep the full struct; return a truncated view for preview only.
 	if limit <= 0 || len(s.Breakdown) <= limit {

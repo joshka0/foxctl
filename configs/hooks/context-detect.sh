@@ -53,7 +53,7 @@ input_json=$(jq -nc \
   }')
 
 # Run code/smart_read skill
-result=$("$AGENTCTL_BIN" run code/smart_read --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
+result=$("$AGENTCTL_BIN" run --daemon code/smart_read --ephemeral --workspace "$workspace_root" --input "$input_json" 2>/dev/null) || {
   jq -nc '{decision:"approve", context:"**Context:** Failed to gather code context."}'
   exit 0
 }

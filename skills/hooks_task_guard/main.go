@@ -20,6 +20,7 @@ import (
 )
 
 // Mode controls task_guard behavior.
+// Mode controls task_guard behavior.
 type Mode string
 
 const (
@@ -29,10 +30,21 @@ const (
 	ModeStrict Mode = "strict"
 )
 
+// main is the skill entry point for hooks/task_guard.
 func main() {
 	skillmain.Main("hooks/task_guard", run)
 }
 
+// run orchestrates task-centric model enforcement with auto-creation and graph edge creation.
+//
+// Index:
+// - Purpose: Enforce task-centric model by ensuring an active task exists before allowing write operations
+// - Flow: validate write operation → determine mode → resolve workspace → open task store → ensure/dirty task → create graph edges → emit results
+// - SideEffects: task creation/updates; graph edge creation; task status management
+// - FailureModes: store access failures, workspace resolution errors
+// - Observability: emits task info, creation status, and graph edge creation results
+// - Related: deriveTaskTitle, createModifiedEdge, toolutil.IsWriteOperation
+// - Keywords: hooks/task_guard, task_centric, write_operations, task_creation, graph_edges
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 
@@ -230,6 +242,7 @@ func createModifiedEdge(ctx context.Context, storagePath, workspaceID, taskID, f
 	_ = graphStore.UpsertEdge(ctx, edge)
 }
 
+// intPtr returns a pointer to an integer.
 func intPtr(i int) *int {
 	return &i
 }

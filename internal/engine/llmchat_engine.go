@@ -206,6 +206,12 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 		resp, err := e.callLLM(ctx, messages, tools)
 		iterDuration := time.Since(iterStart)
 		if err != nil {
+			// Check if error is due to context cancellation
+			if ctx.Err() != nil {
+				output.StopReason = StopReasonCancelled
+				output.Error = ctx.Err().Error()
+				return output, nil
+			}
 			output.StopReason = StopReasonError
 			output.Error = err.Error()
 			return output, nil
@@ -357,6 +363,13 @@ func (e *LLMChatEngine) Run(ctx context.Context, input EngineInput) (EngineOutpu
 					// Append injected context to tool result if present
 					if injectedCtx != "" {
 						result.Content = result.Content + "\n\n---\n" + injectedCtx
+
+						// Track injected context for visibility
+						output.InjectedContexts = append(output.InjectedContexts, InjectedContext{
+							ToolCallID: toolCall.ID,
+							Source:     "PostToolUse:" + toolCall.Name,
+							Content:    injectedCtx,
+						})
 					}
 				}
 

@@ -20,7 +20,7 @@ const (
 	defaultBatchMax = 10 // Process 10 memories at a time by default
 )
 
-// Input is the skill input schema.
+// Input is the skill input schema for embedding/memories operations.
 type Input struct {
 	// Workspace is the workspace to process memories for (optional, defaults to detected workspace).
 	Workspace string `json:"workspace,omitempty"`
@@ -36,7 +36,7 @@ type Input struct {
 	DryRun bool `json:"dry_run,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output for embedding/memories operations.
 type Output struct {
 	Workspace     string         `json:"workspace"`
 	MemoriesFound int            `json:"memories_found"`
@@ -81,10 +81,21 @@ func formatMemoryContent(entry memory.NamedEntry) string {
 	return fmt.Sprintf("[%s] [%s] %s", dateStr, typeStr, content)
 }
 
+// main is the skill entry point for embedding/memories.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates memory embedding generation with batch processing and dry-run support.
+//
+// Index:
+// - Purpose: Generate semantic embeddings for memories to enable vector search and retrieval
+// - Flow: validate input → check API keys → list memories → process in batches → generate embeddings → update store
+// - SideEffects: embedding API calls; database updates; content formatting; batch processing
+// - FailureModes: missing API keys, embedding failures, database errors, timeout errors
+// - Observability: emits processing statistics, error details, and memory results with status
+// - Related: formatMemoryContent
+// - Keywords: embedding/memories, vector_search, semantic, batch_processing, embeddings
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set defaults
 	if in.BatchSize <= 0 {

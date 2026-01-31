@@ -253,6 +253,10 @@ type LLMSettings struct {
 	// AtomicModel is the model for atomic processing (from AGENTCTL_ATOMIC_MODEL).
 	// Defaults to zhipu-ai/glm-4-flash-250414 if not set.
 	AtomicModel string `mapstructure:"atomic_model" json:"atomic_model"`
+
+	// ElevenLabsAPIKey is the ElevenLabs API key (from ELEVENLABS_API_KEY)
+	// Used for text-to-speech synthesis in presence/voice skill.
+	ElevenLabsAPIKey string `mapstructure:"elevenlabs_api_key" json:"elevenlabs_api_key"`
 }
 
 // ResolveAPIKey returns the API key for the given provider.
@@ -283,6 +287,10 @@ func (l LLMSettings) ResolveAPIKey(provider string) string {
 	case "cerebras":
 		if l.CerebrasAPIKey != "" {
 			return l.CerebrasAPIKey
+		}
+	case "elevenlabs":
+		if l.ElevenLabsAPIKey != "" {
+			return l.ElevenLabsAPIKey
 		}
 	}
 	// Fall back to generic API key
@@ -471,6 +479,15 @@ func decodeConfig(v *viper.Viper) (Config, error) {
 	return cfg, nil
 }
 
+// finalizeConfig finalizes and normalizes a Config using the provided home directory.
+// 
+// It resolves and normalizes configured paths relative to the resolved Home, applies
+// sensible defaults for unset numeric/time/string fields (inline output size, capture
+// limits, memory TTLs, cache/default mode, logging defaults, plugin paths, embedding
+// models, etc.), derives or adjusts related fields (database driver detection, vector
+// dimensions), and applies environment-variable overrides for Turso, CAS, LLM, Atomic,
+// embedding, search, and observability settings. The returned Config is ready for use
+// by the application.
 func finalizeConfig(cfg Config, home string) Config {
 	cfg.Home = absPath(cfg.Home, home)
 	cfg.Paths.CAS = resolvePath(cfg.Paths.CAS, cfg.Home, home)
@@ -616,6 +633,11 @@ func finalizeConfig(cfg Config, home string) Config {
 	}
 	if key := os.Getenv("PERPLEXITY_API_KEY"); key != "" && cfg.Search.PerplexityAPIKey == "" {
 		cfg.Search.PerplexityAPIKey = key
+	}
+
+	// Voice/TTS API key env var overrides (FC/IS compliant)
+	if key := os.Getenv("ELEVENLABS_API_KEY"); key != "" && cfg.LLM.ElevenLabsAPIKey == "" {
+		cfg.LLM.ElevenLabsAPIKey = key
 	}
 
 	return cfg

@@ -59,24 +59,36 @@ type Store struct {
 	artifactManager artifacts.Manager
 	ttl             time.Duration
 	path            string
+	close           func() error
 	mu              sync.Mutex
 	evictDone       chan struct{} // signals async eviction completed
 }
 
+
 // Stats aliases the shared cache stats type.
 type Stats = storage.CacheStats
 
-// Open initializes the cache store at the provided path.
+// Open initializes and returns a cache Store rooted at the given filesystem path.
+// 
+// It ensures the cache database and schema exist, applies a default AutoTTL when
+// not provided, and configures optional content-addressable storage if a CASPath
+// is set in opts. The returned Store starts background eviction of expired
+// entries; callers should call Store.Close to release resources and wait for
+// background work to finish. An error is returned if initialization fails.
 func Open(ctx context.Context, root string, opts Options) (store *Store, err error) {
 	if opts.AutoTTL <= 0 {
 		opts.AutoTTL = 24 * time.Hour
 	}
 	dbPath := filepath.Join(root, "cache.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("cache: open db: %w", err)
 	}
-	defer errs.CloseOnErr(db, &err)
+	defer func() {
+		if err != nil {
+			_ = closeFn()
+		}
+	}()
 	// Configure connection pool for optimal performance
 	db.SetMaxOpenConns(10)                  // Allow up to 10 concurrent connections
 	db.SetMaxIdleConns(5)                   // Keep 5 idle connections ready
@@ -98,6 +110,7 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 		artifactManager: artifactMgr,
 		ttl:             opts.AutoTTL,
 		path:            dbPath,
+		close:           closeFn,
 		evictDone:       make(chan struct{}),
 	}
 	// Evict expired entries asynchronously to avoid blocking startup.
@@ -109,17 +122,22 @@ func Open(ctx context.Context, root string, opts Options) (store *Store, err err
 	return store, nil
 }
 
+
 // Close releases resources. It waits for any async eviction to complete before closing.
 func (s *Store) Close() error {
 	// Wait for async eviction to complete before closing DB
-	if s.evictDone != nil {
+	if s != nil && s.evictDone != nil {
 		select {
 		case <-s.evictDone:
 		case <-time.After(2 * time.Second):
 		}
 	}
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 // Stats returns entry counts and configuration metadata for observability commands.
 func (s *Store) Stats(ctx context.Context) (Stats, error) {

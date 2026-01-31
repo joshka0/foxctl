@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/platform/config"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/console"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -116,6 +116,8 @@ func init() {
 	consoleRemoveCmd.Flags().BoolVar(&consoleDryRun, "dry-run", false, "Preview without deleting session")
 }
 
+// runConsoleAttach attaches to an existing actor console or creates a new console session and emits an envelope describing the result.
+// It resolves the workspace, opens the console store, optionally performs a dry-run, updates or creates the session, optionally links a session ID, and writes an OK or error envelope to stdout. It returns an error if any store operation, workspace resolution, or envelope write fails.
 func runConsoleAttach(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
@@ -132,12 +134,12 @@ func runConsoleAttach(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Open console store
-	store, db, err := openConsoleStore(ctx, cfg.Storage.Root)
+	store, closeFn, err := openConsoleStore(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeConsoleErrorEnvelope(cmd, "console/attach", string(protocol.ErrorCodeERuntime),
 			fmt.Sprintf("failed to open console store: %v", err))
 	}
-	defer db.Close()
+	defer func() { _ = closeFn() }()
 	defer store.Close()
 
 	// Determine action and session info for dry-run or actual execution
@@ -247,17 +249,21 @@ func runConsoleAttach(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// runConsoleList lists attachable console sessions and writes an OK envelope
+// containing session details (console_id, actor_id, session_id, workspace,
+// created_at, last_attached_at) to stdout.
+// If opening the store, listing sessions, or writing the envelope fails, it
+// emits an error envelope and returns a non-nil error.
 func runConsoleList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
-	store, db, err := openConsoleStore(ctx, cfg.Storage.Root)
+	store, closeFn, err := openConsoleStore(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeConsoleErrorEnvelope(cmd, "console/list", string(protocol.ErrorCodeERuntime),
 			fmt.Sprintf("failed to open console store: %v", err))
 	}
-	defer db.Close()
-	defer store.Close()
+	defer func() { _ = closeFn() }()
 
 	sessions, err := store.List(ctx, consoleWorkspace, consoleLimit)
 	if err != nil {
@@ -290,19 +296,19 @@ func runConsoleList(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// delete, or write the envelope are returned as errors.
 func runConsoleRemove(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
 	targetConsoleID := args[0]
 
-	store, db, err := openConsoleStore(ctx, cfg.Storage.Root)
+	store, closeFn, err := openConsoleStore(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeConsoleErrorEnvelope(cmd, "console/rm", string(protocol.ErrorCodeERuntime),
 			fmt.Sprintf("failed to open console store: %v", err))
 	}
-	defer db.Close()
-	defer store.Close()
+	defer func() { _ = closeFn() }()
 
 	// Check if console exists first (for both dry-run and actual delete)
 	session, err := store.Get(ctx, targetConsoleID)
@@ -349,21 +355,26 @@ func runConsoleRemove(cmd *cobra.Command, args []string) error {
 }
 
 // openConsoleStore opens the console store from the agents.db file.
-// Caller must close the returned *sql.DB after use to avoid connection leaks.
-func openConsoleStore(ctx context.Context, storageRoot string) (*console.SQLiteStore, *sql.DB, error) {
+// openConsoleStore opens the consoles SQLite database at storageRoot/agents.db and returns a console store
+// plus a close function that releases the underlying database handle.
+//
+// The returned close function must be called by the caller to release resources. If opening the database
+// or initializing the store fails, an error is returned. If store initialization fails after the DB is
+// opened, the DB handle is closed before the error is returned.
+func openConsoleStore(ctx context.Context, storageRoot string) (*console.SQLiteStore, func() error, error) {
 	dbPath := filepath.Join(storageRoot, "agents.db")
-	db, err := sql.Open("sqlite3", dbPath)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open agents.db: %w", err)
 	}
 
 	store, err := console.NewStore(ctx, db)
 	if err != nil {
-		db.Close()
+		_ = closeFn()
 		return nil, nil, err
 	}
 
-	return store, db, nil
+	return store, closeFn, nil
 }
 
 // writeConsoleErrorEnvelope writes an error envelope and returns an error.

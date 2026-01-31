@@ -163,11 +163,21 @@ type Input struct {
 	Limits      Limits      `json:"limits,omitempty"`
 }
 
+// main is the skill entry point for code/snippet_extract.
 func main() {
 	skillmain.Main(Command, run)
 }
 
-// run is the main skill logic.
+// run orchestrates code snippet extraction from candidate files with question-aware matching.
+//
+// Index:
+// - Purpose: Extract high-signal code snippets from candidate files based on natural-language question
+// - Flow: validate input → process files (validate paths, read content) → extract snippets with keyword matching → create previews → persist artifact if needed
+// - SideEffects: file system reads; path validation; artifact persistence; observability event logging
+// - FailureModes: invalid candidates, path validation errors, file read errors, policy violations, timeout errors
+// - Observability: emits summary/snippets_inline/related_sessions/artifact; writes SWE Grep events
+// - Related: processFiles, extractSnippets, makeInlinePreviews, persistSnippetsArtifact, searchRelatedSessions
+// - Keywords: code/snippet_extract, snippets, extraction, question_aware, symbol_body, fallback, artifact
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply query alias for question (convenience for callers using "query")
 	if in.Question == "" && in.Query != "" {
@@ -304,6 +314,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, Command, data)
 }
 
+// fatalErrorForFileResults determines if all file results are fatal errors and returns appropriate error.
 func fatalErrorForFileResults(results []FileResult) *skillerr.Error {
 	for _, fr := range results {
 		if !fr.Skipped {
@@ -861,6 +872,7 @@ func makeInlinePreviews(snippets []Snippet) []SnippetPreview {
 
 // persistSnippetsArtifact writes full snippets as NDJSON to CAS.
 
+// inlineThresholdBytes returns the inline threshold in bytes from config or default.
 func inlineThresholdBytes(rc *skillmain.RunContext) int {
 	if rc == nil {
 		return DefaultInlineKB * 1024
@@ -871,6 +883,7 @@ func inlineThresholdBytes(rc *skillmain.RunContext) int {
 	return DefaultInlineKB * 1024
 }
 
+// trimPreviewsToFit iteratively removes previews to fit within the byte threshold.
 func trimPreviewsToFit(data map[string]any, previews []SnippetPreview, thresholdBytes int) ([]SnippetPreview, error) {
 	tmp := make([]SnippetPreview, 0, len(previews))
 	for _, p := range previews {
@@ -887,6 +900,7 @@ func trimPreviewsToFit(data map[string]any, previews []SnippetPreview, threshold
 	return tmp, nil
 }
 
+// persistSnippetsArtifact writes full snippets as NDJSON to CAS.
 func persistSnippetsArtifact(ctx context.Context, rc *skillmain.RunContext, snippets []Snippet) (skillmain.Artifact, error) {
 	if len(snippets) == 0 {
 		return skillmain.Artifact{}, nil

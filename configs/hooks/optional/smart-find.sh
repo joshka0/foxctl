@@ -42,7 +42,7 @@ esac
 pattern="${pattern#\*\*/}"
 
 # Run fs/find with the glob pattern
-result=$("$AGENTCTL_BIN" run fs/find --input "{\"pattern\":\"$pattern\",\"path\":\"$search_path\",\"max_results\":$MAX_RESULTS,\"sort_by\":\"modified\"}" 2>/dev/null) || {
+result=$("$AGENTCTL_BIN" run --daemon fs/find --input "{\"pattern\":\"$pattern\",\"path\":\"$search_path\",\"max_results\":$MAX_RESULTS,\"sort_by\":\"modified\"}" 2>/dev/null) || {
   echo '{}'
   exit 0
 }

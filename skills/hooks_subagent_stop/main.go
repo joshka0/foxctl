@@ -17,6 +17,7 @@ import (
 const command = "hooks/subagent_stop"
 
 // SubagentStopPayload represents the SubagentStop event payload.
+// SubagentStopPayload represents the SubagentStop event payload.
 type SubagentStopPayload struct {
 	SubagentName string `json:"subagent_name"`
 	SubagentType string `json:"subagent_type"`
@@ -25,10 +26,21 @@ type SubagentStopPayload struct {
 	Error        string `json:"error,omitempty"`
 }
 
+// main is the skill entry point for hooks/subagent_stop.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates subagent cleanup with reservation release and lifecycle logging.
+//
+// Index:
+// - Purpose: Handle SubagentStop events to release reservations and emit lifecycle observability events
+// - Flow: parse payload → extract subagent info → release reservations → log completion → emit approve output
+// - SideEffects: reservation cleanup; lifecycle logging; observability events
+// - FailureModes: payload parsing errors, reservation release failures (non-fatal)
+// - Observability: emits subagent name, exit code, and reservation release counts
+// - Related: (future) releaseReservations function when reservation system is integrated
+// - Keywords: hooks/subagent_stop, subagent_lifecycle, reservation_cleanup, lifecycle_logging
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	// Parse subagent payload from tool input
 	var payload SubagentStopPayload

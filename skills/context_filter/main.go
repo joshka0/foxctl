@@ -28,6 +28,7 @@ var httpClient = &http.Client{
 	Timeout: 120 * time.Second, // LLM calls can be slow
 }
 
+// input is the expected JSON input for context/filter operations.
 type input struct {
 	Prompt string      `json:"prompt"`
 	Scope  string      `json:"scope"`
@@ -36,24 +37,28 @@ type input struct {
 	LLM    llmInput    `json:"llm"`
 }
 
+// sourceInput defines the source data for context filtering.
 type sourceInput struct {
 	CASDigest string          `json:"cas_digest"`
 	Text      string          `json:"text"`
 	Chunks    []rawChunkInput `json:"chunks"`
 }
 
+// rawChunkInput represents a raw text chunk with metadata.
 type rawChunkInput struct {
 	ID       string         `json:"id"`
 	Text     string         `json:"text"`
 	Metadata map[string]any `json:"metadata"`
 }
 
+// budgetInput defines token and chunk limits for filtering.
 type budgetInput struct {
 	TargetTokens    int `json:"target_tokens"`
 	MaxChunks       int `json:"max_chunks"`
 	MaxSourceTokens int `json:"max_source_tokens"`
 }
 
+// llmInput configures the LLM provider for chunk selection.
 type llmInput struct {
 	Provider        string  `json:"provider"`
 	Model           string  `json:"model"`
@@ -61,12 +66,14 @@ type llmInput struct {
 	MaxOutputTokens int     `json:"max_output_tokens"`
 }
 
+// candidateChunk represents a text chunk candidate for selection.
 type candidateChunk struct {
 	ID       string
 	Text     string
 	Metadata map[string]any
 }
 
+// llmSelectionResponse is the expected response from the LLM.
 type llmSelectionResponse struct {
 	Chunks []struct {
 		ID        string  `json:"id"`
@@ -77,6 +84,7 @@ type llmSelectionResponse struct {
 	ApproxTokens int    `json:"approx_tokens"`
 }
 
+// outputChunk represents a selected chunk with score and rationale.
 type outputChunk struct {
 	ID        string         `json:"id"`
 	Text      string         `json:"text"`
@@ -85,6 +93,7 @@ type outputChunk struct {
 	Rationale string         `json:"rationale"`
 }
 
+// outputEnvelopeData is the final skill output structure.
 type outputEnvelopeData struct {
 	Prompt       string         `json:"prompt"`
 	Scope        string         `json:"scope"`
@@ -103,10 +112,21 @@ func debugf(logger zerolog.Logger, format string, args ...any) {
 	logger.Debug().Msg(fmt.Sprintf("context/filter: "+format, args...))
 }
 
+// main is the skill entry point for context/filter.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates intelligent context chunk selection using LLM assistance.
+//
+// Index:
+// - Purpose: Select most relevant text chunks from source data using LLM reasoning for context optimization
+// - Flow: validate input → build candidates → call LLM for selection → apply budget constraints → emit results
+// - SideEffects: LLM API calls; CAS store reads; text chunking; token estimation; budget enforcement
+// - FailureModes: invalid input, LLM errors, network failures, budget exceeded, parse errors
+// - Observability: emits selected chunks with scores, rationales, usage metrics, and token estimates
+// - Related: buildCandidates, callLLMForSelection, applySelection, buildLLMPrompt
+// - Keywords: context/filter, LLM, chunking, budget, relevance, selection
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
 	in.Prompt = strings.TrimSpace(in.Prompt)
@@ -193,6 +213,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// buildCandidates creates chunk candidates from various source formats.
 func buildCandidates(ctx context.Context, rc *skillmain.RunContext, src sourceInput, maxSourceTokens int) ([]candidateChunk, error) {
 	var candidates []candidateChunk
 
@@ -257,6 +278,7 @@ func buildCandidates(ctx context.Context, rc *skillmain.RunContext, src sourceIn
 	return candidates, nil
 }
 
+// chunkText splits text into chunks using simple heuristics.
 func chunkText(text string) []candidateChunk {
 	// Simple heuristic: split on double newlines, then trim and cap size.
 	parts := strings.Split(text, "\n\n")
@@ -286,6 +308,7 @@ func chunkText(text string) []candidateChunk {
 	return out
 }
 
+// callLLMForSelection requests chunk selection from configured LLM provider.
 func callLLMForSelection(ctx context.Context, logger zerolog.Logger, in input, candidates []candidateChunk) (llmSelectionResponse, map[string]any, error) {
 	prompt := buildLLMPrompt(in.Prompt, in.Scope, candidates, in.Budget)
 
@@ -309,6 +332,8 @@ func callLLMForSelection(ctx context.Context, logger zerolog.Logger, in input, c
 	return sel, usage, nil
 }
 
+// buildLLMPrompt creates a structured prompt for chunk selection.
+//
 //nolint:revive // strings.Builder.Write/WriteString never returns an error for in-memory writes.
 func buildLLMPrompt(userPrompt, scope string, candidates []candidateChunk, budget budgetInput) string {
 	// Prepare a compact JSON description of candidates with truncated text
@@ -364,6 +389,7 @@ func buildLLMPrompt(userPrompt, scope string, candidates []candidateChunk, budge
 	return b.String()
 }
 
+// applySelection enforces budget constraints on LLM selection results.
 func applySelection(sel llmSelectionResponse, candidates []candidateChunk, budget budgetInput) []outputChunk {
 	// Index candidates by ID for fast lookup
 	index := make(map[string]candidateChunk, len(candidates))
@@ -410,6 +436,7 @@ func applySelection(sel llmSelectionResponse, candidates []candidateChunk, budge
 	return kept
 }
 
+// estimateTokens provides rough token estimation for text chunks.
 func estimateTokens(chunks []outputChunk) int {
 	// Very rough: 1 token ~ 4 chars of text
 	var chars int
@@ -422,6 +449,7 @@ func estimateTokens(chunks []outputChunk) int {
 	return chars / 4
 }
 
+// callProvider routes to the appropriate LLM provider implementation.
 func callProvider(ctx context.Context, logger zerolog.Logger, llm llmInput, prompt string) (string, map[string]any, error) {
 	switch llm.Provider {
 	case "openai", "groq", "openrouter":
@@ -435,6 +463,7 @@ func callProvider(ctx context.Context, logger zerolog.Logger, llm llmInput, prom
 	}
 }
 
+// callOpenAICompatible calls OpenAI-compatible APIs (OpenAI, Groq, OpenRouter).
 func callOpenAICompatible(ctx context.Context, logger zerolog.Logger, llm llmInput, prompt string) (string, map[string]any, error) {
 	var baseURL, apiKeyEnv, path string
 	path = "/v1/chat/completions"
@@ -533,6 +562,7 @@ func callOpenAICompatible(ctx context.Context, logger zerolog.Logger, llm llmInp
 	return parsed.Choices[0].Message.Content, usage, nil
 }
 
+// callAnthropic calls the Anthropic Claude API.
 func callAnthropic(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
 	apiKey := env.GetString("ANTHROPIC_API_KEY")
 	if apiKey == "" {
@@ -616,6 +646,7 @@ func callAnthropic(ctx context.Context, llm llmInput, prompt string) (string, ma
 	return text, usage, nil
 }
 
+// callGemini calls the Google Gemini API.
 func callGemini(ctx context.Context, llm llmInput, prompt string) (string, map[string]any, error) {
 	apiKey := env.GetString("GEMINI_API_KEY")
 	if apiKey == "" {

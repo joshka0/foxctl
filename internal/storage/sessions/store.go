@@ -83,9 +83,11 @@ const (
 
 // Store handles session persistence.
 type Store struct {
-	db   *sql.DB
-	path string
+	db    *sql.DB
+	path  string
+	close func() error
 }
+
 
 // Connection pool defaults
 const (
@@ -95,21 +97,29 @@ const (
 	defaultConnMaxIdleTime = 15 * time.Minute
 )
 
-// Open initializes the session store.
+// Open opens or creates the sessions SQLite database at root and returns a configured Store.
+// 
+// The returned Store is configured with connection pool defaults and retains an internal
+// cleanup function that Close will invoke. Open also performs a non-blocking validation
+// of embedding dimensions and returns an error if the database cannot be opened or migrated.
 func Open(ctx context.Context, root string) (store *Store, err error) {
 	dbPath := filepath.Join(root, "sessions.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("sessions: open db: %w", err)
 	}
-	defer errs.CloseOnErr(db, &err)
+	defer func() {
+		if err != nil {
+			_ = closeFn()
+		}
+	}()
 
 	db.SetMaxOpenConns(defaultMaxOpenConns)
 	db.SetMaxIdleConns(defaultMaxIdleConns)
 	db.SetConnMaxLifetime(defaultConnMaxLifetime)
 	db.SetConnMaxIdleTime(defaultConnMaxIdleTime)
 
-	store = &Store{db: db, path: dbPath}
+	store = &Store{db: db, path: dbPath, close: closeFn}
 
 	// Validate embedding dimensions against config (non-blocking warning)
 	store.validateDimensionsOnOpen(ctx)
@@ -117,16 +127,22 @@ func Open(ctx context.Context, root string) (store *Store, err error) {
 	return store, nil
 }
 
+
 // OpenFromConfig opens the sessions store using paths from config.
-// This is the preferred way to open the store as it ensures correct path handling.
+// OpenFromConfig opens a Store using the configured storage root from cfg.
+// It is the preferred way to open the store as it ensures correct path handling.
 func OpenFromConfig(ctx context.Context, cfg config.Config) (*Store, error) {
 	return Open(ctx, cfg.Storage.Root)
 }
 
 // Close releases resources.
 func (s *Store) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 // Stats returns session count.
 func (s *Store) Stats(ctx context.Context) (Stats, error) {

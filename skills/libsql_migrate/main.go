@@ -23,7 +23,7 @@ import (
 
 const command = "libsql/migrate"
 
-// Input is the skill input schema.
+// Input is the skill input schema for SQLite to libsql migration with vector support and batch processing.
 type Input struct {
 	// LibsqlURL is the libsql server URL (e.g., "http://100.x.x.x:8080")
 	LibsqlURL string `json:"libsql_url" validate:"required"`
@@ -47,7 +47,7 @@ type Input struct {
 	VectorDims int `json:"vector_dims,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output with migration statistics, status, and detailed table information.
 type Output struct {
 	Scope            string            `json:"scope"`
 	MemoriesMigrated int               `json:"memories_migrated"`
@@ -60,7 +60,7 @@ type Output struct {
 	MemoryTypes      []MemoryTypeStats `json:"memory_types"`
 }
 
-// TableStats shows migration stats per table.
+// TableStats shows migration stats per table with counts, embedding statistics, and migration status.
 type TableStats struct {
 	Name      string `json:"name"`
 	Total     int    `json:"total"`
@@ -69,17 +69,28 @@ type TableStats struct {
 	Skipped   int    `json:"skipped"`
 }
 
-// MemoryTypeStats shows memory counts by type in named_memory.
+// MemoryTypeStats shows memory counts by type in named_memory with embedding statistics for analysis.
 type MemoryTypeStats struct {
 	Type      string `json:"type"`
 	Total     int    `json:"total"`
 	WithEmbed int    `json:"with_embedding"`
 }
 
+// main is the skill entry point for libsql/migrate with CGO build constraint for SQLite support.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates SQLite to libsql migration with vector support and batch processing.
+//
+// Index:
+// - Purpose: Migrate SQLite databases to libsql with vector column support and batch processing
+// - Flow: set defaults → connect to libsql → migrate memories → migrate sessions → sync to remote → emit results
+// - SideEffects: database schema creation; data migration; vector normalization; remote synchronization
+// - FailureModes: connection failures, schema errors, data conversion issues, embedding format mismatches
+// - Observability: emits migration counts, table statistics, error details, and timing information
+// - Related: migrateMemories, migrateSessions, normalizeEmbedding, loadMemoryTypeStats
+// - Keywords: libsql/migrate, database_migration, vector_support, batch_processing, sqlite_to_libsql
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Set defaults
 	if in.Scope == "" {
@@ -174,6 +185,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
+// migrateMemories migrates named_memory table with vector support, duplicate detection, and batch processing.
 func migrateMemories(ctx context.Context, in Input, destDB *sql.DB, output *Output) (TableStats, error) {
 	stats := TableStats{Name: "named_memory"}
 
@@ -319,6 +331,7 @@ func migrateMemories(ctx context.Context, in Input, destDB *sql.DB, output *Outp
 	return stats, nil
 }
 
+// loadMemoryTypeStats loads memory type statistics from source database for migration analysis.
 func loadMemoryTypeStats(ctx context.Context, srcDB *sql.DB) ([]MemoryTypeStats, error) {
 	rows, err := srcDB.QueryContext(ctx, `
 		SELECT COALESCE("type", 'unknown') AS memory_type,
@@ -357,6 +370,7 @@ func loadMemoryTypeStats(ctx context.Context, srcDB *sql.DB) ([]MemoryTypeStats,
 	return stats, nil
 }
 
+// migrateSessions migrates sessions table with vector support, metadata preservation, and comprehensive field mapping.
 func migrateSessions(ctx context.Context, in Input, destDB *sql.DB, output *Output) (TableStats, error) {
 	stats := TableStats{Name: "sessions"}
 
@@ -520,7 +534,7 @@ func migrateSessions(ctx context.Context, in Input, destDB *sql.DB, output *Outp
 	return stats, nil
 }
 
-// normalizeEmbedding converts embeddings to binary float32 format.
+// normalizeEmbedding converts embeddings to binary float32 format with dimension validation and format detection.
 // It handles both JSON text arrays (like "[-0.1, 0.2, ...]") and raw binary float32.
 // Returns error if the embedding doesn't match expectedDims.
 func normalizeEmbedding(data []byte, expectedDims int) ([]byte, error) {

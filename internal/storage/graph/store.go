@@ -60,22 +60,25 @@ type Store interface {
 
 // SQLiteStore implements Store using SQLite.
 type SQLiteStore struct {
-	db   *sql.DB
-	path string
+	db    *sql.DB
+	path  string
+	close func() error
 }
 
-// Open creates a new SQLite-backed graph store.
+// Open opens or creates a SQLite-backed graph store at dataDir/graph.db.
+// It initializes a shared database connection, runs schema migrations, and
+// returns a SQLiteStore whose Close method will invoke the underlying close function.
 func Open(ctx context.Context, dataDir string) (*SQLiteStore, error) {
 	dbPath := filepath.Join(dataDir, "graph.db")
 
-	db, err := sqliteutil.OpenDB(ctx, dbPath, nil)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("open graph db: %w", err)
 	}
 
-	store := &SQLiteStore{db: db, path: dbPath}
+	store := &SQLiteStore{db: db, path: dbPath, close: closeFn}
 	if err := store.migrate(ctx); err != nil {
-		db.Close()
+		_ = closeFn()
 		return nil, fmt.Errorf("migrate graph db: %w", err)
 	}
 
@@ -84,7 +87,10 @@ func Open(ctx context.Context, dataDir string) (*SQLiteStore, error) {
 
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
 // migrate creates or updates the database schema.

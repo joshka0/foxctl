@@ -22,6 +22,7 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 	"github.com/jkatigb/agentctl/internal/protocol"
 	"github.com/jkatigb/agentctl/internal/storage/mailbox"
+	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 	"github.com/jkatigb/agentctl/internal/storage/trajectory"
 	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog"
@@ -304,16 +305,20 @@ func runActorSysSupervisorStart(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// runActorSysSupervisorStatus writes an OK envelope to stdout summarizing the supervisor state,
+// including the total number of registered actors, counts grouped by actor status, and the storage root.
+// It opens the actor registry, aggregates status counts, and emits the envelope with appropriate metadata.
+// An error is returned if opening the registry, creating the store, listing actors, or writing the envelope fails.
 func runActorSysSupervisorStatus(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
 	// Open registry store to check registered actors
-	db, err := openActorRegistryDB(cfg.Storage.Root)
+	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeActorSysError(cmd, "actorsys/supervisor/status", "failed to open registry: "+err.Error())
 	}
-	defer func() { errs.Ignore(db.Close(), "close registry db") }()
+	defer func() { errs.Ignore(closeFn(), "close registry db") }()
 
 	regStore, err := actor.NewRegistryStore(ctx, db)
 	if err != nil {
@@ -347,6 +352,15 @@ func runActorSysSupervisorStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// runActorSysSpawn registers a new actor record in the actor registry for the configured namespace and role.
+// 
+// If the global dry-run option is enabled, the function writes a dry-run envelope describing the would-be
+// registration and returns without mutating the registry. On successful registration it writes a success
+// envelope to stdout indicating the actor is registered (activation requires starting the supervisor).
+//
+// The function returns an error if the provided role is invalid, the registry database cannot be opened,
+// the actor configuration cannot be serialized, the registry registration fails, or writing the output
+// envelope to stdout fails.
 func runActorSysSpawn(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
@@ -360,11 +374,11 @@ func runActorSysSpawn(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Open registry store
-	db, err := openActorRegistryDB(cfg.Storage.Root)
+	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeActorSysError(cmd, "actorsys/spawn", "failed to open registry: "+err.Error())
 	}
-	defer func() { errs.Ignore(db.Close(), "close registry db") }()
+	defer func() { errs.Ignore(closeFn(), "close registry db") }()
 
 	regStore, err := actor.NewRegistryStore(ctx, db)
 	if err != nil {
@@ -435,16 +449,19 @@ func runActorSysSpawn(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// runActorSysList lists registered actors (optionally filtered by status) and writes the result as an envelope to stdout.
+// The written envelope contains an "actors" array with objects including "namespace", "role", "status", "created_at", and "updated_at", and a "count" field.
+// It returns an error if registry access or envelope writing fails.
 func runActorSysList(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 
 	// Open registry store
-	db, err := openActorRegistryDB(cfg.Storage.Root)
+	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeActorSysError(cmd, "actorsys/list", "failed to open registry: "+err.Error())
 	}
-	defer func() { errs.Ignore(db.Close(), "close registry db") }()
+	defer func() { errs.Ignore(closeFn(), "close registry db") }()
 
 	regStore, err := actor.NewRegistryStore(ctx, db)
 	if err != nil {
@@ -488,17 +505,20 @@ func runActorSysList(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// runActorSysStatus writes the registry status for the actor identified by the provided namespace to stdout as a structured envelope.
+// It looks up the actor and outputs namespace, role, status, config, config JSON, creation and update timestamps, and metadata.
+// On failure it writes an error envelope and returns a non-nil error (for example when the registry cannot be opened, the actor is not found, or writing the envelope fails).
 func runActorSysStatus(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	namespace := args[0]
 
 	// Open registry store
-	db, err := openActorRegistryDB(cfg.Storage.Root)
+	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeActorSysError(cmd, "actorsys/status", "failed to open registry: "+err.Error())
 	}
-	defer func() { errs.Ignore(db.Close(), "close registry db") }()
+	defer func() { errs.Ignore(closeFn(), "close registry db") }()
 
 	regStore, err := actor.NewRegistryStore(ctx, db)
 	if err != nil {
@@ -673,17 +693,21 @@ func runActorSysLogs(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// runActorSysUnregister unregisters an actor identified by namespace from the actor registry.
+// If the global dry-run flag is set, it emits a descriptive envelope without modifying the registry.
+// It writes a success envelope to stdout on success and returns an error if the registry cannot be opened,
+// the actor does not exist, the unregister operation fails, or writing the output envelope fails.
 func runActorSysUnregister(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	cfg := config.MustFromContext(ctx)
 	namespace := args[0]
 
 	// Open registry store
-	db, err := openActorRegistryDB(cfg.Storage.Root)
+	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
 	if err != nil {
 		return writeActorSysError(cmd, "actorsys/unregister", "failed to open registry: "+err.Error())
 	}
-	defer func() { errs.Ignore(db.Close(), "close registry db") }()
+	defer func() { errs.Ignore(closeFn(), "close registry db") }()
 
 	regStore, err := actor.NewRegistryStore(ctx, db)
 	if err != nil {
@@ -737,20 +761,39 @@ func runActorSysUnregister(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// Helper functions
+// openActorRegistryDB opens the shared actor registry SQLite database located at storageRoot/agents.db.
+// It returns the opened *sql.DB, a close function that must be called to release shared DB resources, and any error encountered.
 
-func openActorRegistryDB(storageRoot string) (*sql.DB, error) {
+func openActorRegistryDB(ctx context.Context, storageRoot string) (*sql.DB, func() error, error) {
 	// Use the agents.db for actor registry (shared with agent store)
 	dbPath := filepath.Join(storageRoot, "agents.db")
-	return sql.Open("sqlite3", dbPath)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return db, closeFn, nil
 }
 
+// respawnRegisteredActors opens the actor registry, finds actors that were
+// previously running or registered, and attempts to recreate and register them
+// with the provided actor system so they resume execution.
+//
+// It uses cfg.Storage.Root to open the registry and cfg.Storage.Root as the
+// workspace root for each recreated actor. The provided hookDispatcher is wired
+// into each agent actor's hooks. For each actor record, the function creates an
+// AgentActor, registers it with system, and updates the actor's status to
+// running. Per-actor failures (creation, registration, or status update) emit
+// observability events but do not stop the respawn loop.
+//
+// The function returns an error only for failures that prevent opening or using
+// the registry (for example, opening the DB, creating the registry store, or
+// listing actors).
 func respawnRegisteredActors(ctx context.Context, cfg config.Config, system *actor.System, hookDispatcher hooks.Dispatcher) error {
-	db, err := openActorRegistryDB(cfg.Storage.Root)
+	db, closeFn, err := openActorRegistryDB(ctx, cfg.Storage.Root)
 	if err != nil {
 		return fmt.Errorf("open registry db: %w", err)
 	}
-	defer func() { errs.Ignore(db.Close(), "close registry db") }()
+	defer func() { errs.Ignore(closeFn(), "close registry db") }()
 
 	regStore, err := actor.NewRegistryStore(ctx, db)
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 
 const command = "obs/logs"
 
+// input defines the parameters for observability log queries with filtering options.
 type input struct {
 	Limit      int    `json:"limit,omitempty"`
 	Operation  string `json:"operation,omitempty"`
@@ -31,7 +32,7 @@ type input struct {
 	ErrorsOnly bool   `json:"errors_only,omitempty"`
 }
 
-// wideEvent represents a wide event from the NDJSON log.
+// wideEvent represents a wide event from the NDJSON log with full context.
 type wideEvent struct {
 	Timestamp   time.Time      `json:"ts"`
 	TraceID     string         `json:"trace_id"`
@@ -50,7 +51,7 @@ type wideEvent struct {
 	Data        map[string]any `json:"data,omitempty"`
 }
 
-// eventSummary is a condensed view for output.
+// eventSummary is a condensed view for output with essential fields.
 type eventSummary struct {
 	Timestamp  string `json:"ts"`
 	TraceID    string `json:"trace_id"`
@@ -63,7 +64,7 @@ type eventSummary struct {
 	ErrorMsg   string `json:"error_message,omitempty"`
 }
 
-// stats holds aggregate statistics.
+// stats holds aggregate statistics computed from filtered events.
 type stats struct {
 	TotalEvents    int            `json:"total_events"`
 	ByStatus       map[string]int `json:"by_status"`
@@ -77,10 +78,21 @@ type stats struct {
 	TimeRangeEnd   string         `json:"time_range_end,omitempty"`
 }
 
+// main is the skill entry point for obs/logs.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates observability log queries with filtering, sorting, and statistics.
+//
+// Index:
+// - Purpose: Query observability logs from NDJSON files with filtering by time, status, operation, and component
+// - Flow: parse input → find events file → read and filter events → sort by timestamp → compute stats → emit results
+// - SideEffects: file system access; NDJSON parsing; large file streaming; statistical computation
+// - FailureModes: missing log files, parsing errors, file access failures
+// - Observability: emits event counts, filtered results, aggregate statistics, and time range information
+// - Related: parseSince, readEvents, matchesFilters, computeStats, topN, buildSummary
+// - Keywords: obs/logs, observability, log_querying, ndjson_parsing, event_filtering, statistics
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Set defaults
 	limit := in.Limit
@@ -158,6 +170,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
+// parseSince converts duration strings or timestamps to time objects for filtering.
 func parseSince(s string) time.Time {
 	// Try parsing as duration (e.g., "1h", "30m", "2h30m")
 	durationPattern := regexp.MustCompile(`^(\d+[hms])+$`)
@@ -183,6 +196,7 @@ func parseSince(s string) time.Time {
 	return time.Time{}
 }
 
+// readEvents streams and filters NDJSON events with memory-efficient processing.
 func readEvents(path string, limit int, sinceTime time.Time, in input) ([]wideEvent, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -232,6 +246,7 @@ func readEvents(path string, limit int, sinceTime time.Time, in input) ([]wideEv
 	return allEvents, totalScanned, nil
 }
 
+// matchesFilters applies all configured filters to determine if an event should be included.
 func matchesFilters(evt wideEvent, sinceTime time.Time, in input) bool {
 	// Time filter
 	if !sinceTime.IsZero() && evt.Timestamp.Before(sinceTime) {
@@ -266,6 +281,7 @@ func matchesFilters(evt wideEvent, sinceTime time.Time, in input) bool {
 	return true
 }
 
+// computeStats calculates aggregate statistics from filtered events.
 func computeStats(events []wideEvent) stats {
 	s := stats{
 		TotalEvents: len(events),
@@ -323,6 +339,7 @@ func computeStats(events []wideEvent) stats {
 	return s
 }
 
+// topN returns the top N items from a map sorted by value in descending order.
 func topN(m map[string]int, n int) map[string]int {
 	if len(m) <= n {
 		return m
@@ -347,6 +364,7 @@ func topN(m map[string]int, n int) map[string]int {
 	return result
 }
 
+// buildSummary generates a human-readable summary of the query results and filters applied.
 func buildSummary(count, total int, in input) string {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("Showing %d of %d events", count, total))
@@ -378,6 +396,7 @@ func buildSummary(count, total int, in input) string {
 	return strings.Join(parts, " ")
 }
 
+// truncateID shortens trace and span IDs for display while preserving uniqueness.
 func truncateID(id string) string {
 	if len(id) > 12 {
 		return id[:12] + "..."

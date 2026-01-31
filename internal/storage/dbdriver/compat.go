@@ -23,11 +23,29 @@ func WrapSQLDB(sqlDB *sql.DB, _ DriverType) DB {
 }
 
 // OpenDBCompat is a backward-compatible version of OpenDB that returns *sql.DB
-// This allows existing code to gradually adopt the new driver system
+// OpenDBCompat opens a database via the package's DB layer and returns its underlying *sql.DB for backward compatibility with callers that expect the standard library type.
+// It returns the underlying *sql.DB and nil on success; if opening the database or obtaining the underlying *sql.DB fails, it returns nil and the corresponding error.
 func OpenDBCompat(ctx context.Context, cfg Config, migrate func(context.Context, *sql.DB) error) (*sql.DB, error) {
 	db, err := OpenDB(ctx, cfg, migrate)
 	if err != nil {
 		return nil, err
 	}
 	return ToSQLDB(db)
+}
+
+// OpenDBCompatWithCloser opens a database using the provided configuration and migration function and returns the underlying *sql.DB along with a closer function to release driver resources.
+// If opening the database or obtaining the underlying *sql.DB fails, any opened resources are closed and the error is returned.
+func OpenDBCompatWithCloser(ctx context.Context, cfg Config, migrate func(context.Context, *sql.DB) error) (*sql.DB, func() error, error) {
+	db, err := OpenDB(ctx, cfg, migrate)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sqlDB, err := ToSQLDB(db)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, err
+	}
+
+	return sqlDB, db.Close, nil
 }

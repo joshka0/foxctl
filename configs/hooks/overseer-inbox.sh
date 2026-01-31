@@ -59,7 +59,7 @@ hook_input=$(printf '%s' "$payload" | jq -c --arg ws "$workspace_root" '{
 
 # Call agentctl skill with --ephemeral for faster execution
 # Pass --workspace so AGENTCTL_WORKSPACE env is set for the skill
-result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run hooks/overseer_inbox --ephemeral --workspace "$workspace_root" --input-file - 2>/dev/null)" || {
+result="$(printf '%s' "$hook_input" | "$AGENTCTL_BIN" run --daemon hooks/overseer_inbox --ephemeral --workspace "$workspace_root" --input-file - 2>/dev/null)" || {
   # On error, emit empty (no-op) - never block on mailbox failures
   echo '{}'
   exit 0

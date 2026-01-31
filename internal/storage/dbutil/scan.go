@@ -3,9 +3,14 @@ package dbutil
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/jkatigb/agentctl/internal/observability"
@@ -58,14 +63,51 @@ func ScanJSONArray(jsonStr string) ([]string, error) {
 
 // ScanJSONArrayMust unmarshals a JSON string into a string slice.
 // Returns nil if unmarshaling fails and logs a warning.
-// WARNING: Use ScanJSONArray instead to properly handle errors.
+// ScanJSONArrayMust parses jsonStr into a slice of strings, tolerating failures.
+// It returns an empty slice if jsonStr is empty or contains only whitespace.
+// If unmarshaling fails, it emits an observability event ("dbutil.json_unmarshal_failed")
+// that includes the original data and captured caller location, and returns nil.
 func ScanJSONArrayMust(jsonStr string) []string {
 	var result []string
+	if len(strings.TrimSpace(jsonStr)) == 0 {
+		return result
+	}
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		observability.Emit(context.Background(), observability.NewEvent("dbutil.json_unmarshal_failed").
+		// Log metadata about the payload without exposing raw content
+		dataHash := fmt.Sprintf("%x", sha256.Sum256([]byte(jsonStr)))
+		snippetLen := 200
+		if len(jsonStr) < snippetLen {
+			snippetLen = len(jsonStr)
+		}
+		event := observability.NewEvent("dbutil.json_unmarshal_failed").
 			WithComponent("dbutil").
-			WithData("data", jsonStr).
-			Error(err, 0))
+			WithData("data_length", len(jsonStr)).
+			WithData("data_hash", dataHash).
+			WithData("data_snippet", jsonStr[:snippetLen])
+		pcs := make([]uintptr, 8)
+		count := runtime.Callers(2, pcs)
+		frames := runtime.CallersFrames(pcs[:count])
+		for {
+			frame, more := frames.Next()
+			fullPath := frame.File
+			normalizedPath := filepath.ToSlash(fullPath)
+			if normalizedPath != "" && !strings.Contains(normalizedPath, "/internal/storage/dbutil/") {
+				file := filepath.Base(fullPath)
+				event = event.
+					WithData("caller", fmt.Sprintf("%s:%d", file, frame.Line)).
+					WithData("caller_file", file).
+					WithData("caller_path", fullPath).
+					WithData("caller_line", frame.Line)
+				if frame.Function != "" {
+					event = event.WithData("caller_func", frame.Function)
+				}
+				break
+			}
+			if !more {
+				break
+			}
+		}
+		observability.Emit(context.Background(), event.Error(err, 0))
 		return nil
 	}
 	return result

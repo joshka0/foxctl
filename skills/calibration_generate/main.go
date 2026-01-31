@@ -1,6 +1,5 @@
 // Package main implements the calibration/generate skill for user profile generation.
-// It analyzes sessions at the context window level to extract communication style,
-// tone, working patterns, and deeper user understanding.
+// Analyzes session context windows to extract communication style, tone, working patterns, and user characteristics.
 package main
 
 import (
@@ -37,7 +36,7 @@ func init() {
 // logger is the package-level observability logger.
 var logger *obs.Logger
 
-// Input represents the skill input parameters.
+// Input represents the skill input parameters for calibration/generate operations.
 type Input struct {
 	Workspace  string   `json:"workspace,omitempty"`
 	SessionIDs []string `json:"session_ids,omitempty"` // Specific sessions to analyze
@@ -47,7 +46,7 @@ type Input struct {
 	DryRun     bool     `json:"dry_run,omitempty"`     // Skip LLM and persistence
 }
 
-// Output represents the skill output.
+// Output represents the skill output for calibration/generate operations.
 type Output struct {
 	ProfileID        string   `json:"profile_id"`
 	Workspace        string   `json:"workspace"`
@@ -61,7 +60,7 @@ type Output struct {
 	Provider         string   `json:"provider,omitempty"`
 }
 
-// LLMSignals is the expected JSON structure from the LLM.
+// LLMSignals is the expected JSON structure from the LLM signal extraction.
 type LLMSignals struct {
 	// Surface signals
 	Communication []LLMSignal `json:"communication"`
@@ -74,7 +73,7 @@ type LLMSignals struct {
 	Trust     []LLMSignal    `json:"trust"`
 }
 
-// LLMSignal represents a single signal extracted by the LLM.
+// LLMSignal represents a single calibration signal extracted by the LLM.
 type LLMSignal struct {
 	Dimension  string  `json:"dimension"`  // e.g., "communication.verbosity"
 	Direction  string  `json:"direction"`  // increase|decrease|confirm or specific value
@@ -82,7 +81,7 @@ type LLMSignal struct {
 	Confidence float32 `json:"confidence"` // 0.0-1.0
 }
 
-// LLMExpertise represents an expertise signal.
+// LLMExpertise represents an expertise domain signal extracted by the LLM.
 type LLMExpertise struct {
 	Domain string `json:"domain"` // e.g., "Go concurrency"
 	Level  string `json:"level"`  // expert|proficient|familiar|learning|novice
@@ -94,10 +93,21 @@ const (
 	maxContentTokens  = 6000
 )
 
+// main is the skill entry point for calibration/generate.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates user profile calibration through session analysis and LLM signal extraction.
+//
+// Index:
+// - Purpose: Generate user calibration profiles by analyzing session context windows with LLM extraction
+// - Flow: resolve workspace → open stores → load/create profile → resolve sessions → process windows → extract signals via LLM → aggregate signals → save profile
+// - SideEffects: database operations (sessions/memory); LLM API calls; profile persistence; observability logging
+// - FailureModes: missing workspace, no sessions found, LLM provider errors, database failures, timeout
+// - Observability: emits profile_id/workspace/windows_analyzed/windows_skipped/signals_extracted/profile_changed/changes/status/message/provider
+// - Related: resolveSessions, buildWindowContent, extractSignals, convertSignals, calibration.AggregateSignals, calibration.SaveProfile
+// - Keywords: calibration/generate, profile, sessions, context_windows, signals, llm_extraction, workspace, scope
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Initialize package logger
 	logger = obs.NewLogger(obs.WithLogCommand(command))
@@ -300,7 +310,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-// resolveSessions gets the list of sessions to analyze based on scope.
+// resolveSessions gets the list of sessions to analyze based on scope and session IDs.
 func resolveSessions(ctx context.Context, store *sessions.Store, workspace string, sessionIDs []string, scope string) ([]sessions.Session, error) {
 	// If specific sessions provided, use those
 	if len(sessionIDs) > 0 {
@@ -332,7 +342,7 @@ func resolveSessions(ctx context.Context, store *sessions.Store, workspace strin
 	return store.List(ctx, opts)
 }
 
-// buildWindowContent builds the transcript content for a context window.
+// buildWindowContent builds the transcript content for a context window within token limits.
 func buildWindowContent(ctx context.Context, store *sessions.Store, sessionID string, window sessions.ContextWindow) (string, error) {
 	var contentParts []string
 	var totalChars int
@@ -371,13 +381,22 @@ func buildWindowContent(ctx context.Context, store *sessions.Store, sessionID st
 	return strings.Join(contentParts, "\n\n"), nil
 }
 
-// hashContent computes a SHA256 hash of the content.
+// hashContent computes a SHA256 hash of the content for idempotency tracking.
 func hashContent(content string) string {
 	h := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(h[:8]) // First 8 bytes = 16 hex chars
 }
 
 // extractSignals uses LLM to extract calibration signals from window content.
+//
+// Index:
+// - Purpose: Extract user calibration signals from session content using LLM providers
+// - Flow: build extraction prompt → try providers in order (API or CLI) → parse LLM response → return structured signals
+// - SideEffects: LLM API calls or CLI execution; network requests
+// - FailureModes: LLM provider failures, API errors, response parsing errors, timeouts
+// - Observability: none (handled by caller)
+// - Related: buildExtractionPrompt, extractWithAPI, extractWithCLI, parseResponse
+// - Keywords: extractSignals, llm_providers, api, cli, prompt, response_parsing
 func extractSignals(ctx context.Context, providers []llmproviders.Provider, sessionID string, windowIndex int, content string) (*LLMSignals, string, error) {
 	prompt := buildExtractionPrompt(sessionID, windowIndex, content)
 
@@ -401,6 +420,7 @@ func extractSignals(ctx context.Context, providers []llmproviders.Provider, sess
 	return nil, "", lastErr
 }
 
+// extractWithAPI extracts signals using an HTTP API LLM provider.
 func extractWithAPI(ctx context.Context, provider llmproviders.Provider, prompt string) (*LLMSignals, error) {
 	reqBody := map[string]any{
 		"model":      provider.Model,
@@ -461,6 +481,7 @@ func extractWithAPI(ctx context.Context, provider llmproviders.Provider, prompt 
 	return parseResponse(result.Choices[0].Message.Content)
 }
 
+// extractWithCLI extracts signals using a CLI-based LLM provider.
 func extractWithCLI(ctx context.Context, provider llmproviders.Provider, prompt string) (*LLMSignals, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -473,6 +494,7 @@ func extractWithCLI(ctx context.Context, provider llmproviders.Provider, prompt 
 	return parseResponse(result.String())
 }
 
+// buildExtractionPrompt creates the LLM prompt for signal extraction from session content.
 func buildExtractionPrompt(sessionID string, windowIndex int, content string) string {
 	return fmt.Sprintf(`You are analyzing a context window from a coding session to extract USER CALIBRATION SIGNALS.
 These signals help understand the user's communication preferences, working style, and deeper characteristics.
@@ -551,6 +573,7 @@ Guidelines:
 Return ONLY valid JSON, no markdown fences.`, sessionID, windowIndex, content)
 }
 
+// parseResponse parses the LLM response content into structured LLMSignals.
 func parseResponse(content string) (*LLMSignals, error) {
 	// Clean up response
 	content = strings.TrimSpace(content)
@@ -567,7 +590,7 @@ func parseResponse(content string) (*LLMSignals, error) {
 	return &signals, nil
 }
 
-// convertSignals converts LLM signals to calibration.Signal and calibration.Domain.
+// convertSignals converts LLM signals to calibration.Signal and calibration.Domain types.
 func convertSignals(llm *LLMSignals, sessionID string, windowIndex int) ([]calibration.Signal, []calibration.Domain) {
 	now := time.Now().UTC()
 	var signals []calibration.Signal
@@ -647,7 +670,7 @@ func convertSignals(llm *LLMSignals, sessionID string, windowIndex int) ([]calib
 	return signals, domains
 }
 
-// detectChanges returns a list of human-readable changes in the profile.
+// detectChanges returns a list of human-readable changes in the calibration profile.
 func detectChanges(profile *calibration.Profile) []string {
 	var changes []string
 

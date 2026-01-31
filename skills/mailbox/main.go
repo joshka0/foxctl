@@ -29,6 +29,7 @@ var allowedOps = []string{
 	"release",
 }
 
+// input defines the skill input parameters for mailbox management operations with message passing and reservations.
 type input struct {
 	Operation    string           `json:"operation"`
 	WorkspaceID  string           `json:"workspace_id"`
@@ -40,6 +41,7 @@ type input struct {
 	Release      *releaseReq      `json:"release"`
 }
 
+// sendReq defines parameters for sending a message with delivery options and team broadcasting.
 type sendReq struct {
 	Sender      string `json:"sender"`
 	Recipient   string `json:"recipient"`
@@ -52,6 +54,7 @@ type sendReq struct {
 	AckRequired bool   `json:"ack_required"`
 }
 
+// inboxReq defines parameters for retrieving inbox messages with filtering and read status management.
 type inboxReq struct {
 	ActorID        string `json:"actor_id"`
 	TaskID         string `json:"task_id"`
@@ -61,16 +64,19 @@ type inboxReq struct {
 	Limit          int    `json:"limit"`
 }
 
+// ackReq defines parameters for acknowledging messages to mark them as processed.
 type ackReq struct {
 	ActorID    string   `json:"actor_id"`
 	MessageIDs []string `json:"message_ids"`
 }
 
+// markSurfacedReq defines parameters for marking messages as surfaced to user interfaces.
 type markSurfacedReq struct {
 	ActorID    string   `json:"actor_id"`
 	MessageIDs []string `json:"message_ids"`
 }
 
+// reserveReq defines parameters for reserving file paths with conflict detection and TTL support.
 type reserveReq struct {
 	ActorID    string   `json:"actor_id"`
 	Paths      []string `json:"paths"`
@@ -78,16 +84,28 @@ type reserveReq struct {
 	TTLSeconds int      `json:"ttl_seconds"`
 }
 
+// releaseReq defines parameters for releasing file reservations by ID or actor/path combination.
 type releaseReq struct {
 	ActorID        string   `json:"actor_id"`
 	Paths          []string `json:"paths"`
 	ReservationIDs []string `json:"reservation_ids"`
 }
 
+// main is the skill entry point for mailbox/manage with workspace coordination capabilities.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates mailbox management with message passing and file reservation capabilities.
+//
+// Index:
+// - Purpose: Manage workspace coordination through message passing and file reservations
+// - Flow: open board store → validate operation → route to handler → execute operation → emit results
+// - SideEffects: message delivery; inbox management; acknowledgments; file reservations; conflict detection
+// - FailureModes: invalid operations, missing required fields, store access failures, team lookup failures
+// - Observability: emits operation results, message counts, reservation status, and delivery summaries
+// - Related: blackboard.OpenBoardStore, teams.Open, agent.BoardMessage, agent.FileReservation
+// - Keywords: mailbox/manage, message_passing, file_reservations, workspace_coordination, team_messaging
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	store, err := blackboard.OpenBoardStore(ctx, rc.Config.Storage.Root)
 	if err != nil {

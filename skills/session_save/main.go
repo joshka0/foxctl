@@ -22,7 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for session state capture.
 type Input struct {
 	Trigger   string `json:"trigger"`   // "pre_compact", "manual", "session_end"
 	Workspace string `json:"workspace"` // Project path
@@ -30,7 +30,7 @@ type Input struct {
 	Summary   string `json:"summary,omitempty"` // Optional user-provided summary
 }
 
-// SessionSnapshot represents the captured session state.
+// SessionSnapshot represents the captured session state with tasks, plans, and metadata.
 type SessionSnapshot struct {
 	SnapshotID   string            `json:"snapshot_id"`
 	SessionID    string            `json:"session_id,omitempty"`
@@ -46,7 +46,7 @@ type SessionSnapshot struct {
 	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
-// PlanInfo represents a simplified plan for the snapshot.
+// PlanInfo represents a simplified plan for the snapshot with task linkage.
 type PlanInfo struct {
 	FilePath    string   `json:"file_path"`
 	FileName    string   `json:"file_name"`
@@ -57,7 +57,7 @@ type PlanInfo struct {
 	ModTime     string   `json:"mod_time,omitempty"`     // ISO format
 }
 
-// TaskInfo represents a simplified task for the snapshot.
+// TaskInfo represents a simplified task for the snapshot with essential fields.
 type TaskInfo struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -67,7 +67,7 @@ type TaskInfo struct {
 	Gotchas     string `json:"gotchas,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with snapshot metadata and capture statistics.
 type Output struct {
 	SnapshotID    string         `json:"snapshot_id"`
 	ItemsCaptured map[string]int `json:"items_captured"`
@@ -76,10 +76,21 @@ type Output struct {
 
 const command = "session/save"
 
+// main is the skill entry point for session/save.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates session state capture before compaction with task prioritization and background archiving.
+//
+// Index:
+// - Purpose: Capture session state including active tasks, plans, and pending todos before compaction
+// - Flow: resolve workspace → open stores → build snapshot → capture tasks/plans → prioritize with PageRank → store snapshot
+// - SideEffects: snapshot storage; background archiving; session state preservation; pending restore flag setting
+// - FailureModes: store access failures, plan parsing errors, task analysis failures, snapshot serialization errors
+// - Observability: emits capture statistics, snapshot ID, and background processing status
+// - Related: triggerArchiveAndSummarize, tasksgraph.Analyzer, sessionkit.OpenMemoryInCache, sessionkit.OpenTasks
+// - Keywords: session/save, session_capture, compaction_backup, task_prioritization, background_archiving
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Default workspace
 	in.Workspace = workspaceutil.Resolve(in.Workspace, "", rc.Workspace)
@@ -308,8 +319,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
-// triggerArchiveAndSummarize runs archive and then window summarization as a background process.
-// Uses nohup to ensure the process continues after the parent exits.
+// triggerArchiveAndSummarize runs archive and then window summarization as a background process using nohup.
 func triggerArchiveAndSummarize(sessionID, workspace string) {
 	// Find JSONL path using claudejsonl package
 	jsonlPath := claudejsonl.LocateSessionJSONL(workspace, sessionID)

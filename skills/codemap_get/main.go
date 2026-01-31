@@ -24,18 +24,21 @@ const (
 	DefaultTimeout         = 5 * time.Second
 )
 
+// Input is the expected JSON input for codemap/get operations.
 type Input struct {
 	ID              string `json:"id" validate:"required"`
 	IncludeTraces   *bool  `json:"include_traces,omitempty"`
 	MaxTraceContent int    `json:"max_trace_content,omitempty"`
 }
 
+// Output contains the retrieved codemap data and metadata.
 type Output struct {
 	Codemap *CodemapData `json:"codemap,omitempty"`
 	Found   bool         `json:"found"`
 	Stats   Stats        `json:"stats"`
 }
 
+// CodemapData represents the codemap structure for API output.
 type CodemapData struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title,omitempty"`
@@ -47,6 +50,7 @@ type CodemapData struct {
 	Summary     string   `json:"summary,omitempty"`
 }
 
+// Trace represents a single trace in a codemap with location information.
 type Trace struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -56,10 +60,12 @@ type Trace struct {
 	EndLine     int    `json:"end_line,omitempty"`
 }
 
+// Stats provides performance metrics for the operation.
 type Stats struct {
 	LatencyMS int `json:"latency_ms"`
 }
 
+// StoredCodemap represents the legacy codemap storage format.
 type StoredCodemap struct {
 	Title       string        `json:"title"`
 	Description string        `json:"description"`
@@ -67,6 +73,7 @@ type StoredCodemap struct {
 	Traces      []StoredTrace `json:"traces"`
 }
 
+// StoredTrace represents the legacy trace storage format.
 type StoredTrace struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -76,10 +83,21 @@ type StoredTrace struct {
 	EndLine     int    `json:"end_line"`
 }
 
+// main is the skill entry point for codemap/get.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run retrieves a codemap by ID with configurable trace inclusion and content limits.
+//
+// Index:
+// - Purpose: Retrieve stored codemaps by ID with format fallback and content truncation
+// - Flow: apply defaults → open memory store → search for codemap by ID → parse format (Windsurf/legacy) → build output with optional traces
+// - SideEffects: database queries; content truncation; format conversion
+// - FailureModes: invalid IDs, database errors, parse errors, timeout errors
+// - Observability: emits codemap data with found flag, traces, and timing metrics
+// - Related: extractWindsurfFiles
+// - Keywords: codemap/get, retrieval, traces, format_fallback, truncation
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.MaxTraceContent <= 0 {
@@ -219,6 +237,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// extractWindsurfFiles extracts unique file paths from Windsurf codemap locations.
 func extractWindsurfFiles(ws *codemap.WindsurfCodemap) []string {
 	if ws == nil {
 		return []string{}

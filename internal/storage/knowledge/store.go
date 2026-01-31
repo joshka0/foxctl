@@ -99,24 +99,37 @@ type Store interface {
 }
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open initializes the knowledge store rooted at the provided path.
+
+// Open initializes the knowledge store rooted at the provided path by opening a
+// SQLite database at root/knowledge.db and applying the package migrations.
+// The returned Store is backed by that database and should be closed when no
+// longer needed.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "knowledge.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
+
 
 // Close releases database resources.
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
+
+// migrate applies the schema required by the knowledge registry to the given database.
+// It creates the knowledge_items, knowledge_triggers, and knowledge_documents tables along with their indexes,
+// and returns an error if executing the DDL fails.
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 CREATE TABLE IF NOT EXISTS knowledge_items (

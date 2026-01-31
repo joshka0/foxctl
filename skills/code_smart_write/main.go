@@ -1,5 +1,5 @@
 // Package main implements the code/smart_write skill.
-// It provides symbol-aware file editing with dry-run diff preview.
+// Provides symbol-aware file editing with diff preview, backup, and restore capabilities.
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 
 const command = "code/smart_write"
 
+// input defines the parameters for code/smart_write operations.
 type input struct {
 	Path          string   `json:"path"`  // Single file (backward compat)
 	Paths         []string `json:"paths"` // Multiple files or globs
@@ -29,7 +30,7 @@ type input struct {
 	RestoreDigest string   `json:"restore_digest"` // CAS digest to restore from (undo mode)
 }
 
-// fileResult holds the result for a single file edit
+// fileResult holds the result for a single file edit operation.
 type fileResult struct {
 	Path         string   `json:"path"`
 	Edited       bool     `json:"edited"`
@@ -40,12 +41,24 @@ type fileResult struct {
 	Error        string   `json:"error,omitempty"`
 }
 
+// edit is an alias for codeedit.Edit for convenience.
 type edit = codeedit.Edit
 
+// main is the skill entry point for code/smart_write.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates code/smart_write edits and delegates restore mode.
+//
+// Index:
+// - Purpose: Apply edits to files with optional backup and restore capabilities
+// - Flow: validate input → if restore_digest delegate to handleRestore → else resolve paths → apply edits → emit response
+// - SideEffects: writes files unless dry_run; optional CAS backup writes; CAS reads for restore
+// - FailureModes: invalid edits, path resolution errors, file I/O errors, CAS errors
+// - Observability: emits dry_run/total_edits/files_edited/files_checked; results/combined_diff in multi-file dry_run
+// - Related: handleRestore, codeedit.ApplyEditsToFile, skillmain.ResolvePaths, skillout.Emit
+// - Keywords: code/smart_write, dry_run, create_backup, restore_digest, total_edits, files_edited, files_checked, codeedit.ApplyEditsToFile
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.ContextLines <= 0 {
@@ -164,7 +177,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
-// handleRestore restores a file from CAS backup
+// handleRestore restores a file from CAS backup.
+//
+// Index:
+// - Purpose: Restore file content from CAS to a specified path
+// - Flow: validate path → fetch from CAS → write unless dry_run → emit result
+// - SideEffects: CAS read; optional file write
+// - FailureModes: invalid digest, CAS read errors, file write errors
+// - Observability: emits path/restored/restore_digest/dry_run/size
+// - Related: skillmain.ValidatePath, CASStore.Get, skillout.Emit
+// - Keywords: restore_digest, dry_run, CASStore.Get, restored, size
 func handleRestore(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Require exactly one path for restore
 	if in.Path == "" {

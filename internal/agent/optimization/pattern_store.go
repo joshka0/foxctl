@@ -88,23 +88,35 @@ type PatternStore interface {
 }
 
 type sqlPatternStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// OpenPatternStore initializes the pattern store at the provided root path.
+// OpenPatternStore opens or creates a pattern store backed by a SQLite database
+// located at "<root>/patterns.db" and ensures the required schema is present.
+// The returned PatternStore provides persistent operations for learned patterns;
+// call Close on it when finished. It returns an error if the database cannot be
+// opened or migrated.
 func OpenPatternStore(ctx context.Context, root string) (PatternStore, error) {
 	dbPath := filepath.Join(root, "patterns.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migratePatterns)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migratePatterns)
 	if err != nil {
 		return nil, fmt.Errorf("patterns: open db: %w", err)
 	}
-	return &sqlPatternStore{db: db}, nil
+	return &sqlPatternStore{db: db, close: closeFn}, nil
 }
 
 func (s *sqlPatternStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
+// migratePatterns creates the patterns table and required indexes if they do not exist.
+// It ensures the database schema contains the columns and indexes used by the pattern store
+// (agent_role, context, tool_sequence, outcome, count, success_count, avg_duration_ms, last_seen, created_at),
+// and returns an error if executing the migration DDL fails.
 func migratePatterns(ctx context.Context, db *sql.DB) error {
 	ddl := `
 -- Patterns table stores learned tool usage patterns.

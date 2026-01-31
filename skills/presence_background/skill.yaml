@@ -1,0 +1,93 @@
+apiVersion: agentctl/v1
+kind: Skill
+metadata:
+  name: presence/background
+  version: 0.1.0
+  description: "Generate mood-based background images using Gemini image generation"
+  tags: ["presence", "image", "background", "companion"]
+distribution:
+  type: exec
+  exec:
+    entry: bin
+io:
+  format: JSON
+  inline_output_kb: 4
+signature:
+  command: presence/background
+  parameters:
+    - name: emotion
+      type: string
+      required: false
+      default: "neutral"
+      description: "Emotion to express: neutral|joy|sadness|anger|fear|surprise|disgust|playful"
+    - name: prompt
+      type: string
+      required: false
+      description: "Custom prompt override (optional, uses emotion template if not provided)"
+    - name: scene
+      type: string
+      required: false
+      description: "Scene context to incorporate (e.g., 'cozy room', 'forest', 'ocean')"
+    - name: style
+      type: string
+      required: false
+      default: "anime"
+      description: "Art style: anime|realistic|watercolor|minimalist"
+    - name: conversation_id
+      type: string
+      required: false
+      description: "Conversation ID for caching context"
+    - name: use_cache
+      type: boolean
+      required: false
+      default: true
+      description: "Check cache before generating new image"
+  help:
+    short: "Generate emotion-driven background images"
+    long: |
+      Generate background images based on emotion using Gemini's image generation.
+
+      Emotion templates create appropriate mood-setting scenes:
+      - neutral: Calm ambient scene, soft lighting, muted colors
+      - joy: Bright warm scene, golden sunlight, vibrant colors
+      - sadness: Moody scene, soft blue tones, rain or mist
+      - anger: Intense scene, deep red/orange tones, dramatic lighting
+      - fear: Dark shadowy scene, cool tones, fog
+      - surprise: Dynamic scene, bright contrasts, energetic
+      - playful: Whimsical scene, pastel colors, fun patterns
+
+      Generated images are stored in CAS and cached by prompt hash.
+
+      Example:
+        agentctl run presence/background --input '{"emotion": "joy", "scene": "garden"}'
+
+    workflows:
+      - id: emotion-background
+        description: "Generate background for emotion"
+        example_input:
+          emotion: "joy"
+          style: "anime"
+      - id: custom-background
+        description: "Generate background with custom prompt"
+        example_input:
+          prompt: "Serene mountain lake at sunset, soft pastel colors"
+  returns:
+    - name: image_digest
+      type: string
+      description: "CAS digest of generated image (sha256:...)"
+    - name: prompt
+      type: string
+      description: "The prompt used for generation"
+    - name: cached
+      type: boolean
+      description: "Whether the result was served from cache"
+    - name: model
+      type: string
+      description: "Model used for generation"
+    - name: emotion
+      type: string
+      description: "Emotion the background represents"
+capabilities:
+  network: "egress"
+  filesystem: []
+  pure: false

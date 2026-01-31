@@ -20,7 +20,7 @@ import (
 
 const command = "codemap/import"
 
-// Input is the skill input schema.
+// Input is the skill input schema for codemap/import operations.
 type Input struct {
 	Path         string `json:"path"`
 	Workspace    string `json:"workspace,omitempty"`
@@ -29,7 +29,7 @@ type Input struct {
 	Embed        *bool  `json:"embed,omitempty"`
 }
 
-// Output is the skill output.
+// Output is the skill output containing import statistics and results.
 type Output struct {
 	Imported       int      `json:"imported"`
 	Skipped        int      `json:"skipped"`
@@ -41,10 +41,21 @@ type Output struct {
 	Message        string   `json:"message,omitempty"`
 }
 
+// main is the skill entry point for codemap/import.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates codemap import from files with optional embedding and deduplication.
+//
+// Index:
+// - Purpose: Import .codemap files from disk into memory store with optional embedding generation
+// - Flow: validate input → collect .codemap files → parse each file → store with deduplication → generate embeddings optionally
+// - SideEffects: file system reads; database storage; embedding generation; path validation
+// - FailureModes: invalid paths, file read errors, parse errors, storage errors, embedding failures
+// - Observability: emits import statistics with imported/skipped/error counts and IDs
+// - Related: collectCodemapFiles, parseCodemapPayload, buildSummary
+// - Keywords: codemap/import, embedding, deduplication, batch_import, statistics
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if strings.TrimSpace(in.Path) == "" {
 		return skillerr.Arg("path is required", skillerr.WithHint("Provide a .codemap file or a directory containing .codemap files."))
@@ -173,6 +184,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// collectCodemapFiles finds .codemap files in a directory or validates a single file.
 func collectCodemapFiles(path string, recursive bool) ([]string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -220,6 +232,7 @@ func collectCodemapFiles(path string, recursive bool) ([]string, error) {
 	return files, nil
 }
 
+// parseCodemapPayload parses raw codemap data and extracts metadata for storage.
 func parseCodemapPayload(raw []byte, filename string) (codemap.EmbeddingPlan, string, time.Time, string, error) {
 	if cm, ok, err := codemap.ParseWindsurfCodemap(raw); err != nil {
 		return codemap.EmbeddingPlan{}, "", time.Time{}, "", err
@@ -249,6 +262,7 @@ func parseCodemapPayload(raw []byte, filename string) (codemap.EmbeddingPlan, st
 	return plan, id, cm.CreatedAt, summary, nil
 }
 
+// buildSummary creates a summary string from title, description, and fallback.
 func buildSummary(title, description, fallback string) string {
 	if title == "" && description == "" {
 		return fallback

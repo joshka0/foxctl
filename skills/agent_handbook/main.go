@@ -1,10 +1,5 @@
 // Package main implements the agent/handbook skill.
-// This skill generates capability briefings for agent profiles.
-//
-// The briefing includes:
-//   - Profile description and title
-//   - List of allowed agentctl skills with examples
-//   - Rules and guidelines for the agent
+// Generates capability briefings for agent profiles with allowed skills and rules.
 package main
 
 import (
@@ -19,14 +14,26 @@ import (
 
 const command = "agent/handbook"
 
+// input defines the parameters for agent/handbook operations.
 type input struct {
 	Profile string `json:"profile" validate:"required"`
 }
 
+// main is the skill entry point for agent/handbook.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run generates an agent handbook briefing for the specified profile.
+//
+// Index:
+// - Purpose: Generate capability briefings for agent profiles with allowed skills and rules
+// - Flow: validate profile → get profile config → generate briefing markdown → emit response
+// - SideEffects: None (read-only operation)
+// - FailureModes: invalid profile name, missing profile configuration
+// - Observability: emits profile/title/description/briefing/allowed_skills/rules/summary
+// - Related: agentpolicy.Profile, agentpolicy.GetProfileConfig, generateBriefing, skillout.Emit
+// - Keywords: agent/handbook, profile, allowed_skills, briefing, rules, agentpolicy.Profile
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate and parse profile
 	profile := agentpolicy.Profile(in.Profile)
@@ -62,7 +69,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, data)
 }
 
-// generateBriefing creates a markdown capability briefing for an agent.
+// generateBriefing creates a markdown capability briefing for an agent profile.
 func generateBriefing(cfg agentpolicy.ProfileConfig) string {
 	var b strings.Builder
 

@@ -20,6 +20,7 @@ const command = "json/transform"
 
 var allowedOps = []string{"extract", "merge", "validate", "format", "keys"}
 
+// input defines the skill input parameters for JSON transformation operations.
 type input struct {
 	Operation string `json:"operation"`
 	Input     string `json:"input"`
@@ -29,10 +30,21 @@ type input struct {
 	Compact   bool   `json:"compact"`
 }
 
+// main is the skill entry point for json/transform.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates JSON transformation operations including extract, merge, validate, format, and keys.
+//
+// Index:
+// - Purpose: Transform and analyze JSON data with multiple operations: path extraction, deep merging, validation, formatting, and key enumeration
+// - Flow: validate input → parse JSON → dispatch operation → execute specific transformation → return structured result
+// - SideEffects: parses JSON strings; performs deep object merging; validates structure; formats output with configurable indentation
+// - FailureModes: invalid JSON input, invalid operations, path extraction errors, merge conflicts
+// - Observability: emits operation results, error messages, structure analysis, and formatting statistics
+// - Related: extractOperation, mergeOperation, validateOperation, formatOperation, keysOperation
+// - Keywords: json/transform, json_manipulation, path_extraction, deep_merge, json_validation, formatting
 func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
@@ -72,6 +84,7 @@ func run(_ context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, result)
 }
 
+// extractOperation extracts values from JSON data using dot notation paths with array index support.
 func extractOperation(data any, path string) map[string]any {
 	if path == "" || path == "." {
 		return map[string]any{
@@ -91,6 +104,7 @@ func extractOperation(data any, path string) map[string]any {
 	}
 }
 
+// extractPath navigates through JSON structure using dot notation and array indices.
 func extractPath(data any, path string) any {
 	parts := strings.Split(strings.TrimPrefix(path, "."), ".")
 	current := data
@@ -150,6 +164,7 @@ func extractPath(data any, path string) any {
 	return current
 }
 
+// mergeOperation performs deep merging of JSON objects with recursive conflict resolution.
 func mergeOperation(data any, mergeWithJSON string) map[string]any {
 	if mergeWithJSON == "" {
 		return map[string]any{
@@ -174,6 +189,7 @@ func mergeOperation(data any, mergeWithJSON string) map[string]any {
 	}
 }
 
+// deepMerge recursively merges two JSON values with maps taking precedence over primitive types.
 func deepMerge(dst, src any) any {
 	dstMap, dstIsMap := dst.(map[string]any)
 	srcMap, srcIsMap := src.(map[string]any)
@@ -199,6 +215,7 @@ func deepMerge(dst, src any) any {
 	return src
 }
 
+// validateOperation analyzes JSON structure and provides detailed validation information.
 func validateOperation(data any) map[string]any {
 	result := map[string]any{
 		"operation": "validate",
@@ -231,6 +248,7 @@ func validateOperation(data any) map[string]any {
 	return result
 }
 
+// formatOperation formats JSON data with configurable indentation and compact/pretty modes.
 func formatOperation(data any, indent int, compact bool) map[string]any {
 	var formatted string
 	var err error
@@ -268,6 +286,7 @@ func formatOperation(data any, indent int, compact bool) map[string]any {
 	return result
 }
 
+// keysOperation extracts and enumerates all keys from JSON objects including nested structures.
 func keysOperation(data any) map[string]any {
 	result := map[string]any{
 		"operation": "keys",
@@ -291,6 +310,7 @@ func keysOperation(data any) map[string]any {
 	return result
 }
 
+// getKeys returns a sorted list of keys from a JSON object map.
 func getKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -323,6 +343,7 @@ func collectAllKeys(data any, prefix string) []string {
 	return keys
 }
 
+// getJSONType returns the JSON type name for a given Go value.
 func getJSONType(data any) string {
 	if data == nil {
 		return "null"
@@ -344,6 +365,7 @@ func getJSONType(data any) string {
 	}
 }
 
+// calculateDepth computes the maximum nesting depth of a JSON structure.
 func calculateDepth(data any) int {
 	switch v := data.(type) {
 	case map[string]any:

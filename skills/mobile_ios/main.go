@@ -54,6 +54,7 @@ var allowedOps = []string{
 	"expo_reload",
 }
 
+// input defines the skill input parameters for iOS simulator operations with comprehensive device control.
 type input struct {
 	Operation   string   `json:"operation"`
 	UDID        string   `json:"udid,omitempty"`
@@ -73,10 +74,21 @@ type input struct {
 	MediaPath   string   `json:"media_path,omitempty"`
 }
 
+// main is the skill entry point for mobile/ios with IDB companion integration.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates iOS simulator automation via IDB with comprehensive device management.
+//
+// Index:
+// - Purpose: Automate iOS Simulator operations via IDB for mobile testing and development
+// - Flow: validate operation → check IDB availability → route to handler → execute device operation → emit results
+// - SideEffects: simulator control; app installation/launch; UI interactions; screenshots; recordings
+// - FailureModes: IDB not found, device errors, invalid operations, file access issues, permission errors
+// - Observability: emits operation results, device status, screenshots, logs, and error details
+// - Related: mobileutil.RunIDB, executil.RequireTool, skillout.PersistBuffer
+// - Keywords: mobile/ios, ios_simulator, idb_companion, device_automation, mobile_testing
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
 	op := oputil.Op(in.Operation)
@@ -157,7 +169,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 }
 
-// listDevices lists all available iOS simulators.
+// listDevices lists all available iOS simulators with filtering for simulators only and device enumeration.
 func listDevices(ctx context.Context, rc *skillmain.RunContext) error {
 	devices, err := mobileutil.ListIDBDevices(ctx)
 	if err != nil {
@@ -179,7 +191,7 @@ func listDevices(ctx context.Context, rc *skillmain.RunContext) error {
 	})
 }
 
-// deviceInfo gets detailed info about a specific device.
+// deviceInfo gets detailed info about a specific device via IDB describe with JSON parsing.
 func deviceInfo(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	result := mobileutil.RunIDB(ctx, udid, "describe", "--json")
 	if result.Err != nil {
@@ -197,7 +209,7 @@ func deviceInfo(ctx context.Context, rc *skillmain.RunContext, udid string) erro
 	})
 }
 
-// boot boots a simulator.
+// boot boots a simulator with UDID validation and success confirmation via IDB.
 func boot(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	if udid == "" {
 		return skillerr.Arg("udid is required for boot operation")
@@ -216,7 +228,7 @@ func boot(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	})
 }
 
-// install installs an app on the simulator.
+// install installs an app on the simulator with path validation, symlink resolution, and security checks.
 func install(ctx context.Context, rc *skillmain.RunContext, udid, app string) error {
 	if app == "" {
 		return skillerr.Arg(
@@ -262,7 +274,7 @@ func install(ctx context.Context, rc *skillmain.RunContext, udid, app string) er
 	})
 }
 
-// launch launches an app by bundle ID.
+// launch launches an app by bundle ID with validation and success tracking via IDB.
 func launch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
 		return skillerr.Arg(
@@ -284,7 +296,7 @@ func launch(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string
 	})
 }
 
-// terminate stops a running app.
+// terminate stops a running app by bundle ID with validation and graceful shutdown.
 func terminate(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string) error {
 	if bundleID == "" {
 		return skillerr.Arg(
@@ -306,7 +318,7 @@ func terminate(ctx context.Context, rc *skillmain.RunContext, udid, bundleID str
 	})
 }
 
-// screenshot captures the simulator screen.
+// screenshot captures the simulator screen with CAS storage, temp file cleanup, and artifact management.
 func screenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath string) error {
 	// Track if we created a temp file that needs cleanup
 	tempCreated := false
@@ -347,7 +359,7 @@ func screenshot(ctx context.Context, rc *skillmain.RunContext, udid, outputPath 
 	})
 }
 
-// tap performs a tap at coordinates.
+// tap performs a tap at coordinates with IDB UI command execution and coordinate validation.
 func tap(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) error {
 	result := mobileutil.RunIDB(ctx, udid, "ui", "tap", strconv.Itoa(x), strconv.Itoa(y))
 	if result.Err != nil {
@@ -362,7 +374,7 @@ func tap(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) e
 	})
 }
 
-// swipe performs a swipe gesture.
+// swipe performs a swipe gesture with start and end coordinates and gesture validation.
 func swipe(ctx context.Context, rc *skillmain.RunContext, udid string, x1, y1, x2, y2 int) error {
 	result := mobileutil.RunIDB(ctx, udid, "ui", "swipe",
 		strconv.Itoa(x1), strconv.Itoa(y1),
@@ -380,7 +392,7 @@ func swipe(ctx context.Context, rc *skillmain.RunContext, udid string, x1, y1, x
 	})
 }
 
-// typeText types text into the simulator.
+// typeText types text into the simulator with validation and IDB UI command execution.
 func typeText(ctx context.Context, rc *skillmain.RunContext, udid, text string) error {
 	if text == "" {
 		return skillerr.Arg("text is required for type_text operation", skillerr.WithHint("Provide text to type."))
@@ -398,7 +410,7 @@ func typeText(ctx context.Context, rc *skillmain.RunContext, udid, text string) 
 	})
 }
 
-// button presses a hardware button.
+// button presses a hardware button with name validation and IDB UI command execution.
 func button(ctx context.Context, rc *skillmain.RunContext, udid, buttonName string) error {
 	if buttonName == "" {
 		return skillerr.Arg("button name is required", skillerr.WithHint("Provide the button name to press."))
@@ -416,7 +428,7 @@ func button(ctx context.Context, rc *skillmain.RunContext, udid, buttonName stri
 	})
 }
 
-// uiTree gets the UI accessibility tree.
+// uiTree gets the UI accessibility tree with JSON parsing, line-by-line fallback, and CAS storage for large trees.
 func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	cmdResult := mobileutil.RunIDB(ctx, udid, "ui", "describe-all", "--json")
 	if cmdResult.Err != nil {
@@ -468,7 +480,7 @@ func uiTree(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	return emit(rc, payload)
 }
 
-// describePoint describes the UI element at a specific point.
+// describePoint describes the UI element at a specific point with JSON parsing and coordinate validation.
 func describePoint(ctx context.Context, rc *skillmain.RunContext, udid string, x, y int) error {
 	result := mobileutil.RunIDB(ctx, udid, "ui", "describe-point", strconv.Itoa(x), strconv.Itoa(y), "--json")
 	if result.Err != nil {
@@ -488,7 +500,7 @@ func describePoint(ctx context.Context, rc *skillmain.RunContext, udid string, x
 	})
 }
 
-// logs gets simulator logs.
+// logs gets simulator logs with timeout handling, CAS storage, preview generation, and error distinction.
 func logs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	// Use a timeout context to get recent logs
 	logCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -529,7 +541,7 @@ func logs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	})
 }
 
-// openURL opens a URL in the simulator.
+// openURL opens a URL in the simulator with validation, scheme handling, and success tracking.
 func openURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) error {
 	if url == "" {
 		return skillerr.Arg("url is required for open_url operation", skillerr.WithHint("Provide a URL to open."))
@@ -547,7 +559,7 @@ func openURL(ctx context.Context, rc *skillmain.RunContext, udid, url string) er
 	})
 }
 
-// setLocation sets the simulated GPS location.
+// setLocation sets the simulated GPS location with coordinate formatting and IDB command execution.
 func setLocation(ctx context.Context, rc *skillmain.RunContext, udid string, lat, long float64) error {
 	result := mobileutil.RunIDB(ctx, udid, "set_location",
 		strconv.FormatFloat(lat, 'f', 6, 64),
@@ -565,7 +577,7 @@ func setLocation(ctx context.Context, rc *skillmain.RunContext, udid string, lat
 	})
 }
 
-// approvePermissions approves permissions for an app.
+// approvePermissions approves permissions for an app with validation and batch permission handling.
 func approvePermissions(ctx context.Context, rc *skillmain.RunContext, udid, bundleID string, permissions []string) error {
 	if bundleID == "" {
 		return skillerr.Arg("app bundle ID is required for approve_permissions", skillerr.WithHint("Provide the app bundle ID in app."))
@@ -588,7 +600,7 @@ func approvePermissions(ctx context.Context, rc *skillmain.RunContext, udid, bun
 	})
 }
 
-// recordPIDFile returns the PID file path for a specific device (or "default" if no UDID).
+// recordPIDFile returns the PID file path for a specific device with device-scoped recording management.
 // This scopes recordings per-device, preventing conflicts when automating different simulators.
 func recordPIDFile(udid string) string {
 	if udid == "" {
@@ -597,7 +609,7 @@ func recordPIDFile(udid string) string {
 	return fmt.Sprintf("/tmp/agentctl_ios_record_%s.pid", udid)
 }
 
-// recordStart starts video recording.
+// recordStart starts video recording with background process, PID tracking, and process lifecycle management.
 func recordStart(ctx context.Context, rc *skillmain.RunContext, udid, outputPath string) error {
 	if outputPath == "" {
 		outputPath = fmt.Sprintf("/tmp/ios_recording_%d.mp4", time.Now().UnixNano())
@@ -633,7 +645,7 @@ func recordStart(ctx context.Context, rc *skillmain.RunContext, udid, outputPath
 	})
 }
 
-// recordStop stops video recording.
+// recordStop stops video recording with PID cleanup, signal handling, and graceful termination.
 func recordStop(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	pidFile := recordPIDFile(udid)
 	pidData, err := os.ReadFile(pidFile)
@@ -668,7 +680,7 @@ func recordStop(ctx context.Context, rc *skillmain.RunContext, udid string) erro
 	})
 }
 
-// crashLogs lists crash logs.
+// crashLogs lists crash logs with JSON parsing, line-by-line fallback, and error handling.
 func crashLogs(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	result := mobileutil.RunIDB(ctx, udid, "crash", "list", "--json")
 	if result.Err != nil {
@@ -698,7 +710,7 @@ func crashLogs(ctx context.Context, rc *skillmain.RunContext, udid string) error
 	})
 }
 
-// addMedia adds media files to the simulator.
+// addMedia adds media files to the simulator with path validation, security checks, and symlink resolution.
 func addMedia(ctx context.Context, rc *skillmain.RunContext, udid, mediaPath string) error {
 	if mediaPath == "" {
 		return skillerr.Arg("media_path is required for add_media operation", skillerr.WithHint("Provide the media file path."))
@@ -742,7 +754,7 @@ func addMedia(ctx context.Context, rc *skillmain.RunContext, udid, mediaPath str
 	})
 }
 
-// clearKeychain clears the keychain.
+// clearKeychain clears the keychain with IDB command execution and security reset.
 func clearKeychain(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	result := mobileutil.RunIDB(ctx, udid, "clear_keychain")
 	if result.Err != nil {
@@ -755,7 +767,7 @@ func clearKeychain(ctx context.Context, rc *skillmain.RunContext, udid string) e
 	})
 }
 
-// focus brings the simulator window to front.
+// focus brings the simulator window to front with IDB command and window management.
 func focus(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	result := mobileutil.RunIDB(ctx, udid, "focus")
 	if result.Err != nil {
@@ -768,8 +780,8 @@ func focus(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	})
 }
 
-// doShake performs the actual shake gesture logic without emitting an envelope.
-// This is used by both shake() and expoReload() to avoid double envelope emission.
+// doShake performs the actual shake gesture logic without emitting an envelope to avoid double emission.
+// This is used by both shake() and expoReload() to prevent duplicate envelope emissions.
 func doShake(ctx context.Context, udid string) error {
 	// IDB doesn't have a direct shake command, so we simulate it
 	// by sending the shake hardware event through button
@@ -793,7 +805,7 @@ func doShake(ctx context.Context, udid string) error {
 	return nil
 }
 
-// shake simulates a shake gesture (for Expo dev menu).
+// shake simulates a shake gesture (for Expo dev menu) with fallback support and error handling.
 func shake(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	if err := doShake(ctx, udid); err != nil {
 		return err
@@ -806,7 +818,7 @@ func shake(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	})
 }
 
-// expoDeepLink opens an Expo deep link URL.
+// expoDeepLink opens an Expo deep link URL with scheme validation and URL normalization.
 func expoDeepLink(ctx context.Context, rc *skillmain.RunContext, udid, expoURL string) error {
 	if expoURL == "" {
 		return skillerr.Arg("expo_url is required for expo_deep_link operation", skillerr.WithHint("Provide the Expo URL to open."))
@@ -830,7 +842,7 @@ func expoDeepLink(ctx context.Context, rc *skillmain.RunContext, udid, expoURL s
 	})
 }
 
-// expoReload triggers a reload in the Expo app.
+// expoReload triggers a reload in the Expo app via shake gesture and keyboard shortcut with timing coordination.
 func expoReload(ctx context.Context, rc *skillmain.RunContext, udid string) error {
 	// Method 1: Shake to open dev menu, then tap reload
 	// Use doShake to avoid double envelope emission
@@ -854,7 +866,7 @@ func expoReload(ctx context.Context, rc *skillmain.RunContext, udid string) erro
 	})
 }
 
-// emit outputs the result envelope.
+// emit outputs the result envelope with operation data and standardized response format.
 func emit(rc *skillmain.RunContext, data map[string]any) error {
 	return skillout.Emit(rc, command, data)
 }

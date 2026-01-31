@@ -23,7 +23,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/tasks"
 )
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for plan synchronization with task import.
 type Input struct {
 	Workspace     string `json:"workspace"`
 	WorkspaceRoot string `json:"workspace_root,omitempty"`
@@ -35,7 +35,7 @@ type Input struct {
 	Provider      string `json:"provider,omitempty"`
 }
 
-// SyncResult represents the result of syncing a single plan.
+// SyncResult represents the result of syncing a single plan with task creation statistics.
 type SyncResult struct {
 	PlanFile     string       `json:"plan_file"`
 	PlanTitle    string       `json:"plan_title"`
@@ -47,7 +47,7 @@ type SyncResult struct {
 	Error        string       `json:"error,omitempty"`
 }
 
-// StepResult represents the result of syncing a single step.
+// StepResult represents the result of syncing a single step with task status.
 type StepResult struct {
 	Title   string `json:"title"`
 	Section string `json:"section"`
@@ -55,7 +55,7 @@ type StepResult struct {
 	TaskID  string `json:"task_id,omitempty"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with sync statistics and per-plan results.
 type Output struct {
 	PlansProcessed int          `json:"plans_processed"`
 	PlansChanged   int          `json:"plans_changed"`
@@ -66,7 +66,7 @@ type Output struct {
 	Message        string       `json:"message"`
 }
 
-// PlanSyncState tracks the last synced state of a plan.
+// PlanSyncState tracks the last synced state of a plan for change detection.
 type PlanSyncState struct {
 	PlanFile    string    `json:"plan_file"`
 	ContentHash string    `json:"content_hash"`
@@ -76,10 +76,21 @@ type PlanSyncState struct {
 
 const command = "plan/sync"
 
+// main is the skill entry point for plan/sync.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates plan synchronization with task import and change detection across providers.
+//
+// Index:
+// - Purpose: Import Claude Code plans as tasks with change detection and multi-provider support
+// - Flow: resolve workspace → open stores → load sync states → detect plans → process each plan → import tasks → save states
+// - SideEffects: task creation; plan state tracking; atomic fact processing; memory store updates
+// - FailureModes: store access failures, plan parsing errors, task creation failures, provider detection errors
+// - Observability: emits sync statistics, per-plan results, task creation counts, and provider information
+// - Related: processPlan, loadSyncStates, sanitizeFileName, plans.UnifiedDetector, atomic.NewProcessorWithConfig
+// - Keywords: plan/sync, plan_import, task_creation, change_detection, claude_code, opencode
 func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	// Default workspace
 	input.Workspace = workspaceutil.Resolve(input.Workspace, input.WorkspaceRoot, rc.Workspace)
@@ -198,6 +209,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, input Input) error {
 	return skillout.Emit(rc, command, output)
 }
 
+// processPlan handles individual plan processing with step extraction and task creation.
 func processPlan(
 	ctx context.Context,
 	logger zerolog.Logger,
@@ -361,6 +373,7 @@ func processPlan(
 	return result
 }
 
+// loadSyncStates retrieves previous sync states from memory store for change detection.
 func loadSyncStates(ctx context.Context, memStore *memory.Store, workspace string) map[string]PlanSyncState {
 	states := make(map[string]PlanSyncState)
 
@@ -386,6 +399,7 @@ func loadSyncStates(ctx context.Context, memStore *memory.Store, workspace strin
 	return states
 }
 
+// sanitizeFileName cleans filenames for memory store naming with special character handling.
 func sanitizeFileName(name string) string {
 	// Remove extension and replace special chars
 	name = strings.TrimSuffix(name, filepath.Ext(name))

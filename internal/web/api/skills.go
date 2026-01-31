@@ -3,10 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/rs/zerolog"
 
 	"github.com/jkatigb/agentctl/internal/domain/skill"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/platform/config"
 )
 
@@ -65,7 +67,7 @@ func SkillsListHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 }
 
 // SkillsRunHandler returns a handler for POST /api/skills/run.
-// Execute a skill via subprocess.
+// On client or server errors it responds with the appropriate HTTP status (400, 405, or 500) and an error message.
 func SkillsRunHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	runner := NewSkillRunner(cfg)
 
@@ -79,7 +81,7 @@ func SkillsRunHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 			Skill string         `json:"skill"`
 			Input map[string]any `json:"input"`
 		}
-		if err := readJSON(r, &req); err != nil {
+		if err := readJSON(w, r, &req); err != nil {
 			httpError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
@@ -91,12 +93,30 @@ func SkillsRunHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 
 		log.Info().Str("skill", req.Skill).Msg("skill run requested")
 
+		// Emit skill start event
+		startTime := time.Now()
+		skillEvent := observability.NewEvent("skill.run").
+			WithComponent(observability.ComponentWeb).
+			WithData("skill_name", req.Skill)
+
 		// Execute skill
 		result, err := runner.Run(r.Context(), req.Skill, req.Input)
+		duration := time.Since(startTime)
+
 		if err != nil {
 			log.Error().Err(err).Str("skill", req.Skill).Msg("skill execution error")
+			observability.Emit(r.Context(), skillEvent.Error(err, duration))
 			httpError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+
+		// Emit result event
+		if result.Success {
+			observability.Emit(r.Context(), skillEvent.Success(duration))
+		} else {
+			observability.Emit(r.Context(), skillEvent.
+				WithData("error", result.Error).
+				Error(nil, duration))
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{

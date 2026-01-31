@@ -26,22 +26,31 @@ type Store interface {
 }
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
+
 // Open initializes the quotas store rooted at the provided path.
+// It opens the SQLite database file at root/quotas.db, applies required schema migrations, and returns a Store backed by that database.
+// On failure it returns a non-nil error describing the problem.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "quotas.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("quotas: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
 
+
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 func (s *sqlStore) Get(ctx context.Context, ns string) (agent.Quotas, error) {
 	row := s.db.QueryRowContext(ctx, `

@@ -1,4 +1,5 @@
 // Package main implements the code/complexity skill.
+// Analyzes code complexity metrics including cyclomatic and cognitive complexity for multiple languages.
 package main
 
 import (
@@ -21,7 +22,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/sliceutil"
 )
 
-// Input defines the input parameters for code/complexity.
+// Input defines the input parameters for code/complexity operations.
 type Input struct {
 	Path         string `json:"path"`
 	AnalysisMode string `json:"analysis_mode" validate:"omitempty,oneof=hotspots overview"`
@@ -32,6 +33,7 @@ type Input struct {
 	MaxResults   int    `json:"max_results" validate:"gte=0"`
 }
 
+// complexityResult represents complexity analysis results for a single function.
 type complexityResult struct {
 	File                 string   `json:"file"`
 	Function             string   `json:"function"`
@@ -45,6 +47,7 @@ type complexityResult struct {
 	Recommendations      []string `json:"recommendations,omitempty"`
 }
 
+// aggregateStats represents aggregate complexity statistics across all analyzed functions.
 type aggregateStats struct {
 	TotalFunctions    int     `json:"total_functions"`
 	AverageComplexity float64 `json:"average_complexity"`
@@ -54,10 +57,21 @@ type aggregateStats struct {
 	LowRiskCount      int     `json:"low_risk_count"`
 }
 
+// main is the skill entry point for code/complexity.
 func main() {
 	skillmain.Main("code/complexity", run)
 }
 
+// run orchestrates code complexity analysis across files and directories.
+//
+// Index:
+// - Purpose: Analyze code complexity metrics (cyclomatic, cognitive) for functions across multiple languages
+// - Flow: resolve path → detect file type → analyze files (Go AST, Python/JS regex) → filter by mode/threshold → calculate statistics → emit results
+// - SideEffects: file system traversal; AST parsing; artifact persistence for large result sets
+// - FailureModes: invalid path, unsupported file types, parse errors, file system errors
+// - Observability: emits analysis_mode/metric/threshold/result_count/results/statistics/artifact
+// - Related: analyzeDirectory, analyzeFile, analyzeGoFile, analyzePythonFile, analyzeJSFile, calculateStats
+// - Keywords: code/complexity, cyclomatic, cognitive, nesting, function_length, hotspots, overview, threshold
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Apply defaults
 	if in.AnalysisMode == "" {
@@ -147,6 +161,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "code/complexity", data)
 }
 
+// analyzeDirectory walks a directory and analyzes all supported source files.
 func analyzeDirectory(dir, workspace string, in Input) ([]complexityResult, error) {
 	var results []complexityResult
 
@@ -187,6 +202,7 @@ func analyzeDirectory(dir, workspace string, in Input) ([]complexityResult, erro
 	return results, err
 }
 
+// analyzeFile analyzes a single file for complexity metrics based on its language.
 func analyzeFile(path, workspace string, in Input) ([]complexityResult, error) {
 	lang := fsutil.DetectLanguageWithHint(in.Language, path)
 	if lang == "" {
@@ -205,6 +221,7 @@ func analyzeFile(path, workspace string, in Input) ([]complexityResult, error) {
 	}
 }
 
+// analyzeGoFile analyzes Go code using AST parsing for accurate complexity metrics.
 func analyzeGoFile(path, workspace string, _ Input) ([]complexityResult, error) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
@@ -255,6 +272,7 @@ func analyzeGoFile(path, workspace string, _ Input) ([]complexityResult, error) 
 	return results, nil
 }
 
+// calculateGoCyclomaticComplexity calculates cyclomatic complexity for Go functions using AST.
 func calculateGoCyclomaticComplexity(fn *ast.FuncDecl) int {
 	complexity := 1
 
@@ -283,6 +301,7 @@ func calculateGoCyclomaticComplexity(fn *ast.FuncDecl) int {
 	return complexity
 }
 
+// calculateGoCognitiveComplexity calculates cognitive complexity for Go functions using AST.
 func calculateGoCognitiveComplexity(fn *ast.FuncDecl) int {
 	complexity := 0
 
@@ -363,12 +382,14 @@ func calculateGoCognitiveComplexity(fn *ast.FuncDecl) int {
 	return complexity
 }
 
+// visitorFunc implements ast.Visitor interface for recursive AST traversal.
 type visitorFunc func(ast.Node) ast.Visitor
 
 func (f visitorFunc) Visit(n ast.Node) ast.Visitor {
 	return f(n)
 }
 
+// calculateGoNestingDepth calculates maximum nesting depth for Go functions using AST.
 func calculateGoNestingDepth(fn *ast.FuncDecl) int {
 	maxDepth := 0
 
@@ -441,6 +462,7 @@ func calculateGoNestingDepth(fn *ast.FuncDecl) int {
 	return maxDepth
 }
 
+// analyzePythonFile analyzes Python code using regex patterns for complexity metrics.
 func analyzePythonFile(path, workspace string, _ Input) ([]complexityResult, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -537,6 +559,7 @@ func analyzePythonFile(path, workspace string, _ Input) ([]complexityResult, err
 	return results, nil
 }
 
+// analyzeJSFile analyzes JavaScript/TypeScript code using regex patterns for complexity metrics.
 func analyzeJSFile(path, workspace string, _ Input) ([]complexityResult, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -639,6 +662,7 @@ func analyzeJSFile(path, workspace string, _ Input) ([]complexityResult, error) 
 	return results, nil
 }
 
+// classifyRisk classifies complexity risk level and generates recommendations.
 func classifyRisk(result *complexityResult) {
 	complexity := result.CyclomaticComplexity
 
@@ -675,6 +699,7 @@ func classifyRisk(result *complexityResult) {
 	}
 }
 
+// calculateStats computes aggregate statistics from complexity analysis results.
 func calculateStats(results []complexityResult) aggregateStats {
 	stats := aggregateStats{
 		TotalFunctions: len(results),

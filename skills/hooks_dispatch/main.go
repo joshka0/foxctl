@@ -18,15 +18,27 @@ import (
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillmain"
 	"github.com/jkatigb/agentctl/internal/adapters/skillslib/skillout"
 	"github.com/jkatigb/agentctl/internal/hooks"
+	"github.com/jkatigb/agentctl/internal/observability"
 	"github.com/jkatigb/agentctl/internal/storage/contextbuffer"
 )
 
 const skillName = "hooks/dispatch"
 
+// main is the skill entry point for hooks/dispatch.
 func main() {
 	skillmain.Main(skillName, run)
 }
 
+// run orchestrates central hook dispatch with configuration loading and context buffer integration.
+//
+// Index:
+// - Purpose: Central dispatcher that loads hooks.yaml, matches hooks, runs them, and merges outputs with context buffer support
+// - Flow: validate event → resolve workspace → load hooks config → create dispatcher → dispatch hooks → process context buffer → emit results
+// - SideEffects: hook execution; context buffer processing; observability events; context injection
+// - FailureModes: invalid events, config loading failures, dispatch errors
+// - Observability: emits hook dispatch events, execution metrics, and context buffer stats
+// - Related: processContextBuffer, buildMatchedHooksInfo, buildStepsInfo, emitHookDispatchEvent
+// - Keywords: hooks/dispatch, hook_dispatcher, context_buffer, hook_matching, orchestration
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	start := time.Now()
 
@@ -74,6 +86,9 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	if err != nil {
 		return fmt.Errorf("dispatch hooks: %w", err)
 	}
+
+	// Emit hook.dispatch observability event for GUI visibility
+	emitHookDispatchEvent(ctx, in, &result, workspaceID, time.Since(start))
 
 	// Context Buffer integration
 	var bufferStats map[string]any
@@ -260,6 +275,7 @@ func buildStepsInfo(results []hooks.HookResult) []map[string]any {
 	return steps
 }
 
+// existingConfigFiles returns list of existing hook configuration files.
 func existingConfigFiles(workspaceRoot string) []string {
 	paths := hooks.DefaultConfigPaths(workspaceRoot)
 	existing := make([]string, 0, len(paths))
@@ -269,4 +285,39 @@ func existingConfigFiles(workspaceRoot string) []string {
 		}
 	}
 	return existing
+}
+
+// emitHookDispatchEvent emits a hook.dispatch observability event for GUI visibility.
+func emitHookDispatchEvent(ctx context.Context, in hooks.Input, result *hooks.Result, workspaceID string, duration time.Duration) {
+	event := observability.NewEvent("hook.dispatch").
+		WithComponent(observability.ComponentHook).
+		WithWorkspace(workspaceID).
+		WithSession(in.SessionID, "").
+		WithData("event", string(in.Event)).
+		WithData("hooks_run", result.HooksRun).
+		WithData("blocked", result.Blocked)
+
+	// Add tool info if present
+	if in.ToolName != "" {
+		event = event.WithData("tool_name", in.ToolName)
+	}
+	if in.ToolKind != "" {
+		event = event.WithData("tool_kind", string(in.ToolKind))
+	}
+
+	// Add blocked_by if blocked
+	if result.Blocked && result.BlockedBy != "" {
+		event = event.WithData("blocked_by", result.BlockedBy)
+	}
+
+	// Add hook names that ran
+	if len(result.HookResults) > 0 {
+		hookNames := make([]string, 0, len(result.HookResults))
+		for _, hr := range result.HookResults {
+			hookNames = append(hookNames, hr.HookID)
+		}
+		event = event.WithData("hook_names", hookNames)
+	}
+
+	observability.Emit(ctx, event.Success(duration))
 }

@@ -142,12 +142,12 @@ if [[ "$trigger" == "resume" || "$trigger" == "compact" ]]; then
     --arg workspace "$workspace" \
     '{trigger: $trigger, workspace: $workspace}')
 
-  result="$(printf '%s' "$skill_input" | "$AGENTCTL_BIN" run session/restore --ephemeral --input-file - 2>/dev/null)" || true
+  result="$(printf '%s' "$skill_input" | "$AGENTCTL_BIN" run --daemon session/restore --ephemeral --input-file - 2>/dev/null)" || true
   context=$(printf '%s' "$result" | jq -r '.data.hook_output.context // ""')
 
   # Get anchor if set
   anchor_input=$(jq -nc --arg ws "$workspace" '{operation: "get", workspace: $ws}')
-  if anchor_result=$(printf '%s' "$anchor_input" | "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace" --input-file - 2>/dev/null); then
+  if anchor_result=$(printf '%s' "$anchor_input" | "$AGENTCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace" --input-file - 2>/dev/null); then
     anchor_main=$(printf '%s' "$anchor_result" | jq -r '.data.anchor.main_prompt // ""' 2>/dev/null || echo "")
     anchor_q=$(printf '%s' "$anchor_result" | jq -r '.data.anchor.pending_question // ""' 2>/dev/null || echo "")
 

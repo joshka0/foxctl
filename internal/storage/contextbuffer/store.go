@@ -95,21 +95,27 @@ type Store interface {
 }
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open initializes the context buffer store rooted at the provided path.
+// Open opens or creates a SQLite-backed context buffer database at root/contextbuffer.db and returns a Store.
+// It applies necessary schema migrations using the provided context and returns an error if opening or migrating the database fails.
+// The returned Store holds an internal close function; callers must call Close on the Store to release underlying database resources.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "contextbuffer.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("contextbuffer: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
 
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
 func (s *sqlStore) DB() *sql.DB {

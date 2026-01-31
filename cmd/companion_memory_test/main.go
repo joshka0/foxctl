@@ -19,6 +19,13 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/sqliteutil"
 )
 
+// main demonstrates a runnable Companion conversation-memory temporal-decay demo.
+// It sets up a temporary SQLite database and filesystem-backed memory store, injects
+// sample yesterday and today turns, runs daily compression (L0 → L1) with a mock
+// summarizer, optionally enables vector embeddings from configuration, prints memory
+// statistics and contexts, exports the full memory state, and lists any stored
+// semantic memories. The program uses temporary files and directories that are
+// cleaned up on exit.
 func main() {
 	ctx := context.Background()
 
@@ -38,12 +45,14 @@ func main() {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "memory.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, nil) // Migration handled by ConversationMemory
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil) // Migration handled by ConversationMemory
 	if err != nil {
 		fmt.Printf("Failed to create database: %v\n", err)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() {
+		_ = closeFn()
+	}()
 
 	// Create named memory store for semantic search integration
 	casDir := filepath.Join(tmpDir, "cas")

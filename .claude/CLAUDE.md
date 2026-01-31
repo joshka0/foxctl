@@ -130,6 +130,17 @@ agentctl index repo build --workspace . --go --typescript
 
 Also read: `configs/USER_PREFS.md` and `configs/RECENT_GOTCHAS.md`
 
+## Interaction Style
+
+**Terminology coaching:** When the user asks something technical but uses imprecise or informal language, provide the correct terminology in parentheses as a mini-lesson. This helps build vocabulary over time.
+
+Examples:
+- User: "the menu cuts off" → Answer + *(in CSS: `overflow-y: auto` handles content overflow when it exceeds container height)*
+- User: "make it not jump around" → Answer + *(layout shift — use fixed dimensions or `aspect-ratio` to reserve space)*
+- User: "the thing that runs when you click" → Answer + *(event handler or onClick callback)*
+
+Keep corrections brief and parenthetical — don't lecture, just annotate.
+
 ## Architecture
 
 ```

@@ -24,7 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/tools/ripgrep"
 )
 
-// Mode determines which search engine to use
+// Mode determines which search engine to use for code context search with different capabilities.
 type Mode string
 
 const (
@@ -33,6 +33,7 @@ const (
 	ModeLine    Mode = "line"    // Line range expansion
 )
 
+// input defines the skill input parameters for code context search with multiple modes and comprehensive options.
 type input struct {
 	// Common options
 	Path          string `json:"path"`
@@ -68,10 +69,21 @@ type (
 	rawMatch     = codeblocks.RawMatch
 )
 
+// main is the skill entry point for code/context_grep with multi-mode search capabilities.
 func main() {
 	skillmain.Main("code/context_grep", run)
 }
 
+// run orchestrates code context search with ripgrep, ast-grep, and line expansion modes.
+//
+// Index:
+// - Purpose: Search code with context expansion using multiple search engines (ripgrep, ast-grep, line expansion)
+// - Flow: apply defaults → detect mode → route to handler → execute search → expand matches → emit results
+// - SideEffects: executes external tools (ripgrep, ast-grep); reads file contents; expands code blocks
+// - FailureModes: missing tools, invalid patterns, file access errors, parsing failures
+// - Observability: emits match counts, block previews, file statistics, and search mode used
+// - Related: detectMode, runRipgrep, runASTGrep, runLineExpansion, codeblocks.ExpandMatches
+// - Keywords: code/context_grep, code_search, context_expansion, ripgrep, ast_grep, line_expansion
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxMatches <= 0 {
@@ -97,7 +109,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	}
 }
 
-// detectMode determines which mode to use based on input
+// detectMode determines which mode to use based on input parameters, patterns, and available options.
 func detectMode(in input) Mode {
 	if in.Mode != "" {
 		return in.Mode
@@ -111,7 +123,7 @@ func detectMode(in input) Mode {
 	return ModeRipgrep
 }
 
-// runRipgrep executes ripgrep search mode
+// runRipgrep executes ripgrep search mode with regex pattern matching, file filtering, and context expansion.
 func runRipgrep(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Check if ripgrep is available
 	if err := rgutil.RequireRipgrep(); err != nil {
@@ -156,7 +168,7 @@ func runRipgrep(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return emitResult(ctx, rc, in, blocks, ModeRipgrep)
 }
 
-// runASTGrep executes ast-grep search mode
+// runASTGrep executes ast-grep search mode with structural pattern matching, rule support, and context expansion.
 func runASTGrep(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Check if ast-grep is available
 	sgPath, err := executil.RequireAny([]string{"sg", "ast-grep"}, "install ast-grep")
@@ -210,7 +222,7 @@ func runASTGrep(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return emitResult(ctx, rc, in, blocks, ModeASTGrep)
 }
 
-// runLineExpansion expands specific line ranges to function boundaries
+// runLineExpansion expands specific line ranges to function boundaries with language detection and block merging.
 func runLineExpansion(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	workspace := rc.PathValidator.Workspace()
 
@@ -267,7 +279,7 @@ func runLineExpansion(ctx context.Context, rc *skillmain.RunContext, in input) e
 	return emitResult(ctx, rc, in, blocks, ModeLine)
 }
 
-// parseASTGrepOutput parses ast-grep JSON output
+// parseASTGrepOutput parses ast-grep JSON output with NDJSON format, workspace path resolution, and error handling.
 func parseASTGrepOutput(output []byte, workspace string, maxMatches int) ([]rawMatch, error) {
 	var matches []rawMatch
 
@@ -304,7 +316,7 @@ func parseASTGrepOutput(output []byte, workspace string, maxMatches int) ([]rawM
 	return matches, scanner.Err()
 }
 
-// mergeOverlappingBlocks merges blocks that overlap or are adjacent.
+// mergeOverlappingBlocks merges blocks that overlap or are adjacent with match aggregation and source preservation.
 // NOTE: When blocks are merged, the Source field retains only the first block's content.
 // Callers should use StartLine/EndLine to re-read source if complete content is needed.
 func mergeOverlappingBlocks(blocks []Block) []Block {
@@ -339,6 +351,7 @@ func mergeOverlappingBlocks(blocks []Block) []Block {
 	return merged
 }
 
+// emitEmptyResult emits empty search results with mode, pattern information, and structured response format.
 func emitEmptyResult(rc *skillmain.RunContext, in input, mode Mode) error {
 	data := map[string]any{
 		"mode":          string(mode),
@@ -353,6 +366,7 @@ func emitEmptyResult(rc *skillmain.RunContext, in input, mode Mode) error {
 	return skillout.Emit(rc, "code/context_grep", data)
 }
 
+// emitResult emits search results with preview generation, artifact storage, file statistics, and comprehensive metrics.
 func emitResult(ctx context.Context, rc *skillmain.RunContext, in input, blocks []Block, mode Mode) error {
 	// Prepare preview and persist full blocks when truncated.
 	previewResult, err := skillout.PreviewAndPersistNDJSON(ctx, rc, blocks, rc.MaxPreview, "code_context_grep", true)

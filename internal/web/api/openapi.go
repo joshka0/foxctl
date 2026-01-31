@@ -395,7 +395,7 @@ const swaggerUIHTML = `<!DOCTYPE html>
 
 // SkillsCRUDHandler handles HTTP methods for /api/skills/{command...}
 // Only skills with openapi.enabled: true accept REST calls.
-// HTTP methods are mapped to operations based on openapi.methods config.
+// The handler returns appropriate HTTP error statuses for bad requests, missing skills, forbidden access, unsupported methods, JSON parse errors, and internal execution errors.
 func SkillsCRUDHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 	runner := NewSkillRunner(cfg)
 
@@ -465,7 +465,7 @@ func SkillsCRUDHandler(cfg config.Config, log zerolog.Logger) http.HandlerFunc {
 		// Build input from body (for POST/PUT/PATCH) or empty
 		var input map[string]any
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
-			if err := readJSON(r, &input); err != nil {
+			if err := readJSON(w, r, &input); err != nil {
 				// Return 400 Bad Request for JSON parse errors
 				httpError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 				return

@@ -61,7 +61,7 @@ const (
 
 var allowedOps = []string{OpWalletInit, OpWalletStatus, OpFetch, OpPay}
 
-// Input defines the skill input parameters.
+// Input defines the skill input parameters for x402 payment operations.
 type Input struct {
 	Operation string `json:"operation"`
 
@@ -87,7 +87,7 @@ type Input struct {
 	Asset  string `json:"asset"`
 }
 
-// Output defines the skill output.
+// Output defines the skill output with wallet, response, and payment information.
 type Output struct {
 	Operation string        `json:"operation"`
 	Wallet    *WalletInfo   `json:"wallet,omitempty"`
@@ -96,7 +96,7 @@ type Output struct {
 	Error     string        `json:"error,omitempty"`
 }
 
-// WalletInfo contains wallet details.
+// WalletInfo contains wallet details with network and balance information.
 type WalletInfo struct {
 	Address  string            `json:"address"`
 	Network  string            `json:"network"`
@@ -105,7 +105,7 @@ type WalletInfo struct {
 	CAIP2    string            `json:"caip2,omitempty"`
 }
 
-// HTTPResponse contains fetch response details.
+// HTTPResponse contains fetch response details with payment status.
 type HTTPResponse struct {
 	StatusCode    int               `json:"status_code"`
 	Headers       map[string]string `json:"headers,omitempty"`
@@ -114,7 +114,7 @@ type HTTPResponse struct {
 	PaymentAmount string            `json:"payment_amount,omitempty"`
 }
 
-// PaymentInfo contains payment transaction details.
+// PaymentInfo contains payment transaction details with status tracking.
 type PaymentInfo struct {
 	TxHash    string `json:"tx_hash,omitempty"`
 	From      string `json:"from"`
@@ -126,7 +126,7 @@ type PaymentInfo struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// PaymentRequirement from x402 protocol.
+// PaymentRequirement from x402 protocol with payment terms and conditions.
 type PaymentRequirement struct {
 	Scheme            string `json:"scheme"`
 	Network           string `json:"network"`
@@ -140,7 +140,7 @@ type PaymentRequirement struct {
 	Extra             any    `json:"extra,omitempty"`
 }
 
-// WalletConfig stores wallet configuration.
+// WalletConfig stores wallet configuration with key management.
 type WalletConfig struct {
 	Type      string `json:"type"`
 	Network   string `json:"network"`
@@ -150,7 +150,7 @@ type WalletConfig struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// JSONRPCRequest for Ethereum RPC calls.
+// JSONRPCRequest for Ethereum RPC calls with standard 2.0 format.
 type JSONRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
@@ -158,7 +158,7 @@ type JSONRPCRequest struct {
 	ID      int    `json:"id"`
 }
 
-// JSONRPCResponse from Ethereum RPC calls.
+// JSONRPCResponse from Ethereum RPC calls with error handling.
 type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int             `json:"id"`
@@ -166,16 +166,27 @@ type JSONRPCResponse struct {
 	Error   *RPCError       `json:"error,omitempty"`
 }
 
-// RPCError from JSON-RPC.
+// RPCError from JSON-RPC with code and message details.
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
+// main is the skill entry point for x402/payment.
 func main() {
 	skillmain.Main(commandName, run)
 }
 
+// run orchestrates x402 payment operations with wallet management and HTTP payment handling.
+//
+// Index:
+// - Purpose: Handle AI-native HTTP micropayments via x402 protocol with wallet management and automatic payment
+// - Flow: validate operation → set defaults → route to handler → execute wallet/fetch/pay operations → emit results
+// - SideEffects: wallet creation; payment execution; HTTP requests with payment headers; balance queries
+// - FailureModes: invalid operations, wallet errors, payment failures, network issues, insufficient funds
+// - Observability: emits wallet status, payment transactions, HTTP responses with payment status
+// - Related: handleWalletInit, handleWalletStatus, handleFetch, handlePay, createPaymentPayload
+// - Keywords: x402/payment, micropayments, cryptocurrency, wallet_management, http_402
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	op := oputil.Op(in.Operation)
 	opHint := fmt.Sprintf("Use one of: %s.", strings.Join(allowedOps, ", "))
@@ -217,6 +228,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 }
 
+// handleWalletInit initializes wallets with support for CDP and local key management.
 func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	var wallet *WalletInfo
 	var err error
@@ -260,6 +272,7 @@ func handleWalletInit(ctx context.Context, rc *skillmain.RunContext, in Input) e
 	return skillout.Emit(rc, commandName, output)
 }
 
+// handleWalletStatus retrieves wallet information including balances via RPC queries.
 func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Load wallet config or use provided address
 	walletCfg, err := loadWalletConfig(rc)
@@ -308,6 +321,7 @@ func handleWalletStatus(ctx context.Context, rc *skillmain.RunContext, in Input)
 	return skillout.Emit(rc, commandName, output)
 }
 
+// handleFetch executes HTTP requests with automatic x402 payment handling for 402 responses.
 func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.URL == "" {
 		return skillerr.Arg("url is required for fetch operation", skillerr.WithHint("Provide url for fetch (e.g., https://example.com)."))
@@ -375,6 +389,7 @@ func handleFetch(ctx context.Context, rc *skillmain.RunContext, in Input) error 
 	return skillout.Emit(rc, commandName, output)
 }
 
+// handle402Response processes HTTP 402 Payment Required responses with payment negotiation.
 func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, resp *http.Response, body []byte) error {
 	// Parse x402 payment requirements from header
 	paymentHeader := resp.Header.Get("X-Payment-Required")
@@ -503,6 +518,7 @@ func handle402Response(ctx context.Context, rc *skillmain.RunContext, in Input, 
 	return skillout.Emit(rc, commandName, output)
 }
 
+// handlePay executes direct cryptocurrency payments with wallet integration.
 func handlePay(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	if in.To == "" {
 		return skillerr.Arg("to is required for pay operation", skillerr.WithHint("Provide recipient address in to."))

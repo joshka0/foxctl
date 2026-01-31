@@ -19,6 +19,7 @@ import (
 
 const skillName = "hooks/stop_guard"
 
+// StopGuardConfig holds configuration for the stop guard hook.
 type StopGuardConfig struct {
 	RequireTests      bool   `json:"require_tests"`
 	RequireReview     bool   `json:"require_review"`
@@ -31,6 +32,7 @@ type StopGuardConfig struct {
 	MaxReviewMessages int    `json:"max_review_messages"`
 }
 
+// defaultStopGuardConfig returns default stop guard configuration.
 func defaultStopGuardConfig() StopGuardConfig {
 	return StopGuardConfig{
 		RequireTests:      true,
@@ -41,10 +43,21 @@ func defaultStopGuardConfig() StopGuardConfig {
 	}
 }
 
+// main is the skill entry point for hooks/stop_guard.
 func main() {
 	skillmain.Main(skillName, run)
 }
 
+// run orchestrates stop validation with test status and review approval requirements.
+//
+// Index:
+// - Purpose: Block StopRequested until tests are green and review approval is present
+// - Flow: load config → validate event → evaluate tests (if required) → evaluate review (if required) → emit decision
+// - SideEffects: test status checking; review approval verification; context building
+// - FailureModes: store access failures, missing test watchers, review verification errors
+// - Observability: emits test results, review status, and blocking reasons
+// - Related: evaluateTests, evaluateReview, buildTestContext, hasReviewApproval, applyConfig
+// - Keywords: hooks/stop_guard, stop_validation, test_requirements, review_approval, quality_gates
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	cfg := defaultStopGuardConfig()
 	applyConfig(&cfg, in.HookConfig)
@@ -102,6 +115,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	return hookutil.EmitOutput(rc, skillName, output, nil)
 }
 
+// evaluateTests checks test status and returns issue/context if tests are not green.
 func evaluateTests(ctx context.Context, storageRoot, workspaceID string, maxFailures int) (string, string, map[string]any) {
 	meta := map[string]any{
 		"tests_required": true,
@@ -145,6 +159,7 @@ func evaluateTests(ctx context.Context, storageRoot, workspaceID string, maxFail
 	return "tests not green", buildTestContext(failing, maxFailures), meta
 }
 
+// buildTestContext formats test failure context for stop guard blocking.
 func buildTestContext(statuses []testwatch.TestStatus, maxFailures int) string {
 	var sb strings.Builder
 	sb.WriteString("Tests are not green:\n\n")
@@ -175,6 +190,7 @@ func buildTestContext(statuses []testwatch.TestStatus, maxFailures int) string {
 	return sb.String()
 }
 
+// evaluateReview checks for review approval and returns issue/context if missing.
 func evaluateReview(
 	ctx context.Context,
 	storageRoot string,
@@ -226,6 +242,7 @@ func evaluateReview(
 	return "review approval missing", context, meta
 }
 
+// hasReviewApproval checks if messages contain required review approval.
 func hasReviewApproval(messages []agent.BoardMessage, cfg StopGuardConfig) bool {
 	for _, msg := range messages {
 		if cfg.ReviewKind != "" && string(msg.Kind) != cfg.ReviewKind {
@@ -242,6 +259,7 @@ func hasReviewApproval(messages []agent.BoardMessage, cfg StopGuardConfig) bool 
 	return false
 }
 
+// matchesSubject checks if message subject matches expected review subject.
 func matchesSubject(subject, expected string) bool {
 	if expected == "" {
 		return true
@@ -254,6 +272,7 @@ func matchesSubject(subject, expected string) bool {
 	return strings.HasPrefix(subject, expected+":")
 }
 
+// applyConfig applies configuration overrides from hook config.
 func applyConfig(cfg *StopGuardConfig, raw map[string]any) {
 	if raw == nil {
 		return
@@ -295,6 +314,7 @@ func applyConfig(cfg *StopGuardConfig, raw map[string]any) {
 	}
 }
 
+// asBool converts any value to boolean with common string representations.
 func asBool(v any) (bool, bool) {
 	switch val := v.(type) {
 	case bool:
@@ -310,6 +330,7 @@ func asBool(v any) (bool, bool) {
 	return false, false
 }
 
+// asInt converts any value to integer with type checking.
 func asInt(v any) (int, bool) {
 	switch val := v.(type) {
 	case int:

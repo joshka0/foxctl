@@ -33,7 +33,7 @@ case "$file_path" in
 esac
 
 # Run security scan on the specific file
-result=$("$AGENTCTL_BIN" run code/security --input "{\"path\":\"$file_path\",\"severity_threshold\":\"$SEVERITY_THRESHOLD\",\"max_results\":5}" 2>/dev/null) || {
+result=$("$AGENTCTL_BIN" run --daemon code/security --input "{\"path\":\"$file_path\",\"severity_threshold\":\"$SEVERITY_THRESHOLD\",\"max_results\":5}" 2>/dev/null) || {
   # On error, fail open
   echo '{}'
   exit 0

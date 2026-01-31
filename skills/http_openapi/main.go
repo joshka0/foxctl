@@ -24,7 +24,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/storage/memory"
 )
 
-// Input matches the OpenAPI skill specification.
+// Input defines the parameters for OpenAPI operation execution.
 type Input struct {
 	Spec        string             `json:"spec"`
 	OperationID string             `json:"operationId"`
@@ -35,7 +35,7 @@ type Input struct {
 	DryRun      bool               `json:"dry_run"`
 }
 
-// PagingConfig configures pagination behavior.
+// PagingConfig configures pagination behavior for OpenAPI operations.
 type PagingConfig struct {
 	Strategy     string `json:"strategy"`
 	MaxPages     int    `json:"max_pages"`
@@ -48,7 +48,7 @@ type PagingConfig struct {
 	PerPageParam string `json:"per_page_param"`
 }
 
-// RetryConfig configures retry behavior.
+// RetryConfig configures retry behavior for HTTP requests.
 type RetryConfig struct {
 	BaseMS      int     `json:"base_ms"`
 	Factor      float64 `json:"factor"`
@@ -58,10 +58,21 @@ type RetryConfig struct {
 
 const command = "http/openapi"
 
+// main is the skill entry point for http/openapi.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates OpenAPI operation execution with pagination, retry, and authentication support.
+//
+// Index:
+// - Purpose: Invoke OpenAPI 3.x operations with authentication, pagination, retry, and dry-run capabilities
+// - Flow: validate input → load spec → build request → apply auth → execute with pagination/retry → emit response
+// - SideEffects: HTTP requests; memory store usage; secret redaction; artifact storage for large responses
+// - FailureModes: spec loading failures, operation not found, authentication errors, HTTP failures
+// - Observability: emits request/response details, pagination summaries, retry attempts, and error hints
+// - Related: executeWithPagination, emitDryRun, emitResponse, wrapOpenAPIError, suggestOperations
+// - Keywords: http/openapi, openapi_execution, http_client, pagination, authentication, retry_logic
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate input
 	if in.Spec == "" {
@@ -167,6 +178,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return emitResponse(rc, response, nil)
 }
 
+// executeWithPagination handles paginated OpenAPI operations with response aggregation.
 func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *http.Request, httpClient *client.Client, pagingCfg *PagingConfig) error {
 	// Create paginator
 	paginator, err := pagination.New(pagination.Config{
@@ -280,6 +292,7 @@ func executeWithPagination(ctx context.Context, rc *skillmain.RunContext, req *h
 	return emitResponse(rc, combined, &summary)
 }
 
+// wrapOpenAPIError converts client errors to appropriate skill error types.
 func wrapOpenAPIError(err error) error {
 	if err == nil {
 		return nil
@@ -302,6 +315,7 @@ func wrapOpenAPIError(err error) error {
 	}
 }
 
+// convertHeaders converts string map to http.Header format.
 func convertHeaders(headers map[string]string) http.Header {
 	h := make(http.Header)
 	for k, v := range headers {
@@ -310,6 +324,7 @@ func convertHeaders(headers map[string]string) http.Header {
 	return h
 }
 
+// aggregateResponses combines multiple paginated responses into a single result.
 func aggregateResponses(bodies []any) any {
 	if len(bodies) == 0 {
 		return nil
@@ -344,6 +359,7 @@ func aggregateResponses(bodies []any) any {
 	return bodies
 }
 
+// emitDryRun outputs the request plan without executing the HTTP request.
 func emitDryRun(rc *skillmain.RunContext, req *builder.Request, in Input) error {
 	// Redact sensitive headers
 	headers := secrets.RedactHeaders(req.Headers)
@@ -394,6 +410,7 @@ func emitDryRun(rc *skillmain.RunContext, req *builder.Request, in Input) error 
 	return skillout.Emit(rc, command, data)
 }
 
+// emitResponse outputs the HTTP response with optional pagination summary.
 func emitResponse(rc *skillmain.RunContext, resp *client.Response, pagingSummary *pagination.Summary) error {
 	summary := map[string]any{
 		"status_code": resp.StatusCode,
@@ -438,6 +455,7 @@ func emitResponse(rc *skillmain.RunContext, resp *client.Response, pagingSummary
 	return skillout.Emit(rc, command, data)
 }
 
+// generateHint provides helpful error messages based on error codes and status.
 func generateHint(code string, statusCode int) string {
 	switch code {
 	case "EAUTH":
@@ -466,6 +484,7 @@ func generateHint(code string, statusCode int) string {
 	}
 }
 
+// generateBuildHint provides specific hints for request building errors.
 func generateBuildHint(err error, spec *loader.Spec, operationID string) string {
 	errMsg := err.Error()
 
@@ -499,6 +518,7 @@ func generateBuildHint(err error, spec *loader.Spec, operationID string) string 
 	return "Review the operation parameters in the OpenAPI spec or use 'agentctl openapi describe <spec>' for details."
 }
 
+// suggestOperations suggests similar operation IDs when a requested operation is not found.
 func suggestOperations(spec *loader.Spec, attempted string) string {
 	if spec == nil || len(spec.Operations) == 0 {
 		return "none"

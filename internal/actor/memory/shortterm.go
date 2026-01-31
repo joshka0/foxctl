@@ -555,16 +555,32 @@ func (m *ShortTermMemory) GetRecentTurns(ctx context.Context, actorID string, co
 
 // compactL0 summarizes pending turns into L1.
 // Uses snapshot-based locking to avoid holding the lock during slow operations.
+// Retries on optimistic lock failure to handle concurrent compaction races.
 func (m *ShortTermMemory) compactL0(ctx context.Context, actorID string) {
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
+		if m.compactL0Once(ctx, actorID) {
+			return // Success or no work needed
+		}
+		// Optimistic lock failed, retry with fresh state
+	}
+}
+
+// compactL0Once attempts a single compaction pass.
+// Returns true if successful or no work needed, false if retry is needed.
+func (m *ShortTermMemory) compactL0Once(ctx context.Context, actorID string) bool {
 	state, err := m.GetState(ctx, actorID)
 	if err != nil || state == nil {
-		return
+		return true // Can't proceed, don't retry
 	}
 
 	startIdx := state.NextTurnToSummarize
 	endIdx := state.TotalTurns
 	if endIdx-startIdx < m.config.RawBufferSize {
-		return // Not enough turns yet
+		return true // Not enough turns yet
 	}
 
 	// Query turns (no global lock held to avoid blocking Append/GetContext).
@@ -575,7 +591,7 @@ func (m *ShortTermMemory) compactL0(ctx context.Context, actorID string) {
 		ORDER BY turn_index ASC
 	`, actorID, startIdx, endIdx)
 	if err != nil {
-		return
+		return true // Query error, don't retry
 	}
 	defer rows.Close()
 
@@ -593,18 +609,18 @@ func (m *ShortTermMemory) compactL0(ctx context.Context, actorID string) {
 	}
 
 	if len(turns) == 0 {
-		return
+		return true // No turns to process
 	}
 
 	// Summarize turns outside of DB tx
 	summary, err := m.summarizer.SummarizeTurns(ctx, state.Task, turns)
 	if err != nil {
-		return // Will retry on next turn
+		return true // Will retry on next turn
 	}
 
 	tx, err := m.db.BeginTx(ctx, nil)
 	if err != nil {
-		return
+		return true // TX error, don't retry
 	}
 	defer func() {
 		_ = tx.Rollback()
@@ -616,7 +632,7 @@ func (m *ShortTermMemory) compactL0(ctx context.Context, actorID string) {
 		FROM actor_summaries
 		WHERE actor_id = ?
 	`, actorID).Scan(&summaryIdx); err != nil {
-		return
+		return true // Query error, don't retry
 	}
 
 	res, err := tx.ExecContext(ctx, `
@@ -627,11 +643,11 @@ func (m *ShortTermMemory) compactL0(ctx context.Context, actorID string) {
 		WHERE actor_id = ? AND next_turn_to_summarize = ?
 	`, endIdx, actorID, startIdx)
 	if err != nil {
-		return
+		return true // Update error, don't retry
 	}
 	rowsAffected, err := res.RowsAffected()
 	if err != nil || rowsAffected == 0 {
-		return // Another compaction raced or state changed
+		return false // Another compaction raced - retry with fresh state
 	}
 
 	_, err = tx.ExecContext(ctx, `
@@ -641,11 +657,11 @@ func (m *ShortTermMemory) compactL0(ctx context.Context, actorID string) {
 		summary.Content, serializeStrings(summary.KeyPoints), serializeStrings(summary.Decisions),
 		summary.TokenCount, summary.CreatedAt)
 	if err != nil {
-		return
+		return true // Insert error, don't retry
 	}
 
 	if err := tx.Commit(); err != nil {
-		return
+		return true // Commit error, don't retry
 	}
 
 	// Update local view and consider L1→L2 compaction.
@@ -655,6 +671,7 @@ func (m *ShortTermMemory) compactL0(ctx context.Context, actorID string) {
 		state.NextSummaryToDistill = summaryIdx
 	}
 	m.checkL1Compaction(ctx, actorID, state)
+	return true // Success
 }
 
 // checkL1Compaction checks if L1→L2 distillation is needed.

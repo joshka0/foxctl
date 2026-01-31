@@ -130,7 +130,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
           metadata: {}
         }
       }')
-    printf '%s' "$file_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
+    printf '%s' "$file_node_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
 
     # Create task node (upsert) - note: node_id uses "task:" prefix per graph conventions
     task_node_input=$(jq -nc \
@@ -147,7 +147,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
           metadata: {}
         }
       }')
-    printf '%s' "$task_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
+    printf '%s' "$task_node_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
 
     # Create "modifies" edge - note: from_id/to_id use prefixed node IDs
     edge_input=$(jq -nc \
@@ -168,7 +168,7 @@ if [[ "${AGENTCTL_TASK_FILE_LINK_SYNC:-}" != "1" ]]; then
           metadata: {}
         }
       }')
-    printf '%s' "$edge_input" | "$AGENTCTL_BIN" run graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
+    printf '%s' "$edge_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - >> "$LOG_FILE" 2>&1 || true
   ) &
   disown
 
@@ -194,7 +194,7 @@ file_node_input=$(jq -nc \
     }
   }')
 
-printf '%s' "$file_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - &>/dev/null || true
+printf '%s' "$file_node_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - &>/dev/null || true
 
 # Create task node (upsert) - note: node_id uses "task:" prefix per graph conventions
 task_node_input=$(jq -nc \
@@ -212,7 +212,7 @@ task_node_input=$(jq -nc \
     }
   }')
 
-printf '%s' "$task_node_input" | "$AGENTCTL_BIN" run graph/manage --input-file - &>/dev/null || true
+printf '%s' "$task_node_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - &>/dev/null || true
 
 # Create "modifies" edge - note: from_id/to_id use prefixed node IDs
 edge_input=$(jq -nc \
@@ -234,7 +234,7 @@ edge_input=$(jq -nc \
     }
   }')
 
-if printf '%s' "$edge_input" | "$AGENTCTL_BIN" run graph/manage --input-file - &>/dev/null; then
+if printf '%s' "$edge_input" | "$AGENTCTL_BIN" run --daemon graph/manage --input-file - &>/dev/null; then
   jq -nc --arg file "$rel_path" --arg task "$task_title" '{
     decision: "approve",
     context: ("**Graph:** Linked `" + $file + "` → task \"" + $task + "\"")

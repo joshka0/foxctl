@@ -1,4 +1,5 @@
-// Package main implements the build/godot skill for exporting Godot projects.
+// Package main implements the build/godot skill for exporting and building Godot projects.
+// Provides export preset management, project export, and C# build operations.
 package main
 
 import (
@@ -29,7 +30,7 @@ const (
 	ActionClean       = "clean"
 )
 
-// Input represents the skill input parameters.
+// Input represents the skill input parameters for build/godot operations.
 type Input struct {
 	Action      string `json:"action"`
 	Preset      string `json:"preset"`
@@ -46,7 +47,7 @@ type Input struct {
 	DotnetPath    string `json:"dotnet_path"`   // Path to dotnet executable
 }
 
-// ExportPreset represents a parsed export preset.
+// ExportPreset represents a parsed export preset configuration.
 type ExportPreset struct {
 	Name       string `json:"name"`
 	Platform   string `json:"platform"`
@@ -54,10 +55,21 @@ type ExportPreset struct {
 	Runnable   bool   `json:"runnable"`
 }
 
+// main is the skill entry point for build/godot.
 func main() {
 	skillmain.Main(skillName, run)
 }
 
+// run orchestrates build/godot operations based on the specified action.
+//
+// Index:
+// - Purpose: Execute Godot project operations including export, build, and preset management
+// - Flow: validate action → apply defaults → route to action handler (listPresets/exportProject/buildCSharp/restoreCSharp/cleanCSharp)
+// - SideEffects: file system operations (exports, builds, directory creation); external process execution (godot, dotnet)
+// - FailureModes: missing export_presets.cfg, invalid preset, godot/dotnet not found, build failures, I/O errors
+// - Observability: emits action-specific results (presets/count, export results, build results)
+// - Related: listPresets, exportProject, buildCSharp, restoreCSharp, cleanCSharp, emitSuccess, executil.Run
+// - Keywords: build/godot, action, preset, export, build, list_presets, validate, restore, clean
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// Validate
 	if strings.TrimSpace(in.Action) == "" {
@@ -94,6 +106,16 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	}
 }
 
+// listPresets parses and returns available export presets from export_presets.cfg.
+//
+// Index:
+// - Purpose: List all available export presets for the Godot project
+// - Flow: parse export_presets.cfg → return preset list with count
+// - SideEffects: file read (export_presets.cfg)
+// - FailureModes: missing export_presets.cfg, file parse errors
+// - Observability: emits action/presets/count/summary
+// - Related: parseExportPresets, emitSuccess
+// - Keywords: list_presets, export_presets.cfg, presets, count, parseExportPresets
 func listPresets(ctx context.Context, rc *skillmain.RunContext, workspace string) error {
 	presets, err := parseExportPresets(workspace)
 	if err != nil {
@@ -115,6 +137,16 @@ func listPresets(ctx context.Context, rc *skillmain.RunContext, workspace string
 	return emitSuccess(rc, result)
 }
 
+// exportProject exports the Godot project using the specified preset.
+//
+// Index:
+// - Purpose: Export Godot project to target platform using preset configuration
+// - Flow: validate preset → parse presets → match preset → resolve output path → create output dir → export via godot CLI
+// - SideEffects: file system writes (exported files); external process execution (godot)
+// - FailureModes: invalid preset, missing export path, godot execution failures, permission errors
+// - Observability: emits action/preset/platform/output_path/output_exists/exit_code/duration_ms/stdout/stderr/output_size_bytes/summary
+// - Related: parseExportPresets, emitSuccess, executil.Run
+// - Keywords: export, preset, platform, output_path, godot, export_debug, pack_only, dry_run
 func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input, dryRun bool) error {
 	// Validate preset is provided
 	if strings.TrimSpace(in.Preset) == "" {
@@ -242,6 +274,7 @@ func exportProject(ctx context.Context, rc *skillmain.RunContext, workspace stri
 	return emitSuccess(rc, result)
 }
 
+// parseExportPresets parses the export_presets.cfg file into ExportPreset structs.
 func parseExportPresets(workspace string) ([]ExportPreset, error) {
 	cfgPath := filepath.Join(workspace, "export_presets.cfg")
 
@@ -319,18 +352,31 @@ func parseExportPresets(workspace string) ([]ExportPreset, error) {
 	return presets, nil
 }
 
+// buildCSharp builds the C# project using dotnet.
 func buildCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "build")
 }
 
+// restoreCSharp restores NuGet packages for the C# project.
 func restoreCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "restore")
 }
 
+// cleanCSharp cleans the C# project build outputs.
 func cleanCSharp(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input) error {
 	return runDotnet(ctx, rc, workspace, in, "clean")
 }
 
+// runDotnet executes a dotnet command (build/restore/clean) on the project.
+//
+// Index:
+// - Purpose: Execute dotnet commands for C# Godot project management
+// - Flow: find .csproj file → build dotnet args → execute dotnet command → emit results
+// - SideEffects: external process execution (dotnet); file system operations (build outputs)
+// - FailureModes: missing .csproj file, dotnet not found, build failures
+// - Observability: emits action/csproj/exit_code/duration_ms/stdout/stderr/configuration/summary
+// - Related: findCsproj, emitSuccess, executil.Run
+// - Keywords: dotnet, build, restore, clean, csproj, configuration, verbosity, target
 func runDotnet(ctx context.Context, rc *skillmain.RunContext, workspace string, in Input, command string) error {
 	// Find the .csproj file
 	csprojPath, err := findCsproj(workspace)
@@ -402,6 +448,7 @@ func runDotnet(ctx context.Context, rc *skillmain.RunContext, workspace string, 
 	return emitSuccess(rc, result)
 }
 
+// findCsproj locates the .csproj file in the workspace directory.
 func findCsproj(workspace string) (string, error) {
 	// Look for .csproj files in workspace
 	entries, err := os.ReadDir(workspace)
@@ -421,6 +468,7 @@ func findCsproj(workspace string) (string, error) {
 	)
 }
 
+// emitSuccess emits a successful result with the provided data.
 func emitSuccess(rc *skillmain.RunContext, result map[string]any) error {
 	return skillout.Emit(rc, skillName, result)
 }

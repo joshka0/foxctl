@@ -30,10 +30,21 @@ const (
 	DefaultRecipient = "overseer"
 )
 
+// main is the skill entry point for hooks/overseer_inbox.
 func main() {
 	skillmain.Main("hooks/overseer_inbox", run)
 }
 
+// run orchestrates overseer inbox monitoring with recipient filtering and auto-acknowledgment.
+//
+// Index:
+// - Purpose: Surface mailbox messages sent to overseer (or broadcast) for human-in-the-loop communication
+// - Flow: resolve workspace → get recipient config → open board store → query inbox → build context → auto-mark surfaced → emit results
+// - SideEffects: message surfacing; auto-acknowledgment; context injection
+// - FailureModes: store access failures, inbox query errors
+// - Observability: emits message counts, recipient info, and formatted overseer context
+// - Related: buildOverseerContext, priorityToEmoji, kindToLabel
+// - Keywords: hooks/overseer_inbox, overseer_communication, message_monitoring, auto_acknowledgment, human_in_the_loop
 func run(ctx context.Context, rc *skillmain.RunContext, in hooks.Input) error {
 	paths := sessionkit.ResolvePaths(rc.Config)
 

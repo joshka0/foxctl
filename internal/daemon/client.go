@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +25,12 @@ func NewClient() *Client {
 
 // IsRunning checks if the daemon is running by attempting a connection.
 func (c *Client) IsRunning() bool {
-	conn, err := c.connect()
+	return c.isRunningWithTimeout(2 * time.Second)
+}
+
+// isRunningWithTimeout checks if the daemon is running with a custom dial timeout.
+func (c *Client) isRunningWithTimeout(timeout time.Duration) bool {
+	conn, err := net.DialTimeout("unix", c.socketPath, timeout)
 	if err != nil {
 		return false
 	}
@@ -355,6 +361,54 @@ func PIDPath() string {
 // ErrDaemonNotRunning is returned when the daemon is not running.
 var ErrDaemonNotRunning = errors.New("daemon not running")
 
+// EnsureRunning starts the daemon if it's not already running.
+// It returns nil if the daemon is now running, or an error if it couldn't be started.
+// This is a convenience wrapper that uses a 10-second timeout.
+func (c *Client) EnsureRunning() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return c.EnsureRunningContext(ctx)
+}
+
+// EnsureRunningContext starts the daemon if it's not already running, with context support.
+// It returns nil if the daemon is now running, or an error if it couldn't be started.
+func (c *Client) EnsureRunningContext(ctx context.Context) error {
+	// Check context before starting
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	// Use short dial timeout for quick checks
+	const pollDialTimeout = 200 * time.Millisecond
+	const pollInterval = 200 * time.Millisecond
+
+	if c.isRunningWithTimeout(pollDialTimeout) {
+		return nil
+	}
+
+	// Start daemon in background
+	if err := Daemonize(); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
+	}
+
+	// Wait for daemon to be ready, respecting context
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("daemon started but not responding: %w", ctx.Err())
+		case <-ticker.C:
+			if c.isRunningWithTimeout(pollDialTimeout) {
+				return nil
+			}
+		}
+	}
+}
+
+// marshalResult marshals the given value to JSON and returns the resulting bytes.
+// If marshaling fails, the error is wrapped with context "marshal result".
 func marshalResult(v any) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {

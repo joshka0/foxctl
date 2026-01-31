@@ -17,6 +17,7 @@ import (
 	"github.com/jkatigb/agentctl/internal/tools/ripgrep"
 )
 
+// input defines the parameters for context-aware ripgrep searches with code block expansion.
 type input struct {
 	Path            string   `json:"path"`
 	Pattern         string   `json:"pattern" validate:"required"`
@@ -35,10 +36,21 @@ type (
 	rawMatch     = codeblocks.RawMatch
 )
 
+// main is the skill entry point for code/context_ripgrep.
 func main() {
 	skillmain.Main("code/context_ripgrep", run)
 }
 
+// run orchestrates context-aware ripgrep searches with code block expansion and artifact storage.
+//
+// Index:
+// - Purpose: Perform ripgrep searches and expand matches to surrounding code blocks using language-specific heuristics
+// - Flow: validate input → check ripgrep availability → resolve path → execute search → expand matches → emit results
+// - SideEffects: file system searching; code block extraction; artifact storage; preview generation
+// - FailureModes: ripgrep unavailable, invalid paths, search execution failures, code block expansion errors
+// - Observability: emits match counts, block counts, file statistics, and expanded code context
+// - Related: codeblocks.ExpandMatches, rgutil.Normalize, emitEmptyResult, parseInput
+// - Keywords: code/context_ripgrep, ripgrep_search, code_blocks, context_expansion, pattern_matching
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Apply defaults
 	if in.MaxBlocks <= 0 {
@@ -121,6 +133,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, "code/context_ripgrep", data)
 }
 
+// emitEmptyResult outputs a structured empty result when no matches are found.
 func emitEmptyResult(rc *skillmain.RunContext, in input) error {
 	data := textmatch.EmptySearchResult(in.Pattern, in.CaseInsensitive, []BlockPreview{})
 	data["block_count"] = 0
@@ -128,7 +141,7 @@ func emitEmptyResult(rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, "code/context_ripgrep", data)
 }
 
-// parseInput parses and validates input from a reader.
+// parseInput parses and validates input from a reader with defaults and validation.
 // Exported for testing.
 func parseInput(r io.Reader) (input, error) {
 	var in input

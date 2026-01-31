@@ -124,7 +124,7 @@ sync_input=$(jq -nc \
 
 # Run inbound sync skill
 sync_stderr=$(mktemp)
-result=$(printf '%s' "$sync_input" | "$AGENTCTL_BIN" run todo/sync_from_provider --input-file - 2>"$sync_stderr") || {
+result=$(printf '%s' "$sync_input" | "$AGENTCTL_BIN" run --daemon todo/sync_from_provider --input-file - 2>"$sync_stderr") || {
   error_detail=$(cat "$sync_stderr" 2>/dev/null || echo "unknown error")
   rm -f "$sync_stderr"
   [[ -n "$DEBUG" ]] && echo "DEBUG: sync skill failed: $error_detail" >&2
@@ -154,7 +154,7 @@ warnings=$(printf '%s' "$result" | jq -r '.data.warnings // [] | join("; ")')
 # Queue task embeddings in background if any tasks were created/updated
 if ((created > 0 || updated > 0)); then
   embed_input=$(jq -nc --arg ws "$workspace" '{scope: "workspace", workspace_id: $ws}')
-  ("$AGENTCTL_BIN" run embedding/tasks --input "$embed_input" 2>/dev/null &) || true
+  ("$AGENTCTL_BIN" run --daemon embedding/tasks --input "$embed_input" 2>/dev/null &) || true
   [[ -n "$DEBUG" ]] && echo "DEBUG: queued task embeddings for workspace" >&2
 fi
 
@@ -226,7 +226,7 @@ if [[ "${AGENTCTL_TODO_BIDIRECTIONAL:-}" == "1" ]]; then
 
   # Enable provider state writes for outbound sync
   export AGENTCTL_ALLOW_PROVIDER_STATE=1
-  outbound_result=$(printf '%s' "$outbound_input" | "$AGENTCTL_BIN" run todo/sync_to_provider --input-file - 2>/dev/null) || true
+  outbound_result=$(printf '%s' "$outbound_input" | "$AGENTCTL_BIN" run --daemon todo/sync_to_provider --input-file - 2>/dev/null) || true
 
   if [[ -n "$outbound_result" ]]; then
     written=$(printf '%s' "$outbound_result" | jq -r '.data.written // 0')

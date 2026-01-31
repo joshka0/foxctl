@@ -41,7 +41,9 @@ type Store struct {
 	cas             *cas.Store
 	artifactManager artifacts.Manager
 	path            string
+	close           func() error
 }
+
 
 // Stats aliases the shared memory stats type.
 type Stats = storage.MemoryStats
@@ -64,14 +66,19 @@ const (
 	defaultConnMaxIdleTime = 15 * time.Minute // Idle connection timeout
 )
 
-// Open initializes the memory store rooted at the provided path.
+// Open initializes a memory-backed Store rooted at the provided filesystem path.
+// It creates or opens the SQLite database at root/memory.db, runs migrations, and configures the DB connection pool; if casPath is non-empty it also initializes a CAS store and an artifacts.Manager.
 func Open(ctx context.Context, root string, casPath string) (store *Store, err error) {
 	dbPath := filepath.Join(root, "memory.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("memory: open db: %w", err)
 	}
-	defer errs.CloseOnErr(db, &err)
+	defer func() {
+		if err != nil {
+			_ = closeFn()
+		}
+	}()
 
 	// Configure connection pool for optimal performance
 	// Note: For SQLite, too many concurrent connections can cause contention
@@ -91,20 +98,27 @@ func Open(ctx context.Context, root string, casPath string) (store *Store, err e
 		}
 		artifactMgr = artifacts.NewManager(casStore)
 	}
-	store = &Store{db: db, cas: casStore, artifactManager: artifactMgr, path: dbPath}
+	store = &Store{db: db, cas: casStore, artifactManager: artifactMgr, path: dbPath, close: closeFn}
 	return store, nil
 }
 
+
 // OpenFromConfig opens the memory store using paths from config.
-// This is the preferred way to open the store as it ensures correct path handling.
+// OpenFromConfig opens a Store using paths from the provided configuration.
+// It uses cfg.Storage.Root as the storage root and cfg.Paths.CAS as the CAS path.
+// It returns the opened Store or an error if initialization fails.
 func OpenFromConfig(ctx context.Context, cfg config.Config) (*Store, error) {
 	return Open(ctx, cfg.Storage.Root, cfg.Paths.CAS)
 }
 
 // Close releases resources.
 func (s *Store) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
+
 
 // DB returns the underlying *sql.DB for advanced operations like search.
 // This allows callers to use WrapSQLDB for creating a dbdriver.DB.

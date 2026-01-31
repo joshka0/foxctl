@@ -73,7 +73,7 @@ input_json=$(jq -nc --arg path "$abs_path" '{
   include_private: false,
   max_results: 20
 }')
-symbols_result=$("$AGENTCTL_BIN" run code/symbols --ephemeral --input "$input_json" 2>/dev/null) || symbols_result="{}"
+symbols_result=$("$AGENTCTL_BIN" run --daemon code/symbols --ephemeral --input "$input_json" 2>/dev/null) || symbols_result="{}"
 
 # Extract key symbols (functions, types, structs)
 key_functions=$(echo "$symbols_result" | jq -r --argjson max "$MAX_SYMBOLS" '

@@ -23,16 +23,27 @@ import (
 	errs "github.com/jkatigb/agentctl/internal/platform/errors"
 )
 
-// Input defines the input parameters for fs/read.
+// Input defines the input parameters for fs/read operations.
 type Input struct {
 	Path     string `json:"path" validate:"required"`
 	MaxBytes int    `json:"max_bytes" validate:"gte=0"`
 }
 
+// main is the skill entry point for fs/read.
 func main() {
 	skillmain.Main("fs/read", run)
 }
 
+// run orchestrates file reading with symlink safety, CAS storage, and preview generation.
+//
+// Index:
+// - Purpose: Read files safely with symlink protection, CAS storage, and text preview generation
+// - Flow: validate path → resolve symlinks → open file → store in CAS → generate preview → emit results
+// - SideEffects: file system access; CAS storage; symlink resolution; preview generation
+// - FailureModes: invalid paths, symlink attacks, permission errors, file not found, CAS errors
+// - Observability: emits file metadata, preview content, CAS artifacts, and binary/text detection
+// - Related: previewLimit, readPreview, formatPreviewWithLineNumbers, detectKind
+// - Keywords: fs/read, file_reading, symlink_safety, cas_storage, preview_generation
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	validPath, err := skillmain.ValidatePath(rc, in.Path)
 	if err != nil {
@@ -119,6 +130,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, "fs/read", data)
 }
 
+// previewLimit determines the maximum bytes to preview based on config and input.
 func previewLimit(rc *skillmain.RunContext, in Input) int {
 	maxInline := rc.InlineKB * 1024
 	if maxInline <= 0 {
@@ -130,6 +142,7 @@ func previewLimit(rc *skillmain.RunContext, in Input) int {
 	return maxInline
 }
 
+// readPreview reads up to limit bytes from reader and indicates if more data exists.
 func readPreview(r io.Reader, limit int) ([]byte, bool, error) {
 	if limit <= 0 {
 		limit = 1
@@ -146,6 +159,16 @@ func readPreview(r io.Reader, limit int) ([]byte, bool, error) {
 	}
 }
 
+// formatPreviewWithLineNumbers adds line numbers to text preview.
+//
+// Index:
+// - Purpose: Add line numbers to text preview
+// - Flow: count lines → add line numbers → return formatted preview
+// - SideEffects: none
+// - FailureModes: none
+// - Observability: none
+// - Related: readPreview, detectKind
+// - Keywords: format_preview, line_numbers
 func formatPreviewWithLineNumbers(preview string, lineCount int) string {
 	if preview == "" {
 		return ""
@@ -181,6 +204,16 @@ func formatPreviewWithLineNumbers(preview string, lineCount int) string {
 	return out.String()
 }
 
+// detectKind determines the MIME type based on file extension.
+//
+// Index:
+// - Purpose: Determine the MIME type based on file extension
+// - Flow: check extension → return MIME type
+// - SideEffects: none
+// - FailureModes: none
+// - Observability: none
+// - Related: readPreview, formatPreviewWithLineNumbers
+// - Keywords: detect_kind, mime_type, extension
 func detectKind(path string) string {
 	ext := strings.ToLower(filepath.Ext(path))
 	switch ext {

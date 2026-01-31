@@ -26,10 +26,18 @@ type Server struct {
 }
 
 // NewServer creates a new web server.
-// The ctx is used for console hub persistence goroutines - pass the application lifecycle context.
+// NewServer creates and returns a configured Server for the web layer.
+// It initializes the SSE hub and the console websocket hub, configures console
+// session persistence and the console runner factory, and wires observability
+// events to the SSE publisher.
+// The provided ctx is used for console hub persistence goroutines and should be
+// tied to the application's lifecycle.
 func NewServer(ctx context.Context, opts Options, cfg config.Config, log zerolog.Logger) (*Server, error) {
 	sseHub := sse.NewHub()
 	consoleHub := consolews.NewHub(ctx)
+
+	// Wire up observability events to SSE for real-time activity streaming
+	observability.SetSSEPublisher(sseHub)
 
 	// Set up persistence adapter for console sessions
 	persistence := consolews.NewPersistenceAdapter(cfg.Storage.Root)
@@ -164,6 +172,10 @@ func (s *Server) Handler() http.Handler {
 
 	// --- Blackboard (Phase 11) ---
 	apiMux.HandleFunc("/api/blackboard", api.BlackboardListHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/blackboard/", api.BlackboardDetailHandler(s.cfg, s.log))
+
+	// --- Logs (Phase 12 - GUI) ---
+	apiMux.HandleFunc("/api/logs", api.LogsHandler(s.cfg, s.log))
 
 	// --- SQLite Browser (Phase 11) ---
 	apiMux.HandleFunc("/api/sqlite", api.SQLiteHandler(s.cfg, s.log))
@@ -179,6 +191,39 @@ func (s *Server) Handler() http.Handler {
 	// --- Companion (RLM Mobile Backend) ---
 	apiMux.HandleFunc("/api/companion/chat", api.CompanionChatHandler(s.cfg, s.log))
 	apiMux.HandleFunc("/api/companion/conversations", api.CompanionConversationsHandler(s.cfg, s.log))
+	apiMux.HandleFunc("/api/companion/conversations/", func(w http.ResponseWriter, r *http.Request) {
+		// Route based on sub-path: /api/companion/conversations/:id/(messages|personality)
+		// or DELETE /api/companion/conversations/:id for soft delete
+		path := strings.TrimPrefix(r.URL.Path, "/api/companion/conversations/")
+		parts := strings.Split(path, "/")
+		if len(parts) >= 2 && parts[1] != "" {
+			switch parts[1] {
+			case "messages":
+				api.CompanionConversationMessagesHandler(s.cfg, s.log).ServeHTTP(w, r)
+			case "personality":
+				// Check for sub-path: /api/companion/conversations/:id/personality/dimension
+				if len(parts) >= 3 && parts[2] == "dimension" {
+					api.CompanionPersonalityDimensionPatchHandler(s.cfg, s.log).ServeHTTP(w, r)
+				} else {
+					api.CompanionPersonalityHandler(s.cfg, s.log).ServeHTTP(w, r)
+				}
+			default:
+				http.Error(w, "unknown conversation endpoint", http.StatusNotFound)
+			}
+		} else if len(parts) >= 1 && parts[0] != "" {
+			// /api/companion/conversations/:id - DELETE for soft delete, PATCH for rename
+			switch r.Method {
+			case http.MethodDelete:
+				api.CompanionConversationDeleteHandler(s.cfg, s.log).ServeHTTP(w, r)
+			case http.MethodPatch:
+				api.CompanionConversationRenameHandler(s.cfg, s.log).ServeHTTP(w, r)
+			default:
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+		} else {
+			http.Error(w, "invalid conversation path", http.StatusBadRequest)
+		}
+	})
 	apiMux.HandleFunc("/api/companion/context", api.CompanionContextSetHandler(s.cfg, s.log))
 	// Context routes with path params (GET, DELETE for specific conversation/key)
 	apiMux.HandleFunc("/api/companion/context/", func(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +245,40 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	// Character routes (presence)
+	skillRunner := api.NewSkillRunner(s.cfg)
+	apiMux.HandleFunc("/api/companion/characters", api.CompanionCharacterCreateHandler(s.cfg, s.log, skillRunner))
+	apiMux.HandleFunc("/api/companion/characters/", func(w http.ResponseWriter, r *http.Request) {
+		// Route based on path and method
+		// GET  /api/companion/characters/:conversation_id           → list characters
+		// GET  /api/companion/characters/:conversation_id/:id       → get character
+		// POST /api/companion/characters/:conversation_id/:id/overlays → add overlay
+		path := strings.TrimPrefix(r.URL.Path, "/api/companion/characters/")
+		parts := strings.Split(path, "/")
+
+		switch r.Method {
+		case http.MethodGet:
+			if len(parts) >= 2 && parts[1] != "" {
+				// GET /:conversation_id/:character_id
+				api.CompanionCharacterGetHandler(s.cfg, s.log, skillRunner).ServeHTTP(w, r)
+			} else if len(parts) >= 1 && parts[0] != "" {
+				// GET /:conversation_id
+				api.CompanionCharactersListHandler(s.cfg, s.log, skillRunner).ServeHTTP(w, r)
+			} else {
+				http.Error(w, "conversation_id required", http.StatusBadRequest)
+			}
+		case http.MethodPost:
+			if len(parts) >= 3 && parts[2] == "overlays" {
+				// POST /:conversation_id/:character_id/overlays
+				api.CompanionCharacterOverlayHandler(s.cfg, s.log, skillRunner).ServeHTTP(w, r)
+			} else {
+				http.Error(w, "invalid path for POST", http.StatusBadRequest)
+			}
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// Memory routes with path params
 	apiMux.HandleFunc("/api/companion/memory/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/companion/memory/")

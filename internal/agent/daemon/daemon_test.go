@@ -726,9 +726,9 @@ func TestDaemon_CompanionMemory(t *testing.T) {
 
 	// Verify conversation turns were stored in companion memory
 	dbPath := filepath.Join(root, "companion.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, nil)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, nil)
 	require.NoError(t, err)
-	defer func() { _ = db.Close() }()
+	defer func() { _ = closeFn() }()
 
 	mem, err := companion.NewConversationMemory(db)
 	require.NoError(t, err)

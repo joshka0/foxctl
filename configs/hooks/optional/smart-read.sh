@@ -56,7 +56,7 @@ input_json=$(jq -nc --arg path "$file_path" --argjson include_private "$INCLUDE_
   include_private: $include_private,
   max_results: 50
 }')
-result=$("$AGENTCTL_BIN" run code/symbols --input "$input_json" 2>/dev/null) || {
+result=$("$AGENTCTL_BIN" run --daemon code/symbols --input "$input_json" 2>/dev/null) || {
   # On error, fail open
   echo '{}'
   exit 0

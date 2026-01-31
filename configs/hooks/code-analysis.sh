@@ -78,7 +78,7 @@ if [[ "${AGENTCTL_COMPLEXITY_DISABLED:-}" != "1" ]]; then
     max_results: 5
   }')
 
-  result=$("$AGENTCTL_BIN" run code/complexity --input "$input_json" 2>/dev/null) || true
+  result=$("$AGENTCTL_BIN" run --daemon code/complexity --input "$input_json" 2>/dev/null) || true
 
   if [[ -n "$result" ]]; then
     results=$(echo "$result" | jq -r '.data.results // []')
@@ -127,7 +127,7 @@ if [[ "${AGENTCTL_IMPACT_DISABLED:-}" != "1" ]]; then
       max_results: $max
     }')
 
-    symbols_result=$("$AGENTCTL_BIN" run code/symbols --ephemeral --input "$input_json" 2>/dev/null) || true
+    symbols_result=$("$AGENTCTL_BIN" run --daemon code/symbols --ephemeral --input "$input_json" 2>/dev/null) || true
 
     if [[ -n "$symbols_result" ]]; then
       symbols=$(echo "$symbols_result" | jq -r '.data.preview // []')
@@ -179,7 +179,7 @@ if [[ "${AGENTCTL_IMPACT_DISABLED:-}" != "1" ]]; then
             operation: "references"
           }')
 
-          refs_result=$("$AGENTCTL_BIN" run "$lsp_skill" --ephemeral --input "$lsp_input" 2>/dev/null) || true
+          refs_result=$("$AGENTCTL_BIN" run --daemon "$lsp_skill" --ephemeral --input "$lsp_input" 2>/dev/null) || true
 
           if [[ -n "$refs_result" ]]; then
             ref_count=$(echo "$refs_result" | jq -r --arg self "$abs_file_path" '

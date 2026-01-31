@@ -59,7 +59,7 @@ const (
 	EnvGoogleAPIKey    = "GOOGLE_API_KEY"
 )
 
-// APIKeys holds all LLM provider API keys.
+// APIKeys holds all LLM provider API keys for boundary injection.
 // FC/IS: Collected at boundary (run) and passed to pure functions.
 type APIKeys struct {
 	Cerebras      string
@@ -70,7 +70,7 @@ type APIKeys struct {
 	Google        string
 }
 
-// LoadAPIKeys reads all API keys from environment.
+// LoadAPIKeys reads all API keys from environment for pure function usage.
 // FC/IS: Called once at boundary, returns pure data structure.
 func LoadAPIKeys() APIKeys {
 	return APIKeys{
@@ -83,7 +83,7 @@ func LoadAPIKeys() APIKeys {
 	}
 }
 
-// Input is the expected JSON input.
+// Input is the expected JSON input for LLM-based code search ranking.
 type Input struct {
 	WorkspaceID string      `json:"workspace_id"`
 	Question    string      `json:"question" validate:"required"`
@@ -92,7 +92,7 @@ type Input struct {
 	Limits      Limits      `json:"limits,omitempty"`
 }
 
-// Candidate represents a file candidate with optional content.
+// Candidate represents a file candidate with optional content for ranking.
 type Candidate struct {
 	Path     string  `json:"path"`
 	SymbolID string  `json:"symbol_id,omitempty"`
@@ -100,20 +100,20 @@ type Candidate struct {
 	Priority float64 `json:"priority,omitempty"`
 }
 
-// Limits controls the ranking process.
+// Limits controls the ranking process with candidate and timing constraints.
 type Limits struct {
 	MaxCandidates int           `json:"max_candidates,omitempty"`
 	Timeout       time.Duration `json:"timeout_ms,omitempty,format:units"`
 }
 
-// Output is the skill output structure.
+// Output is the skill output structure with unified rankings and provider results.
 type Output struct {
 	Summary          Summary                   `json:"summary"`
 	RankedCandidates []RankedCandidate         `json:"ranked_candidates"`
 	ProviderResults  map[string]ProviderResult `json:"provider_results"`
 }
 
-// Summary contains aggregated statistics.
+// Summary contains aggregated statistics for the ranking operation.
 type Summary struct {
 	CandidatesRanked  int              `json:"candidates_ranked"`
 	ProvidersUsed     []string         `json:"providers_used"`
@@ -121,7 +121,7 @@ type Summary struct {
 	DurationMS        int64            `json:"duration_ms"`
 }
 
-// RankedCandidate is the output representation of a ranked candidate.
+// RankedCandidate is the output representation of a ranked candidate with provider breakdown.
 type RankedCandidate struct {
 	Path        string             `json:"path"`
 	SymbolID    string             `json:"symbol_id,omitempty"`
@@ -131,7 +131,7 @@ type RankedCandidate struct {
 	ByProvider  map[string]float64 `json:"by_provider"`
 }
 
-// ProviderResult contains the result from a single provider.
+// ProviderResult contains the result from a single provider with status and latency.
 type ProviderResult struct {
 	Provider   string          `json:"provider"`
 	Status     string          `json:"status"` // "ok", "error", "timeout"
@@ -140,7 +140,7 @@ type ProviderResult struct {
 	DurationMS int64           `json:"duration_ms"`
 }
 
-// ProviderScore is a single provider's score for a candidate.
+// ProviderScore is a single provider's score for a candidate with explanation.
 type ProviderScore struct {
 	Path        string  `json:"path"`
 	Score       float64 `json:"score"`
@@ -157,11 +157,12 @@ type RankingProvider interface {
 	RankCandidates(ctx context.Context, question string, candidates []Candidate) ([]ProviderScore, error)
 }
 
+// main is the skill entry point for code/llm_search.
 func main() {
 	skillmain.Main(Command, run)
 }
 
-// detectAvailableProviders returns providers that have API keys configured.
+// detectAvailableProviders returns providers that have API keys configured with priority ordering.
 // FC/IS: Pure function - uses keys passed from boundary.
 func detectAvailableProviders(keys APIKeys) []string {
 	var providers []string
@@ -192,7 +193,16 @@ func detectAvailableProviders(keys APIKeys) []string {
 	return providers
 }
 
-// run is the main skill logic.
+// run is the main skill logic orchestrating multi-provider LLM ranking with parallel execution.
+//
+// Index:
+// - Purpose: Send candidates to multiple LLM providers for relevance ranking and combine results into unified ranking
+// - Flow: load API keys → detect providers → create provider instances → execute ranking in parallel → merge results
+// - SideEffects: HTTP requests to LLM APIs; parallel provider execution; result aggregation and ranking
+// - FailureModes: missing API keys, provider failures, timeouts, invalid responses, ranking parse errors
+// - Observability: emits ranking statistics, provider latencies, unified candidate scores, and per-provider results
+// - Related: mergeProviderResults, createProvider, buildRankingPrompt, parseRankingResponse
+// - Keywords: code/llm_search, llm_ranking, multi_provider, relevance_scoring, parallel_execution
 func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	// FC/IS: Load API keys at boundary
 	apiKeys := LoadAPIKeys()
@@ -310,7 +320,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in Input) error {
 	return skillout.Emit(rc, Command, output)
 }
 
-// mergeProviderResults combines scores from all providers.
+// mergeProviderResults combines scores from all providers with averaging and ranking.
 func mergeProviderResults(candidates []Candidate, results map[string]ProviderResult) []RankedCandidate {
 	// Build a map of path -> scores by provider
 	scoresByPath := make(map[string]map[string]float64)
@@ -376,7 +386,7 @@ func mergeProviderResults(candidates []Candidate, results map[string]ProviderRes
 	return ranked
 }
 
-// createProvider creates a ranking provider by name.
+// createProvider creates a ranking provider by name with API key validation.
 // FC/IS: Pure function - uses keys passed from boundary.
 func createProvider(name string, keys APIKeys) (RankingProvider, error) {
 	switch name {
@@ -424,7 +434,7 @@ type CerebrasProvider struct {
 	client *http.Client
 }
 
-// NewCerebrasProvider creates a new Cerebras provider.
+// NewCerebrasProvider creates a new Cerebras provider with configurable model.
 func NewCerebrasProvider(apiKey, model string) *CerebrasProvider {
 	return &CerebrasProvider{
 		apiKey: apiKey,
@@ -433,12 +443,12 @@ func NewCerebrasProvider(apiKey, model string) *CerebrasProvider {
 	}
 }
 
-// Name returns the provider name.
+// Name returns the provider name for interface compliance.
 func (p *CerebrasProvider) Name() string {
 	return ProviderCerebras
 }
 
-// RankCandidates ranks candidates using Cerebras (OpenAI-compatible API).
+// RankCandidates ranks candidates using Cerebras (OpenAI-compatible API) with JSON response parsing.
 func (p *CerebrasProvider) RankCandidates(ctx context.Context, question string, candidates []Candidate) ([]ProviderScore, error) {
 	prompt := buildRankingPrompt(question, candidates)
 
@@ -493,13 +503,13 @@ func (p *CerebrasProvider) RankCandidates(ctx context.Context, question string, 
 	return parseRankingResponse(result.Choices[0].Message.Content, candidates)
 }
 
-// AnthropicProvider implements RankingProvider for Claude.
+// AnthropicProvider implements RankingProvider for Claude with Anthropic API.
 type AnthropicProvider struct {
 	apiKey string
 	client *http.Client
 }
 
-// NewAnthropicProvider creates a new Anthropic provider.
+// NewAnthropicProvider creates a new Anthropic provider with Claude API.
 func NewAnthropicProvider(apiKey string) *AnthropicProvider {
 	return &AnthropicProvider{
 		apiKey: apiKey,
@@ -507,12 +517,12 @@ func NewAnthropicProvider(apiKey string) *AnthropicProvider {
 	}
 }
 
-// Name returns the provider name.
+// Name returns the provider name for interface compliance.
 func (p *AnthropicProvider) Name() string {
 	return ProviderAnthropic
 }
 
-// RankCandidates ranks candidates using Claude.
+// RankCandidates ranks candidates using Claude with structured JSON response parsing.
 func (p *AnthropicProvider) RankCandidates(ctx context.Context, question string, candidates []Candidate) ([]ProviderScore, error) {
 	prompt := buildRankingPrompt(question, candidates)
 
@@ -567,13 +577,13 @@ func (p *AnthropicProvider) RankCandidates(ctx context.Context, question string,
 	return parseRankingResponse(result.Content[0].Text, candidates)
 }
 
-// OpenAIProvider implements RankingProvider for GPT.
+// OpenAIProvider implements RankingProvider for GPT with OpenAI API.
 type OpenAIProvider struct {
 	apiKey string
 	client *http.Client
 }
 
-// NewOpenAIProvider creates a new OpenAI provider.
+// NewOpenAIProvider creates a new OpenAI provider with GPT API.
 func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 	return &OpenAIProvider{
 		apiKey: apiKey,
@@ -581,12 +591,12 @@ func NewOpenAIProvider(apiKey string) *OpenAIProvider {
 	}
 }
 
-// Name returns the provider name.
+// Name returns the provider name for interface compliance.
 func (p *OpenAIProvider) Name() string {
 	return ProviderOpenAI
 }
 
-// RankCandidates ranks candidates using GPT.
+// RankCandidates ranks candidates using GPT with structured JSON response parsing.
 func (p *OpenAIProvider) RankCandidates(ctx context.Context, question string, candidates []Candidate) ([]ProviderScore, error) {
 	prompt := buildRankingPrompt(question, candidates)
 
@@ -641,13 +651,13 @@ func (p *OpenAIProvider) RankCandidates(ctx context.Context, question string, ca
 	return parseRankingResponse(result.Choices[0].Message.Content, candidates)
 }
 
-// GeminiProvider implements RankingProvider for Gemini.
+// GeminiProvider implements RankingProvider for Gemini with Google API.
 type GeminiProvider struct {
 	apiKey string
 	client *http.Client
 }
 
-// NewGeminiProvider creates a new Gemini provider.
+// NewGeminiProvider creates a new Gemini provider with Google API.
 func NewGeminiProvider(apiKey string) *GeminiProvider {
 	return &GeminiProvider{
 		apiKey: apiKey,
@@ -655,12 +665,12 @@ func NewGeminiProvider(apiKey string) *GeminiProvider {
 	}
 }
 
-// Name returns the provider name.
+// Name returns the provider name for interface compliance.
 func (p *GeminiProvider) Name() string {
 	return ProviderGemini
 }
 
-// RankCandidates ranks candidates using Gemini.
+// RankCandidates ranks candidates using Gemini with content generation API.
 func (p *GeminiProvider) RankCandidates(ctx context.Context, question string, candidates []Candidate) ([]ProviderScore, error) {
 	prompt := buildRankingPrompt(question, candidates)
 
@@ -722,7 +732,7 @@ func (p *GeminiProvider) RankCandidates(ctx context.Context, question string, ca
 	return parseRankingResponse(result.Candidates[0].Content.Parts[0].Text, candidates)
 }
 
-// buildRankingPrompt creates a prompt for ranking candidates.
+// buildRankingPrompt creates a structured prompt for LLM-based candidate ranking.
 func buildRankingPrompt(question string, candidates []Candidate) string {
 	var sb strings.Builder
 
@@ -748,7 +758,7 @@ func buildRankingPrompt(question string, candidates []Candidate) string {
 	return sb.String()
 }
 
-// parseRankingResponse parses the LLM response into scores.
+// parseRankingResponse parses the LLM response into scores with JSON extraction and validation.
 func parseRankingResponse(response string, candidates []Candidate) ([]ProviderScore, error) {
 	// Find JSON array in response
 	response = strings.TrimSpace(response)

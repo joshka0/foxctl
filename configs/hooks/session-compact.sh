@@ -103,17 +103,17 @@ save_input=$(jq -nc \
   --arg session_id "$session_id" \
   '{trigger: $trigger, workspace: $workspace, session_id: $session_id}')
 
-printf '%s' "$save_input" | "$AGENTCTL_BIN" run session/save --ephemeral --input-file - >/dev/null 2>&1 || true
+printf '%s' "$save_input" | "$AGENTCTL_BIN" run --daemon session/save --ephemeral --input-file - >/dev/null 2>&1 || true
 
 # Bump anchor compaction count
 anchor_bump_input=$(jq -nc --arg ws "$workspace" '{operation: "bump_compaction", workspace: $ws, trigger: "pre_compact"}')
-printf '%s' "$anchor_bump_input" | "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
+printf '%s' "$anchor_bump_input" | "$AGENTCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
 
 # Append custom instructions to anchor learnings
 if [[ -n "${custom_instructions:-}" && "${custom_instructions:-}" != "null" ]]; then
   clipped="${custom_instructions:0:500}"
   anchor_append_input=$(jq -nc --arg ws "$workspace" --arg sum "$clipped" '{operation: "append_learnings", workspace: $ws, trigger: "pre_compact", summary: $sum}')
-  printf '%s' "$anchor_append_input" | "$AGENTCTL_BIN" run session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
+  printf '%s' "$anchor_append_input" | "$AGENTCTL_BIN" run --daemon session/anchor --ephemeral --workspace "$workspace" --input-file - >/dev/null 2>/dev/null || true
 fi
 
 # =============================================================================
@@ -130,7 +130,7 @@ if [[ "${AGENTCTL_SUMMARIZE_DISABLED:-0}" != "1" && -n "$session_id" ]]; then
     --argjson batch_size "$batch_size" \
     '{session_id: $session_id, mode: $mode, batch_size: $batch_size, force: false}')
 
-  result=$("$AGENTCTL_BIN" run session/summarize --ephemeral --input "$summarize_input" 2>/dev/null) || true
+  result=$("$AGENTCTL_BIN" run --daemon session/summarize --ephemeral --input "$summarize_input" 2>/dev/null) || true
 
   if [[ -n "$result" ]]; then
     if [[ "$mode" == "windows" ]]; then

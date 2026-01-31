@@ -16,16 +16,28 @@ import (
 
 const command = "graph/pagerank"
 
+// input defines the input parameters for graph/pagerank operations.
 type input struct {
 	Workspace     string  `json:"workspace"`
 	DampingFactor float64 `json:"damping_factor"` // Default: 0.85
 	Tolerance     float64 `json:"tolerance"`      // Default: 1e-6
 }
 
+// main is the skill entry point for graph/pagerank.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates PageRank computation for graph nodes using gonum library.
+//
+// Index:
+// - Purpose: Compute PageRank scores for all nodes in a graph workspace using gonum algorithms
+// - Flow: validate input → open store → load nodes/edges → build directed graph → compute PageRank → update store → emit results
+// - SideEffects: graph database updates; degree recalculation; PageRank score modifications
+// - FailureModes: database errors, graph building failures, computation errors
+// - Observability: emits computation statistics, top nodes, performance metrics
+// - Related: gonum PageRank algorithm, graph database operations, bulk updates
+// - Keywords: graph/pagerank, pagerank_algorithm, graph_analysis, node_ranking, gonum
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Use workspace from input or from runner context
 	workspace := in.Workspace

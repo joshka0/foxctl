@@ -70,24 +70,39 @@ type Store interface {
 }
 
 type sqlStore struct {
-	db *sql.DB
+	db    *sql.DB
+	close func() error
 }
 
-// Open initializes the trajectory store rooted at the provided path.
+
+// Open initializes a trajectory Store backed by a SQLite database file at root/trajectory.db.
+// It returns the Store or an error if the database cannot be opened or migrated.
 func Open(ctx context.Context, root string) (Store, error) {
 	dbPath := filepath.Join(root, "trajectory.db")
-	db, err := sqliteutil.OpenDB(ctx, dbPath, migrate)
+	db, closeFn, err := sqliteutil.OpenDBShared(ctx, dbPath, migrate)
 	if err != nil {
 		return nil, fmt.Errorf("trajectory: open db: %w", err)
 	}
-	return &sqlStore{db: db}, nil
+	return &sqlStore{db: db, close: closeFn}, nil
 }
+
 
 // Close releases database resources.
 func (s *sqlStore) Close() error {
-	return s.db.Close()
+	if s == nil || s.close == nil {
+		return nil
+	}
+	return s.close()
 }
 
+
+// migrate creates the trajectories, user_requests, and trajectory_events schema, associated indexes,
+// and normalizes existing empty JSON/text fields to NULL for the trajectory store.
+//
+// It applies initial DDL (tables and indexes) and performs lightweight schema upgrades for older
+// databases by attempting to add missing columns (`outcome_json`, `session_id`) and a session index;
+// errors from those ALTER/CREATE attempts are intentionally ignored. Returns an error if executing the
+// primary DDL statement fails.
 func migrate(ctx context.Context, db *sql.DB) error {
 	ddl := `
 -- Trajectories table stores index records for coherent runs/episodes.

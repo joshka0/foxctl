@@ -20,11 +20,13 @@ import (
 
 const command = "verification/cove_verify"
 
+// llmConfig configures the LLM provider for verification operations.
 type llmConfig struct {
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 }
 
+// timeouts defines operation timeouts for different verification phases.
 type timeouts struct {
 	BaselineMS     int `json:"baseline_ms,omitempty"`
 	ExtractionMS   int `json:"extraction_ms,omitempty"`
@@ -32,6 +34,7 @@ type timeouts struct {
 	RefinementMS   int `json:"refinement_ms,omitempty"`
 }
 
+// input is the expected JSON input for verification/cove_verify operations.
 type input struct {
 	Question     string         `json:"question"`
 	Baseline     string         `json:"baseline,omitempty"`
@@ -43,6 +46,7 @@ type input struct {
 	LLM          *llmConfig     `json:"llm,omitempty"`
 }
 
+// summary provides high-level metrics for the verification process.
 type summary struct {
 	Provider     string `json:"provider"`
 	Model        string `json:"model"`
@@ -57,6 +61,7 @@ type summary struct {
 	DurationMS int64 `json:"duration_ms"`
 }
 
+// output contains the verification results with optional artifact storage.
 type output struct {
 	Summary summary `json:"summary"`
 
@@ -66,12 +71,14 @@ type output struct {
 	CASHint  *envelope.CASHint `json:"cas_hint,omitempty"`
 }
 
+// resultPreview provides a truncated view of verification results.
 type resultPreview struct {
 	FinalAnswer string            `json:"final_answer,omitempty"`
 	Claims      []claimOut        `json:"claims,omitempty"`
 	Results     []verifyResultOut `json:"results,omitempty"`
 }
 
+// result contains the complete verification results.
 type result struct {
 	Question         string          `json:"question"`
 	BaselineResponse string          `json:"baseline_response"`
@@ -82,12 +89,14 @@ type result struct {
 	Metrics          metricsOut      `json:"metrics"`
 }
 
+// claimOut represents a claim extracted from the baseline response.
 type claimOut struct {
 	ID       string `json:"id"`
 	Text     string `json:"text"`
 	Category string `json:"category,omitempty"`
 }
 
+// correctionOut represents a correction made during refinement.
 type correctionOut struct {
 	ClaimID   string `json:"claim_id,omitempty"`
 	Original  string `json:"original"`
@@ -95,6 +104,7 @@ type correctionOut struct {
 	Reason    string `json:"reason"`
 }
 
+// verifyResultOut contains the result of verifying a single claim.
 type verifyResultOut struct {
 	ClaimID    string `json:"claim_id"`
 	Claim      string `json:"claim"`
@@ -105,6 +115,7 @@ type verifyResultOut struct {
 	Error      string `json:"error,omitempty"`
 }
 
+// batchOut contains aggregated results from batch verification.
 type batchOut struct {
 	Results         map[string]verifyResultOut `json:"results"`
 	TotalClaims     int                        `json:"total_claims"`
@@ -117,6 +128,7 @@ type batchOut struct {
 	Parallelism     int                        `json:"parallelism"`
 }
 
+// metricsOut provides timing metrics for each verification phase.
 type metricsOut struct {
 	BaselineMS     int64 `json:"baseline_ms"`
 	ExtractionMS   int64 `json:"extraction_ms"`
@@ -125,10 +137,21 @@ type metricsOut struct {
 	TotalMS        int64 `json:"total_ms"`
 }
 
+// main is the skill entry point for verification/cove_verify.
 func main() {
 	skillmain.Main(command, run)
 }
 
+// run orchestrates claim verification using the CoVE (Chain of Verification) method.
+//
+// Index:
+// - Purpose: Verify factual claims in responses using multi-step verification with parallel claim checking
+// - Flow: validate input → resolve LLM → configure CoVE → extract claims → verify in parallel → optionally refine → emit results
+// - SideEffects: LLM API calls; parallel verification; artifact storage for large results; timing measurements
+// - FailureModes: invalid input, LLM errors, verification failures, timeout errors, storage errors
+// - Observability: emits verification metrics, claim results, corrections, and timing breakdown
+// - Related: resolveLLM, convertResult, buildPreview
+// - Keywords: verification/cove_verify, CoVE, claim_verification, fact_checking, LLM
 func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	// Validate input
 	if strings.TrimSpace(in.Question) == "" {
@@ -221,6 +244,7 @@ func run(ctx context.Context, rc *skillmain.RunContext, in input) error {
 	return skillout.Emit(rc, command, out)
 }
 
+// resolveLLM creates and configures the LLM instance based on provider settings.
 func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
 	llms.EnsureFactory()
 
@@ -313,6 +337,7 @@ func resolveLLM(cfg *llmConfig) (dspycore.LLM, string, string, error) {
 	return llm, provider, model, nil
 }
 
+// convertResult converts internal verification response to output format.
 func convertResult(resp *verification.CoVeResponse) result {
 	claims := make([]claimOut, 0, len(resp.Claims))
 	for _, c := range resp.Claims {
@@ -369,6 +394,7 @@ func convertResult(resp *verification.CoVeResponse) result {
 	}
 }
 
+// buildPreview creates a truncated preview of verification results.
 func buildPreview(res result, maxItems int) resultPreview {
 	claimsPreview := res.Claims
 	if maxItems > 0 && len(claimsPreview) > maxItems {
