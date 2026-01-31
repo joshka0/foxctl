@@ -4,14 +4,17 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
 // Environment variable names for sampling configuration.
 const (
-	EnvSampleErrors    = "AGENTCTL_OBS_SAMPLE_ERRORS"     // Always sample errors (default: true)
-	EnvSlowThresholdMS = "AGENTCTL_OBS_SLOW_THRESHOLD_MS" // Slow request threshold (default: 1000)
-	EnvSampleRate      = "AGENTCTL_OBS_SAMPLE_RATE"       // Random sample rate 0.0-1.0 (default: 0.05)
+	EnvSampleErrors            = "AGENTCTL_OBS_SAMPLE_ERRORS"           // Always sample errors (default: true)
+	EnvSlowThresholdMS         = "AGENTCTL_OBS_SLOW_THRESHOLD_MS"       // Slow request threshold (default: 1000)
+	EnvSampleRate              = "AGENTCTL_OBS_SAMPLE_RATE"             // Random sample rate 0.0-1.0 (default: 0.05)
+	EnvAlwaysSampleSessions    = "AGENTCTL_OBS_ALWAYS_SAMPLE_SESSIONS"  // Comma-separated session IDs
+	EnvAlwaysSampleWorkspaces  = "AGENTCTL_OBS_ALWAYS_SAMPLE_WORKSPACES" // Comma-separated workspace IDs
 )
 
 // SampleDecision indicates whether an event should be sampled.
@@ -40,6 +43,9 @@ type TailSampler struct {
 	sampleErrors    bool
 	slowThresholdMS int64
 	randomRate      float64
+
+	alwaysSampleSessions   map[string]struct{}
+	alwaysSampleWorkspaces map[string]struct{}
 }
 
 // Default sampling configuration.
@@ -98,13 +104,24 @@ func NewTailSamplerFromEnv() *TailSampler {
 		}
 	}
 
-	return NewTailSampler(sampleErrors, slowThresholdMS, randomRate)
+	alwaysSessions := parseListEnv(os.Getenv(EnvAlwaysSampleSessions))
+	alwaysWorkspaces := parseListEnv(os.Getenv(EnvAlwaysSampleWorkspaces))
+
+	sampler := NewTailSampler(sampleErrors, slowThresholdMS, randomRate)
+	sampler.alwaysSampleSessions = alwaysSessions
+	sampler.alwaysSampleWorkspaces = alwaysWorkspaces
+	return sampler
 }
 
 // ShouldSample implements Sampler interface.
 func (s *TailSampler) ShouldSample(event *WideEvent) SampleDecision {
 	if event == nil {
 		return Drop
+	}
+
+	// Rule 0: Always sample explicit allowlist/flags
+	if s.shouldAlwaysSample(event) {
+		return AlwaysSample
 	}
 
 	// Rule 1: Always sample errors
@@ -154,5 +171,81 @@ func parseBool(s string, defaultVal bool) bool {
 		return false
 	default:
 		return defaultVal
+	}
+}
+
+func (s *TailSampler) shouldAlwaysSample(event *WideEvent) bool {
+	if s == nil || event == nil {
+		return false
+	}
+	if event.SessionID != "" {
+		if _, ok := s.alwaysSampleSessions[event.SessionID]; ok {
+			return true
+		}
+	}
+	if event.WorkspaceID != "" {
+		if _, ok := s.alwaysSampleWorkspaces[event.WorkspaceID]; ok {
+			return true
+		}
+	}
+	if event.Data != nil {
+		if isTruthy(event.Data["debug"]) || isTruthy(event.Data["always_sample"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseListEnv(v string) map[string]struct{} {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	out := make(map[string]struct{})
+	fields := strings.FieldsFunc(v, func(r rune) bool {
+		return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+	})
+	for _, field := range fields {
+		if trimmed := strings.TrimSpace(field); trimmed != "" {
+			out[trimmed] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func isTruthy(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return parseBool(strings.ToLower(strings.TrimSpace(t)), false)
+	case float32:
+		return t != 0
+	case float64:
+		return t != 0
+	case int:
+		return t != 0
+	case int8:
+		return t != 0
+	case int16:
+		return t != 0
+	case int32:
+		return t != 0
+	case int64:
+		return t != 0
+	case uint:
+		return t != 0
+	case uint8:
+		return t != 0
+	case uint16:
+		return t != 0
+	case uint32:
+		return t != 0
+	case uint64:
+		return t != 0
+	default:
+		return false
 	}
 }

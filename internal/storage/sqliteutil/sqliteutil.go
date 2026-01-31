@@ -178,7 +178,6 @@ func OpenDB(ctx context.Context, path string, migrate func(context.Context, *sql
 			return nil, fmt.Errorf("sqliteutil: ensure dir: %w", err)
 		}
 	}
-	}
 
 	dsn, err := buildSQLiteDSN(path, defaultBusyTimeoutMs, true)
 	if err != nil {

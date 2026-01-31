@@ -307,6 +307,32 @@ func TestTailSampler_RandomSampling(t *testing.T) {
 	}
 }
 
+func TestTailSampler_AlwaysSampleAllowlist(t *testing.T) {
+	sampler := NewTailSampler(true, 1000, 0.0)
+	sampler.alwaysSampleSessions = map[string]struct{}{
+		"session-1": {},
+	}
+	sampler.alwaysSampleWorkspaces = map[string]struct{}{
+		"workspace-1": {},
+	}
+
+	if sampler.ShouldSample(&WideEvent{Status: StatusOK, SessionID: "session-1"}) != AlwaysSample {
+		t.Error("session allowlist should always sample")
+	}
+	if sampler.ShouldSample(&WideEvent{Status: StatusOK, WorkspaceID: "workspace-1"}) != AlwaysSample {
+		t.Error("workspace allowlist should always sample")
+	}
+	if sampler.ShouldSample(&WideEvent{Status: StatusOK, Data: map[string]any{"debug": true}}) != AlwaysSample {
+		t.Error("debug flag should always sample")
+	}
+	if sampler.ShouldSample(&WideEvent{Status: StatusOK, Data: map[string]any{"always_sample": true}}) != AlwaysSample {
+		t.Error("always_sample flag should always sample")
+	}
+	if sampler.ShouldSample(&WideEvent{Status: StatusOK, SessionID: "session-other"}) != Drop {
+		t.Error("non-allowlisted session should be dropped with 0 rate")
+	}
+}
+
 func TestSampleAll(t *testing.T) {
 	sampler := SampleAll{}
 	event := &WideEvent{Status: StatusOK, DurationMS: 1}

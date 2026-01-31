@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,37 +66,25 @@ func SetObsDirForTesting(dir string) {
 // If AGENTCTL_OBS_DIR is unset or empty, this is a no-op.
 // Errors are logged and returned to the caller; callers may choose to ignore them
 // since observability is typically best-effort.
-// The function respects context cancellation and will return ctx.Err() if canceled.
-func WriteEvent(ctx context.Context, name string, v any) error {
-	// Check for cancellation before starting
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
+// The function ignores context cancellation to avoid dropping terminal events.
+func WriteEvent(_ context.Context, name string, v any) error {
 	dir := getObsDir()
 	if dir == "" {
 		return nil // observability disabled
 	}
 
-	// Validate name to prevent directory traversal
+	// Validate name to prevent directory traversal.
 	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
-		return nil // invalid name, silently ignore
+		logWriteError("validate", name, errors.New("invalid event name"))
+		return nil
 	}
 
 	eventsDir := filepath.Join(dir, "events")
 	filePath := filepath.Join(eventsDir, name+".ndjson")
 
 	// Ensure events directory exists
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(eventsDir, 0o755); err != nil {
 		logWriteError("mkdir", name, err)
-		return err
-	}
-
-	// Check for cancellation before file I/O
-	if err := ctx.Err(); err != nil {
 		return err
 	}
 
@@ -110,11 +99,6 @@ func WriteEvent(ctx context.Context, name string, v any) error {
 			logWriteError("close", name, cerr)
 		}
 	}()
-
-	// Check for cancellation before encoding
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 
 	// Encode as JSON + newline
 	enc := json.NewEncoder(f)

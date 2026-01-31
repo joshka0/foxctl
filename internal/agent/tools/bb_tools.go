@@ -212,7 +212,6 @@ func (r *Registry) bbPost(ctx context.Context, args map[string]any) (*models.Cal
 		}
 		ttlSeconds = int(t)
 	}
-	}
 
 	casRef := ""
 	if c, ok := args["cas_ref"].(string); ok {

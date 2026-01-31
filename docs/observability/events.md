@@ -27,8 +27,9 @@ Nothing in this document changes the Protocol v1 envelope contract.
 
 ### 2.1 Enabling on-disk events
 
-An environment variable (or equivalent config field) controls the root
-observability directory:
+An environment variable controls the root observability directory.
+For CLI/daemon runs, `paths.observability` is applied by setting `AGENTCTL_OBS_DIR`
+at startup:
 
 - `AGENTCTL_OBS_DIR=/path/to/observability`
 
@@ -46,7 +47,8 @@ $AGENTCTL_OBS_DIR/
 ```
 
 Skills and subsystems choose an appropriate `<name>.ndjson` but MUST use only
-`[a-z0-9_./-]` in the file name to avoid portability issues.
+`[a-z0-9_.-]` in the file name (flat namespace; no subdirectories) to avoid
+portability issues.
 
 ### 2.2 File semantics
 
@@ -139,8 +141,8 @@ Given `name` (e.g. `"code_swe_grep"`) and an event value `v`:
 
 1. **Configuration check**
    - Resolve observability directory from configuration, e.g.:
-     - `AGENTCTL_OBS_DIR` env var, or
-     - an equivalent field in the runtime config.
+     - `AGENTCTL_OBS_DIR` env var.
+     - CLI/daemon may populate it from `paths.observability` at startup.
    - If the directory is unset or empty, the helper MUST return `nil` without
      performing any I/O.
 

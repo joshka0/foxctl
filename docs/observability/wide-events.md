@@ -13,7 +13,8 @@ request**.
 ### Key Principles
 
 1. **One event per operation** - A single event captures all context needed for
-   debugging
+   debugging. In agentctl, an operation is the unit of work (skill run, hook,
+   job, agent iteration), linked via `parent_id`.
 2. **Business context included** - Session IDs, workspace IDs, not just
    technical details
 3. **Tail sampling** - Always sample errors and slow requests; randomly sample
@@ -30,6 +31,8 @@ request**.
 | `AGENTCTL_OBS_SAMPLE_ERRORS` | `true` | Always sample error events |
 | `AGENTCTL_OBS_SLOW_THRESHOLD_MS` | `1000` | Slow request threshold (ms) |
 | `AGENTCTL_OBS_SAMPLE_RATE` | `0.05` | Random sample rate for healthy events (0.0-1.0) |
+| `AGENTCTL_OBS_ALWAYS_SAMPLE_SESSIONS` | - | Always sample specific session IDs (comma-separated) |
+| `AGENTCTL_OBS_ALWAYS_SAMPLE_WORKSPACES` | - | Always sample specific workspace IDs (comma-separated) |
 | `AGENTCTL_TRACE_ID` | auto | Propagate trace ID to child processes |
 
 ### Enabling Wide Events
@@ -227,10 +230,11 @@ sampler := observability.NewTailSampler(
 
 Following loggingsucks.com recommendations:
 
-1. **Always sample errors** - All events with `status=error` are recorded
-2. **Always sample canceled** - Context cancellations often indicate problems
-3. **Always sample slow** - Events exceeding `slowThresholdMS` threshold
-4. **Random sample healthy** - Configurable % of fast, successful events
+1. **Always sample allowlisted/flagged** - Matching sessions/workspaces or `data.debug`/`data.always_sample`
+2. **Always sample errors** - All events with `status=error` are recorded
+3. **Always sample canceled** - Context cancellations often indicate problems
+4. **Always sample slow** - Events exceeding `slowThresholdMS` threshold
+5. **Random sample healthy** - Configurable % of fast, successful events
 
 Default configuration samples:
 - 100% of errors
@@ -342,9 +346,9 @@ Wide events are stored under the observability directory:
     └── code_swe_grep.ndjson  # Legacy narrow events (if enabled)
 ```
 
-The default observability path is `~/.agentctl/observability`, configurable via:
-- Config file: `paths.observability`
-- Environment: `AGENTCTL_OBS_DIR` (overrides config)
+The default observability path is `~/.agentctl/observability`. CLI/daemon loads
+`paths.observability` and sets `AGENTCTL_OBS_DIR` at startup unless it is already
+set in the environment.
 
 ### Backup Integration
 

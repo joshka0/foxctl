@@ -31,6 +31,7 @@
 package observability
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -38,6 +39,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +62,8 @@ const (
 	// PersistNone disables persistence (still sampled/logged).
 	PersistNone
 )
+
+const defaultPersistTimeout = 250 * time.Millisecond
 
 // String returns the string representation of a PersistenceMode.
 func (m PersistenceMode) String() string {
@@ -373,40 +377,48 @@ func (s *Syncer) syncFile(ctx context.Context, path string) (int, error) {
 		}
 	}
 
-	dec := json.NewDecoder(f)
+	reader := bufio.NewReader(f)
 	synced := 0
+	offset := s.offset
 
 	for synced < s.config.BatchSize {
-		// Capture position before decode to handle partial records
-		pos, _ := f.Seek(0, io.SeekCurrent)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				if len(line) == 0 {
+					break
+				}
+				// Partial line without newline; retry on next sync.
+				break
+			}
+			s.logger.Warn().Err(err).Msg("read error")
+			break
+		}
+
+		lineLen := int64(len(line))
+		line = strings.TrimSpace(line)
+		if line == "" {
+			offset += lineLen
+			continue
+		}
 
 		var event WideEvent
-		if err := dec.Decode(&event); err != nil {
-			// Check for partial record errors (EOF, unexpected EOF, syntax errors)
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				// Seek back to position before partial record for retry later
-				_, _ = f.Seek(pos, io.SeekStart)
-				break
-			}
-			if _, ok := err.(*json.SyntaxError); ok {
-				// Partial JSON - seek back and retry later
-				_, _ = f.Seek(pos, io.SeekStart)
-				break
-			}
-			// Other errors - log and break
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			s.logger.Warn().Err(err).Msg("decode error")
-			break
+			offset += lineLen
+			continue
 		}
 
 		if err := s.store.Insert(ctx, &event); err != nil {
 			s.logger.Warn().Err(err).Str("span_id", event.SpanID).Msg("insert failed")
-			continue
+			break
 		}
+
+		offset += lineLen
 		synced++
 	}
 
-	// Update offset from current file position
-	s.offset, _ = f.Seek(0, io.SeekCurrent)
+	s.offset = offset
 
 	return synced, nil
 }
@@ -474,6 +486,9 @@ func persistEvent(ctx context.Context, event *WideEvent, config *persistConfig) 
 		return
 	}
 
+	persistCtx, cancel := context.WithTimeout(context.Background(), defaultPersistTimeout)
+	defer cancel()
+
 	mode := PersistDefault
 	fileName := WideEventFileName
 	if config != nil {
@@ -489,20 +504,20 @@ func persistEvent(ctx context.Context, event *WideEvent, config *persistConfig) 
 
 	case PersistSQL:
 		if globalStore != nil {
-			if err := globalStore.Insert(ctx, event); err != nil {
+			if err := globalStore.Insert(persistCtx, event); err != nil {
 				logPersistError("sql", event.Operation, err)
 			}
 		}
 
 	case PersistHybrid:
 		// Write to NDJSON first (fast path)
-		if err := WriteEvent(ctx, fileName, event); err != nil {
+		if err := WriteEvent(persistCtx, fileName, event); err != nil {
 			logPersistError("ndjson", event.Operation, err)
 		}
 		// SQLite sync happens in background via Syncer
 
 	case PersistDefault, PersistNDJSON:
-		if err := WriteEvent(ctx, fileName, event); err != nil {
+		if err := WriteEvent(persistCtx, fileName, event); err != nil {
 			logPersistError("ndjson", event.Operation, err)
 		}
 	}
